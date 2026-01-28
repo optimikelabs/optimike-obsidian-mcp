@@ -12,6 +12,23 @@ npm run build
 node dist/index.js --stdio
 ```
 
+## Installation
+
+Depuis le repo :
+
+```bash
+git clone https://github.com/mickahouan/optimike-obsidian-mcp.git
+cd optimike-obsidian-mcp
+npm install
+npm run build
+```
+
+Lancer :
+
+```bash
+node dist/index.js --stdio
+```
+
 ## Pourquoi
 
 - Connecter Obsidian à des agents MCP (Codex, IDE, etc.)
