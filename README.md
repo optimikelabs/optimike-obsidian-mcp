@@ -17,8 +17,8 @@ node dist/index.js --stdio
 - Node.js >= 16
 - Obsidian Desktop
 - Plugins:
-  - Local REST API (required for REST tools)
-  - Smart Connections (required for semantic search)
+  - Local REST API (required for REST tools): https://github.com/coddingtonbear/obsidian-local-rest-api
+  - Smart Connections (required for semantic search): https://github.com/brianpetro/obsidian-smart-connections
   - Bases Bridge (REST) (required for .base tools, bundled in this repo)
 - For semantic search, make sure your vault has a `.smart-env` folder (created by Smart Connections)
 
@@ -186,9 +186,9 @@ export OBSIDIAN_BASE_URL=http://$GW:27124
 ## Obsidian companions (recommended)
 
 Plugins required for full functionality:
-- **Local REST API**: Obsidian API used by MCP.
+- **Local REST API**: Obsidian API used by MCP (https://github.com/coddingtonbear/obsidian-local-rest-api).
 - **Bases Bridge (REST)**: `.base` support via REST.
-- **Smart Connections**: vector index and `.smart-env` for semantic search.
+- **Smart Connections**: vector index and `.smart-env` for semantic search (https://github.com/brianpetro/obsidian-smart-connections).
 
 ### Bases Bridge (REST) — bundled in this repo
 
@@ -217,7 +217,7 @@ The server:
 
 ## Providers (optional override)
 
-More details: README_EMBEDDERS.md
+More details: [README_EMBEDDERS.md](README_EMBEDDERS.md)
 
 **Ollama (local)**
 
@@ -247,6 +247,7 @@ export OPENAI_API_KEY=...
 
 For shared MCP setups, avoid hard‑coding `OLLAMA_BASE_URL` inside the vault.
 Keep auto mode and let each user override via env vars.
+Do not commit secrets: keep `OBSIDIAN_API_KEY` / `OPENAI_API_KEY` in env vars.
 
 ## WSL + Ollama Windows (recommended)
 
@@ -270,7 +271,7 @@ export OLLAMA_BASE_URL=http://$GW:11434
 ## Troubleshooting (quick)
 
 - WSL2 + Obsidian on Windows: use the Windows host IP for `OBSIDIAN_BASE_URL` (see WSL section).
-- No `.smart-env`: run Smart Connections to build embeddings, or set `ENABLE_QUERY_EMBEDDING=false`.
+- No `.smart-env`: run Smart Connections to build embeddings (recommended). If you only need REST tools, you can set `ENABLE_QUERY_EMBEDDING=false`.
 - Wrong embedder: keep auto mode, or set `QUERY_EMBEDDER` + `QUERY_EMBEDDER_MODEL` (see README_EMBEDDERS.md).
 
 ## Credits

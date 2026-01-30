@@ -17,8 +17,8 @@ node dist/index.js --stdio
 - Node.js >= 16
 - Obsidian Desktop
 - Plugins :
-  - Local REST API (obligatoire pour les outils REST)
-  - Smart Connections (obligatoire pour la recherche sémantique)
+  - Local REST API (obligatoire pour les outils REST) : https://github.com/coddingtonbear/obsidian-local-rest-api
+  - Smart Connections (obligatoire pour la recherche sémantique) : https://github.com/brianpetro/obsidian-smart-connections
   - Bases Bridge (REST) (obligatoire pour les outils .base, inclus dans ce repo)
 - Pour la recherche sémantique, assure-toi que ton vault contient un dossier `.smart-env` (créé par Smart Connections)
 
@@ -125,7 +125,7 @@ tool_timeout_sec = 900
 [mcp_servers.optimike-obsidian-mcp.env]
 # Smart Connections
 SMART_ENV_DIR = "/ABSOLUTE/PATH/TO/YOUR/VAULT/.smart-env"
-ENABLE_QUERY_EMBEDDING = "true" # optionnel (defaut : true)
+ENABLE_QUERY_EMBEDDING = "true" # optionnel (défaut : true)
 
 # Recommandé : auto (ne rien setter)
 # QUERY_EMBEDDER = "auto"
@@ -157,9 +157,9 @@ OBSIDIAN_API_KEY=<ta_cle_api>
 Note : en WSL2, `127.0.0.1` pointe vers WSL, pas Windows.  
 Si Obsidian tourne sur Windows, utilise l’IP host (voir section WSL).
 
-## Securite
+## Sécurité
 
-- Garde `OBSIDIAN_API_KEY` privee et locale.
+- Garde `OBSIDIAN_API_KEY` privée et locale.
 - N'expose pas l'API REST d'Obsidian sur Internet.
 - Si tu partages des configs, garde les secrets dans les variables d'env.
 
@@ -186,9 +186,9 @@ export OBSIDIAN_BASE_URL=http://$GW:27124
 ## Compagnons Obsidian (recommandés)
 
 Plugins à activer pour que tout fonctionne :
-- **Local REST API** : API Obsidian requise par le MCP.
+- **Local REST API** : API Obsidian requise par le MCP (https://github.com/coddingtonbear/obsidian-local-rest-api).
 - **Bases Bridge (REST)** : support `.base` via REST.
-- **Smart Connections** : index vectoriel et `.smart-env` pour la recherche sémantique.
+- **Smart Connections** : index vectoriel et `.smart-env` pour la recherche sémantique (https://github.com/brianpetro/obsidian-smart-connections).
 
 ### Bases Bridge (REST) — inclus dans ce repo
 
@@ -217,7 +217,7 @@ Le serveur :
 
 ## Providers (override optionnel)
 
-Plus de details : README_EMBEDDERS.md
+Plus de détails : [README_EMBEDDERS.md](README_EMBEDDERS.md)
 
 **Ollama (local)**
 
@@ -247,6 +247,7 @@ export OPENAI_API_KEY=...
 
 Pour un MCP partagé, ne pas figer un `OLLAMA_BASE_URL` global dans le vault.
 Laisser le mode auto et laisser chaque utilisateur overrider par env vars.
+Ne commite pas de secrets : garde `OBSIDIAN_API_KEY` / `OPENAI_API_KEY` dans les variables d'env.
 
 ## WSL + Ollama Windows (recommandé)
 
@@ -267,10 +268,10 @@ Puis, si besoin :
 export OLLAMA_BASE_URL=http://$GW:11434
 ```
 
-## Depannage rapide
+## Dépannage rapide
 
 - WSL2 + Obsidian sur Windows : utilise l'IP du host Windows pour `OBSIDIAN_BASE_URL` (voir section WSL).
-- Pas de `.smart-env` : lance Smart Connections pour generer les embeddings, ou mets `ENABLE_QUERY_EMBEDDING=false`.
+- Pas de `.smart-env` : lance Smart Connections pour générer les embeddings (recommandé). Si tu veux seulement les outils REST, tu peux mettre `ENABLE_QUERY_EMBEDDING=false`.
 - Mauvais embedder : laisse le mode auto, ou fixe `QUERY_EMBEDDER` + `QUERY_EMBEDDER_MODEL` (voir README_EMBEDDERS.md).
 
 ## Credits
