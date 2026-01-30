@@ -12,12 +12,22 @@ npm run build
 node dist/index.js --stdio
 ```
 
+## Prerequisites
+
+- Node.js >= 16
+- Obsidian Desktop
+- Plugins:
+  - Local REST API (required for REST tools)
+  - Smart Connections (required for semantic search)
+  - Bases Bridge (REST) (required for .base tools, bundled in this repo)
+- For semantic search, make sure your vault has a `.smart-env` folder (created by Smart Connections)
+
 ## Installation
 
 From source:
 
 ```bash
-git clone https://github.com/mickahouan/optimike-obsidian-mcp.git
+git clone https://github.com/optimikelabs/optimike-obsidian-mcp.git
 cd optimike-obsidian-mcp
 npm install
 npm run build
@@ -114,8 +124,8 @@ tool_timeout_sec = 900
 
 [mcp_servers.optimike-obsidian-mcp.env]
 # Smart Connections
-SMART_ENV_DIR = "/mnt/f/OBSIDIAN/ÉLYSIA/.smart-env"
-ENABLE_QUERY_EMBEDDING = "true"
+SMART_ENV_DIR = "/ABSOLUTE/PATH/TO/YOUR/VAULT/.smart-env"
+ENABLE_QUERY_EMBEDDING = "true" # optional (default: true)
 
 # Recommended: auto (do not set)
 # QUERY_EMBEDDER = "auto"
@@ -126,6 +136,9 @@ OBSIDIAN_API_KEY  = "<token>"
 ```
 
 ## Obsidian Local REST API setup
+
+Local REST API plugin repo:
+https://github.com/coddingtonbear/obsidian-local-rest-api
 
 In Obsidian, install and enable **Local REST API**.
 
@@ -198,6 +211,8 @@ The server:
 
 ## Providers (optional override)
 
+More details: README_EMBEDDERS.md
+
 **Ollama (local)**
 
 ```bash
@@ -246,10 +261,18 @@ Then, if needed:
 export OLLAMA_BASE_URL=http://$GW:11434
 ```
 
+## Troubleshooting (quick)
+
+- WSL2 + Obsidian on Windows: use the Windows host IP for `OBSIDIAN_BASE_URL` (see WSL section).
+- No `.smart-env`: run Smart Connections to build embeddings, or set `ENABLE_QUERY_EMBEDDING=false`.
+- Wrong embedder: keep auto mode, or set `QUERY_EMBEDDER` + `QUERY_EMBEDDER_MODEL` (see README_EMBEDDERS.md).
+
 ## Credits
 
 - Created by **Optimike** (Mickaël Ahouansou)
 - Technical base inspired by `cyanheads/obsidian-mcp-server`
+- Local REST API plugin: `coddingtonbear/obsidian-local-rest-api`
+- Semantic search powered by Smart Connections: `brianpetro/obsidian-smart-connections`
 
 ## License
 

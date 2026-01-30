@@ -12,12 +12,22 @@ npm run build
 node dist/index.js --stdio
 ```
 
+## Prérequis
+
+- Node.js >= 16
+- Obsidian Desktop
+- Plugins :
+  - Local REST API (obligatoire pour les outils REST)
+  - Smart Connections (obligatoire pour la recherche sémantique)
+  - Bases Bridge (REST) (obligatoire pour les outils .base, inclus dans ce repo)
+- Pour la recherche sémantique, assure-toi que ton vault contient un dossier `.smart-env` (créé par Smart Connections)
+
 ## Installation
 
 Depuis le repo :
 
 ```bash
-git clone https://github.com/mickahouan/optimike-obsidian-mcp.git
+git clone https://github.com/optimikelabs/optimike-obsidian-mcp.git
 cd optimike-obsidian-mcp
 npm install
 npm run build
@@ -114,8 +124,8 @@ tool_timeout_sec = 900
 
 [mcp_servers.optimike-obsidian-mcp.env]
 # Smart Connections
-SMART_ENV_DIR = "/mnt/f/OBSIDIAN/ÉLYSIA/.smart-env"
-ENABLE_QUERY_EMBEDDING = "true"
+SMART_ENV_DIR = "/ABSOLUTE/PATH/TO/YOUR/VAULT/.smart-env"
+ENABLE_QUERY_EMBEDDING = "true" # optionnel (defaut : true)
 
 # Recommandé : auto (ne rien setter)
 # QUERY_EMBEDDER = "auto"
@@ -126,6 +136,9 @@ OBSIDIAN_API_KEY  = "<token>"
 ```
 
 ## Réglage Local REST API (Obsidian)
+
+Repo du plugin Local REST API :
+https://github.com/coddingtonbear/obsidian-local-rest-api
 
 Dans Obsidian, installe et active **Local REST API**.
 
@@ -198,6 +211,8 @@ Le serveur :
 
 ## Providers (override optionnel)
 
+Plus de details : README_EMBEDDERS.md
+
 **Ollama (local)**
 
 ```bash
@@ -246,10 +261,18 @@ Puis, si besoin :
 export OLLAMA_BASE_URL=http://$GW:11434
 ```
 
+## Depannage rapide
+
+- WSL2 + Obsidian sur Windows : utilise l'IP du host Windows pour `OBSIDIAN_BASE_URL` (voir section WSL).
+- Pas de `.smart-env` : lance Smart Connections pour generer les embeddings, ou mets `ENABLE_QUERY_EMBEDDING=false`.
+- Mauvais embedder : laisse le mode auto, ou fixe `QUERY_EMBEDDER` + `QUERY_EMBEDDER_MODEL` (voir README_EMBEDDERS.md).
+
 ## Credits
 
 - Créé par **Optimike** (Mickaël Ahouansou)
 - Base technique inspirée par `cyanheads/obsidian-mcp-server`
+- Plugin Local REST API : `coddingtonbear/obsidian-local-rest-api`
+- Recherche sémantique basée sur Smart Connections : `brianpetro/obsidian-smart-connections`
 
 ## License
 
