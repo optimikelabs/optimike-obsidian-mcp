@@ -157,6 +157,12 @@ OBSIDIAN_API_KEY=<your_api_key>
 Note: in WSL2, `127.0.0.1` points to WSL, not Windows.  
 If Obsidian runs on Windows, use the host IP (see WSL section below).
 
+## Security
+
+- Keep your `OBSIDIAN_API_KEY` private and local.
+- Do not expose the Obsidian REST API to the public internet.
+- If you share configs, keep secrets in env vars, not in files.
+
 ## WSL2 + Obsidian on Windows (Local REST API)
 
 If Obsidian runs on Windows and Codex runs in WSL2:
