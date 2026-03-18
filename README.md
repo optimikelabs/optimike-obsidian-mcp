@@ -9,7 +9,7 @@ MCP (Model Context Protocol) server for Obsidian with semantic search powered by
 ```bash
 npm install
 npm run build
-node dist/index.js --stdio
+node dist/stdio-proxy.js
 ```
 
 ## Why
@@ -84,18 +84,43 @@ This server exposes “Base” MCP tools:
 - `bases_get_config` / `bases_upsert_config` : read/write YAML
 - `bases_create` : create/validate a `.base`
 
+## Runtime modes
+
+The repo now supports two local runtime modes:
+
+- `stdio proxy` (recommended for Codex): a lightweight stdio process that auto-starts a local Streamable HTTP backend if needed
+- `http backend`: the actual long-lived backend process that owns the heavy cache / warmup work
+
+Useful scripts:
+
+```bash
+npm run build
+npm run start:proxy
+npm run start:http
+```
+
+Health endpoint when running the backend directly:
+
+```bash
+curl http://127.0.0.1:3010/healthz
+```
+
 ## Minimal config (Codex)
 
 In `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.optimike-obsidian-mcp]
+[mcp_servers.optimike-obsidian-mcp-stdio]
 command = "node"
-args = ["/path/to/optimike-obsidian-mcp/dist/index.js", "--stdio"]
+args = ["/path/to/optimike-obsidian-mcp/dist/stdio-proxy.js"]
 
 tool_timeout_sec = 900
 
-[mcp_servers.optimike-obsidian-mcp.env]
+[mcp_servers.optimike-obsidian-mcp-stdio.env]
+MCP_HTTP_HOST = "127.0.0.1"
+MCP_HTTP_PORT = "3010"
+MCP_PROXY_START_TIMEOUT_MS = "20000"
+
 # Smart Connections
 SMART_ENV_DIR = "/path/to/<vault>/.smart-env"
 ENABLE_QUERY_EMBEDDING = "true"
@@ -117,6 +142,7 @@ OBSIDIAN_STARTUP_BLOCKING = "false"
 Notes:
 - Keep this config local in `~/.codex/config.toml` (do not commit personal machine paths).
 - Use logical placeholders in documentation (`/path/to/...`) and keep real paths only in local config.
+- `dist/index.js` is still the backend entrypoint, but Codex should point to `dist/stdio-proxy.js`.
 
 ## Obsidian companions (recommended)
 

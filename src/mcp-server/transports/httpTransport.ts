@@ -141,6 +141,15 @@ export async function startHttpTransport(
     component: "HttpTransportSetup",
   });
 
+  app.get("/healthz", (c: Context) =>
+    c.json({
+      ok: true,
+      transport: "streamable-http",
+      endpoint: MCP_ENDPOINT_PATH,
+      pid: process.pid,
+    }),
+  );
+
   app.use(
     "*",
     cors({
