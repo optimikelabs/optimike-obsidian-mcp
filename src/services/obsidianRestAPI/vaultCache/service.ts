@@ -47,14 +47,24 @@ CREATE TABLE IF NOT EXISTS file_cache (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_file_cache_mtime ON file_cache (mtime DESC);
+CREATE TABLE IF NOT EXISTS shared_cache_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
+
+const SHARED_CACHE_SCHEMA_VERSION = "2026-03-18.1";
 
 function computeContentHash(content: string): string {
   return createHash("sha1").update(content).digest("hex");
 }
 
 function normalizeDirPath(dirPath: string): string {
-  const normalized = path.posix.normalize(dirPath === "" ? "/" : dirPath);
+  const candidate = dirPath === "" ? "/" : dirPath;
+  const normalized = path.posix.normalize(
+    candidate.startsWith("/") ? candidate : `/${candidate}`,
+  );
   return normalized === "." ? "/" : normalized;
 }
 
@@ -74,6 +84,7 @@ export class VaultCacheService {
   constructor(obsidianService: ObsidianRestApiService) {
     this.obsidianService = obsidianService;
     this.db = this.initializeDatabase();
+    this.ensureMetadata();
     this.loadMetadataSnapshot();
     logger.info(
       "VaultCacheService initialized with persistent shared store.",
@@ -131,6 +142,61 @@ export class VaultCacheService {
 
   public getCachedFileCount(): number {
     return this.metadataCache.size;
+  }
+
+  public getStats(): Record<string, unknown> {
+    return {
+      dbPath: config.obsidianSharedCacheDbPath,
+      schemaVersion:
+        this.readMetadataValue("schema_version") ?? SHARED_CACHE_SCHEMA_VERSION,
+      ready: this.isCacheReady,
+      building: this.isBuilding,
+      inMemoryFileCount: this.metadataCache.size,
+      cachedFileCount: this.metadataCache.size,
+      hotCacheSize: this.contentHotCache.size,
+      hotCacheLimit: this.hotCacheLimit,
+      lastRefreshAt: this.readMetadataNumber("last_refresh_at"),
+    };
+  }
+
+  public runIntegrityCheck(): { ok: boolean; result: string } {
+    const row = this.db.prepare("PRAGMA integrity_check;").get() as
+      | { integrity_check?: string }
+      | undefined;
+    const result = row?.integrity_check ?? "unknown";
+    return { ok: result === "ok", result };
+  }
+
+  public runMaintenance(): { vacuum: boolean; analyze: boolean; checkpoint: string } {
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+    this.db.exec("VACUUM;");
+    this.db.exec("ANALYZE;");
+    return {
+      vacuum: true,
+      analyze: true,
+      checkpoint: "truncate",
+    };
+  }
+
+  public async rebuildFromSource(): Promise<void> {
+    this.isCacheReady = false;
+    this.contentHotCache.clear();
+    await this.refreshCache(true);
+  }
+
+  public findMatchingPath(filePath: string): string | undefined {
+    const normalizedInput = normalizeDirPath(filePath);
+    if (this.metadataCache.has(normalizedInput)) {
+      return normalizedInput;
+    }
+
+    const normalized = normalizedInput.toLowerCase();
+    for (const candidate of this.metadataCache.keys()) {
+      if (candidate.toLowerCase() === normalized) {
+        return candidate;
+      }
+    }
+    return undefined;
   }
 
   public getEntriesByPrefix(prefix?: string): CacheIndexEntry[] {
@@ -338,6 +404,7 @@ export class VaultCacheService {
 
       const duration = (Date.now() - startTime) / 1000;
       this.isCacheReady = true;
+      this.upsertMetadataValue("last_refresh_at", String(Date.now()));
       logger.info(
         `${
           isInitialBuild ? "Initial vault cache build" : "Vault cache refresh"
@@ -369,6 +436,10 @@ export class VaultCacheService {
     db.exec("PRAGMA busy_timeout = 5000;");
     db.exec(CREATE_SCHEMA_SQL);
     return db;
+  }
+
+  private ensureMetadata(): void {
+    this.upsertMetadataValue("schema_version", SHARED_CACHE_SCHEMA_VERSION);
   }
 
   private loadMetadataSnapshot(): void {
@@ -434,6 +505,34 @@ export class VaultCacheService {
       size: row.size,
       hash: row.hash,
     });
+  }
+
+  private readMetadataValue(key: string): string | undefined {
+    const stmt = this.db.prepare(
+      "SELECT value FROM shared_cache_metadata WHERE key = ?",
+    );
+    const row = stmt.get(key) as { value?: string } | undefined;
+    return row?.value;
+  }
+
+  private readMetadataNumber(key: string): number | undefined {
+    const raw = this.readMetadataValue(key);
+    if (!raw) {
+      return undefined;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  private upsertMetadataValue(key: string, value: string): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO shared_cache_metadata (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(key, value, Date.now());
   }
 
   private deleteRow(filePath: string): void {

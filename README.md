@@ -23,6 +23,8 @@ node dist/stdio-proxy.js
 - Complete MCP toolset (notes, frontmatter, tags, global search, etc.)
 - Integrated Tasks tools: `list_all_tasks` and `query_tasks`
 - Local semantic search `smart_semantic_search`
+- Runtime observability tools: `obsidian_runtime_status` and `obsidian_runtime_maintenance`
+- Read-only degraded mode for `obsidian_read_note` and `obsidian_list_notes` when Obsidian REST is down
 - Embedder‑agnostic: query embedding aligned to the vault model
 - Ollama / Xenova / OpenAI support (env overrides)
 
@@ -106,6 +108,7 @@ Useful env overrides:
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT` to tune the bounded in-memory hot set
 
 This runtime also exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
+It also persists semantic metadata in the same shared SQLite store (`semantic_manifest`, `semantic_vectors`) so warm semantic refreshes can load from disk instead of re-reading the whole `.smart-env` path every time.
 
 Useful scripts:
 
@@ -120,6 +123,18 @@ Health endpoint when running the backend directly:
 ```bash
 curl http://127.0.0.1:3010/healthz
 ```
+
+Extended health / maintenance:
+
+- `GET /healthz?integrity=1` adds a SQLite integrity check
+- MCP tool `obsidian_runtime_status` returns process, cache, semantic, and degraded-mode status
+- MCP tool `obsidian_runtime_maintenance` supports:
+  - `integrity_check`
+  - `run_maintenance`
+  - `refresh_vault_cache`
+  - `refresh_semantic_cache`
+  - `refresh_tasks_cache`
+  - `refresh_all`
 
 ## Minimal config (Codex)
 
@@ -187,6 +202,11 @@ The server:
 - reads `.smart-env/multi/*.ajson`
 - selects the dominant dimension
 - embeds the query with the same model as the vault
+- persists a semantic manifest in SQLite for faster warm refreshes
+
+Important:
+- semantic query execution still requires a reachable query embedder provider
+- if the vault was built with Ollama embeddings, an unreachable Ollama instance will produce a clear error instead of a silent hang
 
 ## Providers (optional override)
 

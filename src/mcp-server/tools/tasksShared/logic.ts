@@ -811,6 +811,43 @@ async function findAllTasks(
   }
 }
 
+export async function warmSharedTaskCache(
+  vaultCacheService: VaultCacheService | undefined,
+): Promise<{
+  sourceFileCount: number;
+  taskFileCount: number;
+}> {
+  const context = requestContextService.createRequestContext({
+    operation: "warmSharedTaskCache",
+  });
+
+  await ensureSharedCacheReady(vaultCacheService, context);
+  const config = await loadTasksPluginConfig();
+  const db = openSharedCacheDb(false);
+  try {
+    const directoryPath = getVaultRoot();
+    const prefix = computeSharedPrefix(directoryPath);
+    const sharedIndexRows = loadSharedCacheIndexRows(db, directoryPath, prefix);
+    syncTaskFileCache(
+      db,
+      sharedIndexRows,
+      config.statusMap,
+      config.statusNameMap,
+      config.statusTypeMap,
+      config.taskFormat,
+    );
+    const row = db
+      .prepare("SELECT COUNT(*) as count FROM task_file_cache")
+      .get() as { count?: number } | undefined;
+    return {
+      sourceFileCount: sharedIndexRows.length,
+      taskFileCount: row?.count ?? 0,
+    };
+  } finally {
+    db.close();
+  }
+}
+
 function queryTasks(tasks: Task[], queryText: string): Task[] {
   try {
     return filterTasks(tasks, queryText);

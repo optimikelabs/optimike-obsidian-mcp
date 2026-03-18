@@ -21,7 +21,10 @@ node dist/index.js --stdio
 ## Points forts
 
 - Outils MCP complets (notes, frontmatter, tags, recherche globale, etc.)
+- Outils Tasks intégrés : `list_all_tasks` et `query_tasks`
 - Recherche sémantique locale `smart_semantic_search`
+- Outils d’exploitation : `obsidian_runtime_status` et `obsidian_runtime_maintenance`
+- Mode dégradé lecture seule pour `obsidian_read_note` et `obsidian_list_notes` si Obsidian REST tombe
 - Embedder-agnostic : aligne automatiquement la requête sur le modèle du vault
 - Support Ollama / Xenova / OpenAI (override par env vars)
 
@@ -84,18 +87,67 @@ Le serveur expose des tools MCP “Base” (via Obsidian MCP) :
 - `bases_get_config` / `bases_upsert_config` : lire/écrire le YAML
 - `bases_create` : créer/valider une base `.base`
 
+## Modes runtime
+
+Le repo supporte maintenant deux modes locaux :
+
+- `stdio proxy` : recommandé pour Codex, un petit wrapper `stdio` qui démarre au besoin un backend HTTP local
+- `http backend` : le vrai process long-lived qui porte le cache partagé et les warmups
+
+Le backend persiste désormais :
+
+- le contenu du vault dans un cache SQLite partagé
+- un hot cache RAM borné
+- un manifest sémantique (`semantic_manifest`, `semantic_vectors`) dans la même base
+
+Chemin par défaut :
+
+```text
+<vault>/.obsidian/optimike-mcp/shared-cache.sqlite
+```
+
+Variables utiles :
+
+- `OBSIDIAN_SHARED_CACHE_DB_PATH`
+- `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
+
+Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
+
+Scripts utiles :
+
+```bash
+npm run build
+npm run start:proxy
+npm run start:http
+```
+
+Health et maintenance :
+
+```bash
+curl http://127.0.0.1:3010/healthz
+curl http://127.0.0.1:3010/healthz?integrity=1
+```
+
+Et via MCP :
+
+- `obsidian_runtime_status`
+- `obsidian_runtime_maintenance`
+
 ## Configuration minimale (Codex)
 
 Dans `~/.codex/config.toml` :
 
 ```toml
-[mcp_servers.optimike-obsidian-mcp]
+[mcp_servers.optimike-obsidian-mcp-stdio]
 command = "node"
-args = ["/chemin/vers/optimike-obsidian-mcp/dist/index.js", "--stdio"]
+args = ["/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js"]
 
-tool_timeout_sec = 900
+[mcp_servers.optimike-obsidian-mcp-stdio.env]
+MCP_HTTP_HOST = "127.0.0.1"
+MCP_HTTP_PORT = "3010"
+MCP_PROXY_START_TIMEOUT_MS = "20000"
+OBSIDIAN_VAULT = "/chemin/vers/<vault>"
 
-[mcp_servers.optimike-obsidian-mcp.env]
 # Smart Connections
 SMART_ENV_DIR = "/chemin/vers/<vault>/.smart-env"
 ENABLE_QUERY_EMBEDDING = "true"
@@ -112,11 +164,16 @@ OBSIDIAN_API_KEY  = "<token>"
 OBSIDIAN_STARTUP_MAX_RETRIES = "2"
 OBSIDIAN_STARTUP_RETRY_DELAY_MS = "1200"
 OBSIDIAN_STARTUP_BLOCKING = "false"
+
+# Cache partagé (optionnel)
+# OBSIDIAN_SHARED_CACHE_DB_PATH = "/chemin/vers/<vault>/.obsidian/optimike-mcp/shared-cache.sqlite"
+# OBSIDIAN_CONTENT_HOT_CACHE_LIMIT = "64"
 ```
 
 Notes :
 - Garde cette config en local dans `~/.codex/config.toml` (ne pas commit des chemins machine personnels).
 - Dans la doc, utilise des chemins logiques (`/chemin/vers/...`) et garde les chemins réels uniquement en local.
+- `dist/index.js` reste l’entrypoint backend, mais Codex doit pointer vers `dist/stdio-proxy.js`.
 
 ## Compagnons Obsidian (recommandés)
 
@@ -140,6 +197,11 @@ Le serveur :
 - lit `.smart-env/multi/*.ajson`
 - choisit la dimension dominante
 - encode la requête avec le même modèle que le vault
+- persiste un manifest sémantique dans SQLite pour accélérer les refreshs à chaud
+
+Important :
+- l’exécution d’une requête sémantique exige toujours un provider de requête joignable
+- si le vault repose sur Ollama et qu’Ollama est down, l’erreur remonte clairement au lieu de bloquer silencieusement
 
 ## Providers (override optionnel)
 

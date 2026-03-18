@@ -42,6 +42,7 @@ import { registerBasesCreateTool } from "./tools/basesCreateTool/index.js";
 import { registerBasesUpsertConfigTool } from "./tools/basesUpsertConfigTool/index.js";
 import { registerListAllTasksTool } from "./tools/listAllTasksTool/index.js";
 import { registerQueryTasksTool } from "./tools/queryTasksTool/index.js";
+import { registerRuntimeTools } from "./tools/runtimeTools/index.js";
 // Import transport setup functions.
 import { startHttpTransport } from "./transports/httpTransport.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
@@ -111,8 +112,8 @@ async function createMcpServerInstance(
       context,
     );
     // Register all tools, passing the vaultCacheService which may be undefined
-    await registerObsidianListNotesTool(server, obsidianService);
-    await registerObsidianReadNoteTool(server, obsidianService);
+    await registerObsidianListNotesTool(server, obsidianService, vaultCacheService);
+    await registerObsidianReadNoteTool(server, obsidianService, vaultCacheService);
     await registerObsidianDeleteNoteTool(
       server,
       obsidianService,
@@ -163,6 +164,7 @@ async function createMcpServerInstance(
     await registerBasesUpsertConfigTool(server, obsidianService);
     await registerListAllTasksTool(server, vaultCacheService);
     await registerQueryTasksTool(server, vaultCacheService);
+    await registerRuntimeTools(server, vaultCacheService);
 
     logger.info("Resources and tools registered successfully", context);
 
@@ -239,6 +241,7 @@ async function startTransport(
     const httpServerInstance = await startHttpTransport(
       mcpServerFactory,
       context,
+      vaultCacheService,
     );
     return httpServerInstance; // Return the http.Server instance.
   }

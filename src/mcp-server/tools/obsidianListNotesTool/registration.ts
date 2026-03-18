@@ -7,6 +7,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   ErrorHandler,
@@ -41,6 +42,7 @@ import {
 export const registerObsidianListNotesTool = async (
   server: McpServer,
   obsidianService: ObsidianRestApiService, // Dependency injection for the Obsidian service
+  vaultCacheService: VaultCacheService | undefined,
 ): Promise<void> => {
   const toolName = "obsidian_list_notes";
   const toolDescription =
@@ -99,6 +101,7 @@ export const registerObsidianListNotesTool = async (
                   params,
                   handlerContext,
                   obsidianService,
+                  vaultCacheService,
                 );
               logger.debug(
                 `'${toolName}' processed successfully`,
