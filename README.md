@@ -91,6 +91,19 @@ The repo now supports two local runtime modes:
 - `stdio proxy` (recommended for Codex): a lightweight stdio process that auto-starts a local Streamable HTTP backend if needed
 - `http backend`: the actual long-lived backend process that owns the heavy cache / warmup work
 
+The backend now persists vault content to a shared SQLite cache and keeps only a bounded hot set in RAM. By default the cache lives at:
+
+```text
+<vault>/.obsidian/optimike-mcp/shared-cache.sqlite
+```
+
+If `OBSIDIAN_VAULT` is not set, the server falls back to the parent vault inferred from `SMART_ENV_DIR`, then to the project root.
+
+Useful env overrides:
+
+- `OBSIDIAN_SHARED_CACHE_DB_PATH` to move the shared SQLite file
+- `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT` to tune the bounded in-memory hot set
+
 Useful scripts:
 
 ```bash
@@ -120,6 +133,7 @@ tool_timeout_sec = 900
 MCP_HTTP_HOST = "127.0.0.1"
 MCP_HTTP_PORT = "3010"
 MCP_PROXY_START_TIMEOUT_MS = "20000"
+OBSIDIAN_VAULT = "/path/to/<vault>"
 
 # Smart Connections
 SMART_ENV_DIR = "/path/to/<vault>/.smart-env"
@@ -137,6 +151,10 @@ OBSIDIAN_API_KEY  = "<token>"
 OBSIDIAN_STARTUP_MAX_RETRIES = "2"
 OBSIDIAN_STARTUP_RETRY_DELAY_MS = "1200"
 OBSIDIAN_STARTUP_BLOCKING = "false"
+
+# Shared cache tuning (optional)
+# OBSIDIAN_SHARED_CACHE_DB_PATH = "/path/to/<vault>/.obsidian/optimike-mcp/shared-cache.sqlite"
+# OBSIDIAN_CONTENT_HOT_CACHE_LIMIT = "64"
 ```
 
 Notes:

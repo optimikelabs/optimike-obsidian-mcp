@@ -1,8 +1,12 @@
 /**
  * @module VaultCacheService
- * @description Service for building and managing an in-memory cache of Obsidian vault content.
+ * @description
+ * Persists vault content on disk and keeps only a bounded hot cache in RAM.
  */
 
+import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { config } from "../../../config/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -14,44 +18,72 @@ import {
 } from "../../../utils/index.js";
 import { NoteJson, ObsidianRestApiService } from "../index.js";
 
-interface CacheEntry {
+export interface CacheEntry {
   content: string;
-  mtime: number; // Store modification time for date filtering
-  // Add other stats if needed, e.g., ctime, size
+  ctime: number;
+  mtime: number;
+  size: number;
+  hash: string;
+}
+
+export interface CacheIndexEntry {
+  path: string;
+  ctime: number;
+  mtime: number;
+  size: number;
+  hash: string;
+}
+
+type CacheRow = CacheIndexEntry & { content: string };
+
+const CREATE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS file_cache (
+  path TEXT PRIMARY KEY,
+  ctime INTEGER NOT NULL,
+  mtime INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  hash TEXT NOT NULL,
+  content TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_file_cache_mtime ON file_cache (mtime DESC);
+`;
+
+function computeContentHash(content: string): string {
+  return createHash("sha1").update(content).digest("hex");
+}
+
+function normalizeDirPath(dirPath: string): string {
+  const normalized = path.posix.normalize(dirPath === "" ? "/" : dirPath);
+  return normalized === "." ? "/" : normalized;
 }
 
 /**
- * Manages an in-memory cache of the Obsidian vault's file structure and metadata.
- *
- * __Is the cache safe and secure?__
- * Yes, the cache is safe and secure for its purpose within this application. Here's why:
- * 1. __In-Memory Storage:__ The cache exists only in the server's memory. It is not written to disk or transmitted over the network, so its attack surface is limited to the server process itself.
- * 2. __Local Data Source:__ The data populating the cache comes directly from your own Obsidian vault via the local REST API. It is not fetching data from external, untrusted sources.
- *
- * __Warning: High Memory Usage__
- * This service stores the entire content of every markdown file in the vault in memory. For users with very large vaults (e.g., many gigabytes of markdown files), this can lead to significant RAM consumption. If you experience high memory usage, consider disabling the cache via the `OBSIDIAN_ENABLE_CACHE` environment variable.
+ * Disk-backed vault cache with a bounded in-memory hot set.
  */
 export class VaultCacheService {
-  private vaultContentCache: Map<string, CacheEntry> = new Map();
-  private isCacheReady: boolean = false;
-  private isBuilding: boolean = false;
-  private obsidianService: ObsidianRestApiService;
+  private readonly metadataCache = new Map<string, CacheIndexEntry>();
+  private readonly contentHotCache = new Map<string, CacheEntry>();
+  private readonly hotCacheLimit = config.obsidianContentHotCacheLimit;
+  private readonly obsidianService: ObsidianRestApiService;
+  private readonly db: DatabaseSync;
+  private isCacheReady = false;
+  private isBuilding = false;
   private refreshIntervalId: NodeJS.Timeout | null = null;
 
   constructor(obsidianService: ObsidianRestApiService) {
     this.obsidianService = obsidianService;
+    this.db = this.initializeDatabase();
+    this.loadMetadataSnapshot();
     logger.info(
-      "VaultCacheService initialized.",
+      "VaultCacheService initialized with persistent shared store.",
       requestContextService.createRequestContext({
         operation: "VaultCacheServiceInit",
+        cachePath: config.obsidianSharedCacheDbPath,
       }),
     );
   }
 
-  /**
-   * Starts the periodic cache refresh mechanism.
-   * The interval is controlled by the `OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN` config setting.
-   */
   public startPeriodicRefresh(): void {
     const refreshIntervalMs =
       config.obsidianCacheRefreshIntervalMin * 60 * 1000;
@@ -65,7 +97,7 @@ export class VaultCacheService {
       return;
     }
     this.refreshIntervalId = setInterval(
-      () => this.refreshCache(),
+      () => this.refreshCache().catch(() => undefined),
       refreshIntervalMs,
     );
     logger.info(
@@ -76,10 +108,6 @@ export class VaultCacheService {
     );
   }
 
-  /**
-   * Stops the periodic cache refresh mechanism.
-   * Should be called during graceful shutdown.
-   */
   public stopPeriodicRefresh(): void {
     const context = requestContextService.createRequestContext({
       operation: "stopPeriodicRefresh",
@@ -88,52 +116,59 @@ export class VaultCacheService {
       clearInterval(this.refreshIntervalId);
       this.refreshIntervalId = null;
       logger.info("Stopped periodic cache refresh.", context);
-    } else {
-      logger.info("Periodic cache refresh was not running.", context);
+      return;
     }
+    logger.info("Periodic cache refresh was not running.", context);
   }
 
-  /**
-   * Checks if the cache has been successfully built.
-   * @returns {boolean} True if the cache is ready, false otherwise.
-   */
   public isReady(): boolean {
     return this.isCacheReady;
   }
 
-  /**
-   * Checks if the cache is currently being built.
-   * @returns {boolean} True if the cache build is in progress, false otherwise.
-   */
   public getIsBuilding(): boolean {
     return this.isBuilding;
   }
 
-  /**
-   * Returns the entire vault content cache.
-   * Use with caution for large vaults due to potential memory usage.
-   * @returns {ReadonlyMap<string, CacheEntry>} The cache map.
-   */
-  public getCache(): ReadonlyMap<string, CacheEntry> {
-    // Return a readonly view or copy if mutation is a concern
-    return this.vaultContentCache;
+  public getCachedFileCount(): number {
+    return this.metadataCache.size;
   }
 
-  /**
-   * Retrieves a specific entry from the cache.
-   * @param {string} filePath - The vault-relative path of the file.
-   * @returns {CacheEntry | undefined} The cache entry or undefined if not found.
-   */
-  public getEntry(filePath: string): CacheEntry | undefined {
-    return this.vaultContentCache.get(filePath);
+  public getEntriesByPrefix(prefix?: string): CacheIndexEntry[] {
+    const normalizedPrefix = prefix ? normalizeDirPath(prefix) : undefined;
+    return [...this.metadataCache.values()].filter((entry) => {
+      if (!normalizedPrefix || normalizedPrefix === "/") {
+        return true;
+      }
+      return entry.path.startsWith(normalizedPrefix);
+    });
   }
 
-  /**
-   * Immediately fetches the latest data for a single file and updates its entry in the cache.
-   * This is useful for ensuring cache consistency immediately after a file modification.
-   * @param {string} filePath - The vault-relative path of the file to update.
-   * @param {RequestContext} context - The request context for logging.
-   */
+  public async getEntry(filePath: string): Promise<CacheEntry | undefined> {
+    const cached = this.contentHotCache.get(filePath);
+    if (cached) {
+      this.touchHotCache(filePath, cached);
+      return cached;
+    }
+
+    const stmt = this.db.prepare(
+      "SELECT path, ctime, mtime, size, hash, content FROM file_cache WHERE path = ?",
+    );
+    const row = stmt.get(filePath) as CacheRow | undefined;
+    if (!row) {
+      return undefined;
+    }
+
+    const entry: CacheEntry = {
+      content: row.content,
+      ctime: row.ctime,
+      mtime: row.mtime,
+      size: row.size,
+      hash: row.hash,
+    };
+    this.touchHotCache(filePath, entry);
+    return entry;
+  }
+
   public async updateCacheForFile(
     filePath: string,
     context: RequestContext,
@@ -160,41 +195,39 @@ export class VaultCacheService {
         },
       );
 
-      if (noteJson && noteJson.content && noteJson.stat) {
-        this.vaultContentCache.set(filePath, {
-          content: noteJson.content,
-          mtime: noteJson.stat.mtime,
-        });
-        logger.info(`Proactively updated cache for: ${filePath}`, opContext);
-      } else {
+      if (!noteJson || !noteJson.content || !noteJson.stat) {
         logger.warning(
           `Proactive cache update for ${filePath} received invalid data, skipping update.`,
           opContext,
         );
+        return;
       }
+
+      this.upsertRow({
+        path: filePath,
+        ctime: noteJson.stat.ctime,
+        mtime: noteJson.stat.mtime,
+        size: noteJson.stat.size,
+        hash: computeContentHash(noteJson.content),
+        content: noteJson.content,
+      });
+      logger.info(`Proactively updated cache for: ${filePath}`, opContext);
     } catch (error) {
-      // If the file was deleted, a NOT_FOUND error is expected. We should remove it from the cache.
       if (error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND) {
-        if (this.vaultContentCache.has(filePath)) {
-          this.vaultContentCache.delete(filePath);
-          logger.info(
-            `Proactively removed deleted file from cache: ${filePath}`,
-            opContext,
-          );
-        }
-      } else {
-        logger.error(
-          `Failed to proactively update cache for ${filePath}. Error: ${error instanceof Error ? error.message : String(error)}`,
+        this.deleteRow(filePath);
+        logger.info(
+          `Proactively removed deleted file from cache: ${filePath}`,
           opContext,
         );
+        return;
       }
+      logger.error(
+        `Failed to proactively update cache for ${filePath}. Error: ${error instanceof Error ? error.message : String(error)}`,
+        opContext,
+      );
     }
   }
 
-  /**
-   * Builds the in-memory cache by fetching all markdown files and their content.
-   * This is intended to be run once at startup. Subsequent updates are handled by `refreshCache`.
-   */
   public async buildVaultCache(): Promise<void> {
     const initialBuildContext = requestContextService.createRequestContext({
       operation: "buildVaultCache.initialCheck",
@@ -210,15 +243,9 @@ export class VaultCacheService {
       logger.info("Cache already built. Skipping.", initialBuildContext);
       return;
     }
-
-    await this.refreshCache(true); // Perform an initial, full build
+    await this.refreshCache(true);
   }
 
-  /**
-   * Refreshes the cache by comparing remote file modification times with cached ones.
-   * Only fetches content for new or updated files.
-   * @param isInitialBuild - If true, forces a full build and sets the cache readiness flag.
-   */
   public async refreshCache(isInitialBuild = false): Promise<void> {
     const context = requestContextService.createRequestContext({
       operation: "refreshCache",
@@ -235,31 +262,25 @@ export class VaultCacheService {
       this.isCacheReady = false;
     }
 
-    logger.info("Starting vault cache refresh process...", context);
+    logger.info("Starting persistent vault cache refresh process...", context);
 
     try {
       const startTime = Date.now();
       const remoteFiles = await this.listAllMarkdownFiles("/", context);
       const remoteFileSet = new Set(remoteFiles);
-      const cachedFileSet = new Set(this.vaultContentCache.keys());
+      const cachedFileSet = new Set(this.metadataCache.keys());
 
       let filesAdded = 0;
       let filesUpdated = 0;
       let filesRemoved = 0;
 
-      // 1. Remove deleted files from cache
       for (const cachedFile of cachedFileSet) {
         if (!remoteFileSet.has(cachedFile)) {
-          this.vaultContentCache.delete(cachedFile);
+          this.deleteRow(cachedFile);
           filesRemoved++;
-          logger.debug(`Removed deleted file from cache: ${cachedFile}`, {
-            ...context,
-            filePath: cachedFile,
-          });
         }
       }
 
-      // 2. Check for new or updated files
       for (const filePath of remoteFiles) {
         try {
           const fileMetadata = await this.obsidianService.getFileMetadata(
@@ -275,33 +296,37 @@ export class VaultCacheService {
             continue;
           }
 
+          const cachedEntry = this.metadataCache.get(filePath);
           const remoteMtime = fileMetadata.mtime;
-          const cachedEntry = this.vaultContentCache.get(filePath);
+          const remoteSize = fileMetadata.size;
+          const needsRefresh =
+            !cachedEntry ||
+            cachedEntry.mtime < remoteMtime ||
+            cachedEntry.size !== remoteSize;
 
-          if (!cachedEntry || cachedEntry.mtime < remoteMtime) {
-            const noteJson = (await this.obsidianService.getFileContent(
-              filePath,
-              "json",
-              context,
-            )) as NoteJson;
-            this.vaultContentCache.set(filePath, {
-              content: noteJson.content,
-              mtime: noteJson.stat.mtime,
-            });
+          if (!needsRefresh) {
+            continue;
+          }
 
-            if (!cachedEntry) {
-              filesAdded++;
-              logger.debug(`Added new file to cache: ${filePath}`, {
-                ...context,
-                filePath,
-              });
-            } else {
-              filesUpdated++;
-              logger.debug(`Updated modified file in cache: ${filePath}`, {
-                ...context,
-                filePath,
-              });
-            }
+          const noteJson = (await this.obsidianService.getFileContent(
+            filePath,
+            "json",
+            context,
+          )) as NoteJson;
+          const hash = computeContentHash(noteJson.content);
+          this.upsertRow({
+            path: filePath,
+            ctime: noteJson.stat.ctime,
+            mtime: noteJson.stat.mtime,
+            size: noteJson.stat.size,
+            hash,
+            content: noteJson.content,
+          });
+
+          if (!cachedEntry) {
+            filesAdded++;
+          } else {
+            filesUpdated++;
           }
         } catch (error) {
           logger.error(
@@ -312,18 +337,13 @@ export class VaultCacheService {
       }
 
       const duration = (Date.now() - startTime) / 1000;
-      if (isInitialBuild) {
-        this.isCacheReady = true;
-        logger.info(
-          `Initial vault cache build completed in ${duration.toFixed(2)}s. Cached ${this.vaultContentCache.size} files.`,
-          context,
-        );
-      } else {
-        logger.info(
-          `Vault cache refresh completed in ${duration.toFixed(2)}s. Added: ${filesAdded}, Updated: ${filesUpdated}, Removed: ${filesRemoved}. Total cached: ${this.vaultContentCache.size}.`,
-          context,
-        );
-      }
+      this.isCacheReady = true;
+      logger.info(
+        `${
+          isInitialBuild ? "Initial vault cache build" : "Vault cache refresh"
+        } completed in ${duration.toFixed(2)}s. Added: ${filesAdded}, Updated: ${filesUpdated}, Removed: ${filesRemoved}. Total indexed: ${this.metadataCache.size}.`,
+        context,
+      );
     } catch (error) {
       logger.error(
         `Critical error during vault cache refresh. Cache may be incomplete. Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -337,13 +357,92 @@ export class VaultCacheService {
     }
   }
 
-  /**
-   * Helper to recursively list all markdown files. Similar to the one in search logic.
-   * @param dirPath - Starting directory path.
-   * @param context - Request context.
-   * @param visitedDirs - Set to track visited directories.
-   * @returns Array of file paths.
-   */
+  private initializeDatabase(): DatabaseSync {
+    const dbPath = config.obsidianSharedCacheDbPath;
+    const dirPath = path.dirname(dbPath);
+    if (!existsSync(dirPath)) {
+      mkdirSync(dirPath, { recursive: true });
+    }
+    const db = new DatabaseSync(dbPath);
+    db.exec("PRAGMA journal_mode = WAL;");
+    db.exec("PRAGMA synchronous = NORMAL;");
+    db.exec("PRAGMA busy_timeout = 5000;");
+    db.exec(CREATE_SCHEMA_SQL);
+    return db;
+  }
+
+  private loadMetadataSnapshot(): void {
+    const stmt = this.db.prepare(
+      "SELECT path, ctime, mtime, size, hash FROM file_cache ORDER BY path ASC",
+    );
+    const rows = stmt.all() as unknown as CacheIndexEntry[];
+    this.metadataCache.clear();
+    for (const row of rows) {
+      this.metadataCache.set(row.path, row);
+    }
+    this.isCacheReady = rows.length > 0;
+  }
+
+  private touchHotCache(filePath: string, entry: CacheEntry): void {
+    this.contentHotCache.delete(filePath);
+    this.contentHotCache.set(filePath, entry);
+    if (this.contentHotCache.size <= this.hotCacheLimit) {
+      return;
+    }
+
+    const firstKey = this.contentHotCache.keys().next().value;
+    if (firstKey) {
+      this.contentHotCache.delete(firstKey);
+    }
+  }
+
+  private upsertRow(row: CacheRow): void {
+    const now = Date.now();
+    const stmt = this.db.prepare(`
+      INSERT INTO file_cache (path, ctime, mtime, size, hash, content, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET
+        ctime = excluded.ctime,
+        mtime = excluded.mtime,
+        size = excluded.size,
+        hash = excluded.hash,
+        content = excluded.content,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(
+      row.path,
+      row.ctime,
+      row.mtime,
+      row.size,
+      row.hash,
+      row.content,
+      now,
+    );
+
+    const indexEntry: CacheIndexEntry = {
+      path: row.path,
+      ctime: row.ctime,
+      mtime: row.mtime,
+      size: row.size,
+      hash: row.hash,
+    };
+    this.metadataCache.set(row.path, indexEntry);
+    this.touchHotCache(row.path, {
+      content: row.content,
+      ctime: row.ctime,
+      mtime: row.mtime,
+      size: row.size,
+      hash: row.hash,
+    });
+  }
+
+  private deleteRow(filePath: string): void {
+    const stmt = this.db.prepare("DELETE FROM file_cache WHERE path = ?");
+    stmt.run(filePath);
+    this.metadataCache.delete(filePath);
+    this.contentHotCache.delete(filePath);
+  }
+
   private async listAllMarkdownFiles(
     dirPath: string,
     context: RequestContext,
@@ -351,7 +450,7 @@ export class VaultCacheService {
   ): Promise<string[]> {
     const operation = "listAllMarkdownFiles";
     const opContext = { ...context, operation, dirPath };
-    const normalizedPath = path.posix.normalize(dirPath === "" ? "/" : dirPath);
+    const normalizedPath = normalizeDirPath(dirPath);
 
     if (visitedDirs.has(normalizedPath)) {
       logger.warning(
@@ -384,12 +483,11 @@ export class VaultCacheService {
       return markdownFiles;
     } catch (error) {
       const errMsg = `Failed to list directory during cache build scan: ${normalizedPath}`;
-      const err = error as McpError | Error; // Type assertion
+      const err = error as McpError | Error;
       if (err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND) {
         logger.warning(`${errMsg} - Directory not found, skipping.`, opContext);
         return [];
       }
-      // Log and re-throw critical listing errors
       if (err instanceof Error) {
         logger.error(errMsg, err, opContext);
       } else {

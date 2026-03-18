@@ -104,6 +104,12 @@ const EnvSchema = z.object({
     .int()
     .positive()
     .default(30000),
+  OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
+  OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(64),
   OBSIDIAN_STARTUP_MAX_RETRIES: z.coerce.number().int().positive().default(5),
   OBSIDIAN_STARTUP_RETRY_DELAY_MS: z.coerce
     .number()
@@ -251,6 +257,17 @@ export const config = {
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,
   obsidianEnableCache: env.OBSIDIAN_ENABLE_CACHE,
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
+  obsidianSharedCacheDbPath:
+    env.OBSIDIAN_SHARED_CACHE_DB_PATH ||
+    path.join(
+      env.OBSIDIAN_VAULT ||
+        env.SMART_ENV_DIR?.replace(/[/\\]\.smart-env(?:[/\\].*)?$/u, "") ||
+        projectRoot,
+      ".obsidian",
+      "optimike-mcp",
+      "shared-cache.sqlite",
+    ),
+  obsidianContentHotCacheLimit: env.OBSIDIAN_CONTENT_HOT_CACHE_LIMIT,
   obsidianStartupMaxRetries: env.OBSIDIAN_STARTUP_MAX_RETRIES,
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
