@@ -40,6 +40,8 @@ import { registerBasesQueryTool } from "./tools/basesQueryTool/index.js";
 import { registerBasesUpsertRowsTool } from "./tools/basesUpsertRowsTool/index.js";
 import { registerBasesCreateTool } from "./tools/basesCreateTool/index.js";
 import { registerBasesUpsertConfigTool } from "./tools/basesUpsertConfigTool/index.js";
+import { registerListAllTasksTool } from "./tools/listAllTasksTool/index.js";
+import { registerQueryTasksTool } from "./tools/queryTasksTool/index.js";
 // Import transport setup functions.
 import { startHttpTransport } from "./transports/httpTransport.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
@@ -159,6 +161,8 @@ async function createMcpServerInstance(
     await registerBasesUpsertRowsTool(server, obsidianService);
     await registerBasesCreateTool(server, obsidianService);
     await registerBasesUpsertConfigTool(server, obsidianService);
+    await registerListAllTasksTool(server, vaultCacheService);
+    await registerQueryTasksTool(server, vaultCacheService);
 
     logger.info("Resources and tools registered successfully", context);
 

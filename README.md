@@ -21,6 +21,7 @@ node dist/stdio-proxy.js
 ## Highlights
 
 - Complete MCP toolset (notes, frontmatter, tags, global search, etc.)
+- Integrated Tasks tools: `list_all_tasks` and `query_tasks`
 - Local semantic search `smart_semantic_search`
 - Embedder‑agnostic: query embedding aligned to the vault model
 - Ollama / Xenova / OpenAI support (env overrides)
@@ -103,6 +104,8 @@ Useful env overrides:
 
 - `OBSIDIAN_SHARED_CACHE_DB_PATH` to move the shared SQLite file
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT` to tune the bounded in-memory hot set
+
+This runtime also exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
 
 Useful scripts:
 
