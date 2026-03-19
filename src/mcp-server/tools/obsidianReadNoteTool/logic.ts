@@ -1,9 +1,11 @@
 import path from "node:path"; // Using POSIX path functions for vault path manipulation
+import { load } from "js-yaml";
 import { z } from "zod";
 import {
   NoteJson,
   ObsidianRestApiService,
 } from "../../../services/obsidianRestAPI/index.js";
+import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   createFormattedStatWithTokenCount,
@@ -136,6 +138,7 @@ export const processObsidianReadNote = async (
   params: ObsidianReadNoteInput,
   context: RequestContext,
   obsidianService: ObsidianRestApiService,
+  vaultCacheService?: VaultCacheService,
 ): Promise<ObsidianReadNoteResponse> => {
   const {
     filePath: originalFilePath,
@@ -151,6 +154,49 @@ export const processObsidianReadNote = async (
 
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;
+
+  const readFromSharedCache = async (
+    requestedPath: string,
+  ): Promise<ObsidianReadNoteResponse | null> => {
+    if (!vaultCacheService?.isReady()) {
+      return null;
+    }
+
+    const matchedPath = vaultCacheService.findMatchingPath(requestedPath);
+    if (!matchedPath) {
+      return null;
+    }
+
+    const cacheEntry = await vaultCacheService.getEntry(matchedPath);
+    if (!cacheEntry) {
+      return null;
+    }
+
+    effectiveFilePath = matchedPath;
+    const noteJson = buildNoteJsonFromCache(matchedPath, cacheEntry);
+    const formattedStat = await createFormattedStatWithTokenCount(
+      noteJson.stat,
+      noteJson.content ?? "",
+      { ...context, operation: "formatSharedCacheResponse", effectiveFilePath: matchedPath },
+    );
+
+    logger.info(`Serving ${matchedPath} from shared cache fallback.`, {
+      ...context,
+      fallbackMode: "shared-cache",
+    });
+
+    if (requestedFormat === "json") {
+      return {
+        content: noteJson,
+        stats: formattedStat ?? undefined,
+      };
+    }
+
+    return {
+      content: noteJson.content ?? "",
+      stats: includeStat ? formattedStat ?? undefined : undefined,
+    };
+  };
 
   try {
     let noteJson: NoteJson;
@@ -184,6 +230,16 @@ export const processObsidianReadNote = async (
         readContext,
       );
     } catch (error) {
+      if (
+        error instanceof McpError &&
+        error.code === BaseErrorCode.SERVICE_UNAVAILABLE
+      ) {
+        const cached = await readFromSharedCache(originalFilePath);
+        if (cached) {
+          return cached;
+        }
+      }
+
       // Attempt 2: Case-insensitive fallback if initial read failed with NOT_FOUND
       if (error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND) {
         logger.info(
@@ -388,3 +444,72 @@ export const processObsidianReadNote = async (
     }
   }
 };
+
+function buildNoteJsonFromCache(
+  filePath: string,
+  entry: {
+    content: string;
+    ctime: number;
+    mtime: number;
+    size: number;
+  },
+): NoteJson {
+  const { frontmatter, body } = extractFrontmatter(entry.content);
+  return {
+    content: entry.content,
+    frontmatter,
+    path: filePath,
+    stat: {
+      ctime: entry.ctime,
+      mtime: entry.mtime,
+      size: entry.size,
+    },
+    tags: extractTags(frontmatter, body),
+  };
+}
+
+function extractFrontmatter(content: string): {
+  frontmatter: Record<string, any>;
+  body: string;
+} {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?/u);
+  if (!match) {
+    return { frontmatter: {}, body: content };
+  }
+
+  try {
+    const parsed = load(match[1]);
+    return {
+      frontmatter:
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, any>)
+          : {},
+      body: content.slice(match[0].length),
+    };
+  } catch {
+    return { frontmatter: {}, body: content.slice(match[0].length) };
+  }
+}
+
+function extractTags(frontmatter: Record<string, any>, body: string): string[] {
+  const collected = new Set<string>();
+  const frontmatterTags = frontmatter.tags;
+  if (Array.isArray(frontmatterTags)) {
+    for (const tag of frontmatterTags) {
+      if (typeof tag === "string" && tag.trim()) {
+        collected.add(tag.replace(/^#/u, ""));
+      }
+    }
+  } else if (typeof frontmatterTags === "string" && frontmatterTags.trim()) {
+    collected.add(frontmatterTags.replace(/^#/u, ""));
+  }
+
+  const regex = /(^|\s)#([A-Za-z0-9/_-]+)/g;
+  for (const match of body.matchAll(regex)) {
+    if (match[2]) {
+      collected.add(match[2]);
+    }
+  }
+
+  return [...collected];
+}

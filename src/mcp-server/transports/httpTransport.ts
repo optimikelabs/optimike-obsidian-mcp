@@ -25,6 +25,8 @@ import { cors } from "hono/cors";
 import http from "http";
 import { randomUUID } from "node:crypto";
 import { config } from "../../config/index.js";
+import { collectRuntimeStatus } from "../../services/runtimeState.js";
+import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import {
   logger,
@@ -134,11 +136,24 @@ function startHttpServerWithRetry(
 export async function startHttpTransport(
   createServerInstanceFn: () => Promise<McpServer>,
   parentContext: RequestContext,
+  vaultCacheService?: VaultCacheService,
 ): Promise<ServerType> {
   const app = new Hono<{ Bindings: HttpBindings }>();
   const transportContext = requestContextService.createRequestContext({
     ...parentContext,
     component: "HttpTransportSetup",
+  });
+
+  app.get("/healthz", async (c: Context) => {
+    const includeIntegrity = c.req.query("integrity") === "1";
+    const runtimeStatus = await collectRuntimeStatus(vaultCacheService, {
+      includeIntegrity,
+    });
+    return c.json({
+      ...runtimeStatus,
+      transport: "streamable-http",
+      endpoint: MCP_ENDPOINT_PATH,
+    });
   });
 
   app.use(

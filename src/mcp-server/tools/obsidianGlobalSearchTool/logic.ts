@@ -4,7 +4,7 @@ import {
   NoteJson,
   ObsidianRestApiService,
   SimpleSearchResult,
-} from "../../../services/obsidianRestAPI/index.js"; // Removed NoteStat import
+} from "../../../services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 // Import formatTimestamp utility
@@ -391,22 +391,17 @@ export const processObsidianGlobalSearch = async (
         "API search failed/timed out. Falling back to in-memory cache.",
         opContext,
       );
-      const cache = vaultCacheService.getCache();
       const cacheSearchContext = {
         ...opContext,
         subOperation: "searchCacheFallback",
       };
+      const entries = vaultCacheService.getEntriesByPrefix(searchPathPrefix);
       allFilteredResults = []; // Reset results for cache search
       totalMatchesCount = 0;
       let processedCount = 0;
 
-      for (const [filePath, cacheEntry] of cache.entries()) {
-        // Apply path filter
-        if (searchPathPrefix && !filePath.startsWith(searchPathPrefix)) {
-          continue; // Skip if file is not in the specified path
-        }
-
-        const mtime = cacheEntry.mtime; // Get mtime from cache
+      for (const entry of entries) {
+        const mtime = entry.mtime;
 
         // Apply date filtering
         if (
@@ -417,6 +412,10 @@ export const processObsidianGlobalSearch = async (
         }
 
         try {
+          const cacheEntry = await vaultCacheService.getEntry(entry.path);
+          if (!cacheEntry) {
+            continue;
+          }
           const matches = findMatchesInContent(
             cacheEntry.content,
             params.query,
@@ -430,29 +429,15 @@ export const processObsidianGlobalSearch = async (
           const limitedMatches = matches.slice(0, params.maxMatchesPerFile);
 
           if (limitedMatches.length > 0) {
-            let ctime: number | null = null;
-            // Attempt to fetch ctime as cache likely doesn't have it
-            try {
-              const noteJson = (await obsidianService.getFileContent(
-                filePath,
-                "json",
-                cacheSearchContext,
-              )) as NoteJson;
-              ctime = noteJson.stat.ctime;
-            } catch (statError) {
-              logger.warning(
-                `Failed to fetch ctime for cached file ${filePath} during fallback. Error: ${statError instanceof Error ? statError.message : String(statError)}`,
-                cacheSearchContext,
-              );
-              // Proceed without ctime if fetch fails
-            }
-
             allFilteredResults.push({
               // Add to unfiltered list
-              path: filePath,
-              filename: path.basename(filePath),
+              path: entry.path,
+              filename: path.basename(entry.path),
               modifiedTime: formatTimestamp(mtime, cacheSearchContext), // Format mtime
-              createdTime: formatTimestamp(ctime ?? mtime, cacheSearchContext), // Format ctime (or mtime fallback)
+              createdTime: formatTimestamp(
+                entry.ctime ?? mtime,
+                cacheSearchContext,
+              ),
               matches: limitedMatches, // Use limited matches
               numericMtime: mtime, // Store numeric mtime from cache
             });
@@ -461,12 +446,12 @@ export const processObsidianGlobalSearch = async (
           }
         } catch (matchError) {
           logger.warning(
-            `Error matching content in cached file ${filePath} during fallback: ${matchError instanceof Error ? matchError.message : String(matchError)}`,
+            `Error matching content in cached file ${entry.path} during fallback: ${matchError instanceof Error ? matchError.message : String(matchError)}`,
             cacheSearchContext,
           );
         }
       }
-      strategyMessage += `Searched ${cache.size} cached files, processed ${processedCount} matching all filters (including path: '${searchPathPrefix || "entire vault"}'). `;
+      strategyMessage += `Searched ${entries.length} cached files, processed ${processedCount} matching all filters (including path: '${searchPathPrefix || "entire vault"}'). `;
     } else {
       // This block now handles both "cache disabled" and "cache not ready"
       const reason = vaultCacheService ? "is not ready" : "is disabled";

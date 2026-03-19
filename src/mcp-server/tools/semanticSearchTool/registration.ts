@@ -11,7 +11,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { promises as fs } from "fs";
 import path from "path";
-import { loadSmartEnv, cosine, type SmartVec } from "../../../services/smartEnv.js";
+import { cosine, type SmartVec } from "../../../services/smartEnv.js";
+import { getSemanticCacheService } from "../../../services/semanticCache.js";
 import { getQueryEmbedder } from "../../../adapters/embed/index.js";
 import { resolveNoteAbsolutePath } from "./resolvePath.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
@@ -44,15 +45,6 @@ const Out = z.object({
 
 type InType = z.infer<typeof In>;
 type OutType = z.infer<typeof Out>;
-
-type SmartEnvCacheEntry = {
-  dir: string;
-  ts: number;
-  items: SmartVec[];
-  smartEnvMtimeMs?: number;
-};
-
-let smartEnvCache: SmartEnvCacheEntry | null = null;
 
 function getEnv() {
   const env = process.env;
@@ -179,36 +171,6 @@ async function detectOllamaBaseUrlFromSmartEnv(
   return undefined;
 }
 
-async function loadItemsWithCache(
-  dir: string,
-  ttlMs: number,
-): Promise<SmartVec[]> {
-  const ttl = Number.isFinite(ttlMs) ? Math.max(ttlMs, 0) : 60000;
-  const now = Date.now();
-  const smartEnvJsonPath = path.join(dir, "smart_env.json");
-  let smartEnvMtimeMs: number | undefined;
-
-  try {
-    const stat = await fs.stat(smartEnvJsonPath);
-    smartEnvMtimeMs = stat.mtimeMs;
-  } catch {
-    smartEnvMtimeMs = undefined;
-  }
-
-  if (
-    !smartEnvCache ||
-    smartEnvCache.dir !== dir ||
-    now - smartEnvCache.ts > ttl ||
-    (smartEnvMtimeMs !== undefined &&
-      smartEnvCache.smartEnvMtimeMs !== smartEnvMtimeMs)
-  ) {
-    const items = await loadSmartEnv(dir);
-    smartEnvCache = { dir, ts: now, items, smartEnvMtimeMs };
-  }
-
-  return smartEnvCache.items;
-}
-
 function makeSuccessResult(payload: OutType) {
   return {
     content: [
@@ -248,7 +210,6 @@ async function performSearch(input: InType): Promise<OutType> {
     OPENAI_BASE_URL,
     OPENAI_EMBEDDING_DIMENSIONS,
     OBSIDIAN_VAULT,
-    CACHE_TTL,
   } = getEnv();
 
   if (!SMART_ENV_DIR) {
@@ -272,18 +233,20 @@ async function performSearch(input: InType): Promise<OutType> {
     };
   }
 
-  const items = await loadItemsWithCache(SMART_ENV_DIR, CACHE_TTL);
+  const semanticCache = getSemanticCacheService();
+  const snapshot = await semanticCache.getSnapshot();
+  const items = snapshot.items;
   if (!items.length) {
     throw new Error(`No embeddings found in ${SMART_ENV_DIR}`);
   }
 
-  const dimension = pickDominantDimension(items);
+  const dimension = snapshot.dominantDim ?? pickDominantDimension(items);
   if (!dimension) {
     throw new Error("Embeddings are missing vector data");
   }
 
   const itemsWithDim = items.filter((item) => item.vec?.length === dimension);
-  const model = pickDominantModel(itemsWithDim);
+  const model = snapshot.dominantModel ?? pickDominantModel(itemsWithDim);
 
   const openaiDimensions = Number.isFinite(Number(OPENAI_EMBEDDING_DIMENSIONS))
     ? Number(OPENAI_EMBEDDING_DIMENSIONS)
