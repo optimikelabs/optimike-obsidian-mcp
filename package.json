@@ -1,12 +1,15 @@
 {
   "name": "optimike-obsidian-mcp",
   "version": "2.0.7",
-  "description": "Optimike Obsidian MCP (Model Context Protocol) server enabling AI agents and dev tools to interact with an Obsidian vault, with embedder-agnostic semantic search aligned to Smart Connections.",
+  "description": "Unified Obsidian MCP server with shared local cache, integrated Tasks tools, Bases support, semantic search via Smart Connections, runtime observability, and degraded read mode for durable Codex workflows.",
   "main": "dist/index.js",
   "files": [
     "dist",
     "README.md",
     "README.fr.md",
+    "OPERATIONS.md",
+    "OPERATIONS.fr.md",
+    "docs/assets",
     "LICENSE",
     "CHANGELOG.md"
   ],

@@ -1,8 +1,12 @@
 # Optimike Obsidian MCP
 
 French version: [README.fr.md](README.fr.md)
+Operations guide: [OPERATIONS.md](OPERATIONS.md)
+Guide d’exploitation (FR): [OPERATIONS.fr.md](OPERATIONS.fr.md)
 
-MCP (Model Context Protocol) server for Obsidian with semantic search powered by Smart Connections.
+![Optimike Obsidian MCP hero](docs/assets/hero-optimike-obsidian-mcp.png)
+
+MCP (Model Context Protocol) server for Obsidian with shared local caching, integrated Tasks tools, and semantic search powered by Smart Connections.
 
 ## TL;DR
 
@@ -12,11 +16,14 @@ npm run build
 node dist/stdio-proxy.js
 ```
 
+Recommended for Codex: point your MCP config to `dist/stdio-proxy.js`, not directly to `dist/index.js`.
+
 ## Why
 
 - Connect Obsidian to MCP agents (Codex, IDEs, etc.)
 - Expose Obsidian REST tools (read/write, frontmatter, tags, search)
 - Provide local vector search via Smart Connections (`.smart-env`)
+- Keep one durable local backend instead of re-spawning heavy state on every stdio run
 
 ## Highlights
 
@@ -25,6 +32,7 @@ node dist/stdio-proxy.js
 - Local semantic search `smart_semantic_search`
 - Runtime observability tools: `obsidian_runtime_status` and `obsidian_runtime_maintenance`
 - Read-only degraded mode for `obsidian_read_note` and `obsidian_list_notes` when Obsidian REST is down
+- Shared SQLite store for vault content, task cache, and semantic manifest data
 - Embedder‑agnostic: query embedding aligned to the vault model
 - Ollama / Xenova / OpenAI support (env overrides)
 
@@ -34,7 +42,7 @@ node dist/stdio-proxy.js
 2) **Optimike Obsidian MCP** (this server)  
 3) **MCP Agents** (Codex, IDEs, etc.)
 
-The server acts as a **bridge** between agents and Obsidian, and adds a “Base” layer for `.base` files.
+The server acts as a **bridge** between agents and Obsidian, adds a “Base” layer for `.base` files, and persists shared runtime state locally so Codex can stay fast and stable across runs.
 
 ## Bases Bridge (REST) — why & how
 
@@ -87,18 +95,24 @@ This server exposes “Base” MCP tools:
 - `bases_get_config` / `bases_upsert_config` : read/write YAML
 - `bases_create` : create/validate a `.base`
 
-## Runtime modes
+## Final Runtime Model
 
-The repo now supports two local runtime modes:
+The repo supports two local runtime modes:
 
 - `stdio proxy` (recommended for Codex): a lightweight stdio process that auto-starts a local Streamable HTTP backend if needed
 - `http backend`: the actual long-lived backend process that owns the heavy cache / warmup work
 
-The backend now persists vault content to a shared SQLite cache and keeps only a bounded hot set in RAM. By default the cache lives at:
+The backend persists vault content to a shared SQLite store and keeps only a bounded hot set in RAM. By default the cache lives at:
 
 ```text
 <vault>/.obsidian/optimike-mcp/shared-cache.sqlite
 ```
+
+The same database also stores:
+
+- `file_cache` for note content
+- `task_file_cache` for parsed Tasks data
+- `semantic_manifest` and `semantic_vectors` for semantic metadata
 
 If `OBSIDIAN_VAULT` is not set, the server falls back to the parent vault inferred from `SMART_ENV_DIR`, then to the project root.
 
@@ -107,8 +121,8 @@ Useful env overrides:
 - `OBSIDIAN_SHARED_CACHE_DB_PATH` to move the shared SQLite file
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT` to tune the bounded in-memory hot set
 
-This runtime also exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
-It also persists semantic metadata in the same shared SQLite store (`semantic_manifest`, `semantic_vectors`) so warm semantic refreshes can load from disk instead of re-reading the whole `.smart-env` path every time.
+This runtime exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
+Warm semantic refreshes now load from SQLite first instead of re-reading the whole `.smart-env` path every time.
 
 Useful scripts:
 
@@ -136,7 +150,14 @@ Extended health / maintenance:
   - `refresh_tasks_cache`
   - `refresh_all`
 
-## Minimal config (Codex)
+Typical checks:
+
+```bash
+curl http://127.0.0.1:3010/healthz
+curl http://127.0.0.1:3010/healthz?integrity=1
+```
+
+## Minimal Codex Config
 
 In `~/.codex/config.toml`:
 
@@ -180,6 +201,45 @@ Notes:
 - Use logical placeholders in documentation (`/path/to/...`) and keep real paths only in local config.
 - `dist/index.js` is still the backend entrypoint, but Codex should point to `dist/stdio-proxy.js`.
 
+## Main MCP Surface
+
+The main MCP now includes:
+
+- note tools: read, list, update, search-replace, tags, frontmatter
+- Bases tools: list, schema, query, create, upsert config, upsert rows
+- Tasks tools: `list_all_tasks`, `query_tasks`
+- semantic tools: `smart_semantic_search`, `smart_search`, `smart-search`
+- runtime tools: `obsidian_runtime_status`, `obsidian_runtime_maintenance`
+
+## Tasks Integration
+
+The main MCP now owns the Tasks surface directly.
+
+What this means:
+
+- Codex does not need a separate `optimike-obsidian-tasks-mcp` entry anymore
+- `list_all_tasks` and `query_tasks` are exposed by this main server
+- parsed task data is persisted in `task_file_cache` inside the shared SQLite database
+
+Dependencies for Tasks support:
+
+- Obsidian vault access
+- shared cache database
+- Obsidian Tasks plugin configuration file at:
+
+```text
+<vault>/.obsidian/plugins/obsidian-tasks-plugin/data.json
+```
+
+How it works:
+
+1. note content is indexed in `file_cache`
+2. task parsing reuses that content instead of rescanning the vault from scratch
+3. parsed tasks are stored in `task_file_cache`
+4. `list_all_tasks` and `query_tasks` reuse that persisted layer
+
+This gives you one MCP surface, one runtime, and one durable local data path.
+
 ## Obsidian companions (recommended)
 
 Plugins required for full functionality:
@@ -207,6 +267,11 @@ The server:
 Important:
 - semantic query execution still requires a reachable query embedder provider
 - if the vault was built with Ollama embeddings, an unreachable Ollama instance will produce a clear error instead of a silent hang
+
+That means:
+
+- the semantic metadata path is now durable and observable
+- the final query still depends on a live embedding provider at request time
 
 ## Providers (optional override)
 
@@ -238,6 +303,15 @@ export OPENAI_API_KEY=...
 
 For shared MCP setups, avoid hard‑coding `OLLAMA_BASE_URL` inside the vault.
 Keep auto mode and let each user override via env vars.
+
+## Legacy Tasks Repo
+
+`optimike-obsidian-tasks-mcp` can still exist as a legacy standalone repo, but Codex no longer needs it when using this main server. The main MCP is now the canonical surface.
+
+## More Documentation
+
+- Product overview and install: this README
+- Runtime and maintenance guide: [OPERATIONS.md](OPERATIONS.md)
 
 ## WSL + Ollama Windows (recommended)
 

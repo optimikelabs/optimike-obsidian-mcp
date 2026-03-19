@@ -1,22 +1,29 @@
 # Optimike Obsidian MCP
 
 Version anglaise : [README.md](README.md)
+Guide d’exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
+Operations guide (EN) : [OPERATIONS.md](OPERATIONS.md)
 
-Serveur MCP (Model Context Protocol) pour Obsidian avec recherche sémantique basée sur Smart Connections.
+![Hero Optimike Obsidian MCP](docs/assets/hero-optimike-obsidian-mcp.png)
+
+Serveur MCP (Model Context Protocol) pour Obsidian avec cache local partagé, outils Tasks intégrés et recherche sémantique basée sur Smart Connections.
 
 ## TL;DR
 
 ```bash
 npm install
 npm run build
-node dist/index.js --stdio
+node dist/stdio-proxy.js
 ```
+
+Recommandation Codex : pointer la config MCP vers `dist/stdio-proxy.js`, pas directement vers `dist/index.js`.
 
 ## Pourquoi
 
 - Connecter Obsidian à des agents MCP (Codex, IDE, etc.)
 - Exposer les outils REST Obsidian (lecture/écriture, frontmatter, tags, recherche)
 - Offrir une recherche vectorielle locale via Smart Connections (`.smart-env`)
+- Garder un backend local durable au lieu de respawner tout l’état lourd à chaque run stdio
 
 ## Points forts
 
@@ -25,6 +32,7 @@ node dist/index.js --stdio
 - Recherche sémantique locale `smart_semantic_search`
 - Outils d’exploitation : `obsidian_runtime_status` et `obsidian_runtime_maintenance`
 - Mode dégradé lecture seule pour `obsidian_read_note` et `obsidian_list_notes` si Obsidian REST tombe
+- Store SQLite partagé pour le contenu du vault, le cache Tasks et le manifest sémantique
 - Embedder-agnostic : aligne automatiquement la requête sur le modèle du vault
 - Support Ollama / Xenova / OpenAI (override par env vars)
 
@@ -34,7 +42,7 @@ node dist/index.js --stdio
 2) **Optimike Obsidian MCP** (ce serveur)  
 3) **Agents MCP** (Codex, IDE, etc.)
 
-Le serveur agit comme un **pont** entre tes agents et Obsidian, et ajoute une couche “Base” pour les fichiers `.base`.
+Le serveur agit comme un **pont** entre tes agents et Obsidian, ajoute une couche “Base” pour les fichiers `.base`, et persiste l’état runtime local pour garder Codex rapide et stable au fil des sessions.
 
 ## Bases Bridge (REST) — pourquoi et comment
 
@@ -87,7 +95,7 @@ Le serveur expose des tools MCP “Base” (via Obsidian MCP) :
 - `bases_get_config` / `bases_upsert_config` : lire/écrire le YAML
 - `bases_create` : créer/valider une base `.base`
 
-## Modes runtime
+## Modèle Runtime Final
 
 Le repo supporte maintenant deux modes locaux :
 
@@ -99,6 +107,12 @@ Le backend persiste désormais :
 - le contenu du vault dans un cache SQLite partagé
 - un hot cache RAM borné
 - un manifest sémantique (`semantic_manifest`, `semantic_vectors`) dans la même base
+
+La même base stocke donc :
+
+- `file_cache` pour le contenu des notes
+- `task_file_cache` pour les données Tasks déjà parsées
+- `semantic_manifest` et `semantic_vectors` pour le chemin sémantique
 
 Chemin par défaut :
 
@@ -112,6 +126,7 @@ Variables utiles :
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 
 Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
+Les refreshs sémantiques à chaud relisent SQLite d’abord, puis seulement `.smart-env` si nécessaire.
 
 Scripts utiles :
 
@@ -133,7 +148,14 @@ Et via MCP :
 - `obsidian_runtime_status`
 - `obsidian_runtime_maintenance`
 
-## Configuration minimale (Codex)
+Checks typiques :
+
+```bash
+curl http://127.0.0.1:3010/healthz
+curl http://127.0.0.1:3010/healthz?integrity=1
+```
+
+## Configuration Codex minimale
 
 Dans `~/.codex/config.toml` :
 
@@ -175,6 +197,16 @@ Notes :
 - Dans la doc, utilise des chemins logiques (`/chemin/vers/...`) et garde les chemins réels uniquement en local.
 - `dist/index.js` reste l’entrypoint backend, mais Codex doit pointer vers `dist/stdio-proxy.js`.
 
+## Surface MCP principale
+
+Le MCP principal inclut maintenant :
+
+- outils notes : lecture, listing, update, search-replace, tags, frontmatter
+- outils Bases : list, schema, query, create, upsert config, upsert rows
+- outils Tasks : `list_all_tasks`, `query_tasks`
+- outils sémantiques : `smart_semantic_search`, `smart_search`, `smart-search`
+- outils runtime : `obsidian_runtime_status`, `obsidian_runtime_maintenance`
+
 ## Compagnons Obsidian (recommandés)
 
 Plugins à activer pour que tout fonctionne :
@@ -202,6 +234,11 @@ Le serveur :
 Important :
 - l’exécution d’une requête sémantique exige toujours un provider de requête joignable
 - si le vault repose sur Ollama et qu’Ollama est down, l’erreur remonte clairement au lieu de bloquer silencieusement
+
+Autrement dit :
+
+- le chemin des métadonnées sémantiques est maintenant durable et observable
+- la requête finale dépend toujours d’un provider d’embedding vivant au moment de l’appel
 
 ## Providers (override optionnel)
 
@@ -233,6 +270,10 @@ export OPENAI_API_KEY=...
 
 Pour un MCP partagé, ne pas figer un `OLLAMA_BASE_URL` global dans le vault.
 Laisser le mode auto et laisser chaque utilisateur overrider par env vars.
+
+## Repo Tasks legacy
+
+`optimike-obsidian-tasks-mcp` peut encore exister comme repo standalone legacy, mais Codex n’en a plus besoin quand ce serveur principal est utilisé. Le MCP canonique est maintenant celui-ci.
 
 ## WSL + Ollama Windows (recommandé)
 
