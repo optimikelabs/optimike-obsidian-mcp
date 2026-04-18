@@ -5,14 +5,28 @@
 import { z } from "zod";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import {
-  BaseUpsertRequest,
+  BaseUpsertOperation,
   BaseUpsertResponse,
+  BaseUpsertResult,
 } from "../../../services/obsidianRestAPI/types.js";
 import {
   logger,
   RequestContext,
   requestContextService,
 } from "../../../utils/index.js";
+
+const UPSERT_CHUNK_SIZE = 25;
+
+function chunkOperations(
+  operations: BaseUpsertOperation[],
+  chunkSize: number,
+): BaseUpsertOperation[][] {
+  const chunks: BaseUpsertOperation[][] = [];
+  for (let i = 0; i < operations.length; i += chunkSize) {
+    chunks.push(operations.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
 
 const OperationSchema = z
   .object({
@@ -65,16 +79,6 @@ export async function processBasesUpsertRows(
   parentContext: RequestContext,
   obsidianService: ObsidianRestApiService,
 ): Promise<BaseUpsertResponse> {
-  const payload: BaseUpsertRequest = {
-    operations: params.operations.map((operation) => ({
-      file: operation.file,
-      set: operation.set,
-      unset: operation.unset,
-      expected_mtime: operation.expected_mtime,
-    })),
-    continueOnError: params.continueOnError,
-  };
-
   const context = requestContextService.createRequestContext({
     parentContext,
     operation: "BasesUpsertRows",
@@ -85,6 +89,69 @@ export async function processBasesUpsertRows(
     },
   });
 
-  logger.debug("Upserting rows via REST bridge", context);
-  return obsidianService.upsertBaseRows(params.base_id, payload, context);
+  const operations: BaseUpsertOperation[] = params.operations.map((operation) => ({
+    file: operation.file,
+    set: operation.set,
+    unset: operation.unset,
+    expected_mtime: operation.expected_mtime,
+  }));
+  const operationChunks = chunkOperations(operations, UPSERT_CHUNK_SIZE);
+  const allResults: BaseUpsertResult[] = [];
+
+  logger.debug("Upserting rows via REST bridge (chunked)", {
+    ...context,
+    chunkSize: UPSERT_CHUNK_SIZE,
+    chunkCount: operationChunks.length,
+  });
+
+  for (let index = 0; index < operationChunks.length; index++) {
+    const chunk = operationChunks[index]!;
+    const chunkContext = requestContextService.createRequestContext({
+      parentContext: context,
+      operation: "BasesUpsertRowsChunk",
+      params: {
+        base_id: params.base_id,
+        chunkIndex: index + 1,
+        chunkCount: operationChunks.length,
+        operationsInChunk: chunk.length,
+      },
+    });
+
+    try {
+      const response = await obsidianService.upsertBaseRows(
+        params.base_id,
+        { operations: chunk, continueOnError: params.continueOnError },
+        chunkContext,
+      );
+
+      allResults.push(...response.results);
+      if (!params.continueOnError && !response.ok) {
+        break;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error("bases_upsert_rows chunk failed after retries", {
+        ...chunkContext,
+        error: message,
+      });
+      allResults.push(
+        ...chunk.map((operation) => ({
+          file: operation.file,
+          mtime: 0,
+          error: {
+            code: "request_failed_outcome_unknown",
+            message: `Chunk request failed; individual write outcomes are unknown. ${message}`,
+          },
+        })),
+      );
+      if (!params.continueOnError) {
+        break;
+      }
+    }
+  }
+
+  return {
+    ok: allResults.every((result) => !result.error),
+    results: allResults,
+  };
 }

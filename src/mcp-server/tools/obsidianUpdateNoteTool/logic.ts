@@ -263,14 +263,12 @@ export interface ObsidianUpdateNoteResponse {
 /**
  * Attempts to retrieve the final state (content and stats) of the target note after an update operation.
  * Uses the appropriate Obsidian API method based on the target type.
- * Logs a warning and returns null if fetching the final state fails, to avoid failing the entire update operation.
- *
  * @param {z.infer<typeof TargetTypeSchema>} targetType - The type of the target note.
  * @param {string | undefined} targetIdentifier - The identifier (path or period) if applicable.
  * @param {z.infer<typeof PeriodicNotePeriodSchema> | undefined} period - The parsed period if targetType is 'periodicNote'.
  * @param {ObsidianRestApiService} obsidianService - The Obsidian API service instance.
  * @param {RequestContext} context - The request context for logging and correlation.
- * @returns {Promise<NoteJson | null>} A promise resolving to the NoteJson object or null if retrieval fails.
+ * @returns {Promise<NoteJson | null>} A promise resolving to the NoteJson object or null if no target could be resolved.
  */
 async function getFinalState(
   targetType: z.infer<typeof TargetTypeSchema>,
@@ -284,40 +282,50 @@ async function getFinalState(
     `Attempting to retrieve final state for target: ${targetType} ${targetIdentifier ?? "(active)"}`,
     { ...context, operation },
   );
+  let noteJson: NoteJson | null = null;
+  // Call the appropriate API method based on target type
+  if (targetType === "filePath" && targetIdentifier) {
+    noteJson = (await obsidianService.getFileContent(
+      targetIdentifier,
+      "json",
+      context,
+    )) as NoteJson;
+  } else if (targetType === "activeFile") {
+    noteJson = (await obsidianService.getActiveFile(
+      "json",
+      context,
+    )) as NoteJson;
+  } else if (targetType === "periodicNote" && period) {
+    noteJson = (await obsidianService.getPeriodicNote(
+      period,
+      "json",
+      context,
+    )) as NoteJson;
+  }
+  logger.debug(`Successfully retrieved final state`, {
+    ...context,
+    operation,
+  });
+  return noteJson;
+}
+
+async function refreshFileCacheBestEffort(
+  vaultCacheService: VaultCacheService | null | undefined,
+  filePath: string | undefined,
+  context: RequestContext,
+): Promise<void> {
+  if (!vaultCacheService || !filePath) {
+    return;
+  }
+
   try {
-    let noteJson: NoteJson | null = null;
-    // Call the appropriate API method based on target type
-    if (targetType === "filePath" && targetIdentifier) {
-      noteJson = (await obsidianService.getFileContent(
-        targetIdentifier,
-        "json",
-        context,
-      )) as NoteJson;
-    } else if (targetType === "activeFile") {
-      noteJson = (await obsidianService.getActiveFile(
-        "json",
-        context,
-      )) as NoteJson;
-    } else if (targetType === "periodicNote" && period) {
-      noteJson = (await obsidianService.getPeriodicNote(
-        period,
-        "json",
-        context,
-      )) as NoteJson;
-    }
-    logger.debug(`Successfully retrieved final state`, {
-      ...context,
-      operation,
-    });
-    return noteJson;
+    await vaultCacheService.updateCacheForFile(filePath, context);
   } catch (error) {
-    // Log the error but don't let it fail the main update operation.
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.warning(
-      `Could not retrieve final state after update for target: ${targetType} ${targetIdentifier ?? "(active)"}. Error: ${errorMsg}`,
-      { ...context, operation, error: errorMsg },
+      `Background cache refresh failed for '${filePath}': ${errorMsg}`,
+      { ...context, operation: "backgroundCacheRefresh", filePath },
     );
-    return null; // Return null to indicate failure without throwing
   }
 }
 
@@ -353,6 +361,7 @@ export const processObsidianUpdateNote = async (
   const mode = params.wholeFileMode;
   let wasCreated = false; // Flag to track if the file was newly created by the operation
   let targetPeriod: z.infer<typeof PeriodicNotePeriodSchema> | undefined;
+  let writtenContentForStats = contentString;
 
   // Parse the period if the target is a periodic note
   if (params.targetType === "periodicNote" && targetId) {
@@ -562,6 +571,7 @@ export const processObsidianUpdateNote = async (
         mode === "prepend"
           ? contentString + existingContent
           : existingContent + contentString;
+      writtenContentForStats = newContent;
       logger.debug(
         `Combined content length for ${mode}: ${newContent.length}`,
         updateContext,
@@ -589,8 +599,8 @@ export const processObsidianUpdateNote = async (
         `Successfully wrote combined content for ${mode}`,
         writeContext,
       );
-      if (params.targetType === "filePath" && targetId && vaultCacheService) {
-        await vaultCacheService.updateCacheForFile(targetId, writeContext);
+      if (params.targetType === "filePath") {
+        await refreshFileCacheBestEffort(vaultCacheService, targetId, writeContext);
       }
     } else {
       // Handle 'overwrite' mode directly.
@@ -619,75 +629,154 @@ export const processObsidianUpdateNote = async (
         `Successfully performed overwrite on target: ${params.targetType} ${targetId ?? "(active)"}`,
         updateContext,
       );
-      if (params.targetType === "filePath" && targetId && vaultCacheService) {
-        await vaultCacheService.updateCacheForFile(targetId, updateContext);
+      if (params.targetType === "filePath") {
+        await refreshFileCacheBestEffort(vaultCacheService, targetId, updateContext);
       }
     }
 
-    // --- Step 4: Get Final State (Stat and Optional Content) ---
-    // Add a small delay before attempting to get the final state, to allow Obsidian API to stabilize after write.
-    const POST_UPDATE_DELAY_MS = 250;
-    logger.debug(
-      `Waiting ${POST_UPDATE_DELAY_MS}ms before retrieving final state...`,
-      { ...context, operation: "postUpdateDelay" },
-    );
-    await new Promise((resolve) => setTimeout(resolve, POST_UPDATE_DELAY_MS));
-
-    // Attempt to retrieve the file's state *after* the modification.
     let finalState: NoteJson | null = null; // Initialize to null
-    try {
-      finalState = await retryWithDelay(
-        async () =>
-          getFinalState(
-            params.targetType,
-            targetId,
-            targetPeriod,
-            obsidianService,
-            context,
-          ),
-        {
-          operationName: "getFinalStateAfterUpdate",
-          context: { ...context, operation: "getFinalStateAfterUpdateAttempt" }, // Use a distinct context for retry logs
-          maxRetries: 3, // Total attempts: 1 initial + 2 retries
-          delayMs: 250, // Shorter delay
-          shouldRetry: (error: unknown) => {
-            // Retry on common transient issues or if the file might not be immediately available
-            const should =
-              error instanceof McpError &&
-              (error.code === BaseErrorCode.NOT_FOUND || // File might not be indexed immediately
-                error.code === BaseErrorCode.SERVICE_UNAVAILABLE || // API temporarily busy
-                error.code === BaseErrorCode.TIMEOUT); // API call timed out
-            if (should) {
-              logger.debug(
-                `getFinalStateAfterUpdate: shouldRetry=true for error code ${(error as McpError).code}`,
+    let formattedStat: FormattedStat | undefined;
+    let finalStateWarning = false;
+    if (params.returnContent) {
+      // Only pay the post-write read-back cost when the caller explicitly asked for it.
+      const POST_UPDATE_DELAY_MS = 250;
+      logger.debug(
+        `Waiting ${POST_UPDATE_DELAY_MS}ms before retrieving final state...`,
+        { ...context, operation: "postUpdateDelay" },
+      );
+      await new Promise((resolve) => setTimeout(resolve, POST_UPDATE_DELAY_MS));
+
+      try {
+        finalState = await retryWithDelay(
+          async () =>
+            getFinalState(
+              params.targetType,
+              targetId,
+              targetPeriod,
+              obsidianService,
+              context,
+            ),
+          {
+            operationName: "getFinalStateAfterUpdate",
+            context: { ...context, operation: "getFinalStateAfterUpdateAttempt" },
+            maxRetries: 3,
+            delayMs: 250,
+            shouldRetry: (error: unknown) => {
+              const should =
+                error instanceof McpError &&
+                (error.code === BaseErrorCode.NOT_FOUND ||
+                  error.code === BaseErrorCode.SERVICE_UNAVAILABLE ||
+                  error.code === BaseErrorCode.TIMEOUT);
+              if (should) {
+                logger.debug(
+                  `getFinalStateAfterUpdate: shouldRetry=true for error code ${(error as McpError).code}`,
+                  context,
+                );
+              }
+              return should;
+            },
+            onRetry: (attempt, error) => {
+              const errorMsg =
+                error instanceof Error ? error.message : String(error);
+              logger.warning(
+                `getFinalState (attempt ${attempt}) failed. Error: ${errorMsg}. Retrying...`,
+                { ...context, operation: "getFinalStateRetry" },
+              );
+            },
+          },
+        );
+        if (finalState === null) {
+          finalStateWarning = true;
+        }
+      } catch (error) {
+        finalState = null;
+        finalStateWarning = true;
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error(
+          `Failed to retrieve final state for target '${params.targetType} ${targetId ?? ""}' even after retries. Error: ${errorMsg}`,
+          error instanceof Error ? error : undefined,
+          context,
+        );
+      }
+    } else if (params.targetType === "filePath" && targetId) {
+      try {
+        const stat = await retryWithDelay(
+          async () => {
+            const metadata = await obsidianService.getFileMetadata(targetId, context);
+            if (!metadata) {
+              throw new McpError(
+                BaseErrorCode.SERVICE_UNAVAILABLE,
+                `Could not retrieve final metadata for '${targetId}' after update.`,
                 context,
               );
             }
-            return should;
+            return metadata;
           },
-          onRetry: (attempt, error) => {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
-            logger.warning(
-              `getFinalState (attempt ${attempt}) failed. Error: ${errorMsg}. Retrying...`,
-              { ...context, operation: "getFinalStateRetry" },
-            );
+          {
+            operationName: "getFileMetadataAfterUpdate",
+            context: { ...context, operation: "getFileMetadataAfterUpdateAttempt" },
+            maxRetries: 3,
+            delayMs: 250,
+            shouldRetry: (error: unknown) =>
+              error instanceof McpError &&
+              (error.code === BaseErrorCode.NOT_FOUND ||
+                error.code === BaseErrorCode.SERVICE_UNAVAILABLE ||
+                error.code === BaseErrorCode.TIMEOUT),
           },
-        },
-      );
-    } catch (error) {
-      // If retryWithDelay throws after all attempts, getFinalState effectively failed.
-      // The original getFinalState already logs a warning and returns null if it encounters an error internally
-      // and is designed not to let its failure stop the main operation.
-      // So, if retryWithDelay throws, it means even retries didn't help.
-      finalState = null; // Ensure finalState remains null
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error(
-        `Failed to retrieve final state for target '${params.targetType} ${targetId ?? ""}' even after retries. Error: ${errorMsg}`,
-        error instanceof Error ? error : undefined,
-        context,
-      );
-      // Do not re-throw here, allow the main process to construct a response with a warning.
+        );
+
+        const formattedStatResult = await createFormattedStatWithTokenCount(
+          stat,
+          writtenContentForStats,
+          context,
+        );
+        formattedStat =
+          formattedStatResult === null ? undefined : formattedStatResult;
+      } catch (error) {
+        finalStateWarning = true;
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error(
+          `Failed to retrieve final metadata for target '${targetId}' after update. Error: ${errorMsg}`,
+          error instanceof Error ? error : undefined,
+          context,
+        );
+      }
+    } else {
+      try {
+        finalState = await retryWithDelay(
+          async () =>
+            getFinalState(
+              params.targetType,
+              targetId,
+              targetPeriod,
+              obsidianService,
+              context,
+            ),
+          {
+            operationName: "getFinalStateForStatsAfterUpdate",
+            context: { ...context, operation: "getFinalStateForStatsAfterUpdateAttempt" },
+            maxRetries: 3,
+            delayMs: 250,
+            shouldRetry: (error: unknown) =>
+              error instanceof McpError &&
+              (error.code === BaseErrorCode.NOT_FOUND ||
+                error.code === BaseErrorCode.SERVICE_UNAVAILABLE ||
+                error.code === BaseErrorCode.TIMEOUT),
+          },
+        );
+        if (finalState === null) {
+          finalStateWarning = true;
+        }
+      } catch (error) {
+        finalState = null;
+        finalStateWarning = true;
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.error(
+          `Failed to retrieve final state for stats on target '${params.targetType} ${targetId ?? ""}' after update. Error: ${errorMsg}`,
+          error instanceof Error ? error : undefined,
+          context,
+        );
+      }
     }
 
     // --- Step 5: Construct Success Message ---
@@ -711,7 +800,7 @@ export const processObsidianUpdateNote = async (
     logger.info(successMessage, context); // Log initial success message
 
     // Append a warning if the final state couldn't be retrieved
-    if (finalState === null) {
+    if (finalStateWarning) {
       const warningMsg =
         " (Warning: Could not retrieve final file stats/content after update.)";
       successMessage += warningMsg;
@@ -723,17 +812,24 @@ export const processObsidianUpdateNote = async (
 
     // --- Step 6: Build and Return Response ---
     // Format the file statistics (if available) using the shared utility.
-    const finalContentForStat = finalState?.content ?? ""; // Provide content for token counting
-    const formattedStatResult = finalState?.stat
-      ? await createFormattedStatWithTokenCount(
-          finalState.stat,
-          finalContentForStat,
-          context,
-        ) // Await the async utility
-      : undefined;
-    // Ensure stat is undefined if the utility returned null (e.g., token counting failed)
-    const formattedStat =
-      formattedStatResult === null ? undefined : formattedStatResult;
+    if (!formattedStat && finalState?.stat) {
+      const finalContentForStat = finalState?.content ?? "";
+      const formattedStatResult = await createFormattedStatWithTokenCount(
+        finalState.stat,
+        finalContentForStat,
+        context,
+      );
+      formattedStat =
+        formattedStatResult === null ? undefined : formattedStatResult;
+    }
+
+    if (params.targetType !== "filePath" && finalState?.path) {
+      await refreshFileCacheBestEffort(
+        vaultCacheService,
+        finalState.path,
+        { ...context, operation: "postWriteCacheRefresh" },
+      );
+    }
 
     // Construct the final response object.
     const response: ObsidianUpdateNoteResponse = {

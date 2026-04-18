@@ -11,6 +11,7 @@ import {
 type EngineRow = Record<string, any>;
 type EngineSnap = { ts: number; rows: EngineRow[]; total: number };
 const ENGINE_CACHE = new Map<string, EngineSnap>();
+const ENGINE_CACHE_TTL_MS = 15_000;
 
 interface BridgeSettings {
   engineEnabled: boolean;
@@ -276,6 +277,33 @@ export default class BasesBridgePlugin extends Plugin {
     if (this.settings.engineEnabled) {
       this.maybeRegisterHeadlessView();
     }
+
+    const onVaultMutation = (path: string) => {
+      if (!path) return;
+      if (path.endsWith(".base")) {
+        this.invalidateEngineCache(path);
+        return;
+      }
+      if (path.endsWith(".md")) {
+        this.invalidateEngineCache();
+      }
+    };
+    this.registerEvent(
+      this.app.vault.on("modify", (file: any) => onVaultMutation(String(file?.path ?? "")))
+    );
+    this.registerEvent(
+      this.app.vault.on("create", (file: any) => onVaultMutation(String(file?.path ?? "")))
+    );
+    this.registerEvent(
+      this.app.vault.on("delete", (file: any) => onVaultMutation(String(file?.path ?? "")))
+    );
+    this.registerEvent(
+      this.app.vault.on("rename", (file: any, oldPath: string) => {
+        onVaultMutation(String(oldPath ?? ""));
+        onVaultMutation(String(file?.path ?? ""));
+      })
+    );
+
     this.registerRestExtension().catch((error) => {
       console.error("[bases-bridge] Unable to register REST extension:", error);
     });
@@ -378,9 +406,19 @@ export default class BasesBridgePlugin extends Plugin {
   private async ensureEngineForBase(baseId: string): Promise<void> {
     if (!this.settings.engineEnabled) return;
     const key = ensureBaseExt(baseId);
-    if (ENGINE_CACHE.has(key)) return;
+    const snap = ENGINE_CACHE.get(key);
+    if (snap && Date.now() - snap.ts <= ENGINE_CACHE_TTL_MS) return;
+    if (snap) ENGINE_CACHE.delete(key);
 
     this.maybeRegisterHeadlessView();
+  }
+
+  private invalidateEngineCache(baseId?: string): void {
+    if (baseId) {
+      ENGINE_CACHE.delete(ensureBaseExt(baseId));
+      return;
+    }
+    ENGINE_CACHE.clear();
   }
 
   private async readBaseConfig(baseId: string): Promise<{ id: string; file: TFile; yaml: string; json: Record<string, any> }> {
@@ -560,6 +598,26 @@ export default class BasesBridgePlugin extends Plugin {
     return this.evalFormulaExpression(file, expr, schema);
   }
 
+  private isTruthyValue(value: any): boolean {
+    return (
+      value === true ||
+      (typeof value === "string" && value.trim().length > 0) ||
+      (typeof value === "number" && Number.isFinite(value)) ||
+      (Array.isArray(value) && value.length > 0) ||
+      (!!value && typeof value === "object" && Object.keys(value).length > 0)
+    );
+  }
+
+  private getEngineRowPath(row: any): string | undefined {
+    const candidates = [row?.file?.path, row?.path, row?.filePath];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim().length > 0) {
+        return candidate.replace(/\\/g, "/");
+      }
+    }
+    return undefined;
+  }
+
   /**
    * Évalue un sous-ensemble “safe” de formules Bases.
    * Objectif : améliorer le mode fallback quand l’engine est désactivé.
@@ -570,6 +628,7 @@ export default class BasesBridgePlugin extends Plugin {
 
     // Literals
     if (raw === "null") return null;
+    if (/^(true|false)$/i.test(raw)) return /^true$/i.test(raw);
     if (/^-?\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
     if ((raw.startsWith("\"") && raw.endsWith("\"")) || (raw.startsWith("'") && raw.endsWith("'"))) {
       return stripQuotes(raw);
@@ -606,20 +665,18 @@ export default class BasesBridgePlugin extends Plugin {
     if (ifMatch) {
       const args = splitTopLevelCommas(String(ifMatch[1] ?? "")).map((x) => x.trim());
       if (args.length >= 3) {
-        const condRef = args[0]!;
-        const thenRef = args[1]!;
+        const condExpr = args[0]!;
+        const thenExpr = args[1]!;
         const elseExpr = args.slice(2).join(",").trim();
 
-        const condVal = this.getValueForRef(file, condRef, schema);
-        const condOk =
-          condVal === true ||
-          (typeof condVal === "string" && condVal.trim().length > 0) ||
-          (typeof condVal === "number" && Number.isFinite(condVal)) ||
-          (Array.isArray(condVal) && condVal.length > 0) ||
-          (condVal && typeof condVal === "object" && Object.keys(condVal).length > 0);
+        let condVal = this.evalFormulaExpression(file, condExpr, schema);
+        if (condVal === undefined) {
+          const condRes = this.evaluateStatement(file, condExpr, schema);
+          condVal = condRes.ok;
+        }
 
-        return condOk
-          ? this.getValueForRef(file, thenRef, schema)
+        return this.isTruthyValue(condVal)
+          ? this.evalFormulaExpression(file, thenExpr, schema)
           : this.evalFormulaExpression(file, elseExpr, schema);
       }
     }
@@ -809,6 +866,10 @@ export default class BasesBridgePlugin extends Plugin {
       const leftNum = typeof left === "number" ? left : Number(left);
       const rightNum = typeof right === "number" ? right : Number(right);
       const bothNumeric = Number.isFinite(leftNum) && Number.isFinite(rightNum);
+      const numericOp = op === ">" || op === "<" || op === ">=" || op === "<=";
+      if (numericOp && typeof right === "number" && !Number.isFinite(leftNum)) {
+        return { ok: false, warnings };
+      }
 
       switch (op) {
         case "==":
@@ -1172,11 +1233,47 @@ export default class BasesBridgePlugin extends Plugin {
           }
           const warnings = Array.from(warningsSet).sort((a, b) => a.localeCompare(b));
           if (warningsTruncated) warnings.push("Warnings tronqués (max 200).");
-          if (evaluate && snap) {
+
+          if (evaluate && shouldEngine && snap) {
+            const cachedRowsByPath = new Map<string, any>();
+            for (const rawRow of snap.rows ?? []) {
+              const rowPath = this.getEngineRowPath(rawRow);
+              if (!rowPath || cachedRowsByPath.has(rowPath)) continue;
+              cachedRowsByPath.set(rowPath, rawRow);
+            }
+
+            const alignedRows: BaseQueryRow[] = matches.map((file) => {
+              const cached = cachedRowsByPath.get(file.path);
+              if (cached && cached.file && cached.props) return cached as BaseQueryRow;
+              if (cached) {
+                const inferredPath = this.getEngineRowPath(cached) ?? file.path;
+                const inferredName =
+                  typeof cached?.file?.name === "string" && cached.file.name.trim().length > 0
+                    ? cached.file.name
+                    : file.basename;
+                return {
+                  file: { path: inferredPath, name: inferredName },
+                  props:
+                    cached?.props && typeof cached.props === "object"
+                      ? cached.props
+                      : this.buildRowProps(file, schema),
+                  computed:
+                    cached?.computed && typeof cached.computed === "object"
+                      ? cached.computed
+                      : this.buildComputed(file, schema),
+                };
+              }
+              return {
+                file: { path: file.path, name: file.basename },
+                props: this.buildRowProps(file, schema),
+                computed: this.buildComputed(file, schema),
+              };
+            });
+
             const startEngine = (page - 1) * limit;
-            const engineRows = snap.rows.slice(startEngine, startEngine + limit);
+            const engineRows = alignedRows.slice(startEngine, startEngine + limit);
             const response: BaseQueryResponse = {
-              total: snap.total,
+              total: alignedRows.length,
               page,
               rows: engineRows as any,
               evaluate,
@@ -1265,7 +1362,10 @@ export default class BasesBridgePlugin extends Plugin {
               results.push({
                 file: filePath,
                 mtime: abstract.stat.mtime,
-                error: { code: "write_error", message: String(e?.message ?? e) },
+                error: {
+                  code: "write_error",
+                  message: String(e?.message ?? e),
+                },
               });
               if (!continueOnError) break;
             }
