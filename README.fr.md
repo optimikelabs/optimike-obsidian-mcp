@@ -276,13 +276,15 @@ Le MCP principal inclut maintenant :
 - outils sémantiques : `smart_semantic_search`, `smart_search`, `smart-search`
 - outils runtime : `obsidian_runtime_status`, `obsidian_runtime_maintenance`
 
-## Compagnons Obsidian (recommandés)
+## Plugins Obsidian requis ou utiles
 
-Plugins à activer pour que tout fonctionne :
+Plugins requis selon les surfaces utilisées :
 - **Local REST API** : API Obsidian requise par le MCP.
-- **MCP Tools** (Jack Steam) : expose les outils MCP dans Obsidian.
 - **Bases Bridge (REST)** : support `.base` via REST.
 - **Smart Connections** : index vectoriel et `.smart-env` pour la recherche sémantique.
+
+Non requis :
+- **MCP Tools** (Jack Steam) : optionnel, utile seulement si tu veux exposer des outils MCP dans Obsidian. Ce serveur n’en dépend pas.
 
 ## Recherche sémantique (Smart Connections)
 

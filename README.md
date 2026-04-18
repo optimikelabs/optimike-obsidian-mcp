@@ -309,13 +309,15 @@ How it works:
 
 This gives you one MCP surface, one runtime, and one durable local data path.
 
-## Obsidian companions (recommended)
+## Required and useful Obsidian plugins
 
-Plugins required for full functionality:
+Required depending on the MCP surfaces you use:
 - **Local REST API**: Obsidian API used by MCP.
-- **MCP Tools** (Jack Steam): exposes MCP tools in Obsidian.
 - **Bases Bridge (REST)**: `.base` support via REST.
 - **Smart Connections**: vector index and `.smart-env` for semantic search.
+
+Not required:
+- **MCP Tools** (Jack Steam): optional, useful only if you want to expose MCP tools inside Obsidian. This server does not depend on it.
 
 ## Semantic search (Smart Connections)
 
