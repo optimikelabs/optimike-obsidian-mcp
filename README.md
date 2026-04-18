@@ -316,9 +316,6 @@ Required depending on the MCP surfaces you use:
 - **Bases Bridge (REST)**: `.base` support via REST.
 - **Smart Connections**: vector index and `.smart-env` for semantic search.
 
-Not required:
-- **MCP Tools** (Jack Steam): optional, useful only if you want to expose MCP tools inside Obsidian. This server does not depend on it.
-
 ## Semantic search (Smart Connections)
 
 Tool: `smart_semantic_search` (aliases: `smart_search`, `smart-search`).

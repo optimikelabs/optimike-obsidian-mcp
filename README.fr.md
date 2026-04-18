@@ -283,9 +283,6 @@ Plugins requis selon les surfaces utilisées :
 - **Bases Bridge (REST)** : support `.base` via REST.
 - **Smart Connections** : index vectoriel et `.smart-env` pour la recherche sémantique.
 
-Non requis :
-- **MCP Tools** (Jack Steam) : optionnel, utile seulement si tu veux exposer des outils MCP dans Obsidian. Ce serveur n’en dépend pas.
-
 ## Recherche sémantique (Smart Connections)
 
 Tool : `smart_semantic_search` (alias : `smart_search`, `smart-search`).
