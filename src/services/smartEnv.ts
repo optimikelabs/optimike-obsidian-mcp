@@ -1,5 +1,7 @@
 import { promises as fs } from "fs";
+import { execFile } from "node:child_process";
 import path from "path";
+import { promisify } from "node:util";
 
 // ---- Types ----
 export type SmartVec = {
@@ -14,9 +16,56 @@ export type SmartVec = {
 // ---- Scan config ----
 const SUBDIRS = ["", "multi", "vectors", "cache"];
 const EXTS = [".ajson", ".json", ".jsonl", ".ndjson"];
+const execFileAsync = promisify(execFile);
 
 const isNumArr = (v: unknown): v is number[] =>
   Array.isArray(v) && v.every((x) => typeof x === "number");
+
+const isEioError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { code?: string }).code === "EIO";
+
+const splitLines = (value: string): string[] =>
+  value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+async function listEmbeddingFilesViaRipgrep(directory: string): Promise<string[]> {
+  const args = ["--files", "--max-depth", "1", directory];
+
+  try {
+    const { stdout } = await execFileAsync("rg", args, {
+      maxBuffer: 32 * 1024 * 1024,
+    });
+
+    return splitLines(stdout)
+      .map((entry) => path.basename(entry))
+      .filter((entry) =>
+        EXTS.some((extension) => entry.toLowerCase().endsWith(extension)),
+      );
+  } catch (error) {
+    const stdout =
+      typeof error === "object" &&
+      error !== null &&
+      "stdout" in error &&
+      typeof (error as { stdout?: unknown }).stdout === "string"
+        ? (error as { stdout: string }).stdout
+        : "";
+
+    if (!stdout) {
+      return [];
+    }
+
+    return splitLines(stdout)
+      .map((entry) => path.basename(entry))
+      .filter((entry) =>
+        EXTS.some((extension) => entry.toLowerCase().endsWith(extension)),
+      );
+  }
+}
 
 // ---- Loose parsing helpers ----
 const stripBOM = (s: string) => s.replace(/^\uFEFF/, "");
@@ -254,6 +303,43 @@ function mapDocToSmartVec(doc: unknown, fallbackId: string): SmartVec | null {
   };
 }
 
+async function listEmbeddingFiles(directory: string): Promise<string[]> {
+  const files: string[] = [];
+  const handle = await fs.opendir(directory);
+  let hadEio = false;
+
+  try {
+    for await (const entry of handle) {
+      if (!entry.isFile()) continue;
+
+      const name = entry.name;
+      if (EXTS.some((extension) => name.toLowerCase().endsWith(extension))) {
+        files.push(name);
+      }
+    }
+  } catch (error) {
+    // WSL + drvfs can raise EIO while iterating large directories.
+    // Keep already-read entries instead of failing the whole scan.
+    if (!(isEioError(error) && files.length > 0)) {
+      throw error;
+    }
+    hadEio = true;
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+
+  if (!hadEio) {
+    return files;
+  }
+
+  const fromRipgrep = await listEmbeddingFilesViaRipgrep(directory);
+  if (!fromRipgrep.length) {
+    return files;
+  }
+
+  return [...new Set([...files, ...fromRipgrep])];
+}
+
 export async function loadSmartEnv(baseDir: string): Promise<SmartVec[]> {
   const collected: SmartVec[] = [];
 
@@ -262,10 +348,7 @@ export async function loadSmartEnv(baseDir: string): Promise<SmartVec[]> {
     let files: string[] = [];
 
     try {
-      const entries = await fs.readdir(directory);
-      files = entries.filter((entry) =>
-        EXTS.some((extension) => entry.toLowerCase().endsWith(extension)),
-      );
+      files = await listEmbeddingFiles(directory);
     } catch {
       continue;
     }
@@ -352,4 +435,3 @@ export const cosine = (a: number[], b: number[]): number => {
   const denominator = Math.sqrt(normA) * Math.sqrt(normB);
   return denominator === 0 ? 0 : dot / denominator;
 };
-
