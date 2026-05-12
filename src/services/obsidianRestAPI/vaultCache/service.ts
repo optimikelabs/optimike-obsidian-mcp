@@ -7,6 +7,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
+import type { Dirent } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../../../config/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -35,6 +37,7 @@ export interface CacheIndexEntry {
 }
 
 type CacheRow = CacheIndexEntry & { content: string };
+type CacheRefreshSource = "rest" | "filesystem";
 
 const CREATE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS file_cache (
@@ -66,6 +69,37 @@ function normalizeDirPath(dirPath: string): string {
     candidate.startsWith("/") ? candidate : `/${candidate}`,
   );
   return normalized === "." ? "/" : normalized;
+}
+
+function getVaultRoot(): string | undefined {
+  return config.obsidianVaultPath
+    ? path.resolve(config.obsidianVaultPath)
+    : undefined;
+}
+
+function vaultRelativePathFromAbsolute(filePath: string, vaultRoot: string): string {
+  return `/${path.relative(vaultRoot, filePath).replace(/\\/g, "/")}`;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+  const workers = Array.from(
+    { length: Math.min(Math.max(concurrency, 1), items.length || 1) },
+    async () => {
+      while (index < items.length) {
+        const currentIndex = index;
+        index += 1;
+        results[currentIndex] = await worker(items[currentIndex]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 /**
@@ -147,6 +181,9 @@ export class VaultCacheService {
   public getStats(): Record<string, unknown> {
     return {
       dbPath: config.obsidianSharedCacheDbPath,
+      refreshSource: this.readMetadataValue("last_refresh_source"),
+      configuredRefreshSource: config.obsidianCacheSource,
+      refreshConcurrency: config.obsidianCacheConcurrency,
       schemaVersion:
         this.readMetadataValue("schema_version") ?? SHARED_CACHE_SCHEMA_VERSION,
       ready: this.isCacheReady,
@@ -332,7 +369,11 @@ export class VaultCacheService {
 
     try {
       const startTime = Date.now();
-      const remoteFiles = await this.listAllMarkdownFiles("/", context);
+      const refreshSource = await this.pickRefreshSource();
+      const remoteFiles =
+        refreshSource === "filesystem"
+          ? await this.listAllMarkdownFilesFromFilesystem(context)
+          : await this.listAllMarkdownFiles("/", context);
       const remoteFileSet = new Set(remoteFiles);
       const cachedFileSet = new Set(this.metadataCache.keys());
 
@@ -347,8 +388,39 @@ export class VaultCacheService {
         }
       }
 
-      for (const filePath of remoteFiles) {
+      const processFile = async (filePath: string): Promise<"added" | "updated" | "skipped" | "failed"> => {
         try {
+          const cachedEntry = this.metadataCache.get(filePath);
+          if (refreshSource === "filesystem") {
+            const vaultRoot = getVaultRoot();
+            if (!vaultRoot) {
+              return "failed";
+            }
+            const absolutePath = path.join(vaultRoot, filePath.replace(/^\/+/u, ""));
+            const stats = await fs.stat(absolutePath);
+            const remoteMtime = Math.round(stats.mtimeMs);
+            const remoteSize = stats.size;
+            const needsRefresh =
+              !cachedEntry ||
+              cachedEntry.mtime < remoteMtime ||
+              cachedEntry.size !== remoteSize;
+
+            if (!needsRefresh) {
+              return "skipped";
+            }
+
+            const content = await fs.readFile(absolutePath, "utf-8");
+            this.upsertRow({
+              path: filePath,
+              ctime: Math.round(stats.ctimeMs),
+              mtime: remoteMtime,
+              size: remoteSize,
+              hash: computeContentHash(content),
+              content,
+            });
+            return cachedEntry ? "updated" : "added";
+          }
+
           const fileMetadata = await this.obsidianService.getFileMetadata(
             filePath,
             context,
@@ -359,10 +431,9 @@ export class VaultCacheService {
               `Skipping file during cache refresh due to missing or invalid metadata: ${filePath}`,
               { ...context, filePath },
             );
-            continue;
+            return "failed";
           }
 
-          const cachedEntry = this.metadataCache.get(filePath);
           const remoteMtime = fileMetadata.mtime;
           const remoteSize = fileMetadata.size;
           const needsRefresh =
@@ -371,7 +442,7 @@ export class VaultCacheService {
             cachedEntry.size !== remoteSize;
 
           if (!needsRefresh) {
-            continue;
+            return "skipped";
           }
 
           const noteJson = (await this.obsidianService.getFileContent(
@@ -389,26 +460,43 @@ export class VaultCacheService {
             content: noteJson.content,
           });
 
-          if (!cachedEntry) {
-            filesAdded++;
-          } else {
-            filesUpdated++;
-          }
+          return cachedEntry ? "updated" : "added";
         } catch (error) {
           logger.error(
             `Failed to process file during cache refresh: ${filePath}. Skipping. Error: ${error instanceof Error ? error.message : String(error)}`,
-            { ...context, filePath },
+            { ...context, filePath, refreshSource },
           );
+          return "failed";
+        }
+      };
+
+      const outcomes =
+        refreshSource === "filesystem"
+          ? await mapWithConcurrency(
+              remoteFiles,
+              config.obsidianCacheConcurrency,
+              processFile,
+            )
+          : [];
+
+      if (refreshSource === "rest") {
+        for (const filePath of remoteFiles) {
+          const outcome = await processFile(filePath);
+          outcomes.push(outcome);
         }
       }
+
+      filesAdded += outcomes.filter((outcome) => outcome === "added").length;
+      filesUpdated += outcomes.filter((outcome) => outcome === "updated").length;
 
       const duration = (Date.now() - startTime) / 1000;
       this.isCacheReady = true;
       this.upsertMetadataValue("last_refresh_at", String(Date.now()));
+      this.upsertMetadataValue("last_refresh_source", refreshSource);
       logger.info(
         `${
           isInitialBuild ? "Initial vault cache build" : "Vault cache refresh"
-        } completed in ${duration.toFixed(2)}s. Added: ${filesAdded}, Updated: ${filesUpdated}, Removed: ${filesRemoved}. Total indexed: ${this.metadataCache.size}.`,
+        } completed in ${duration.toFixed(2)}s via ${refreshSource}. Added: ${filesAdded}, Updated: ${filesUpdated}, Removed: ${filesRemoved}. Total indexed: ${this.metadataCache.size}.`,
         context,
       );
     } catch (error) {
@@ -600,5 +688,59 @@ export class VaultCacheService {
         opContext,
       );
     }
+  }
+
+  private async pickRefreshSource(): Promise<CacheRefreshSource> {
+    if (config.obsidianCacheSource === "rest") {
+      return "rest";
+    }
+    if (config.obsidianCacheSource === "filesystem") {
+      return getVaultRoot() && existsSync(getVaultRoot()!) ? "filesystem" : "rest";
+    }
+    const vaultRoot = getVaultRoot();
+    return vaultRoot && existsSync(vaultRoot) ? "filesystem" : "rest";
+  }
+
+  private async listAllMarkdownFilesFromFilesystem(
+    context: RequestContext,
+  ): Promise<string[]> {
+    const vaultRoot = getVaultRoot();
+    if (!vaultRoot) {
+      return [];
+    }
+
+    const markdownFiles: string[] = [];
+    const walk = async (directory: string): Promise<void> => {
+      let entries: Dirent[];
+      try {
+        entries = await fs.readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        logger.warning(
+          `Failed to read local vault directory during cache refresh: ${directory}`,
+          {
+            ...context,
+            operation: "listAllMarkdownFilesFromFilesystem",
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        return;
+      }
+
+      for (const entry of entries) {
+        if (entry.name === ".obsidian" || entry.name === ".trash" || entry.name === ".git") {
+          continue;
+        }
+        const fullPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+          markdownFiles.push(vaultRelativePathFromAbsolute(fullPath, vaultRoot));
+        }
+      }
+    };
+
+    await walk(vaultRoot);
+    markdownFiles.sort((a, b) => a.localeCompare(b));
+    return markdownFiles;
   }
 }

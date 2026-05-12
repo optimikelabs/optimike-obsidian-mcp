@@ -14,6 +14,7 @@ import {
   RequestContext,
   requestContextService,
 } from "../../../utils/index.js";
+import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 const UPSERT_CHUNK_SIZE = 25;
 
@@ -79,6 +80,26 @@ export async function processBasesUpsertRows(
   parentContext: RequestContext,
   obsidianService: ObsidianRestApiService,
 ): Promise<BaseUpsertResponse> {
+  assertWriteAllowed({
+    operation: "bases_upsert_rows",
+    action: "upsert_rows",
+    target: params.base_id,
+    batchCount: params.operations.length,
+    frontmatterKeys: params.operations.flatMap((operation) => [
+      ...Object.keys(operation.set ?? {}),
+      ...(operation.unset ?? []),
+    ]),
+    destructive: params.operations.some(
+      (operation) => operation.unset && operation.unset.length > 0,
+    ),
+    guardedReason: params.operations.some(
+      (operation) => operation.unset && operation.unset.length > 0,
+    )
+      ? "frontmatter unset operations require MCP_WRITE_MODE=full"
+      : undefined,
+    context: parentContext,
+  });
+
   const context = requestContextService.createRequestContext({
     parentContext,
     operation: "BasesUpsertRows",

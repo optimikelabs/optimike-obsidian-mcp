@@ -13,6 +13,7 @@ import {
   RequestContext,
   requestContextService,
 } from "../../../utils/index.js";
+import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 export const BasesCreateInputSchema = z
   .object({
@@ -45,6 +46,18 @@ export async function processBasesCreate(
   parentContext: RequestContext,
   obsidianService: ObsidianRestApiService,
 ): Promise<BaseCreateResponse> {
+  assertWriteAllowed({
+    operation: "bases_create",
+    action: params.validateOnly ? "validateOnly" : "create",
+    target: params.path,
+    allowInReadonly: params.validateOnly,
+    destructive: params.overwrite,
+    guardedReason: params.overwrite
+      ? "base overwrite requires MCP_WRITE_MODE=full"
+      : undefined,
+    context: parentContext,
+  });
+
   const payload: BaseCreateRequest = {
     path: params.path,
     spec: params.spec,

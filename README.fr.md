@@ -152,6 +152,10 @@ Variables utiles :
 
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
+- `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` pour choisir la source de refresh cache (`auto` privilégie le vault local quand il existe)
+- `OBSIDIAN_CACHE_CONCURRENCY` pour borner le travail filesystem local
+- `MCP_WRITE_MODE=readonly|guarded|full` pour imposer la sécurité d’écriture côté serveur (`guarded` est le défaut public)
+- `MCP_GUARDED_MAX_WRITE_CHARS` et `MCP_GUARDED_MAX_BATCH_OPERATIONS` pour régler les limites du mode guarded
 
 Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
 Les refreshs sémantiques à chaud relisent SQLite d’abord, puis seulement `.smart-env` si nécessaire.
@@ -175,6 +179,19 @@ Et via MCP :
 
 - `obsidian_runtime_status`
 - `obsidian_runtime_maintenance`
+
+Sécurité runtime publique :
+
+- `readonly` bloque tous les outils d’écriture hors opérations de validation pure
+- `guarded` autorise les écritures explicites et bornées, mais bloque suppression, overwrite, unset frontmatter, regex replace-all large et gros batchs
+- `full` restaure le comportement d’écriture complet pour un environnement local de confiance
+
+Contrôle du contexte agent :
+
+- `obsidian_list_notes` supporte `responseMode="compact"`, `limit` et `cursor`
+- `obsidian_global_search` supporte `responseMode="compact"` en gardant la pagination `page/pageSize`
+- `list_all_tasks` et `query_tasks` supportent `responseMode="compact"|"detailed"`, `responseLimit` et `cursor`
+- la lecture d’une note identifiée reste complète via `obsidian_read_note`
 
 Checks typiques :
 

@@ -11,6 +11,7 @@ import {
   RequestContext,
   retryWithDelay,
 } from "../../../utils/index.js";
+import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 // ====================================================================================
 // Schema Definitions for Input Validation
@@ -377,6 +378,20 @@ export const processObsidianUpdateNote = async (
     }
     targetPeriod = parseResult.data;
   }
+
+  assertWriteAllowed({
+    operation: "obsidian_update_note",
+    action: mode,
+    target: targetId,
+    targetType: params.targetType,
+    contentLength: contentString.length,
+    destructive: mode === "overwrite" && params.overwriteIfExists,
+    guardedReason:
+      mode === "overwrite" && params.overwriteIfExists
+        ? "overwriting an existing target requires MCP_WRITE_MODE=full"
+        : undefined,
+    context,
+  });
 
   try {
     // --- Step 1: Pre-operation Existence Check ---

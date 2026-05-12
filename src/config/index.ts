@@ -104,6 +104,10 @@ const EnvSchema = z.object({
     .int()
     .positive()
     .default(30000),
+  OBSIDIAN_CACHE_SOURCE: z
+    .enum(["auto", "rest", "filesystem"])
+    .default("auto"),
+  OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
   OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
   OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
     .number()
@@ -120,6 +124,21 @@ const EnvSchema = z.object({
     .string()
     .transform((val) => val.toLowerCase() === "true")
     .default("true"),
+  // --- Public runtime safety ---
+  MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).default("guarded"),
+  MCP_GUARDED_MAX_WRITE_CHARS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(100000),
+  MCP_GUARDED_MAX_BATCH_OPERATIONS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(25),
+  MCP_PROTECTED_FRONTMATTER_KEYS: z
+    .string()
+    .default("création,modification"),
   // --- Smart Connections Semantic Search ---
   SMART_SEARCH_MODE: z.enum(["plugin", "smartenv", "files"]).default("plugin"),
   SMART_ENV_DIR: z.string().optional(),
@@ -258,6 +277,8 @@ export const config = {
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,
   obsidianEnableCache: env.OBSIDIAN_ENABLE_CACHE,
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
+  obsidianCacheSource: env.OBSIDIAN_CACHE_SOURCE,
+  obsidianCacheConcurrency: env.OBSIDIAN_CACHE_CONCURRENCY,
   obsidianSharedCacheDbPath:
     env.OBSIDIAN_SHARED_CACHE_DB_PATH ||
     path.join(
@@ -272,6 +293,12 @@ export const config = {
   obsidianStartupMaxRetries: env.OBSIDIAN_STARTUP_MAX_RETRIES,
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
+  mcpWriteMode: env.MCP_WRITE_MODE,
+  mcpGuardedMaxWriteChars: env.MCP_GUARDED_MAX_WRITE_CHARS,
+  mcpGuardedMaxBatchOperations: env.MCP_GUARDED_MAX_BATCH_OPERATIONS,
+  mcpProtectedFrontmatterKeys: env.MCP_PROTECTED_FRONTMATTER_KEYS.split(",")
+    .map((key) => key.trim())
+    .filter(Boolean),
   smartSearchMode: env.SMART_SEARCH_MODE,
   smartEnvDir: env.SMART_ENV_DIR,
   enableQueryEmbedding: env.ENABLE_QUERY_EMBEDDING,

@@ -12,6 +12,7 @@ import {
   RequestContext,
   retryWithDelay,
 } from "../../../utils/index.js";
+import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 // ====================================================================================
 // Schema Definitions for Input Validation
@@ -349,6 +350,24 @@ export const processObsidianSearchReplace = async (
     flexibleWhitespace,
     wholeWord,
     returnContent,
+  });
+
+  assertWriteAllowed({
+    operation: "obsidian_search_replace",
+    action: "replace",
+    target: targetIdentifier,
+    targetType,
+    contentLength: replacements.reduce(
+      (total, replacement) =>
+        total + replacement.search.length + replacement.replace.length,
+      0,
+    ),
+    batchCount: replacements.length,
+    guardedReason:
+      initialUseRegex && replaceAll
+        ? "regex replaceAll is blocked in guarded mode; use exact replacement, replaceAll=false, or MCP_WRITE_MODE=full"
+        : undefined,
+    context,
   });
 
   // --- Step 1: Read Initial Content (with case-insensitive fallback for filePath) ---

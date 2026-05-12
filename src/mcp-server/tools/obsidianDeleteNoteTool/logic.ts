@@ -10,6 +10,7 @@ import {
   RequestContext,
   retryWithDelay,
 } from "../../../utils/index.js";
+import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 // ====================================================================================
 // Schema Definitions for Input Validation
@@ -93,6 +94,14 @@ export const processObsidianDeleteNote = async (
     `Processing obsidian_delete_note request for path: ${originalFilePath}`,
     context,
   );
+
+  assertWriteAllowed({
+    operation: "obsidian_delete_note",
+    action: "delete",
+    target: originalFilePath,
+    destructive: true,
+    context,
+  });
 
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;

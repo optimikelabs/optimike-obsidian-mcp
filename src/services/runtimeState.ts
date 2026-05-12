@@ -8,6 +8,7 @@ import { warmSharedTaskCache } from "../mcp-server/tools/tasksShared/logic.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { RequestContext, requestContextService } from "../utils/index.js";
 import { getSemanticCacheService } from "./semanticCache.js";
+import { getWritePolicyStatus } from "./writePolicy.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
 
 const PROCESS_STARTED_AT_MS = Math.round(Date.now() - process.uptime() * 1000);
@@ -128,7 +129,13 @@ function hashRuntimeConfig(): {
     obsidianVaultPath: config.obsidianVaultPath,
     obsidianSharedCacheDbPath: config.obsidianSharedCacheDbPath,
     obsidianContentHotCacheLimit: config.obsidianContentHotCacheLimit,
+    obsidianCacheSource: config.obsidianCacheSource,
+    obsidianCacheConcurrency: config.obsidianCacheConcurrency,
     obsidianStartupBlocking: config.obsidianStartupBlocking,
+    mcpWriteMode: config.mcpWriteMode,
+    mcpGuardedMaxWriteChars: config.mcpGuardedMaxWriteChars,
+    mcpGuardedMaxBatchOperations: config.mcpGuardedMaxBatchOperations,
+    mcpProtectedFrontmatterKeys: config.mcpProtectedFrontmatterKeys,
     smartEnvDir: config.smartEnvDir,
     enableQueryEmbedding: config.enableQueryEmbedding,
     queryEmbedder: config.queryEmbedder,
@@ -226,6 +233,7 @@ export async function collectRuntimeStatus(
       ],
       writeToolsRequireApi: true,
     },
+    writePolicy: getWritePolicyStatus(),
   };
 }
 

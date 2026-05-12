@@ -148,6 +148,10 @@ Useful env overrides:
 
 - `OBSIDIAN_SHARED_CACHE_DB_PATH` to move the shared SQLite file
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT` to tune the bounded in-memory hot set
+- `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` to choose cache refresh source (`auto` prefers the local vault path when available)
+- `OBSIDIAN_CACHE_CONCURRENCY` to bound local filesystem refresh work
+- `MCP_WRITE_MODE=readonly|guarded|full` to enforce server-side write safety (`guarded` is the public default)
+- `MCP_GUARDED_MAX_WRITE_CHARS` and `MCP_GUARDED_MAX_BATCH_OPERATIONS` to tune guarded-mode limits
 
 This runtime exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
 Warm semantic refreshes now load from SQLite first instead of re-reading the whole `.smart-env` path every time.
@@ -177,6 +181,19 @@ Extended health / maintenance:
   - `refresh_semantic_cache`
   - `refresh_tasks_cache`
   - `refresh_all`
+
+Public runtime safety:
+
+- `readonly` blocks all write tools except validation-only operations
+- `guarded` allows bounded explicit writes and blocks destructive operations such as delete, overwrite, frontmatter unset, broad regex replace-all, and large batches
+- `full` restores unrestricted write behavior for trusted local environments
+
+Agent-context controls:
+
+- `obsidian_list_notes` supports `responseMode="compact"`, `limit`, and `cursor`
+- `obsidian_global_search` supports `responseMode="compact"` while keeping existing page/pageSize pagination
+- `list_all_tasks` and `query_tasks` support `responseMode="compact"|"detailed"`, `responseLimit`, and `cursor`
+- reading an identified note remains full-fidelity through `obsidian_read_note`
 
 Typical checks:
 

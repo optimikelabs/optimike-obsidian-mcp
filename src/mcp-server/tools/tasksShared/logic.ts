@@ -52,8 +52,10 @@ const ListAllTasksArgsSchema = z.object({
   metaFallbackToFile: z.boolean().optional(),
   applyGlobalFilter: z.boolean().optional(),
   responseFormat: z.enum(["json", "markdown"]).optional(),
+  responseMode: z.enum(["legacy", "compact", "detailed"]).optional(),
   useCache: z.boolean().optional(),
   responseLimit: z.number().int().positive().optional(),
+  cursor: z.string().optional(),
 });
 
 const QueryTasksArgsSchema = z.object({
@@ -68,8 +70,10 @@ const QueryTasksArgsSchema = z.object({
   metaFallbackToFile: z.boolean().optional(),
   applyGlobalFilter: z.boolean().optional(),
   responseFormat: z.enum(["json", "markdown"]).optional(),
+  responseMode: z.enum(["legacy", "compact", "detailed"]).optional(),
   useCache: z.boolean().optional(),
   responseLimit: z.number().int().positive().optional(),
+  cursor: z.string().optional(),
 });
 
 export const ListAllTasksInputSchemaShape = ListAllTasksArgsSchema.shape;
@@ -864,6 +868,80 @@ function serializeTasksToMarkdown(tasks: Task[]): string {
   return tasks.map(taskToString).join("\n");
 }
 
+function parseCursor(cursor?: string): number {
+  if (!cursor) return 0;
+  const parsed = Number(cursor);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new McpError(
+      BaseErrorCode.VALIDATION_ERROR,
+      `Invalid cursor '${cursor}'. Use nextCursor from the previous tasks response.`,
+    );
+  }
+  return parsed;
+}
+
+function compactTask(task: Task): Record<string, unknown> {
+  return {
+    id: task.id,
+    description: task.description,
+    status: task.status,
+    statusSymbol: task.statusSymbol,
+    filePath: task.filePath,
+    lineNumber: task.lineNumber,
+    tags: task.tags,
+    dueDate: task.dueDate,
+    scheduledDate: task.scheduledDate,
+    priority: task.priority,
+  };
+}
+
+function serializeTasksResponse(
+  tasks: Task[],
+  options: {
+    responseFormat: "json" | "markdown";
+    responseMode?: "legacy" | "compact" | "detailed";
+    responseLimit?: number;
+    cursor?: string;
+  },
+): string {
+  const responseMode = options.responseMode ?? "legacy";
+  const offset = parseCursor(options.cursor);
+  const limit = options.responseLimit;
+  const finalTasks = limit && limit > 0
+    ? tasks.slice(offset, offset + limit)
+    : tasks.slice(offset);
+  const nextOffset = offset + finalTasks.length;
+  const hasMore = nextOffset < tasks.length;
+
+  if (responseMode === "legacy" && !options.cursor) {
+    return options.responseFormat === "markdown"
+      ? serializeTasksToMarkdown(finalTasks)
+      : serializeTasksToJson(finalTasks);
+  }
+
+  const payload = {
+    responseMode,
+    total: tasks.length,
+    count: finalTasks.length,
+    limit,
+    cursor: String(offset),
+    nextCursor: hasMore ? String(nextOffset) : undefined,
+    hasMore,
+    tasks: responseMode === "compact" ? finalTasks.map(compactTask) : finalTasks,
+  };
+
+  if (options.responseFormat === "markdown") {
+    const lines = finalTasks.map(taskToString);
+    if (hasMore) {
+      lines.push(``);
+      lines.push(`More tasks available. Re-run with cursor="${nextOffset}".`);
+    }
+    return lines.join("\n");
+  }
+
+  return JSON.stringify(payload, null, 2);
+}
+
 function needsFileMetadata(queryText: string): boolean {
   return /file\s+(created|modified)\s+(before|after|on)\s+\d{4}-\d{2}-\d{2}/i.test(
     queryText,
@@ -989,15 +1067,16 @@ export async function processListAllTasks(
     ? queryTasks(tasks, effectiveGlobalFilter)
     : tasks;
   const responseFormat = validated.responseFormat ?? "json";
-  const finalTasks =
-    limit && limit > 0 ? filteredTasks.slice(0, limit) : filteredTasks;
   logger.debug("Processed list_all_tasks request", {
     ...context,
-    resultCount: finalTasks.length,
+    resultCount: filteredTasks.length,
   });
-  return responseFormat === "markdown"
-    ? serializeTasksToMarkdown(finalTasks)
-    : serializeTasksToJson(finalTasks);
+  return serializeTasksResponse(filteredTasks, {
+    responseFormat,
+    responseMode: validated.responseMode,
+    responseLimit: limit,
+    cursor: validated.cursor,
+  });
 }
 
 export async function processQueryTasks(
@@ -1054,13 +1133,14 @@ export async function processQueryTasks(
   const filteredTasks = queryTasks(allTasks, mergedQuery);
   const responseFormat = validated.responseFormat ?? "json";
   const limit = validated.responseLimit;
-  const finalTasks =
-    limit && limit > 0 ? filteredTasks.slice(0, limit) : filteredTasks;
   logger.debug("Processed query_tasks request", {
     ...context,
-    resultCount: finalTasks.length,
+    resultCount: filteredTasks.length,
   });
-  return responseFormat === "markdown"
-    ? serializeTasksToMarkdown(finalTasks)
-    : serializeTasksToJson(finalTasks);
+  return serializeTasksResponse(filteredTasks, {
+    responseFormat,
+    responseMode: validated.responseMode,
+    responseLimit: limit,
+    cursor: validated.cursor,
+  });
 }
