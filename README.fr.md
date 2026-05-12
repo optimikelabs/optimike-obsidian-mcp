@@ -1,26 +1,33 @@
 # Optimike Obsidian MCP
 
 Version anglaise : [README.md](README.md)
+Guide d’exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
+Operations guide (EN) : [OPERATIONS.md](OPERATIONS.md)
 
-Serveur MCP (Model Context Protocol) pour Obsidian avec recherche sémantique basée sur Smart Connections.
+![Hero Optimike Obsidian MCP](docs/assets/hero-optimike-obsidian-mcp.png)
+
+Serveur MCP (Model Context Protocol) pour Obsidian avec cache local partagé, outils Tasks intégrés et recherche sémantique basée sur Smart Connections.
 
 ## TL;DR
 
 ```bash
 npm install
 npm run build
-node dist/index.js --stdio
+node dist/stdio-proxy.js
 ```
+
+Recommandation Codex : pointer la config MCP vers `dist/stdio-proxy.js`, pas directement vers `dist/index.js`.
 
 ## Prérequis
 
-- Node.js >= 16
+- Node.js >= 22.7.5
 - Obsidian Desktop
 - Plugins :
   - Local REST API (obligatoire pour les outils REST) : https://github.com/coddingtonbear/obsidian-local-rest-api
   - Smart Connections (obligatoire pour la recherche sémantique) : https://github.com/brianpetro/obsidian-smart-connections
-  - Bases Bridge (REST) (obligatoire pour les outils .base, inclus dans ce repo)
-- Pour la recherche sémantique, assure-toi que ton vault contient un dossier `.smart-env` (créé par Smart Connections)
+  - Bases Bridge (REST) (obligatoire pour les outils `.base`, inclus dans ce repo)
+  - plugin Obsidian Tasks (obligatoire pour un comportement Tasks canonique)
+- Pour la recherche sémantique, assure-toi que ton vault contient un dossier `.smart-env`
 
 ## Installation
 
@@ -33,10 +40,10 @@ npm install
 npm run build
 ```
 
-Lancer :
+Lancer l’entrypoint MCP recommandé :
 
 ```bash
-node dist/index.js --stdio
+node dist/stdio-proxy.js
 ```
 
 ## Pourquoi
@@ -44,13 +51,18 @@ node dist/index.js --stdio
 - Connecter Obsidian à des agents MCP (Codex, IDE, etc.)
 - Exposer les outils REST Obsidian (lecture/écriture, frontmatter, tags, recherche)
 - Offrir une recherche vectorielle locale via Smart Connections (`.smart-env`)
+- Garder un backend local durable au lieu de respawner tout l’état lourd à chaque run stdio
 
 ## Points forts
 
 - Outils MCP complets (notes, frontmatter, tags, recherche globale, etc.)
+- Outils Tasks intégrés : `list_all_tasks` et `query_tasks`
 - Recherche sémantique locale `smart_semantic_search`
+- Outils d’exploitation : `obsidian_runtime_status` et `obsidian_runtime_maintenance`
+- Mode dégradé lecture seule pour `obsidian_read_note` et `obsidian_list_notes` si Obsidian REST tombe
+- Store SQLite partagé pour le contenu du vault, le cache Tasks et le manifest sémantique
 - Embedder-agnostic : aligne automatiquement la requête sur le modèle du vault
-- Support Ollama / Xenova / OpenAI (override par env vars)
+- Support Ollama / OpenAI (override par env vars) ; Xenova / Transformers est désactivé tant que sa chaîne ONNX/protobuf vulnérable ne peut pas être réintroduite proprement
 
 ## Architecture (vue d'ensemble)
 
@@ -58,7 +70,7 @@ node dist/index.js --stdio
 2) **Optimike Obsidian MCP** (ce serveur)  
 3) **Agents MCP** (Codex, IDE, etc.)
 
-Le serveur agit comme un **pont** entre tes agents et Obsidian, et ajoute une couche “Base” pour les fichiers `.base`.
+Le serveur agit comme un **pont** entre tes agents et Obsidian, ajoute une couche “Base” pour les fichiers `.base`, et persiste l’état runtime local pour garder Codex rapide et stable au fil des sessions.
 
 ## Bases Bridge (REST) — pourquoi et comment
 
@@ -111,21 +123,84 @@ Le serveur expose des tools MCP “Base” (via Obsidian MCP) :
 - `bases_get_config` / `bases_upsert_config` : lire/écrire le YAML
 - `bases_create` : créer/valider une base `.base`
 
-## Configuration minimale (Codex)
+## Modèle Runtime Final
+
+Le repo supporte maintenant deux modes locaux :
+
+- `stdio proxy` : recommandé pour Codex, un petit wrapper `stdio` qui démarre au besoin un backend HTTP local
+- `http backend` : le vrai process long-lived qui porte le cache partagé et les warmups
+
+Le backend persiste désormais :
+
+- le contenu du vault dans un cache SQLite partagé
+- un hot cache RAM borné
+- un manifest sémantique (`semantic_manifest`, `semantic_vectors`) dans la même base
+
+La même base stocke donc :
+
+- `file_cache` pour le contenu des notes
+- `task_file_cache` pour les données Tasks déjà parsées
+- `semantic_manifest` et `semantic_vectors` pour le chemin sémantique
+
+Chemin par défaut :
+
+```text
+<vault>/.obsidian/optimike-mcp/shared-cache.sqlite
+```
+
+Variables utiles :
+
+- `OBSIDIAN_SHARED_CACHE_DB_PATH`
+- `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
+
+Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
+Les refreshs sémantiques à chaud relisent SQLite d’abord, puis seulement `.smart-env` si nécessaire.
+
+Scripts utiles :
+
+```bash
+npm run build
+npm run start:proxy
+npm run start:http
+```
+
+Health et maintenance :
+
+```bash
+curl http://127.0.0.1:3010/healthz
+curl http://127.0.0.1:3010/healthz?integrity=1
+```
+
+Et via MCP :
+
+- `obsidian_runtime_status`
+- `obsidian_runtime_maintenance`
+
+Checks typiques :
+
+```bash
+curl http://127.0.0.1:3010/healthz
+curl http://127.0.0.1:3010/healthz?integrity=1
+```
+
+## Configuration Codex minimale
 
 Dans `~/.codex/config.toml` :
 
 ```toml
-[mcp_servers.optimike-obsidian-mcp]
+[mcp_servers.optimike-obsidian-mcp-stdio]
 command = "node"
-args = ["/ABSOLUTE/PATH/optimike-obsidian-mcp/dist/index.js", "--stdio"]
+args = ["/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js"]
 
-tool_timeout_sec = 900
+[mcp_servers.optimike-obsidian-mcp-stdio.env]
+MCP_HTTP_HOST = "127.0.0.1"
+MCP_HTTP_PORT = "3010"
+MCP_PROXY_START_TIMEOUT_MS = "20000"
+OBSIDIAN_VAULT = "/chemin/vers/<vault>"
 
-[mcp_servers.optimike-obsidian-mcp.env]
 # Smart Connections
-SMART_ENV_DIR = "/ABSOLUTE/PATH/TO/YOUR/VAULT/.smart-env"
-ENABLE_QUERY_EMBEDDING = "true" # optionnel (défaut : true)
+SMART_ENV_DIR = "/chemin/vers/<vault>/.smart-env"
+ENABLE_QUERY_EMBEDDING = "true"
 
 # Recommandé : auto (ne rien setter)
 # QUERY_EMBEDDER = "auto"
@@ -133,72 +208,80 @@ ENABLE_QUERY_EMBEDDING = "true" # optionnel (défaut : true)
 # Obsidian REST (si plugin Local REST API actif)
 OBSIDIAN_BASE_URL = "http://localhost:27123"
 OBSIDIAN_API_KEY  = "<token>"
+
+# Comportement au démarrage (optionnel, recommandé pour un boot plus rapide sous WSL)
+# OBSIDIAN_STARTUP_BLOCKING=false démarre le MCP immédiatement et lance le health check en arrière-plan.
+OBSIDIAN_STARTUP_MAX_RETRIES = "2"
+OBSIDIAN_STARTUP_RETRY_DELAY_MS = "1200"
+OBSIDIAN_STARTUP_BLOCKING = "false"
+
+# Cache partagé (optionnel)
+# OBSIDIAN_SHARED_CACHE_DB_PATH = "/chemin/vers/<vault>/.obsidian/optimike-mcp/shared-cache.sqlite"
+# OBSIDIAN_CONTENT_HOT_CACHE_LIMIT = "64"
 ```
+
+Notes :
+- Garde cette config en local dans `~/.codex/config.toml` (ne pas commit des chemins machine personnels).
+- Dans la doc, utilise des chemins logiques (`/chemin/vers/...`) et garde les chemins réels uniquement en local.
+- `dist/index.js` reste l’entrypoint backend, mais Codex doit pointer vers `dist/stdio-proxy.js`.
 
 ## Réglage Local REST API (Obsidian)
 
 Repo du plugin Local REST API :
 https://github.com/coddingtonbear/obsidian-local-rest-api
 
-Dans Obsidian, installe et active **Local REST API**.
+Dans Obsidian :
 
-1) Ouvre les réglages du plugin  
-2) Active le serveur HTTP  
-3) Copie la clé API  
-4) Renseigne l’URL + clé dans tes variables d’env
+1. installe et active **Local REST API**
+2. active le serveur HTTP
+3. copie la clé API
+4. renseigne `OBSIDIAN_BASE_URL` et `OBSIDIAN_API_KEY` dans les variables d’env du MCP
 
 Exemple :
 
+```bash
+export OBSIDIAN_BASE_URL=http://127.0.0.1:27123
+export OBSIDIAN_API_KEY=<ta_cle_api>
 ```
-OBSIDIAN_BASE_URL=http://127.0.0.1:27123
-OBSIDIAN_API_KEY=<ta_cle_api>
-```
-
-Note : en WSL2, `127.0.0.1` pointe vers WSL, pas Windows.  
-Si Obsidian tourne sur Windows, utilise l’IP host (voir section WSL).
 
 ## Sécurité
 
 - Garde `OBSIDIAN_API_KEY` privée et locale.
-- N'expose pas l'API REST d'Obsidian sur Internet.
-- Si tu partages des configs, garde les secrets dans les variables d'env.
+- N’expose pas l’API REST d’Obsidian sur Internet.
+- Garde `OBSIDIAN_API_KEY` et `OPENAI_API_KEY` dans les variables d’env, pas dans des fichiers de config commités.
 
 ## WSL2 + Obsidian sous Windows (Local REST API)
 
 Si Obsidian tourne sur Windows et Codex dans WSL2 :
 
-- `127.0.0.1` côté WSL pointe vers WSL, pas vers Windows.
-- Utilise l’IP du host Windows (gateway WSL) pour `OBSIDIAN_BASE_URL`.
+- `127.0.0.1` côté WSL pointe vers WSL, pas vers Windows
+- utilise l’IP du host Windows (gateway WSL) pour `OBSIDIAN_BASE_URL`
 
-Exemple (WSL) :
+Exemple :
 
 ```bash
 GW=$(ip route | awk '/default/ {print $3; exit}')
 export OBSIDIAN_BASE_URL=http://$GW:27123
 ```
 
-Si tu as un portproxy Windows (ex. `27124` → `27123`), alors :
+Si tu utilises un portproxy Windows, adapte simplement le port.
 
-```bash
-export OBSIDIAN_BASE_URL=http://$GW:27124
-```
+## Surface MCP principale
 
-## Compagnons Obsidian (recommandés)
+Le MCP principal inclut maintenant :
 
-Plugins à activer pour que tout fonctionne :
-- **Local REST API** : API Obsidian requise par le MCP (https://github.com/coddingtonbear/obsidian-local-rest-api).
+- outils notes : lecture, listing, update, search-replace, tags, frontmatter
+- outils Bases : list, schema, query, create, upsert config, upsert rows
+- outils Tasks : `list_all_tasks`, `query_tasks`
+- outils sémantiques : `smart_semantic_search`, `smart_search`, `smart-search`
+- outils runtime : `obsidian_runtime_status`, `obsidian_runtime_maintenance`
+
+## Plugins Obsidian requis ou utiles
+
+Plugins requis selon les surfaces utilisées :
+- **Local REST API** : API Obsidian requise par le MCP.
 - **Bases Bridge (REST)** : support `.base` via REST.
-- **Smart Connections** : index vectoriel et `.smart-env` pour la recherche sémantique (https://github.com/brianpetro/obsidian-smart-connections).
-
-### Bases Bridge (REST) — inclus dans ce repo
-
-Le plugin est inclus dans `plugins/obsidian-bases-bridge`.
-
-Installation locale (Obsidian) :
-
-1) Copier `plugins/obsidian-bases-bridge` dans ton vault :  
-   `<vault>/.obsidian/plugins/obsidian-bases-bridge`
-2) Dans Obsidian : Réglages → Community plugins → activer **Obsidian Bases Bridge**
+- **Smart Connections** : index vectoriel et `.smart-env` pour la recherche sémantique.
 
 ## Recherche sémantique (Smart Connections)
 
@@ -214,10 +297,18 @@ Le serveur :
 - lit `.smart-env/multi/*.ajson`
 - choisit la dimension dominante
 - encode la requête avec le même modèle que le vault
+- persiste un manifest sémantique dans SQLite pour accélérer les refreshs à chaud
+
+Important :
+- l’exécution d’une requête sémantique exige toujours un provider de requête joignable
+- si le vault repose sur Ollama et qu’Ollama est down, l’erreur remonte clairement au lieu de bloquer silencieusement
+
+Autrement dit :
+
+- le chemin des métadonnées sémantiques est maintenant durable et observable
+- la requête finale dépend toujours d’un provider d’embedding vivant au moment de l’appel
 
 ## Providers (override optionnel)
-
-Plus de détails : [README_EMBEDDERS.md](README_EMBEDDERS.md)
 
 **Ollama (local)**
 
@@ -227,12 +318,9 @@ export QUERY_EMBEDDER_MODEL=snowflake-arctic-embed2
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
-**Xenova (Transformers)**
+**Xenova / Transformers**
 
-```bash
-export QUERY_EMBEDDER=xenova
-export QUERY_EMBEDDER_MODEL_HINT=bge-384   # ou e5 / snowflake / etc.
-```
+Le provider local Xenova est désactivé pour l’instant, car sa chaîne de dépendances ONNX/protobuf remontait des vulnérabilités `npm audit`. Utiliser Ollama en local, ou OpenAI en mode cloud.
 
 **OpenAI (cloud)**
 
@@ -247,7 +335,10 @@ export OPENAI_API_KEY=...
 
 Pour un MCP partagé, ne pas figer un `OLLAMA_BASE_URL` global dans le vault.
 Laisser le mode auto et laisser chaque utilisateur overrider par env vars.
-Ne commite pas de secrets : garde `OBSIDIAN_API_KEY` / `OPENAI_API_KEY` dans les variables d'env.
+
+## Repo Tasks legacy
+
+`optimike-obsidian-tasks-mcp` peut encore exister comme repo standalone legacy, mais Codex n’en a plus besoin quand ce serveur principal est utilisé. Le MCP canonique est maintenant celui-ci.
 
 ## WSL + Ollama Windows (recommandé)
 
@@ -268,18 +359,10 @@ Puis, si besoin :
 export OLLAMA_BASE_URL=http://$GW:11434
 ```
 
-## Dépannage rapide
-
-- WSL2 + Obsidian sur Windows : utilise l'IP du host Windows pour `OBSIDIAN_BASE_URL` (voir section WSL).
-- Pas de `.smart-env` : lance Smart Connections pour générer les embeddings (recommandé). Si tu veux seulement les outils REST, tu peux mettre `ENABLE_QUERY_EMBEDDING=false`.
-- Mauvais embedder : laisse le mode auto, ou fixe `QUERY_EMBEDDER` + `QUERY_EMBEDDER_MODEL` (voir README_EMBEDDERS.md).
-
 ## Credits
 
 - Créé par **Optimike** (Mickaël Ahouansou)
 - Base technique inspirée par `cyanheads/obsidian-mcp-server`
-- Plugin Local REST API : `coddingtonbear/obsidian-local-rest-api`
-- Recherche sémantique basée sur Smart Connections : `brianpetro/obsidian-smart-connections`
 
 ## License
 

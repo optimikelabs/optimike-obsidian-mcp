@@ -8,6 +8,7 @@
 import path from "node:path";
 import { z } from "zod";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   logger,
@@ -244,6 +245,7 @@ export const processObsidianListNotes = async (
   params: ObsidianListNotesInput,
   context: RequestContext,
   obsidianService: ObsidianRestApiService,
+  vaultCacheService?: VaultCacheService,
 ): Promise<ObsidianListNotesResponse> => {
   const { dirPath } = params;
   const dirPathForLog = dirPath === "" || dirPath === "/" ? "/" : dirPath;
@@ -264,23 +266,44 @@ export const processObsidianListNotes = async (
     const shouldRetryNotFound = (err: unknown) =>
       err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;
 
-    const fileTree = await retryWithDelay(
-      () =>
-        buildFileTree(
+    let fileTree: FileTreeNode[];
+    try {
+      fileTree = await retryWithDelay(
+        () =>
+          buildFileTree(
+            effectiveDirPath,
+            0, // Start at depth 0
+            params,
+            buildTreeContext,
+            obsidianService,
+          ),
+        {
+          operationName: "buildFileTreeWithRetry",
+          context: buildTreeContext,
+          maxRetries: 3,
+          delayMs: 300,
+          shouldRetry: shouldRetryNotFound,
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof McpError &&
+        error.code === BaseErrorCode.SERVICE_UNAVAILABLE &&
+        vaultCacheService?.isReady()
+      ) {
+        logger.info(
+          `Falling back to shared cache tree for ${effectiveDirPath}.`,
+          { ...buildTreeContext, fallbackMode: "shared-cache" },
+        );
+        fileTree = buildFileTreeFromCache(
           effectiveDirPath,
-          0, // Start at depth 0
           params,
-          buildTreeContext,
-          obsidianService,
-        ),
-      {
-        operationName: "buildFileTreeWithRetry",
-        context: buildTreeContext,
-        maxRetries: 3,
-        delayMs: 300,
-        shouldRetry: shouldRetryNotFound,
-      },
-    );
+          vaultCacheService,
+        );
+      } else {
+        throw error;
+      }
+    }
 
     // --- Step 2: Format the tree and count entries ---
     const formatContext = { ...context, operation: "formatResponse" };
@@ -339,3 +362,122 @@ export const processObsidianListNotes = async (
     );
   }
 };
+
+function buildFileTreeFromCache(
+  dirPath: string,
+  params: ObsidianListNotesInput,
+  vaultCacheService: VaultCacheService,
+): FileTreeNode[] {
+  const effectiveDirPath = dirPath === "" ? "/" : dirPath;
+  const normalizedPrefix =
+    effectiveDirPath === "/"
+      ? "/"
+      : path.posix.normalize(
+          effectiveDirPath.startsWith("/") ? effectiveDirPath : `/${effectiveDirPath}`,
+        );
+  const regex =
+    params.nameRegexFilter && params.nameRegexFilter.trim() !== ""
+      ? new RegExp(params.nameRegexFilter)
+      : null;
+  const root: FileTreeNode[] = [];
+  const entries = vaultCacheService.getEntriesByPrefix(normalizedPrefix);
+
+  const getOrCreateDirectory = (
+    parent: FileTreeNode[],
+    name: string,
+  ): FileTreeNode | null => {
+    if (regex && !regex.test(name)) {
+      return null;
+    }
+
+    const key = `${name}/`;
+    const existing = parent.find(
+      (node) => node.type === "directory" && node.name === key,
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const created: FileTreeNode = {
+      name: `${name}/`,
+      type: "directory",
+      children: [],
+    };
+    parent.push(created);
+    return created;
+  };
+
+  for (const entry of entries) {
+    const relative =
+      normalizedPrefix === "/"
+        ? entry.path.replace(/^\/+/u, "")
+        : path.posix.relative(normalizedPrefix, entry.path);
+    if (!relative || relative.startsWith("..")) {
+      continue;
+    }
+
+    const segments = relative.split("/").filter(Boolean);
+    if (segments.length === 0) {
+      continue;
+    }
+
+    let currentLevel = root;
+    let hiddenByFilter = false;
+    const maxDirectoryDepth =
+      params.recursionDepth === -1
+        ? Math.max(segments.length - 1, 0)
+        : Math.min(params.recursionDepth, Math.max(segments.length - 1, 0));
+
+    for (let index = 0; index < maxDirectoryDepth; index++) {
+      const directoryNode = getOrCreateDirectory(currentLevel, segments[index]);
+      if (!directoryNode) {
+        hiddenByFilter = true;
+        break;
+      }
+      currentLevel = directoryNode.children;
+    }
+
+    if (hiddenByFilter) {
+      continue;
+    }
+
+    const fileName = segments[segments.length - 1];
+    const fileDepth = segments.length - 1;
+    if (params.recursionDepth !== -1 && fileDepth > params.recursionDepth) {
+      continue;
+    }
+    if (regex && !regex.test(fileName)) {
+      continue;
+    }
+    if (
+      params.fileExtensionFilter &&
+      params.fileExtensionFilter.length > 0 &&
+      !params.fileExtensionFilter.includes(path.posix.extname(fileName))
+    ) {
+      continue;
+    }
+    if (!currentLevel.some((node) => node.type === "file" && node.name === fileName)) {
+      currentLevel.push({
+        name: fileName,
+        type: "file",
+        children: [],
+      });
+    }
+  }
+
+  return sortTreeNodes(root);
+}
+
+function sortTreeNodes(nodes: FileTreeNode[]): FileTreeNode[] {
+  for (const node of nodes) {
+    if (node.children.length > 0) {
+      node.children = sortTreeNodes(node.children);
+    }
+  }
+
+  return nodes.sort((a, b) => {
+    if (a.type === "directory" && b.type === "file") return -1;
+    if (a.type === "file" && b.type === "directory") return 1;
+    return a.name.localeCompare(b.name);
+  });
+}

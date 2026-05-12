@@ -1,12 +1,15 @@
 {
   "name": "optimike-obsidian-mcp",
   "version": "2.0.7",
-  "description": "Optimike Obsidian MCP (Model Context Protocol) server enabling AI agents and dev tools to interact with an Obsidian vault, with embedder-agnostic semantic search aligned to Smart Connections.",
+  "description": "Unified Obsidian MCP server with shared local cache, integrated Tasks tools, Bases support, semantic search via Smart Connections, runtime observability, and degraded read mode for durable Codex workflows.",
   "main": "dist/index.js",
   "files": [
     "dist",
     "README.md",
     "README.fr.md",
+    "OPERATIONS.md",
+    "OPERATIONS.fr.md",
+    "docs/assets",
     "LICENSE",
     "CHANGELOG.md"
   ],
@@ -23,12 +26,13 @@
   },
   "homepage": "https://github.com/optimikelabs/optimike-obsidian-mcp#readme",
   "scripts": {
-    "build": "tsc && node scripts/make-executable.mjs dist/index.js",
+    "build": "tsc && node scripts/make-executable.mjs dist/index.js dist/stdio-proxy.js",
     "start:stdio": "node dist/index.js",
+    "start:proxy": "node dist/stdio-proxy.js",
     "inspect": "DANGEROUSLY_OMIT_AUTH=true npx @modelcontextprotocol/inspector --open",
-    "prewarm:xenova": "node -e \"import('@xenova/transformers').then(async({pipeline})=>{const e=await pipeline('feature-extraction','Xenova/bge-small-en-v1.5');await e('warmup');console.log('embedder ok')})\"",
     "start": "node dist/index.js",
     "start:http": "MCP_LOG_LEVEL=debug MCP_TRANSPORT_TYPE=http node dist/index.js",
+    "start:daemon": "MCP_LOG_LEVEL=debug MCP_TRANSPORT_TYPE=http node dist/index.js",
     "rebuild": "npx ts-node --esm scripts/clean.ts && npm run build",
     "fetch:spec": "npx ts-node --esm scripts/fetch-openapi-spec.ts",
     "docs:generate": "typedoc --tsconfig ./tsconfig.typedoc.json",
@@ -38,17 +42,16 @@
     "inspect:http": "mcp-inspector --config mcp.json --server optimike-obsidian-mcp-http"
   },
   "dependencies": {
-    "@hono/node-server": "^1.14.4",
-    "@modelcontextprotocol/inspector": "^0.14.3",
-    "@modelcontextprotocol/sdk": "^1.13.0",
+    "@hono/node-server": "^1.19.14",
+    "@modelcontextprotocol/inspector": "^0.21.2",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/sanitize-html": "^2.16.0",
-    "@types/validator": "13.15.2",
-    "@xenova/transformers": "^2.8.0",
-    "axios": "^1.10.0",
+    "@types/validator": "^13.15.10",
+    "axios": "^1.16.0",
     "chrono-node": "2.8.0",
     "date-fns": "^4.1.0",
     "dotenv": "^16.5.0",
-    "hono": "^4.8.2",
+    "hono": "^4.12.18",
     "ignore": "^7.0.5",
     "jose": "^6.0.11",
     "js-yaml": "^4.1.0",
@@ -57,7 +60,7 @@
     "partial-json": "^0.1.7",
     "sanitize-html": "^2.17.0",
     "tiktoken": "^1.0.21",
-    "validator": "13.15.15",
+    "validator": "^13.15.35",
     "winston": "^3.17.0",
     "winston-transport": "^4.9.0",
     "zod": "^3.25.67"
@@ -82,7 +85,7 @@
   "author": "Optimike (Mickael Ahouansou)",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=22.7.5"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

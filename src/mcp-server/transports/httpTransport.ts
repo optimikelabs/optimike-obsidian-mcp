@@ -18,13 +18,15 @@
 
 import { HttpBindings, serve, ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { Context, Hono, Next } from "hono";
 import { cors } from "hono/cors";
 import http from "http";
 import { randomUUID } from "node:crypto";
 import { config } from "../../config/index.js";
+import { collectRuntimeStatus } from "../../services/runtimeState.js";
+import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import {
   logger,
@@ -49,7 +51,7 @@ const MAX_PORT_RETRIES = 15;
 // It will not work in a multi-process (clustered) or serverless environment.
 // For a scalable deployment, this would need to be replaced with a distributed
 // store like Redis or Memcached.
-const transports: Record<string, StreamableHTTPServerTransport> = {};
+const transports: Record<string, WebStandardStreamableHTTPServerTransport> = {};
 
 async function isPortInUse(
   port: number,
@@ -134,11 +136,24 @@ function startHttpServerWithRetry(
 export async function startHttpTransport(
   createServerInstanceFn: () => Promise<McpServer>,
   parentContext: RequestContext,
+  vaultCacheService?: VaultCacheService,
 ): Promise<ServerType> {
   const app = new Hono<{ Bindings: HttpBindings }>();
   const transportContext = requestContextService.createRequestContext({
     ...parentContext,
     component: "HttpTransportSetup",
+  });
+
+  app.get("/healthz", async (c: Context) => {
+    const includeIntegrity = c.req.query("integrity") === "1";
+    const runtimeStatus = await collectRuntimeStatus(vaultCacheService, {
+      includeIntegrity,
+    });
+    return c.json({
+      ...runtimeStatus,
+      transport: "streamable-http",
+      endpoint: MCP_ENDPOINT_PATH,
+    });
   });
 
   app.use(
@@ -190,9 +205,9 @@ export async function startHttpTransport(
       ...transportContext,
       operation: "handlePost",
     });
-    const body = await c.req.json();
+    const body = await c.req.raw.clone().json();
     const sessionId = c.req.header("mcp-session-id");
-    let transport: StreamableHTTPServerTransport | undefined = sessionId
+    let transport: WebStandardStreamableHTTPServerTransport | undefined = sessionId
       ? transports[sessionId]
       : undefined;
 
@@ -207,7 +222,7 @@ export async function startHttpTransport(
       }
 
       // Create a new transport for a new session.
-      const newTransport = new StreamableHTTPServerTransport({
+      const newTransport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (newId) => {
           transports[newId] = newTransport;
@@ -243,7 +258,10 @@ export async function startHttpTransport(
     }
 
     // Pass the request to the transport to handle.
-    return await transport.handleRequest(c.env.incoming, c.env.outgoing, body);
+    return await transport.handleRequest(c.req.raw, {
+      authInfo: c.env.incoming.auth,
+      parsedBody: body,
+    });
   });
 
   // A reusable handler for GET and DELETE requests which operate on existing sessions.
@@ -261,7 +279,9 @@ export async function startHttpTransport(
     }
 
     // Let the transport handle the streaming (GET) or termination (DELETE) request.
-    return await transport.handleRequest(c.env.incoming, c.env.outgoing);
+    return await transport.handleRequest(c.req.raw, {
+      authInfo: c.env.incoming.auth,
+    });
   };
 
   app.get(MCP_ENDPOINT_PATH, handleSessionRequest);
