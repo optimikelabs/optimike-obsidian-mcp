@@ -140,6 +140,8 @@ Persisted:
 - semantic manifest
 - semantic vector metadata
 - dominant dimension and related semantic cache state
+- in-process semantic snapshot during `SMART_ENV_CACHE_TTL_MS`
+- vector norms for faster repeated ranking
 
 Still live at query time:
 
@@ -149,6 +151,8 @@ Examples:
 
 - if your vault semantic setup relies on Ollama, Ollama still needs to be reachable for semantic queries
 - if Ollama is down, the MCP now returns a clean error instead of silently hanging
+
+At startup, the backend prewarms semantic search by loading the semantic snapshot and sending a small embedding request to the configured provider. Disable it with `SEMANTIC_SEARCH_PREWARM=false`; override the warmup text with `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
 ## Degraded Mode
 

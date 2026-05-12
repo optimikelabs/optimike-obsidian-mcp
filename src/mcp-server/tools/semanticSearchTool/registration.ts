@@ -11,7 +11,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { promises as fs } from "fs";
 import path from "path";
-import { cosine, type SmartVec } from "../../../services/smartEnv.js";
+import { type SmartVec } from "../../../services/smartEnv.js";
 import { getSemanticCacheService } from "../../../services/semanticCache.js";
 import { getQueryEmbedder } from "../../../adapters/embed/index.js";
 import { resolveNoteAbsolutePath } from "./resolvePath.js";
@@ -33,6 +33,19 @@ const Out = z.object({
   query_model: z.string().optional(),
   query_dim: z.number().optional(),
   ollama_base_url: z.string().optional(),
+  vector_count: z.number().optional(),
+  filtered_count: z.number().optional(),
+  timings_ms: z
+    .object({
+      total: z.number(),
+      semantic_cache: z.number().optional(),
+      embedder_setup: z.number().optional(),
+      query_embedding: z.number().optional(),
+      filter: z.number().optional(),
+      ranking: z.number().optional(),
+      snippets: z.number().optional(),
+    })
+    .optional(),
   results: z.array(
     z.object({
       path: z.string(),
@@ -45,6 +58,8 @@ const Out = z.object({
 
 type InType = z.infer<typeof In>;
 type OutType = z.infer<typeof Out>;
+
+const vectorNormCache = new WeakMap<number[], number>();
 
 function getEnv() {
   const env = process.env;
@@ -65,6 +80,9 @@ function getEnv() {
   const CACHE_TTL = Number.isFinite(Number(env.SMART_ENV_CACHE_TTL_MS))
     ? Number(env.SMART_ENV_CACHE_TTL_MS)
     : 60000;
+  const SEMANTIC_SEARCH_PREWARM_TEXT =
+    env.SEMANTIC_SEARCH_PREWARM_TEXT?.trim() ||
+    "optimike semantic search warmup";
 
   return {
     SMART_ENV_DIR,
@@ -78,7 +96,65 @@ function getEnv() {
     OPENAI_EMBEDDING_DIMENSIONS,
     OBSIDIAN_VAULT,
     CACHE_TTL,
+    SEMANTIC_SEARCH_PREWARM_TEXT,
   };
+}
+
+function nowMs(): number {
+  return Date.now();
+}
+
+function elapsedSince(startMs: number): number {
+  return nowMs() - startMs;
+}
+
+function vectorNorm(vector: number[]): number {
+  const cached = vectorNormCache.get(vector);
+  if (cached !== undefined) return cached;
+
+  let sum = 0;
+  for (const value of vector) {
+    sum += value * value;
+  }
+
+  const norm = Math.sqrt(sum);
+  vectorNormCache.set(vector, norm);
+  return norm;
+}
+
+function cosineWithCachedNorm(
+  queryVector: number[],
+  queryNorm: number,
+  itemVector: number[],
+): number {
+  const itemNorm = vectorNorm(itemVector);
+  if (!queryNorm || !itemNorm) return 0;
+
+  let dot = 0;
+  for (let index = 0; index < queryVector.length; index += 1) {
+    dot += queryVector[index] * itemVector[index];
+  }
+
+  return dot / (queryNorm * itemNorm);
+}
+
+function insertRankedTopK<T>(
+  ranked: Array<{ item: T; score: number }>,
+  candidate: { item: T; score: number },
+  limit: number,
+): void {
+  const insertAt = ranked.findIndex((entry) => candidate.score > entry.score);
+  if (insertAt === -1) {
+    if (ranked.length < limit) {
+      ranked.push(candidate);
+    }
+    return;
+  }
+
+  ranked.splice(insertAt, 0, candidate);
+  if (ranked.length > limit) {
+    ranked.pop();
+  }
 }
 
 function pickDominantDimension(items: SmartVec[]): number {
@@ -199,6 +275,10 @@ function makeErrorResult(error: unknown) {
 }
 
 async function performSearch(input: InType): Promise<OutType> {
+  const startedAt = nowMs();
+  const timings: NonNullable<OutType["timings_ms"]> = {
+    total: 0,
+  };
   const {
     SMART_ENV_DIR,
     ENABLE_QUERY_EMBEDDING,
@@ -222,6 +302,7 @@ async function performSearch(input: InType): Promise<OutType> {
 
   const query = input.query.trim();
   if (!query) {
+    timings.total = elapsedSince(startedAt);
     return {
       model: undefined,
       dim: undefined,
@@ -229,12 +310,17 @@ async function performSearch(input: InType): Promise<OutType> {
       query_model: undefined,
       query_dim: undefined,
       ollama_base_url: undefined,
+      vector_count: 0,
+      filtered_count: 0,
+      timings_ms: timings,
       results: [],
     };
   }
 
   const semanticCache = getSemanticCacheService();
+  const semanticCacheStartedAt = nowMs();
   const snapshot = await semanticCache.getSnapshot();
+  timings.semantic_cache = elapsedSince(semanticCacheStartedAt);
   const items = snapshot.items;
   if (!items.length) {
     throw new Error(`No embeddings found in ${SMART_ENV_DIR}`);
@@ -256,6 +342,7 @@ async function performSearch(input: InType): Promise<OutType> {
     OLLAMA_BASE_URL?.trim() ||
     (await detectOllamaBaseUrlFromSmartEnv(SMART_ENV_DIR, model));
 
+  const embedderSetupStartedAt = nowMs();
   const selection = await getQueryEmbedder({
     provider: QUERY_EMBEDDER,
     modelHint: QUERY_EMBEDDER_MODEL_HINT,
@@ -267,8 +354,11 @@ async function performSearch(input: InType): Promise<OutType> {
     openaiBaseUrl: OPENAI_BASE_URL,
     openaiDimensions,
   });
+  timings.embedder_setup = elapsedSince(embedderSetupStartedAt);
 
+  const queryEmbeddingStartedAt = nowMs();
   const queryVector = await selection.embed(query);
+  timings.query_embedding = elapsedSince(queryEmbeddingStartedAt);
 
   if (queryVector.length !== dimension) {
     throw new Error(
@@ -276,6 +366,7 @@ async function performSearch(input: InType): Promise<OutType> {
     );
   }
 
+  const filterStartedAt = nowMs();
   const filtered = itemsWithDim.filter((item) => {
     const folderOk =
       !input.folders ||
@@ -285,17 +376,27 @@ async function performSearch(input: InType): Promise<OutType> {
       (item.tags ?? []).some((tag) => input.tags?.includes(tag));
     return folderOk && tagsOk;
   });
+  timings.filter = elapsedSince(filterStartedAt);
 
-  const ranked = filtered
-    .map((item) => ({
-      item,
-      score: cosine(queryVector, item.vec),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, input.top_k);
+  const rankingStartedAt = nowMs();
+  const queryNorm = vectorNorm(queryVector);
+  const ranked: Array<{ item: SmartVec; score: number }> = [];
+
+  for (const item of filtered) {
+    insertRankedTopK(
+      ranked,
+      {
+        item,
+        score: cosineWithCachedNorm(queryVector, queryNorm, item.vec),
+      },
+      input.top_k,
+    );
+  }
+  timings.ranking = elapsedSince(rankingStartedAt);
 
   const results: OutType["results"] = [];
 
+  const snippetsStartedAt = nowMs();
   for (const { item, score } of ranked) {
     let snippet: string | undefined;
 
@@ -316,6 +417,8 @@ async function performSearch(input: InType): Promise<OutType> {
       snippet,
     });
   }
+  timings.snippets = elapsedSince(snippetsStartedAt);
+  timings.total = elapsedSince(startedAt);
 
   return {
     model,
@@ -325,7 +428,115 @@ async function performSearch(input: InType): Promise<OutType> {
     query_dim: queryVector.length,
     ollama_base_url:
       selection.provider === "ollama" ? inferredOllamaBaseUrl : undefined,
+    vector_count: itemsWithDim.length,
+    filtered_count: filtered.length,
+    timings_ms: timings,
     results,
+  };
+}
+
+export type SemanticSearchPrewarmResult = {
+  ok: boolean;
+  skipped?: string;
+  model?: string;
+  dim?: number;
+  query_provider?: string;
+  query_model?: string;
+  query_dim?: number;
+  vector_count?: number;
+  ollama_base_url?: string;
+  timings_ms: NonNullable<OutType["timings_ms"]>;
+};
+
+export async function prewarmSemanticSearch(): Promise<SemanticSearchPrewarmResult> {
+  const startedAt = nowMs();
+  const timings: NonNullable<OutType["timings_ms"]> = {
+    total: 0,
+  };
+  const {
+    SMART_ENV_DIR,
+    ENABLE_QUERY_EMBEDDING,
+    QUERY_EMBEDDER,
+    QUERY_EMBEDDER_MODEL,
+    QUERY_EMBEDDER_MODEL_HINT,
+    OLLAMA_BASE_URL,
+    OPENAI_API_KEY,
+    OPENAI_BASE_URL,
+    OPENAI_EMBEDDING_DIMENSIONS,
+    SEMANTIC_SEARCH_PREWARM_TEXT,
+  } = getEnv();
+
+  const skipped = (reason: string): SemanticSearchPrewarmResult => {
+    timings.total = elapsedSince(startedAt);
+    return {
+      ok: true,
+      skipped: reason,
+      timings_ms: timings,
+    };
+  };
+
+  if (!SMART_ENV_DIR) {
+    return skipped("SMART_ENV_DIR is not set");
+  }
+
+  if (!ENABLE_QUERY_EMBEDDING) {
+    return skipped("ENABLE_QUERY_EMBEDDING=false");
+  }
+
+  const semanticCacheStartedAt = nowMs();
+  const snapshot = await getSemanticCacheService().getSnapshot();
+  timings.semantic_cache = elapsedSince(semanticCacheStartedAt);
+
+  if (!snapshot.items.length) {
+    return skipped(`No embeddings found in ${SMART_ENV_DIR}`);
+  }
+
+  const dimension = snapshot.dominantDim ?? pickDominantDimension(snapshot.items);
+  if (!dimension) {
+    return skipped("Embeddings are missing vector data");
+  }
+
+  const itemsWithDim = snapshot.items.filter(
+    (item) => item.vec?.length === dimension,
+  );
+  const model = snapshot.dominantModel ?? pickDominantModel(itemsWithDim);
+  const openaiDimensions = Number.isFinite(Number(OPENAI_EMBEDDING_DIMENSIONS))
+    ? Number(OPENAI_EMBEDDING_DIMENSIONS)
+    : undefined;
+  const inferredOllamaBaseUrl =
+    OLLAMA_BASE_URL?.trim() ||
+    (await detectOllamaBaseUrlFromSmartEnv(SMART_ENV_DIR, model));
+
+  const embedderSetupStartedAt = nowMs();
+  const selection = await getQueryEmbedder({
+    provider: QUERY_EMBEDDER,
+    modelHint: QUERY_EMBEDDER_MODEL_HINT,
+    model: QUERY_EMBEDDER_MODEL,
+    vaultModel: model,
+    dimension,
+    ollamaBaseUrl: inferredOllamaBaseUrl,
+    openaiApiKey: OPENAI_API_KEY,
+    openaiBaseUrl: OPENAI_BASE_URL,
+    openaiDimensions,
+  });
+  timings.embedder_setup = elapsedSince(embedderSetupStartedAt);
+
+  const queryEmbeddingStartedAt = nowMs();
+  const warmupVector = await selection.embed(SEMANTIC_SEARCH_PREWARM_TEXT);
+  timings.query_embedding = elapsedSince(queryEmbeddingStartedAt);
+  timings.total = elapsedSince(startedAt);
+
+  return {
+    ok: true,
+    model,
+    dim: dimension,
+    query_provider: selection.provider,
+    query_model: selection.model,
+    query_dim: warmupVector.length,
+    vector_count: itemsWithDim.length,
+    ollama_base_url:
+      selection.provider === "ollama" ? inferredOllamaBaseUrl : undefined,
+    timings_ms: timings,
   };
 }
 

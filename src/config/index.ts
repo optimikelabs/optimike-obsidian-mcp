@@ -139,6 +139,13 @@ const EnvSchema = z.object({
   OPENAI_BASE_URL: z.string().optional(),
   OPENAI_EMBEDDING_DIMENSIONS: z.string().optional(),
   SMART_ENV_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(60000),
+  SEMANTIC_SEARCH_PREWARM: z
+    .string()
+    .transform((val) => val.toLowerCase() === "true")
+    .default("true"),
+  SEMANTIC_SEARCH_PREWARM_TEXT: z
+    .string()
+    .default("optimike semantic search warmup"),
   OBSIDIAN_VAULT: z.string().optional(),
 });
 
@@ -276,6 +283,8 @@ export const config = {
   openaiBaseUrl: env.OPENAI_BASE_URL,
   openaiEmbeddingDimensions: env.OPENAI_EMBEDDING_DIMENSIONS,
   smartEnvCacheTtlMs: env.SMART_ENV_CACHE_TTL_MS,
+  semanticSearchPrewarm: env.SEMANTIC_SEARCH_PREWARM,
+  semanticSearchPrewarmText: env.SEMANTIC_SEARCH_PREWARM_TEXT,
   obsidianVaultPath: env.OBSIDIAN_VAULT,
 };
 
