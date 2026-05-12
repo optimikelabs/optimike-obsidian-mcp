@@ -146,7 +146,6 @@ const EnvSchema = z.object({
     .nonnegative()
     .default(60000),
   OBSIDIAN_VAULT: z.string().optional(),
-  TRANSFORMERS_CACHE: z.string().optional(),
 });
 
 const parsedEnv = EnvSchema.safeParse(process.env);
@@ -283,7 +282,6 @@ export const config = {
   openaiEmbeddingDimensions: env.OPENAI_EMBEDDING_DIMENSIONS,
   smartEnvCacheTtlMs: env.SMART_ENV_CACHE_TTL_MS,
   obsidianVaultPath: env.OBSIDIAN_VAULT,
-  transformersCache: env.TRANSFORMERS_CACHE,
 };
 
 /**

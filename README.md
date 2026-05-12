@@ -20,7 +20,7 @@ Recommended for Codex: point your MCP config to `dist/stdio-proxy.js`, not direc
 
 ## Prerequisites
 
-- Node.js >= 16
+- Node.js >= 22.7.5
 - Obsidian Desktop
 - Plugins:
   - Local REST API (required for REST tools): https://github.com/coddingtonbear/obsidian-local-rest-api
@@ -62,7 +62,7 @@ node dist/stdio-proxy.js
 - Read-only degraded mode for `obsidian_read_note` and `obsidian_list_notes` when Obsidian REST is down
 - Shared SQLite store for vault content, task cache, and semantic manifest data
 - Embedder‑agnostic: query embedding aligned to the vault model
-- Ollama / Xenova / OpenAI support (env overrides)
+- Ollama / OpenAI support (env overrides); Xenova / Transformers is disabled until its vulnerable ONNX/protobuf chain can be safely reintroduced
 
 ## Architecture (overview)
 
@@ -351,12 +351,9 @@ export QUERY_EMBEDDER_MODEL=snowflake-arctic-embed2
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
-**Xenova (Transformers)**
+**Xenova / Transformers**
 
-```bash
-export QUERY_EMBEDDER=xenova
-export QUERY_EMBEDDER_MODEL_HINT=bge-384   # or e5 / snowflake / etc.
-```
+The local Xenova provider is disabled for now because its ONNX/protobuf dependency chain was affected by npm audit vulnerabilities. Use Ollama locally, or OpenAI in cloud mode.
 
 **OpenAI (cloud)**
 

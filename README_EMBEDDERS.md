@@ -2,8 +2,9 @@ Embedding-agnostic notes for optimike-obsidian-mcp
 
 What this adds
 - QUERY_EMBEDDER=auto (default): query embedder auto-matches the vault embedding model found in .smart-env
-- QUERY_EMBEDDER can be forced to: xenova | ollama | openai
+- QUERY_EMBEDDER can be forced to: ollama | openai
 - QUERY_EMBEDDER_MODEL can force the model name/id
+- Xenova / Transformers is disabled for now because its ONNX/protobuf dependency chain was affected by npm audit vulnerabilities.
 
 Ollama settings
 - OLLAMA_BASE_URL (default: http://127.0.0.1:11434)
@@ -19,8 +20,9 @@ Recommended default (hands-off)
 
 If your .smart-env does NOT store the model
 - Set:
-  QUERY_EMBEDDER=xenova
-  QUERY_EMBEDDER_MODEL_HINT=bge-384 (or e5 / snowflake / etc)
+  QUERY_EMBEDDER=ollama
+  QUERY_EMBEDDER_MODEL=snowflake-arctic-embed2
+  OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 If your vault embeddings are built with Ollama snowflake-arctic-embed2
 - Set:

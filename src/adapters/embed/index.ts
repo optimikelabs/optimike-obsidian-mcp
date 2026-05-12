@@ -1,4 +1,3 @@
-import { getEmbedder as getXenovaEmbedder, resolveTransformersModel } from "./xenova.js";
 import { getEmbedder as getOllamaEmbedder } from "./ollama.js";
 import { getEmbedder as getOpenAIEmbedder } from "./openai.js";
 
@@ -15,7 +14,7 @@ export type QueryEmbedderSelection = {
 export type QueryEmbedderOptions = {
   provider?: string;
   modelHint?: string;
-  // Explicit override (strongest). Can be a HuggingFace id (xenova), an Ollama model name, or an OpenAI model.
+  // Explicit override (strongest). HuggingFace ids resolve to the disabled Xenova provider.
   model?: string;
   // What Smart Connections stored in .smart-env (often a HuggingFace id when using Transformers).
   vaultModel?: string;
@@ -60,21 +59,16 @@ export const getQueryEmbedder = async (
     provider === "auto"
       ? modelCandidate
         ? inferProviderFromModel(modelCandidate)
-        : "xenova"
+        : "ollama"
       : provider;
 
   if (resolvedProvider === "xenova") {
-    const resolvedModel = resolveTransformersModel(
-      opts.modelHint,
-      opts.dimension,
-      modelCandidate || undefined,
+    throw new Error(
+      [
+        "QUERY_EMBEDDER=xenova is disabled because @xenova/transformers pulls vulnerable ONNX/protobuf dependencies.",
+        "Use QUERY_EMBEDDER=ollama with QUERY_EMBEDDER_MODEL, or QUERY_EMBEDDER=openai.",
+      ].join(" "),
     );
-    const embed = await getXenovaEmbedder(
-      opts.modelHint,
-      opts.dimension,
-      modelCandidate || undefined,
-    );
-    return { provider: "xenova", model: resolvedModel, embed };
   }
 
   if (resolvedProvider === "openai") {
