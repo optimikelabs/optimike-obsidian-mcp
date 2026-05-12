@@ -76,7 +76,7 @@ Useful tuning:
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
 - `OBSIDIAN_STARTUP_BLOCKING=false` for faster non-blocking startup in WSL-heavy setups
 
-For public or ÉLYSIA OS distribution, keep `MCP_WRITE_MODE=guarded` unless the host explicitly opts into `readonly` or `full`. Guarded mode is enforced inside the server; agents do not need to choose a mode per write.
+Default write behavior is `MCP_WRITE_MODE=full`. Hosts that want a stricter public/runtime posture can explicitly set `MCP_WRITE_MODE=guarded` or `MCP_WRITE_MODE=readonly`; agents do not need to choose a mode per write.
 
 ## Required Dependencies
 

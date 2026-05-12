@@ -154,7 +154,7 @@ Variables utiles :
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` pour choisir la source de refresh cache (`auto` privilégie le vault local quand il existe)
 - `OBSIDIAN_CACHE_CONCURRENCY` pour borner le travail filesystem local
-- `MCP_WRITE_MODE=readonly|guarded|full` pour imposer la sécurité d’écriture côté serveur (`guarded` est le défaut public)
+- `MCP_WRITE_MODE=readonly|guarded|full` pour imposer la sécurité d’écriture côté serveur (`full` est le défaut ; définir explicitement `guarded` ou `readonly` pour durcir un hôte)
 - `MCP_GUARDED_MAX_WRITE_CHARS` et `MCP_GUARDED_MAX_BATCH_OPERATIONS` pour régler les limites du mode guarded
 
 Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
@@ -180,11 +180,11 @@ Et via MCP :
 - `obsidian_runtime_status`
 - `obsidian_runtime_maintenance`
 
-Sécurité runtime publique :
+Sécurité d’écriture runtime :
 
 - `readonly` bloque tous les outils d’écriture hors opérations de validation pure
 - `guarded` autorise les écritures explicites et bornées, mais bloque suppression, overwrite, unset frontmatter, regex replace-all large et gros batchs
-- `full` restaure le comportement d’écriture complet pour un environnement local de confiance
+- `full` est le défaut et conserve le comportement d’écriture complet pour un environnement local de confiance
 
 Contrôle du contexte agent :
 

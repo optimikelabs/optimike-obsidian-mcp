@@ -125,7 +125,7 @@ const EnvSchema = z.object({
     .transform((val) => val.toLowerCase() === "true")
     .default("true"),
   // --- Public runtime safety ---
-  MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).default("guarded"),
+  MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).default("full"),
   MCP_GUARDED_MAX_WRITE_CHARS: z.coerce
     .number()
     .int()

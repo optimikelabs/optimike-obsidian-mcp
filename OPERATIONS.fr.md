@@ -76,7 +76,7 @@ Variables de tuning utiles :
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
 - `OBSIDIAN_STARTUP_BLOCKING=false` pour un démarrage non bloquant plus confortable sous WSL
 
-Pour une distribution publique ou ÉLYSIA OS, garder `MCP_WRITE_MODE=guarded` sauf choix explicite de l’hôte vers `readonly` ou `full`. Le mode guarded est appliqué dans le serveur ; l’agent n’a pas à choisir un mode à chaque écriture.
+Le comportement d’écriture par défaut est `MCP_WRITE_MODE=full`. Les hôtes qui veulent une posture publique/runtime plus stricte peuvent définir explicitement `MCP_WRITE_MODE=guarded` ou `MCP_WRITE_MODE=readonly` ; l’agent n’a pas à choisir un mode à chaque écriture.
 
 ## Dépendances requises
 
