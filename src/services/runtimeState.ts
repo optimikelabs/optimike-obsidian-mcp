@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { config } from "../config/index.js";
 import { warmSharedTaskCache } from "../mcp-server/tools/tasksShared/logic.js";
@@ -6,6 +9,8 @@ import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { RequestContext, requestContextService } from "../utils/index.js";
 import { getSemanticCacheService } from "./semanticCache.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
+
+const PROCESS_STARTED_AT_MS = Math.round(Date.now() - process.uptime() * 1000);
 
 export type RuntimeMaintenanceAction =
   | "integrity_check"
@@ -59,13 +64,129 @@ function readDbCounts() {
   }
 }
 
+type FileFingerprint = {
+  path: string;
+  exists: boolean;
+  sizeBytes?: number;
+  mtimeMs?: number;
+};
+
+function safeFileFingerprint(filePath: string): FileFingerprint {
+  try {
+    const stats = statSync(filePath);
+    return {
+      path: filePath,
+      exists: true,
+      sizeBytes: stats.size,
+      mtimeMs: Math.round(stats.mtimeMs),
+    };
+  } catch {
+    return {
+      path: filePath,
+      exists: false,
+    };
+  }
+}
+
+function readGitSha(): { sha?: string; shortSha?: string; error?: string } {
+  try {
+    const result = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: config.projectRoot,
+      encoding: "utf-8",
+      windowsHide: true,
+    });
+    if (result.status !== 0) {
+      return {
+        error: (
+          result.stderr ||
+          result.stdout ||
+          "git rev-parse failed"
+        ).trim(),
+      };
+    }
+    const sha = result.stdout.trim();
+    return {
+      sha,
+      shortSha: sha.slice(0, 7),
+    };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function hashRuntimeConfig(): {
+  hash: string;
+  fields: Record<string, unknown>;
+} {
+  const fields = {
+    mcpTransportType: config.mcpTransportType,
+    mcpHttpHost: config.mcpHttpHost,
+    mcpHttpPort: config.mcpHttpPort,
+    obsidianBaseUrl: config.obsidianBaseUrl,
+    obsidianVaultPath: config.obsidianVaultPath,
+    obsidianSharedCacheDbPath: config.obsidianSharedCacheDbPath,
+    obsidianContentHotCacheLimit: config.obsidianContentHotCacheLimit,
+    obsidianStartupBlocking: config.obsidianStartupBlocking,
+    smartEnvDir: config.smartEnvDir,
+    enableQueryEmbedding: config.enableQueryEmbedding,
+    queryEmbedder: config.queryEmbedder,
+    queryEmbedderModel: config.queryEmbedderModel,
+    ollamaBaseUrl: config.ollamaBaseUrl,
+    openaiBaseUrl: config.openaiBaseUrl,
+    smartEnvCacheTtlMs: config.smartEnvCacheTtlMs,
+  };
+  return {
+    hash: createHash("sha256").update(JSON.stringify(fields)).digest("hex"),
+    fields,
+  };
+}
+
+function collectRuntimeFingerprint(): Record<string, unknown> {
+  const configHash = hashRuntimeConfig();
+  const distIndex = safeFileFingerprint(
+    path.join(config.projectRoot, "dist", "index.js"),
+  );
+  const distStdioProxy = safeFileFingerprint(
+    path.join(config.projectRoot, "dist", "stdio-proxy.js"),
+  );
+  const newestDistMtimeMs = Math.max(
+    distIndex.mtimeMs ?? 0,
+    distStdioProxy.mtimeMs ?? 0,
+  );
+  const distIsNewerThanProcess =
+    newestDistMtimeMs > 0 && newestDistMtimeMs > PROCESS_STARTED_AT_MS + 1000;
+
+  return {
+    packageName: config.pkg.name,
+    packageVersion: config.pkg.version,
+    git: readGitSha(),
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    pid: process.pid,
+    processStartedAtMs: PROCESS_STARTED_AT_MS,
+    processUptimeSec: Math.round(process.uptime()),
+    cwd: process.cwd(),
+    projectRoot: config.projectRoot,
+    entrypoint: process.argv[1],
+    dist: {
+      index: distIndex,
+      stdioProxy: distStdioProxy,
+      newestMtimeMs: newestDistMtimeMs || undefined,
+      isNewerThanProcess: distIsNewerThanProcess,
+    },
+    configHash: configHash.hash,
+    configFields: configHash.fields,
+  };
+}
+
 export async function collectRuntimeStatus(
   vaultCacheService: VaultCacheService | undefined,
   options: RuntimeStatusOptions = {},
 ): Promise<Record<string, unknown>> {
-  const semanticCache = config.smartEnvDir
-    ? getSemanticCacheService()
-    : null;
+  const semanticCache = config.smartEnvDir ? getSemanticCacheService() : null;
   const sharedDb = readDbCounts();
   const integrity =
     options.includeIntegrity && vaultCacheService
@@ -76,6 +197,7 @@ export async function collectRuntimeStatus(
     ok: integrity ? integrity.ok : true,
     pid: process.pid,
     transport: config.mcpTransportType,
+    runtime: collectRuntimeFingerprint(),
     sharedCache: {
       ...(vaultCacheService?.getStats() ?? {
         dbPath: config.obsidianSharedCacheDbPath,
@@ -122,9 +244,7 @@ export async function runRuntimeMaintenance(
     );
   }
 
-  const semanticCache = config.smartEnvDir
-    ? getSemanticCacheService()
-    : null;
+  const semanticCache = config.smartEnvDir ? getSemanticCacheService() : null;
 
   switch (action) {
     case "integrity_check":

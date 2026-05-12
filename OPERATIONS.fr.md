@@ -47,14 +47,17 @@ Ce qui reste en RAM :
 Le design final réduit la mémoire de quatre façons :
 
 1. le `stdio` est devenu léger
+
    - Codex parle à `stdio-proxy.js`
    - le backend lourd est réutilisé au lieu d’être relancé
 
 2. le contenu des notes est persisté
+
    - le serveur ne garde plus tout le vault chaud en mémoire
    - le contenu est lu depuis SQLite d’abord, puis depuis le disque ou REST seulement si nécessaire
 
 3. Tasks réutilise la même couche persistée
+
    - le parsing Tasks relit le contenu partagé des notes
    - le serveur évite un second chemin de scan brutal pour un autre MCP Tasks
 
@@ -79,10 +82,12 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 ### Plugins Obsidian
 
 - Local REST API
+
   - utilisé pour la majorité des opérations live sur les notes
   - configuré via `OBSIDIAN_BASE_URL` et `OBSIDIAN_API_KEY`
 
 - Bases Bridge (REST)
+
   - requis pour le support `.base`
   - expose les endpoints Bases consommés par ce MCP
 
@@ -166,6 +171,7 @@ curl http://127.0.0.1:3010/healthz?integrity=1
 Ce que tu obtiens :
 
 - mode runtime
+- fingerprint runtime : version package, git sha, Node, chemins `dist`, hash de config non sensible
 - état du mode dégradé
 - stats de cache
 - stats sémantiques
@@ -184,6 +190,42 @@ Actions de maintenance supportées :
 - `refresh_semantic_cache`
 - `refresh_tasks_cache`
 - `refresh_all`
+
+### Vérification automatisée locale
+
+Le script de smoke local vérifie le runtime tel qu’il est réellement utilisé :
+
+```bash
+npm run smoke:runtime
+```
+
+Il contrôle :
+
+- `/healthz?integrity=1`
+- le fingerprint runtime
+- la fraîcheur du process par rapport aux fichiers `dist`
+- l’intégrité SQLite
+- la découverte des tools via MCP HTTP
+- la découverte des tools via `stdio-proxy`
+
+Pour vérifier le code avant PR ou merge :
+
+```bash
+npm run verify:code
+```
+
+Ce script enchaîne :
+
+- `npm audit`
+- `npm run build`
+
+Ensuite, redémarre le backend si le build vient de modifier `dist`, puis lance :
+
+```bash
+npm run smoke:runtime
+```
+
+Le smoke échoue volontairement si le process backend est plus vieux que les fichiers `dist`.
 
 ## Setup Codex minimal
 

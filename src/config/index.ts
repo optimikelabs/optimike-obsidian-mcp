@@ -121,9 +121,7 @@ const EnvSchema = z.object({
     .transform((val) => val.toLowerCase() === "true")
     .default("true"),
   // --- Smart Connections Semantic Search ---
-  SMART_SEARCH_MODE: z
-    .enum(["plugin", "smartenv", "files"])
-    .default("plugin"),
+  SMART_SEARCH_MODE: z.enum(["plugin", "smartenv", "files"]).default("plugin"),
   SMART_ENV_DIR: z.string().optional(),
   ENABLE_QUERY_EMBEDDING: z
     .string()
@@ -140,11 +138,7 @@ const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().optional(),
   OPENAI_EMBEDDING_DIMENSIONS: z.string().optional(),
-  SMART_ENV_CACHE_TTL_MS: z.coerce
-    .number()
-    .int()
-    .nonnegative()
-    .default(60000),
+  SMART_ENV_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(60000),
   OBSIDIAN_VAULT: z.string().optional(),
 });
 
@@ -234,6 +228,7 @@ if (!validatedLogsPath) {
  */
 export const config = {
   pkg,
+  projectRoot,
   mcpServerName: env.MCP_SERVER_NAME || pkg.name,
   mcpServerVersion: env.MCP_SERVER_VERSION || pkg.version,
   logLevel: env.MCP_LOG_LEVEL,
