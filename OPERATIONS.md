@@ -47,14 +47,17 @@ What stays in RAM:
 The final design reduces memory usage in four ways:
 
 1. `stdio` is now cheap
+
    - Codex talks to `stdio-proxy.js`
    - the heavy backend is reused instead of respawned
 
 2. note content is persisted
+
    - the server does not keep the whole vault hot in memory
    - note content is loaded from SQLite first, then from disk or REST only when needed
 
 3. Tasks reuse the same persisted content
+
    - task parsing reads from shared cached note content
    - the server avoids a second brute-force scan path for a separate Tasks MCP
 
@@ -79,10 +82,12 @@ The final server can expose different capabilities depending on which Obsidian p
 ### Obsidian plugins
 
 - Local REST API
+
   - used for most live Obsidian note operations
   - configured through `OBSIDIAN_BASE_URL` and `OBSIDIAN_API_KEY`
 
 - Bases Bridge (REST)
+
   - required for `.base` support
   - exposes the Bases endpoints used by this MCP
 
@@ -166,6 +171,7 @@ curl http://127.0.0.1:3010/healthz?integrity=1
 What you get:
 
 - runtime mode
+- runtime fingerprint: package version, git sha, Node.js version, `dist` paths, non-sensitive config hash
 - degraded mode state
 - cache stats
 - semantic stats
@@ -184,6 +190,42 @@ Supported maintenance actions:
 - `refresh_semantic_cache`
 - `refresh_tasks_cache`
 - `refresh_all`
+
+### Automated local verification
+
+The local smoke script checks the runtime exactly as Codex uses it:
+
+```bash
+npm run smoke:runtime
+```
+
+It verifies:
+
+- `/healthz?integrity=1`
+- runtime fingerprint
+- process freshness compared with the current `dist` files
+- SQLite integrity
+- tool discovery through MCP HTTP
+- tool discovery through `stdio-proxy`
+
+To verify code before a PR or merge:
+
+```bash
+npm run verify:code
+```
+
+This runs:
+
+- `npm audit`
+- `npm run build`
+
+Then restart the backend if the build changed `dist`, and run:
+
+```bash
+npm run smoke:runtime
+```
+
+The smoke intentionally fails when the backend process is older than the current `dist` files.
 
 ## Minimal Codex Setup
 
