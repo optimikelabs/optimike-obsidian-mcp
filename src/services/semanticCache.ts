@@ -165,16 +165,16 @@ export class SemanticCacheService {
         operation: "SemanticCacheService.getSnapshot",
       });
 
-    const sourceState = await scanSmartEnvSourceState(this.smartEnvDir);
     const now = Date.now();
 
     if (
       this.memorySnapshot &&
-      this.memorySnapshot.sourceSignature === sourceState.signature &&
       (this.ttlMs === 0 || now - this.memorySnapshotLoadedAt < this.ttlMs)
     ) {
       return this.memorySnapshot;
     }
+
+    const sourceState = await scanSmartEnvSourceState(this.smartEnvDir);
 
     const manifest = this.readManifest();
     if (

@@ -298,10 +298,13 @@ Le serveur :
 - choisit la dimension dominante
 - encode la requête avec le même modèle que le vault
 - persiste un manifest sémantique dans SQLite pour accélérer les refreshs à chaud
+- préchauffe la recherche sémantique au démarrage en chargeant le snapshot et en réveillant l’embedder de requête
+- renvoie `timings_ms`, `vector_count` et `filtered_count` pour diagnostiquer le coût réel
 
 Important :
 - l’exécution d’une requête sémantique exige toujours un provider de requête joignable
 - si le vault repose sur Ollama et qu’Ollama est down, l’erreur remonte clairement au lieu de bloquer silencieusement
+- `SEMANTIC_SEARCH_PREWARM=false` désactive le préchauffage au démarrage
 
 Autrement dit :
 

@@ -140,6 +140,8 @@ Persisté :
 - manifest sémantique
 - métadonnées vecteurs
 - dimension dominante et état de cache associé
+- snapshot sémantique en mémoire pendant `SMART_ENV_CACHE_TTL_MS`
+- normes de vecteurs pour accélérer les classements répétés
 
 Toujours vivant au moment de la requête :
 
@@ -149,6 +151,8 @@ Exemples :
 
 - si ton vault sémantique repose sur Ollama, Ollama doit toujours être joignable pour exécuter une requête sémantique
 - si Ollama tombe, le MCP renvoie maintenant une erreur propre au lieu de sembler freezer
+
+Au démarrage, le backend préchauffe la recherche sémantique en chargeant le snapshot et en envoyant une petite requête d’embedding au provider configuré. Désactivation possible avec `SEMANTIC_SEARCH_PREWARM=false` ; texte de warmup surchargeable avec `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
 ## Mode dégradé
 

@@ -136,6 +136,8 @@ function hashRuntimeConfig(): {
     ollamaBaseUrl: config.ollamaBaseUrl,
     openaiBaseUrl: config.openaiBaseUrl,
     smartEnvCacheTtlMs: config.smartEnvCacheTtlMs,
+    semanticSearchPrewarm: config.semanticSearchPrewarm,
+    semanticSearchPrewarmText: config.semanticSearchPrewarmText,
   };
   return {
     hash: createHash("sha256").update(JSON.stringify(fields)).digest("hex"),

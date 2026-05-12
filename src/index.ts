@@ -10,6 +10,7 @@ import { logger, McpLogLevel } from "./utils/internal/logger.js"; // Import logg
 // Import Services
 import { ObsidianRestApiService } from "./services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "./services/obsidianRestAPI/vaultCache/index.js"; // Import VaultCacheService
+import { prewarmSemanticSearch } from "./mcp-server/tools/semanticSearchTool/registration.js";
 
 /**
  * The main MCP server instance (only stored globally for stdio shutdown).
@@ -351,6 +352,36 @@ const start = async () => {
         });
     }
     // --- End Cache Build Trigger ---
+
+    if (config.semanticSearchPrewarm) {
+      logger.info(
+        "Triggering background semantic search prewarm...",
+        startupContext,
+      );
+      prewarmSemanticSearch()
+        .then((result) => {
+          logger.info("Semantic search prewarm completed.", {
+            ...startupContext,
+            semanticPrewarm: result,
+          });
+        })
+        .catch((prewarmError) => {
+          logger.warning("Background semantic search prewarm failed.", {
+            ...startupContext,
+            error:
+              prewarmError instanceof Error
+                ? prewarmError.message
+                : String(prewarmError),
+            stack:
+              prewarmError instanceof Error ? prewarmError.stack : undefined,
+          });
+        });
+    } else {
+      logger.info(
+        "Semantic search prewarm is disabled by configuration.",
+        startupContext,
+      );
+    }
 
     // --- Signal and Error Handling Setup ---
 

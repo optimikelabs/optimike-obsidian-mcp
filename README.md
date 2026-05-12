@@ -331,10 +331,13 @@ The server:
 - selects the dominant dimension
 - embeds the query with the same model as the vault
 - persists a semantic manifest in SQLite for faster warm refreshes
+- prewarms semantic search on startup by loading the snapshot and warming the query embedder
+- returns `timings_ms`, `vector_count`, and `filtered_count` for operational diagnosis
 
 Important:
 - semantic query execution still requires a reachable query embedder provider
 - if the vault was built with Ollama embeddings, an unreachable Ollama instance will produce a clear error instead of a silent hang
+- set `SEMANTIC_SEARCH_PREWARM=false` to disable startup prewarm
 
 That means:
 
