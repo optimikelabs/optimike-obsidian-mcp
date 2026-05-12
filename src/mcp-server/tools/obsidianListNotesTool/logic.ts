@@ -68,6 +68,24 @@ export const ObsidianListNotesInputSchema = z
       .describe(
         "Maximum recursion depth. 0 for no recursion, -1 for infinite (default).",
       ),
+    responseMode: z
+      .enum(["tree", "compact"])
+      .optional()
+      .default("tree")
+      .describe(
+        "Response shape. 'tree' preserves the legacy tree string; 'compact' returns paginated path entries for agent context efficiency.",
+      ),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(500)
+      .optional()
+      .describe("Maximum compact entries to return. Only applies to responseMode='compact'."),
+    cursor: z
+      .string()
+      .optional()
+      .describe("Opaque cursor returned by a previous compact response."),
   })
   .describe(
     "Input parameters for listing files and subdirectories within a specified Obsidian vault directory, with optional filtering and recursion.",
@@ -93,13 +111,25 @@ interface FileTreeNode {
   children: FileTreeNode[];
 }
 
+interface CompactFileEntry {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+}
+
 /**
  * Defines the structure of the successful response returned by the core logic function.
  */
 export interface ObsidianListNotesResponse {
   directoryPath: string;
-  tree: string;
+  tree?: string;
+  entries?: CompactFileEntry[];
   totalEntries: number;
+  count?: number;
+  limit?: number;
+  nextCursor?: string;
+  hasMore?: boolean;
+  responseMode?: "tree" | "compact";
 }
 
 // ====================================================================================
@@ -135,6 +165,42 @@ function formatTree(
   });
 
   return { tree: treeString, count };
+}
+
+function parseCursor(cursor?: string): number {
+  if (!cursor) return 0;
+  const parsed = Number(cursor);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new McpError(
+      BaseErrorCode.VALIDATION_ERROR,
+      `Invalid cursor '${cursor}'. Use nextCursor from the previous compact response.`,
+    );
+  }
+  return parsed;
+}
+
+function flattenTree(
+  nodes: FileTreeNode[],
+  parentPath: string,
+): CompactFileEntry[] {
+  const entries: CompactFileEntry[] = [];
+  for (const node of nodes) {
+    const cleanName =
+      node.type === "directory" ? node.name.replace(/\/$/u, "") : node.name;
+    const entryPath =
+      parentPath === "/" || parentPath === ""
+        ? cleanName
+        : path.posix.join(parentPath, cleanName);
+    entries.push({
+      path: node.type === "directory" ? `${entryPath}/` : entryPath,
+      name: node.name,
+      type: node.type,
+    });
+    if (node.children.length > 0) {
+      entries.push(...flattenTree(node.children, entryPath));
+    }
+  }
+  return entries;
 }
 
 /**
@@ -316,16 +382,38 @@ export const processObsidianListNotes = async (
         directoryPath: dirPathForLog,
         tree: "(empty or all items filtered)",
         totalEntries: 0,
+        count: 0,
+        hasMore: false,
+        responseMode: params.responseMode,
       };
     }
 
     const { tree, count } = formatTree(fileTree);
+    if (params.responseMode === "compact") {
+      const allEntries = flattenTree(fileTree, dirPathForLog);
+      const offset = parseCursor(params.cursor);
+      const limit = params.limit ?? 100;
+      const entries = allEntries.slice(offset, offset + limit);
+      const nextOffset = offset + entries.length;
+      const hasMore = nextOffset < allEntries.length;
+      return {
+        directoryPath: dirPathForLog,
+        entries,
+        totalEntries: allEntries.length,
+        count: entries.length,
+        limit,
+        nextCursor: hasMore ? String(nextOffset) : undefined,
+        hasMore,
+        responseMode: "compact",
+      };
+    }
 
     // --- Step 3: Construct and return the response ---
     const response: ObsidianListNotesResponse = {
       directoryPath: dirPathForLog,
       tree: tree.trimEnd(), // Remove trailing newline
       totalEntries: count,
+      responseMode: "tree",
     };
 
     logger.debug(

@@ -69,7 +69,14 @@ Useful tuning:
 
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
+- `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest`
+- `OBSIDIAN_CACHE_CONCURRENCY`
+- `MCP_WRITE_MODE=readonly|guarded|full`
+- `MCP_GUARDED_MAX_WRITE_CHARS`
+- `MCP_GUARDED_MAX_BATCH_OPERATIONS`
 - `OBSIDIAN_STARTUP_BLOCKING=false` for faster non-blocking startup in WSL-heavy setups
+
+For public or ÉLYSIA OS distribution, keep `MCP_WRITE_MODE=guarded` unless the host explicitly opts into `readonly` or `full`. Guarded mode is enforced inside the server; agents do not need to choose a mode per write.
 
 ## Required Dependencies
 

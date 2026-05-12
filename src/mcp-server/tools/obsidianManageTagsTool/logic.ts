@@ -12,6 +12,7 @@ import {
   retryWithDelay,
 } from "../../../utils/index.js";
 import { sanitization } from "../../../utils/security/sanitization.js";
+import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 // ====================================================================================
 // Schema Definitions
@@ -65,6 +66,21 @@ export const processObsidianManageTags = async (
 
   const { filePath, operation, tags: inputTags } = params;
   const sanitizedTags = inputTags.map((t) => sanitization.sanitizeTagName(t));
+
+  if (operation !== "list") {
+    assertWriteAllowed({
+      operation: "obsidian_manage_tags",
+      action: operation,
+      target: filePath,
+      batchCount: sanitizedTags.length,
+      destructive: operation === "remove",
+      guardedReason:
+        operation === "remove"
+          ? "tag removal requires MCP_WRITE_MODE=full"
+          : undefined,
+      context,
+    });
+  }
 
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;

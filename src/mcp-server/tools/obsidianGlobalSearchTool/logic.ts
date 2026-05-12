@@ -83,6 +83,13 @@ const ObsidianGlobalSearchInputSchema = z
       .optional()
       .default(5)
       .describe("Maximum number of matches to show per file. Defaults to 5."),
+    responseMode: z
+      .enum(["detailed", "compact"])
+      .optional()
+      .default("detailed")
+      .describe(
+        "Response shape. 'detailed' returns match snippets; 'compact' returns file-level hits with counts and metadata only.",
+      ),
   })
   .describe(
     "Performs search across vault content using text or regex. Supports filtering by modification date, directory path, pagination, and limiting matches per file.",
@@ -114,17 +121,26 @@ export interface GlobalSearchResult {
   numericMtime: number; // Numeric mtime for robust sorting
 }
 
+export interface CompactGlobalSearchResult {
+  path: string;
+  filename: string;
+  matchCount: number;
+  modifiedTime: string;
+  createdTime: string;
+}
+
 // Added alsoFoundInFiles
 export interface ObsidianGlobalSearchResponse {
   success: boolean;
   message: string;
-  results: GlobalSearchResult[];
+  results: Array<GlobalSearchResult | CompactGlobalSearchResult>;
   totalFilesFound: number; // Total files matching query *before* pagination
   totalMatchesFound: number; // Total matches across all found files *before* pagination
   currentPage: number;
   pageSize: number;
   totalPages: number;
   alsoFoundInFiles?: string[]; // List of filenames found but not on the current page
+  responseMode?: "detailed" | "compact";
 }
 
 // ====================================================================================
@@ -483,6 +499,16 @@ export const processObsidianGlobalSearch = async (
   });
 
   const paginatedResults = allFilteredResults.slice(startIndex, endIndex);
+  const responseResults =
+    params.responseMode === "compact"
+      ? paginatedResults.map((result) => ({
+          path: result.path,
+          filename: result.filename,
+          matchCount: result.matches.length,
+          modifiedTime: result.modifiedTime,
+          createdTime: result.createdTime,
+        }))
+      : paginatedResults;
 
   // 5. Determine alsoFoundInFiles
   let alsoFoundInFiles: string[] | undefined = undefined;
@@ -500,13 +526,14 @@ export const processObsidianGlobalSearch = async (
   const response: ObsidianGlobalSearchResponse = {
     success: true, // Indicate overall tool success, even if fallback was used or results are empty
     message: finalMessage,
-    results: paginatedResults,
+    results: responseResults,
     totalFilesFound: totalFilesFound,
     totalMatchesFound: totalMatchesCount,
     currentPage: currentPage,
     pageSize: pageSize,
     totalPages: totalPages,
     alsoFoundInFiles: alsoFoundInFiles, // Add the list here
+    responseMode: params.responseMode,
   };
 
   logger.info(`Global search processing completed. ${finalMessage}`, opContext);

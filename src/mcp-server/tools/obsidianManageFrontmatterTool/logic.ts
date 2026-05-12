@@ -12,6 +12,7 @@ import {
   RequestContext,
   retryWithDelay,
 } from "../../../utils/index.js";
+import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 // ====================================================================================
 // Schema Definitions
@@ -88,6 +89,21 @@ export const processObsidianManageFrontmatter = async (
   });
 
   const { filePath, operation, key, value } = params;
+
+  if (operation !== "get") {
+    assertWriteAllowed({
+      operation: "obsidian_manage_frontmatter",
+      action: operation,
+      target: filePath,
+      frontmatterKeys: [key],
+      destructive: operation === "delete",
+      guardedReason:
+        operation === "delete"
+          ? "frontmatter key deletion requires MCP_WRITE_MODE=full"
+          : undefined,
+      context,
+    });
+  }
 
   const shouldRetryNotFound = (err: unknown) =>
     err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND;

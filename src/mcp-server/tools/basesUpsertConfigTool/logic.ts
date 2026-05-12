@@ -14,6 +14,7 @@ import {
   requestContextService,
 } from "../../../utils/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 const RawBasesUpsertConfigInputSchema = z
   .object({
@@ -49,6 +50,18 @@ export async function processBasesUpsertConfig(
   parentContext: RequestContext,
   obsidianService: ObsidianRestApiService,
 ): Promise<BaseConfigUpsertResponse> {
+  assertWriteAllowed({
+    operation: "bases_upsert_config",
+    action: params.validateOnly ? "validateOnly" : "upsert_config",
+    target: params.base_id,
+    allowInReadonly: params.validateOnly,
+    destructive: !params.validateOnly,
+    guardedReason: !params.validateOnly
+      ? "base config replacement requires MCP_WRITE_MODE=full"
+      : undefined,
+    context: parentContext,
+  });
+
   if (!params.yaml && !params.json) {
     throw new McpError(
       BaseErrorCode.VALIDATION_ERROR,
