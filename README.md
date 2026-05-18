@@ -62,9 +62,9 @@ Optimike Obsidian MCP gives agents a structured way to work with an Obsidian vau
 - query and update Obsidian Bases through the bundled Bases Bridge
 - inspect and query Obsidian Tasks
 - run semantic search against a Smart Connections index
-- check runtime health, cache state, degraded mode, and write policy
+- check server health, cache state, degraded mode, and write policy
 
-In short: it does more than read notes. It exposes the vault as an operational MCP surface, with read/write tools, structured metadata operations, Tasks, Bases, semantic search, and runtime observability.
+In short: it does more than read notes. It exposes the vault as an operational MCP surface, with read/write tools, structured metadata operations, Tasks, Bases, semantic search, and server health/status observability.
 
 ## Shared backend use
 
@@ -79,7 +79,7 @@ This makes the MCP a practical boundary between agents and Obsidian: agents call
 - Complete MCP toolset (notes, frontmatter, tags, global search, etc.)
 - Integrated Tasks tools: `list_all_tasks` and `query_tasks`
 - Local semantic search `smart_semantic_search`
-- Runtime observability tools: `obsidian_runtime_status` and `obsidian_runtime_maintenance`
+- Server health/status tools: `obsidian_runtime_status` and `obsidian_runtime_maintenance`
 - Read-only degraded mode for `obsidian_read_note` and `obsidian_list_notes` when Obsidian REST is down
 - Shared SQLite store for vault content, task cache, and semantic manifest data
 - Embedder‑agnostic: query embedding aligned to the vault model
@@ -141,7 +141,7 @@ This server exposes “Base” MCP tools:
 - `bases_get_schema` : fetch schema
 - `bases_query` : paged query with filters/sort
 - `bases_upsert_rows` : bulk frontmatter update
-- `bases_get_config` / `bases_upsert_config` : read/write YAML
+- `bases_upsert_config` : validate or update base YAML/JSON config
 - `bases_create` : create/validate a `.base`
 
 ## Final Runtime Model
@@ -316,7 +316,7 @@ The main MCP now includes:
 - Bases tools: list, schema, query, create, upsert config, upsert rows
 - Tasks tools: `list_all_tasks`, `query_tasks`
 - semantic tools: `smart_semantic_search`, `smart_search`, `smart-search`
-- runtime tools: `obsidian_runtime_status`, `obsidian_runtime_maintenance`
+- server health/status tools: `obsidian_runtime_status`, `obsidian_runtime_maintenance`
 
 ## Tasks Integration
 

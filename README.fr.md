@@ -62,9 +62,9 @@ Optimike Obsidian MCP donne aux agents une façon structurée de travailler avec
 - interroger et mettre à jour les Bases Obsidian via le Bases Bridge inclus
 - inspecter et requêter les tâches Obsidian Tasks
 - lancer une recherche sémantique sur un index Smart Connections
-- vérifier la santé runtime, l'état du cache, le mode dégradé et la politique d'écriture
+- vérifier la santé du serveur, l'état du cache, le mode dégradé et la politique d'écriture
 
-En clair : il ne fait pas seulement de la lecture de notes. Il expose le coffre comme une vraie surface MCP opérationnelle, avec outils de lecture/écriture, opérations structurées sur les métadonnées, Tasks, Bases, recherche sémantique et observabilité runtime.
+En clair : il ne fait pas seulement de la lecture de notes. Il expose le coffre comme une vraie surface MCP opérationnelle, avec outils de lecture/écriture, opérations structurées sur les métadonnées, Tasks, Bases, recherche sémantique et observabilité de l'état du serveur.
 
 ## Usage backend partagé
 
@@ -79,7 +79,7 @@ Le MCP devient donc une frontière pratique entre les agents et Obsidian : les a
 - Outils MCP complets (notes, frontmatter, tags, recherche globale, etc.)
 - Outils Tasks intégrés : `list_all_tasks` et `query_tasks`
 - Recherche sémantique locale `smart_semantic_search`
-- Outils d’exploitation : `obsidian_runtime_status` et `obsidian_runtime_maintenance`
+- Outils de santé/état du serveur : `obsidian_runtime_status` et `obsidian_runtime_maintenance`
 - Mode dégradé lecture seule pour `obsidian_read_note` et `obsidian_list_notes` si Obsidian REST tombe
 - Store SQLite partagé pour le contenu du vault, le cache Tasks et le manifest sémantique
 - Embedder-agnostic : aligne automatiquement la requête sur le modèle du vault
@@ -141,7 +141,7 @@ Le serveur expose des tools MCP “Base” (via Obsidian MCP) :
 - `bases_get_schema` : récupère le schéma d’une base
 - `bases_query` : requête paginée avec filtres/tri
 - `bases_upsert_rows` : mise à jour de frontmatter en masse
-- `bases_get_config` / `bases_upsert_config` : lire/écrire le YAML
+- `bases_upsert_config` : valider ou mettre à jour la configuration YAML/JSON d’une base
 - `bases_create` : créer/valider une base `.base`
 
 ## Modèle Runtime Final
@@ -312,7 +312,7 @@ Le MCP principal inclut maintenant :
 - outils Bases : list, schema, query, create, upsert config, upsert rows
 - outils Tasks : `list_all_tasks`, `query_tasks`
 - outils sémantiques : `smart_semantic_search`, `smart_search`, `smart-search`
-- outils runtime : `obsidian_runtime_status`, `obsidian_runtime_maintenance`
+- outils santé/état du serveur : `obsidian_runtime_status`, `obsidian_runtime_maintenance`
 
 ## Plugins Obsidian requis ou utiles
 
