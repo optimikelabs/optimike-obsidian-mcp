@@ -53,6 +53,27 @@ node dist/stdio-proxy.js
 - Offrir une recherche vectorielle locale via Smart Connections (`.smart-env`)
 - Garder un backend local durable au lieu de respawner tout l’état lourd à chaque run stdio
 
+## Ce qu'il sait faire
+
+Optimike Obsidian MCP donne aux agents une façon structurée de travailler avec un coffre Obsidian :
+
+- lire, lister, modifier et rechercher des notes
+- gérer le frontmatter et les tags
+- interroger et mettre à jour les Bases Obsidian via le Bases Bridge inclus
+- inspecter et requêter les tâches Obsidian Tasks
+- lancer une recherche sémantique sur un index Smart Connections
+- vérifier la santé runtime, l'état du cache, le mode dégradé et la politique d'écriture
+
+En clair : il ne fait pas seulement de la lecture de notes. Il expose le coffre comme une vraie surface MCP opérationnelle, avec outils de lecture/écriture, opérations structurées sur les métadonnées, Tasks, Bases, recherche sémantique et observabilité runtime.
+
+## Usage backend partagé
+
+Le backend durable est utile en local, mais il prend encore plus d'intérêt dans une configuration avec backend partagé ou déporté.
+
+Au lieu de synchroniser et indexer le coffre séparément pour chaque client agentique, les clients peuvent parler à un seul backend MCP qui porte le cache, les métadonnées sémantiques, le cache Tasks et les opérations Obsidian. Le backend doit toujours avoir accès au coffre lui-même, à un chemin de coffre monté, ou à l'API REST Obsidian, mais les clients agents n'ont pas chacun besoin d'une synchronisation complète du vault ni de leur propre couche d'indexation.
+
+Le MCP devient donc une frontière pratique entre les agents et Obsidian : les agents appellent des tools, le backend gère le coffre.
+
 ## Points forts
 
 - Outils MCP complets (notes, frontmatter, tags, recherche globale, etc.)

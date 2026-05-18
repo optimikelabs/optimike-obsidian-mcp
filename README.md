@@ -53,6 +53,27 @@ node dist/stdio-proxy.js
 - Provide local vector search via Smart Connections (`.smart-env`)
 - Keep one durable local backend instead of re-spawning heavy state on every stdio run
 
+## What it can do
+
+Optimike Obsidian MCP gives agents a structured way to work with an Obsidian vault:
+
+- read, list, update, and search notes
+- manage frontmatter and tags
+- query and update Obsidian Bases through the bundled Bases Bridge
+- inspect and query Obsidian Tasks
+- run semantic search against a Smart Connections index
+- check runtime health, cache state, degraded mode, and write policy
+
+In short: it does more than read notes. It exposes the vault as an operational MCP surface, with read/write tools, structured metadata operations, Tasks, Bases, semantic search, and runtime observability.
+
+## Shared backend use
+
+The durable backend is useful in local setups, but it becomes especially valuable in shared or remote backend setups.
+
+Instead of syncing and indexing the vault separately for every agent client, clients can talk to one MCP backend that owns the cache, semantic metadata, task cache, and Obsidian operations. The backend still needs access to the vault itself, a mounted vault path, or the Obsidian REST API, but the agent clients do not each need their own full vault sync or indexing layer.
+
+This makes the MCP a practical boundary between agents and Obsidian: agents call tools, the backend handles the vault.
+
 ## Highlights
 
 - Complete MCP toolset (notes, frontmatter, tags, global search, etc.)
