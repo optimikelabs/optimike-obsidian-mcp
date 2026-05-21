@@ -32,6 +32,30 @@ function hashContent(content: string): string {
   return createHash("sha1").update(content).digest("hex");
 }
 
+function splitFrontmatter(content: string): {
+  frontmatter: Record<string, unknown>;
+  body: string;
+} {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u);
+  const body = match ? content.slice(match[0].length) : content;
+  const parsed = match ? load(match[1]) : {};
+  return {
+    frontmatter:
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? { ...(parsed as Record<string, unknown>) }
+        : {},
+    body,
+  };
+}
+
+function renderWithFrontmatter(
+  frontmatter: Record<string, unknown>,
+  body: string,
+): string {
+  const yaml = dump(frontmatter, { lineWidth: -1, noRefs: true }).trim();
+  return `---\n${yaml}\n---\n${body}`;
+}
+
 export class VaultFileService {
   private readonly vaultRoot: string;
 
@@ -269,19 +293,89 @@ export class VaultFileService {
   ): Promise<{ result: VaultFileReadResult; value: unknown }> {
     const current = await this.read(filePath, context);
     this.assertWritePreconditions(current, preconditions, context);
-    const match = current.content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u);
-    const body = match ? current.content.slice(match[0].length) : current.content;
-    const parsed = match ? load(match[1]) : {};
-    const frontmatter =
-      parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? { ...(parsed as Record<string, unknown>) }
-        : {};
+    const { frontmatter, body } = splitFrontmatter(current.content);
     frontmatter[key] = value;
-    const yaml = dump(frontmatter, { lineWidth: -1, noRefs: true }).trim();
-    const next = `---\n${yaml}\n---\n${body}`;
     return {
-      result: await this.writeAtomic(filePath, next, context),
+      result: await this.writeAtomic(
+        filePath,
+        renderWithFrontmatter(frontmatter, body),
+        context,
+      ),
       value,
     };
+  }
+
+  async setFrontmatterKeys(
+    filePath: string,
+    values: Record<string, unknown>,
+    context: RequestContext,
+    preconditions?: VaultFileWritePreconditions,
+  ): Promise<{ result: VaultFileReadResult; values: Record<string, unknown> }> {
+    const current = await this.read(filePath, context);
+    this.assertWritePreconditions(current, preconditions, context);
+    const { frontmatter, body } = splitFrontmatter(current.content);
+    for (const [key, value] of Object.entries(values)) {
+      frontmatter[key] = value;
+    }
+    return {
+      result: await this.writeAtomic(
+        filePath,
+        renderWithFrontmatter(frontmatter, body),
+        context,
+      ),
+      values,
+    };
+  }
+
+  async manageFrontmatterTags(
+    filePath: string,
+    operation: "add" | "remove" | "list",
+    tags: string[],
+    context: RequestContext,
+    preconditions?: VaultFileWritePreconditions,
+  ): Promise<{ result?: VaultFileReadResult; currentTags: string[] }> {
+    const current = await this.read(filePath, context);
+    const { frontmatter, body } = splitFrontmatter(current.content);
+    const currentTags = Array.isArray(frontmatter.tags)
+      ? frontmatter.tags.map(String)
+      : [];
+    if (operation === "list") {
+      return { currentTags };
+    }
+
+    this.assertWritePreconditions(current, preconditions, context);
+    const normalized = tags.map((tag) => tag.replace(/^#+/u, "").trim()).filter(Boolean);
+    const nextTags =
+      operation === "add"
+        ? [...new Set([...currentTags, ...normalized])]
+        : currentTags.filter((tag) => !normalized.includes(tag));
+
+    if (nextTags.length > 0) {
+      frontmatter.tags = nextTags;
+    } else {
+      delete frontmatter.tags;
+    }
+
+    return {
+      result: await this.writeAtomic(
+        filePath,
+        renderWithFrontmatter(frontmatter, body),
+        context,
+      ),
+      currentTags: nextTags,
+    };
+  }
+
+  async deleteFile(
+    filePath: string,
+    context: RequestContext,
+    preconditions: VaultFileWritePreconditions,
+  ): Promise<VaultFileReadResult> {
+    const current = await this.read(filePath, context);
+    this.assertWritePreconditions(current, preconditions, context);
+    const absolutePath = this.resolveVaultPath(filePath, context);
+    await this.assertRealPathInsideVault(absolutePath, context);
+    await rm(absolutePath, { force: false });
+    return current;
   }
 }

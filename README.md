@@ -167,7 +167,7 @@ If `OBSIDIAN_VAULT` is not set, the server falls back to the parent vault inferr
 
 Useful env overrides:
 
-- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded` to choose the runtime contract
+- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded|headless-filesystem` to choose the runtime contract
 - `OBSIDIAN_SHARED_CACHE_DB_PATH` to move the shared SQLite file
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT` to tune the bounded in-memory hot set
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` to choose cache refresh source (`auto` prefers the local vault path when available)
@@ -194,6 +194,7 @@ Warm semantic refreshes now load from SQLite first instead of re-reading the who
 - `hybrid`: starts from the local vault/cache and uses Local REST API when `OBSIDIAN_API_KEY` is configured. The API startup check is non-blocking. If no API key is configured, `OBSIDIAN_VAULT` is required.
 - `headless-readonly`: no Obsidian Desktop, no Local REST API, no `OBSIDIAN_API_KEY`. Requires `OBSIDIAN_VAULT` and `OBSIDIAN_CACHE_SOURCE=filesystem`; exposes read/list/search/tasks/semantic/runtime tools plus local readonly `bases_list`, `bases_get_schema`, and `bases_query`.
 - `headless-guarded`: no Obsidian Desktop; exposes the headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by the guarded write policy. Local readonly Bases fallback is also available.
+- `headless-filesystem`: no Obsidian Desktop; exposes `headless-guarded` plus bounded filesystem features: YAML frontmatter tags, delete with `expectedHash` or `expectedMtime`, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
 
 Headless means Optimike MCP running over a synchronized Markdown vault. It does not mean Obsidian Desktop, community plugins, command palette, active file, or Bases Bridge are available without Desktop.
 
@@ -205,6 +206,7 @@ npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
+npm run smoke:headless-filesystem
 npm run smoke:headless-status
 npm run check:vault-exclusions -- --vault=/path/to/vault
 ```

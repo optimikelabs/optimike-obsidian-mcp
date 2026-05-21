@@ -1,6 +1,6 @@
 # Matrice des capacités runtime
 
-Optimike Obsidian MCP a quatre contrats runtime. Les modes headless tournent au-dessus d’un vault Markdown synchronisé. Ils ne lancent pas Obsidian Desktop, ne chargent pas les plugins communautaires, n’exposent pas la command palette et ne donnent pas l’état live de l’UI.
+Optimike Obsidian MCP a cinq contrats runtime. Les modes headless tournent au-dessus d’un vault Markdown synchronisé. Ils ne lancent pas Obsidian Desktop, ne chargent pas les plugins communautaires, n’exposent pas la command palette et ne donnent pas l’état live de l’UI.
 
 ## Usage recommandé
 
@@ -10,28 +10,29 @@ Optimike Obsidian MCP a quatre contrats runtime. Les modes headless tournent au-
 | `hybrid` avec API disponible | Workflows Desktop avec cache durable | Requis pendant l’usage des outils live | Optionnelle au démarrage, disponible pour la surface complète | Outils REST complets tant que l’API répond | Bases Bridge REST | Desktop robuste |
 | `hybrid` sans API | Lecture/search dégradés quand Desktop est indisponible | Non requis | Indisponible | Aucun outil d’écriture | Non enregistré | Mode dégradé résilient |
 | `headless-readonly` | Serveur, CI, Codex ou validation d’un vault Sync copié | Non requis | Non requis | Aucune | Fallback local readonly | Mode headless le plus sûr |
-| `headless-guarded` | Écritures contrôlées sur copie ou vault dédié | Non requis | Non requis | Écritures filesystem bornées | Fallback local readonly | Sandbox d’écriture d’abord |
+| `headless-guarded` | Écritures note très prudentes sur copie ou vault dédié | Non requis | Non requis | Append/prepend, search_replace, frontmatter set | Fallback local readonly | Palier write prudent |
+| `headless-filesystem` | Features filesystem headless explicites | Non requis | Non requis | Écritures filesystem bornées + delete préconditionné | Fallback local + writes `.base` minimaux | Sandbox/copie obligatoire |
 
 ## Tableau des capacités
 
-| Capacité | `live` | `hybrid` API disponible | `hybrid` API indisponible | `headless-readonly` | `headless-guarded` |
-| --- | --- | --- | --- | --- | --- |
-| Démarrer sans `OBSIDIAN_API_KEY` | Non | Oui | Oui | Oui | Oui |
-| Démarrer sans Obsidian Desktop | Non | Oui | Oui | Oui | Oui |
-| Cache filesystem | Optionnel | Oui | Oui | Requis | Requis |
-| Politique d’exclusion du vault | Oui pour les scans cache | Oui pour les scans cache | Oui | Oui | Oui |
-| Lire/lister/rechercher | REST/cache | REST/cache | Cache/filesystem | Cache/filesystem | Cache/filesystem |
-| Tasks list/query | Cache/filesystem | Cache/filesystem | Cache/filesystem | Cache/filesystem | Cache/filesystem |
-| Recherche sémantique Smart Connections | Si `.smart-env` existe | Si `.smart-env` existe | Si `.smart-env` existe | Si `.smart-env` existe | Si `.smart-env` existe |
-| Status/maintenance runtime | Oui | Oui | Oui | Oui | Oui |
-| Update note | Outil REST complet | Outil REST complet | Non | Non | Append/prepend seulement |
-| Search/replace | Outil REST complet | Outil REST complet | Non | Non | Remplacements exacts par `filePath` |
-| Frontmatter | Outil REST complet | Outil REST complet | Non | Non | `set` d’une clé unique |
-| Tags/delete | Outils REST complets | Outils REST complets | Non | Non | Non |
-| Active file / UI / commandes | Via Desktop/plugin | Via Desktop/plugin | Non | Non | Non |
-| Bases list/schema/query | Bases Bridge REST | Bases Bridge REST | Non | Fallback local readonly | Fallback local readonly |
-| Bases create/upsert | Bases Bridge REST | Bases Bridge REST | Non | Non | Non |
-| Parité plugins Obsidian | Plugins Desktop | Plugins Desktop tant que l’API répond | Non | Non | Non |
+| Capacité | `live` | `hybrid` API disponible | `hybrid` API indisponible | `headless-readonly` | `headless-guarded` | `headless-filesystem` |
+| --- | --- | --- | --- | --- | --- | --- |
+| Démarrer sans `OBSIDIAN_API_KEY` | Non | Oui | Oui | Oui | Oui | Oui |
+| Démarrer sans Obsidian Desktop | Non | Oui | Oui | Oui | Oui | Oui |
+| Cache filesystem | Optionnel | Oui | Oui | Requis | Requis | Requis |
+| Politique d’exclusion du vault | Oui pour les scans cache | Oui pour les scans cache | Oui | Oui | Oui | Oui |
+| Lire/lister/rechercher | REST/cache | REST/cache | Cache/filesystem | Cache/filesystem | Cache/filesystem | Cache/filesystem |
+| Tasks list/query | Cache/filesystem | Cache/filesystem | Cache/filesystem | Cache/filesystem | Cache/filesystem | Cache/filesystem |
+| Recherche sémantique Smart Connections | Si `.smart-env` existe | Si `.smart-env` existe | Si `.smart-env` existe | Si `.smart-env` existe | Si `.smart-env` existe | Si `.smart-env` existe |
+| Status/maintenance runtime | Oui | Oui | Oui | Oui | Oui | Oui |
+| Update note | Outil REST complet | Outil REST complet | Non | Non | Append/prepend seulement | Append/prepend seulement |
+| Search/replace | Outil REST complet | Outil REST complet | Non | Non | Remplacements exacts par `filePath` | Remplacements exacts par `filePath` |
+| Frontmatter | Outil REST complet | Outil REST complet | Non | Non | `set` d’une clé unique | `set` et batch frontmatter via Bases rows |
+| Tags/delete | Outils REST complets | Outils REST complets | Non | Non | Non | Tags YAML frontmatter + delete avec précondition |
+| Active file / UI / commandes | Via Desktop/plugin | Via Desktop/plugin | Non | Non | Non | Non |
+| Bases list/schema/query | Bases Bridge REST | Bases Bridge REST | Non | Fallback local readonly | Fallback local readonly | Fallback local readonly |
+| Bases create/upsert | Bases Bridge REST | Bases Bridge REST | Non | Non | Non | `.base` YAML create/config + rows -> frontmatter `set` |
+| Parité plugins Obsidian | Plugins Desktop | Plugins Desktop tant que l’API répond | Non | Non | Non | Non |
 
 ## Registre des tools par mode
 
@@ -39,13 +40,18 @@ Optimike Obsidian MCP a quatre contrats runtime. Les modes headless tournent au-
 | --- | --- |
 | `headless-readonly` | `bases_get_schema`, `bases_list`, `bases_query`, `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search` |
 | `headless-guarded` | Tout `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note` |
+| `headless-filesystem` | Tout `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_tags` |
 | `hybrid` API indisponible | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search` |
 | `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique, plus outils REST d’écriture et Bases Bridge : `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
 ## Notes de sécurité
 
 - `headless-readonly` est le premier mode sûr pour une vraie copie Sync.
-- `headless-guarded` doit être validé sur une copie ou un vault dédié avant tout chemin d’écriture production.
+- `headless-guarded` garde une surface write prudente et ne porte pas les opérations destructives.
+- `headless-filesystem` doit être validé sur une copie ou un vault dédié avant tout chemin d’écriture production.
 - Les écritures guarded utilisent des chemins relatifs au vault, rejettent les chemins absolus et les traversals, écrivent atomiquement et acceptent des préconditions `expectedHash` ou `expectedMtime`.
+- Le delete filesystem headless requiert une précondition `expectedHash` ou `expectedMtime`.
+- Les tags headless modifient seulement `tags` dans le frontmatter YAML.
+- Les writes Bases headless écrivent des fichiers `.base` et des propriétés frontmatter ; ils n’évaluent pas les vues, formules ou propriétés calculées d’Obsidian.
 - La politique d’exclusion protège les scans Optimike cache/search/tasks/Bases. Elle n’empêche pas Obsidian Sync de télécharger les fichiers.
 - Une validation d’écriture headless doit créer un nouveau brouillon dans un dossier sandbox. Elle ne doit pas modifier des notes existantes d’un vrai vault.

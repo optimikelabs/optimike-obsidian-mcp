@@ -64,7 +64,13 @@ try {
  * @private
  */
 const RuntimeModeSchema = z
-  .enum(["live", "hybrid", "headless-readonly", "headless-guarded"])
+  .enum([
+    "live",
+    "hybrid",
+    "headless-readonly",
+    "headless-guarded",
+    "headless-filesystem",
+  ])
   .default("live");
 
 const EnvSchema = z
@@ -341,6 +347,8 @@ export const config = {
   mcpWriteMode:
     env.MCP_WRITE_MODE ||
     (env.OBSIDIAN_RUNTIME_MODE === "headless-guarded"
+      ? "guarded"
+      : env.OBSIDIAN_RUNTIME_MODE === "headless-filesystem"
       ? "guarded"
       : env.OBSIDIAN_RUNTIME_MODE === "headless-readonly"
         ? "readonly"

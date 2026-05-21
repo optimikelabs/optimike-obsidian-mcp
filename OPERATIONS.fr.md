@@ -67,7 +67,7 @@ Le design final réduit la mémoire de quatre façons :
 
 Variables de tuning utiles :
 
-- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded`
+- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded|headless-filesystem`
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest`
@@ -105,6 +105,7 @@ Cette politique protège le cache Optimike, la recherche, Tasks et le fallback l
 - `hybrid` : Local REST API optionnelle et non bloquante. Si l’API est configurée, les tools live sont exposées ; sinon `OBSIDIAN_VAULT` est requis et la surface cache/filesystem reste disponible.
 - `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases readonly.
 - `headless-guarded` : même surface read headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases readonly est aussi disponible.
+- `headless-filesystem` : même surface que `headless-guarded`, plus features filesystem explicites pour sandbox/vault dédié : tags YAML frontmatter, delete avec `expectedHash` ou `expectedMtime`, création/config YAML `.base`, et rows Bases comme opérations `set` de frontmatter Markdown.
 
 Règle opérationnelle : les modes headless signifient Optimike MCP au-dessus d’un vault Markdown synchronisé. Ils ne chargent pas les plugins communautaires Obsidian et ne fournissent pas active file, command palette ou Bases Bridge sans Desktop.
 
@@ -116,6 +117,7 @@ npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
+npm run smoke:headless-filesystem
 npm run smoke:headless-status
 npm run check:vault-exclusions -- --vault=/chemin/vers/vault
 ```

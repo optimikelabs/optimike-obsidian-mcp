@@ -67,7 +67,7 @@ The final design reduces memory usage in four ways:
 
 Useful tuning:
 
-- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded`
+- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded|headless-filesystem`
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest`
@@ -105,6 +105,7 @@ This policy protects Optimike cache, search, Tasks, and local Bases fallback beh
 - `hybrid`: Local REST API is optional and non-blocking. If API credentials are configured, live tools are exposed; otherwise `OBSIDIAN_VAULT` is required and the server keeps the cache/filesystem read surface available.
 - `headless-readonly`: requires `OBSIDIAN_VAULT`; does not require Obsidian Desktop, Local REST API, or `OBSIDIAN_API_KEY`; exposes read/list/search/tasks/semantic/runtime tools plus readonly local Bases fallback.
 - `headless-guarded`: same headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by guarded policy. Readonly local Bases fallback is also available.
+- `headless-filesystem`: same as `headless-guarded`, plus explicit filesystem features for sandbox/dedicated vaults: YAML frontmatter tags, delete with `expectedHash` or `expectedMtime`, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
 
 Operational rule: headless modes mean Optimike MCP over a synchronized Markdown vault. They do not load Obsidian community plugins or provide active file, command palette, or Bases Bridge without Desktop.
 
@@ -116,6 +117,7 @@ npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
+npm run smoke:headless-filesystem
 npm run smoke:headless-status
 npm run check:vault-exclusions -- --vault=/path/to/vault
 ```

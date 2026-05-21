@@ -9,7 +9,7 @@ Ce profil sert à valider un serveur dédié ou une copie Sync. Il garde la post
 - Garder Optimike MCP en `headless-readonly` tant que list/read/search/tasks/Bases/status ne sont pas verts.
 - Garder le cache MCP hors du vault synchronisé.
 - Utiliser les exclusions pour le bruit opérationnel, sans prétendre qu’elles bloquent les téléchargements Obsidian Sync.
-- Ne pas promettre la parité Desktop. Delete/admin, tags avancés et writes Bases sont des fonctions filesystem si elles sont implémentées plus tard.
+- Ne pas promettre la parité Desktop. Delete, tags frontmatter et writes Bases minimaux existent en `headless-filesystem` comme fonctions filesystem bornées, pas comme comportement Obsidian Desktop.
 
 ## Environnement
 
@@ -52,5 +52,14 @@ Seulement après validation du profil serveur read-only :
 3. Créer uniquement un nouveau brouillon sandbox.
 4. Exiger `expectedHash` ou `expectedMtime` pour les modifications suivantes.
 5. Confirmer que hash périmé et path traversal sont bloqués.
+
+## Features filesystem
+
+Seulement après le palier `headless-guarded`, passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
+
+1. Pour delete, exiger `expectedHash` ou `expectedMtime`.
+2. Pour tags, limiter le contrat à `tags` dans le frontmatter YAML.
+3. Pour Bases, limiter le contrat aux fichiers `.base` YAML et aux propriétés frontmatter des notes.
+4. Valider avec `npm run smoke:headless-filesystem`.
 
 Ne jamais utiliser cette phase pour modifier des notes de production existantes tant que le profil serveur n’a pas son propre rollback et monitoring.
