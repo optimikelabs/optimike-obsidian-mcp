@@ -11,6 +11,8 @@
     "OPERATIONS.fr.md",
     "docs/runtime-capability-matrix.md",
     "docs/runtime-capability-matrix.fr.md",
+    "docs/headless-server-profile.md",
+    "docs/headless-server-profile.fr.md",
     "docs/assets",
     "LICENSE",
     "CHANGELOG.md"
@@ -41,6 +43,7 @@
     "smoke:hybrid-api-available": "node scripts/smoke-headless-readonly.mjs --mode=hybrid-live",
     "smoke:headless-guarded": "node scripts/smoke-headless-readonly.mjs --mode=headless-guarded",
     "smoke:headless-status": "node scripts/smoke-headless-status.mjs",
+    "smoke:headless-server-profile": "node scripts/smoke-headless-server-profile.mjs",
     "check:vault-exclusions": "node scripts/check-vault-exclusion-policy.mjs",
     "test:runtime": "npm run build && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-status",
     "verify:code": "npm audit && npm run build",

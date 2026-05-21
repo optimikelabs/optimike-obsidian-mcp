@@ -123,6 +123,7 @@ npm run check:vault-exclusions -- --vault=/chemin/vers/vault
 `npm run test:runtime` est la gate locale durable pour cette famille runtime. Elle lance `npm run build`, les smokes de mode et le smoke HTTP health/status sur des vaults temporaires. Les smokes headless vérifient aussi qu’un contenu exclu sous `tmp/**` n’est pas indexé.
 
 Le comparatif détaillé par mode vit dans [Matrice des capacités runtime](docs/runtime-capability-matrix.fr.md).
+Le runbook serveur dédié vit dans [Profil serveur headless](docs/headless-server-profile.fr.md).
 
 ## Dépendances requises
 

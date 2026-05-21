@@ -212,6 +212,7 @@ npm run check:vault-exclusions -- --vault=/path/to/vault
 `npm run test:runtime` runs the build, all runtime mode smokes, and the HTTP health/status smoke. It uses temporary vaults and does not require a real Obsidian vault or API key. The headless smokes also assert that excluded `tmp/**` content is not indexed.
 
 For a mode-by-mode comparison, see [Runtime Capability Matrix](docs/runtime-capability-matrix.md).
+For the dedicated server path, see [Headless Server Profile](docs/headless-server-profile.md).
 
 Local Bases fallback:
 

@@ -219,6 +219,7 @@ Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchron
 `npm run test:runtime` lance le build, les smokes runtime principaux et le smoke HTTP health/status. Il utilise des vaults temporaires et ne dépend ni d’un vrai coffre Obsidian, ni d’une clé API réelle. Les smokes headless vérifient aussi qu’un contenu exclu sous `tmp/**` n’est pas indexé.
 
 Pour le comparatif mode par mode, voir [Matrice des capacités runtime](docs/runtime-capability-matrix.fr.md).
+Pour le chemin serveur dédié, voir [Profil serveur headless](docs/headless-server-profile.fr.md).
 
 Fallback local Bases :
 
