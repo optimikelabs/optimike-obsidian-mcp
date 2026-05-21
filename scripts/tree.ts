@@ -64,6 +64,8 @@ const DEFAULT_IGNORE_PATTERNS: string[] = [
   "dist",
   "build",
   "logs",
+  ".tmp",
+  "$root",
 ];
 
 /**

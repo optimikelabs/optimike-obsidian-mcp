@@ -23,9 +23,9 @@ Recommended for Codex: point your MCP config to `dist/stdio-proxy.js`, not direc
 - Node.js >= 22.7.5
 - Obsidian Desktop for `live` mode. Headless modes only require a local vault path.
 - Plugins:
-  - Local REST API (required for REST tools): https://github.com/coddingtonbear/obsidian-local-rest-api
+  - Local REST API (required for live REST tools): https://github.com/coddingtonbear/obsidian-local-rest-api
   - Smart Connections (required for semantic search): https://github.com/brianpetro/obsidian-smart-connections
-  - Bases Bridge (REST) (required for `.base` tools, bundled in this repo)
+  - Bases Bridge (REST) (required for live/plugin-backed `.base` tools, bundled in this repo)
   - Obsidian Tasks plugin (required for canonical Tasks behavior)
 - For semantic search, make sure your vault has a `.smart-env` folder
 
@@ -193,7 +193,7 @@ Warm semantic refreshes now load from SQLite first instead of re-reading the who
 
 - `live` (default): Obsidian Desktop + Local REST API. Full REST, write, and Bases Bridge surface.
 - `hybrid`: starts from the local vault/cache and uses Local REST API when `OBSIDIAN_API_KEY` is configured. The API startup check is non-blocking. If no API key is configured, `OBSIDIAN_VAULT` is required.
-- `headless-readonly`: no Obsidian Desktop, no Local REST API, no `OBSIDIAN_API_KEY`. Requires `OBSIDIAN_VAULT` and `OBSIDIAN_CACHE_SOURCE=filesystem`; exposes read/list/search/tasks/semantic/runtime tools plus local readonly `bases_list`, `bases_get_schema`, and `bases_query`.
+- `headless-readonly`: no Obsidian Desktop, no Local REST API, no `OBSIDIAN_API_KEY`. Requires `OBSIDIAN_VAULT`; set `OBSIDIAN_CACHE_SOURCE=filesystem` for an explicit server profile. Exposes read/list/search/tasks/semantic/runtime tools plus local readonly `bases_list`, `bases_get_schema`, and `bases_query`.
 - `headless-guarded`: no Obsidian Desktop; exposes the headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by the guarded write policy. Local readonly Bases fallback is also available.
 - `headless-filesystem`: no Obsidian Desktop; exposes `headless-guarded` plus bounded filesystem features: frontmatter/inline tags, local tag index/audit and dry-run rename, admin move/archive/delete operations with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, Bases rows as Markdown frontmatter `set` operations, and minimal JSON Canvas create/validate helpers.
 
@@ -307,7 +307,7 @@ ENABLE_QUERY_EMBEDDING = "true"
 # QUERY_EMBEDDER = "auto"
 
 # Obsidian REST (if Local REST API plugin is active)
-OBSIDIAN_BASE_URL = "http://localhost:27123"
+OBSIDIAN_BASE_URL = "http://127.0.0.1:27123"
 OBSIDIAN_API_KEY  = "<token>"
 
 # Startup behavior (optional, recommended for faster startup)
@@ -493,12 +493,12 @@ Keep auto mode and let each user override via env vars.
 - Mode-by-mode capability matrix: [docs/runtime-capability-matrix.md](docs/runtime-capability-matrix.md)
 - Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
 - Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
+- Current tool surface: [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
 - French README: [README.fr.md](README.fr.md)
 
 ## Credits
 
 - Created by **Optimike** (Mickaël Ahouansou)
-- Technical base inspired by `cyanheads/obsidian-mcp-server`
 
 ## License
 

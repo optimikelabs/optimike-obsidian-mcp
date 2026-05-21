@@ -4,16 +4,30 @@
       "command": "npx",
       "args": ["optimike-obsidian-mcp"],
       "env": {
+        "OBSIDIAN_RUNTIME_MODE": "live",
         "OBSIDIAN_API_KEY": "YOUR_OBSIDIAN_API_KEY_HERE",
         "OBSIDIAN_BASE_URL": "http://127.0.0.1:27123",
         "MCP_TRANSPORT_TYPE": "stdio",
         "MCP_LOG_LEVEL": "debug"
       }
     },
+    "optimike-obsidian-mcp-headless-readonly-stdio": {
+      "command": "npx",
+      "args": ["optimike-obsidian-mcp"],
+      "env": {
+        "OBSIDIAN_RUNTIME_MODE": "headless-readonly",
+        "OBSIDIAN_VAULT": "/path/to/vault",
+        "OBSIDIAN_CACHE_SOURCE": "filesystem",
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "MCP_WRITE_MODE": "readonly",
+        "MCP_LOG_LEVEL": "info"
+      }
+    },
     "optimike-obsidian-mcp-http": {
       "command": "npx",
       "args": ["optimike-obsidian-mcp"],
       "env": {
+        "OBSIDIAN_RUNTIME_MODE": "live",
         "OBSIDIAN_API_KEY": "YOUR_OBSIDIAN_API_KEY_HERE",
         "OBSIDIAN_BASE_URL": "http://127.0.0.1:27123",
         "MCP_TRANSPORT_TYPE": "http",
