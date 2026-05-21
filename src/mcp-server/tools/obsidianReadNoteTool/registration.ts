@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -37,7 +37,7 @@ import {
  */
 export const registerObsidianReadNoteTool = async (
   server: McpServer,
-  obsidianService: ObsidianRestApiService, // Dependency injection for the Obsidian service
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
 ): Promise<void> => {
   const toolName = "obsidian_read_note";

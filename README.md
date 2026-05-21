@@ -21,7 +21,7 @@ Recommended for Codex: point your MCP config to `dist/stdio-proxy.js`, not direc
 ## Prerequisites
 
 - Node.js >= 22.7.5
-- Obsidian Desktop
+- Obsidian Desktop for `live` mode. Headless modes only require a local vault path.
 - Plugins:
   - Local REST API (required for REST tools): https://github.com/coddingtonbear/obsidian-local-rest-api
   - Smart Connections (required for semantic search): https://github.com/brianpetro/obsidian-smart-connections
@@ -167,6 +167,7 @@ If `OBSIDIAN_VAULT` is not set, the server falls back to the parent vault inferr
 
 Useful env overrides:
 
+- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded` to choose the runtime contract
 - `OBSIDIAN_SHARED_CACHE_DB_PATH` to move the shared SQLite file
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT` to tune the bounded in-memory hot set
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` to choose cache refresh source (`auto` prefers the local vault path when available)
@@ -176,6 +177,24 @@ Useful env overrides:
 
 This runtime exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
 Warm semantic refreshes now load from SQLite first instead of re-reading the whole `.smart-env` path every time.
+
+## Runtime modes
+
+- `live` (default): Obsidian Desktop + Local REST API. Full REST, write, and Bases Bridge surface.
+- `hybrid`: starts from the local vault/cache and uses Local REST API when `OBSIDIAN_API_KEY` is configured. The API startup check is non-blocking. If no API key is configured, `OBSIDIAN_VAULT` is required.
+- `headless-readonly`: no Obsidian Desktop, no Local REST API, no `OBSIDIAN_API_KEY`. Requires `OBSIDIAN_VAULT` and `OBSIDIAN_CACHE_SOURCE=filesystem`; exposes read/list/search/tasks/semantic/runtime tools only.
+- `headless-guarded`: no Obsidian Desktop; exposes the headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by the guarded write policy.
+
+Headless means Optimike MCP running over a synchronized Markdown vault. It does not mean Obsidian Desktop, community plugins, command palette, active file, or Bases Bridge are available without Desktop.
+
+Smoke tests:
+
+```bash
+npm run smoke:headless-readonly
+npm run smoke:hybrid-unavailable
+npm run smoke:hybrid-api-available
+npm run smoke:headless-guarded
+```
 
 Useful scripts:
 

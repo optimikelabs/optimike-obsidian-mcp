@@ -67,6 +67,7 @@ The final design reduces memory usage in four ways:
 
 Useful tuning:
 
+- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded`
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest`
@@ -77,6 +78,24 @@ Useful tuning:
 - `OBSIDIAN_STARTUP_BLOCKING=false` for faster non-blocking startup in WSL-heavy setups
 
 Default write behavior is `MCP_WRITE_MODE=full`. Hosts that want a stricter public/runtime posture can explicitly set `MCP_WRITE_MODE=guarded` or `MCP_WRITE_MODE=readonly`; agents do not need to choose a mode per write.
+
+## Runtime Modes
+
+- `live`: default full-power mode. Requires Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
+- `hybrid`: Local REST API is optional and non-blocking. If API credentials are configured, live tools are exposed; otherwise `OBSIDIAN_VAULT` is required and the server keeps the cache/filesystem read surface available.
+- `headless-readonly`: requires `OBSIDIAN_VAULT`; does not require Obsidian Desktop, Local REST API, or `OBSIDIAN_API_KEY`; exposes read/list/search/tasks/semantic/runtime tools.
+- `headless-guarded`: same headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by guarded policy.
+
+Operational rule: headless modes mean Optimike MCP over a synchronized Markdown vault. They do not load Obsidian community plugins or provide active file, command palette, or Bases Bridge without Desktop.
+
+Runtime smokes:
+
+```bash
+npm run smoke:headless-readonly
+npm run smoke:hybrid-unavailable
+npm run smoke:hybrid-api-available
+npm run smoke:headless-guarded
+```
 
 ## Required Dependencies
 

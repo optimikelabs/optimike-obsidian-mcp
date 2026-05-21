@@ -547,7 +547,7 @@ async function handleSearchRequest(params: unknown): Promise<OutType> {
 
 export const registerSemanticSearchTool = async (
   server: McpServer,
-  _obsidianService: ObsidianRestApiService,
+  _obsidianService: ObsidianRestApiService | undefined,
   _vaultCacheService: VaultCacheService | undefined,
 ): Promise<void> => {
   const register = (name: string, description: string) => {

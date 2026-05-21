@@ -176,7 +176,19 @@ const start = async () => {
   try {
     // --- Instantiate Shared Services ---
     logger.debug("Instantiating shared services...", startupContext);
-    obsidianService = new ObsidianRestApiService(); // Instantiate Obsidian Service
+    const isHeadlessReadonly =
+      config.obsidianRuntimeMode === "headless-readonly";
+    const shouldInitializeObsidianRest =
+      config.obsidianRuntimeMode === "live" ||
+      (config.obsidianRuntimeMode === "hybrid" && !!config.obsidianApiKey);
+    if (!shouldInitializeObsidianRest) {
+      logger.info(
+        "Skipping Obsidian REST API service initialization for runtime mode without API credentials.",
+        { ...startupContext, runtimeMode: config.obsidianRuntimeMode },
+      );
+    } else {
+      obsidianService = new ObsidianRestApiService(); // Instantiate Obsidian Service
+    }
 
     // --- Perform Initial Obsidian API Status Check ---
     const runInitialObsidianStatusCheck = async () => {
@@ -224,7 +236,18 @@ const start = async () => {
       return status;
     };
 
-    if (config.obsidianStartupBlocking) {
+    const shouldRunObsidianStatusCheck = !!obsidianService;
+    const startupBlocking =
+      config.obsidianRuntimeMode === "hybrid"
+        ? false
+        : config.obsidianStartupBlocking;
+
+    if (!shouldRunObsidianStatusCheck) {
+      logger.info(
+        "Skipping initial Obsidian API status check because Obsidian REST is unavailable for this runtime mode.",
+        { ...startupContext, runtimeMode: config.obsidianRuntimeMode },
+      );
+    } else if (startupBlocking) {
       try {
         await runInitialObsidianStatusCheck();
       } catch (statusError) {
@@ -262,7 +285,7 @@ const start = async () => {
     // --- End Status Check ---
 
     if (config.obsidianEnableCache) {
-      vaultCacheService = new VaultCacheService(obsidianService); // Instantiate Cache Service, passing Obsidian Service
+      vaultCacheService = new VaultCacheService(obsidianService); // REST service is optional in headless-readonly.
       logger.info(
         "Vault cache is enabled and service is instantiated.",
         startupContext,

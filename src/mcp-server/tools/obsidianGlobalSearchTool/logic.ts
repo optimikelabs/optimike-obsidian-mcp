@@ -208,7 +208,7 @@ const API_SEARCH_TIMEOUT_MS = config.obsidianApiSearchTimeoutMs;
 export const processObsidianGlobalSearch = async (
   params: ObsidianGlobalSearchInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
 ): Promise<ObsidianGlobalSearchResponse> => {
   const operation = "processObsidianGlobalSearch";
@@ -260,6 +260,14 @@ export const processObsidianGlobalSearch = async (
   // 2. Attempt API Search with Retries and Timeout
   let apiFailedOrTimedOut = false;
   try {
+    if (!obsidianService) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Obsidian REST API is unavailable; using shared cache fallback.",
+        opContext,
+      );
+    }
+
     strategyMessage = `Attempting live API search with retries (timeout: ${API_SEARCH_TIMEOUT_MS / 1000}s per attempt). `;
     const apiSearchContext = {
       ...opContext,

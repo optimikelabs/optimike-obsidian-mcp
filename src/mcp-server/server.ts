@@ -16,6 +16,7 @@
 
 import { ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 // Import validated configuration and environment details.
 import { config, environment } from "../config/index.js";
 // Import core utilities: ErrorHandler, logger, requestContextService.
@@ -24,6 +25,8 @@ import { ErrorHandler, logger, requestContextService } from "../utils/index.js";
 import { ObsidianRestApiService } from "../services/obsidianRestAPI/index.js";
 // Import the Vault Cache service
 import { VaultCacheService } from "../services/obsidianRestAPI/vaultCache/index.js";
+import { VaultFileService } from "../services/vaultFileService.js";
+import { assertWriteAllowed } from "../services/writePolicy.js";
 // Import registration functions for specific resources and tools.
 import { registerObsidianDeleteNoteTool } from "./tools/obsidianDeleteNoteTool/index.js";
 import { registerObsidianGlobalSearchTool } from "./tools/obsidianGlobalSearchTool/index.js";
@@ -47,6 +50,186 @@ import { registerRuntimeTools } from "./tools/runtimeTools/index.js";
 import { startHttpTransport } from "./transports/httpTransport.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
 
+async function rebuildCacheAfterGuardedWrite(
+  vaultCacheService: VaultCacheService | undefined,
+): Promise<void> {
+  if (vaultCacheService) {
+    await vaultCacheService.rebuildFromSource();
+  }
+}
+
+function registerHeadlessGuardedWriteTools(
+  server: McpServer,
+  vaultCacheService: VaultCacheService | undefined,
+): void {
+  const vaultFileService = new VaultFileService();
+
+  server.tool(
+    "obsidian_update_note",
+    "Headless-guarded filesystem note update. Supports filePath targets with append or prepend. Uses atomic writes and vault path safety.",
+    {
+      targetType: z.literal("filePath"),
+      targetIdentifier: z.string().min(1),
+      modificationType: z.literal("wholeFile"),
+      wholeFileMode: z.enum(["append", "prepend"]),
+      content: z.string(),
+      returnContent: z.boolean().optional().default(false),
+    },
+    async (params) => {
+      const context = requestContextService.createRequestContext({
+        operation: "headlessGuardedUpdateNote",
+        toolName: "obsidian_update_note",
+        target: params.targetIdentifier,
+      });
+      assertWriteAllowed({
+        operation: "obsidian_update_note",
+        action: params.wholeFileMode,
+        target: params.targetIdentifier,
+        context,
+      });
+      const result = await vaultFileService.updateWholeFile(
+        params.targetIdentifier,
+        params.wholeFileMode,
+        params.content,
+        context,
+      );
+      await rebuildCacheAfterGuardedWrite(vaultCacheService);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                mode: "headless-guarded",
+                path: result.path,
+                stats: {
+                  ctime: result.ctime,
+                  mtime: result.mtime,
+                  size: result.size,
+                  hash: result.hash,
+                },
+                content: params.returnContent ? result.content : undefined,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
+  );
+
+  server.tool(
+    "obsidian_search_replace",
+    "Headless-guarded filesystem exact search/replace for filePath targets.",
+    {
+      targetType: z.literal("filePath"),
+      targetIdentifier: z.string().min(1),
+      replacements: z
+        .array(z.object({ search: z.string().min(1), replace: z.string() }))
+        .min(1),
+      returnContent: z.boolean().optional().default(false),
+    },
+    async (params) => {
+      const context = requestContextService.createRequestContext({
+        operation: "headlessGuardedSearchReplace",
+        toolName: "obsidian_search_replace",
+        target: params.targetIdentifier,
+      });
+      assertWriteAllowed({
+        operation: "obsidian_search_replace",
+        action: "replace",
+        target: params.targetIdentifier,
+        context,
+      });
+      const { result, replacementsApplied } = await vaultFileService.searchReplace(
+        params.targetIdentifier,
+        params.replacements,
+        context,
+      );
+      await rebuildCacheAfterGuardedWrite(vaultCacheService);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                mode: "headless-guarded",
+                path: result.path,
+                replacementsApplied,
+                stats: {
+                  ctime: result.ctime,
+                  mtime: result.mtime,
+                  size: result.size,
+                  hash: result.hash,
+                },
+                content: params.returnContent ? result.content : undefined,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
+  );
+
+  server.tool(
+    "obsidian_manage_frontmatter",
+    "Headless-guarded filesystem frontmatter setter for a single key.",
+    {
+      filePath: z.string().min(1),
+      operation: z.literal("set"),
+      key: z.string().min(1),
+      value: z.any(),
+    },
+    async (params) => {
+      const context = requestContextService.createRequestContext({
+        operation: "headlessGuardedManageFrontmatter",
+        toolName: "obsidian_manage_frontmatter",
+        target: params.filePath,
+      });
+      assertWriteAllowed({
+        operation: "obsidian_manage_frontmatter",
+        action: "set",
+        target: params.filePath,
+        frontmatterKeys: [params.key],
+        context,
+      });
+      const { result, value } = await vaultFileService.setFrontmatterKey(
+        params.filePath,
+        params.key,
+        params.value,
+        context,
+      );
+      await rebuildCacheAfterGuardedWrite(vaultCacheService);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                mode: "headless-guarded",
+                path: result.path,
+                key: params.key,
+                value,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
+  );
+}
+
 /**
  * Creates and configures a new instance of the `McpServer`.
  *
@@ -69,7 +252,7 @@ import { connectStdioTransport } from "./transports/stdioTransport.js";
  * @private
  */
 async function createMcpServerInstance(
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
 ): Promise<McpServer> {
   const context = requestContextService.createRequestContext({
@@ -111,14 +294,15 @@ async function createMcpServerInstance(
       "Registering resources and tools using shared services...",
       context,
     );
-    // Register all tools, passing the vaultCacheService which may be undefined
+    const isHeadlessReadonly =
+      config.obsidianRuntimeMode === "headless-readonly";
+    const isHeadlessGuarded =
+      config.obsidianRuntimeMode === "headless-guarded";
+
+    // Register read/cache-friendly tools first. In headless-readonly, the REST
+    // service is intentionally absent and these tools must use the shared cache.
     await registerObsidianListNotesTool(server, obsidianService, vaultCacheService);
     await registerObsidianReadNoteTool(server, obsidianService, vaultCacheService);
-    await registerObsidianDeleteNoteTool(
-      server,
-      obsidianService,
-      vaultCacheService,
-    );
     if (vaultCacheService) {
       await registerObsidianGlobalSearchTool(
         server,
@@ -131,40 +315,55 @@ async function createMcpServerInstance(
         context,
       );
     }
-    await registerObsidianSearchReplaceTool(
-      server,
-      obsidianService,
-      vaultCacheService,
-    );
-    await registerObsidianUpdateNoteTool(
-      server,
-      obsidianService,
-      vaultCacheService,
-    );
-    await registerObsidianManageFrontmatterTool(
-      server,
-      obsidianService,
-      vaultCacheService,
-    );
-    await registerObsidianManageTagsTool(
-      server,
-      obsidianService,
-      vaultCacheService,
-    );
     await registerSemanticSearchTool(
       server,
       obsidianService,
       vaultCacheService,
     );
-    await registerBasesListTool(server, obsidianService);
-    await registerBasesGetSchemaTool(server, obsidianService);
-    await registerBasesQueryTool(server, obsidianService);
-    await registerBasesUpsertRowsTool(server, obsidianService);
-    await registerBasesCreateTool(server, obsidianService);
-    await registerBasesUpsertConfigTool(server, obsidianService);
     await registerListAllTasksTool(server, vaultCacheService);
     await registerQueryTasksTool(server, vaultCacheService);
     await registerRuntimeTools(server, vaultCacheService);
+
+    if (isHeadlessGuarded) {
+      registerHeadlessGuardedWriteTools(server, vaultCacheService);
+    } else if (!isHeadlessReadonly && obsidianService) {
+      await registerObsidianDeleteNoteTool(
+        server,
+        obsidianService,
+        vaultCacheService,
+      );
+      await registerObsidianSearchReplaceTool(
+        server,
+        obsidianService,
+        vaultCacheService,
+      );
+      await registerObsidianUpdateNoteTool(
+        server,
+        obsidianService,
+        vaultCacheService,
+      );
+      await registerObsidianManageFrontmatterTool(
+        server,
+        obsidianService,
+        vaultCacheService,
+      );
+      await registerObsidianManageTagsTool(
+        server,
+        obsidianService,
+        vaultCacheService,
+      );
+      await registerBasesListTool(server, obsidianService);
+      await registerBasesGetSchemaTool(server, obsidianService);
+      await registerBasesQueryTool(server, obsidianService);
+      await registerBasesUpsertRowsTool(server, obsidianService);
+      await registerBasesCreateTool(server, obsidianService);
+      await registerBasesUpsertConfigTool(server, obsidianService);
+    } else {
+      logger.info(
+        "Skipping live/write/Bases tools because runtime mode is headless-readonly or Obsidian REST is unavailable.",
+        { ...context, runtimeMode: config.obsidianRuntimeMode },
+      );
+    }
 
     logger.info("Resources and tools registered successfully", context);
 
@@ -219,7 +418,7 @@ async function createMcpServerInstance(
  * @private
  */
 async function startTransport(
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
 ): Promise<McpServer | ServerType | void> {
   const transportType = config.mcpTransportType;
@@ -284,7 +483,7 @@ async function startTransport(
  *   Rejects on critical failure, leading to process exit.
  */
 export async function initializeAndStartServer(
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
 ): Promise<void | McpServer | ServerType> {
   const context = requestContextService.createRequestContext({

@@ -109,13 +109,13 @@ export class VaultCacheService {
   private readonly metadataCache = new Map<string, CacheIndexEntry>();
   private readonly contentHotCache = new Map<string, CacheEntry>();
   private readonly hotCacheLimit = config.obsidianContentHotCacheLimit;
-  private readonly obsidianService: ObsidianRestApiService;
+  private readonly obsidianService: ObsidianRestApiService | undefined;
   private readonly db: DatabaseSync;
   private isCacheReady = false;
   private isBuilding = false;
   private refreshIntervalId: NodeJS.Timeout | null = null;
 
-  constructor(obsidianService: ObsidianRestApiService) {
+  constructor(obsidianService?: ObsidianRestApiService) {
     this.obsidianService = obsidianService;
     this.db = this.initializeDatabase();
     this.ensureMetadata();
@@ -279,9 +279,16 @@ export class VaultCacheService {
     const opContext = { ...context, operation: "updateCacheForFile", filePath };
     logger.debug(`Proactively updating cache for file: ${filePath}`, opContext);
     try {
+      if (!this.obsidianService) {
+        throw new McpError(
+          BaseErrorCode.SERVICE_UNAVAILABLE,
+          "Obsidian REST API service is unavailable for proactive cache update.",
+          opContext,
+        );
+      }
       const noteJson = await retryWithDelay(
         () =>
-          this.obsidianService.getFileContent(
+          this.obsidianService!.getFileContent(
             filePath,
             "json",
             opContext,
@@ -419,6 +426,14 @@ export class VaultCacheService {
               content,
             });
             return cachedEntry ? "updated" : "added";
+          }
+
+          if (!this.obsidianService) {
+            throw new McpError(
+              BaseErrorCode.SERVICE_UNAVAILABLE,
+              "Obsidian REST API service is unavailable for REST cache refresh.",
+              context,
+            );
           }
 
           const fileMetadata = await this.obsidianService.getFileMetadata(
@@ -650,7 +665,7 @@ export class VaultCacheService {
 
     let markdownFiles: string[] = [];
     try {
-      const entries = await this.obsidianService.listFiles(
+      const entries = await this.obsidianService!.listFiles(
         normalizedPath,
         opContext,
       );
@@ -698,7 +713,19 @@ export class VaultCacheService {
       return getVaultRoot() && existsSync(getVaultRoot()!) ? "filesystem" : "rest";
     }
     const vaultRoot = getVaultRoot();
-    return vaultRoot && existsSync(vaultRoot) ? "filesystem" : "rest";
+    if (vaultRoot && existsSync(vaultRoot)) {
+      return "filesystem";
+    }
+    if (!this.obsidianService) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "No vault filesystem path is available and Obsidian REST API service is disabled.",
+        requestContextService.createRequestContext({
+          operation: "pickRefreshSource",
+        }),
+      );
+    }
+    return "rest";
   }
 
   private async listAllMarkdownFilesFromFilesystem(

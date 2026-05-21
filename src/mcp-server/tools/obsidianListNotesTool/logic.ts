@@ -310,7 +310,7 @@ async function buildFileTree(
 export const processObsidianListNotes = async (
   params: ObsidianListNotesInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService?: VaultCacheService,
 ): Promise<ObsidianListNotesResponse> => {
   const { dirPath } = params;
@@ -334,23 +334,38 @@ export const processObsidianListNotes = async (
 
     let fileTree: FileTreeNode[];
     try {
-      fileTree = await retryWithDelay(
-        () =>
-          buildFileTree(
-            effectiveDirPath,
-            0, // Start at depth 0
-            params,
+      if (!obsidianService) {
+        if (!vaultCacheService?.isReady()) {
+          throw new McpError(
+            BaseErrorCode.SERVICE_UNAVAILABLE,
+            "Obsidian REST API is unavailable and shared cache is not ready.",
             buildTreeContext,
-            obsidianService,
-          ),
-        {
-          operationName: "buildFileTreeWithRetry",
-          context: buildTreeContext,
-          maxRetries: 3,
-          delayMs: 300,
-          shouldRetry: shouldRetryNotFound,
-        },
-      );
+          );
+        }
+        fileTree = buildFileTreeFromCache(
+          effectiveDirPath,
+          params,
+          vaultCacheService,
+        );
+      } else {
+        fileTree = await retryWithDelay(
+          () =>
+            buildFileTree(
+              effectiveDirPath,
+              0, // Start at depth 0
+              params,
+              buildTreeContext,
+              obsidianService,
+            ),
+          {
+            operationName: "buildFileTreeWithRetry",
+            context: buildTreeContext,
+            maxRetries: 3,
+            delayMs: 300,
+            shouldRetry: shouldRetryNotFound,
+          },
+        );
+      }
     } catch (error) {
       if (
         error instanceof McpError &&

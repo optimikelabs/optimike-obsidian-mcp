@@ -122,6 +122,7 @@ function hashRuntimeConfig(): {
   fields: Record<string, unknown>;
 } {
   const fields = {
+    obsidianRuntimeMode: config.obsidianRuntimeMode,
     mcpTransportType: config.mcpTransportType,
     mcpHttpHost: config.mcpHttpHost,
     mcpHttpPort: config.mcpHttpPort,
@@ -206,6 +207,7 @@ export async function collectRuntimeStatus(
     ok: integrity ? integrity.ok : true,
     pid: process.pid,
     transport: config.mcpTransportType,
+    runtimeMode: config.obsidianRuntimeMode,
     runtime: collectRuntimeFingerprint(),
     sharedCache: {
       ...(vaultCacheService?.getStats() ?? {

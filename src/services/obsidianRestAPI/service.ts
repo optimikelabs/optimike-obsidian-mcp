@@ -50,8 +50,8 @@ export class ObsidianRestApiService {
   private apiKey: string;
 
   constructor() {
-    this.apiKey = config.obsidianApiKey; // Get from central config
-    if (!this.apiKey) {
+    const apiKey = config.obsidianApiKey; // Get from central config
+    if (!apiKey) {
       // Config validation should prevent this, but double-check
       throw new McpError(
         BaseErrorCode.CONFIGURATION_ERROR,
@@ -59,6 +59,7 @@ export class ObsidianRestApiService {
         {},
       );
     }
+    this.apiKey = apiKey;
 
     const httpsAgent = new https.Agent({
       rejectUnauthorized: config.obsidianVerifySsl,

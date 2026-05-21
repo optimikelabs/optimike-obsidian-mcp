@@ -1,0 +1,410 @@
+#!/usr/bin/env node
+
+import { mkdtemp, rm, writeFile, mkdir, readFile, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "12000");
+const modeArg =
+  process.argv.find((arg) => arg.startsWith("--mode="))?.split("=")[1] ??
+  "headless-readonly";
+if (
+  !["headless-readonly", "hybrid", "hybrid-live", "headless-guarded"].includes(
+    modeArg,
+  )
+) {
+  throw new Error(`Unsupported smoke mode: ${modeArg}`);
+}
+const runtimeMode = modeArg === "hybrid-live" ? "hybrid" : modeArg;
+
+async function withTimeout(promise, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function assertTextIncludes(result, needle, label) {
+  const text = result.content?.map((item) => item.text ?? "").join("\n") ?? "";
+  if (!text.includes(needle)) {
+    throw new Error(`${label} did not include ${JSON.stringify(needle)}: ${text}`);
+  }
+  return text;
+}
+
+async function createTempVault() {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "optimike-headless-vault-"));
+  await mkdir(path.join(vaultRoot, "Projects"), { recursive: true });
+  await mkdir(path.join(vaultRoot, ".obsidian"), { recursive: true });
+  await writeFile(
+    path.join(vaultRoot, "Projects", "Headless.md"),
+    [
+      "---",
+      "type: smoke",
+      "tags:",
+      "  - headless",
+      "---",
+      "",
+      "Headless runtime smoke note.",
+      "- [ ] Verify task extraction #headless",
+      "- [x] Keep live mode as rollback",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(vaultRoot, "Root.md"),
+    "Root smoke note with searchable keyword alphasmoke.\n",
+    "utf8",
+  );
+  return vaultRoot;
+}
+
+async function main() {
+  const vaultRoot = await createTempVault();
+  const cachePath = path.join(vaultRoot, ".obsidian", "optimike-mcp", "shared-cache.sqlite");
+  let fakeRestServer;
+  let fakeRestUrl;
+  if (modeArg === "hybrid-live") {
+    const { createServer } = await import("node:http");
+    fakeRestServer = createServer(async (request, response) => {
+      if (request.url === "/") {
+        response.setHeader("content-type", "application/json");
+        response.end(
+          JSON.stringify({
+            service: "Obsidian Local REST API",
+            authenticated: true,
+            versions: { obsidian: "smoke", self: "smoke" },
+          }),
+        );
+        return;
+      }
+      if (request.method === "GET" && request.url === "/vault/") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ files: ["Projects/", "Root.md"] }));
+        return;
+      }
+      if (request.method === "GET" && request.url === "/vault/Projects/") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ files: ["Headless.md"] }));
+        return;
+      }
+      if (request.url?.startsWith("/vault/")) {
+        const relativePath = decodeURIComponent(request.url.replace(/^\/vault\//u, ""));
+        const absolutePath = path.join(vaultRoot, relativePath);
+        try {
+          const fileStat = await stat(absolutePath);
+          response.setHeader("x-obsidian-mtime", String(fileStat.mtimeMs / 1000));
+          response.setHeader("x-obsidian-ctime", String(fileStat.ctimeMs / 1000));
+          if (request.method === "HEAD") {
+            response.setHeader("content-length", String(fileStat.size));
+            response.statusCode = 200;
+            response.end();
+            return;
+          }
+          if (request.method === "GET") {
+            const content = await readFile(absolutePath, "utf8");
+            const accept = request.headers.accept ?? "";
+            if (String(accept).includes("application/vnd.olrapi.note+json")) {
+              response.setHeader("content-type", "application/json");
+              response.end(
+                JSON.stringify({
+                  content,
+                  frontmatter: {},
+                  path: relativePath,
+                  stat: {
+                    ctime: Math.round(fileStat.ctimeMs),
+                    mtime: Math.round(fileStat.mtimeMs),
+                    size: fileStat.size,
+                  },
+                  tags: [],
+                }),
+              );
+            } else {
+              response.setHeader("content-type", "text/markdown");
+              response.end(content);
+            }
+            return;
+          }
+        } catch {
+          response.statusCode = 404;
+          response.end("not found");
+          return;
+        }
+      }
+      if (request.method === "POST" && request.url?.startsWith("/search/simple/")) {
+        const url = new URL(request.url, fakeRestUrl);
+        const query = url.searchParams.get("query") ?? "";
+        const files = ["Root.md", "Projects/Headless.md"];
+        const matches = [];
+        for (const file of files) {
+          const content = await readFile(path.join(vaultRoot, file), "utf8");
+          if (content.includes(query)) {
+            matches.push({
+              filename: file,
+              matches: [{ context: content.slice(0, 200) }],
+            });
+          }
+        }
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify(matches));
+        return;
+      }
+      response.statusCode = 404;
+      response.end("not found");
+    });
+    await new Promise((resolve) => fakeRestServer.listen(0, "127.0.0.1", resolve));
+    const address = fakeRestServer.address();
+    fakeRestUrl = `http://127.0.0.1:${address.port}`;
+  }
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["dist/index.js"],
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      OBSIDIAN_RUNTIME_MODE: runtimeMode,
+      OBSIDIAN_VAULT: vaultRoot,
+      OBSIDIAN_CACHE_SOURCE: "filesystem",
+      OBSIDIAN_SHARED_CACHE_DB_PATH: cachePath,
+      OBSIDIAN_ENABLE_CACHE: "true",
+      MCP_WRITE_MODE: modeArg === "headless-guarded" ? "guarded" : "readonly",
+      OBSIDIAN_API_KEY: modeArg === "hybrid-live" ? "smoke-key" : "",
+      OBSIDIAN_BASE_URL: fakeRestUrl ?? "http://127.0.0.1:9",
+      SEMANTIC_SEARCH_PREWARM: "false",
+      MCP_TRANSPORT_TYPE: "stdio",
+      MCP_LOG_LEVEL: process.env.MCP_LOG_LEVEL ?? "error",
+    },
+  });
+  const client = new Client({
+    name: "optimike-headless-readonly-smoke",
+    version: "0",
+  });
+
+  try {
+    await withTimeout(client.connect(transport), "connect");
+
+    // Give the background filesystem cache build a short window. The tool calls
+    // below also fail loudly if cache readiness does not arrive.
+    await new Promise((resolve) => setTimeout(resolve, 750));
+
+    const tools = await withTimeout(client.listTools(), "listTools");
+    const toolNames = tools.tools.map((tool) => tool.name).sort();
+    const expected = [
+      "obsidian_list_notes",
+      "obsidian_read_note",
+      "obsidian_global_search",
+      "list_all_tasks",
+      "query_tasks",
+      "obsidian_runtime_status",
+      "obsidian_runtime_maintenance",
+    ];
+    for (const name of expected) {
+      if (!toolNames.includes(name)) {
+        throw new Error(`Missing expected headless-readonly tool: ${name}`);
+      }
+    }
+    const liveOnly = [
+      "obsidian_update_note",
+      "obsidian_delete_note",
+      "obsidian_search_replace",
+      "obsidian_manage_frontmatter",
+      "bases_list",
+      "bases_query",
+    ];
+    for (const name of liveOnly) {
+      if (
+        modeArg === "hybrid-live" ||
+        (modeArg === "headless-guarded" &&
+          [
+            "obsidian_update_note",
+            "obsidian_search_replace",
+            "obsidian_manage_frontmatter",
+          ].includes(name))
+      ) {
+        if (!toolNames.includes(name)) {
+          throw new Error(`Expected write tool in ${modeArg}: ${name}`);
+        }
+      } else if (toolNames.includes(name)) {
+        throw new Error(`Live/write tool should not be registered in ${modeArg}: ${name}`);
+      }
+    }
+
+    const status = await withTimeout(
+      client.callTool({ name: "obsidian_runtime_status", arguments: {} }),
+      "runtime status",
+    );
+    assertTextIncludes(status, runtimeMode, "runtime status");
+
+    const list = await withTimeout(
+      client.callTool({
+        name: "obsidian_list_notes",
+        arguments: { dirPath: "/", responseMode: "compact" },
+      }),
+      "list notes",
+    );
+    assertTextIncludes(list, "Projects/Headless.md", "list notes");
+
+    const read = await withTimeout(
+      client.callTool({
+        name: "obsidian_read_note",
+        arguments: { filePath: "Projects/Headless.md", format: "markdown" },
+      }),
+      "read note",
+    );
+    assertTextIncludes(read, "Headless runtime smoke note", "read note");
+
+    const search = await withTimeout(
+      client.callTool({
+        name: "obsidian_global_search",
+        arguments: {
+          query: "alphasmoke",
+          page: 1,
+          pageSize: 10,
+          maxMatchesPerFile: 3,
+          responseMode: "compact",
+        },
+      }),
+      "global search",
+    );
+    assertTextIncludes(search, "Root.md", "global search");
+
+    const tasks = await withTimeout(
+      client.callTool({
+        name: "list_all_tasks",
+        arguments: { path: "/", responseFormat: "json", responseMode: "compact" },
+      }),
+      "list tasks",
+    );
+    assertTextIncludes(tasks, "Verify task extraction", "list tasks");
+
+    const queryTasks = await withTimeout(
+      client.callTool({
+        name: "query_tasks",
+        arguments: {
+          path: "/",
+          query: "not done",
+          responseFormat: "json",
+          responseMode: "compact",
+        },
+      }),
+      "query tasks",
+    );
+    assertTextIncludes(queryTasks, "Verify task extraction", "query tasks");
+
+    if (modeArg === "headless-guarded") {
+      const update = await withTimeout(
+        client.callTool({
+          name: "obsidian_update_note",
+          arguments: {
+            targetType: "filePath",
+            targetIdentifier: "Projects/Headless.md",
+            modificationType: "wholeFile",
+            wholeFileMode: "append",
+            content: "\nGuarded append smoke.",
+            returnContent: true,
+          },
+        }),
+        "guarded update",
+      );
+      assertTextIncludes(update, "Guarded append smoke", "guarded update");
+
+      const replace = await withTimeout(
+        client.callTool({
+          name: "obsidian_search_replace",
+          arguments: {
+            targetType: "filePath",
+            targetIdentifier: "Projects/Headless.md",
+            replacements: [
+              {
+                search: "Guarded append smoke",
+                replace: "Guarded replace smoke",
+              },
+            ],
+            returnContent: true,
+          },
+        }),
+        "guarded search replace",
+      );
+      assertTextIncludes(replace, "Guarded replace smoke", "guarded search replace");
+
+      const frontmatter = await withTimeout(
+        client.callTool({
+          name: "obsidian_manage_frontmatter",
+          arguments: {
+            filePath: "Projects/Headless.md",
+            operation: "set",
+            key: "headless_guarded_smoke",
+            value: true,
+          },
+        }),
+        "guarded frontmatter",
+      );
+      assertTextIncludes(frontmatter, "headless_guarded_smoke", "guarded frontmatter");
+
+      const traversal = await client.callTool({
+        name: "obsidian_update_note",
+        arguments: {
+          targetType: "filePath",
+          targetIdentifier: "../escape.md",
+          modificationType: "wholeFile",
+          wholeFileMode: "append",
+          content: "bad",
+        },
+      });
+      if (!traversal.isError) {
+        throw new Error("Expected path traversal write to be rejected");
+      }
+    }
+
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          mode: modeArg,
+          runtimeMode,
+          vaultRoot,
+          cachePath,
+          toolCount: toolNames.length,
+          tools: toolNames,
+        },
+        null,
+        2,
+      ),
+    );
+  } finally {
+    await client.close().catch(() => undefined);
+    if (fakeRestServer) {
+      await new Promise((resolve) => fakeRestServer.close(resolve)).catch(
+        () => undefined,
+      );
+    }
+    await rm(vaultRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+main().catch((error) => {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(1);
+});

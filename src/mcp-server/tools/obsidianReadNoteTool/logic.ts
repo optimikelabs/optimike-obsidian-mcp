@@ -137,7 +137,7 @@ export interface ObsidianReadNoteResponse {
 export const processObsidianReadNote = async (
   params: ObsidianReadNoteInput,
   context: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService?: VaultCacheService,
 ): Promise<ObsidianReadNoteResponse> => {
   const {
@@ -204,6 +204,18 @@ export const processObsidianReadNote = async (
     // --- Step 1: Read File Content (always fetch JSON internally) ---
     const readContext = { ...context, operation: "readFileAsJson" };
     try {
+      if (!obsidianService) {
+        const cached = await readFromSharedCache(originalFilePath);
+        if (cached) {
+          return cached;
+        }
+        throw new McpError(
+          BaseErrorCode.SERVICE_UNAVAILABLE,
+          "Obsidian REST API is unavailable and shared cache is not ready or does not contain the requested file.",
+          readContext,
+        );
+      }
+
       // Attempt 1: Read using the provided path (case-sensitive)
       logger.debug(
         `Attempting to read file as JSON (case-sensitive): ${originalFilePath}`,
@@ -265,7 +277,7 @@ export const processObsidianReadNote = async (
             fallbackContext,
           );
           const filesInDir = await retryWithDelay(
-            () => obsidianService.listFiles(dirToList, fallbackContext),
+              () => obsidianService!.listFiles(dirToList, fallbackContext),
             {
               operationName: "listFilesForReadFallback",
               context: fallbackContext,
@@ -294,7 +306,7 @@ export const processObsidianReadNote = async (
             // Retry reading the file content using the corrected path
             noteJson = await retryWithDelay(
               () =>
-                obsidianService.getFileContent(
+                obsidianService!.getFileContent(
                   effectiveFilePath,
                   "json",
                   fallbackContext,

@@ -21,7 +21,7 @@ Recommandation Codex : pointer la config MCP vers `dist/stdio-proxy.js`, pas dir
 ## Prérequis
 
 - Node.js >= 22.7.5
-- Obsidian Desktop
+- Obsidian Desktop pour le mode `live`. Les modes headless demandent seulement un chemin de vault local.
 - Plugins :
   - Local REST API (obligatoire pour les outils REST) : https://github.com/coddingtonbear/obsidian-local-rest-api
   - Smart Connections (obligatoire pour la recherche sémantique) : https://github.com/brianpetro/obsidian-smart-connections
@@ -171,6 +171,7 @@ Chemin par défaut :
 
 Variables utiles :
 
+- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded` pour choisir le contrat runtime
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` pour choisir la source de refresh cache (`auto` privilégie le vault local quand il existe)
@@ -187,7 +188,20 @@ Scripts utiles :
 npm run build
 npm run start:proxy
 npm run start:http
+npm run smoke:headless-readonly
+npm run smoke:hybrid-unavailable
+npm run smoke:hybrid-api-available
+npm run smoke:headless-guarded
 ```
+
+## Modes runtime
+
+- `live` (défaut) : Obsidian Desktop + Local REST API. Surface complète REST, writes et Bases Bridge.
+- `hybrid` : démarre depuis le vault/cache local et utilise Local REST API quand `OBSIDIAN_API_KEY` est configurée. Le check API au démarrage n’est pas bloquant. Si aucune clé API n’est configurée, `OBSIDIAN_VAULT` est requis.
+- `headless-readonly` : sans Obsidian Desktop, sans Local REST API, sans `OBSIDIAN_API_KEY`. Requiert `OBSIDIAN_VAULT` et `OBSIDIAN_CACHE_SOURCE=filesystem`; expose seulement lecture, liste, recherche, Tasks, sémantique et runtime.
+- `headless-guarded` : sans Obsidian Desktop ; expose la surface read headless + écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded.
+
+Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchronisé. Cela ne signifie pas que Desktop, les plugins communautaires, la command palette, l’active file ou Bases Bridge sont disponibles sans Obsidian Desktop.
 
 Health et maintenance :
 

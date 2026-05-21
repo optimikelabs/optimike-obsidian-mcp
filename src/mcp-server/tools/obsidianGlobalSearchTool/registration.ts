@@ -35,7 +35,7 @@ import {
  */
 export async function registerObsidianGlobalSearchTool(
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService, // Now required
 ): Promise<void> {
   const toolName = "obsidian_global_search";

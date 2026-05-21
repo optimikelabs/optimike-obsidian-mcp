@@ -62,7 +62,12 @@ try {
  * Zod schema for validating environment variables.
  * @private
  */
-const EnvSchema = z.object({
+const RuntimeModeSchema = z
+  .enum(["live", "hybrid", "headless-readonly", "headless-guarded"])
+  .default("live");
+
+const EnvSchema = z
+  .object({
   MCP_SERVER_NAME: z.string().optional(),
   MCP_SERVER_VERSION: z.string().optional(),
   MCP_LOG_LEVEL: z.string().default("info"),
@@ -84,7 +89,8 @@ const EnvSchema = z.object({
   OAUTH_AUDIENCE: z.string().optional(),
   OAUTH_JWKS_URI: z.string().url().optional(),
   // --- Obsidian Specific Config ---
-  OBSIDIAN_API_KEY: z.string().min(1, "OBSIDIAN_API_KEY cannot be empty"),
+  OBSIDIAN_RUNTIME_MODE: RuntimeModeSchema,
+  OBSIDIAN_API_KEY: z.string().optional(),
   OBSIDIAN_BASE_URL: z.string().url().default("http://127.0.0.1:27123"),
   OBSIDIAN_VERIFY_SSL: z
     .string()
@@ -125,7 +131,7 @@ const EnvSchema = z.object({
     .transform((val) => val.toLowerCase() === "true")
     .default("true"),
   // --- Public runtime safety ---
-  MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).default("full"),
+  MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).optional(),
   MCP_GUARDED_MAX_WRITE_CHARS: z.coerce
     .number()
     .int()
@@ -166,7 +172,40 @@ const EnvSchema = z.object({
     .string()
     .default("optimike semantic search warmup"),
   OBSIDIAN_VAULT: z.string().optional(),
-});
+})
+  .superRefine((env, ctx) => {
+    if (env.OBSIDIAN_RUNTIME_MODE === "live" && !env.OBSIDIAN_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["OBSIDIAN_API_KEY"],
+        message: "OBSIDIAN_API_KEY is required in live mode",
+      });
+    }
+
+    if (
+      env.OBSIDIAN_RUNTIME_MODE.startsWith("headless") &&
+      !env.OBSIDIAN_VAULT
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["OBSIDIAN_VAULT"],
+        message: "OBSIDIAN_VAULT is required in headless modes",
+      });
+    }
+
+    if (
+      env.OBSIDIAN_RUNTIME_MODE === "hybrid" &&
+      !env.OBSIDIAN_API_KEY &&
+      !env.OBSIDIAN_VAULT
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["OBSIDIAN_VAULT"],
+        message:
+          "OBSIDIAN_VAULT is required in hybrid mode when OBSIDIAN_API_KEY is not configured",
+      });
+    }
+  });
 
 const parsedEnv = EnvSchema.safeParse(process.env);
 
@@ -272,6 +311,7 @@ export const config = {
   oauthAudience: env.OAUTH_AUDIENCE,
   oauthJwksUri: env.OAUTH_JWKS_URI,
   obsidianApiKey: env.OBSIDIAN_API_KEY,
+  obsidianRuntimeMode: env.OBSIDIAN_RUNTIME_MODE,
   obsidianBaseUrl: env.OBSIDIAN_BASE_URL,
   obsidianVerifySsl: env.OBSIDIAN_VERIFY_SSL,
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,
@@ -293,7 +333,13 @@ export const config = {
   obsidianStartupMaxRetries: env.OBSIDIAN_STARTUP_MAX_RETRIES,
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
-  mcpWriteMode: env.MCP_WRITE_MODE,
+  mcpWriteMode:
+    env.MCP_WRITE_MODE ||
+    (env.OBSIDIAN_RUNTIME_MODE === "headless-guarded"
+      ? "guarded"
+      : env.OBSIDIAN_RUNTIME_MODE === "headless-readonly"
+        ? "readonly"
+        : "full"),
   mcpGuardedMaxWriteChars: env.MCP_GUARDED_MAX_WRITE_CHARS,
   mcpGuardedMaxBatchOperations: env.MCP_GUARDED_MAX_BATCH_OPERATIONS,
   mcpProtectedFrontmatterKeys: env.MCP_PROTECTED_FRONTMATTER_KEYS.split(",")
