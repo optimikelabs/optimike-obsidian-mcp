@@ -87,9 +87,9 @@ Le MCP devient donc une frontière pratique entre les agents et Obsidian : les a
 
 ## Architecture (vue d'ensemble)
 
-1) **Obsidian** + plugins (Local REST API, Bases Bridge, Smart Connections)  
-2) **Optimike Obsidian MCP** (ce serveur)  
-3) **Agents MCP** (Codex, IDE, etc.)
+1. **Obsidian** + plugins (Local REST API, Bases Bridge, Smart Connections)
+2. **Optimike Obsidian MCP** (ce serveur)
+3. **Agents MCP** (Codex, IDE, etc.)
 
 Le serveur agit comme un **pont** entre tes agents et Obsidian, ajoute une couche “Base” pour les fichiers `.base`, et persiste l’état runtime local pour garder Codex rapide et stable au fil des sessions.
 
@@ -130,6 +130,7 @@ Alias legacy (compat MCP) :
 ### Engine / Evaluate
 
 Quand `evaluate: true`, le bridge renvoie :
+
 - `source: "engine"` : cache auto + évaluation des formules (sans vue Bridge)
 - `source: "fallback"` : calcul partiel sur disque si l’engine est OFF
 
@@ -214,7 +215,7 @@ npm run check:vault-exclusions -- --vault=/chemin/vers/vault
 - `hybrid` : démarre depuis le vault/cache local et utilise Local REST API quand `OBSIDIAN_API_KEY` est configurée. Le check API au démarrage n’est pas bloquant. Si aucune clé API n’est configurée, `OBSIDIAN_VAULT` est requis.
 - `headless-readonly` : sans Obsidian Desktop, sans Local REST API, sans `OBSIDIAN_API_KEY`. Requiert `OBSIDIAN_VAULT` et `OBSIDIAN_CACHE_SOURCE=filesystem`; expose lecture, liste, recherche, Tasks, sémantique, runtime, plus `bases_list`, `bases_get_schema` et `bases_query` en fallback local readonly.
 - `headless-guarded` : sans Obsidian Desktop ; expose la surface read headless + écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases readonly est aussi disponible.
-- `headless-filesystem` : sans Obsidian Desktop ; expose `headless-guarded` plus les features filesystem bornées : tags YAML frontmatter, delete avec `expectedHash` ou `expectedMtime`, création/config YAML `.base`, et rows Bases comme opérations `set` de frontmatter Markdown.
+- `headless-filesystem` : sans Obsidian Desktop ; expose `headless-guarded` plus les features filesystem bornées : tags frontmatter/inline et index local des tags, move/rename avec `expectedHash` ou `expectedMtime`, delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, et rows Bases comme opérations `set` de frontmatter Markdown.
 
 Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchronisé. Cela ne signifie pas que Desktop, les plugins communautaires, la command palette, l’active file ou Bases Bridge sont disponibles sans Obsidian Desktop.
 
@@ -302,6 +303,7 @@ OBSIDIAN_STARTUP_BLOCKING = "false"
 ```
 
 Notes :
+
 - Garde cette config en local dans `~/.codex/config.toml` (ne pas commit des chemins machine personnels).
 - Dans la doc, utilise des chemins logiques (`/chemin/vers/...`) et garde les chemins réels uniquement en local.
 - `dist/index.js` reste l’entrypoint backend, mais Codex doit pointer vers `dist/stdio-proxy.js`.
@@ -360,6 +362,7 @@ Le MCP principal inclut maintenant :
 ## Plugins Obsidian requis ou utiles
 
 Plugins requis selon les surfaces utilisées :
+
 - **Local REST API** : API Obsidian requise par le MCP.
 - **Bases Bridge (REST)** : support `.base` via REST.
 - **Smart Connections** : index vectoriel et `.smart-env` pour la recherche sémantique.
@@ -375,6 +378,7 @@ Exemple :
 ```
 
 Le serveur :
+
 - lit `.smart-env/multi/*.ajson`
 - choisit la dimension dominante
 - encode la requête avec le même modèle que le vault
@@ -383,6 +387,7 @@ Le serveur :
 - renvoie `timings_ms`, `vector_count` et `filtered_count` pour diagnostiquer le coût réel
 
 Important :
+
 - l’exécution d’une requête sémantique exige toujours un provider de requête joignable
 - si le vault repose sur Ollama et qu’Ollama est down, l’erreur remonte clairement au lieu de bloquer silencieusement
 - `SEMANTIC_SEARCH_PREWARM=false` désactive le préchauffage au démarrage
@@ -428,9 +433,9 @@ Laisser le mode auto et laisser chaque utilisateur overrider par env vars.
 
 Si Obsidian tourne sur Windows et Ollama aussi :
 
-1) définir `OLLAMA_HOST=0.0.0.0:11434` sur Windows
-2) redémarrer Ollama
-3) tester depuis WSL :
+1. définir `OLLAMA_HOST=0.0.0.0:11434` sur Windows
+2. redémarrer Ollama
+3. tester depuis WSL :
 
 ```bash
 GW=$(ip route | awk '/default/ {print $3; exit}')

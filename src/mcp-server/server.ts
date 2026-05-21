@@ -17,6 +17,7 @@
 import { ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dump, load } from "js-yaml";
+import path from "node:path";
 import { z } from "zod";
 // Import validated configuration and environment details.
 import { config, environment } from "../config/index.js";
@@ -27,7 +28,11 @@ import { ObsidianRestApiService } from "../services/obsidianRestAPI/index.js";
 // Import the Vault Cache service
 import { VaultCacheService } from "../services/obsidianRestAPI/vaultCache/index.js";
 import { LocalBasesService } from "../services/localBasesService.js";
-import { VaultFileService } from "../services/vaultFileService.js";
+import {
+  extractMarkdownTags,
+  VaultFileService,
+  type VaultTagLocation,
+} from "../services/vaultFileService.js";
 import { assertWriteAllowed } from "../services/writePolicy.js";
 // Import registration functions for specific resources and tools.
 import { registerObsidianDeleteNoteTool } from "./tools/obsidianDeleteNoteTool/index.js";
@@ -104,7 +109,11 @@ function registerHeadlessGuardedWriteTools(
           expectedMtime: params.expectedMtime,
         },
       );
-      await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        result.path,
+        context,
+      );
       return {
         content: [
           {
@@ -157,16 +166,21 @@ function registerHeadlessGuardedWriteTools(
         target: params.targetIdentifier,
         context,
       });
-      const { result, replacementsApplied } = await vaultFileService.searchReplace(
-        params.targetIdentifier,
-        params.replacements,
+      const { result, replacementsApplied } =
+        await vaultFileService.searchReplace(
+          params.targetIdentifier,
+          params.replacements,
+          context,
+          {
+            expectedHash: params.expectedHash,
+            expectedMtime: params.expectedMtime,
+          },
+        );
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        result.path,
         context,
-        {
-          expectedHash: params.expectedHash,
-          expectedMtime: params.expectedMtime,
-        },
       );
-      await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
       return {
         content: [
           {
@@ -229,7 +243,11 @@ function registerHeadlessGuardedWriteTools(
           expectedMtime: params.expectedMtime,
         },
       );
-      await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        result.path,
+        context,
+      );
       return {
         content: [
           {
@@ -283,11 +301,19 @@ function registerHeadlessGuardedWriteTools(
         allowInGuarded: true,
         context,
       });
-      const deleted = await vaultFileService.deleteFile(params.filePath, context, {
-        expectedHash: params.expectedHash,
-        expectedMtime: params.expectedMtime,
-      });
-      await updateCacheAfterGuardedWrite(vaultCacheService, deleted.path, context);
+      const deleted = await vaultFileService.deleteFile(
+        params.filePath,
+        context,
+        {
+          expectedHash: params.expectedHash,
+          expectedMtime: params.expectedMtime,
+        },
+      );
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        deleted.path,
+        context,
+      );
       return {
         content: [
           {
@@ -311,11 +337,14 @@ function registerHeadlessGuardedWriteTools(
 
   server.tool(
     "obsidian_manage_tags",
-    "Headless-guarded filesystem tag management for YAML frontmatter tags only.",
+    "Headless-filesystem tag management for YAML frontmatter tags, inline Markdown tags, and local tag index.",
     {
-      filePath: z.string().min(1),
-      operation: z.enum(["add", "remove", "list"]),
+      filePath: z.string().min(1).optional(),
+      operation: z.enum(["add", "remove", "list", "index"]),
       tags: z.array(z.string()).default([]),
+      location: z
+        .enum(["frontmatter", "inline", "both"])
+        .default("frontmatter"),
       expectedHash: z.string().optional(),
       expectedMtime: z.number().optional(),
     },
@@ -325,6 +354,55 @@ function registerHeadlessGuardedWriteTools(
         toolName: "obsidian_manage_tags",
         target: params.filePath,
       });
+      if (params.operation === "index") {
+        const entries = vaultCacheService?.getEntriesByPrefix("") ?? [];
+        const counts = new Map<string, { files: number; paths: string[] }>();
+        for (const entry of entries) {
+          if (path.extname(entry.path).toLowerCase() !== ".md") {
+            continue;
+          }
+          const content =
+            (await vaultCacheService?.getEntry(entry.path))?.content ?? "";
+          for (const tag of extractMarkdownTags(content).allTags) {
+            const current = counts.get(tag) ?? { files: 0, paths: [] };
+            current.files += 1;
+            current.paths.push(entry.path);
+            counts.set(tag, current);
+          }
+        }
+        const tags = [...counts.entries()]
+          .map(([tag, value]) => ({
+            tag,
+            files: value.files,
+            paths: value.paths.sort(),
+          }))
+          .sort((left, right) => left.tag.localeCompare(right.tag));
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  success: true,
+                  mode: "headless-filesystem",
+                  source: "filesystem-cache",
+                  tags,
+                  limitations: [
+                    "The index is built from Markdown files in the shared cache.",
+                    "It does not evaluate Obsidian plugin-specific tag behavior.",
+                  ],
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: false,
+        };
+      }
+      if (!params.filePath) {
+        throw new Error("filePath is required unless operation=index.");
+      }
       if (params.operation !== "list") {
         assertWriteAllowed({
           operation: "obsidian_manage_tags",
@@ -335,18 +413,24 @@ function registerHeadlessGuardedWriteTools(
           context,
         });
       }
-      const { result, currentTags } = await vaultFileService.manageFrontmatterTags(
-        params.filePath,
-        params.operation,
-        params.tags,
-        context,
-        {
-          expectedHash: params.expectedHash,
-          expectedMtime: params.expectedMtime,
-        },
-      );
+      const { result, currentTags, frontmatterTags, inlineTags } =
+        await vaultFileService.manageTags(
+          params.filePath,
+          params.operation,
+          params.tags,
+          params.location as VaultTagLocation,
+          context,
+          {
+            expectedHash: params.expectedHash,
+            expectedMtime: params.expectedMtime,
+          },
+        );
       if (result) {
-        await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
+        await updateCacheAfterGuardedWrite(
+          vaultCacheService,
+          result.path,
+          context,
+        );
       }
       return {
         content: [
@@ -355,8 +439,11 @@ function registerHeadlessGuardedWriteTools(
             text: JSON.stringify(
               {
                 success: true,
-                mode: "headless-guarded",
+                mode: "headless-filesystem",
                 path: params.filePath,
+                location: params.location,
+                frontmatterTags,
+                inlineTags,
                 currentTags,
                 stats: result
                   ? {
@@ -367,9 +454,232 @@ function registerHeadlessGuardedWriteTools(
                     }
                   : undefined,
                 limitations: [
-                  "Headless tag management edits YAML frontmatter tags only.",
-                  "It does not evaluate Obsidian's full tag index or plugin-specific tag behavior.",
+                  "Headless tag management edits Markdown/YAML text only.",
+                  "It does not evaluate Obsidian's plugin-specific tag behavior.",
                 ],
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
+  );
+
+  server.tool(
+    "obsidian_move_note",
+    "Headless-filesystem move/rename for explicit filePath targets. Requires expectedHash or expectedMtime.",
+    {
+      sourcePath: z.string().min(1),
+      targetPath: z.string().min(1),
+      overwrite: z.boolean().default(false),
+      expectedHash: z.string().optional(),
+      expectedMtime: z.number().optional(),
+      dryRun: z.boolean().default(false),
+    },
+    async (params) => {
+      const context = requestContextService.createRequestContext({
+        operation: "headlessFilesystemMoveNote",
+        toolName: "obsidian_move_note",
+        target: params.sourcePath,
+      });
+      if (!params.expectedHash && typeof params.expectedMtime !== "number") {
+        throw new Error(
+          "headless-filesystem move requires expectedHash or expectedMtime.",
+        );
+      }
+      assertWriteAllowed({
+        operation: "obsidian_move_note",
+        action: params.dryRun ? "dryRun" : "move",
+        target: `${params.sourcePath} -> ${params.targetPath}`,
+        destructive: params.overwrite,
+        allowInReadonly: params.dryRun,
+        allowInGuarded: true,
+        context,
+      });
+      if (params.dryRun) {
+        const current = await vaultFileService.read(params.sourcePath, context);
+        if (params.expectedHash && current.hash !== params.expectedHash) {
+          throw new Error(
+            "File changed since the caller-provided expectedHash.",
+          );
+        }
+        if (
+          typeof params.expectedMtime === "number" &&
+          current.mtime !== Math.round(params.expectedMtime)
+        ) {
+          throw new Error(
+            "File changed since the caller-provided expectedMtime.",
+          );
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ok: true,
+                  dryRun: true,
+                  source: "filesystem-guarded",
+                  sourcePath: current.path,
+                  targetPath: params.targetPath,
+                  sourceHash: current.hash,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: false,
+        };
+      }
+      const { previous, result } = await vaultFileService.moveFile(
+        params.sourcePath,
+        params.targetPath,
+        context,
+        {
+          expectedHash: params.expectedHash,
+          expectedMtime: params.expectedMtime,
+        },
+        params.overwrite,
+      );
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        previous.path,
+        context,
+      );
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        result.path,
+        context,
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ok: true,
+                source: "filesystem-guarded",
+                from: previous.path,
+                to: result.path,
+                previousHash: previous.hash,
+                stats: {
+                  mtime: result.mtime,
+                  size: result.size,
+                  hash: result.hash,
+                },
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
+  );
+
+  server.tool(
+    "obsidian_batch_frontmatter",
+    "Headless-filesystem batch frontmatter set with dry-run support. Protected keys remain blocked by write policy.",
+    {
+      operations: z
+        .array(
+          z.object({
+            filePath: z.string().min(1),
+            set: z.record(z.any()).default({}),
+            expectedHash: z.string().optional(),
+            expectedMtime: z.number().optional(),
+          }),
+        )
+        .min(1),
+      dryRun: z.boolean().default(true),
+      continueOnError: z.boolean().default(false),
+    },
+    async (params) => {
+      const context = requestContextService.createRequestContext({
+        operation: "headlessFilesystemBatchFrontmatter",
+        toolName: "obsidian_batch_frontmatter",
+        target: "batch",
+      });
+      const keys = params.operations.flatMap((operation) =>
+        Object.keys(operation.set ?? {}),
+      );
+      assertWriteAllowed({
+        operation: "obsidian_batch_frontmatter",
+        action: params.dryRun ? "dryRun" : "set",
+        batchCount: params.operations.length,
+        frontmatterKeys: keys,
+        allowInReadonly: params.dryRun,
+        allowInGuarded: true,
+        context,
+      });
+      const results = [];
+      for (const operation of params.operations) {
+        try {
+          if (Object.keys(operation.set ?? {}).length === 0) {
+            throw new Error(
+              "obsidian_batch_frontmatter supports non-empty set only.",
+            );
+          }
+          if (params.dryRun) {
+            const current = await vaultFileService.read(
+              operation.filePath,
+              context,
+            );
+            results.push({
+              file: current.path,
+              dryRun: true,
+              setKeys: Object.keys(operation.set),
+              currentHash: current.hash,
+            });
+            continue;
+          }
+          const { result } = await vaultFileService.setFrontmatterKeys(
+            operation.filePath,
+            operation.set,
+            context,
+            {
+              expectedHash: operation.expectedHash,
+              expectedMtime: operation.expectedMtime,
+            },
+          );
+          await updateCacheAfterGuardedWrite(
+            vaultCacheService,
+            result.path,
+            context,
+          );
+          results.push({
+            file: result.path,
+            setKeys: Object.keys(operation.set),
+            mtime: result.mtime,
+            hash: result.hash,
+          });
+        } catch (error) {
+          results.push({
+            file: operation.filePath,
+            error: {
+              message: error instanceof Error ? error.message : String(error),
+            },
+          });
+          if (!params.continueOnError) {
+            break;
+          }
+        }
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ok: results.every((result) => !("error" in result)),
+                dryRun: params.dryRun,
+                source: "filesystem-guarded",
+                results,
               },
               null,
               2,
@@ -398,7 +708,9 @@ function registerHeadlessGuardedWriteTools(
         toolName: "bases_create",
         target: params.path,
       });
-      const target = params.path.endsWith(".base") ? params.path : `${params.path}.base`;
+      const target = params.path.endsWith(".base")
+        ? params.path
+        : `${params.path}.base`;
       const yaml = `${dump(params.spec, { lineWidth: -1, noRefs: true }).trim()}\n`;
       load(yaml);
       assertWriteAllowed({
@@ -416,7 +728,11 @@ function registerHeadlessGuardedWriteTools(
           content: [
             {
               type: "text",
-              text: JSON.stringify({ ok: true, validateOnly: true, path: target }, null, 2),
+              text: JSON.stringify(
+                { ok: true, validateOnly: true, path: target },
+                null,
+                2,
+              ),
             },
           ],
           isError: false,
@@ -428,10 +744,17 @@ function registerHeadlessGuardedWriteTools(
         yaml,
         context,
         params.overwrite
-          ? { expectedHash: params.expectedHash, expectedMtime: params.expectedMtime }
+          ? {
+              expectedHash: params.expectedHash,
+              expectedMtime: params.expectedMtime,
+            }
           : undefined,
       );
-      await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        result.path,
+        context,
+      );
       return {
         content: [
           {
@@ -441,7 +764,11 @@ function registerHeadlessGuardedWriteTools(
                 ok: true,
                 source: "filesystem-guarded",
                 path: result.path,
-                stats: { mtime: result.mtime, size: result.size, hash: result.hash },
+                stats: {
+                  mtime: result.mtime,
+                  size: result.size,
+                  hash: result.hash,
+                },
                 limitations: [
                   "Writes .base YAML only; Obsidian UI formulas and views are not evaluated headlessly.",
                 ],
@@ -476,7 +803,8 @@ function registerHeadlessGuardedWriteTools(
       if (!params.yaml && !params.json) {
         throw new Error("Provide yaml or json for bases_upsert_config.");
       }
-      const content = params.yaml ?? dump(params.json, { lineWidth: -1, noRefs: true });
+      const content =
+        params.yaml ?? dump(params.json, { lineWidth: -1, noRefs: true });
       load(content);
       assertWriteAllowed({
         operation: "bases_upsert_config",
@@ -492,7 +820,11 @@ function registerHeadlessGuardedWriteTools(
           content: [
             {
               type: "text",
-              text: JSON.stringify({ ok: true, validateOnly: true, path: params.base_id }, null, 2),
+              text: JSON.stringify(
+                { ok: true, validateOnly: true, path: params.base_id },
+                null,
+                2,
+              ),
             },
           ],
           isError: false,
@@ -503,9 +835,16 @@ function registerHeadlessGuardedWriteTools(
         "overwrite",
         content.endsWith("\n") ? content : `${content}\n`,
         context,
-        { expectedHash: params.expectedHash, expectedMtime: params.expectedMtime },
+        {
+          expectedHash: params.expectedHash,
+          expectedMtime: params.expectedMtime,
+        },
       );
-      await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        result.path,
+        context,
+      );
       return {
         content: [
           {
@@ -515,7 +854,11 @@ function registerHeadlessGuardedWriteTools(
                 ok: true,
                 source: "filesystem-guarded",
                 path: result.path,
-                stats: { mtime: result.mtime, size: result.size, hash: result.hash },
+                stats: {
+                  mtime: result.mtime,
+                  size: result.size,
+                  hash: result.hash,
+                },
                 limitations: [
                   "Replaces .base YAML only; Obsidian UI formulas and views are not evaluated headlessly.",
                 ],
@@ -569,7 +912,9 @@ function registerHeadlessGuardedWriteTools(
       for (const operation of params.operations) {
         try {
           if (!operation.set || Object.keys(operation.set).length === 0) {
-            throw new Error("headless-guarded bases_upsert_rows supports set only.");
+            throw new Error(
+              "headless-guarded bases_upsert_rows supports set only.",
+            );
           }
           const { result } = await vaultFileService.setFrontmatterKeys(
             operation.file,
@@ -580,7 +925,11 @@ function registerHeadlessGuardedWriteTools(
               expectedMtime: operation.expected_mtime,
             },
           );
-          await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
+          await updateCacheAfterGuardedWrite(
+            vaultCacheService,
+            result.path,
+            context,
+          );
           results.push({
             file: result.path,
             mtime: result.mtime,
@@ -690,8 +1039,7 @@ async function createMcpServerInstance(
     );
     const isHeadlessReadonly =
       config.obsidianRuntimeMode === "headless-readonly";
-    const isHeadlessGuarded =
-      config.obsidianRuntimeMode === "headless-guarded";
+    const isHeadlessGuarded = config.obsidianRuntimeMode === "headless-guarded";
     const isHeadlessFilesystem =
       config.obsidianRuntimeMode === "headless-filesystem";
     const localBasesService = vaultCacheService
@@ -700,8 +1048,16 @@ async function createMcpServerInstance(
 
     // Register read/cache-friendly tools first. In headless-readonly, the REST
     // service is intentionally absent and these tools must use the shared cache.
-    await registerObsidianListNotesTool(server, obsidianService, vaultCacheService);
-    await registerObsidianReadNoteTool(server, obsidianService, vaultCacheService);
+    await registerObsidianListNotesTool(
+      server,
+      obsidianService,
+      vaultCacheService,
+    );
+    await registerObsidianReadNoteTool(
+      server,
+      obsidianService,
+      vaultCacheService,
+    );
     if (vaultCacheService) {
       await registerObsidianGlobalSearchTool(
         server,

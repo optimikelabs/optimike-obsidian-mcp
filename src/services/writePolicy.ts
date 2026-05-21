@@ -4,9 +4,11 @@ import type { RequestContext } from "../utils/index.js";
 
 export type WriteOperation =
   | "obsidian_delete_note"
+  | "obsidian_move_note"
   | "obsidian_update_note"
   | "obsidian_search_replace"
   | "obsidian_manage_frontmatter"
+  | "obsidian_batch_frontmatter"
   | "obsidian_manage_tags"
   | "bases_create"
   | "bases_upsert_config"

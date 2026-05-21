@@ -28,6 +28,8 @@ export type VaultFileWritePreconditions = {
   expectedMtime?: number;
 };
 
+export type VaultTagLocation = "frontmatter" | "inline" | "both";
+
 function hashContent(content: string): string {
   return createHash("sha1").update(content).digest("hex");
 }
@@ -54,6 +56,45 @@ function renderWithFrontmatter(
 ): string {
   const yaml = dump(frontmatter, { lineWidth: -1, noRefs: true }).trim();
   return `---\n${yaml}\n---\n${body}`;
+}
+
+function normalizeTag(tag: string): string {
+  return tag.replace(/^#+/u, "").trim();
+}
+
+function uniqueTags(tags: string[]): string[] {
+  return [...new Set(tags.map(normalizeTag).filter(Boolean))].sort();
+}
+
+export function extractMarkdownTags(content: string): {
+  frontmatterTags: string[];
+  inlineTags: string[];
+  allTags: string[];
+} {
+  const { frontmatter, body } = splitFrontmatter(content);
+  const frontmatterTags = Array.isArray(frontmatter.tags)
+    ? uniqueTags(frontmatter.tags.map(String))
+    : [];
+  const inlineTags = uniqueTags(
+    [...body.matchAll(/(^|[\s([{])#([A-Za-z0-9][A-Za-z0-9_/-]*)/gu)].map(
+      (match) => match[2],
+    ),
+  );
+  return {
+    frontmatterTags,
+    inlineTags,
+    allTags: uniqueTags([...frontmatterTags, ...inlineTags]),
+  };
+}
+
+function removeInlineTag(body: string, tag: string): string {
+  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return body
+    .replace(
+      new RegExp(`(^|[\\s([{])#${escaped}(?=$|[\\s\\])}.,;:!?])`, "gu"),
+      "$1",
+    )
+    .replace(/[ \t]{2,}/g, " ");
 }
 
 export class VaultFileService {
@@ -187,7 +228,10 @@ export class VaultFileService {
     }
   }
 
-  async read(filePath: string, context: RequestContext): Promise<VaultFileReadResult> {
+  async read(
+    filePath: string,
+    context: RequestContext,
+  ): Promise<VaultFileReadResult> {
     const absolutePath = this.resolveVaultPath(filePath, context);
     await this.assertRealPathInsideVault(absolutePath, context);
     const [content, fileStat] = await Promise.all([
@@ -344,7 +388,9 @@ export class VaultFileService {
     }
 
     this.assertWritePreconditions(current, preconditions, context);
-    const normalized = tags.map((tag) => tag.replace(/^#+/u, "").trim()).filter(Boolean);
+    const normalized = tags
+      .map((tag) => tag.replace(/^#+/u, "").trim())
+      .filter(Boolean);
     const nextTags =
       operation === "add"
         ? [...new Set([...currentTags, ...normalized])]
@@ -363,6 +409,124 @@ export class VaultFileService {
         context,
       ),
       currentTags: nextTags,
+    };
+  }
+
+  async manageTags(
+    filePath: string,
+    operation: "add" | "remove" | "list",
+    tags: string[],
+    location: VaultTagLocation,
+    context: RequestContext,
+    preconditions?: VaultFileWritePreconditions,
+  ): Promise<{
+    result?: VaultFileReadResult;
+    frontmatterTags: string[];
+    inlineTags: string[];
+    currentTags: string[];
+  }> {
+    const current = await this.read(filePath, context);
+    const { frontmatter, body } = splitFrontmatter(current.content);
+    const currentFrontmatterTags = Array.isArray(frontmatter.tags)
+      ? uniqueTags(frontmatter.tags.map(String))
+      : [];
+    const currentInlineTags = extractMarkdownTags(current.content).inlineTags;
+
+    if (operation === "list") {
+      return {
+        frontmatterTags: currentFrontmatterTags,
+        inlineTags: currentInlineTags,
+        currentTags: uniqueTags([
+          ...currentFrontmatterTags,
+          ...currentInlineTags,
+        ]),
+      };
+    }
+
+    this.assertWritePreconditions(current, preconditions, context);
+    const normalized = uniqueTags(tags);
+    let nextFrontmatterTags = currentFrontmatterTags;
+    let nextBody = body;
+
+    if (location === "frontmatter" || location === "both") {
+      nextFrontmatterTags =
+        operation === "add"
+          ? uniqueTags([...currentFrontmatterTags, ...normalized])
+          : currentFrontmatterTags.filter((tag) => !normalized.includes(tag));
+      if (nextFrontmatterTags.length > 0) {
+        frontmatter.tags = nextFrontmatterTags;
+      } else {
+        delete frontmatter.tags;
+      }
+    }
+
+    if (location === "inline" || location === "both") {
+      const currentInlineSet = new Set(currentInlineTags);
+      if (operation === "add") {
+        const missing = normalized.filter((tag) => !currentInlineSet.has(tag));
+        if (missing.length > 0) {
+          nextBody = `${nextBody.trimEnd()}\n\n${missing
+            .map((tag) => `#${tag}`)
+            .join(" ")}\n`;
+        }
+      } else {
+        for (const tag of normalized) {
+          nextBody = removeInlineTag(nextBody, tag);
+        }
+      }
+    }
+
+    const result = await this.writeAtomic(
+      filePath,
+      renderWithFrontmatter(frontmatter, nextBody),
+      context,
+    );
+    const nextTags = extractMarkdownTags(result.content);
+    return {
+      result,
+      frontmatterTags: nextTags.frontmatterTags,
+      inlineTags: nextTags.inlineTags,
+      currentTags: nextTags.allTags,
+    };
+  }
+
+  async moveFile(
+    sourcePath: string,
+    targetPath: string,
+    context: RequestContext,
+    preconditions: VaultFileWritePreconditions,
+    overwrite = false,
+  ): Promise<{ previous: VaultFileReadResult; result: VaultFileReadResult }> {
+    const previous = await this.read(sourcePath, context);
+    this.assertWritePreconditions(previous, preconditions, context);
+    const sourceAbsolutePath = this.resolveVaultPath(sourcePath, context);
+    const targetAbsolutePath = this.resolveVaultPath(targetPath, context);
+    await this.assertRealPathInsideVault(sourceAbsolutePath, context);
+    await mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+    await this.assertRealPathInsideVault(
+      path.dirname(targetAbsolutePath),
+      context,
+    );
+
+    if (!overwrite) {
+      try {
+        await stat(targetAbsolutePath);
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Target file already exists. Pass overwrite=true with a source precondition to replace it.",
+          { ...context, sourcePath, targetPath },
+        );
+      } catch (error) {
+        if (error instanceof McpError) {
+          throw error;
+        }
+      }
+    }
+
+    await rename(sourceAbsolutePath, targetAbsolutePath);
+    return {
+      previous,
+      result: await this.read(targetPath, context),
     };
   }
 

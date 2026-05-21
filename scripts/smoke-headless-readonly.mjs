@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 
-import { mkdtemp, rm, writeFile, mkdir, readFile, stat } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  writeFile,
+  mkdir,
+  readFile,
+  stat,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -43,7 +50,9 @@ async function withTimeout(promise, label) {
 function assertTextIncludes(result, needle, label) {
   const text = result.content?.map((item) => item.text ?? "").join("\n") ?? "";
   if (!text.includes(needle)) {
-    throw new Error(`${label} did not include ${JSON.stringify(needle)}: ${text}`);
+    throw new Error(
+      `${label} did not include ${JSON.stringify(needle)}: ${text}`,
+    );
   }
   return text;
 }
@@ -58,7 +67,9 @@ function jsonOf(result, label) {
 }
 
 async function createTempVault() {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "optimike-headless-vault-"));
+  const vaultRoot = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-headless-vault-"),
+  );
   await mkdir(path.join(vaultRoot, "Projects"), { recursive: true });
   await mkdir(path.join(vaultRoot, "tmp", "reports"), { recursive: true });
   await mkdir(path.join(vaultRoot, ".obsidian"), { recursive: true });
@@ -80,7 +91,14 @@ async function createTempVault() {
   );
   await writeFile(
     path.join(vaultRoot, "Root.md"),
-    ["---", "type: root", "---", "", "Root smoke note with searchable keyword alphasmoke.", ""].join("\n"),
+    [
+      "---",
+      "type: root",
+      "---",
+      "",
+      "Root smoke note with searchable keyword alphasmoke.",
+      "",
+    ].join("\n"),
     "utf8",
   );
   await writeFile(
@@ -121,7 +139,12 @@ async function createTempVault() {
 
 async function main() {
   const vaultRoot = await createTempVault();
-  const cachePath = path.join(vaultRoot, ".obsidian", "optimike-mcp", "shared-cache.sqlite");
+  const cachePath = path.join(
+    vaultRoot,
+    ".obsidian",
+    "optimike-mcp",
+    "shared-cache.sqlite",
+  );
   let fakeRestServer;
   let fakeRestUrl;
   if (modeArg === "hybrid-live") {
@@ -149,12 +172,20 @@ async function main() {
         return;
       }
       if (request.url?.startsWith("/vault/")) {
-        const relativePath = decodeURIComponent(request.url.replace(/^\/vault\//u, ""));
+        const relativePath = decodeURIComponent(
+          request.url.replace(/^\/vault\//u, ""),
+        );
         const absolutePath = path.join(vaultRoot, relativePath);
         try {
           const fileStat = await stat(absolutePath);
-          response.setHeader("x-obsidian-mtime", String(fileStat.mtimeMs / 1000));
-          response.setHeader("x-obsidian-ctime", String(fileStat.ctimeMs / 1000));
+          response.setHeader(
+            "x-obsidian-mtime",
+            String(fileStat.mtimeMs / 1000),
+          );
+          response.setHeader(
+            "x-obsidian-ctime",
+            String(fileStat.ctimeMs / 1000),
+          );
           if (request.method === "HEAD") {
             response.setHeader("content-length", String(fileStat.size));
             response.statusCode = 200;
@@ -191,7 +222,10 @@ async function main() {
           return;
         }
       }
-      if (request.method === "POST" && request.url?.startsWith("/search/simple/")) {
+      if (
+        request.method === "POST" &&
+        request.url?.startsWith("/search/simple/")
+      ) {
         const url = new URL(request.url, fakeRestUrl);
         const query = url.searchParams.get("query") ?? "";
         const files = ["Root.md", "Projects/Headless.md"];
@@ -212,7 +246,9 @@ async function main() {
       response.statusCode = 404;
       response.end("not found");
     });
-    await new Promise((resolve) => fakeRestServer.listen(0, "127.0.0.1", resolve));
+    await new Promise((resolve) =>
+      fakeRestServer.listen(0, "127.0.0.1", resolve),
+    );
     const address = fakeRestServer.address();
     fakeRestUrl = `http://127.0.0.1:${address.port}`;
   }
@@ -300,6 +336,8 @@ async function main() {
             "obsidian_search_replace",
             "obsidian_manage_frontmatter",
             "obsidian_manage_tags",
+            "obsidian_move_note",
+            "obsidian_batch_frontmatter",
             "bases_create",
             "bases_upsert_config",
             "bases_upsert_rows",
@@ -309,7 +347,21 @@ async function main() {
           throw new Error(`Expected write tool in ${modeArg}: ${name}`);
         }
       } else if (toolNames.includes(name)) {
-        throw new Error(`Live/write tool should not be registered in ${modeArg}: ${name}`);
+        throw new Error(
+          `Live/write tool should not be registered in ${modeArg}: ${name}`,
+        );
+      }
+    }
+    const filesystemOnly = ["obsidian_move_note", "obsidian_batch_frontmatter"];
+    for (const name of filesystemOnly) {
+      if (modeArg === "headless-filesystem") {
+        if (!toolNames.includes(name)) {
+          throw new Error(`Expected filesystem tool in ${modeArg}: ${name}`);
+        }
+      } else if (toolNames.includes(name)) {
+        throw new Error(
+          `Filesystem-only tool should not be registered in ${modeArg}: ${name}`,
+        );
       }
     }
 
@@ -365,14 +417,26 @@ async function main() {
       }),
       "excluded global search",
     );
-    if (assertTextIncludes(excludedSearch, "totalFiles", "excluded global search").includes("Excluded.md")) {
-      throw new Error("Vault exclusion policy failed: tmp/Excluded.md was indexed");
+    if (
+      assertTextIncludes(
+        excludedSearch,
+        "totalFiles",
+        "excluded global search",
+      ).includes("Excluded.md")
+    ) {
+      throw new Error(
+        "Vault exclusion policy failed: tmp/Excluded.md was indexed",
+      );
     }
 
     const tasks = await withTimeout(
       client.callTool({
         name: "list_all_tasks",
-        arguments: { path: "/", responseFormat: "json", responseMode: "compact" },
+        arguments: {
+          path: "/",
+          responseFormat: "json",
+          responseMode: "compact",
+        },
       }),
       "list tasks",
     );
@@ -465,7 +529,11 @@ async function main() {
         }),
         "guarded search replace",
       );
-      assertTextIncludes(replace, "Guarded replace smoke", "guarded search replace");
+      assertTextIncludes(
+        replace,
+        "Guarded replace smoke",
+        "guarded search replace",
+      );
 
       const frontmatter = await withTimeout(
         client.callTool({
@@ -479,117 +547,231 @@ async function main() {
         }),
         "guarded frontmatter",
       );
-      assertTextIncludes(frontmatter, "headless_guarded_smoke", "guarded frontmatter");
+      assertTextIncludes(
+        frontmatter,
+        "headless_guarded_smoke",
+        "guarded frontmatter",
+      );
 
       if (modeArg === "headless-filesystem") {
         const tagsAdd = await withTimeout(
-        client.callTool({
-          name: "obsidian_manage_tags",
-          arguments: {
-            filePath: "Projects/Headless.md",
-            operation: "add",
-            tags: ["headless/filesystem"],
-          },
-        }),
-        "guarded tags add",
-      );
-      assertTextIncludes(tagsAdd, "headless/filesystem", "guarded tags add");
-
-      const tagsRemove = await withTimeout(
-        client.callTool({
-          name: "obsidian_manage_tags",
-          arguments: {
-            filePath: "Projects/Headless.md",
-            operation: "remove",
-            tags: ["headless/filesystem"],
-          },
-        }),
-        "guarded tags remove",
-      );
-      assertTextIncludes(tagsRemove, "currentTags", "guarded tags remove");
-
-      const baseCreate = await withTimeout(
-        client.callTool({
-          name: "bases_create",
-          arguments: {
-            path: "GuardedSmoke.base",
-            spec: {
-              properties: {
-                "file.name": { displayName: "Name" },
-                headless_guarded_smoke: { displayName: "Smoke" },
-              },
-              views: [{ type: "table", name: "Smoke" }],
-            },
-          },
-        }),
-        "guarded bases create",
-      );
-      assertTextIncludes(baseCreate, "filesystem-guarded", "guarded bases create");
-
-      const baseConfig = await withTimeout(
-        client.callTool({
-          name: "bases_upsert_config",
-          arguments: {
-            base_id: "GuardedSmoke.base",
-            json: {
-              properties: {
-                "file.name": { displayName: "Name" },
-                headless_guarded_smoke: { displayName: "Smoke Updated" },
-              },
-              views: [{ type: "table", name: "Smoke Updated" }],
-            },
-          },
-        }),
-        "guarded bases config",
-      );
-      assertTextIncludes(baseConfig, "filesystem-guarded", "guarded bases config");
-
-      const rowUpsert = await withTimeout(
-        client.callTool({
-          name: "bases_upsert_rows",
-          arguments: {
-            base_id: "GuardedSmoke.base",
-            operations: [
-              {
-                file: "Projects/Headless.md",
-                set: { headless_guarded_smoke_row: "ok" },
-              },
-            ],
-          },
-        }),
-        "guarded bases rows",
-      );
-      assertTextIncludes(rowUpsert, "filesystem-guarded", "guarded bases rows");
-
-      const deleteTarget = jsonOf(
-        await withTimeout(
           client.callTool({
-            name: "obsidian_update_note",
+            name: "obsidian_manage_tags",
             arguments: {
-              targetType: "filePath",
-              targetIdentifier: "Projects/DeleteMe.md",
-              modificationType: "wholeFile",
-              wholeFileMode: "append",
-              content: "delete me",
-              returnContent: true,
+              filePath: "Projects/Headless.md",
+              operation: "add",
+              location: "inline",
+              tags: ["headless/filesystem"],
             },
           }),
-          "guarded delete target create",
-        ),
-        "guarded delete target create",
-      );
+          "filesystem inline tags add",
+        );
+        assertTextIncludes(
+          tagsAdd,
+          "headless/filesystem",
+          "filesystem inline tags add",
+        );
 
-      const deleteResult = await withTimeout(
-        client.callTool({
-          name: "obsidian_delete_note",
-          arguments: {
-            filePath: "Projects/DeleteMe.md",
-            expectedHash: deleteTarget.stats.hash,
-          },
-        }),
-        "guarded delete",
-      );
-      assertTextIncludes(deleteResult, "deletedHash", "guarded delete");
+        const tagIndex = await withTimeout(
+          client.callTool({
+            name: "obsidian_manage_tags",
+            arguments: {
+              operation: "index",
+            },
+          }),
+          "filesystem tag index",
+        );
+        assertTextIncludes(
+          tagIndex,
+          "headless/filesystem",
+          "filesystem tag index",
+        );
+
+        const tagsRemove = await withTimeout(
+          client.callTool({
+            name: "obsidian_manage_tags",
+            arguments: {
+              filePath: "Projects/Headless.md",
+              operation: "remove",
+              location: "inline",
+              tags: ["headless/filesystem"],
+            },
+          }),
+          "filesystem inline tags remove",
+        );
+        assertTextIncludes(
+          tagsRemove,
+          "currentTags",
+          "filesystem inline tags remove",
+        );
+
+        const batchDryRun = await withTimeout(
+          client.callTool({
+            name: "obsidian_batch_frontmatter",
+            arguments: {
+              dryRun: true,
+              operations: [
+                {
+                  filePath: "Projects/Headless.md",
+                  set: { headless_batch_smoke: "dry-run" },
+                },
+              ],
+            },
+          }),
+          "filesystem batch frontmatter dry run",
+        );
+        assertTextIncludes(
+          batchDryRun,
+          '"dryRun": true',
+          "filesystem batch frontmatter dry run",
+        );
+
+        const batchSet = await withTimeout(
+          client.callTool({
+            name: "obsidian_batch_frontmatter",
+            arguments: {
+              dryRun: false,
+              operations: [
+                {
+                  filePath: "Projects/Headless.md",
+                  set: { headless_batch_smoke: "ok" },
+                },
+              ],
+            },
+          }),
+          "filesystem batch frontmatter set",
+        );
+        assertTextIncludes(
+          batchSet,
+          "headless_batch_smoke",
+          "filesystem batch frontmatter set",
+        );
+
+        const moveTarget = jsonOf(
+          await withTimeout(
+            client.callTool({
+              name: "obsidian_update_note",
+              arguments: {
+                targetType: "filePath",
+                targetIdentifier: "Projects/MoveMe.md",
+                modificationType: "wholeFile",
+                wholeFileMode: "append",
+                content: "move me",
+                returnContent: true,
+              },
+            }),
+            "filesystem move target create",
+          ),
+          "filesystem move target create",
+        );
+
+        const moveResult = await withTimeout(
+          client.callTool({
+            name: "obsidian_move_note",
+            arguments: {
+              sourcePath: "Projects/MoveMe.md",
+              targetPath: "Projects/Moved.md",
+              expectedHash: moveTarget.stats.hash,
+            },
+          }),
+          "filesystem move",
+        );
+        assertTextIncludes(moveResult, "Projects/Moved.md", "filesystem move");
+
+        const baseCreate = await withTimeout(
+          client.callTool({
+            name: "bases_create",
+            arguments: {
+              path: "GuardedSmoke.base",
+              spec: {
+                properties: {
+                  "file.name": { displayName: "Name" },
+                  headless_guarded_smoke: { displayName: "Smoke" },
+                },
+                views: [{ type: "table", name: "Smoke" }],
+              },
+            },
+          }),
+          "guarded bases create",
+        );
+        assertTextIncludes(
+          baseCreate,
+          "filesystem-guarded",
+          "guarded bases create",
+        );
+
+        const baseConfig = await withTimeout(
+          client.callTool({
+            name: "bases_upsert_config",
+            arguments: {
+              base_id: "GuardedSmoke.base",
+              json: {
+                properties: {
+                  "file.name": { displayName: "Name" },
+                  headless_guarded_smoke: { displayName: "Smoke Updated" },
+                },
+                views: [{ type: "table", name: "Smoke Updated" }],
+              },
+            },
+          }),
+          "guarded bases config",
+        );
+        assertTextIncludes(
+          baseConfig,
+          "filesystem-guarded",
+          "guarded bases config",
+        );
+
+        const rowUpsert = await withTimeout(
+          client.callTool({
+            name: "bases_upsert_rows",
+            arguments: {
+              base_id: "GuardedSmoke.base",
+              operations: [
+                {
+                  file: "Projects/Headless.md",
+                  set: { headless_guarded_smoke_row: "ok" },
+                },
+              ],
+            },
+          }),
+          "guarded bases rows",
+        );
+        assertTextIncludes(
+          rowUpsert,
+          "filesystem-guarded",
+          "guarded bases rows",
+        );
+
+        const deleteTarget = jsonOf(
+          await withTimeout(
+            client.callTool({
+              name: "obsidian_update_note",
+              arguments: {
+                targetType: "filePath",
+                targetIdentifier: "Projects/DeleteMe.md",
+                modificationType: "wholeFile",
+                wholeFileMode: "append",
+                content: "delete me",
+                returnContent: true,
+              },
+            }),
+            "guarded delete target create",
+          ),
+          "guarded delete target create",
+        );
+
+        const deleteResult = await withTimeout(
+          client.callTool({
+            name: "obsidian_delete_note",
+            arguments: {
+              filePath: "Projects/DeleteMe.md",
+              expectedHash: deleteTarget.stats.hash,
+            },
+          }),
+          "guarded delete",
+        );
+        assertTextIncludes(deleteResult, "deletedHash", "guarded delete");
       }
 
       const staleHash = await client.callTool({
@@ -644,7 +826,9 @@ async function main() {
         () => undefined,
       );
     }
-    await rm(vaultRoot, { recursive: true, force: true }).catch(() => undefined);
+    await rm(vaultRoot, { recursive: true, force: true }).catch(
+      () => undefined,
+    );
   }
 }
 

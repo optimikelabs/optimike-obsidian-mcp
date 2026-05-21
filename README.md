@@ -87,9 +87,9 @@ This makes the MCP a practical boundary between agents and Obsidian: agents call
 
 ## Architecture (overview)
 
-1) **Obsidian** + plugins (Local REST API, Bases Bridge, Smart Connections)  
-2) **Optimike Obsidian MCP** (this server)  
-3) **MCP Agents** (Codex, IDEs, etc.)
+1. **Obsidian** + plugins (Local REST API, Bases Bridge, Smart Connections)
+2. **Optimike Obsidian MCP** (this server)
+3. **MCP Agents** (Codex, IDEs, etc.)
 
 The server acts as a **bridge** between agents and Obsidian, adds a “Base” layer for `.base` files, and persists shared runtime state locally so Codex can stay fast and stable across runs.
 
@@ -130,6 +130,7 @@ Legacy aliases (MCP compat):
 ### Engine / Evaluate
 
 When `evaluate: true`, the bridge returns:
+
 - `source: "engine"`: auto‑cache + formula evaluation (no Bridge view)
 - `source: "fallback"`: partial on‑disk evaluation if engine is OFF
 
@@ -194,7 +195,7 @@ Warm semantic refreshes now load from SQLite first instead of re-reading the who
 - `hybrid`: starts from the local vault/cache and uses Local REST API when `OBSIDIAN_API_KEY` is configured. The API startup check is non-blocking. If no API key is configured, `OBSIDIAN_VAULT` is required.
 - `headless-readonly`: no Obsidian Desktop, no Local REST API, no `OBSIDIAN_API_KEY`. Requires `OBSIDIAN_VAULT` and `OBSIDIAN_CACHE_SOURCE=filesystem`; exposes read/list/search/tasks/semantic/runtime tools plus local readonly `bases_list`, `bases_get_schema`, and `bases_query`.
 - `headless-guarded`: no Obsidian Desktop; exposes the headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by the guarded write policy. Local readonly Bases fallback is also available.
-- `headless-filesystem`: no Obsidian Desktop; exposes `headless-guarded` plus bounded filesystem features: YAML frontmatter tags, delete with `expectedHash` or `expectedMtime`, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
+- `headless-filesystem`: no Obsidian Desktop; exposes `headless-guarded` plus bounded filesystem features: frontmatter/inline tags and local tag index, move/rename with `expectedHash` or `expectedMtime`, delete with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
 
 Headless means Optimike MCP running over a synchronized Markdown vault. It does not mean Obsidian Desktop, community plugins, command palette, active file, or Bases Bridge are available without Desktop.
 
@@ -311,6 +312,7 @@ OBSIDIAN_STARTUP_BLOCKING = "false"
 ```
 
 Notes:
+
 - Keep this config local in `~/.codex/config.toml` (do not commit personal machine paths).
 - Use logical placeholders in documentation (`/path/to/...`) and keep real paths only in local config.
 - `dist/index.js` is still the backend entrypoint, but Codex should point to `dist/stdio-proxy.js`.
@@ -398,6 +400,7 @@ This gives you one MCP surface, one runtime, and one durable local data path.
 ## Required and useful Obsidian plugins
 
 Required depending on the MCP surfaces you use:
+
 - **Local REST API**: Obsidian API used by MCP.
 - **Bases Bridge (REST)**: `.base` support via REST.
 - **Smart Connections**: vector index and `.smart-env` for semantic search.
@@ -413,6 +416,7 @@ Example:
 ```
 
 The server:
+
 - reads `.smart-env/multi/*.ajson`
 - selects the dominant dimension
 - embeds the query with the same model as the vault
@@ -421,6 +425,7 @@ The server:
 - returns `timings_ms`, `vector_count`, and `filtered_count` for operational diagnosis
 
 Important:
+
 - semantic query execution still requires a reachable query embedder provider
 - if the vault was built with Ollama embeddings, an unreachable Ollama instance will produce a clear error instead of a silent hang
 - set `SEMANTIC_SEARCH_PREWARM=false` to disable startup prewarm
@@ -471,9 +476,9 @@ Keep auto mode and let each user override via env vars.
 
 If Obsidian runs on Windows and Ollama too:
 
-1) set `OLLAMA_HOST=0.0.0.0:11434` on Windows
-2) restart Ollama
-3) test from WSL:
+1. set `OLLAMA_HOST=0.0.0.0:11434` on Windows
+2. restart Ollama
+3. test from WSL:
 
 ```bash
 GW=$(ip route | awk '/default/ {print $3; exit}')
