@@ -354,6 +354,21 @@ async function main() {
       );
       assertTextIncludes(frontmatter, "headless_guarded_smoke", "guarded frontmatter");
 
+      const staleHash = await client.callTool({
+        name: "obsidian_update_note",
+        arguments: {
+          targetType: "filePath",
+          targetIdentifier: "Projects/Headless.md",
+          modificationType: "wholeFile",
+          wholeFileMode: "append",
+          content: "bad stale write",
+          expectedHash: "not-the-current-hash",
+        },
+      });
+      if (!staleHash.isError) {
+        throw new Error("Expected stale expectedHash write to be rejected");
+      }
+
       const traversal = await client.callTool({
         name: "obsidian_update_note",
         arguments: {

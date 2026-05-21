@@ -38,6 +38,7 @@ export interface CacheIndexEntry {
 
 type CacheRow = CacheIndexEntry & { content: string };
 type CacheRefreshSource = "rest" | "filesystem";
+type CacheReadinessStatus = "empty" | "building" | "ready" | "error";
 
 const CREATE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS file_cache (
@@ -113,6 +114,11 @@ export class VaultCacheService {
   private readonly db: DatabaseSync;
   private isCacheReady = false;
   private isBuilding = false;
+  private lastRefreshStartedAt: number | null = null;
+  private lastRefreshCompletedAt: number | null = null;
+  private lastRefreshDurationMs: number | null = null;
+  private lastRefreshError: string | null = null;
+  private lastRefreshFileCount = 0;
   private refreshIntervalId: NodeJS.Timeout | null = null;
 
   constructor(obsidianService?: ObsidianRestApiService) {
@@ -174,6 +180,27 @@ export class VaultCacheService {
     return this.isBuilding;
   }
 
+  public getReadinessStatus(): CacheReadinessStatus {
+    if (this.isBuilding) return "building";
+    if (this.isCacheReady) return "ready";
+    if (this.lastRefreshError) return "error";
+    return "empty";
+  }
+
+  public async waitUntilReady(timeoutMs = 60000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.isCacheReady) {
+        return true;
+      }
+      if (!this.isBuilding && this.lastRefreshError) {
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return this.isCacheReady;
+  }
+
   public getCachedFileCount(): number {
     return this.metadataCache.size;
   }
@@ -186,6 +213,7 @@ export class VaultCacheService {
       refreshConcurrency: config.obsidianCacheConcurrency,
       schemaVersion:
         this.readMetadataValue("schema_version") ?? SHARED_CACHE_SCHEMA_VERSION,
+      status: this.getReadinessStatus(),
       ready: this.isCacheReady,
       building: this.isBuilding,
       inMemoryFileCount: this.metadataCache.size,
@@ -193,6 +221,11 @@ export class VaultCacheService {
       hotCacheSize: this.contentHotCache.size,
       hotCacheLimit: this.hotCacheLimit,
       lastRefreshAt: this.readMetadataNumber("last_refresh_at"),
+      lastRefreshStartedAt: this.lastRefreshStartedAt,
+      lastRefreshCompletedAt: this.lastRefreshCompletedAt,
+      lastRefreshDurationMs: this.lastRefreshDurationMs,
+      lastRefreshError: this.lastRefreshError,
+      lastRefreshFileCount: this.lastRefreshFileCount,
     };
   }
 
@@ -368,6 +401,10 @@ export class VaultCacheService {
     }
 
     this.isBuilding = true;
+    this.lastRefreshStartedAt = Date.now();
+    this.lastRefreshCompletedAt = null;
+    this.lastRefreshDurationMs = null;
+    this.lastRefreshError = null;
     if (isInitialBuild) {
       this.isCacheReady = false;
     }
@@ -506,6 +543,9 @@ export class VaultCacheService {
 
       const duration = (Date.now() - startTime) / 1000;
       this.isCacheReady = true;
+      this.lastRefreshCompletedAt = Date.now();
+      this.lastRefreshDurationMs = Math.round(duration * 1000);
+      this.lastRefreshFileCount = this.metadataCache.size;
       this.upsertMetadataValue("last_refresh_at", String(Date.now()));
       this.upsertMetadataValue("last_refresh_source", refreshSource);
       logger.info(
@@ -515,6 +555,8 @@ export class VaultCacheService {
         context,
       );
     } catch (error) {
+      this.lastRefreshError =
+        error instanceof Error ? error.message : String(error);
       logger.error(
         `Critical error during vault cache refresh. Cache may be incomplete. Error: ${error instanceof Error ? error.message : String(error)}`,
         context,

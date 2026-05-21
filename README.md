@@ -175,6 +175,8 @@ Useful env overrides:
 - `MCP_WRITE_MODE=readonly|guarded|full` to enforce server-side write safety (`full` is the default; set `guarded` or `readonly` explicitly to harden a host)
 - `MCP_GUARDED_MAX_WRITE_CHARS` and `MCP_GUARDED_MAX_BATCH_OPERATIONS` to tune guarded-mode limits
 
+For production-like tests on a real vault, set `OBSIDIAN_SHARED_CACHE_DB_PATH` outside the vault so validation databases do not pollute the synced note tree.
+
 This runtime exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
 Warm semantic refreshes now load from SQLite first instead of re-reading the whole `.smart-env` path every time.
 
@@ -187,14 +189,17 @@ Warm semantic refreshes now load from SQLite first instead of re-reading the who
 
 Headless means Optimike MCP running over a synchronized Markdown vault. It does not mean Obsidian Desktop, community plugins, command palette, active file, or Bases Bridge are available without Desktop.
 
-Smoke tests:
+Smoke tests and runtime contract:
 
 ```bash
+npm run test:runtime
 npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
 ```
+
+`npm run test:runtime` runs the build and all four runtime smokes. It uses temporary vaults and does not require a real Obsidian vault or API key.
 
 Useful scripts:
 
@@ -227,6 +232,8 @@ Runtime write safety:
 - `readonly` blocks all write tools except validation-only operations
 - `guarded` allows bounded explicit writes and blocks destructive operations such as delete, overwrite, frontmatter unset, broad regex replace-all, and large batches
 - `full` is the default and keeps unrestricted write behavior for trusted local environments
+
+Guarded filesystem writes support optional `expectedHash` and `expectedMtime` preconditions. Use `expectedHash` for multi-agent or synced-vault writes so stale updates fail as explicit conflicts instead of overwriting newer content.
 
 Agent-context controls:
 

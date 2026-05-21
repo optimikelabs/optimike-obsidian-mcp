@@ -79,6 +79,8 @@ Useful tuning:
 
 Default write behavior is `MCP_WRITE_MODE=full`. Hosts that want a stricter public/runtime posture can explicitly set `MCP_WRITE_MODE=guarded` or `MCP_WRITE_MODE=readonly`; agents do not need to choose a mode per write.
 
+For real-vault validation, keep `OBSIDIAN_SHARED_CACHE_DB_PATH` outside the synced vault. This lets you test readonly, hybrid, and guarded sandbox flows without adding validation databases to the vault itself.
+
 ## Runtime Modes
 
 - `live`: default full-power mode. Requires Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
@@ -91,11 +93,14 @@ Operational rule: headless modes mean Optimike MCP over a synchronized Markdown 
 Runtime smokes:
 
 ```bash
+npm run test:runtime
 npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
 ```
+
+`npm run test:runtime` is the durable local gate for this runtime family. It runs `npm run build` and all four mode smokes on temporary vaults.
 
 ## Required Dependencies
 
@@ -189,6 +194,8 @@ If Obsidian REST is unavailable but the shared cache is warm, the backend can st
 
 This is meant to keep the MCP useful when Obsidian is temporarily down, while still making the failure mode explicit.
 
+If a first read/search request arrives while the filesystem cache is still building, the tool waits briefly for cache readiness and then returns cache stats if the vault is still unavailable. Use `obsidian_runtime_maintenance` with `refresh_all` as a manual readiness gate on large vaults.
+
 ## Health and Maintenance
 
 ### HTTP health
@@ -241,10 +248,19 @@ It verifies:
 To verify code before a PR or merge:
 
 ```bash
+npm run test:runtime
 npm run verify:code
 ```
 
-This runs:
+`npm run test:runtime` runs:
+
+- `npm run build`
+- headless readonly smoke
+- hybrid without API smoke
+- hybrid with mocked API smoke
+- headless guarded smoke
+
+`npm run verify:code` runs:
 
 - `npm audit`
 - `npm run build`

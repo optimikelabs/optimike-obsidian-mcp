@@ -213,6 +213,10 @@ async function ensureSharedCacheReady(
       { ...context, dbPath: config.obsidianSharedCacheDbPath },
     );
     await vaultCacheService.buildVaultCache();
+    await vaultCacheService.waitUntilReady();
+  } else if (vaultCacheService && !vaultCacheService.isReady()) {
+    await vaultCacheService.buildVaultCache();
+    await vaultCacheService.waitUntilReady();
   }
   if (!existsSync(config.obsidianSharedCacheDbPath)) {
     throw new McpError(

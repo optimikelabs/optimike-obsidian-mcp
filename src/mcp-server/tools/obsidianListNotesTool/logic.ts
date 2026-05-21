@@ -336,10 +336,15 @@ export const processObsidianListNotes = async (
     try {
       if (!obsidianService) {
         if (!vaultCacheService?.isReady()) {
+          await vaultCacheService?.buildVaultCache();
+          await vaultCacheService?.waitUntilReady();
+        }
+        if (!vaultCacheService?.isReady()) {
+          const stats = vaultCacheService?.getStats();
           throw new McpError(
             BaseErrorCode.SERVICE_UNAVAILABLE,
-            "Obsidian REST API is unavailable and shared cache is not ready.",
-            buildTreeContext,
+            `Obsidian REST API is unavailable and shared cache is ${String(stats?.status ?? "not ready")}. Run obsidian_runtime_maintenance refresh_all or wait for cache readiness.`,
+            { ...buildTreeContext, cacheStats: stats },
           );
         }
         fileTree = buildFileTreeFromCache(

@@ -73,6 +73,8 @@ function registerHeadlessGuardedWriteTools(
       modificationType: z.literal("wholeFile"),
       wholeFileMode: z.enum(["append", "prepend"]),
       content: z.string(),
+      expectedHash: z.string().optional(),
+      expectedMtime: z.number().optional(),
       returnContent: z.boolean().optional().default(false),
     },
     async (params) => {
@@ -92,6 +94,10 @@ function registerHeadlessGuardedWriteTools(
         params.wholeFileMode,
         params.content,
         context,
+        {
+          expectedHash: params.expectedHash,
+          expectedMtime: params.expectedMtime,
+        },
       );
       await rebuildCacheAfterGuardedWrite(vaultCacheService);
       return {
@@ -130,6 +136,8 @@ function registerHeadlessGuardedWriteTools(
       replacements: z
         .array(z.object({ search: z.string().min(1), replace: z.string() }))
         .min(1),
+      expectedHash: z.string().optional(),
+      expectedMtime: z.number().optional(),
       returnContent: z.boolean().optional().default(false),
     },
     async (params) => {
@@ -148,6 +156,10 @@ function registerHeadlessGuardedWriteTools(
         params.targetIdentifier,
         params.replacements,
         context,
+        {
+          expectedHash: params.expectedHash,
+          expectedMtime: params.expectedMtime,
+        },
       );
       await rebuildCacheAfterGuardedWrite(vaultCacheService);
       return {
@@ -186,6 +198,8 @@ function registerHeadlessGuardedWriteTools(
       operation: z.literal("set"),
       key: z.string().min(1),
       value: z.any(),
+      expectedHash: z.string().optional(),
+      expectedMtime: z.number().optional(),
     },
     async (params) => {
       const context = requestContextService.createRequestContext({
@@ -205,6 +219,10 @@ function registerHeadlessGuardedWriteTools(
         params.key,
         params.value,
         context,
+        {
+          expectedHash: params.expectedHash,
+          expectedMtime: params.expectedMtime,
+        },
       );
       await rebuildCacheAfterGuardedWrite(vaultCacheService);
       return {

@@ -409,6 +409,10 @@ export const processObsidianGlobalSearch = async (
 
   // 3. Fallback to Cache if API Failed/Timed Out
   if (apiFailedOrTimedOut) {
+    if (vaultCacheService && !vaultCacheService.isReady()) {
+      await vaultCacheService.buildVaultCache();
+      await vaultCacheService.waitUntilReady();
+    }
     if (vaultCacheService && vaultCacheService.isReady()) {
       strategyMessage += "Falling back to in-memory cache. ";
       logger.info(
@@ -478,17 +482,20 @@ export const processObsidianGlobalSearch = async (
       strategyMessage += `Searched ${entries.length} cached files, processed ${processedCount} matching all filters (including path: '${searchPathPrefix || "entire vault"}'). `;
     } else {
       // This block now handles both "cache disabled" and "cache not ready"
-      const reason = vaultCacheService ? "is not ready" : "is disabled";
+      const stats = vaultCacheService?.getStats();
+      const reason = vaultCacheService
+        ? `is ${String(stats?.status ?? "not ready")}`
+        : "is disabled";
       strategyMessage += `Cache not available (${reason}), unable to fallback. `;
       logger.error(
         `API search failed and cache ${reason}. Cannot perform search.`,
-        opContext,
+        { ...opContext, cacheStats: stats },
       );
       // Throw a specific error because the tool cannot function without a data source.
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
-        `Live API search failed and the cache is currently ${reason}. Please ensure the Obsidian REST API is running and reachable, and that the cache is enabled and has had time to build.`,
-        opContext,
+        `Live API search failed and the cache ${reason}. Run obsidian_runtime_maintenance refresh_all or wait for cache readiness.`,
+        { ...opContext, cacheStats: stats },
       );
     }
   }

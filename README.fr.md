@@ -179,6 +179,8 @@ Variables utiles :
 - `MCP_WRITE_MODE=readonly|guarded|full` pour imposer la sécurité d’écriture côté serveur (`full` est le défaut ; définir explicitement `guarded` ou `readonly` pour durcir un hôte)
 - `MCP_GUARDED_MAX_WRITE_CHARS` et `MCP_GUARDED_MAX_BATCH_OPERATIONS` pour régler les limites du mode guarded
 
+Pour tester sur un vrai coffre, définir `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du coffre afin que les bases SQLite de validation ne polluent pas l’arbre synchronisé.
+
 Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
 Les refreshs sémantiques à chaud relisent SQLite d’abord, puis seulement `.smart-env` si nécessaire.
 
@@ -188,6 +190,7 @@ Scripts utiles :
 npm run build
 npm run start:proxy
 npm run start:http
+npm run test:runtime
 npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
@@ -202,6 +205,8 @@ npm run smoke:headless-guarded
 - `headless-guarded` : sans Obsidian Desktop ; expose la surface read headless + écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded.
 
 Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchronisé. Cela ne signifie pas que Desktop, les plugins communautaires, la command palette, l’active file ou Bases Bridge sont disponibles sans Obsidian Desktop.
+
+`npm run test:runtime` lance le build et les quatre smokes runtime principaux. Il utilise des vaults temporaires et ne dépend ni d’un vrai coffre Obsidian, ni d’une clé API réelle.
 
 Health et maintenance :
 
@@ -220,6 +225,8 @@ Sécurité d’écriture runtime :
 - `readonly` bloque tous les outils d’écriture hors opérations de validation pure
 - `guarded` autorise les écritures explicites et bornées, mais bloque suppression, overwrite, unset frontmatter, regex replace-all large et gros batchs
 - `full` est le défaut et conserve le comportement d’écriture complet pour un environnement local de confiance
+
+Les écritures filesystem guarded acceptent `expectedHash` et `expectedMtime`. Préférer `expectedHash` sur un coffre synchronisé ou multi-agent : une note modifiée entre lecture et écriture produit alors un conflit explicite au lieu d’un écrasement silencieux.
 
 Contrôle du contexte agent :
 

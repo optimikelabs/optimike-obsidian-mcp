@@ -159,6 +159,11 @@ export const processObsidianReadNote = async (
     requestedPath: string,
   ): Promise<ObsidianReadNoteResponse | null> => {
     if (!vaultCacheService?.isReady()) {
+      await vaultCacheService?.buildVaultCache();
+      await vaultCacheService?.waitUntilReady();
+    }
+
+    if (!vaultCacheService?.isReady()) {
       return null;
     }
 
@@ -211,8 +216,8 @@ export const processObsidianReadNote = async (
         }
         throw new McpError(
           BaseErrorCode.SERVICE_UNAVAILABLE,
-          "Obsidian REST API is unavailable and shared cache is not ready or does not contain the requested file.",
-          readContext,
+          `Obsidian REST API is unavailable and shared cache is ${String(vaultCacheService?.getStats().status ?? "not ready")} or does not contain the requested file.`,
+          { ...readContext, cacheStats: vaultCacheService?.getStats() },
         );
       }
 

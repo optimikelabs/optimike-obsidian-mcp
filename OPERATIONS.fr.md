@@ -79,6 +79,8 @@ Variables de tuning utiles :
 
 Le comportement d’écriture par défaut est `MCP_WRITE_MODE=full`. Les hôtes qui veulent une posture publique/runtime plus stricte peuvent définir explicitement `MCP_WRITE_MODE=guarded` ou `MCP_WRITE_MODE=readonly` ; l’agent n’a pas à choisir un mode à chaque écriture.
 
+Pour valider sur un vrai coffre, garder `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du coffre synchronisé. Cela permet de tester readonly, hybrid et les flows guarded en sandbox sans ajouter de base SQLite de validation dans le vault.
+
 ## Modes runtime
 
 - `live` : mode complet par défaut. Requiert Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
@@ -91,11 +93,14 @@ Règle opérationnelle : les modes headless signifient Optimike MCP au-dessus d�
 Smokes runtime :
 
 ```bash
+npm run test:runtime
 npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
 ```
+
+`npm run test:runtime` est la gate locale durable pour cette famille runtime. Elle lance `npm run build` puis les quatre smokes de mode sur des vaults temporaires.
 
 ## Dépendances requises
 
@@ -189,6 +194,8 @@ Si Obsidian REST n’est plus joignable mais que le cache partagé est chaud, le
 
 Le but est de garder le MCP utile quand Obsidian tombe temporairement, tout en rendant l’état explicite.
 
+Si une première lecture ou recherche arrive pendant que le cache filesystem est encore en construction, la tool attend brièvement la readiness du cache puis renvoie les stats cache si le vault reste indisponible. Sur gros coffre, utiliser `obsidian_runtime_maintenance` avec `refresh_all` comme gate manuelle de readiness.
+
 ## Santé et maintenance
 
 ### Health HTTP
@@ -241,10 +248,19 @@ Il contrôle :
 Pour vérifier le code avant PR ou merge :
 
 ```bash
+npm run test:runtime
 npm run verify:code
 ```
 
-Ce script enchaîne :
+`npm run test:runtime` enchaîne :
+
+- `npm run build`
+- smoke headless readonly
+- smoke hybrid sans API
+- smoke hybrid avec API simulée
+- smoke headless guarded
+
+`npm run verify:code` enchaîne :
 
 - `npm audit`
 - `npm run build`
