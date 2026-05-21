@@ -76,7 +76,7 @@ Useful tuning:
 - `MCP_WRITE_MODE=readonly|guarded|full`
 - `MCP_GUARDED_MAX_WRITE_CHARS`
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
-- `OBSIDIAN_STARTUP_BLOCKING=false` for faster non-blocking startup in WSL-heavy setups
+- `OBSIDIAN_STARTUP_BLOCKING=false` for faster non-blocking startup
 
 Default write behavior is `MCP_WRITE_MODE=full`. Hosts that want a stricter public/runtime posture can explicitly set `MCP_WRITE_MODE=guarded` or `MCP_WRITE_MODE=readonly`; agents do not need to choose a mode per write.
 

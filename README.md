@@ -310,7 +310,7 @@ ENABLE_QUERY_EMBEDDING = "true"
 OBSIDIAN_BASE_URL = "http://localhost:27123"
 OBSIDIAN_API_KEY  = "<token>"
 
-# Startup behavior (optional, recommended for faster startup in WSL setups)
+# Startup behavior (optional, recommended for faster startup)
 # OBSIDIAN_STARTUP_BLOCKING=false starts MCP immediately and runs health check in background.
 OBSIDIAN_STARTUP_MAX_RETRIES = "2"
 OBSIDIAN_STARTUP_RETRY_DELAY_MS = "1200"
@@ -359,9 +359,11 @@ export OBSIDIAN_API_KEY=<your_api_key>
   `MCP_ALLOWED_ORIGINS` narrow. The default `stdio` / `127.0.0.1` profile is the
   safer local setup.
 
-## WSL2 + Obsidian on Windows (Local REST API)
+## Legacy WSL2 Troubleshooting: Obsidian on Windows
 
-If Obsidian runs on Windows and Codex runs in WSL2:
+Most local setups should use the native `stdio` entrypoint and `127.0.0.1`.
+This section is only for older or explicit WSL2 setups where Obsidian runs on
+Windows and Codex runs inside WSL2:
 
 - `127.0.0.1` from WSL points to WSL, not Windows
 - use the Windows host IP (the WSL gateway) for `OBSIDIAN_BASE_URL`
@@ -492,25 +494,6 @@ Keep auto mode and let each user override via env vars.
 - Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
 - Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
 - French README: [README.fr.md](README.fr.md)
-
-## WSL + Ollama Windows (recommended)
-
-If Obsidian runs on Windows and Ollama too:
-
-1. set `OLLAMA_HOST=0.0.0.0:11434` on Windows
-2. restart Ollama
-3. test from WSL:
-
-```bash
-GW=$(ip route | awk '/default/ {print $3; exit}')
-curl http://$GW:11434/api/tags
-```
-
-Then, if needed:
-
-```bash
-export OLLAMA_BASE_URL=http://$GW:11434
-```
 
 ## Credits
 

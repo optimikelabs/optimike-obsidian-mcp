@@ -76,7 +76,7 @@ Variables de réglage utiles :
 - `MCP_WRITE_MODE=readonly|guarded|full`
 - `MCP_GUARDED_MAX_WRITE_CHARS`
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
-- `OBSIDIAN_STARTUP_BLOCKING=false` pour un démarrage non bloquant plus confortable sous WSL
+- `OBSIDIAN_STARTUP_BLOCKING=false` pour un démarrage non bloquant plus confortable
 
 Le comportement d’écriture par défaut est `MCP_WRITE_MODE=full`. Les hôtes qui veulent une posture publique plus stricte peuvent définir explicitement `MCP_WRITE_MODE=guarded` ou `MCP_WRITE_MODE=readonly` ; l’agent n’a pas à choisir un mode à chaque écriture.
 
