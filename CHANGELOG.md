@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-05-21
+
+### Added
+
+- Dedicated headless server profile assets: `.env.server.example`, vault snapshot helper, long-run validation script, and cross-platform runtime CI workflow.
+- `obsidian_admin_filesystem` for dry-run-first archive, batch move, and batch delete operations with per-file preconditions.
+- Advanced headless tag operations: local tag audit and guarded tag rename across frontmatter and inline Markdown tags.
+- Richer local Bases query filters for equality, arrays, `contains`, `in`, and numeric/date comparisons.
+
+### Changed
+
+- `headless-filesystem` now exposes explicit filesystem admin features while keeping Desktop/UI/Bases-engine parity out of scope.
+- Package contents now include server docs, examples, and operational scripts for backend deployment validation.
+
+### Security
+
+- Admin filesystem apply paths require `expectedHash` or `expectedMtime`; dry-run remains the default.
+- Server validation guidance keeps cache/output outside the synced vault and recommends snapshots before write tests.
+
 ## [2.0.7-optimike.2] - 2026-05-21
 
 ### Added

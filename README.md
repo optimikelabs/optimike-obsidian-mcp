@@ -195,7 +195,7 @@ Warm semantic refreshes now load from SQLite first instead of re-reading the who
 - `hybrid`: starts from the local vault/cache and uses Local REST API when `OBSIDIAN_API_KEY` is configured. The API startup check is non-blocking. If no API key is configured, `OBSIDIAN_VAULT` is required.
 - `headless-readonly`: no Obsidian Desktop, no Local REST API, no `OBSIDIAN_API_KEY`. Requires `OBSIDIAN_VAULT` and `OBSIDIAN_CACHE_SOURCE=filesystem`; exposes read/list/search/tasks/semantic/runtime tools plus local readonly `bases_list`, `bases_get_schema`, and `bases_query`.
 - `headless-guarded`: no Obsidian Desktop; exposes the headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by the guarded write policy. Local readonly Bases fallback is also available.
-- `headless-filesystem`: no Obsidian Desktop; exposes `headless-guarded` plus bounded filesystem features: frontmatter/inline tags and local tag index, move/rename with `expectedHash` or `expectedMtime`, delete with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
+- `headless-filesystem`: no Obsidian Desktop; exposes `headless-guarded` plus bounded filesystem features: frontmatter/inline tags, local tag index/audit and dry-run rename, admin move/archive/delete operations with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
 
 Headless means Optimike MCP running over a synchronized Markdown vault. It does not mean Obsidian Desktop, community plugins, command palette, active file, or Bases Bridge are available without Desktop.
 
@@ -210,6 +210,9 @@ npm run smoke:headless-guarded
 npm run smoke:headless-filesystem
 npm run smoke:headless-status
 npm run check:vault-exclusions -- --vault=/path/to/vault
+npm run test:headless-long-run
+npm run snapshot:vault
+npm pack --dry-run
 ```
 
 `npm run test:runtime` runs the build, all runtime mode smokes, and the HTTP health/status smoke. It uses temporary vaults and does not require a real Obsidian vault or API key. The headless smokes also assert that excluded `tmp/**` content is not indexed.
@@ -221,7 +224,7 @@ Local Bases fallback:
 
 - `bases_list`, `bases_get_schema`, and `bases_query` are available in headless modes with `source: "local-fallback"`.
 - The fallback reads `.base` YAML from `OBSIDIAN_VAULT` and cached Markdown frontmatter from the shared cache.
-- It supports direct equality filters, simple sorting, pagination, and schema inspection.
+- It supports direct equality filters, arrays, `contains`, `in`, comparisons, simple sorting, pagination, and schema inspection.
 - It does not evaluate Obsidian formulas, plugin-specific filters, calculated properties, or exact UI view semantics.
 
 Useful scripts:

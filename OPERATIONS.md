@@ -105,7 +105,7 @@ This policy protects Optimike cache, search, Tasks, and local Bases fallback beh
 - `hybrid`: Local REST API is optional and non-blocking. If API credentials are configured, live tools are exposed; otherwise `OBSIDIAN_VAULT` is required and the server keeps the cache/filesystem read surface available.
 - `headless-readonly`: requires `OBSIDIAN_VAULT`; does not require Obsidian Desktop, Local REST API, or `OBSIDIAN_API_KEY`; exposes read/list/search/tasks/semantic/runtime tools plus readonly local Bases fallback.
 - `headless-guarded`: same headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by guarded policy. Readonly local Bases fallback is also available.
-- `headless-filesystem`: same as `headless-guarded`, plus explicit filesystem features for sandbox/dedicated vaults: frontmatter/inline tags and local tag index, move/rename with `expectedHash` or `expectedMtime`, delete with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
+- `headless-filesystem`: same as `headless-guarded`, plus explicit filesystem features for sandbox/dedicated vaults: frontmatter/inline tags, local tag index/audit and dry-run rename, admin move/archive/delete operations with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
 
 Operational rule: headless modes mean Optimike MCP over a synchronized Markdown vault. They do not load Obsidian community plugins or provide active file, command palette, or Bases Bridge without Desktop.
 
@@ -120,6 +120,9 @@ npm run smoke:headless-guarded
 npm run smoke:headless-filesystem
 npm run smoke:headless-status
 npm run check:vault-exclusions -- --vault=/path/to/vault
+npm run test:headless-long-run
+npm run snapshot:vault
+npm pack --dry-run
 ```
 
 `npm run test:runtime` is the durable local gate for this runtime family. It runs `npm run build`, all mode smokes, and the HTTP health/status smoke on temporary vaults. The headless smokes also check that excluded `tmp/**` content is not indexed.

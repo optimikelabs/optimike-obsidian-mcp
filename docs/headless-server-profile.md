@@ -13,6 +13,8 @@ This profile is for a dedicated server or copied Sync vault. It keeps the stable
 
 ## Environment
 
+An adaptable example is provided in `.env.server.example`.
+
 ```bash
 OBSIDIAN_RUNTIME_MODE=headless-readonly
 OBSIDIAN_VAULT=/path/to/dedicated-or-copied-vault
@@ -34,6 +36,18 @@ HEADLESS_SERVER_CACHE_DIR=.tmp/headless-server-profile-cache \
 npm run smoke:headless-server-profile
 ```
 
+For long-run validation:
+
+```bash
+HEADLESS_SERVER_VAULT=/path/to/dedicated-or-copied-vault \
+HEADLESS_SERVER_CACHE_DIR=/path/outside/vault/cache \
+HEADLESS_LONG_RUN_MINUTES=120 \
+HEADLESS_LONG_RUN_INTERVAL_SECONDS=60 \
+npm run test:headless-long-run
+```
+
+The report is written to `.tmp/headless-long-run` by default, or to `HEADLESS_LONG_RUN_OUTPUT_DIR`.
+
 The server-profile smoke checks that:
 
 - the server starts in `headless-readonly`;
@@ -53,6 +67,14 @@ Only after the read-only server profile is green:
 4. Require `expectedHash` or `expectedMtime` for follow-up edits.
 5. Confirm stale hash and traversal writes are blocked.
 
+Before a write test, snapshot the dedicated vault:
+
+```bash
+HEADLESS_SERVER_VAULT=/path/to/dedicated-or-copied-vault npm run snapshot:vault
+```
+
+The snapshot is not a full backup strategy, but it gives a fast local rollback point for server tests.
+
 ## Filesystem Features
 
 Only after the `headless-guarded` step, switch a copied or dedicated vault to `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
@@ -64,3 +86,7 @@ Only after the `headless-guarded` step, switch a copied or dedicated vault to `O
 5. Validate with `npm run smoke:headless-filesystem`.
 
 Never use this phase to edit existing production notes until the server profile has its own rollback and monitoring story.
+
+## Server Go/No-Go
+
+Go when `test:runtime`, `smoke:headless-server-profile`, a short then longer long-run validation, and `npm pack --dry-run` are green. No-go if the server vault still shares the live Desktop location, the cache lives inside the vault, or writes are enabled before snapshot/rollback.

@@ -105,7 +105,7 @@ Cette politique protège le cache Optimike, la recherche, Tasks et le fallback l
 - `hybrid` : Local REST API optionnelle et non bloquante. Si l’API est configurée, les tools live sont exposées ; sinon `OBSIDIAN_VAULT` est requis et la surface cache/filesystem reste disponible.
 - `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases readonly.
 - `headless-guarded` : même surface read headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases readonly est aussi disponible.
-- `headless-filesystem` : même surface que `headless-guarded`, plus features filesystem explicites pour sandbox/vault dédié : tags frontmatter/inline et index local des tags, move/rename avec `expectedHash` ou `expectedMtime`, delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, et rows Bases comme opérations `set` de frontmatter Markdown.
+- `headless-filesystem` : même surface que `headless-guarded`, plus features filesystem explicites pour sandbox/vault dédié : tags frontmatter/inline, index/audit local des tags et rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, et rows Bases comme opérations `set` de frontmatter Markdown.
 
 Règle opérationnelle : les modes headless signifient Optimike MCP au-dessus d’un vault Markdown synchronisé. Ils ne chargent pas les plugins communautaires Obsidian et ne fournissent pas active file, command palette ou Bases Bridge sans Desktop.
 
@@ -120,6 +120,9 @@ npm run smoke:headless-guarded
 npm run smoke:headless-filesystem
 npm run smoke:headless-status
 npm run check:vault-exclusions -- --vault=/chemin/vers/vault
+npm run test:headless-long-run
+npm run snapshot:vault
+npm pack --dry-run
 ```
 
 `npm run test:runtime` est la gate locale durable pour cette famille runtime. Elle lance `npm run build`, les smokes de mode et le smoke HTTP health/status sur des vaults temporaires. Les smokes headless vérifient aussi qu’un contenu exclu sous `tmp/**` n’est pas indexé.

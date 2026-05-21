@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "2.0.7",
+  "version": "2.1.0",
   "description": "Unified Obsidian MCP server with shared local cache, integrated Tasks tools, Bases support, semantic search via Smart Connections, server health/status observability, and degraded read mode for durable Codex workflows.",
   "main": "dist/index.js",
   "files": [
@@ -13,6 +13,8 @@
     "docs/runtime-capability-matrix.fr.md",
     "docs/headless-server-profile.md",
     "docs/headless-server-profile.fr.md",
+    ".env.server.example",
+    "scripts",
     "docs/assets",
     "LICENSE",
     "CHANGELOG.md"
@@ -45,6 +47,8 @@
     "smoke:headless-filesystem": "node scripts/smoke-headless-readonly.mjs --mode=headless-filesystem",
     "smoke:headless-status": "node scripts/smoke-headless-status.mjs",
     "smoke:headless-server-profile": "node scripts/smoke-headless-server-profile.mjs",
+    "test:headless-long-run": "node scripts/long-run-headless-server.mjs",
+    "snapshot:vault": "node scripts/snapshot-vault.mjs",
     "check:vault-exclusions": "node scripts/check-vault-exclusion-policy.mjs",
     "test:runtime": "npm run build && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && npm run smoke:headless-status",
     "verify:code": "npm audit && npm run build",

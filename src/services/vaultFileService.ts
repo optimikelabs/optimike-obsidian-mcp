@@ -97,6 +97,18 @@ function removeInlineTag(body: string, tag: string): string {
     .replace(/[ \t]{2,}/g, " ");
 }
 
+function replaceInlineTag(
+  body: string,
+  fromTag: string,
+  toTag: string,
+): string {
+  const escaped = fromTag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return body.replace(
+    new RegExp(`(^|[\\s([{])#${escaped}(?=$|[\\s\\])}.,;:!?])`, "gu"),
+    `$1#${toTag}`,
+  );
+}
+
 export class VaultFileService {
   private readonly vaultRoot: string;
 
@@ -488,6 +500,41 @@ export class VaultFileService {
       inlineTags: nextTags.inlineTags,
       currentTags: nextTags.allTags,
     };
+  }
+
+  async renameTag(
+    filePath: string,
+    fromTag: string,
+    toTag: string,
+    context: RequestContext,
+    preconditions?: VaultFileWritePreconditions,
+  ): Promise<{
+    result: VaultFileReadResult;
+    before: ReturnType<typeof extractMarkdownTags>;
+    after: ReturnType<typeof extractMarkdownTags>;
+  }> {
+    const current = await this.read(filePath, context);
+    this.assertWritePreconditions(current, preconditions, context);
+    const before = extractMarkdownTags(current.content);
+    const normalizedFrom = normalizeTag(fromTag);
+    const normalizedTo = normalizeTag(toTag);
+    const { frontmatter, body } = splitFrontmatter(current.content);
+    if (Array.isArray(frontmatter.tags)) {
+      frontmatter.tags = uniqueTags(
+        frontmatter.tags
+          .map(String)
+          .map((tag) =>
+            normalizeTag(tag) === normalizedFrom ? normalizedTo : tag,
+          ),
+      );
+    }
+    const nextBody = replaceInlineTag(body, normalizedFrom, normalizedTo);
+    const result = await this.writeAtomic(
+      filePath,
+      renderWithFrontmatter(frontmatter, nextBody),
+      context,
+    );
+    return { result, before, after: extractMarkdownTags(result.content) };
   }
 
   async moveFile(

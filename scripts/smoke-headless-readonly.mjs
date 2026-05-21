@@ -338,6 +338,7 @@ async function main() {
             "obsidian_manage_tags",
             "obsidian_move_note",
             "obsidian_batch_frontmatter",
+            "obsidian_admin_filesystem",
             "bases_create",
             "bases_upsert_config",
             "bases_upsert_rows",
@@ -352,7 +353,11 @@ async function main() {
         );
       }
     }
-    const filesystemOnly = ["obsidian_move_note", "obsidian_batch_frontmatter"];
+    const filesystemOnly = [
+      "obsidian_move_note",
+      "obsidian_batch_frontmatter",
+      "obsidian_admin_filesystem",
+    ];
     for (const name of filesystemOnly) {
       if (modeArg === "headless-filesystem") {
         if (!toolNames.includes(name)) {
@@ -605,6 +610,33 @@ async function main() {
           "filesystem inline tags remove",
         );
 
+        const tagAudit = await withTimeout(
+          client.callTool({
+            name: "obsidian_manage_tags",
+            arguments: { operation: "audit" },
+          }),
+          "filesystem tag audit",
+        );
+        assertTextIncludes(tagAudit, "frontmatterTags", "filesystem tag audit");
+
+        const tagRenameDryRun = await withTimeout(
+          client.callTool({
+            name: "obsidian_manage_tags",
+            arguments: {
+              operation: "rename",
+              fromTag: "headless",
+              toTag: "headless/renamed",
+              dryRun: true,
+            },
+          }),
+          "filesystem tag rename dry run",
+        );
+        assertTextIncludes(
+          tagRenameDryRun,
+          "headless/renamed",
+          "filesystem tag rename dry run",
+        );
+
         const batchDryRun = await withTimeout(
           client.callTool({
             name: "obsidian_batch_frontmatter",
@@ -677,6 +709,24 @@ async function main() {
           "filesystem move",
         );
         assertTextIncludes(moveResult, "Projects/Moved.md", "filesystem move");
+
+        const adminDryRun = await withTimeout(
+          client.callTool({
+            name: "obsidian_admin_filesystem",
+            arguments: {
+              operation: "archive",
+              dryRun: true,
+              archiveDir: "Archive",
+              items: [{ sourcePath: "Projects/Moved.md" }],
+            },
+          }),
+          "filesystem admin archive dry run",
+        );
+        assertTextIncludes(
+          adminDryRun,
+          "Archive/Moved.md",
+          "filesystem admin archive dry run",
+        );
 
         const baseCreate = await withTimeout(
           client.callTool({

@@ -13,6 +13,8 @@ Ce profil sert à valider un serveur dédié ou une copie Sync. Il garde la post
 
 ## Environnement
 
+Un exemple prêt à adapter est fourni dans `.env.server.example`.
+
 ```bash
 OBSIDIAN_RUNTIME_MODE=headless-readonly
 OBSIDIAN_VAULT=/chemin/vers/vault-dedie-ou-copie
@@ -34,6 +36,18 @@ HEADLESS_SERVER_CACHE_DIR=.tmp/headless-server-profile-cache \
 npm run smoke:headless-server-profile
 ```
 
+Pour une validation longue :
+
+```bash
+HEADLESS_SERVER_VAULT=/chemin/vers/vault-dedie-ou-copie \
+HEADLESS_SERVER_CACHE_DIR=/chemin/hors/vault/cache \
+HEADLESS_LONG_RUN_MINUTES=120 \
+HEADLESS_LONG_RUN_INTERVAL_SECONDS=60 \
+npm run test:headless-long-run
+```
+
+Le rapport est écrit dans `.tmp/headless-long-run` par défaut, ou dans `HEADLESS_LONG_RUN_OUTPUT_DIR`.
+
 Le smoke serveur vérifie que :
 
 - le serveur démarre en `headless-readonly` ;
@@ -53,6 +67,14 @@ Seulement après validation du profil serveur read-only :
 4. Exiger `expectedHash` ou `expectedMtime` pour les modifications suivantes.
 5. Confirmer que hash périmé et path traversal sont bloqués.
 
+Avant un test d'écriture, créer un snapshot du vault dédié :
+
+```bash
+HEADLESS_SERVER_VAULT=/chemin/vers/vault-dedie-ou-copie npm run snapshot:vault
+```
+
+Le snapshot ne remplace pas une vraie sauvegarde, mais donne un rollback local rapide pour les tests serveur.
+
 ## Features filesystem
 
 Seulement après le palier `headless-guarded`, passer une copie ou un vault dédié en `OBSIDIAN_RUNTIME_MODE=headless-filesystem`.
@@ -64,3 +86,7 @@ Seulement après le palier `headless-guarded`, passer une copie ou un vault déd
 5. Valider avec `npm run smoke:headless-filesystem`.
 
 Ne jamais utiliser cette phase pour modifier des notes de production existantes tant que le profil serveur n’a pas son propre rollback et monitoring.
+
+## Go/no-go serveur
+
+Go si `test:runtime`, `smoke:headless-server-profile`, une validation longue courte puis longue, et `npm pack --dry-run` sont verts. No-go si le vault serveur sync encore dans le même emplacement que le Desktop vivant, si le cache est dans le vault, ou si les writes sont activés avant snapshot/rollback.

@@ -69,12 +69,54 @@ function readProperty(row: LocalBaseRow, prop: string): unknown {
   return row.props[prop];
 }
 
-function matchesFilter(row: LocalBaseRow, filter: Record<string, unknown>): boolean {
+function scalarMatches(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(actual)) {
+    return actual.map(String).includes(String(expected));
+  }
+  return actual === expected;
+}
+
+function matchesFilter(
+  row: LocalBaseRow,
+  filter: Record<string, unknown>,
+): boolean {
   for (const [key, expected] of Object.entries(filter)) {
-    if (isRecord(expected) || Array.isArray(expected)) {
-      return false;
+    const actual = readProperty(row, key);
+    if (Array.isArray(expected)) {
+      if (!expected.some((item) => scalarMatches(actual, item))) {
+        return false;
+      }
+      continue;
     }
-    if (readProperty(row, key) !== expected) {
+    if (isRecord(expected)) {
+      for (const [operator, value] of Object.entries(expected)) {
+        if (operator === "eq" && !scalarMatches(actual, value)) return false;
+        if (operator === "ne" && scalarMatches(actual, value)) return false;
+        if (
+          operator === "contains" &&
+          !String(actual ?? "").includes(String(value))
+        ) {
+          return false;
+        }
+        if (
+          operator === "in" &&
+          (!Array.isArray(value) ||
+            !value.some((item) => scalarMatches(actual, item)))
+        ) {
+          return false;
+        }
+        if (operator === "gt" && !(Number(actual) > Number(value)))
+          return false;
+        if (operator === "gte" && !(Number(actual) >= Number(value)))
+          return false;
+        if (operator === "lt" && !(Number(actual) < Number(value)))
+          return false;
+        if (operator === "lte" && !(Number(actual) <= Number(value)))
+          return false;
+      }
+      continue;
+    }
+    if (!scalarMatches(actual, expected)) {
       return false;
     }
   }
@@ -106,7 +148,9 @@ export class LocalBasesService {
         const relativePathForPolicy = normalizeVaultRelativePath(
           path.relative(config.obsidianVaultPath!, absolutePath),
         );
-        if (isVaultPathExcluded(relativePathForPolicy, this.vaultExclusionMatcher)) {
+        if (
+          isVaultPathExcluded(relativePathForPolicy, this.vaultExclusionMatcher)
+        ) {
           continue;
         }
         if (entry.isDirectory()) {
@@ -136,7 +180,10 @@ export class LocalBasesService {
     return parsedBases.sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  private async getParsedBase(baseId: string, context: RequestContext): Promise<ParsedBase> {
+  private async getParsedBase(
+    baseId: string,
+    context: RequestContext,
+  ): Promise<ParsedBase> {
     const normalized = normalizeBaseId(baseId);
     const bases = await this.listParsedBases();
     const base = bases.find(
@@ -170,7 +217,9 @@ export class LocalBasesService {
   async getBaseSchema(
     baseId: string,
     context: RequestContext,
-  ): Promise<BaseSchemaResponse & { source: "local-fallback"; limitations: string[] }> {
+  ): Promise<
+    BaseSchemaResponse & { source: "local-fallback"; limitations: string[] }
+  > {
     const base = await this.getParsedBase(baseId, context);
     const propertiesConfig = isRecord(base.config.properties)
       ? base.config.properties
@@ -179,13 +228,17 @@ export class LocalBasesService {
       ? base.config.formulas
       : {};
     const views = Array.isArray(base.config.views) ? base.config.views : [];
-    const properties: BaseSchemaProperty[] = Object.entries(propertiesConfig).map(
-      ([key, value]) => ({
-        key,
-        kind: key.startsWith("formula.") ? "formula" : key.startsWith("file.") ? "file" : "note",
-        displayName: isRecord(value) ? String(value.displayName ?? key) : key,
-      }),
-    );
+    const properties: BaseSchemaProperty[] = Object.entries(
+      propertiesConfig,
+    ).map(([key, value]) => ({
+      key,
+      kind: key.startsWith("formula.")
+        ? "formula"
+        : key.startsWith("file.")
+          ? "file"
+          : "note",
+      displayName: isRecord(value) ? String(value.displayName ?? key) : key,
+    }));
     for (const key of Object.keys(formulasConfig)) {
       properties.push({
         key: `formula.${key}`,
@@ -280,7 +333,7 @@ export class LocalBasesService {
       page,
       rows: paged,
       limitations: [
-        "Only direct equality filters are supported in local fallback.",
+        "Local fallback supports direct equality plus simple eq/ne/in/contains/gt/gte/lt/lte filters.",
         "Base-level filters, view filters, formulas, and calculated properties are not evaluated.",
       ],
     };

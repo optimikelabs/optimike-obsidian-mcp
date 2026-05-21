@@ -340,8 +340,11 @@ function registerHeadlessGuardedWriteTools(
     "Headless-filesystem tag management for YAML frontmatter tags, inline Markdown tags, and local tag index.",
     {
       filePath: z.string().min(1).optional(),
-      operation: z.enum(["add", "remove", "list", "index"]),
+      operation: z.enum(["add", "remove", "list", "index", "audit", "rename"]),
       tags: z.array(z.string()).default([]),
+      fromTag: z.string().optional(),
+      toTag: z.string().optional(),
+      dryRun: z.boolean().default(true),
       location: z
         .enum(["frontmatter", "inline", "both"])
         .default("frontmatter"),
@@ -354,20 +357,35 @@ function registerHeadlessGuardedWriteTools(
         toolName: "obsidian_manage_tags",
         target: params.filePath,
       });
-      if (params.operation === "index") {
+      if (params.operation === "index" || params.operation === "audit") {
         const entries = vaultCacheService?.getEntriesByPrefix("") ?? [];
         const counts = new Map<string, { files: number; paths: string[] }>();
+        const files = [];
         for (const entry of entries) {
           if (path.extname(entry.path).toLowerCase() !== ".md") {
             continue;
           }
           const content =
             (await vaultCacheService?.getEntry(entry.path))?.content ?? "";
-          for (const tag of extractMarkdownTags(content).allTags) {
+          const extracted = extractMarkdownTags(content);
+          for (const tag of extracted.allTags) {
             const current = counts.get(tag) ?? { files: 0, paths: [] };
             current.files += 1;
             current.paths.push(entry.path);
             counts.set(tag, current);
+          }
+          if (params.operation === "audit" && extracted.allTags.length > 0) {
+            files.push({
+              path: entry.path,
+              frontmatterTags: extracted.frontmatterTags,
+              inlineTags: extracted.inlineTags,
+              allTags: extracted.allTags,
+              conflicts: extracted.allTags.filter(
+                (tag) =>
+                  extracted.frontmatterTags.includes(tag) &&
+                  extracted.inlineTags.includes(tag),
+              ),
+            });
           }
         }
         const tags = [...counts.entries()]
@@ -387,10 +405,89 @@ function registerHeadlessGuardedWriteTools(
                   mode: "headless-filesystem",
                   source: "filesystem-cache",
                   tags,
+                  files: params.operation === "audit" ? files : undefined,
                   limitations: [
                     "The index is built from Markdown files in the shared cache.",
                     "It does not evaluate Obsidian plugin-specific tag behavior.",
                   ],
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: false,
+        };
+      }
+      if (params.operation === "rename") {
+        if (!params.fromTag || !params.toTag) {
+          throw new Error(
+            "fromTag and toTag are required for operation=rename.",
+          );
+        }
+        const fromTag = params.fromTag.replace(/^#+/u, "").trim();
+        const toTag = params.toTag.replace(/^#+/u, "").trim();
+        if (!fromTag || !toTag) {
+          throw new Error("fromTag and toTag must contain a tag name.");
+        }
+        const entries = vaultCacheService?.getEntriesByPrefix("") ?? [];
+        const candidates = [];
+        for (const entry of entries) {
+          if (path.extname(entry.path).toLowerCase() !== ".md") continue;
+          const content =
+            (await vaultCacheService?.getEntry(entry.path))?.content ?? "";
+          if (extractMarkdownTags(content).allTags.includes(fromTag)) {
+            candidates.push(entry.path);
+          }
+        }
+        assertWriteAllowed({
+          operation: "obsidian_manage_tags",
+          action: params.dryRun ? "renameDryRun" : "rename",
+          batchCount: candidates.length,
+          allowInReadonly: params.dryRun,
+          allowInGuarded: true,
+          context,
+        });
+        const results = [];
+        for (const candidate of candidates) {
+          if (params.dryRun) {
+            results.push({
+              path: candidate,
+              fromTag,
+              toTag,
+            });
+            continue;
+          }
+          const { result, before, after } = await vaultFileService.renameTag(
+            candidate,
+            fromTag,
+            toTag,
+            context,
+            {},
+          );
+          await updateCacheAfterGuardedWrite(
+            vaultCacheService,
+            result.path,
+            context,
+          );
+          results.push({
+            path: result.path,
+            before: before.allTags,
+            after: after.allTags,
+            hash: result.hash,
+          });
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  success: true,
+                  mode: "headless-filesystem",
+                  dryRun: params.dryRun,
+                  count: results.length,
+                  results,
                 },
                 null,
                 2,
@@ -679,6 +776,148 @@ function registerHeadlessGuardedWriteTools(
                 ok: results.every((result) => !("error" in result)),
                 dryRun: params.dryRun,
                 source: "filesystem-guarded",
+                results,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
+  );
+
+  server.tool(
+    "obsidian_admin_filesystem",
+    "Headless-filesystem admin batch operations with dry-run by default. Supports sandbox-safe batch move, archive, and delete with preconditions.",
+    {
+      operation: z.enum(["batch_move", "archive", "batch_delete"]),
+      dryRun: z.boolean().default(true),
+      archiveDir: z.string().optional(),
+      items: z
+        .array(
+          z.object({
+            sourcePath: z.string().min(1),
+            targetPath: z.string().optional(),
+            expectedHash: z.string().optional(),
+            expectedMtime: z.number().optional(),
+          }),
+        )
+        .min(1),
+      continueOnError: z.boolean().default(false),
+    },
+    async (params) => {
+      const context = requestContextService.createRequestContext({
+        operation: "headlessFilesystemAdmin",
+        toolName: "obsidian_admin_filesystem",
+        target: params.operation,
+      });
+      assertWriteAllowed({
+        operation: "obsidian_admin_filesystem",
+        action: params.dryRun ? `${params.operation}:dryRun` : params.operation,
+        batchCount: params.items.length,
+        destructive: params.operation === "batch_delete",
+        allowInReadonly: params.dryRun,
+        allowInGuarded: true,
+        context,
+      });
+      const results = [];
+      for (const item of params.items) {
+        try {
+          const current = await vaultFileService.read(item.sourcePath, context);
+          const targetPath =
+            params.operation === "archive"
+              ? path.posix.join(
+                  params.archiveDir ?? "Archive",
+                  path.posix.basename(item.sourcePath.replace(/\\/g, "/")),
+                )
+              : item.targetPath;
+          if (params.operation !== "batch_delete" && !targetPath) {
+            throw new Error(
+              "targetPath or archiveDir is required for move/archive.",
+            );
+          }
+          if (params.dryRun) {
+            results.push({
+              sourcePath: current.path,
+              targetPath,
+              action: params.operation,
+              hash: current.hash,
+              mtime: current.mtime,
+              dryRun: true,
+            });
+            continue;
+          }
+          if (!item.expectedHash && typeof item.expectedMtime !== "number") {
+            throw new Error("Apply requires expectedHash or expectedMtime.");
+          }
+          if (params.operation === "batch_delete") {
+            const deleted = await vaultFileService.deleteFile(
+              item.sourcePath,
+              context,
+              {
+                expectedHash: item.expectedHash,
+                expectedMtime: item.expectedMtime,
+              },
+            );
+            await updateCacheAfterGuardedWrite(
+              vaultCacheService,
+              deleted.path,
+              context,
+            );
+            results.push({
+              sourcePath: deleted.path,
+              action: "deleted",
+              hash: deleted.hash,
+            });
+            continue;
+          }
+          const { previous, result } = await vaultFileService.moveFile(
+            item.sourcePath,
+            targetPath!,
+            context,
+            {
+              expectedHash: item.expectedHash,
+              expectedMtime: item.expectedMtime,
+            },
+            false,
+          );
+          await updateCacheAfterGuardedWrite(
+            vaultCacheService,
+            previous.path,
+            context,
+          );
+          await updateCacheAfterGuardedWrite(
+            vaultCacheService,
+            result.path,
+            context,
+          );
+          results.push({
+            sourcePath: previous.path,
+            targetPath: result.path,
+            action: "moved",
+            hash: result.hash,
+          });
+        } catch (error) {
+          results.push({
+            sourcePath: item.sourcePath,
+            error: {
+              message: error instanceof Error ? error.message : String(error),
+            },
+          });
+          if (!params.continueOnError) break;
+        }
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ok: results.every((result) => !("error" in result)),
+                source: "filesystem-guarded",
+                dryRun: params.dryRun,
                 results,
               },
               null,
