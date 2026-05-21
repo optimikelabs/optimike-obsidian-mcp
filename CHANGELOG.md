@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.7-optimike.2] - 2026-05-21
+
+### Added
+
+- Runtime modes: `live`, `hybrid`, `headless-readonly`, and `headless-guarded`.
+- Headless readonly smoke coverage for list, read, search, Tasks, semantic tools, and runtime status.
+- Hybrid smoke coverage with and without Local REST API availability.
+- Guarded filesystem writes for append/prepend note updates, exact search/replace, and frontmatter set.
+- `npm run test:runtime` to run build plus all runtime mode smokes.
+
+### Changed
+
+- `OBSIDIAN_API_KEY` is required only in `live` mode.
+- Hybrid startup no longer blocks on Local REST API availability.
+- Cache readiness is exposed through runtime stats and read/search/task fallbacks wait for readiness before failing.
+- Runtime documentation now distinguishes Optimike MCP headless on a synchronized Markdown vault from a full Obsidian Desktop runtime.
+
+### Security
+
+- Guarded filesystem writes reject path traversal and resolved real paths outside the vault root.
+- Guarded writes support `expectedHash` and `expectedMtime` preconditions so stale synced-vault writes fail as conflicts.
+- Headless guarded mode keeps destructive operations, broad overwrite, delete, and large batch writes out of the default public surface.
+
 ## [2.0.7-optimike.1] - 2026-01-18
 
 ### Added
