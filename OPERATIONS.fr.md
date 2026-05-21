@@ -307,6 +307,19 @@ npm run verify:code
 - `npm audit`
 - `npm run build`
 
+Pour vérifier la supply chain, lance aussi :
+
+```bash
+npm audit signatures
+```
+
+Résultat attendu sur l’arbre de dépendances verrouillé : 0 vulnérabilité npm
+connue, signatures registry vérifiées et build TypeScript réussi. Traite tout
+déploiement HTTP sur `0.0.0.0` ou sur une adresse LAN comme un profil proche
+production : active `MCP_AUTH_MODE=jwt` ou `MCP_AUTH_MODE=oauth`, configure un
+`MCP_AUTH_SECRET_KEY` robuste ou un provider OAuth, et limite
+`MCP_ALLOWED_ORIGINS`.
+
 Ensuite, redémarre le backend si le build vient de modifier `dist`, puis lance :
 
 ```bash

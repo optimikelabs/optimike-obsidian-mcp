@@ -305,6 +305,19 @@ npm run verify:code
 - `npm audit`
 - `npm run build`
 
+For supply-chain checks, also run:
+
+```bash
+npm audit signatures
+```
+
+Current expected result for the locked dependency tree: 0 known npm
+vulnerabilities, verified npm registry signatures, and a successful TypeScript
+build. Treat any HTTP deployment on `0.0.0.0` or a LAN address as production-like:
+set `MCP_AUTH_MODE=jwt` or `MCP_AUTH_MODE=oauth`, provide a strong
+`MCP_AUTH_SECRET_KEY` or OAuth provider config, and restrict
+`MCP_ALLOWED_ORIGINS`.
+
 Then restart the backend if the build changed `dist`, and run:
 
 ```bash

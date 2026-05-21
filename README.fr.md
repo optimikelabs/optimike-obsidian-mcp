@@ -342,6 +342,13 @@ export OBSIDIAN_API_KEY=<ta_cle_api>
 - Garde `OBSIDIAN_API_KEY` privée et locale.
 - N’expose pas l’API REST d’Obsidian sur Internet.
 - Garde `OBSIDIAN_API_KEY` et `OPENAI_API_KEY` dans les variables d’env, pas dans des fichiers de config commités.
+- État actuel des dépendances : `npm audit` remonte 0 vulnérabilité connue, et
+  `npm audit signatures` vérifie les signatures registry de l’arbre npm
+  installé.
+- Si tu exposes le MCP en HTTP au-delà de localhost, active
+  `MCP_AUTH_MODE=jwt` ou `MCP_AUTH_MODE=oauth`, utilise un secret/provider
+  robuste et garde `MCP_ALLOWED_ORIGINS` strict. Le profil local le plus sûr
+  reste `stdio` ou HTTP sur `127.0.0.1`.
 
 ## WSL2 + Obsidian sous Windows (Local REST API)
 
