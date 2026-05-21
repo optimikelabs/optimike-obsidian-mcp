@@ -25,6 +25,7 @@ import { ErrorHandler, logger, requestContextService } from "../utils/index.js";
 import { ObsidianRestApiService } from "../services/obsidianRestAPI/index.js";
 // Import the Vault Cache service
 import { VaultCacheService } from "../services/obsidianRestAPI/vaultCache/index.js";
+import { LocalBasesService } from "../services/localBasesService.js";
 import { VaultFileService } from "../services/vaultFileService.js";
 import { assertWriteAllowed } from "../services/writePolicy.js";
 // Import registration functions for specific resources and tools.
@@ -316,6 +317,9 @@ async function createMcpServerInstance(
       config.obsidianRuntimeMode === "headless-readonly";
     const isHeadlessGuarded =
       config.obsidianRuntimeMode === "headless-guarded";
+    const localBasesService = vaultCacheService
+      ? new LocalBasesService(vaultCacheService)
+      : undefined;
 
     // Register read/cache-friendly tools first. In headless-readonly, the REST
     // service is intentionally absent and these tools must use the shared cache.
@@ -344,6 +348,9 @@ async function createMcpServerInstance(
 
     if (isHeadlessGuarded) {
       registerHeadlessGuardedWriteTools(server, vaultCacheService);
+      await registerBasesListTool(server, undefined, localBasesService);
+      await registerBasesGetSchemaTool(server, undefined, localBasesService);
+      await registerBasesQueryTool(server, undefined, localBasesService);
     } else if (!isHeadlessReadonly && obsidianService) {
       await registerObsidianDeleteNoteTool(
         server,
@@ -376,6 +383,10 @@ async function createMcpServerInstance(
       await registerBasesUpsertRowsTool(server, obsidianService);
       await registerBasesCreateTool(server, obsidianService);
       await registerBasesUpsertConfigTool(server, obsidianService);
+    } else if (isHeadlessReadonly && localBasesService) {
+      await registerBasesListTool(server, undefined, localBasesService);
+      await registerBasesGetSchemaTool(server, undefined, localBasesService);
+      await registerBasesQueryTool(server, undefined, localBasesService);
     } else {
       logger.info(
         "Skipping live/write/Bases tools because runtime mode is headless-readonly or Obsidian REST is unavailable.",

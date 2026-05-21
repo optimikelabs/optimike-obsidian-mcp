@@ -3,6 +3,7 @@
  */
 
 import { z } from "zod";
+import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseSchemaResponse } from "../../../services/obsidianRestAPI/types.js";
 import {
@@ -27,13 +28,21 @@ export type BasesGetSchemaInput = z.infer<typeof BasesGetSchemaInputSchema>;
 export async function processBasesGetSchema(
   params: BasesGetSchemaInput,
   parentContext: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
+  localBasesService?: LocalBasesService,
 ): Promise<BaseSchemaResponse> {
   const context = requestContextService.createRequestContext({
     parentContext,
     operation: "BasesGetSchema",
     params,
   });
-  logger.debug("Fetching Base schema via REST bridge", context);
-  return obsidianService.getBaseSchema(params.base_id, context);
+  if (obsidianService) {
+    logger.debug("Fetching Base schema via REST bridge", context);
+    return obsidianService.getBaseSchema(params.base_id, context);
+  }
+  if (localBasesService) {
+    logger.debug("Fetching Base schema via local fallback", context);
+    return localBasesService.getBaseSchema(params.base_id, context);
+  }
+  throw new Error("Base schema requires either Obsidian REST or local Bases fallback.");
 }

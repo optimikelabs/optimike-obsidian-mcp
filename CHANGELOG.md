@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hybrid smoke coverage with and without Local REST API availability.
 - Guarded filesystem writes for append/prepend note updates, exact search/replace, and frontmatter set.
 - `npm run test:runtime` to run build plus all runtime mode smokes.
+- Local Bases fallback for `bases_list`, `bases_get_schema`, and `bases_query` in headless modes.
+- `npm run smoke:headless-status` for HTTP health/status monitoring validation.
 
 ### Changed
 
@@ -21,12 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hybrid startup no longer blocks on Local REST API availability.
 - Cache readiness is exposed through runtime stats and read/search/task fallbacks wait for readiness before failing.
 - Runtime documentation now distinguishes Optimike MCP headless on a synchronized Markdown vault from a full Obsidian Desktop runtime.
+- `npm run test:runtime` now includes the HTTP health/status smoke.
 
 ### Security
 
 - Guarded filesystem writes reject path traversal and resolved real paths outside the vault root.
 - Guarded writes support `expectedHash` and `expectedMtime` preconditions so stale synced-vault writes fail as conflicts.
 - Headless guarded mode keeps destructive operations, broad overwrite, delete, and large batch writes out of the default public surface.
+- Local Bases fallback treats invalid note frontmatter as empty frontmatter instead of failing a whole-vault query.
 
 ## [2.0.7-optimike.1] - 2026-01-18
 

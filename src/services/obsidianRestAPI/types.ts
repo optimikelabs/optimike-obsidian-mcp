@@ -208,7 +208,8 @@ export interface BaseQueryResponse {
   page: number;
   rows: BaseQueryRow[];
   evaluate?: boolean;
-  source?: "engine" | "fallback";
+  source?: "engine" | "fallback" | "local-fallback";
+  limitations?: string[];
 }
 
 /**

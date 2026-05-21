@@ -85,8 +85,8 @@ Pour valider sur un vrai coffre, garder `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du 
 
 - `live` : mode complet par défaut. Requiert Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
 - `hybrid` : Local REST API optionnelle et non bloquante. Si l’API est configurée, les tools live sont exposées ; sinon `OBSIDIAN_VAULT` est requis et la surface cache/filesystem reste disponible.
-- `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique et runtime.
-- `headless-guarded` : même surface read headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded.
+- `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases readonly.
+- `headless-guarded` : même surface read headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases readonly est aussi disponible.
 
 Règle opérationnelle : les modes headless signifient Optimike MCP au-dessus d’un vault Markdown synchronisé. Ils ne chargent pas les plugins communautaires Obsidian et ne fournissent pas active file, command palette ou Bases Bridge sans Desktop.
 
@@ -98,9 +98,10 @@ npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
+npm run smoke:headless-status
 ```
 
-`npm run test:runtime` est la gate locale durable pour cette famille runtime. Elle lance `npm run build` puis les quatre smokes de mode sur des vaults temporaires.
+`npm run test:runtime` est la gate locale durable pour cette famille runtime. Elle lance `npm run build`, les smokes de mode et le smoke HTTP health/status sur des vaults temporaires.
 
 ## Dépendances requises
 
@@ -119,8 +120,15 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 
 - Bases Bridge (REST)
 
-  - requis pour le support `.base`
+  - requis pour les écritures `.base` live et le comportement complet des requêtes via bridge
   - expose les endpoints Bases consommés par ce MCP
+
+- Fallback local Bases
+
+  - disponible en modes headless pour `bases_list`, `bases_get_schema` et `bases_query`
+  - renvoie `source: "local-fallback"`
+  - supporte les filtres par égalité directe, le tri simple, la pagination et l’inspection de schéma
+  - n’évalue pas les formules, filtres plugin, propriétés calculées ni la sémantique exacte des vues UI
 
 - Smart Connections
   - requis pour la recherche sémantique

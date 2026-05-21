@@ -85,8 +85,8 @@ For real-vault validation, keep `OBSIDIAN_SHARED_CACHE_DB_PATH` outside the sync
 
 - `live`: default full-power mode. Requires Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
 - `hybrid`: Local REST API is optional and non-blocking. If API credentials are configured, live tools are exposed; otherwise `OBSIDIAN_VAULT` is required and the server keeps the cache/filesystem read surface available.
-- `headless-readonly`: requires `OBSIDIAN_VAULT`; does not require Obsidian Desktop, Local REST API, or `OBSIDIAN_API_KEY`; exposes read/list/search/tasks/semantic/runtime tools.
-- `headless-guarded`: same headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by guarded policy.
+- `headless-readonly`: requires `OBSIDIAN_VAULT`; does not require Obsidian Desktop, Local REST API, or `OBSIDIAN_API_KEY`; exposes read/list/search/tasks/semantic/runtime tools plus readonly local Bases fallback.
+- `headless-guarded`: same headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by guarded policy. Readonly local Bases fallback is also available.
 
 Operational rule: headless modes mean Optimike MCP over a synchronized Markdown vault. They do not load Obsidian community plugins or provide active file, command palette, or Bases Bridge without Desktop.
 
@@ -98,9 +98,10 @@ npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
+npm run smoke:headless-status
 ```
 
-`npm run test:runtime` is the durable local gate for this runtime family. It runs `npm run build` and all four mode smokes on temporary vaults.
+`npm run test:runtime` is the durable local gate for this runtime family. It runs `npm run build`, all mode smokes, and the HTTP health/status smoke on temporary vaults.
 
 ## Required Dependencies
 
@@ -119,8 +120,15 @@ The final server can expose different capabilities depending on which Obsidian p
 
 - Bases Bridge (REST)
 
-  - required for `.base` support
+  - required for live `.base` write support and full bridge-backed query behavior
   - exposes the Bases endpoints used by this MCP
+
+- Local Bases fallback
+
+  - available in headless modes for `bases_list`, `bases_get_schema`, and `bases_query`
+  - returns `source: "local-fallback"`
+  - supports direct equality filters, simple sorting, pagination, and schema inspection
+  - does not evaluate formulas, plugin filters, calculated properties, or exact UI view semantics
 
 - Smart Connections
   - required for semantic search

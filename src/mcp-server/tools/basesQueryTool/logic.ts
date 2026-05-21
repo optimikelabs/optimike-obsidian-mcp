@@ -3,6 +3,7 @@
  */
 
 import { z } from "zod";
+import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import {
   BaseQueryRequest,
@@ -68,7 +69,8 @@ export type BasesQueryInput = z.infer<typeof BasesQueryInputSchema>;
 export async function processBasesQuery(
   params: BasesQueryInput,
   parentContext: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
+  localBasesService?: LocalBasesService,
 ): Promise<BaseQueryResponse> {
   const payload: BaseQueryRequest = {
     view: params.view,
@@ -89,6 +91,13 @@ export async function processBasesQuery(
     },
   });
 
-  logger.debug("Querying base via REST bridge", context);
-  return obsidianService.queryBase(params.base_id, payload, context);
+  if (obsidianService) {
+    logger.debug("Querying base via REST bridge", context);
+    return obsidianService.queryBase(params.base_id, payload, context);
+  }
+  if (localBasesService) {
+    logger.debug("Querying base via local fallback", context);
+    return localBasesService.queryBase(params.base_id, payload, context);
+  }
+  throw new Error("Base query requires either Obsidian REST or local Bases fallback.");
 }

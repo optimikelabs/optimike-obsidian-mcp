@@ -184,8 +184,8 @@ Warm semantic refreshes now load from SQLite first instead of re-reading the who
 
 - `live` (default): Obsidian Desktop + Local REST API. Full REST, write, and Bases Bridge surface.
 - `hybrid`: starts from the local vault/cache and uses Local REST API when `OBSIDIAN_API_KEY` is configured. The API startup check is non-blocking. If no API key is configured, `OBSIDIAN_VAULT` is required.
-- `headless-readonly`: no Obsidian Desktop, no Local REST API, no `OBSIDIAN_API_KEY`. Requires `OBSIDIAN_VAULT` and `OBSIDIAN_CACHE_SOURCE=filesystem`; exposes read/list/search/tasks/semantic/runtime tools only.
-- `headless-guarded`: no Obsidian Desktop; exposes the headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by the guarded write policy.
+- `headless-readonly`: no Obsidian Desktop, no Local REST API, no `OBSIDIAN_API_KEY`. Requires `OBSIDIAN_VAULT` and `OBSIDIAN_CACHE_SOURCE=filesystem`; exposes read/list/search/tasks/semantic/runtime tools plus local readonly `bases_list`, `bases_get_schema`, and `bases_query`.
+- `headless-guarded`: no Obsidian Desktop; exposes the headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by the guarded write policy. Local readonly Bases fallback is also available.
 
 Headless means Optimike MCP running over a synchronized Markdown vault. It does not mean Obsidian Desktop, community plugins, command palette, active file, or Bases Bridge are available without Desktop.
 
@@ -197,9 +197,17 @@ npm run smoke:headless-readonly
 npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
+npm run smoke:headless-status
 ```
 
-`npm run test:runtime` runs the build and all four runtime smokes. It uses temporary vaults and does not require a real Obsidian vault or API key.
+`npm run test:runtime` runs the build, all runtime mode smokes, and the HTTP health/status smoke. It uses temporary vaults and does not require a real Obsidian vault or API key.
+
+Local Bases fallback:
+
+- `bases_list`, `bases_get_schema`, and `bases_query` are available in headless modes with `source: "local-fallback"`.
+- The fallback reads `.base` YAML from `OBSIDIAN_VAULT` and cached Markdown frontmatter from the shared cache.
+- It supports direct equality filters, simple sorting, pagination, and schema inspection.
+- It does not evaluate Obsidian formulas, plugin-specific filters, calculated properties, or exact UI view semantics.
 
 Useful scripts:
 

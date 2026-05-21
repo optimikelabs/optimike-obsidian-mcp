@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import {
   BasesListResponse as BasesListResult,
@@ -35,12 +36,20 @@ export type BasesListInput = z.infer<typeof BasesListInputSchema>;
 export async function processBasesList(
   _params: BasesListInput,
   parentContext: RequestContext,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
+  localBasesService?: LocalBasesService,
 ): Promise<BasesListResult> {
   const context = requestContextService.createRequestContext({
     parentContext,
     operation: "BasesList",
   });
-  logger.debug("Fetching Bases list via REST bridge", context);
-  return obsidianService.listBases(context);
+  if (obsidianService) {
+    logger.debug("Fetching Bases list via REST bridge", context);
+    return obsidianService.listBases(context);
+  }
+  if (localBasesService) {
+    logger.debug("Fetching Bases list via local fallback", context);
+    return localBasesService.listBases();
+  }
+  throw new Error("Bases list requires either Obsidian REST or local Bases fallback.");
 }

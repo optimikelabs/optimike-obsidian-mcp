@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -19,7 +20,8 @@ const TOOL_DESCRIPTION =
 
 export async function registerBasesGetSchemaTool(
   server: McpServer,
-  obsidianService: ObsidianRestApiService,
+  obsidianService: ObsidianRestApiService | undefined,
+  localBasesService?: LocalBasesService,
 ): Promise<void> {
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({
@@ -45,6 +47,7 @@ export async function registerBasesGetSchemaTool(
             params,
             handlerContext,
             obsidianService,
+            localBasesService,
           );
 
           return {

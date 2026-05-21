@@ -66,7 +66,28 @@ async function createTempVault() {
   );
   await writeFile(
     path.join(vaultRoot, "Root.md"),
-    "Root smoke note with searchable keyword alphasmoke.\n",
+    ["---", "type: root", "---", "", "Root smoke note with searchable keyword alphasmoke.", ""].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(vaultRoot, "Smoke.base"),
+    [
+      "properties:",
+      "  file.name:",
+      "    displayName: Name",
+      "  type:",
+      "    displayName: Type",
+      "views:",
+      "  - type: list",
+      "    name: All",
+      "    order:",
+      "      - file.name",
+      "      - type",
+      "    sort:",
+      "      - property: file.name",
+      "        direction: ASC",
+      "",
+    ].join("\n"),
     "utf8",
   );
   return vaultRoot;
@@ -211,6 +232,9 @@ async function main() {
       "obsidian_runtime_status",
       "obsidian_runtime_maintenance",
     ];
+    if (["headless-readonly", "headless-guarded"].includes(modeArg)) {
+      expected.push("bases_list", "bases_get_schema", "bases_query");
+    }
     for (const name of expected) {
       if (!toolNames.includes(name)) {
         throw new Error(`Missing expected headless-readonly tool: ${name}`);
@@ -221,8 +245,6 @@ async function main() {
       "obsidian_delete_note",
       "obsidian_search_replace",
       "obsidian_manage_frontmatter",
-      "bases_list",
-      "bases_query",
     ];
     for (const name of liveOnly) {
       if (
@@ -303,6 +325,41 @@ async function main() {
       "query tasks",
     );
     assertTextIncludes(queryTasks, "Verify task extraction", "query tasks");
+
+    if (["headless-readonly", "headless-guarded"].includes(modeArg)) {
+      const bases = await withTimeout(
+        client.callTool({ name: "bases_list", arguments: {} }),
+        "bases list",
+      );
+      assertTextIncludes(bases, "local-fallback", "bases list");
+      assertTextIncludes(bases, "Smoke.base", "bases list");
+
+      const schema = await withTimeout(
+        client.callTool({
+          name: "bases_get_schema",
+          arguments: { base_id: "Smoke.base" },
+        }),
+        "bases schema",
+      );
+      assertTextIncludes(schema, "local-fallback", "bases schema");
+      assertTextIncludes(schema, "file.name", "bases schema");
+
+      const query = await withTimeout(
+        client.callTool({
+          name: "bases_query",
+          arguments: {
+            base_id: "Smoke.base",
+            filter: { type: "root" },
+            sort: [{ prop: "file.name", dir: "asc" }],
+            limit: 10,
+            page: 1,
+          },
+        }),
+        "bases query",
+      );
+      assertTextIncludes(query, "local-fallback", "bases query");
+      assertTextIncludes(query, "Root.md", "bases query");
+    }
 
     if (modeArg === "headless-guarded") {
       const update = await withTimeout(
