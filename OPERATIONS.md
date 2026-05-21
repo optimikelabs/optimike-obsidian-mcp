@@ -105,7 +105,7 @@ This policy protects Optimike cache, search, Tasks, and local Bases fallback beh
 - `hybrid`: Local REST API is optional and non-blocking. If API credentials are configured, live tools are exposed; otherwise `OBSIDIAN_VAULT` is required and the server keeps the cache/filesystem read surface available.
 - `headless-readonly`: requires `OBSIDIAN_VAULT`; does not require Obsidian Desktop, Local REST API, or `OBSIDIAN_API_KEY`; exposes read/list/search/tasks/semantic/runtime tools plus readonly local Bases fallback.
 - `headless-guarded`: same headless read surface plus guarded filesystem writes for `obsidian_update_note`, `obsidian_search_replace`, and `obsidian_manage_frontmatter`. Note updates are append/prepend only; overwrite remains blocked by guarded policy. Readonly local Bases fallback is also available.
-- `headless-filesystem`: same as `headless-guarded`, plus explicit filesystem features for sandbox/dedicated vaults: frontmatter/inline tags, local tag index/audit and dry-run rename, admin move/archive/delete operations with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, and Bases rows as Markdown frontmatter `set` operations.
+- `headless-filesystem`: same as `headless-guarded`, plus explicit filesystem features for sandbox/dedicated vaults: frontmatter/inline tags, local tag index/audit and dry-run rename, admin move/archive/delete operations with `expectedHash` or `expectedMtime`, batch frontmatter with dry-run, `.base` YAML create/config, Bases rows as Markdown frontmatter `set` operations, and minimal JSON Canvas helpers.
 
 Operational rule: headless modes mean Optimike MCP over a synchronized Markdown vault. They do not load Obsidian community plugins or provide active file, command palette, or Bases Bridge without Desktop.
 
@@ -129,6 +129,9 @@ npm pack --dry-run
 
 The detailed mode comparison lives in [Runtime Capability Matrix](docs/runtime-capability-matrix.md).
 The dedicated server runbook lives in [Headless Server Profile](docs/headless-server-profile.md).
+Agent routing guidance lives in [MCP Routing Guide](docs/mcp-routing-guide.md).
+
+Use `obsidian_validate_format` before generated Markdown, `.base`, or `.canvas` content is written. It validates local syntax/shape; Desktop rendering, plugin behavior, and exact Bases UI semantics still require Obsidian Desktop.
 
 ## Required Dependencies
 

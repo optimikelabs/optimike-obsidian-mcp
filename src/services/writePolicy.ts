@@ -6,6 +6,7 @@ export type WriteOperation =
   | "obsidian_delete_note"
   | "obsidian_move_note"
   | "obsidian_admin_filesystem"
+  | "obsidian_manage_canvas"
   | "obsidian_update_note"
   | "obsidian_search_replace"
   | "obsidian_manage_frontmatter"

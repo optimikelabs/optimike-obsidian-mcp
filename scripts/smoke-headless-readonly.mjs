@@ -71,6 +71,7 @@ async function createTempVault() {
     path.join(os.tmpdir(), "optimike-headless-vault-"),
   );
   await mkdir(path.join(vaultRoot, "Projects"), { recursive: true });
+  await mkdir(path.join(vaultRoot, "Canvases"), { recursive: true });
   await mkdir(path.join(vaultRoot, "tmp", "reports"), { recursive: true });
   await mkdir(path.join(vaultRoot, ".obsidian"), { recursive: true });
   await writeFile(
@@ -83,6 +84,10 @@ async function createTempVault() {
       "---",
       "",
       "Headless runtime smoke note.",
+      "Related note: [[Root]].",
+      "> [!info]",
+      "> Format validation callout.",
+      "![[Canvases/Flow.canvas]]",
       "- [ ] Verify task extraction #headless",
       "- [x] Keep live mode as rollback",
       "",
@@ -121,17 +126,62 @@ async function createTempVault() {
       "    displayName: Name",
       "  type:",
       "    displayName: Type",
+      "  formula.priority_label:",
+      "    displayName: Priority",
+      "formulas:",
+      '  priority_label: \'if(priority, "P" + priority.toString(), "")\'',
+      "filters:",
+      "  and:",
+      "    - 'file.ext == \"md\"'",
       "views:",
-      "  - type: list",
-      "    name: All",
+      "  - type: table",
+      "    name: Active",
       "    order:",
       "      - file.name",
       "      - type",
+      "      - formula.priority_label",
       "    sort:",
       "      - property: file.name",
       "        direction: ASC",
       "",
     ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(vaultRoot, "Canvases", "Flow.canvas"),
+    JSON.stringify(
+      {
+        nodes: [
+          {
+            id: "aaaaaaaaaaaaaaaa",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 320,
+            height: 180,
+            text: "Start",
+          },
+          {
+            id: "bbbbbbbbbbbbbbbb",
+            type: "text",
+            x: 420,
+            y: 0,
+            width: 320,
+            height: 180,
+            text: "End",
+          },
+        ],
+        edges: [
+          {
+            id: "cccccccccccccccc",
+            fromNode: "aaaaaaaaaaaaaaaa",
+            toNode: "bbbbbbbbbbbbbbbb",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
     "utf8",
   );
   return vaultRoot;
@@ -297,6 +347,7 @@ async function main() {
       "query_tasks",
       "obsidian_runtime_status",
       "obsidian_runtime_maintenance",
+      "obsidian_validate_format",
     ];
     if (
       ["headless-readonly", "headless-guarded", "headless-filesystem"].includes(
@@ -339,6 +390,7 @@ async function main() {
             "obsidian_move_note",
             "obsidian_batch_frontmatter",
             "obsidian_admin_filesystem",
+            "obsidian_manage_canvas",
             "bases_create",
             "bases_upsert_config",
             "bases_upsert_rows",
@@ -357,6 +409,7 @@ async function main() {
       "obsidian_move_note",
       "obsidian_batch_frontmatter",
       "obsidian_admin_filesystem",
+      "obsidian_manage_canvas",
     ];
     for (const name of filesystemOnly) {
       if (modeArg === "headless-filesystem") {
@@ -393,6 +446,32 @@ async function main() {
       "read note",
     );
     assertTextIncludes(read, "Headless runtime smoke note", "read note");
+
+    const markdownValidation = await withTimeout(
+      client.callTool({
+        name: "obsidian_validate_format",
+        arguments: {
+          kind: "markdown",
+          filePath: "Projects/Headless.md",
+        },
+      }),
+      "markdown format validation",
+    );
+    assertTextIncludes(markdownValidation, '"ok": true', "markdown validation");
+    assertTextIncludes(markdownValidation, "wikilinks", "markdown validation");
+
+    const canvasValidation = await withTimeout(
+      client.callTool({
+        name: "obsidian_validate_format",
+        arguments: {
+          kind: "canvas",
+          filePath: "Canvases/Flow.canvas",
+        },
+      }),
+      "canvas format validation",
+    );
+    assertTextIncludes(canvasValidation, '"ok": true', "canvas validation");
+    assertTextIncludes(canvasValidation, "edges", "canvas validation");
 
     const search = await withTimeout(
       client.callTool({
@@ -498,6 +577,23 @@ async function main() {
       );
       assertTextIncludes(query, "local-fallback", "bases query");
       assertTextIncludes(query, "Root.md", "bases query");
+
+      const baseValidation = await withTimeout(
+        client.callTool({
+          name: "obsidian_validate_format",
+          arguments: {
+            kind: "base",
+            filePath: "Smoke.base",
+          },
+        }),
+        "base format validation",
+      );
+      assertTextIncludes(baseValidation, '"ok": true', "base validation");
+      assertTextIncludes(
+        baseValidation,
+        "formulaReferences",
+        "base validation",
+      );
     }
 
     if (modeArg === "headless-guarded" || modeArg === "headless-filesystem") {
@@ -726,6 +822,107 @@ async function main() {
           adminDryRun,
           "Archive/Moved.md",
           "filesystem admin archive dry run",
+        );
+
+        const canvasCreateDryRun = await withTimeout(
+          client.callTool({
+            name: "obsidian_manage_canvas",
+            arguments: {
+              operation: "create",
+              filePath: "Canvases/Generated.canvas",
+              dryRun: true,
+              nodes: [
+                {
+                  id: "1111111111111111",
+                  type: "text",
+                  x: 0,
+                  y: 0,
+                  width: 300,
+                  height: 160,
+                  text: "Draft",
+                },
+              ],
+            },
+          }),
+          "filesystem canvas create dry run",
+        );
+        assertTextIncludes(
+          canvasCreateDryRun,
+          '"dryRun": true',
+          "filesystem canvas create dry run",
+        );
+
+        const canvasCreate = await withTimeout(
+          client.callTool({
+            name: "obsidian_manage_canvas",
+            arguments: {
+              operation: "create",
+              filePath: "Canvases/Generated.canvas",
+              dryRun: false,
+              nodes: [
+                {
+                  id: "1111111111111111",
+                  type: "text",
+                  x: 0,
+                  y: 0,
+                  width: 300,
+                  height: 160,
+                  text: "Start",
+                },
+                {
+                  id: "2222222222222222",
+                  type: "text",
+                  x: 420,
+                  y: 0,
+                  width: 300,
+                  height: 160,
+                  text: "Next",
+                },
+              ],
+            },
+          }),
+          "filesystem canvas create",
+        );
+        assertTextIncludes(
+          canvasCreate,
+          "Canvases/Generated.canvas",
+          "filesystem canvas create",
+        );
+
+        const canvasConnect = await withTimeout(
+          client.callTool({
+            name: "obsidian_manage_canvas",
+            arguments: {
+              operation: "connect_nodes",
+              filePath: "Canvases/Generated.canvas",
+              dryRun: false,
+              fromNode: "1111111111111111",
+              toNode: "2222222222222222",
+              label: "next",
+            },
+          }),
+          "filesystem canvas connect",
+        );
+        assertTextIncludes(
+          canvasConnect,
+          "filesystem-guarded",
+          "filesystem canvas connect",
+        );
+
+        const canvasToolValidation = await withTimeout(
+          client.callTool({
+            name: "obsidian_manage_canvas",
+            arguments: {
+              operation: "validate",
+              filePath: "Canvases/Generated.canvas",
+            },
+          }),
+          "filesystem canvas validate",
+        );
+        assertTextIncludes(
+          canvasToolValidation,
+          '"ok": true',
+          "filesystem canvas validate",
         );
 
         const baseCreate = await withTimeout(

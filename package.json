@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Unified Obsidian MCP server with shared local cache, integrated Tasks tools, Bases support, semantic search via Smart Connections, server health/status observability, and degraded read mode for durable Codex workflows.",
   "main": "dist/index.js",
   "files": [
@@ -13,6 +13,8 @@
     "docs/runtime-capability-matrix.fr.md",
     "docs/headless-server-profile.md",
     "docs/headless-server-profile.fr.md",
+    "docs/mcp-routing-guide.md",
+    "docs/mcp-routing-guide.fr.md",
     ".env.server.example",
     "scripts",
     "docs/assets",

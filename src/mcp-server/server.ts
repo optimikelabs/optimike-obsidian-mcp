@@ -17,6 +17,7 @@
 import { ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dump, load } from "js-yaml";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
 // Import validated configuration and environment details.
@@ -31,9 +32,15 @@ import { LocalBasesService } from "../services/localBasesService.js";
 import {
   extractMarkdownTags,
   VaultFileService,
+  type VaultFileReadResult,
   type VaultTagLocation,
 } from "../services/vaultFileService.js";
 import { assertWriteAllowed } from "../services/writePolicy.js";
+import {
+  validateJsonCanvas,
+  validateObsidianFormat,
+  type ObsidianFormatKind,
+} from "../services/obsidianFormatService.js";
 // Import registration functions for specific resources and tools.
 import { registerObsidianDeleteNoteTool } from "./tools/obsidianDeleteNoteTool/index.js";
 import { registerObsidianGlobalSearchTool } from "./tools/obsidianGlobalSearchTool/index.js";
@@ -65,6 +72,110 @@ async function updateCacheAfterGuardedWrite(
   if (vaultCacheService) {
     await vaultCacheService.updateCacheForFile(filePath, context);
   }
+}
+
+async function readFormatValidationContent(
+  filePath: string | undefined,
+  content: string | undefined,
+  context: ReturnType<typeof requestContextService.createRequestContext>,
+): Promise<{
+  content: string;
+  source: "content" | "filePath";
+  filePath?: string;
+}> {
+  if (typeof content === "string") {
+    return { content, source: "content", filePath };
+  }
+  if (!filePath) {
+    throw new Error("Provide either content or filePath.");
+  }
+  const vaultFileService = new VaultFileService();
+  const result = await vaultFileService.read(filePath, context);
+  return { content: result.content, source: "filePath", filePath: result.path };
+}
+
+function inferFormatKind(
+  kind: ObsidianFormatKind | "auto",
+  filePath: string | undefined,
+): ObsidianFormatKind {
+  if (kind !== "auto") return kind;
+  const extension = path.extname(filePath ?? "").toLowerCase();
+  if (extension === ".base") return "base";
+  if (extension === ".canvas") return "canvas";
+  return "markdown";
+}
+
+function createCanvasId(): string {
+  return randomBytes(8).toString("hex");
+}
+
+function parseCanvasContent(content: string): {
+  nodes: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+} {
+  const parsed = JSON.parse(content || '{"nodes":[],"edges":[]}');
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Canvas content must be a JSON object.");
+  }
+  const root = parsed as Record<string, unknown>;
+  return {
+    nodes: Array.isArray(root.nodes)
+      ? (root.nodes as Array<Record<string, unknown>>)
+      : [],
+    edges: Array.isArray(root.edges)
+      ? (root.edges as Array<Record<string, unknown>>)
+      : [],
+  };
+}
+
+function renderCanvas(canvas: {
+  nodes: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+}): string {
+  return `${JSON.stringify({ nodes: canvas.nodes, edges: canvas.edges }, null, 2)}\n`;
+}
+
+function registerFormatValidationTool(server: McpServer): void {
+  server.tool(
+    "obsidian_validate_format",
+    "Validate Obsidian-facing file formats before writing. Checks Markdown frontmatter/tags/wikilinks/callouts, .base YAML/formula references/views, and JSON Canvas nodes/edges.",
+    {
+      kind: z.enum(["auto", "markdown", "base", "canvas"]).default("auto"),
+      filePath: z.string().optional(),
+      content: z.string().optional(),
+    },
+    async (params) => {
+      const context = requestContextService.createRequestContext({
+        operation: "obsidianValidateFormat",
+        toolName: "obsidian_validate_format",
+        target: params.filePath,
+      });
+      const { content, source, filePath } = await readFormatValidationContent(
+        params.filePath,
+        params.content,
+        context,
+      );
+      const kind = inferFormatKind(params.kind, filePath ?? params.filePath);
+      const result = validateObsidianFormat(kind, content);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ...result,
+                source,
+                filePath,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
+  );
 }
 
 function registerHeadlessGuardedWriteTools(
@@ -931,6 +1042,255 @@ function registerHeadlessGuardedWriteTools(
   );
 
   server.tool(
+    "obsidian_manage_canvas",
+    "Headless filesystem JSON Canvas helper. Validates, creates, adds text nodes, and connects nodes in .canvas files with dry-run by default.",
+    {
+      operation: z.enum([
+        "validate",
+        "create",
+        "add_text_node",
+        "connect_nodes",
+      ]),
+      filePath: z.string().min(1),
+      dryRun: z.boolean().default(true),
+      overwrite: z.boolean().default(false),
+      nodes: z.array(z.record(z.any())).optional(),
+      edges: z.array(z.record(z.any())).optional(),
+      nodeId: z.string().optional(),
+      text: z.string().optional(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      width: z.number().optional(),
+      height: z.number().optional(),
+      color: z.string().optional(),
+      edgeId: z.string().optional(),
+      fromNode: z.string().optional(),
+      toNode: z.string().optional(),
+      fromSide: z.enum(["top", "right", "bottom", "left"]).optional(),
+      toSide: z.enum(["top", "right", "bottom", "left"]).optional(),
+      label: z.string().optional(),
+      expectedHash: z.string().optional(),
+      expectedMtime: z.number().optional(),
+    },
+    async (params) => {
+      const context = requestContextService.createRequestContext({
+        operation: "headlessManageCanvas",
+        toolName: "obsidian_manage_canvas",
+        target: params.filePath,
+      });
+      const target = params.filePath.endsWith(".canvas")
+        ? params.filePath
+        : `${params.filePath}.canvas`;
+
+      let current: VaultFileReadResult | undefined = undefined;
+      try {
+        current = await vaultFileService.read(target, context);
+      } catch (error) {
+        if (params.operation !== "create") {
+          throw error;
+        }
+      }
+
+      if (params.operation === "validate") {
+        if (!current) {
+          throw new Error(`Canvas file not found: ${target}`);
+        }
+        const validation = validateJsonCanvas(current.content);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ...validation,
+                  source: "filePath",
+                  filePath: current.path,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: false,
+        };
+      }
+
+      assertWriteAllowed({
+        operation: "obsidian_manage_canvas",
+        action: params.dryRun ? `${params.operation}DryRun` : params.operation,
+        target,
+        allowInReadonly: params.dryRun,
+        allowInGuarded: true,
+        destructive: params.operation === "create" && params.overwrite,
+        context,
+      });
+
+      let nextCanvas =
+        params.operation === "create"
+          ? { nodes: params.nodes ?? [], edges: params.edges ?? [] }
+          : parseCanvasContent(current?.content ?? "");
+
+      if (params.operation === "create" && current && !params.overwrite) {
+        throw new Error(
+          "Canvas file already exists. Pass overwrite=true to replace it.",
+        );
+      }
+
+      if (params.operation === "add_text_node") {
+        nextCanvas.nodes.push({
+          id: params.nodeId ?? createCanvasId(),
+          type: "text",
+          x: params.x ?? 0,
+          y: params.y ?? 0,
+          width: params.width ?? 400,
+          height: params.height ?? 200,
+          text: params.text ?? "",
+          ...(params.color ? { color: params.color } : {}),
+        });
+      }
+
+      if (params.operation === "connect_nodes") {
+        if (!params.fromNode || !params.toNode) {
+          throw new Error(
+            "fromNode and toNode are required for operation=connect_nodes.",
+          );
+        }
+        nextCanvas.edges.push({
+          id: params.edgeId ?? createCanvasId(),
+          fromNode: params.fromNode,
+          toNode: params.toNode,
+          ...(params.fromSide ? { fromSide: params.fromSide } : {}),
+          ...(params.toSide ? { toSide: params.toSide } : {}),
+          ...(params.label ? { label: params.label } : {}),
+        });
+      }
+
+      const nextContent = renderCanvas(nextCanvas);
+      const validation = validateJsonCanvas(nextContent);
+      if (!validation.ok) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  dryRun: params.dryRun,
+                  filePath: target,
+                  validation,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: false,
+        };
+      }
+
+      if (params.dryRun) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ok: true,
+                  dryRun: true,
+                  filePath: target,
+                  content: nextContent,
+                  validation,
+                  limitations: [
+                    "Canvas layout is validated structurally but not rendered headlessly.",
+                  ],
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: false,
+        };
+      }
+
+      if (current) {
+        const result = await vaultFileService.updateWholeFile(
+          target,
+          "overwrite",
+          nextContent,
+          context,
+          {
+            expectedHash: params.expectedHash,
+            expectedMtime: params.expectedMtime,
+          },
+        );
+        await updateCacheAfterGuardedWrite(
+          vaultCacheService,
+          result.path,
+          context,
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ok: true,
+                  source: "filesystem-guarded",
+                  filePath: result.path,
+                  stats: {
+                    mtime: result.mtime,
+                    size: result.size,
+                    hash: result.hash,
+                  },
+                  validation,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: false,
+        };
+      }
+
+      const result = await vaultFileService.writeAtomic(
+        target,
+        nextContent,
+        context,
+      );
+      await updateCacheAfterGuardedWrite(
+        vaultCacheService,
+        result.path,
+        context,
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ok: true,
+                source: "filesystem-guarded",
+                filePath: result.path,
+                stats: {
+                  mtime: result.mtime,
+                  size: result.size,
+                  hash: result.hash,
+                },
+                validation,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
+  );
+
+  server.tool(
     "bases_create",
     "Headless-guarded filesystem .base create/validate. Writes YAML directly and does not evaluate Obsidian Bases semantics.",
     {
@@ -1317,6 +1677,7 @@ async function createMcpServerInstance(
     await registerListAllTasksTool(server, vaultCacheService);
     await registerQueryTasksTool(server, vaultCacheService);
     await registerRuntimeTools(server, vaultCacheService);
+    registerFormatValidationTool(server);
 
     if (isHeadlessGuarded || isHeadlessFilesystem) {
       registerHeadlessGuardedWriteTools(

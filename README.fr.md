@@ -218,7 +218,7 @@ npm pack --dry-run
 - `hybrid` : démarre depuis le vault/cache local et utilise Local REST API quand `OBSIDIAN_API_KEY` est configurée. Le check API au démarrage n’est pas bloquant. Si aucune clé API n’est configurée, `OBSIDIAN_VAULT` est requis.
 - `headless-readonly` : sans Obsidian Desktop, sans Local REST API, sans `OBSIDIAN_API_KEY`. Requiert `OBSIDIAN_VAULT` et `OBSIDIAN_CACHE_SOURCE=filesystem`; expose lecture, liste, recherche, Tasks, sémantique, runtime, plus `bases_list`, `bases_get_schema` et `bases_query` en fallback local readonly.
 - `headless-guarded` : sans Obsidian Desktop ; expose la surface read headless + écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases readonly est aussi disponible.
-- `headless-filesystem` : sans Obsidian Desktop ; expose `headless-guarded` plus les features filesystem bornées : tags frontmatter/inline, index/audit local des tags et rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, et rows Bases comme opérations `set` de frontmatter Markdown.
+- `headless-filesystem` : sans Obsidian Desktop ; expose `headless-guarded` plus les features filesystem bornées : tags frontmatter/inline, index/audit local des tags et rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
 
 Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchronisé. Cela ne signifie pas que Desktop, les plugins communautaires, la command palette, l’active file ou Bases Bridge sont disponibles sans Obsidian Desktop.
 
@@ -226,6 +226,13 @@ Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchron
 
 Pour le comparatif mode par mode, voir [Matrice des capacités runtime](docs/runtime-capability-matrix.fr.md).
 Pour le chemin serveur dédié, voir [Profil serveur headless](docs/headless-server-profile.fr.md).
+Pour le routage agent entre MCP, Desktop/API, filesystem, CLI et skills de format, voir [Guide de routage MCP](docs/mcp-routing-guide.fr.md).
+
+Validation de format :
+
+- `obsidian_validate_format` est disponible dans tous les modes runtime.
+- Il valide Markdown Obsidian, YAML `.base` et structure JSON Canvas avant les writes.
+- Il attrape les erreurs locales de format, mais ne rend pas Obsidian, ne charge pas les plugins et n'évalue pas la sémantique exacte de l'UI Bases.
 
 Fallback local Bases :
 

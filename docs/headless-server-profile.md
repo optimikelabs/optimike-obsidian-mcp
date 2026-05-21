@@ -9,7 +9,7 @@ This profile is for a dedicated server or copied Sync vault. It keeps the stable
 - Keep Optimike MCP in `headless-readonly` until list/read/search/tasks/Bases/status are green.
 - Keep MCP cache outside the synchronized vault.
 - Use vault exclusions for operational noise, but do not rely on them to stop Obsidian Sync downloads.
-- Do not claim Desktop parity. Move/delete, frontmatter or inline tags, batch frontmatter, and minimal Bases writes exist in `headless-filesystem` as bounded filesystem features, not as Obsidian Desktop behavior.
+- Do not claim Desktop parity. Move/delete, frontmatter or inline tags, batch frontmatter, minimal Bases writes, format validation, and minimal Canvas helpers exist as bounded filesystem/local features, not as Obsidian Desktop behavior.
 
 ## Environment
 
@@ -83,7 +83,8 @@ Only after the `headless-guarded` step, switch a copied or dedicated vault to `O
 2. For tags, limit the contract to Markdown text: YAML frontmatter `tags`, inline `#tags`, and cache-backed local index.
 3. For batch frontmatter, keep dry-run as the default and allow only `set`.
 4. For Bases, limit the contract to `.base` YAML files and Markdown frontmatter properties.
-5. Validate with `npm run smoke:headless-filesystem`.
+5. For Canvas, limit the contract to JSON Canvas structure: create, add text node, connect nodes, validate.
+6. Validate with `npm run smoke:headless-filesystem`.
 
 Never use this phase to edit existing production notes until the server profile has its own rollback and monitoring story.
 

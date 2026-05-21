@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-05-21
+
+### Added
+
+- `obsidian_validate_format` readonly tool for Obsidian Markdown, `.base`, and JSON Canvas validation.
+- `obsidian_manage_canvas` headless filesystem tool for validating, creating, adding text nodes, and connecting JSON Canvas nodes.
+- Realistic smoke fixtures for Obsidian Markdown, `.base` formulas/views, and `.canvas` nodes/edges.
+- MCP routing guide explaining when to use MCP, Desktop/API, filesystem tools, CLI, and format skills.
+
+### Changed
+
+- Runtime smokes now validate Obsidian-facing formats before and during headless filesystem write coverage.
+- Documentation now separates format guidance from execution tools and clarifies what headless validation can and cannot guarantee.
+
+### Security
+
+- Canvas writes are limited to `headless-filesystem`, dry-run by default, structurally validated before write, and use the existing guarded filesystem path safety.
+
 ## [2.1.0] - 2026-05-21
 
 ### Added
