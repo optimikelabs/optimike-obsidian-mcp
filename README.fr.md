@@ -176,10 +176,18 @@ Variables utiles :
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` pour choisir la source de refresh cache (`auto` privilégie le vault local quand il existe)
 - `OBSIDIAN_CACHE_CONCURRENCY` pour borner le travail filesystem local
+- `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` pour ajouter des exclusions façon gitignore, séparées par virgules ou retours ligne, au-dessus de la politique de sécurité intégrée
 - `MCP_WRITE_MODE=readonly|guarded|full` pour imposer la sécurité d’écriture côté serveur (`full` est le défaut ; définir explicitement `guarded` ou `readonly` pour durcir un hôte)
 - `MCP_GUARDED_MAX_WRITE_CHARS` et `MCP_GUARDED_MAX_BATCH_OPERATIONS` pour régler les limites du mode guarded
 
 Pour tester sur un vrai coffre, définir `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du coffre afin que les bases SQLite de validation ne polluent pas l’arbre synchronisé.
+
+Politique d’exclusion du vault :
+
+- Les exclusions intégrées couvrent `.obsidian`, `.trash`, `.git`, `.tmp`, `tmp`, `node_modules`, les dossiers de screenshots, les dossiers build/cache, les fichiers SQLite/DB et les logs.
+- `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` permet d’ajouter les exclusions propres au coffre, par exemple `tmp/**,**/tmp/**,Efforts/Archives/**`.
+- Les exclusions s’appliquent aux refreshs filesystem du cache et aux scans du fallback local Bases. Elles ne promettent pas la parité Desktop et n’empêchent pas Obsidian Sync de télécharger les fichiers ; pour cela, il faut un profil serveur/vault propre côté Sync.
+- `npm run check:vault-exclusions -- --vault=/chemin/vers/vault` affiche l’effet de la politique avant une validation headless longue.
 
 Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
 Les refreshs sémantiques à chaud relisent SQLite d’abord, puis seulement `.smart-env` si nécessaire.
@@ -196,6 +204,7 @@ npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
 npm run smoke:headless-status
+npm run check:vault-exclusions -- --vault=/chemin/vers/vault
 ```
 
 ## Modes runtime
@@ -207,7 +216,9 @@ npm run smoke:headless-status
 
 Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchronisé. Cela ne signifie pas que Desktop, les plugins communautaires, la command palette, l’active file ou Bases Bridge sont disponibles sans Obsidian Desktop.
 
-`npm run test:runtime` lance le build, les smokes runtime principaux et le smoke HTTP health/status. Il utilise des vaults temporaires et ne dépend ni d’un vrai coffre Obsidian, ni d’une clé API réelle.
+`npm run test:runtime` lance le build, les smokes runtime principaux et le smoke HTTP health/status. Il utilise des vaults temporaires et ne dépend ni d’un vrai coffre Obsidian, ni d’une clé API réelle. Les smokes headless vérifient aussi qu’un contenu exclu sous `tmp/**` n’est pas indexé.
+
+Pour le comparatif mode par mode, voir [Matrice des capacités runtime](docs/runtime-capability-matrix.fr.md).
 
 Fallback local Bases :
 

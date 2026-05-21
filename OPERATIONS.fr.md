@@ -72,6 +72,7 @@ Variables de tuning utiles :
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest`
 - `OBSIDIAN_CACHE_CONCURRENCY`
+- `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`
 - `MCP_WRITE_MODE=readonly|guarded|full`
 - `MCP_GUARDED_MAX_WRITE_CHARS`
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
@@ -80,6 +81,23 @@ Variables de tuning utiles :
 Le comportement d’écriture par défaut est `MCP_WRITE_MODE=full`. Les hôtes qui veulent une posture publique/runtime plus stricte peuvent définir explicitement `MCP_WRITE_MODE=guarded` ou `MCP_WRITE_MODE=readonly` ; l’agent n’a pas à choisir un mode à chaque écriture.
 
 Pour valider sur un vrai coffre, garder `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du coffre synchronisé. Cela permet de tester readonly, hybrid et les flows guarded en sandbox sans ajouter de base SQLite de validation dans le vault.
+
+## Politique d’exclusion du vault
+
+Le serveur embarque une politique d’exclusion pour les scans runtime filesystem. Elle évite d’indexer le bruit opérationnel et les artefacts de validation :
+
+- `.obsidian`, `.trash`, `.git`
+- `.tmp`, `tmp`, `node_modules`
+- dossiers de screenshots, dossiers build/cache, fichiers SQLite/DB et fichiers log
+
+Ajouter des règles locales avec `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`, au format gitignore séparé par virgules ou retours ligne. Exemple :
+
+```bash
+OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,Efforts/Archives/**"
+npm run check:vault-exclusions -- --vault=/chemin/vers/vault
+```
+
+Cette politique protège le cache Optimike, la recherche, Tasks et le fallback local Bases. Elle n’empêche pas Obsidian Headless/Sync de télécharger les fichiers. Pour un serveur durable, commencer par un vault copié en pull-only, puis nettoyer le contenu côté Sync ou utiliser un profil/vault serveur spécifique avant toute validation d’écriture guarded.
 
 ## Modes runtime
 
@@ -99,9 +117,12 @@ npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
 npm run smoke:headless-status
+npm run check:vault-exclusions -- --vault=/chemin/vers/vault
 ```
 
-`npm run test:runtime` est la gate locale durable pour cette famille runtime. Elle lance `npm run build`, les smokes de mode et le smoke HTTP health/status sur des vaults temporaires.
+`npm run test:runtime` est la gate locale durable pour cette famille runtime. Elle lance `npm run build`, les smokes de mode et le smoke HTTP health/status sur des vaults temporaires. Les smokes headless vérifient aussi qu’un contenu exclu sous `tmp/**` n’est pas indexé.
+
+Le comparatif détaillé par mode vit dans [Matrice des capacités runtime](docs/runtime-capability-matrix.fr.md).
 
 ## Dépendances requises
 

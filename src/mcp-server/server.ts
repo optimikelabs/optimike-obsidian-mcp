@@ -51,11 +51,13 @@ import { registerRuntimeTools } from "./tools/runtimeTools/index.js";
 import { startHttpTransport } from "./transports/httpTransport.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
 
-async function rebuildCacheAfterGuardedWrite(
+async function updateCacheAfterGuardedWrite(
   vaultCacheService: VaultCacheService | undefined,
+  filePath: string,
+  context: ReturnType<typeof requestContextService.createRequestContext>,
 ): Promise<void> {
   if (vaultCacheService) {
-    await vaultCacheService.rebuildFromSource();
+    await vaultCacheService.updateCacheForFile(filePath, context);
   }
 }
 
@@ -100,7 +102,7 @@ function registerHeadlessGuardedWriteTools(
           expectedMtime: params.expectedMtime,
         },
       );
-      await rebuildCacheAfterGuardedWrite(vaultCacheService);
+      await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
       return {
         content: [
           {
@@ -162,7 +164,7 @@ function registerHeadlessGuardedWriteTools(
           expectedMtime: params.expectedMtime,
         },
       );
-      await rebuildCacheAfterGuardedWrite(vaultCacheService);
+      await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
       return {
         content: [
           {
@@ -225,7 +227,7 @@ function registerHeadlessGuardedWriteTools(
           expectedMtime: params.expectedMtime,
         },
       );
-      await rebuildCacheAfterGuardedWrite(vaultCacheService);
+      await updateCacheAfterGuardedWrite(vaultCacheService, result.path, context);
       return {
         content: [
           {

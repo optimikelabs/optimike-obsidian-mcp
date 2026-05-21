@@ -172,10 +172,18 @@ Useful env overrides:
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT` to tune the bounded in-memory hot set
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` to choose cache refresh source (`auto` prefers the local vault path when available)
 - `OBSIDIAN_CACHE_CONCURRENCY` to bound local filesystem refresh work
+- `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` to add comma- or newline-separated gitignore-style exclusions on top of the built-in vault safety policy
 - `MCP_WRITE_MODE=readonly|guarded|full` to enforce server-side write safety (`full` is the default; set `guarded` or `readonly` explicitly to harden a host)
 - `MCP_GUARDED_MAX_WRITE_CHARS` and `MCP_GUARDED_MAX_BATCH_OPERATIONS` to tune guarded-mode limits
 
 For production-like tests on a real vault, set `OBSIDIAN_SHARED_CACHE_DB_PATH` outside the vault so validation databases do not pollute the synced note tree.
+
+Vault exclusion policy:
+
+- Built-in filesystem/cache exclusions cover `.obsidian`, `.trash`, `.git`, `.tmp`, `tmp`, `node_modules`, screenshots folders, build/cache folders, SQLite/DB files, and log files.
+- `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` lets an operator add project-specific exclusions, for example `tmp/**,**/tmp/**,Efforts/Archives/**`.
+- Exclusions apply to filesystem cache refreshes and local Bases fallback scans. They do not claim Desktop parity and they do not stop Obsidian Sync itself from downloading files; use a clean server vault or Sync-side hygiene for that.
+- `npm run check:vault-exclusions -- --vault=/path/to/vault` prints the policy effect before running a long headless validation.
 
 This runtime exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
 Warm semantic refreshes now load from SQLite first instead of re-reading the whole `.smart-env` path every time.
@@ -198,9 +206,12 @@ npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
 npm run smoke:headless-status
+npm run check:vault-exclusions -- --vault=/path/to/vault
 ```
 
-`npm run test:runtime` runs the build, all runtime mode smokes, and the HTTP health/status smoke. It uses temporary vaults and does not require a real Obsidian vault or API key.
+`npm run test:runtime` runs the build, all runtime mode smokes, and the HTTP health/status smoke. It uses temporary vaults and does not require a real Obsidian vault or API key. The headless smokes also assert that excluded `tmp/**` content is not indexed.
+
+For a mode-by-mode comparison, see [Runtime Capability Matrix](docs/runtime-capability-matrix.md).
 
 Local Bases fallback:
 

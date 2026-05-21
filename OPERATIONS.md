@@ -72,6 +72,7 @@ Useful tuning:
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
 - `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest`
 - `OBSIDIAN_CACHE_CONCURRENCY`
+- `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`
 - `MCP_WRITE_MODE=readonly|guarded|full`
 - `MCP_GUARDED_MAX_WRITE_CHARS`
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
@@ -80,6 +81,23 @@ Useful tuning:
 Default write behavior is `MCP_WRITE_MODE=full`. Hosts that want a stricter public/runtime posture can explicitly set `MCP_WRITE_MODE=guarded` or `MCP_WRITE_MODE=readonly`; agents do not need to choose a mode per write.
 
 For real-vault validation, keep `OBSIDIAN_SHARED_CACHE_DB_PATH` outside the synced vault. This lets you test readonly, hybrid, and guarded sandbox flows without adding validation databases to the vault itself.
+
+## Vault exclusion policy
+
+The server has a built-in exclusion policy for filesystem-backed runtime scans. It skips operational noise and unsafe validation material before indexing:
+
+- `.obsidian`, `.trash`, `.git`
+- `.tmp`, `tmp`, `node_modules`
+- screenshot folders, build/cache folders, SQLite/DB files, and log files
+
+Add local rules with `OBSIDIAN_VAULT_EXCLUDE_PATTERNS`, using comma- or newline-separated gitignore-style patterns. Example:
+
+```bash
+OBSIDIAN_VAULT_EXCLUDE_PATTERNS="tmp/**,**/tmp/**,Efforts/Archives/**"
+npm run check:vault-exclusions -- --vault=/path/to/vault
+```
+
+This policy protects Optimike cache, search, Tasks, and local Bases fallback behavior. It does not stop Obsidian Headless/Sync from downloading files. For a durable server, use a pull-only copied vault first, then clean Sync-side content or use a server-specific vault/profile before any guarded write validation.
 
 ## Runtime Modes
 
@@ -99,9 +117,12 @@ npm run smoke:hybrid-unavailable
 npm run smoke:hybrid-api-available
 npm run smoke:headless-guarded
 npm run smoke:headless-status
+npm run check:vault-exclusions -- --vault=/path/to/vault
 ```
 
-`npm run test:runtime` is the durable local gate for this runtime family. It runs `npm run build`, all mode smokes, and the HTTP health/status smoke on temporary vaults.
+`npm run test:runtime` is the durable local gate for this runtime family. It runs `npm run build`, all mode smokes, and the HTTP health/status smoke on temporary vaults. The headless smokes also check that excluded `tmp/**` content is not indexed.
+
+The detailed mode comparison lives in [Runtime Capability Matrix](docs/runtime-capability-matrix.md).
 
 ## Required Dependencies
 

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
+import { parseVaultExcludePatterns } from "../services/vaultExclusions.js";
 
 dotenv.config();
 
@@ -114,6 +115,7 @@ const EnvSchema = z
     .enum(["auto", "rest", "filesystem"])
     .default("auto"),
   OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
+  OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
   OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
   OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
     .number()
@@ -319,6 +321,9 @@ export const config = {
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
   obsidianCacheSource: env.OBSIDIAN_CACHE_SOURCE,
   obsidianCacheConcurrency: env.OBSIDIAN_CACHE_CONCURRENCY,
+  obsidianVaultExcludePatterns: parseVaultExcludePatterns(
+    env.OBSIDIAN_VAULT_EXCLUDE_PATTERNS,
+  ),
   obsidianSharedCacheDbPath:
     env.OBSIDIAN_SHARED_CACHE_DB_PATH ||
     path.join(

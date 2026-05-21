@@ -13,6 +13,11 @@ import type {
 } from "./obsidianRestAPI/types.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
+import {
+  createVaultExclusionMatcher,
+  isVaultPathExcluded,
+  normalizeVaultRelativePath,
+} from "./vaultExclusions.js";
 
 type ParsedBase = {
   id: string;
@@ -85,6 +90,10 @@ function compareValues(a: unknown, b: unknown): number {
 }
 
 export class LocalBasesService {
+  private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
+    config.obsidianVaultExcludePatterns,
+  );
+
   constructor(private readonly vaultCacheService: VaultCacheService) {}
 
   private async listParsedBases(): Promise<ParsedBase[]> {
@@ -93,8 +102,13 @@ export class LocalBasesService {
     const walk = async (directory: string): Promise<void> => {
       const entries = await readdir(directory, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.name === ".obsidian" || entry.name === ".git") continue;
         const absolutePath = path.join(directory, entry.name);
+        const relativePathForPolicy = normalizeVaultRelativePath(
+          path.relative(config.obsidianVaultPath!, absolutePath),
+        );
+        if (isVaultPathExcluded(relativePathForPolicy, this.vaultExclusionMatcher)) {
+          continue;
+        }
         if (entry.isDirectory()) {
           await walk(absolutePath);
           continue;

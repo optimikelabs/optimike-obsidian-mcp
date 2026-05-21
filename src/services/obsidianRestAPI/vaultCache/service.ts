@@ -11,6 +11,11 @@ import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../../../config/index.js";
+import {
+  createVaultExclusionMatcher,
+  isVaultPathExcluded,
+  normalizeVaultRelativePath,
+} from "../../vaultExclusions.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
   logger,
@@ -112,6 +117,9 @@ export class VaultCacheService {
   private readonly hotCacheLimit = config.obsidianContentHotCacheLimit;
   private readonly obsidianService: ObsidianRestApiService | undefined;
   private readonly db: DatabaseSync;
+  private readonly vaultExclusionMatcher = createVaultExclusionMatcher(
+    config.obsidianVaultExcludePatterns,
+  );
   private isCacheReady = false;
   private isBuilding = false;
   private lastRefreshStartedAt: number | null = null;
@@ -211,6 +219,7 @@ export class VaultCacheService {
       refreshSource: this.readMetadataValue("last_refresh_source"),
       configuredRefreshSource: config.obsidianCacheSource,
       refreshConcurrency: config.obsidianCacheConcurrency,
+      vaultExcludePatterns: config.obsidianVaultExcludePatterns,
       schemaVersion:
         this.readMetadataValue("schema_version") ?? SHARED_CACHE_SCHEMA_VERSION,
       status: this.getReadinessStatus(),
@@ -309,9 +318,64 @@ export class VaultCacheService {
     filePath: string,
     context: RequestContext,
   ): Promise<void> {
-    const opContext = { ...context, operation: "updateCacheForFile", filePath };
-    logger.debug(`Proactively updating cache for file: ${filePath}`, opContext);
+    const normalizedPath = normalizeDirPath(filePath);
+    const opContext = {
+      ...context,
+      operation: "updateCacheForFile",
+      filePath: normalizedPath,
+    };
+    logger.debug(`Proactively updating cache for file: ${normalizedPath}`, opContext);
     try {
+      const vaultRoot = getVaultRoot();
+      if (
+        vaultRoot &&
+        (config.obsidianCacheSource === "filesystem" || !this.obsidianService)
+      ) {
+        if (isVaultPathExcluded(normalizedPath, this.vaultExclusionMatcher)) {
+          this.deleteRow(normalizedPath);
+          logger.info(
+            `Proactively removed excluded file from cache: ${normalizedPath}`,
+            opContext,
+          );
+          return;
+        }
+
+        try {
+          const absolutePath = path.join(
+            vaultRoot,
+            normalizedPath.replace(/^\/+/u, ""),
+          );
+          const [content, stats] = await Promise.all([
+            fs.readFile(absolutePath, "utf-8"),
+            fs.stat(absolutePath),
+          ]);
+          this.upsertRow({
+            path: normalizedPath,
+            ctime: Math.round(stats.ctimeMs),
+            mtime: Math.round(stats.mtimeMs),
+            size: stats.size,
+            hash: computeContentHash(content),
+            content,
+          });
+          logger.info(
+            `Proactively updated filesystem cache for: ${normalizedPath}`,
+            opContext,
+          );
+          return;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "ENOENT") {
+            this.deleteRow(normalizedPath);
+            logger.info(
+              `Proactively removed missing file from cache: ${normalizedPath}`,
+              opContext,
+            );
+            return;
+          }
+          throw error;
+        }
+      }
+
       if (!this.obsidianService) {
         throw new McpError(
           BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -347,7 +411,7 @@ export class VaultCacheService {
       }
 
       this.upsertRow({
-        path: filePath,
+        path: normalizedPath,
         ctime: noteJson.stat.ctime,
         mtime: noteJson.stat.mtime,
         size: noteJson.stat.size,
@@ -357,15 +421,15 @@ export class VaultCacheService {
       logger.info(`Proactively updated cache for: ${filePath}`, opContext);
     } catch (error) {
       if (error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND) {
-        this.deleteRow(filePath);
+        this.deleteRow(normalizedPath);
         logger.info(
-          `Proactively removed deleted file from cache: ${filePath}`,
+          `Proactively removed deleted file from cache: ${normalizedPath}`,
           opContext,
         );
         return;
       }
       logger.error(
-        `Failed to proactively update cache for ${filePath}. Error: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to proactively update cache for ${normalizedPath}. Error: ${error instanceof Error ? error.message : String(error)}`,
         opContext,
       );
     }
@@ -796,7 +860,10 @@ export class VaultCacheService {
       }
 
       for (const entry of entries) {
-        if (entry.name === ".obsidian" || entry.name === ".trash" || entry.name === ".git") {
+        const relativePath = normalizeVaultRelativePath(
+          path.relative(vaultRoot, path.join(directory, entry.name)),
+        );
+        if (isVaultPathExcluded(relativePath, this.vaultExclusionMatcher)) {
           continue;
         }
         const fullPath = path.join(directory, entry.name);

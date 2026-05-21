@@ -47,6 +47,7 @@ function assertTextIncludes(result, needle, label) {
 async function createTempVault() {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "optimike-headless-vault-"));
   await mkdir(path.join(vaultRoot, "Projects"), { recursive: true });
+  await mkdir(path.join(vaultRoot, "tmp", "reports"), { recursive: true });
   await mkdir(path.join(vaultRoot, ".obsidian"), { recursive: true });
   await writeFile(
     path.join(vaultRoot, "Projects", "Headless.md"),
@@ -67,6 +68,18 @@ async function createTempVault() {
   await writeFile(
     path.join(vaultRoot, "Root.md"),
     ["---", "type: root", "---", "", "Root smoke note with searchable keyword alphasmoke.", ""].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(vaultRoot, "tmp", "reports", "Excluded.md"),
+    [
+      "---",
+      "type: excluded",
+      "---",
+      "",
+      "This operational scratch note contains excluded keyword betasmoke.",
+      "",
+    ].join("\n"),
     "utf8",
   );
   await writeFile(
@@ -200,6 +213,7 @@ async function main() {
       OBSIDIAN_VAULT: vaultRoot,
       OBSIDIAN_CACHE_SOURCE: "filesystem",
       OBSIDIAN_SHARED_CACHE_DB_PATH: cachePath,
+      OBSIDIAN_VAULT_EXCLUDE_PATTERNS: "tmp/**,**/tmp/**",
       OBSIDIAN_ENABLE_CACHE: "true",
       MCP_WRITE_MODE: modeArg === "headless-guarded" ? "guarded" : "readonly",
       OBSIDIAN_API_KEY: modeArg === "hybrid-live" ? "smoke-key" : "",
@@ -302,6 +316,23 @@ async function main() {
       "global search",
     );
     assertTextIncludes(search, "Root.md", "global search");
+
+    const excludedSearch = await withTimeout(
+      client.callTool({
+        name: "obsidian_global_search",
+        arguments: {
+          query: "betasmoke",
+          page: 1,
+          pageSize: 10,
+          maxMatchesPerFile: 3,
+          responseMode: "compact",
+        },
+      }),
+      "excluded global search",
+    );
+    if (assertTextIncludes(excludedSearch, "totalFiles", "excluded global search").includes("Excluded.md")) {
+      throw new Error("Vault exclusion policy failed: tmp/Excluded.md was indexed");
+    }
 
     const tasks = await withTimeout(
       client.callTool({
