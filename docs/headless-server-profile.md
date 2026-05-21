@@ -1,5 +1,9 @@
 # Headless Server Profile
 
+French version: [headless-server-profile.fr.md](headless-server-profile.fr.md)
+
+Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Runtime Capability Matrix](runtime-capability-matrix.md), [MCP Routing Guide](mcp-routing-guide.md)
+
 This profile is for a dedicated server or copied Sync vault. It keeps the stable release posture: read-only first, guarded writes only after the read-only profile is proven.
 
 ## Contract

@@ -1,5 +1,9 @@
 # MCP Routing Guide
 
+French version: [mcp-routing-guide.fr.md](mcp-routing-guide.fr.md)
+
+Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Runtime Capability Matrix](runtime-capability-matrix.md), [Headless Server Profile](headless-server-profile.md)
+
 This guide helps agents choose the right layer for Obsidian work.
 
 ## Default Decision

@@ -157,7 +157,7 @@ The final server can expose different capabilities depending on which Obsidian p
 
   - available in headless modes for `bases_list`, `bases_get_schema`, and `bases_query`
   - returns `source: "local-fallback"`
-  - supports direct equality filters, simple sorting, pagination, and schema inspection
+  - supports direct equality, arrays, `contains`, `in`, comparisons, simple sorting, pagination, and schema inspection
   - does not evaluate formulas, plugin filters, calculated properties, or exact UI view semantics
 
 - Smart Connections
@@ -297,6 +297,8 @@ npm run verify:code
 - hybrid without API smoke
 - hybrid with mocked API smoke
 - headless guarded smoke
+- headless filesystem smoke
+- HTTP health/status smoke
 
 `npm run verify:code` runs:
 
@@ -386,3 +388,11 @@ Think of the server as:
 - optional live semantic provider
 
 That is the final intended shape of the product.
+
+## More Documentation
+
+- Product overview and install: [README.md](README.md)
+- Mode-by-mode capability matrix: [docs/runtime-capability-matrix.md](docs/runtime-capability-matrix.md)
+- Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
+- Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
+- French operations guide: [OPERATIONS.fr.md](OPERATIONS.fr.md)

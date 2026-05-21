@@ -2,7 +2,7 @@
 
 Version anglaise : [README.md](README.md)
 Guide d’exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
-Operations guide (EN) : [OPERATIONS.md](OPERATIONS.md)
+Guide d’exploitation anglais : [OPERATIONS.md](OPERATIONS.md)
 
 ![Hero Optimike Obsidian MCP](docs/assets/hero-optimike-obsidian-mcp.png)
 
@@ -83,7 +83,7 @@ Le MCP devient donc une frontière pratique entre les agents et Obsidian : les a
 - Mode dégradé lecture seule pour `obsidian_read_note` et `obsidian_list_notes` si Obsidian REST tombe
 - Store SQLite partagé pour le contenu du vault, le cache Tasks et le manifest sémantique
 - Embedder-agnostic : aligne automatiquement la requête sur le modèle du vault
-- Support Ollama / OpenAI (override par env vars) ; Xenova / Transformers est désactivé tant que sa chaîne ONNX/protobuf vulnérable ne peut pas être réintroduite proprement
+- Support Ollama / OpenAI (surcharge par variables d’environnement) ; Xenova / Transformers est désactivé tant que sa chaîne ONNX/protobuf vulnérable ne peut pas être réintroduite proprement
 
 ## Architecture (vue d'ensemble)
 
@@ -136,7 +136,7 @@ Quand `evaluate: true`, le bridge renvoie :
 
 ## Outils MCP liés aux Bases
 
-Le serveur expose des tools MCP “Base” (via Obsidian MCP) :
+Le serveur expose des tools MCP “Base” via Obsidian MCP :
 
 - `bases_list` : liste toutes les bases
 - `bases_get_schema` : récupère le schéma d’une base
@@ -145,17 +145,17 @@ Le serveur expose des tools MCP “Base” (via Obsidian MCP) :
 - `bases_upsert_config` : valider ou mettre à jour la configuration YAML/JSON d’une base
 - `bases_create` : créer/valider une base `.base`
 
-## Modèle Runtime Final
+## Modèle runtime final
 
 Le repo supporte maintenant deux modes locaux :
 
 - `stdio proxy` : recommandé pour Codex, un petit wrapper `stdio` qui démarre au besoin un backend HTTP local
-- `http backend` : le vrai process long-lived qui porte le cache partagé et les warmups
+- `http backend` : le backend persistant qui porte le cache partagé et les warmups
 
 Le backend persiste désormais :
 
 - le contenu du vault dans un cache SQLite partagé
-- un hot cache RAM borné
+- un cache RAM borné
 - un manifest sémantique (`semantic_manifest`, `semantic_vectors`) dans la même base
 
 La même base stocke donc :
@@ -175,7 +175,7 @@ Variables utiles :
 - `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded|headless-filesystem` pour choisir le contrat runtime
 - `OBSIDIAN_SHARED_CACHE_DB_PATH`
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
-- `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` pour choisir la source de refresh cache (`auto` privilégie le vault local quand il existe)
+- `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` pour choisir la source de refresh du cache (`auto` privilégie le vault local quand il existe)
 - `OBSIDIAN_CACHE_CONCURRENCY` pour borner le travail filesystem local
 - `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` pour ajouter des exclusions façon gitignore, séparées par virgules ou retours ligne, au-dessus de la politique de sécurité intégrée
 - `MCP_WRITE_MODE=readonly|guarded|full` pour imposer la sécurité d’écriture côté serveur (`full` est le défaut ; définir explicitement `guarded` ou `readonly` pour durcir un hôte)
@@ -187,7 +187,7 @@ Politique d’exclusion du vault :
 
 - Les exclusions intégrées couvrent `.obsidian`, `.trash`, `.git`, `.tmp`, `tmp`, `node_modules`, les dossiers de screenshots, les dossiers build/cache, les fichiers SQLite/DB et les logs.
 - `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` permet d’ajouter les exclusions propres au coffre, par exemple `tmp/**,**/tmp/**,Efforts/Archives/**`.
-- Les exclusions s’appliquent aux refreshs filesystem du cache et aux scans du fallback local Bases. Elles ne promettent pas la parité Desktop et n’empêchent pas Obsidian Sync de télécharger les fichiers ; pour cela, il faut un profil serveur/vault propre côté Sync.
+- Les exclusions s’appliquent aux refreshs filesystem du cache et aux scans du fallback local Bases. Elles ne promettent pas la parité Desktop et n’empêchent pas Obsidian Sync de télécharger les fichiers ; pour cela, il faut un profil serveur ou un vault propre côté Sync.
 - `npm run check:vault-exclusions -- --vault=/chemin/vers/vault` affiche l’effet de la politique avant une validation headless longue.
 
 Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
@@ -214,11 +214,11 @@ npm pack --dry-run
 
 ## Modes runtime
 
-- `live` (défaut) : Obsidian Desktop + Local REST API. Surface complète REST, writes et Bases Bridge.
+- `live` (défaut) : Obsidian Desktop + Local REST API. Surface complète REST, écritures et Bases Bridge.
 - `hybrid` : démarre depuis le vault/cache local et utilise Local REST API quand `OBSIDIAN_API_KEY` est configurée. Le check API au démarrage n’est pas bloquant. Si aucune clé API n’est configurée, `OBSIDIAN_VAULT` est requis.
-- `headless-readonly` : sans Obsidian Desktop, sans Local REST API, sans `OBSIDIAN_API_KEY`. Requiert `OBSIDIAN_VAULT` et `OBSIDIAN_CACHE_SOURCE=filesystem`; expose lecture, liste, recherche, Tasks, sémantique, runtime, plus `bases_list`, `bases_get_schema` et `bases_query` en fallback local readonly.
-- `headless-guarded` : sans Obsidian Desktop ; expose la surface read headless + écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases readonly est aussi disponible.
-- `headless-filesystem` : sans Obsidian Desktop ; expose `headless-guarded` plus les features filesystem bornées : tags frontmatter/inline, index/audit local des tags et rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
+- `headless-readonly` : sans Obsidian Desktop, sans Local REST API, sans `OBSIDIAN_API_KEY`. Requiert `OBSIDIAN_VAULT` et `OBSIDIAN_CACHE_SOURCE=filesystem`; expose lecture, liste, recherche, Tasks, sémantique, runtime, plus `bases_list`, `bases_get_schema` et `bases_query` en fallback local en lecture seule.
+- `headless-guarded` : sans Obsidian Desktop ; expose la surface de lecture headless + écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases en lecture seule est aussi disponible.
+- `headless-filesystem` : sans Obsidian Desktop ; expose `headless-guarded` plus les fonctions filesystem bornées : tags frontmatter/inline, index/audit local des tags et rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
 
 Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchronisé. Cela ne signifie pas que Desktop, les plugins communautaires, la command palette, l’active file ou Bases Bridge sont disponibles sans Obsidian Desktop.
 
@@ -231,14 +231,14 @@ Pour le routage agent entre MCP, Desktop/API, filesystem, CLI et skills de forma
 Validation de format :
 
 - `obsidian_validate_format` est disponible dans tous les modes runtime.
-- Il valide Markdown Obsidian, YAML `.base` et structure JSON Canvas avant les writes.
+- Il valide Markdown Obsidian, YAML `.base` et structure JSON Canvas avant les écritures.
 - Il attrape les erreurs locales de format, mais ne rend pas Obsidian, ne charge pas les plugins et n'évalue pas la sémantique exacte de l'UI Bases.
 
 Fallback local Bases :
 
 - `bases_list`, `bases_get_schema` et `bases_query` sont disponibles en modes headless avec `source: "local-fallback"`.
 - Le fallback lit les YAML `.base` depuis `OBSIDIAN_VAULT` et le frontmatter Markdown depuis le cache partagé.
-- Il supporte les filtres par égalité directe, les arrays, `contains`, `in`, les comparaisons, le tri simple, la pagination et l’inspection de schéma.
+- Il supporte l’égalité directe, les arrays, `contains`, `in`, les comparaisons, le tri simple, la pagination et l’inspection de schéma.
 - Il n’évalue pas les formules Obsidian, les filtres spécifiques à des plugins, les propriétés calculées, ni la sémantique exacte des vues UI.
 
 Health et maintenance :
@@ -407,7 +407,7 @@ Autrement dit :
 - le chemin des métadonnées sémantiques est maintenant durable et observable
 - la requête finale dépend toujours d’un provider d’embedding vivant au moment de l’appel
 
-## Providers (override optionnel)
+## Providers (surcharge optionnelle)
 
 **Ollama (local)**
 
@@ -433,11 +433,20 @@ export OPENAI_API_KEY=...
 ## MCP partage : portabilité
 
 Pour un MCP partagé, ne pas figer un `OLLAMA_BASE_URL` global dans le vault.
-Laisser le mode auto et laisser chaque utilisateur overrider par env vars.
+Garder le mode auto et laisser chaque utilisateur surcharger par variables d’environnement.
 
 ## Repo Tasks legacy
 
 `optimike-obsidian-tasks-mcp` peut encore exister comme repo standalone legacy, mais Codex n’en a plus besoin quand ce serveur principal est utilisé. Le MCP canonique est maintenant celui-ci.
+
+## Documentation complémentaire
+
+- Vue produit et installation : ce README
+- Guide d’exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
+- Matrice des capacités par mode : [docs/runtime-capability-matrix.fr.md](docs/runtime-capability-matrix.fr.md)
+- Profil serveur headless dédié : [docs/headless-server-profile.fr.md](docs/headless-server-profile.fr.md)
+- Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
+- README anglais : [README.md](README.md)
 
 ## WSL + Ollama Windows (recommandé)
 
@@ -458,11 +467,11 @@ Puis, si besoin :
 export OLLAMA_BASE_URL=http://$GW:11434
 ```
 
-## Credits
+## Crédits
 
 - Créé par **Optimike** (Mickaël Ahouansou)
 - Base technique inspirée par `cyanheads/obsidian-mcp-server`
 
-## License
+## Licence
 
 Voir `LICENSE`.

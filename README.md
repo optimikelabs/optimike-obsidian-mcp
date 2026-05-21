@@ -481,6 +481,10 @@ Keep auto mode and let each user override via env vars.
 
 - Product overview and install: this README
 - Runtime and maintenance guide: [OPERATIONS.md](OPERATIONS.md)
+- Mode-by-mode capability matrix: [docs/runtime-capability-matrix.md](docs/runtime-capability-matrix.md)
+- Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
+- Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
+- French README: [README.fr.md](README.fr.md)
 
 ## WSL + Ollama Windows (recommended)
 

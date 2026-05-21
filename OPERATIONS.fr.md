@@ -15,7 +15,7 @@ Le runtime final repose sur deux couches :
    - démarre ou réutilise le backend local
    - garde la partie client MCP peu coûteuse
 2. `dist/index.js` en mode HTTP
-   - backend local long-lived
+   - backend local persistant
    - possède le store SQLite partagé
    - gère les refreshs, le mode dégradé et la santé runtime
 
@@ -39,7 +39,7 @@ Le store partagé contient :
 Ce qui reste en RAM :
 
 - uniquement le backend actif
-- un hot cache de contenu borné
+- un cache chaud de contenu borné
 - un petit état runtime pour le mode dégradé, la disponibilité sémantique et les refreshs récents
 
 ## Comment la mémoire reste basse
@@ -63,9 +63,9 @@ Le design final réduit la mémoire de quatre façons :
 
 4. les refreshs sémantiques sont incrémentaux
    - les métadonnées sémantiques sont persistées
-   - les warm refreshs consultent SQLite avant de reparcourir tout `.smart-env`
+   - les refreshs à chaud consultent SQLite avant de reparcourir tout `.smart-env`
 
-Variables de tuning utiles :
+Variables de réglage utiles :
 
 - `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded|headless-filesystem`
 - `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
@@ -78,7 +78,7 @@ Variables de tuning utiles :
 - `MCP_GUARDED_MAX_BATCH_OPERATIONS`
 - `OBSIDIAN_STARTUP_BLOCKING=false` pour un démarrage non bloquant plus confortable sous WSL
 
-Le comportement d’écriture par défaut est `MCP_WRITE_MODE=full`. Les hôtes qui veulent une posture publique/runtime plus stricte peuvent définir explicitement `MCP_WRITE_MODE=guarded` ou `MCP_WRITE_MODE=readonly` ; l’agent n’a pas à choisir un mode à chaque écriture.
+Le comportement d’écriture par défaut est `MCP_WRITE_MODE=full`. Les hôtes qui veulent une posture publique plus stricte peuvent définir explicitement `MCP_WRITE_MODE=guarded` ou `MCP_WRITE_MODE=readonly` ; l’agent n’a pas à choisir un mode à chaque écriture.
 
 Pour valider sur un vrai coffre, garder `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du coffre synchronisé. Cela permet de tester readonly, hybrid et les flows guarded en sandbox sans ajouter de base SQLite de validation dans le vault.
 
@@ -103,9 +103,9 @@ Cette politique protège le cache Optimike, la recherche, Tasks et le fallback l
 
 - `live` : mode complet par défaut. Requiert Obsidian Desktop + Local REST API + `OBSIDIAN_API_KEY`.
 - `hybrid` : Local REST API optionnelle et non bloquante. Si l’API est configurée, les tools live sont exposées ; sinon `OBSIDIAN_VAULT` est requis et la surface cache/filesystem reste disponible.
-- `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases readonly.
-- `headless-guarded` : même surface read headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases readonly est aussi disponible.
-- `headless-filesystem` : même surface que `headless-guarded`, plus features filesystem explicites pour sandbox/vault dédié : tags frontmatter/inline, index/audit local des tags et rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
+- `headless-readonly` : requiert `OBSIDIAN_VAULT`; ne requiert ni Obsidian Desktop, ni Local REST API, ni `OBSIDIAN_API_KEY`; expose lecture, liste, recherche, Tasks, sémantique, runtime et fallback local Bases en lecture seule.
+- `headless-guarded` : même surface de lecture headless, plus écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases en lecture seule est aussi disponible.
+- `headless-filesystem` : même surface que `headless-guarded`, avec des fonctions filesystem explicites pour sandbox ou vault dédié : tags frontmatter/inline, index/audit local des tags, rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
 
 Règle opérationnelle : les modes headless signifient Optimike MCP au-dessus d’un vault Markdown synchronisé. Ils ne chargent pas les plugins communautaires Obsidian et ne fournissent pas active file, command palette ou Bases Bridge sans Desktop.
 
@@ -157,7 +157,9 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 
   - disponible en modes headless pour `bases_list`, `bases_get_schema` et `bases_query`
   - renvoie `source: "local-fallback"`
-  - supporte les filtres par égalité directe, le tri simple, la pagination et l’inspection de schéma
+
+- supporte l’égalité directe, les arrays, `contains`, `in`, les comparaisons, le tri simple, la pagination et l’inspection de schéma
+
   - n’évalue pas les formules, filtres plugin, propriétés calculées ni la sémantique exacte des vues UI
 
 - Smart Connections
@@ -219,7 +221,7 @@ Toujours vivant au moment de la requête :
 Exemples :
 
 - si ton vault sémantique repose sur Ollama, Ollama doit toujours être joignable pour exécuter une requête sémantique
-- si Ollama tombe, le MCP renvoie maintenant une erreur propre au lieu de sembler freezer
+- si Ollama tombe, le MCP renvoie maintenant une erreur propre au lieu de sembler bloqué
 
 Au démarrage, le backend préchauffe la recherche sémantique en chargeant le snapshot et en envoyant une petite requête d’embedding au provider configuré. Désactivation possible avec `SEMANTIC_SEARCH_PREWARM=false` ; texte de warmup surchargeable avec `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
@@ -232,7 +234,7 @@ Si Obsidian REST n’est plus joignable mais que le cache partagé est chaud, le
 
 Le but est de garder le MCP utile quand Obsidian tombe temporairement, tout en rendant l’état explicite.
 
-Si une première lecture ou recherche arrive pendant que le cache filesystem est encore en construction, la tool attend brièvement la readiness du cache puis renvoie les stats cache si le vault reste indisponible. Sur gros coffre, utiliser `obsidian_runtime_maintenance` avec `refresh_all` comme gate manuelle de readiness.
+Si une première lecture ou recherche arrive pendant que le cache filesystem est encore en construction, la tool attend brièvement que le cache soit prêt, puis renvoie les stats cache si le vault reste indisponible. Sur gros coffre, utiliser `obsidian_runtime_maintenance` avec `refresh_all` comme gate manuelle de readiness.
 
 ## Santé et maintenance
 
@@ -297,6 +299,8 @@ npm run verify:code
 - smoke hybrid sans API
 - smoke hybrid avec API simulée
 - smoke headless guarded
+- smoke headless filesystem
+- smoke HTTP health/status
 
 `npm run verify:code` enchaîne :
 
@@ -373,7 +377,7 @@ Vérifie :
 Vérifie :
 
 - que les clients pointent vers `dist/stdio-proxy.js` et non `dist/index.js`
-- la limite de hot cache via `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
+- la limite du cache chaud via `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
 - qu’un ancien backend MCP ne tourne pas encore
 
 ## Modèle mental recommandé
@@ -385,4 +389,12 @@ Pense au serveur comme :
 - un seul état local persisté
 - un provider sémantique live en option
 
-C’est la forme finale visée du produit.
+C’est la forme visée du produit.
+
+## Documentation complémentaire
+
+- Vue produit et installation : [README.fr.md](README.fr.md)
+- Matrice des capacités par mode : [docs/runtime-capability-matrix.fr.md](docs/runtime-capability-matrix.fr.md)
+- Profil serveur headless dédié : [docs/headless-server-profile.fr.md](docs/headless-server-profile.fr.md)
+- Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
+- Guide d’exploitation anglais : [OPERATIONS.md](OPERATIONS.md)
