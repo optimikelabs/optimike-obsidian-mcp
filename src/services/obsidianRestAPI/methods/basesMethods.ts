@@ -88,12 +88,14 @@ export async function upsertBaseRows(
   payload: BaseUpsertRequest,
   context: RequestContext,
 ): Promise<BaseUpsertResponse> {
+  const { requestTimeoutMs, ...bridgePayload } = payload;
   return _request<BaseUpsertResponse>(
     {
       method: "POST",
       url: `/bases/${encodeURIComponent(baseId)}/upsert`,
       headers: { "Content-Type": "application/json" },
-      data: payload,
+      data: bridgePayload,
+      timeout: requestTimeoutMs,
     },
     context,
     "upsertBaseRows",

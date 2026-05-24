@@ -15,6 +15,10 @@ import {
 import { ensureLocalBackendRunning } from "./runtime/localBackend.js";
 
 type PackageInfo = { name?: string; version?: string };
+type BackendClient = {
+  client: Client;
+  transport: StreamableHTTPClientTransport;
+};
 
 const packageInfo = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
@@ -29,29 +33,36 @@ const port = Number(process.env.MCP_HTTP_PORT || "3010");
 const backendUrl = new URL(`http://${host}:${port}/mcp`);
 const healthUrl = new URL(`http://${host}:${port}/healthz`);
 
-const client = new Client(
-  { name: `${packageName}-stdio-proxy`, version: packageVersion },
-  { capabilities: {} },
-);
-
 const proxyServer = new Server(
   { name: `${packageName}-stdio-proxy`, version: packageVersion },
   { capabilities: { tools: { listChanged: true } } },
 );
 
-let backendTransport: StreamableHTTPClientTransport | undefined;
+let backend: BackendClient | undefined;
 
-async function shutdown(signal: string) {
-  console.error(`[${packageName}] proxy shutdown on ${signal}`);
-  await Promise.allSettled([
-    proxyServer.close(),
-    client.close(),
-    backendTransport?.close() ?? Promise.resolve(),
-  ]);
-  process.exit(0);
+function isReconnectableBackendError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("fetch failed") ||
+    message.includes("ECONNREFUSED") ||
+    message.includes("ECONNRESET") ||
+    message.includes("Invalid or expired session ID") ||
+    message.includes("Streamable HTTP error") ||
+    message.includes("terminated") ||
+    message.includes("socket hang up")
+  );
 }
 
-async function start() {
+async function ensureBackendConnected(forceReconnect = false): Promise<Client> {
+  if (backend && !forceReconnect) {
+    return backend.client;
+  }
+
+  if (backend) {
+    await Promise.allSettled([backend.client.close(), backend.transport.close()]);
+    backend = undefined;
+  }
+
   await ensureLocalBackendRunning({
     serviceName: packageName,
     url: healthUrl,
@@ -65,17 +76,63 @@ async function start() {
     startupTimeoutMs: Number(process.env.MCP_PROXY_START_TIMEOUT_MS || "20000"),
   });
 
-  backendTransport = new StreamableHTTPClientTransport(backendUrl);
-  await client.connect(backendTransport);
+  const transport = new StreamableHTTPClientTransport(backendUrl);
+  const client = new Client(
+    { name: `${packageName}-stdio-proxy`, version: packageVersion },
+    { capabilities: {} },
+  );
+  await client.connect(transport);
+  backend = { client, transport };
+  return client;
+}
+
+async function withBackendRetry<T>(
+  operationName: string,
+  operation: (client: Client) => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation(await ensureBackendConnected());
+  } catch (error) {
+    if (!isReconnectableBackendError(error)) {
+      throw error;
+    }
+
+    console.error(
+      `[${packageName}] ${operationName} failed against backend (${error instanceof Error ? error.message : String(error)}); reconnecting once`,
+    );
+
+    try {
+      return await operation(await ensureBackendConnected(true));
+    } catch (retryError) {
+      const message =
+        retryError instanceof Error ? retryError.message : String(retryError);
+      throw new Error(
+        `MCP backend_unreachable after retry for ${operationName}. Backend ${backendUrl.toString()} did not complete the request: ${message}`,
+      );
+    }
+  }
+}
+
+async function shutdown(signal: string) {
+  console.error(`[${packageName}] proxy shutdown on ${signal}`);
+  await Promise.allSettled([
+    proxyServer.close(),
+    backend?.client.close() ?? Promise.resolve(),
+    backend?.transport.close() ?? Promise.resolve(),
+  ]);
+  process.exit(0);
+}
+
+async function start() {
+  await ensureBackendConnected();
 
   proxyServer.setRequestHandler(ListToolsRequestSchema, async (request) =>
-    client.listTools(request.params),
+    withBackendRetry("listTools", (client) => client.listTools(request.params)),
   );
 
   proxyServer.setRequestHandler(CallToolRequestSchema, async (request) =>
-    client.callTool(
-      request.params,
-      CompatibilityCallToolResultSchema,
+    withBackendRetry("callTool", (client) =>
+      client.callTool(request.params, CompatibilityCallToolResultSchema),
     ),
   );
 

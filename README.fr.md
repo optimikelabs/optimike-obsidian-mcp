@@ -145,6 +145,10 @@ Le serveur expose des tools MCP “Base” via Obsidian MCP :
 - `bases_upsert_config` : valider ou mettre à jour la configuration YAML/JSON d’une base
 - `bases_create` : créer/valider une base `.base`
 
+`bases_upsert_rows` est conçu pour les écritures Obsidian live en lot : préflight Local REST/Bases Bridge, `dryRun`, `chunkSize`, `delayMs`, `maxRetries`, `retryBackoffMs`, `requestTimeoutMs`, puis `summary` structuré avec `changed_count`, `failed_count`, `failed_operations` et métadonnées de retry. Pour un lot sensible, commencer par `dryRun: true`, puis écrire avec `chunkSize: 1`, `continueOnError: true` et `maxRetries: 2`.
+
+Les clés protégées ou virtuelles (`file.*`, `formula.*`, `création`/`creation`, `modification`) sont refusées avant écriture. Les timeouts `processFrontMatter` du Bridge remontent en `write_timeout` retryable : les traiter d’abord comme signal “Obsidian occupé/indexing/locked”, pas comme une donnée forcément invalide.
+
 ## Modèle runtime final
 
 Le repo supporte maintenant deux modes locaux :

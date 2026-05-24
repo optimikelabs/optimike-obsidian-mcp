@@ -145,6 +145,10 @@ This server exposes “Base” MCP tools:
 - `bases_upsert_config` : validate or update base YAML/JSON config
 - `bases_create` : create/validate a `.base`
 
+`bases_upsert_rows` is batch-safe by default for live Obsidian writes: it runs a live preflight, supports `dryRun`, configurable `chunkSize`, `delayMs`, `maxRetries`, `retryBackoffMs`, and `requestTimeoutMs`, and returns a structured `summary` with `changed_count`, `failed_count`, `failed_operations`, and retry metadata. For large or sensitive batches, prefer `dryRun: true` first, then `chunkSize: 1`, `continueOnError: true`, and `maxRetries: 2`.
+
+Protected or virtual keys (`file.*`, `formula.*`, `création`/`creation`, `modification`) are refused before writing. Bridge-side `processFrontMatter` timeouts are surfaced as retryable `write_timeout` errors; treat them as an Obsidian busy/indexing/locked signal before blaming the payload.
+
 ## Final Runtime Model
 
 The repo supports two local runtime modes:

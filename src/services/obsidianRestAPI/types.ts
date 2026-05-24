@@ -228,6 +228,8 @@ export interface BaseUpsertOperation {
 export interface BaseUpsertRequest {
   operations: BaseUpsertOperation[];
   continueOnError?: boolean;
+  dryRun?: boolean;
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -236,6 +238,7 @@ export interface BaseUpsertRequest {
 export interface BaseUpsertResult {
   file: string;
   mtime: number;
+  attempts?: number;
   changed?: {
     keys: string[];
     unset?: string[];
@@ -253,6 +256,29 @@ export interface BaseUpsertResult {
 export interface BaseUpsertResponse {
   ok: boolean;
   results: BaseUpsertResult[];
+  summary?: {
+    total_count: number;
+    changed_count: number;
+    failed_count: number;
+    skipped_count?: number;
+    retryable_error_count?: number;
+    retried_count?: number;
+    dry_run?: boolean;
+    failed_operations?: Array<{
+      file: string;
+      code: string;
+      message: string;
+      retryable?: boolean;
+      attempts?: number;
+    }>;
+  };
+  diagnostics?: {
+    source: "bases-bridge-rest" | "preflight" | "request-failed";
+    base_id?: string;
+    phase?: string;
+    message?: string;
+    recommendation?: string;
+  };
 }
 
 /**

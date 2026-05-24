@@ -32,3 +32,19 @@ Alias legacy (compat MCP) :
 - `PUT /bases/:id/config`
 
 Les routes héritent de l’authentification Bearer + TLS local du plugin REST.
+
+## Upsert robuste
+
+`POST /bases/:id/upsert` accepte :
+
+- `operations` : tableau `{ file, set?, unset?, expected_mtime? }`
+- `continueOnError` : poursuit le lot après une erreur individuelle
+- `dryRun` : valide les fichiers, les `mtime` et les clés sans écrire
+
+Garde-fous :
+
+- `file.*` et `formula.*` sont refusés car ce sont des champs virtuels/calculés.
+- `création`, `creation` et `modification` sont refusés car ils peuvent être auto-gérés par le coffre.
+- Les timeouts `processFrontMatter` sont classés en `write_timeout`, ce qui permet au MCP de retry l’opération seule après backoff.
+
+Usage recommandé pour les lots sensibles : commencer par `dryRun: true`, puis écrire en petits chunks côté MCP.

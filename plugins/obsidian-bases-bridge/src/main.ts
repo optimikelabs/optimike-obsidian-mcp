@@ -113,7 +113,7 @@ type BaseUpsertOperation = {
   unset?: string[];
   expected_mtime?: number;
 };
-type BaseUpsertRequest = { operations: BaseUpsertOperation[]; continueOnError?: boolean };
+type BaseUpsertRequest = { operations: BaseUpsertOperation[]; continueOnError?: boolean; dryRun?: boolean };
 type BaseUpsertResult = {
   file: string;
   mtime: number;
@@ -122,6 +122,35 @@ type BaseUpsertResult = {
   error?: { code: string; message: string };
 };
 type BaseUpsertResponse = { ok: boolean; results: BaseUpsertResult[] };
+
+const PROTECTED_UPSERT_KEYS = new Set(["création", "creation", "modification"]);
+
+function isForbiddenUpsertKey(key: string): boolean {
+  const normalized = key.trim().toLowerCase();
+  return (
+    normalized.startsWith("file.") ||
+    normalized.startsWith("formula.") ||
+    PROTECTED_UPSERT_KEYS.has(normalized)
+  );
+}
+
+function validateUpsertKeys(setObj: Record<string, any>, unsetArr: string[]): string[] {
+  return [...Object.keys(setObj), ...unsetArr].filter(isForbiddenUpsertKey);
+}
+
+function classifyWriteError(error: any): { code: string; message: string; warnings?: string[] } {
+  const message = String(error?.message ?? error);
+  if (/processFrontMatter.*timed out|timed out|timeout/i.test(message)) {
+    return {
+      code: "write_timeout",
+      message,
+      warnings: [
+        "Obsidian appears busy, indexing, locked, or slow while processFrontMatter is running. Retry this operation alone after a short backoff.",
+      ],
+    };
+  }
+  return { code: "write_error", message };
+}
 
 function ensureBaseExt(path: string): string {
   const normalized = normBaseId(path);
@@ -1301,6 +1330,7 @@ export default class BasesBridgePlugin extends Plugin {
         const upsertBase = async (req: any, res: any) => {
           const body: BaseUpsertRequest = (req.body ?? {}) as any;
           const continueOnError = !!body?.continueOnError;
+          const dryRun = !!body?.dryRun;
           const results: BaseUpsertResult[] = [];
 
           for (const op of body?.operations ?? []) {
@@ -1340,32 +1370,51 @@ export default class BasesBridgePlugin extends Plugin {
             const setObj =
               op?.set && typeof op.set === "object" && !Array.isArray(op.set) ? (op.set as Record<string, any>) : {};
             const unsetArr = Array.isArray(op?.unset) ? (op.unset.filter((k: any) => typeof k === "string") as string[]) : [];
+            const forbiddenKeys = validateUpsertKeys(setObj, unsetArr);
+            if (forbiddenKeys.length > 0) {
+              results.push({
+                file: filePath,
+                mtime: abstract.stat.mtime,
+                error: {
+                  code: "forbidden_key",
+                  message: `Clés non modifiables via Bases Bridge: ${forbiddenKeys.join(", ")}`,
+                },
+              });
+              if (!continueOnError) break;
+              continue;
+            }
 
             try {
               const changedKeys: string[] = [];
-              await (this.app as any).fileManager.processFrontMatter(abstract, (fm: any) => {
-                for (const [k, v] of Object.entries(setObj)) {
-                  fm[k] = v;
-                  changedKeys.push(k);
-                }
-                for (const k of unsetArr) {
-                  if (k in fm) delete fm[k];
-                }
-              });
+              for (const k of Object.keys(setObj)) changedKeys.push(k);
+
+              if (!dryRun) {
+                await (this.app as any).fileManager.processFrontMatter(abstract, (fm: any) => {
+                  for (const [k, v] of Object.entries(setObj)) {
+                    fm[k] = v;
+                  }
+                  for (const k of unsetArr) {
+                    if (k in fm) delete fm[k];
+                  }
+                });
+              }
 
               results.push({
                 file: filePath,
                 mtime: abstract.stat.mtime,
                 changed: { keys: changedKeys, unset: unsetArr.length ? unsetArr : undefined },
+                warnings: dryRun ? ["dry_run_no_write"] : undefined,
               });
             } catch (e: any) {
+              const classified = classifyWriteError(e);
               results.push({
                 file: filePath,
                 mtime: abstract.stat.mtime,
                 error: {
-                  code: "write_error",
-                  message: String(e?.message ?? e),
+                  code: classified.code,
+                  message: classified.message,
                 },
+                warnings: classified.warnings,
               });
               if (!continueOnError) break;
             }
