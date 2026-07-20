@@ -62,7 +62,11 @@
     "tree": "npx ts-node --esm scripts/tree.ts",
     "format": "prettier --write \"**/*.{ts,js,json,md,html,css}\"",
     "inspect:stdio": "mcp-inspector --config mcp.json --server optimike-obsidian-mcp-stdio",
-    "inspect:http": "mcp-inspector --config mcp.json --server optimike-obsidian-mcp-http"
+    "inspect:http": "mcp-inspector --config mcp.json --server optimike-obsidian-mcp-http",
+    "test:operon-contract": "node scripts/test-operon-contract.mjs",
+    "test:operon-service": "node scripts/test-operon-service.mjs",
+    "build:operon-bridge": "npm --prefix plugins/obsidian-operon-bridge run build",
+    "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && npm --prefix plugins/obsidian-operon-bridge run check"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",

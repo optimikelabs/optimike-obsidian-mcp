@@ -1,0 +1,49 @@
+name: Operon Bridge
+
+on:
+  push:
+    branches:
+      - feat/operon-bridge-integration
+  pull_request:
+    paths:
+      - "src/services/operon/**"
+      - "src/mcp-server/tools/operonTools/**"
+      - "src/mcp-server/tools/runtimeTools/registration.ts"
+      - "plugins/obsidian-operon-bridge/**"
+      - "scripts/test-operon-contract.mjs"
+      - "scripts/test-operon-service.mjs"
+      - "docs/operon-*.md"
+      - "docs/adr/ADR-Operon-Bridge.md"
+      - "package.json"
+      - ".github/workflows/operon-bridge.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:runtime
+      - run: npm run test:operon-contract
+      - run: npm run test:operon-service
+      - run: npm pack --dry-run
+
+  bridge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/obsidian-operon-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run check
