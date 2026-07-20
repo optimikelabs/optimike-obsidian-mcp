@@ -9,6 +9,7 @@ import {
   queryTasks,
   resolveWorkflow,
   settingsSignature,
+  shouldAttemptIndexValidation,
   type OperonBridgeTask,
   type RuntimeIndexedTask,
 } from "./contract";
@@ -66,7 +67,8 @@ function normalized(): OperonBridgeTask {
 
 test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("2.4.0"), true);
-  assert.equal(isVersionCompatible("2.4.1"), false);
+  assert.equal(isVersionCompatible("2.5.0"), true);
+  assert.equal(isVersionCompatible("2.5.1"), false);
   assert.equal(isVersionCompatible("2.9.1"), false);
   assert.equal(isVersionCompatible("2.3.9"), false);
   assert.equal(isVersionCompatible("3.0.0"), false);
@@ -98,6 +100,51 @@ test("index readiness refuses startup, recovery, sync, and dirty states", () => 
     false,
   );
   assert.equal(isIndexReady({ compatible: true, generation: 1, diagnostics: null }), false);
+});
+
+test("index validation is attempted only for a settled unverified snapshot", () => {
+  const settled = {
+    health: "healthy",
+    runtimePhase: "idle",
+    verifiedThisSession: false,
+    dirtySourceCount: 0,
+  };
+  assert.equal(
+    shouldAttemptIndexValidation({
+      compatible: true,
+      generation: 2,
+      diagnostics: settled,
+      hasValidator: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAttemptIndexValidation({
+      compatible: true,
+      generation: 2,
+      diagnostics: { ...settled, verifiedThisSession: true },
+      hasValidator: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAttemptIndexValidation({
+      compatible: true,
+      generation: 2,
+      diagnostics: { ...settled, dirtySourceCount: 1 },
+      hasValidator: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAttemptIndexValidation({
+      compatible: true,
+      generation: 2,
+      diagnostics: settled,
+      hasValidator: false,
+    }),
+    false,
+  );
 });
 
 test("workflow resolution uses configured pipeline labels", () => {

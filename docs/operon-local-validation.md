@@ -7,7 +7,7 @@ This recipe is the remaining Desktop proof. Run it only in a disposable validati
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `2.4.0` enabled
+- Operon `2.4.0` or `2.5.0` enabled
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
@@ -188,7 +188,7 @@ FAIL if cached data is presented as live.
 
 ## 11. Incompatibility test
 
-Disable Operon or use any test manifest version other than `2.4.0`.
+Disable Operon or use any test manifest version outside `2.4.0` and `2.5.0`.
 
 PASS:
 

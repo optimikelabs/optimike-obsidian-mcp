@@ -3,7 +3,7 @@
 - Status: proposed for pilot
 - Date: 2026-07-20
 - MCP baseline: `optimikelabs/optimike-obsidian-mcp@8cea94610a526e50a017d334be6008b8dab79500`
-- Operon baseline: `hasanyilmaz/operon@76d251973b149afc69192ef565d626740aa7b7cf` (`2.4.0`)
+- Operon baselines: `hasanyilmaz/operon@76d251973b149afc69192ef565d626740aa7b7cf` (`2.4.0`) and `hasanyilmaz/operon@31099cc3d5231b320cd8520424fc29449b003778` (`2.5.0`)
 - Historical lab baseline: Operon `1.6.2`; evidence only, not an implementation source
 
 ## Problem
@@ -16,7 +16,7 @@ The missing boundary is agent operation. At the audited upstream SHA, Operon exp
 
 ### Current upstream code
 
-Operon `2.4.0` exposes these runtime objects on the plugin instance:
+Operon `2.4.0` and `2.5.0` expose these runtime objects on the plugin instance:
 
 - `indexer`
 - `writer`
@@ -108,7 +108,7 @@ Use Operon manually and keep agent operation on Tasks/TaskNotes.
 Implement Option A as a strict read-only integration:
 
 ```text
-Operon official 2.4.0
+Operon official 2.4.0 or 2.5.0
     ↓ live runtime index
 Optimike Operon Bridge (Obsidian companion plugin)
     ↓ Local REST API extension, contract v1
@@ -143,9 +143,9 @@ No Operon mutation tool is registered in this decision.
 
 ## REST compatibility contract
 
-The Bridge uses an explicit tested-version allowlist containing Operon `2.4.0`.
-No later release is assumed compatible: it must pass the contract tests and
-Desktop validation recipe before being added.
+The Bridge uses an explicit tested-version allowlist containing Operon `2.4.0`
+and `2.5.0`. No later release is assumed compatible: it must pass the contract
+tests and Desktop validation recipe before being added.
 
 The Bridge probes:
 

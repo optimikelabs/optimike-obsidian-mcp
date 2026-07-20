@@ -9,7 +9,8 @@
 | Component | Branch / version | SHA | Evidence status |
 |---|---|---|---|
 | Optimike Obsidian MCP | `main` | `8cea94610a526e50a017d334be6008b8dab79500` | current repository code |
-| Operon | `2.4.0` | `76d251973b149afc69192ef565d626740aa7b7cf` | current repository code/release |
+| Operon | `2.4.0` | `76d251973b149afc69192ef565d626740aa7b7cf` | qualified Desktop baseline |
+| Operon | `2.5.0` | `31099cc3d5231b320cd8520424fc29449b003778` | latest qualified Desktop release |
 | Historical ÉLYSIA lab | Operon `1.6.2` | local bundle | historical experiment only |
 
 ## M0 findings
@@ -40,7 +41,9 @@
 - duplicate/P0 refusal;
 - incomplete-pagination refusal;
 - startup/recovery/sync/dirty-index readiness refusal;
-- exact Operon `2.4.0` compatibility allowlist;
+- exact Operon `2.4.0` and `2.5.0` compatibility allowlist;
+- coalesced read-only V8 validation for a healthy, idle, clean but unverified
+  Operon 2.4 snapshot;
 - generation/settings coherence across pagination, validation, and final status;
 - reproducible Bridge install and installable CI artifact;
 - built contract and snapshot-service tests;
@@ -73,7 +76,9 @@
 | MCP root `npm audit --audit-level=high` | FAIL — 10 pre-existing lockfile findings (4 moderate, 4 high, 2 critical); this branch does not change root dependencies |
 | Runtime workflow on Ubuntu Node 22 | PASS — GitHub Actions |
 | Runtime workflow on Windows Node 22 | PASS — GitHub Actions |
-| Obsidian Desktop recipe | NOT RUN |
+| Obsidian Desktop inline smoke on Operon 2.4.0 | PASS — native create, status/list/query/validate, 0 duplicate |
+| Obsidian Desktop inline smoke on Operon 2.5.0 | PASS — native create, status/list/query/validate, 0 duplicate |
+| Complete Desktop fixture/parity recipe | NOT RUN |
 | Real Sync topology | UNVERIFIED |
 | Production migration | NOT RUN by design |
 
@@ -105,10 +110,12 @@
 
 ## Next evidence decision
 
-Run `docs/operon-local-validation.md` on a copied vault. Do not progress to mutation architecture until the read gate passes.
+Complete the rich fixture and restart/Sync sections of
+`docs/operon-local-validation.md` on a copied vault. Do not progress to
+mutation architecture until the complete read gate passes.
 
 ## Project-state check
 
 - Recommended status for the existing ÉLYSIA Operon project: `maturation` until Desktop parity is proven.
-- Credible next action: execute the read-only validation recipe against the current Operon release and record the matrix.
+- Credible next action: complete file-task, hierarchy, dependency, restart and Sync parity on Operon 2.5.0 and record the matrix.
 - Existing Tasks/TaskNotes tasks: unchanged.

@@ -15,8 +15,8 @@ All routes inherit Local REST API authentication and TLS behavior.
 ## Compatibility
 
 - Bridge contract: `1`
-- Tested Operon version: `2.4.0`
-- Accepted read allowlist: `2.4.0`
+- Latest tested Operon version: `2.5.0`
+- Accepted read allowlist: `2.4.0`, `2.5.0`
 - Mutation capabilities: always `false` in v1
 
 A future Operon version is not assumed compatible merely because its Markdown looks similar.
@@ -36,10 +36,10 @@ Returns:
   },
   "operon": {
     "present": true,
-    "version": "2.4.0",
+    "version": "2.5.0",
     "compatible": true,
-    "testedAgainst": "2.4.0",
-    "supportedRange": "2.4.0"
+    "testedAgainst": "2.5.0",
+    "supportedRange": "2.4.0, 2.5.0"
   },
   "index": {
     "ready": true,
@@ -117,7 +117,7 @@ zero is never considered ready.
   },
   "revision": "fnv1a32:...",
   "sourceKind": "operon-index",
-  "operonVersion": "2.4.0",
+  "operonVersion": "2.5.0",
   "bridgeVersion": "0.1.0"
 }
 ```

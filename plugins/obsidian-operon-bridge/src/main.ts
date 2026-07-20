@@ -8,6 +8,7 @@ import {
   normalizeTask,
   queryTasks,
   settingsSignature,
+  shouldAttemptIndexValidation,
   type OperonBridgeTask,
   type OperonTaskQuery,
   type RuntimeIndexedTask,
@@ -32,6 +33,7 @@ interface OperonRuntime {
     getTask: (operonId: string) => RuntimeIndexedTask | undefined;
     getGeneration: () => number;
     getIndexV8Diagnostics: () => Promise<RuntimeIndexDiagnostics>;
+    validateIndexV8Now?: () => Promise<{ status?: string; code?: string }>;
     getDuplicateRegistry?: () => {
       revision?: number;
       totalConflictCount?: number;
@@ -63,7 +65,7 @@ interface StableTaskRead {
 
 const READ_ONLY_LIMITATIONS = [
   "Bridge contract v1 is intentionally read-only.",
-  "Mutations are disabled because Operon 2.4.0 does not expose a public versioned mutation API that guarantees the full domain orchestration path.",
+  "Mutations are disabled because the tested Operon releases do not expose a public versioned mutation API that guarantees the full domain orchestration path.",
   "Exact Operon semantics require Obsidian Desktop with Operon loaded; headless clients must treat persisted MCP snapshots as stale fallbacks.",
   "Unmanaged frontmatter properties are returned only for file tasks and only when includeProperties=true.",
 ];
@@ -167,6 +169,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private restCleanup: (() => void) | null = null;
   private mountInterval: number | null = null;
   private mountTimeout: number | null = null;
+  private indexValidationInFlight: Promise<void> | null = null;
 
   async onload(): Promise<void> {
     this.app.workspace.onLayoutReady(() => {
@@ -254,11 +257,48 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     } catch (error) {
       console.warn(`[${EXTENSION_ID}] Operon index diagnostics unavailable.`, error);
     }
+    if (
+      shouldAttemptIndexValidation({
+        compatible: runtime.compatible,
+        generation,
+        diagnostics,
+        hasValidator: typeof runtime.indexer.validateIndexV8Now === "function",
+      })
+    ) {
+      await this.validateSettledIndex(runtime);
+      try {
+        diagnostics = await runtime.indexer.getIndexV8Diagnostics();
+      } catch (error) {
+        console.warn(`[${EXTENSION_ID}] Operon index diagnostics unavailable after validation.`, error);
+      }
+    }
     return {
       generation,
       diagnostics,
       ready: isIndexReady({ compatible: runtime.compatible, generation, diagnostics }),
     };
+  }
+
+  private async validateSettledIndex(runtime: OperonRuntime): Promise<void> {
+    if (!runtime.indexer.validateIndexV8Now) return;
+    if (!this.indexValidationInFlight) {
+      this.indexValidationInFlight = runtime.indexer
+        .validateIndexV8Now()
+        .then((result) => {
+          if (result?.status !== "loaded") {
+            console.warn(
+              `[${EXTENSION_ID}] Operon index validation did not load the active snapshot (${result?.code ?? result?.status ?? "unknown"}).`,
+            );
+          }
+        })
+        .catch((error: unknown) => {
+          console.warn(`[${EXTENSION_ID}] Operon index validation failed.`, error);
+        })
+        .finally(() => {
+          this.indexValidationInFlight = null;
+        });
+    }
+    await this.indexValidationInFlight;
   }
 
   private async statusPayload(): Promise<Record<string, unknown>> {

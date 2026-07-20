@@ -4,13 +4,13 @@ Read-only Obsidian companion plugin that exposes Operon's **live in-memory index
 
 ## Why read-only
 
-Operon 2.4.0 exposes a useful runtime index (`getAllTasks`, `getTask`, duplicate diagnostics), but no public, versioned mutation API. Operon's complete mutation path also coordinates workflow normalization, reindexing, dependencies, recurrence, aggregate totals, project serials, archiving, auto-unpin, and view refreshes. The bridge therefore refuses to present direct Markdown edits or private method calls as safe Operon mutations.
+Operon 2.4.0 and 2.5.0 expose a useful runtime index (`getAllTasks`, `getTask`, duplicate diagnostics), but no public, versioned mutation API. Operon's complete mutation path also coordinates workflow normalization, reindexing, dependencies, recurrence, aggregate totals, project serials, archiving, auto-unpin, and view refreshes. The bridge therefore refuses to present direct Markdown edits or private method calls as safe Operon mutations.
 
 ## Requirements
 
 - Obsidian Desktop
-- Operon `2.4.0` exactly. Later releases remain unavailable until their runtime
-  contract has passed this Bridge's tests and Desktop recipe.
+- Operon `2.4.0` or `2.5.0` exactly. Later releases remain unavailable until
+  their runtime contract has passed this Bridge's tests and Desktop recipe.
 - Obsidian Local REST API
 
 ## Routes
