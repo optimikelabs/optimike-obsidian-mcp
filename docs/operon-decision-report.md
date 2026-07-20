@@ -2,120 +2,64 @@
 
 ## Decision
 
-**PILOT Operon** through a read-only Bridge and MCP snapshot. Keep Tasks and TaskNotes during the evidence phase.
+**PILOT Operon with direct MCP mutations.** The technical integration is now strong enough for a bounded real-project pilot. Keep Tasks and TaskNotes in production until Sync, cockpit parity, maintenance cost, and human usability pass.
 
-## Audited baselines
+## Implemented
 
-| Component | Branch / version | SHA | Evidence status |
-|---|---|---|---|
-| Optimike Obsidian MCP | `main` | `8cea94610a526e50a017d334be6008b8dab79500` | current repository code |
-| Operon | `2.4.0` | `76d251973b149afc69192ef565d626740aa7b7cf` | qualified Desktop baseline |
-| Operon | `2.5.0` | `31099cc3d5231b320cd8520424fc29449b003778` | latest qualified Desktop release |
-| Historical ÉLYSIA lab | Operon `1.6.2` | local bundle | historical experiment only |
+- Operon Public API v1 in a minimal GPL 2.5.0 fork;
+- Bridge read/write capability probe;
+- REST list/get/query/validate/create/update/transition/convert;
+- nine MCP tools in the canonical server;
+- dry-run by default;
+- live expected-revision conflicts;
+- Bridge and durable MCP idempotency;
+- before/requested/after evidence and post-write re-read;
+- central write policy integration;
+- SQLite live/stale snapshots and mutation journal;
+- no Markdown/private-method fallback;
+- exact read allowlist for Operon 2.4.0 and 2.5.0.
 
-## M0 findings
+## Verified in disposable Operon 2.5 vault
 
-| Area | Finding | Classification |
-|---|---|---|
-| MCP server | Main Optimike MCP already owns Tasks, Bases, semantic search, runtime modes, HTTP backend, stdio proxy, and SQLite | KEEP |
-| Legacy Tasks MCP | No longer needed by the canonical server | KEEP legacy only; do not revive |
-| Operon read model | Public runtime index exposes stable IDs and structured tasks | ADD Bridge projection |
-| Operon mutation model | Full orchestration remains private and spans more than direct writes | BLOCK mutations |
-| Headless exactness | Community plugins are not loaded headlessly | cache only, explicitly stale |
-| Licenses | MCP Apache-2.0; Operon GPL-3.0-or-later | keep code/process boundary |
-| Existing lab | Inline scan/dry-run only; incomplete for current upstream | evidence, not code source |
-| Fork | Not required for read pilot | DEFER |
-
-## Implemented in this branch
-
-- read-only Obsidian companion Bridge;
-- version/capability probe;
-- REST status/list/get/query/validate;
-- normalized contract v1;
-- optional unmanaged file-task properties;
-- stable per-task read revision;
-- five MCP tools;
-- transactional SQLite snapshots;
-- generation/settings-signature validation;
-- stale cache fallback;
-- duplicate/P0 refusal;
-- incomplete-pagination refusal;
-- startup/recovery/sync/dirty-index readiness refusal;
-- exact Operon `2.4.0` and `2.5.0` compatibility allowlist;
-- coalesced read-only V8 validation for a healthy, idle, clean but unverified
-  Operon 2.4 snapshot;
-- generation/settings coherence across pagination, validation, and final status;
-- reproducible Bridge install and installable CI artifact;
-- built contract and snapshot-service tests;
-- CI workflow;
-- ADR, contracts, validation recipe, migration and rollback plan.
-
-## Deliberately not implemented
-
-- create/update/transition/convert tools;
-- reflective calls to private Operon methods;
-- direct `TaskWriter` integration;
-- raw Markdown/YAML mutation fallback;
-- Operon fork;
-- upstream PR;
-- production-vault migration;
-- Tasks/TaskNotes removal.
-
-## Test status
-
-| Test | Status |
+| Evidence | Result |
 |---|---|
-| Plugin pure contract TypeScript check with local stubs | PASS |
-| MCP new-source TypeScript check with local stubs | PASS |
-| Bridge dependency install, typecheck, Node contract tests and build | PASS — GitHub Actions |
-| MCP root `npm ci`, build and all runtime-mode smokes | PASS — GitHub Actions |
-| MCP Operon contract smoke | PASS — GitHub Actions |
-| MCP SQLite refresh/generation/stale/property/duplicate/P0/incomplete-page smoke | PASS — GitHub Actions |
-| Package dry run | PASS — GitHub Actions |
-| Bridge `npm audit --audit-level=high` | PASS — 0 vulnerability |
-| MCP root `npm audit --audit-level=high` | FAIL — 10 pre-existing lockfile findings (4 moderate, 4 high, 2 critical); this branch does not change root dependencies |
-| Runtime workflow on Ubuntu Node 22 | PASS — GitHub Actions |
-| Runtime workflow on Windows Node 22 | PASS — GitHub Actions |
-| Obsidian Desktop inline smoke on Operon 2.4.0 | PASS — native create, status/list/query/validate, 0 duplicate |
-| Obsidian Desktop inline smoke on Operon 2.5.0 | PASS — native create, status/list/query/validate, 0 duplicate |
-| Complete Desktop fixture/parity recipe | NOT RUN |
-| Real Sync topology | UNVERIFIED |
+| Native file and inline fixtures | PASS |
+| Direct MCP file and inline creation | PASS |
+| Managed fields and tags | PASS |
+| Unmanaged `north_star` / `rang` file properties | PASS |
+| Parent and blocker links plus inverse reconciliation | PASS |
+| Completion blocked while dependency open | PASS |
+| Completion after blocker finished | PASS |
+| Inline → file → inline with same `operonId` | PASS |
+| Dry-run default | PASS |
+| Durable idempotency replay | PASS |
+| Stale revision conflict | PASS |
+| Full V8 reindex parity | PASS — 13 tasks before/after, generation advanced |
+| Operon/Bridge plugin restart | PASS — 13 tasks, read-write restored |
+| Live → cache fallback | PASS — same task/revision, `stale: true` |
+| Duplicate identity | PASS — P0 detected, last good snapshot retained |
+| Final validation | PASS — P0/P1/P2 = 0/0/0 |
+| Actual Sync topology | UNVERIFIED |
 | Production migration | NOT RUN by design |
 
-## Risk register
+## Defects discovered and corrected
 
-### P0
+1. Immediate post-write reads could hit Operon's transient reindex window and report unavailable after a successful write. The Bridge now waits boundedly for a verified idle index and records `outcome_unverified` without blind retry if proof never arrives.
+2. A combined rename + managed fields + unmanaged properties request could partially apply because Obsidian metadata lagged after rename. The contract now permits exactly one mutation group per operation and one unmanaged property per call.
+3. Creating a child legitimately changes parent aggregates and therefore its revision. The rich smoke recipe now rereads the parent before transition; stale parent revisions are rejected as designed.
 
-- Duplicate `operonId`: blocks snapshot replacement.
-- Incomplete pagination: blocks snapshot replacement.
-- Contract/version mismatch: blocks live refresh.
-- Index not proven healthy, idle, session-verified, and clean: blocks live refresh.
-- Generation or settings drift during refresh: preserves the previous snapshot.
+## Remaining risks
 
-### P1
+- The public API lives in a fork until accepted upstream.
+- Real Sync behavior remains unverified.
+- Cockpit equivalence and low-energy human workflow remain unproven.
+- Root npm advisories predate this branch and require a separate dependency-security change.
+- Production activation would expose write tools and therefore remains a manual gate.
 
-- Runtime index shape is public in JavaScript but not a documented versioned API.
-- The root MCP dependency lock has pre-existing npm advisories, including two
-  critical findings; remediate in a separate dependency-security change with
-  its own regression run.
-- A future Operon release requires explicit qualification before it enters the
-  allowlist.
-- File-task property parity still needs Desktop proof.
-- Four ÉLYSIA cockpit equivalents still need pilot proof.
+## Recommendation
 
-### P2
+Proceed to a bounded non-critical project pilot, not a global switch. Production status remains `maturation` until the four cockpits, actual Sync, and seven-to-fourteen-day human/agent use pass. If they pass and the fork delta remains thin, recommend `SWITCH Operon`; otherwise `KEEP Tasks + TaskNotes`.
 
-- Snapshot refresh loads the complete task set when generation changes.
-- Query semantics are intentionally smaller than Operon's full Filter UI.
+## Next action
 
-## Next evidence decision
-
-Complete the rich fixture and restart/Sync sections of
-`docs/operon-local-validation.md` on a copied vault. Do not progress to
-mutation architecture until the complete read gate passes.
-
-## Project-state check
-
-- Recommended status for the existing ÉLYSIA Operon project: `maturation` until Desktop parity is proven.
-- Credible next action: complete file-task, hierarchy, dependency, restart and Sync parity on Operon 2.5.0 and record the matrix.
-- Existing Tasks/TaskNotes tasks: unchanged.
+Install the signed pilot builds in a copied-vault environment matching Mike's Sync topology, reproduce Now/Inbox/Étoile du Nord/Audit, and run one real non-critical project with Operon as exclusive task owner.

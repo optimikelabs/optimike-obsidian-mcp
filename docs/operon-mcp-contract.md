@@ -2,125 +2,76 @@
 
 ## Surface
 
-The main MCP server registers five Operon tools:
+The main MCP server registers nine Operon tools:
 
 - `operon_status`
 - `operon_list_tasks`
 - `operon_get_task`
 - `operon_query_tasks`
 - `operon_validate`
-
-There is no second MCP server and no mutation tool in contract v1.
-
-## Source and freshness envelope
-
-Every task response includes:
-
-- `source: "operon-live" | "operon-cache"`
-- `stale: boolean`
-- `snapshotAt`
-- `snapshotAgeMs`
-- `operonVersion`
-- `bridgeVersion`
-- `contractVersion`
-- capabilities
-- limitations
-
-Semantics:
-
-### `operon-live`
-
-Obsidian Desktop and Local REST API are reachable. The Bridge status is compatible. The MCP snapshot either:
-
-- was rebuilt from a complete live pagination; or
-- was validated against the same live index generation, settings signature, Operon version, Bridge version, and task count.
-
-### `operon-cache`
-
-The Bridge is unavailable or the runtime is headless. The response is the last successfully validated snapshot and is always marked stale.
-
-A cached response is suitable for discovery and planning. It is not proof of current Desktop state and must never be used to assert a mutation succeeded.
-
-## SQLite ownership
-
-The existing shared SQLite database receives two reconstructible tables:
-
-```sql
-operon_task_snapshot
-operon_snapshot_meta
-```
-
-A refresh is transactional. The previous snapshot survives malformed payloads,
-incomplete pagination, generation/settings drift during pagination or
-validation, duplicate IDs, version incompatibility, an unready index, or P0
-validation failures.
-
-The tables are cache state, not canonical task storage.
-
-## `operon_status`
-
-Input:
-
-```json
-{ "forceRefresh": false }
-```
-
-`forceRefresh=true` requests a complete live snapshot rebuild. It fails if the live Bridge is unavailable and no valid cache exists.
-
-## `operon_list_tasks`
-
-Uses the same filter/pagination schema as `operon_query_tasks`. Calling it with no filters lists tasks in stable path/line order.
-
-## `operon_query_tasks`
-
-Supported filters:
-
-- IDs;
-- search text;
-- inline/file source;
-- checkbox state;
-- workflow status and pipeline;
-- priority and hot/warm/cold tier;
-- include/exclude paths;
-- tags any/all;
-- parent;
-- ISO date conditions;
-- canonical/custom `fields` equality;
-- unmanaged file-task `properties` equality;
-- sort rules;
-- cursor/limit;
-- `includeProperties`;
-- `forceRefresh`.
-
-Properties are stripped from returned tasks unless `includeProperties=true`.
-
-## `operon_get_task`
-
-Input:
-
-```json
-{
-  "operonId": "abc1234",
-  "includeProperties": false,
-  "forceRefresh": false
-}
-```
-
-Lookup is by durable `operonId`, never by title or line number.
-
-## `operon_validate`
-
-When live, delegates to Bridge validation. When only a snapshot is available, performs a limited graph validation and states that it cannot prove source-file existence or current duplicate-registry health.
-
-## Mutation posture
-
-The following tools are deliberately absent:
-
 - `operon_create_task`
 - `operon_update_task`
 - `operon_transition_task`
 - `operon_convert_task`
 
-Reason: at the audited Operon SHA, no public versioned API guarantees the complete mutation path. Direct Markdown edits, direct `TaskWriter` calls, command invocations, or reflective calls to private methods are not accepted as a production contract.
+There is no second MCP server.
 
-The next mutation gate is documented in `docs/adr/ADR-Operon-Bridge.md`.
+## Reads and freshness
+
+Every read response declares `source`, `stale`, snapshot time/age, Operon and Bridge versions, contract version, capabilities, and limitations.
+
+- `operon-live`: complete pagination and validation match one stable Operon generation/settings signature.
+- `operon-cache`: last validated SQLite snapshot; always stale and never proof of a mutation.
+
+SQLite cache state lives in `operon_task_snapshot` and `operon_snapshot_meta`. Malformed payloads, incomplete pagination, generation drift, duplicate IDs, incompatible versions, unready index, or P0 validation never replace the last known-good snapshot.
+
+## Mutations
+
+Mutation tools call Bridge REST routes backed by Operon Public API v1. They do not edit Markdown, call `TaskWriter` directly, invoke UI commands, or reflect into private methods.
+
+Common controls:
+
+- `dryRun` defaults to `true`;
+- `idempotencyKey` is mandatory;
+- existing tasks require `expectedRevision`;
+- after apply, the Bridge rereads the verified live index;
+- the MCP refreshes its SQLite snapshot;
+- no mutation is available from a stale/headless snapshot.
+
+Durable results are stored in `operon_mutation_journal`. Reusing an idempotency key with the same canonical request returns the original `operationId` and result without calling the Bridge again. Reusing it for a different request is rejected as `CONFLICT`. Revision mismatch returns `conflict` without writing.
+
+### Write policy
+
+- `MCP_WRITE_MODE=readonly`: dry-run only.
+- `MCP_WRITE_MODE=guarded`: create, update, and transition apply are allowed with their normal preconditions.
+- `MCP_WRITE_MODE=full`: conversion apply is additionally allowed.
+
+Conversion remains classified as destructive because file-to-inline moves the source file to trash and inline-to-file replaces the source line with a durable link.
+
+### Tool-specific rules
+
+`operon_create_task` creates inline or file tasks through Operon's creator services. File tasks may include unmanaged YAML properties.
+
+`operon_update_task` accepts exactly one group per call: description, managed fields/tags, or one unmanaged file property. Status transitions use the dedicated tool.
+
+`operon_transition_task` accepts an exact configured workflow status and preserves Operon's dependency, recurrence, aggregate, terminal-date, archive, and auto-unpin semantics.
+
+`operon_convert_task` converts inline ↔ file through Operon's transition-safe paths. File-to-inline requires an explicit target note.
+
+## Verified pilot behavior
+
+On Operon `2.5.0` in a disposable vault, direct MCP calls proved:
+
+- file and inline creation;
+- managed fields, tags, and unmanaged ÉLYSIA properties;
+- parent and blocker relationships plus reverse dependency reconciliation;
+- blocked terminal transition rejection;
+- successful transition after blocker completion;
+- inline-to-file and file-to-inline conversion with identity preserved;
+- durable idempotency replay;
+- stale-revision conflict detection;
+- full reindex and plugin restart parity;
+- explicit live-to-stale cache fallback;
+- duplicate-ID P0 detection and refusal to replace the last good snapshot.
+
+Production activation and Tasks/TaskNotes migration remain separate manual gates.

@@ -69,7 +69,8 @@ PASS when:
 - index generation is greater than zero;
 - diagnostics report `health=healthy`, `runtimePhase=idle`,
   `verifiedThisSession=true`, and `dirtySourceCount=0`;
-- mutation capabilities are all false;
+- official Operon reports mutation capabilities false, while the minimal
+  Public API v1 fork reports create/update/transition/convert true;
 - duplicate conflict count is zero.
 
 FAIL if the route claims compatibility while Operon is absent or incompatible.
@@ -222,15 +223,49 @@ PASS: one task identity, no duplicate conflict, matching normalized data.
 
 This remains `UNVERIFIED` until executed on the actual Sync topology.
 
-## 14. No-write assertion
+## 14. Mutation boundary
 
-Review Local REST routes and MCP tools.
+Review Local REST routes, MCP tools, and the loaded Operon capability probe.
 
 PASS:
 
-- no Bridge POST/PATCH/PUT/DELETE mutation route exists;
-- no `operon_create/update/transition/convert` MCP tool exists;
-- fixture Markdown is unchanged by read/query/validate calls.
+- official Operon without Public API v1 remains read-only;
+- the minimal Operon fork exposes create/update/transition/convert through a versioned API;
+- dry-run is the default;
+- apply requires live capabilities and an idempotency key;
+- existing-task apply requires the live expected revision;
+- the MCP write policy blocks conversion outside `full` mode;
+- no raw Markdown, direct writer, UI command, or private-reflection fallback exists.
+
+## 15. Rich mutation recipe
+
+Run `scripts/smoke-operon-mutations.mjs` in guarded mode, then
+`scripts/smoke-operon-rich-mutations.mjs` in full mode against a disposable
+vault.
+
+PASS:
+
+- file and inline creation;
+- managed fields/tags and one unmanaged file property;
+- blocked terminal transition is rejected;
+- blocker completion then child completion succeeds;
+- inline → file → inline preserves `operonId`;
+- idempotency replay returns the original `operationId`;
+- stale revision returns conflict without writing.
+
+## Executed pilot result — 2026-07-21
+
+| Check | Result |
+|---|---|
+| Operon 2.5 Public API v1 capability probe | PASS — create/update/transition/convert true |
+| Guarded MCP smoke | PASS — create/update/transition/replay/conflict |
+| Rich full MCP smoke | PASS — hierarchy/dependency/inline/file/conversion |
+| Full reindex | PASS — generation 36 → 37, task count 13 → 13 |
+| Plugin restart | PASS — generation reset to 1, 13 tasks, read-write restored |
+| Stale fallback | PASS — `operon-live` → `operon-cache`, same ID/path/revision |
+| Duplicate fixture | PASS — one P0 `duplicate_operon_id`, last good cache retained |
+| Duplicate cleanup | PASS — P0/P1/P2 = 0/0/0, 13 tasks |
+| Actual Sync topology | NOT RUN |
 
 ## Evidence record
 

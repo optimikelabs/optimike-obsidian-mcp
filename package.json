@@ -66,7 +66,9 @@
     "test:operon-contract": "node scripts/test-operon-contract.mjs",
     "test:operon-service": "node scripts/test-operon-service.mjs",
     "build:operon-bridge": "npm --prefix plugins/obsidian-operon-bridge run build",
-    "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && npm --prefix plugins/obsidian-operon-bridge run check"
+    "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && npm --prefix plugins/obsidian-operon-bridge run check",
+    "smoke:operon-mutations": "node scripts/smoke-operon-mutations.mjs",
+    "smoke:operon-rich-mutations": "node scripts/smoke-operon-rich-mutations.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",

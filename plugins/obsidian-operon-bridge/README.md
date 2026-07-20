@@ -1,16 +1,14 @@
 # Optimike Operon Bridge
 
-Read-only Obsidian companion plugin that exposes Operon's **live in-memory index** through the extension API of Obsidian Local REST API.
+Obsidian companion plugin exposing Operon's live task engine through the extension API of Obsidian Local REST API.
 
-## Why read-only
-
-Operon 2.4.0 and 2.5.0 expose a useful runtime index (`getAllTasks`, `getTask`, duplicate diagnostics), but no public, versioned mutation API. Operon's complete mutation path also coordinates workflow normalization, reindexing, dependencies, recurrence, aggregate totals, project serials, archiving, auto-unpin, and view refreshes. The bridge therefore refuses to present direct Markdown edits or private method calls as safe Operon mutations.
+Reads use Operon's in-memory V8 index. Mutations are advertised only when the loaded Operon plugin exposes versioned `OperonPublicApiV1`; official Operon remains read-only and no Markdown/private-method fallback exists.
 
 ## Requirements
 
 - Obsidian Desktop
-- Operon `2.4.0` or `2.5.0` exactly. Later releases remain unavailable until
-  their runtime contract has passed this Bridge's tests and Desktop recipe.
+- Operon `2.4.0` or `2.5.0` for reads
+- Optimike Operon `2.5.0` with Public API v1 for mutations
 - Obsidian Local REST API
 
 ## Routes
@@ -18,12 +16,16 @@ Operon 2.4.0 and 2.5.0 expose a useful runtime index (`getAllTasks`, `getTask`, 
 Prefix: `/extensions/optimike-operon-bridge/v1`
 
 - `GET /status`
-- `GET /tasks?cursor=0&limit=100&includeProperties=false`
+- `GET /tasks`
 - `GET /tasks/:operonId`
 - `POST /tasks/query`
 - `GET /validate`
+- `POST /tasks`
+- `POST /tasks/:operonId/update`
+- `POST /tasks/:operonId/transition`
+- `POST /tasks/:operonId/convert`
 
-All routes inherit Local REST API authentication and local TLS settings.
+All routes inherit Local REST API authentication and local TLS settings. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected. Existing-task mutations require the live revision; dry-run is the default.
 
 ## Build
 
@@ -32,8 +34,4 @@ npm ci
 npm run check
 ```
 
-CI also publishes `optimike-operon-bridge` containing `main.js` and
-`manifest.json`. Copy those files to
-`.obsidian/plugins/optimike-operon-bridge/` in a disposable validation vault.
-Do not install the Bridge into a production vault before the manual recipe in
-`docs/operon-local-validation.md` passes.
+CI publishes `optimike-operon-bridge` containing `main.js` and `manifest.json`. Install only in a disposable validation vault until the manual recipe in `docs/operon-local-validation.md` passes and production activation is explicitly approved.

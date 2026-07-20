@@ -68,7 +68,7 @@ export const OperonStatusSchema = z.object({
   bridge: z.object({
     id: z.string(),
     version: z.string(),
-    mode: z.literal("read-only"),
+    mode: z.enum(["read-only", "read-write"]),
   }),
   operon: z.object({
     present: z.boolean(),
@@ -191,6 +191,108 @@ export const OperonQuerySchema = z.object({
 });
 
 export type OperonQuery = z.infer<typeof OperonQuerySchema>;
+
+export const OperonRawPropertyValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])),
+]);
+
+const MutationControlSchema = z.object({
+  idempotencyKey: z.string().min(8).max(200),
+  dryRun: z.boolean().optional().default(true),
+});
+
+export const OperonCreateTaskSchema = MutationControlSchema.extend({
+  task: z.object({
+    source: OperonTaskSourceSchema,
+    description: z.string().trim().min(1),
+    tags: z.array(z.string()).optional(),
+    fields: z.record(z.string()).optional(),
+    properties: z.record(OperonRawPropertyValueSchema).optional(),
+    fileTemplateId: z.string().optional(),
+    targetDateKey: z.string().optional(),
+  }),
+});
+
+export const OperonUpdatePatchSchema = z.object({
+  description: z.string().trim().min(1).optional(),
+  tags: z.array(z.string()).optional(),
+  fields: z.record(z.string()).optional(),
+  properties: z.record(OperonRawPropertyValueSchema).optional(),
+}).superRefine((value, context) => {
+  const groupCount = [
+    value.description !== undefined,
+    value.tags !== undefined || value.fields !== undefined,
+    value.properties !== undefined,
+  ].filter(Boolean).length;
+  if (groupCount !== 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide exactly one mutation group: description, managed fields/tags, or one unmanaged property.",
+    });
+  }
+  if (value.properties && Object.keys(value.properties).length !== 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Update exactly one unmanaged property per operation.",
+    });
+  }
+});
+
+export const OperonUpdateTaskSchema = MutationControlSchema.extend({
+  operonId: z.string().min(1),
+  expectedRevision: z.string().min(1),
+  patch: OperonUpdatePatchSchema,
+});
+
+export const OperonTransitionTaskSchema = MutationControlSchema.extend({
+  operonId: z.string().min(1),
+  expectedRevision: z.string().min(1),
+  status: z.string().trim().min(1),
+});
+
+export const OperonConvertTaskInputSchema = MutationControlSchema.extend({
+  operonId: z.string().min(1),
+  expectedRevision: z.string().min(1),
+  target: OperonTaskSourceSchema,
+  fileTemplateId: z.string().optional(),
+  targetPath: z.string().optional(),
+});
+
+export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine((value, context) => {
+  if (value.target === "inline" && !value.targetPath?.trim()) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["targetPath"],
+      message: "targetPath is required for file-to-inline conversion.",
+    });
+  }
+});
+
+export const OperonMutationResultSchema = z.object({
+  ok: z.boolean(),
+  contractVersion: z.literal(OPERON_CONTRACT_VERSION),
+  operationId: z.string(),
+  idempotencyKey: z.string(),
+  status: z.enum(["planned", "applied", "conflict", "rejected", "failed"]),
+  before: OperonTaskSchema.nullable().optional(),
+  requested: z.record(z.unknown()),
+  after: OperonTaskSchema.nullable().optional(),
+  error: z.object({ code: z.string(), message: z.string() }).optional(),
+  retryable: z.boolean().optional(),
+  source: z.literal("operon-live"),
+  stale: z.literal(false),
+  replayed: z.boolean().optional(),
+});
+
+export type OperonCreateTask = z.infer<typeof OperonCreateTaskSchema>;
+export type OperonUpdateTask = z.infer<typeof OperonUpdateTaskSchema>;
+export type OperonTransitionTask = z.infer<typeof OperonTransitionTaskSchema>;
+export type OperonConvertTask = z.infer<typeof OperonConvertTaskSchema>;
+export type OperonMutationResult = z.infer<typeof OperonMutationResultSchema>;
 
 export interface OperonSnapshotEnvelope {
   source: "operon-live" | "operon-cache";

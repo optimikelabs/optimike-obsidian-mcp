@@ -1,6 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { OperonQuerySchema } from "../../../services/operon/contract.js";
+import {
+  OperonConvertTaskSchema,
+  OperonConvertTaskInputSchema,
+  OperonCreateTaskSchema,
+  OperonQuerySchema,
+  OperonTransitionTaskSchema,
+  OperonUpdateTaskSchema,
+} from "../../../services/operon/contract.js";
 import { OperonService } from "../../../services/operon/service.js";
 import { McpError } from "../../../types-global/errors.js";
 
@@ -81,5 +88,37 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     ForceRefreshSchema.shape,
     async (params: z.infer<typeof ForceRefreshSchema>) =>
       runTool(() => service.validate(params.forceRefresh)),
+  );
+
+  server.tool(
+    "operon_create_task",
+    "Create an Operon inline or file task through Operon Public API v1. dryRun defaults to true. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
+    OperonCreateTaskSchema.shape,
+    async (params: z.infer<typeof OperonCreateTaskSchema>) =>
+      runTool(() => service.createTask(params)),
+  );
+
+  server.tool(
+    "operon_update_task",
+    "Update exactly one Operon mutation group through the full Operon domain path: description, managed fields/tags, or one unmanaged file property. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    OperonUpdateTaskSchema.shape,
+    async (params: z.infer<typeof OperonUpdateTaskSchema>) =>
+      runTool(() => service.updateTask(params)),
+  );
+
+  server.tool(
+    "operon_transition_task",
+    "Transition an Operon task to an exact configured workflow status through Operon's dependency, recurrence, aggregate, and workflow guards. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    OperonTransitionTaskSchema.shape,
+    async (params: z.infer<typeof OperonTransitionTaskSchema>) =>
+      runTool(() => service.transitionTask(params)),
+  );
+
+  server.tool(
+    "operon_convert_task",
+    "Convert an Operon task between inline and file forms through Operon's transition-safe conversion path. Apply is destructive and requires MCP_WRITE_MODE=full; dryRun defaults to true.",
+    OperonConvertTaskInputSchema.shape,
+    async (params: z.infer<typeof OperonConvertTaskSchema>) =>
+      runTool(() => service.convertTask(params)),
   );
 }

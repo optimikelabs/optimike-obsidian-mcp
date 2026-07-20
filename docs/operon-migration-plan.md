@@ -4,7 +4,9 @@
 
 `PILOT Operon`, not `SWITCH Operon`.
 
-This plan is intentionally unapplied. The integration branch performs no production-vault migration and registers no mutation tool.
+This plan is intentionally unapplied. The integration branch registers guarded
+mutation tools for disposable/pilot vaults, but performs no production-vault
+installation, mutation activation, or migration.
 
 ## Existing canon to preserve
 

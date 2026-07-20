@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import {
   OPERON_CONTRACT_VERSION,
   OperonBridgePageSchema,
+  OperonConvertTaskSchema,
+  OperonCreateTaskSchema,
   OperonQuerySchema,
   OperonStatusSchema,
   OperonTaskSchema,
+  OperonTransitionTaskSchema,
+  OperonUpdateTaskSchema,
   queryOperonSnapshot,
 } from "../dist/services/operon/contract.js";
 
@@ -147,4 +151,53 @@ assert.equal(stripped.source, "operon-cache");
 assert.equal(stripped.stale, true);
 assert.equal("properties" in stripped.tasks[0], false);
 
-console.log("PASS: Operon MCP contract schemas, filtering, property gating, and freshness envelope");
+const create = OperonCreateTaskSchema.parse({
+  idempotencyKey: "contract-create-1",
+  task: {
+    source: "file",
+    description: "Create through MCP",
+    properties: { north_star: true, rang: 2 },
+  },
+});
+assert.equal(create.dryRun, true);
+
+const update = OperonUpdateTaskSchema.parse({
+  operonId: task.operonId,
+  expectedRevision: task.revision,
+  idempotencyKey: "contract-update-1",
+  patch: { fields: { priority: "B" }, tags: ["elysia"] },
+});
+assert.equal(update.patch.fields?.priority, "B");
+assert.equal(
+  OperonUpdateTaskSchema.safeParse({
+    ...update,
+    patch: { description: "Rename", properties: { north_star: false } },
+  }).success,
+  false,
+);
+assert.equal(
+  OperonUpdateTaskSchema.safeParse({
+    ...update,
+    patch: { properties: { north_star: false, rang: 3 } },
+  }).success,
+  false,
+);
+
+const transition = OperonTransitionTaskSchema.parse({
+  operonId: task.operonId,
+  expectedRevision: task.revision,
+  idempotencyKey: "contract-transition-1",
+  status: "Project.Finished",
+});
+assert.equal(transition.dryRun, true);
+assert.equal(
+  OperonConvertTaskSchema.safeParse({
+    operonId: task.operonId,
+    expectedRevision: task.revision,
+    idempotencyKey: "contract-convert-1",
+    target: "inline",
+  }).success,
+  false,
+);
+
+console.log("PASS: Operon MCP read/mutation schemas, filtering, property gating, and freshness envelope");

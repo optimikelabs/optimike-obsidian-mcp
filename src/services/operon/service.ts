@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { config } from "../../config/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { logger, requestContextService } from "../../utils/index.js";
+import { assertWriteAllowed } from "../writePolicy.js";
 import {
   OPERON_CONTRACT_VERSION,
   OPERON_SNAPSHOT_SCHEMA_VERSION,
@@ -16,6 +17,11 @@ import {
   OperonValidationSchema,
   queryOperonSnapshot,
   OperonCapabilitiesSchema,
+  OperonConvertTaskSchema,
+  OperonCreateTaskSchema,
+  OperonMutationResultSchema,
+  OperonTransitionTaskSchema,
+  OperonUpdateTaskSchema,
   type OperonBridgePage,
   type OperonQuery,
   type OperonSnapshotEnvelope,
@@ -23,6 +29,11 @@ import {
   type OperonTask,
   type OperonTaskPage,
   type OperonValidation,
+  type OperonConvertTask,
+  type OperonCreateTask,
+  type OperonMutationResult,
+  type OperonTransitionTask,
+  type OperonUpdateTask,
 } from "./contract.js";
 import type { z } from "zod";
 
@@ -48,12 +59,25 @@ CREATE TABLE IF NOT EXISTS operon_snapshot_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS operon_mutation_journal (
+  operation_id TEXT PRIMARY KEY,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  operon_id TEXT,
+  action TEXT NOT NULL,
+  requested_json TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_operon_mutation_created
+  ON operon_mutation_journal (created_at DESC);
 `;
 
 const CACHE_LIMITATIONS = [
   "Operon is not loaded in headless modes; cached results are a last known snapshot, not live plugin semantics.",
   "Cached results must not be used as proof that a mutation was applied.",
-  "Mutation tools are intentionally not registered because Operon has no public versioned mutation API at the audited upstream SHA.",
+  "Mutation tools require the live Bridge and cannot apply or dry-run against a stale/headless snapshot.",
 ];
 
 interface SnapshotRow {
@@ -110,9 +134,32 @@ function safeJsonParse(value: string | undefined): unknown {
   }
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+interface MutationJournalEntry {
+  action: string;
+  operonId: string | null;
+  requestedJson: string;
+  result: OperonMutationResult;
+}
+
 export class OperonService {
   private readonly dbPath = config.obsidianSharedCacheDbPath;
   private client: AxiosInstance | null = null;
+  private readonly mutationInFlight = new Map<string, {
+    signature: string;
+    promise: Promise<OperonMutationResult>;
+  }>();
 
   private requestContext(operation: string, extra: Record<string, unknown> = {}) {
     return requestContextService.createRequestContext({
@@ -152,6 +199,166 @@ export class OperonService {
     db.exec("PRAGMA busy_timeout = 5000;");
     db.exec(SNAPSHOT_TABLE_SQL);
     return db;
+  }
+
+  private readMutationJournal(idempotencyKey: string): MutationJournalEntry | null {
+    const db = this.openDb();
+    try {
+      const row = db.prepare(
+        `SELECT action, operon_id as operonId, requested_json as requestedJson,
+                result_json as resultJson
+         FROM operon_mutation_journal WHERE idempotency_key = ?`,
+      ).get(idempotencyKey) as {
+        action?: string;
+        operonId?: string | null;
+        requestedJson?: string;
+        resultJson?: string;
+      } | undefined;
+      if (!row?.resultJson) return null;
+      const parsed = OperonMutationResultSchema.safeParse(JSON.parse(row.resultJson));
+      if (!parsed.success || !row.action || !row.requestedJson) return null;
+      return {
+        action: row.action,
+        operonId: row.operonId ?? null,
+        requestedJson: row.requestedJson,
+        result: { ...parsed.data, replayed: true },
+      };
+    } finally {
+      db.close();
+    }
+  }
+
+  private writeMutationJournal(
+    action: string,
+    operonId: string | null,
+    requested: unknown,
+    result: OperonMutationResult,
+  ): void {
+    const now = Date.now();
+    const db = this.openDb();
+    try {
+      db.prepare(
+        `INSERT INTO operon_mutation_journal (
+          operation_id, idempotency_key, operon_id, action, requested_json,
+          result_json, status, created_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(idempotency_key) DO NOTHING`,
+      ).run(
+        result.operationId,
+        result.idempotencyKey,
+        operonId,
+        action,
+        stableJson(requested),
+        JSON.stringify(result),
+        result.status,
+        now,
+        now,
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  private async executeMutation(
+    action: "create" | "update" | "transition" | "convert",
+    operonId: string | null,
+    idempotencyKey: string,
+    dryRun: boolean,
+    path: string,
+    payload: Record<string, unknown>,
+  ): Promise<OperonMutationResult> {
+    const requestedJson = stableJson(payload);
+    const signature = stableJson({ action, operonId, payload });
+    const existing = this.readMutationJournal(idempotencyKey);
+    if (existing) {
+      if (existing.action !== action || existing.requestedJson !== requestedJson) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Idempotency key was already used for a different Operon mutation request.",
+          this.requestContext(`operon_${action}`, { operonId, idempotencyKey }),
+        );
+      }
+      return existing.result;
+    }
+    const inFlight = this.mutationInFlight.get(idempotencyKey);
+    if (inFlight) {
+      if (inFlight.signature !== signature) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Idempotency key is currently executing a different Operon mutation request.",
+          this.requestContext(`operon_${action}`, { operonId, idempotencyKey }),
+        );
+      }
+      return inFlight.promise;
+    }
+    const promise = this.performMutation(action, operonId, idempotencyKey, dryRun, path, payload);
+    this.mutationInFlight.set(idempotencyKey, { signature, promise });
+    try {
+      return await promise;
+    } finally {
+      if (this.mutationInFlight.get(idempotencyKey)?.promise === promise) {
+        this.mutationInFlight.delete(idempotencyKey);
+      }
+    }
+  }
+
+  private async performMutation(
+    action: "create" | "update" | "transition" | "convert",
+    operonId: string | null,
+    idempotencyKey: string,
+    dryRun: boolean,
+    path: string,
+    payload: Record<string, unknown>,
+  ): Promise<OperonMutationResult> {
+    if (!liveModeConfigured()) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Operon mutations require the live Obsidian Desktop Bridge.",
+        this.requestContext(`operon_${action}`, { operonId }),
+      );
+    }
+    const status = await this.fetchLiveStatus();
+    if (!status.capabilities[action]) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        `Operon Bridge capability is unavailable: ${action}.`,
+        this.requestContext(`operon_${action}`, { operonId, capabilities: status.capabilities }),
+      );
+    }
+    const operation = `operon_${action}_task` as const;
+    assertWriteAllowed({
+      operation,
+      action: dryRun ? "dry_run" : "apply",
+      target: operonId ?? "new-task",
+      destructive: action === "convert" && !dryRun,
+      allowInReadonly: dryRun,
+      allowInGuarded: dryRun || action !== "convert",
+      context: this.requestContext(operation, { operonId, idempotencyKey }),
+    });
+    const response = await this.getClient().post(path, payload, {
+      validateStatus: () => true,
+    });
+    const parsed = OperonMutationResultSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        `Invalid Operon mutation response (${response.status}).`,
+        this.requestContext(operation, { operonId, issues: parsed.error.issues, response: response.data }),
+      );
+    }
+    const result = parsed.data;
+    this.writeMutationJournal(action, operonId ?? result.after?.operonId ?? null, payload, result);
+    if (result.status === "applied") {
+      try {
+        await this.ensureSnapshot(true);
+      } catch (error) {
+        logger.warning("Operon mutation succeeded but snapshot refresh failed.", {
+          ...this.requestContext(operation, { operonId, operationId: result.operationId }),
+          error: errorMessage(error),
+        });
+      }
+    }
+    return result;
   }
 
   private readMeta(db: DatabaseSync): SnapshotMeta | null {
@@ -661,6 +868,54 @@ export class OperonService {
     const query = OperonQuerySchema.parse(queryInput);
     const snapshot = await this.ensureSnapshot(query.forceRefresh);
     return queryOperonSnapshot(snapshot, query);
+  }
+
+  async createTask(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonCreateTask = OperonCreateTaskSchema.parse(input);
+    return this.executeMutation(
+      "create",
+      null,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks`,
+      params,
+    );
+  }
+
+  async updateTask(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonUpdateTask = OperonUpdateTaskSchema.parse(input);
+    return this.executeMutation(
+      "update",
+      params.operonId,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/update`,
+      params,
+    );
+  }
+
+  async transitionTask(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonTransitionTask = OperonTransitionTaskSchema.parse(input);
+    return this.executeMutation(
+      "transition",
+      params.operonId,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/transition`,
+      params,
+    );
+  }
+
+  async convertTask(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonConvertTask = OperonConvertTaskSchema.parse(input);
+    return this.executeMutation(
+      "convert",
+      params.operonId,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/convert`,
+      params,
+    );
   }
 
   async getTask(options: {

@@ -14,7 +14,11 @@ export type WriteOperation =
   | "obsidian_manage_tags"
   | "bases_create"
   | "bases_upsert_config"
-  | "bases_upsert_rows";
+  | "bases_upsert_rows"
+  | "operon_create_task"
+  | "operon_update_task"
+  | "operon_transition_task"
+  | "operon_convert_task";
 
 type GuardCheck = {
   operation: WriteOperation;

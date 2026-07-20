@@ -65,6 +65,8 @@ const state = {
   statusCalls: 0,
   postCalls: 0,
   validationCalls: 0,
+  mutationCalls: 0,
+  mutations: false,
 };
 
 function statusPayload() {
@@ -91,7 +93,9 @@ function statusPayload() {
       duplicateConflictCount: state.mode === "duplicate" ? 1 : 0,
     },
     settingsSignature: "fnv1a32:settings",
-    capabilities,
+    capabilities: state.mutations
+      ? { ...capabilities, create: true, update: true, transition: true, convert: true }
+      : capabilities,
     source: "operon-runtime",
     stale: false,
     limitations: ["read-only"],
@@ -164,6 +168,29 @@ const server = http.createServer((request, response) => {
         hasMore: generationDrift && !secondPage,
         tasks: pageTasks,
         limitations: ["read-only"],
+      });
+    });
+    return;
+  }
+  if (request.method === "POST" && url.pathname.endsWith("/tasks")) {
+    state.mutationCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-create-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: "planned",
+        before: null,
+        requested: params.task,
+        after: null,
+        source: "operon-live",
+        stale: false,
       });
     });
     return;
@@ -270,8 +297,54 @@ try {
   assert.equal(afterStatusDrift.snapshotAt, firstSnapshotAt);
   assert.equal(afterStatusDrift.tasks.length, 2);
 
+  state.mode = "normal";
+  state.mutations = true;
+  state.generation = 8;
+  const planned = await service.createTask({
+    idempotencyKey: "test-create-idempotency",
+    dryRun: true,
+    task: { source: "file", description: "Dry run task" },
+  });
+  assert.equal(planned.status, "planned");
+  assert.equal(state.mutationCalls, 1);
+  const replayed = await service.createTask({
+    idempotencyKey: "test-create-idempotency",
+    dryRun: true,
+    task: { source: "file", description: "Dry run task" },
+  });
+  assert.equal(replayed.replayed, true);
+  assert.equal(replayed.operationId, planned.operationId);
+  assert.equal(state.mutationCalls, 1, "journal replay must not call the Bridge twice");
+
+  await assert.rejects(
+    service.createTask({
+      idempotencyKey: "test-create-idempotency",
+      dryRun: true,
+      task: { source: "file", description: "Different request" },
+    }),
+    (error) => error?.code === "CONFLICT",
+  );
+  assert.equal(state.mutationCalls, 1, "mismatched idempotency reuse must be rejected locally");
+
+  const concurrentInput = {
+    idempotencyKey: "test-concurrent-idempotency",
+    dryRun: true,
+    task: { source: "inline", description: "Concurrent dry run" },
+  };
+  const mutationCallsBeforeConcurrent = state.mutationCalls;
+  const [concurrentA, concurrentB] = await Promise.all([
+    service.createTask(concurrentInput),
+    service.createTask(concurrentInput),
+  ]);
+  assert.equal(concurrentA.operationId, concurrentB.operationId);
+  assert.equal(
+    state.mutationCalls,
+    mutationCallsBeforeConcurrent + 1,
+    "concurrent identical requests must share one Bridge operation",
+  );
+
   console.log(
-    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, and pagination/validation/final-status drift preservation",
+    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, pagination/validation drift preservation, and bound/concurrent mutation idempotency",
   );
 } finally {
   await new Promise((resolve, reject) =>

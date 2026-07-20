@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Bridge exposes a read-only projection of the **live Operon index** through Obsidian Local REST API. It does not parse the vault independently and it does not mutate tasks.
+The Bridge projects Operon's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`. Mutations are exposed only when the loaded Operon instance implements `OperonPublicApiV1`; there is no raw Markdown or private-reflection fallback.
 
 Prefix:
 
@@ -12,232 +12,132 @@ Prefix:
 
 All routes inherit Local REST API authentication and TLS behavior.
 
-## Compatibility
+## Compatibility and capabilities
 
 - Bridge contract: `1`
 - Latest tested Operon version: `2.5.0`
-- Accepted read allowlist: `2.4.0`, `2.5.0`
-- Mutation capabilities: always `false` in v1
+- Read allowlist: `2.4.0`, `2.5.0`
+- Mutation contract: Operon Public API `1`
+- Official Operon `2.5.0`: read-only
+- Optimike minimal Operon `2.5.0` fork with Public API v1: read-write
 
-A future Operon version is not assumed compatible merely because its Markdown looks similar.
+`GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future Operon version is not assumed compatible merely because its Markdown looks similar.
 
-## `GET /status`
+Readiness requires a compatible plugin, positive generation, healthy idle V8 index, zero dirty sources, and a task count matching diagnostics. A duplicate-ID conflict is reported separately and causes MCP snapshot refresh refusal.
 
-Returns:
+## Stable task projection
+
+Each task includes durable `operonId`, inline/file source, path and one-based line, description, checkbox, workflow, priority, tags, parent, dependency edges, normalized dates, managed fields, source mtime, and deterministic `revision`.
+
+For file tasks, `includeProperties=true` also returns unmanaged YAML properties such as `north_star` and `rang`. Raw note bodies and raw task lines are never exposed.
+
+The `revision` covers the normalized projection and source mtime. Every existing-task mutation requires the exact live revision.
+
+## Read routes
+
+- `GET /status`
+- `GET /tasks?cursor=0&limit=100&includeProperties=false`
+- `GET /tasks/:operonId?includeProperties=false`
+- `POST /tasks/query`
+- `GET /validate?includeProperties=false`
+
+Query supports IDs, text, source, checkbox, status, pipeline, priority, tier, paths, tags, parent, ISO dates, managed-field equality, unmanaged-property equality, sorting, cursor, and limit.
+
+Live validation reports duplicate IDs, missing sources, unknown workflow statuses, missing parents, and missing blockers. P0 prevents a new MCP snapshot from replacing the last known-good one.
+
+## Mutation controls
+
+All mutation routes require `idempotencyKey`. The key is bound to the canonical request: an identical replay returns the cached result, while reuse for different input returns HTTP 409 with `idempotency_key_reused`. Existing-task routes also require `expectedRevision`. `dryRun` defaults to `true`; apply occurs only with `dryRun: false`.
+
+Responses use:
 
 ```json
 {
   "ok": true,
   "contractVersion": "1",
-  "bridge": {
-    "id": "optimike-operon-bridge",
-    "version": "0.1.0",
-    "mode": "read-only"
-  },
-  "operon": {
-    "present": true,
-    "version": "2.5.0",
-    "compatible": true,
-    "testedAgainst": "2.5.0",
-    "supportedRange": "2.4.0, 2.5.0"
-  },
-  "index": {
-    "ready": true,
-    "generation": 42,
-    "taskCount": 120,
-    "duplicateConflictCount": 0,
-    "diagnostics": {
-      "health": "healthy",
-      "runtimePhase": "idle",
-      "verifiedThisSession": true,
-      "dirtySourceCount": 0
-    }
-  },
-  "settingsSignature": "fnv1a32:...",
-  "capabilities": {
-    "status": true,
-    "list": true,
-    "get": true,
-    "query": true,
-    "validate": true,
-    "create": false,
-    "update": false,
-    "transition": false,
-    "convert": false
-  },
-  "source": "operon-runtime",
-  "stale": false,
-  "limitations": []
+  "operationId": "uuid",
+  "idempotencyKey": "client-key",
+  "status": "planned | applied | conflict | rejected | failed",
+  "before": {},
+  "requested": {},
+  "after": {},
+  "retryable": false,
+  "source": "operon-live",
+  "stale": false
 }
 ```
 
-`ok=false` is returned when Operon is absent, its runtime index is unavailable,
-its diagnostics do not prove a healthy and idle index verified during the
-current session, or its version is outside the tested allowlist. Generation
-zero is never considered ready.
+The Bridge waits for Operon's index to return to a verified idle state before proving `after`. If the final state cannot be proven, it records `failed/outcome_unverified` and does not invite a blind retry.
 
-## Task object
+### `POST /tasks`
 
 ```json
 {
-  "operonId": "abc1234",
-  "source": "inline",
-  "path": "Efforts/Projets/Bridge.md",
-  "line": 7,
-  "sourceMtime": 1784545200000,
-  "description": "Ship bridge",
-  "checkbox": "open",
-  "status": "Project.InProgress",
-  "statusLabel": "InProgress",
-  "pipeline": "Project",
-  "priority": "A",
-  "tier": "hot",
-  "tags": ["bridge", "elysia"],
-  "parentTask": null,
-  "blocking": [],
-  "blockedBy": [],
-  "dates": {
-    "due": "2026-07-31",
-    "scheduled": null,
-    "started": null,
-    "completed": null,
-    "cancelled": null,
-    "datetimeStart": null,
-    "datetimeEnd": null,
-    "created": "2026-07-20T10:00:00",
-    "modified": "2026-07-20T11:00:00"
-  },
-  "fields": {
-    "status": "Project.InProgress",
-    "priority": "A"
-  },
-  "properties": {
-    "rang": 4,
-    "north_star": true
-  },
-  "revision": "fnv1a32:...",
-  "sourceKind": "operon-index",
-  "operonVersion": "2.5.0",
-  "bridgeVersion": "0.1.0"
+  "idempotencyKey": "create-001",
+  "dryRun": false,
+  "task": {
+    "source": "file",
+    "description": "Ship bridge",
+    "tags": ["elysia"],
+    "fields": { "status": "Project.Planned", "priority": "A" },
+    "properties": { "north_star": true }
+  }
 }
 ```
 
-Rules:
+Creation uses Operon's Task Creator paths, template resolution, identity generation, indexing, dependency reconciliation, aggregates, and workflow transition logic.
 
-- `line` is one-based for inline tasks and `null` for file tasks.
-- `fields` includes indexed canonical and custom fields.
-- `properties` contains unmanaged YAML frontmatter only, is file-task-only, and is omitted unless requested.
-- `revision` is a deterministic read revision over the normalized task projection and source mtime. It is not yet accepted by a mutation endpoint.
-- Raw note bodies and raw task lines are not exposed.
-
-## `GET /tasks`
-
-Parameters:
-
-- `cursor` — numeric offset string, default `0`
-- `limit` — `1..500`, default `100`
-- `includeProperties` — boolean, default `false`
-
-Response contains `total`, `count`, `cursor`, optional `nextCursor`, `hasMore`,
-`generation`, `settingsSignature`, and `tasks`. Every page is tied to the same
-live generation and settings signature; the MCP rejects the refresh if either
-changes before pagination and validation settle.
-
-## `GET /tasks/:operonId`
-
-Returns one task or a structured `not_found` error.
-
-Optional query parameter:
-
-- `includeProperties`
-
-## `POST /tasks/query`
-
-Body fields:
+### `POST /tasks/:operonId/update`
 
 ```json
 {
-  "operonIds": ["abc1234"],
-  "search": "bridge",
-  "sources": ["inline", "file"],
-  "checkboxes": ["open", "done", "cancelled"],
-  "statuses": ["Project.InProgress"],
-  "pipelines": ["Project"],
-  "priorities": ["A"],
-  "tiers": ["hot"],
-  "pathIncludes": ["Efforts/Projets/"],
-  "pathExcludes": ["Archive/"],
-  "tagsAny": ["bridge"],
-  "tagsAll": ["elysia"],
-  "parentTask": null,
-  "dates": [
-    { "field": "due", "before": "2026-08-01" }
-  ],
-  "fieldEquals": {
-    "custom": "signal"
-  },
-  "propertyEquals": {
-    "north_star": true
-  },
-  "sort": [
-    { "field": "due", "direction": "asc" },
-    { "field": "priority", "direction": "asc" }
-  ],
-  "includeProperties": true,
-  "cursor": "0",
-  "limit": 100
+  "idempotencyKey": "update-001",
+  "expectedRevision": "fnv1a32:...",
+  "dryRun": false,
+  "patch": {
+    "fields": { "priority": "B" },
+    "tags": ["elysia", "mcp"]
+  }
 }
 ```
 
-Multiple filters are combined with AND. Values inside `tagsAny` use OR; values inside `tagsAll` use AND.
+One request must contain exactly one mutation group:
 
-Date fields:
+- description only;
+- managed fields and/or tags;
+- exactly one unmanaged file property.
 
-- `due`
-- `scheduled`
-- `started`
-- `completed`
-- `cancelled`
-- `datetimeStart`
-- `datetimeEnd`
-- `created`
-- `modified`
+This rule prevents false atomicity across Obsidian rename, managed-field, and raw-property write paths.
 
-Date operators are lexical comparisons over normalized ISO values: `before`, `after`, `on`.
+Status is not accepted by `update`; use the transition route.
 
-## `GET /validate`
+### `POST /tasks/:operonId/transition`
 
-Live validation reports:
+```json
+{
+  "idempotencyKey": "transition-001",
+  "expectedRevision": "fnv1a32:...",
+  "dryRun": false,
+  "status": "Project.Finished"
+}
+```
 
-- duplicate `operonId` conflicts from Operon's registry;
-- missing source files;
-- unknown configured workflow statuses;
-- missing parents;
-- missing blocker references.
+The exact configured status is resolved by Operon. Checkbox, terminal dates, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, and view refreshes remain Operon's responsibility.
 
-The validation response carries the same `generation` and `settingsSignature`
-coherence markers as task pages.
+### `POST /tasks/:operonId/convert`
 
-Severity:
+```json
+{
+  "idempotencyKey": "convert-001",
+  "expectedRevision": "fnv1a32:...",
+  "dryRun": false,
+  "target": "inline",
+  "targetPath": "Pilot.md"
+}
+```
 
-- P0 — snapshot refresh must be refused;
-- P1 — pilot-blocking semantic inconsistency;
-- P2 — warning to triage.
+Inline-to-file accepts an optional `fileTemplateId`. File-to-inline requires an explicit different Markdown `targetPath`. Conversion uses Operon's transition-safe paths; no copy/delete logic lives in the MCP.
 
 ## Errors
 
-Errors use:
-
-```json
-{
-  "ok": false,
-  "contractVersion": "1",
-  "error": {
-    "code": "operon_unavailable",
-    "message": "..."
-  },
-  "limitations": []
-}
-```
-
-No error path silently reads or writes Markdown as a fallback.
+Validation errors use HTTP 400, revision conflicts 409, domain rejection 422, and unavailable live mutation surfaces 503. No error path silently reads or writes Markdown as a fallback.

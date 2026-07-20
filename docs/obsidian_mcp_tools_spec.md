@@ -56,7 +56,7 @@ Related docs:
 - `query_tasks`: query cached Tasks data with status, date, tag, description, and
   path filters.
 
-## Operon (read-only contract v1)
+## Operon (contract v1)
 
 - `operon_status`: inspect live Bridge compatibility and persisted snapshot state;
   optional `forceRefresh` requests a complete live rebuild.
@@ -68,14 +68,18 @@ Related docs:
   properties.
 - `operon_validate`: live duplicate/source/workflow graph validation, or a limited
   snapshot-only validation with explicit caveats.
+- `operon_create_task`: create inline/file tasks through Operon Public API v1.
+- `operon_update_task`: update one mutation group with expected revision.
+- `operon_transition_task`: apply an exact workflow transition through Operon's guards.
+- `operon_convert_task`: convert inline/file shape in `MCP_WRITE_MODE=full`.
 
 Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`,
 Operon/Bridge versions, capabilities, and limitations.
 
-No `operon_create_task`, `operon_update_task`, `operon_transition_task`, or
-`operon_convert_task` tool is exposed. At the audited Operon 2.4.0 SHA, the full
-mutation orchestration is not available through a public versioned API. The MCP
-must not silently replace that contract with direct Markdown writes.
+Mutations require a live Bridge and Operon Public API v1. Official Operon remains
+read-only; the minimal Optimike fork supplies the API. Dry-run is the default,
+idempotency is mandatory, existing tasks require `expectedRevision`, and there
+is no direct Markdown fallback.
 
 ## Semantic Search
 

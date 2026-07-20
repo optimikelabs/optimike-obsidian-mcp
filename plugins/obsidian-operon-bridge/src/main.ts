@@ -26,6 +26,7 @@ const MOUNT_RETRY_MS = 500;
 
 interface OperonRuntime {
   plugin: any;
+  api: OperonPublicApiV1 | null;
   version: string;
   compatible: boolean;
   indexer: {
@@ -51,10 +52,32 @@ interface BridgeCapabilities {
   get: boolean;
   query: boolean;
   validate: boolean;
-  create: false;
-  update: false;
-  transition: false;
-  convert: false;
+  create: boolean;
+  update: boolean;
+  transition: boolean;
+  convert: boolean;
+}
+
+interface OperonPublicMutationResult {
+  ok: boolean;
+  operonId: string | null;
+  code: "applied" | "not-ready" | "not-found" | "invalid-input" | "rejected" | "failed";
+  message?: string;
+}
+
+interface OperonPublicApiV1 {
+  version: "1";
+  capabilities: () => {
+    ready: boolean;
+    create: boolean;
+    update: boolean;
+    transition: boolean;
+    convert: boolean;
+  };
+  createTask: (input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
+  updateTask: (operonId: string, input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
+  transitionTask: (operonId: string, input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
+  convertTask: (operonId: string, input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
 }
 
 interface StableTaskRead {
@@ -63,16 +86,36 @@ interface StableTaskRead {
   settingsSignature: string;
 }
 
-const READ_ONLY_LIMITATIONS = [
-  "Bridge contract v1 is intentionally read-only.",
-  "Mutations are disabled because the tested Operon releases do not expose a public versioned mutation API that guarantees the full domain orchestration path.",
+interface CachedMutation {
+  signature: string;
+  payload: Record<string, unknown>;
+}
+
+const BASE_LIMITATIONS = [
   "Exact Operon semantics require Obsidian Desktop with Operon loaded; headless clients must treat persisted MCP snapshots as stale fallbacks.",
   "Unmanaged frontmatter properties are returned only for file tasks and only when includeProperties=true.",
+];
+
+const READ_ONLY_LIMITATIONS = [
+  ...BASE_LIMITATIONS,
+  "Mutations require Operon Public API v1; official Operon 2.5.0 does not expose it.",
 ];
 
 function boolValue(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function numberValue(value: unknown): number | undefined {
@@ -170,6 +213,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private mountInterval: number | null = null;
   private mountTimeout: number | null = null;
   private indexValidationInFlight: Promise<void> | null = null;
+  private mutationResults = new Map<string, CachedMutation>();
 
   async onload(): Promise<void> {
     this.app.workspace.onLayoutReady(() => {
@@ -205,6 +249,21 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     return manager?.plugins?.[id] ?? manager?.getPlugin?.(id) ?? null;
   }
 
+  private readPublicApi(plugin: any): OperonPublicApiV1 | null {
+    const api = plugin?.api;
+    if (
+      api?.version !== "1" ||
+      typeof api.capabilities !== "function" ||
+      typeof api.createTask !== "function" ||
+      typeof api.updateTask !== "function" ||
+      typeof api.transitionTask !== "function" ||
+      typeof api.convertTask !== "function"
+    ) {
+      return null;
+    }
+    return api as OperonPublicApiV1;
+  }
+
   private getOperonRuntime(): OperonRuntime | null {
     const plugin = this.getCommunityPlugin(OPERON_PLUGIN_ID);
     if (!plugin) return null;
@@ -221,6 +280,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     return {
       plugin,
+      api: this.readPublicApi(plugin),
       version,
       compatible: isVersionCompatible(version),
       indexer,
@@ -231,17 +291,22 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
 
   private capabilities(runtime: OperonRuntime | null, ready = false): BridgeCapabilities {
     const readable = Boolean(runtime?.compatible && ready);
+    const mutation = readable && runtime?.api ? runtime.api.capabilities() : null;
     return {
       status: true,
       list: readable,
       get: readable,
       query: readable,
       validate: readable,
-      create: false,
-      update: false,
-      transition: false,
-      convert: false,
+      create: Boolean(mutation?.ready && mutation.create),
+      update: Boolean(mutation?.ready && mutation.update),
+      transition: Boolean(mutation?.ready && mutation.transition),
+      convert: Boolean(mutation?.ready && mutation.convert),
     };
+  }
+
+  private limitations(runtime: OperonRuntime | null, ready: boolean): string[] {
+    return this.capabilities(runtime, ready).update ? BASE_LIMITATIONS : READ_ONLY_LIMITATIONS;
   }
 
   private async indexState(runtime: OperonRuntime | null): Promise<{
@@ -313,13 +378,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const ready = Boolean(
       indexState.ready && indexState.diagnostics?.taskCount === taskCount,
     );
+    const capabilities = this.capabilities(runtime, ready);
     return {
       ok: Boolean(runtime?.compatible && ready),
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
       bridge: {
         id: this.manifest.id,
         version: this.manifest.version,
-        mode: "read-only",
+        mode: capabilities.update ? "read-write" : "read-only",
       },
       operon: {
         present: Boolean(runtime),
@@ -338,10 +404,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       settingsSignature: runtime
         ? settingsSignature(runtime.pipelines, runtime.keyMappings)
         : null,
-      capabilities: this.capabilities(runtime, ready),
+      capabilities,
       source: "operon-runtime",
       stale: false,
-      limitations: READ_ONLY_LIMITATIONS,
+      limitations: this.limitations(runtime, ready),
     };
   }
 
@@ -429,6 +495,25 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     return { task: normalized, generation: state.generation, settingsSignature: signature };
   }
 
+  private async oneTaskAfterMutation(operonId: string, includeProperties: boolean): Promise<{
+    task: OperonBridgeTask | null;
+    generation: number;
+    settingsSignature: string;
+  }> {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      try {
+        return await this.oneTask(operonId, includeProperties);
+      } catch (error) {
+        lastError = error;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 125));
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Operon did not reach a verified idle state after mutation.");
+  }
+
   private async validationPayload(includeProperties = false): Promise<Record<string, unknown>> {
     const runtime = this.requireRuntime();
     const snapshot = await this.allTasksSnapshot(includeProperties);
@@ -499,8 +584,260 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         P2: countSeverity("P2"),
       },
       violations,
-      limitations: READ_ONLY_LIMITATIONS,
+      limitations: this.limitations(runtime, true),
     };
+  }
+
+  private bodyRecord(req: any): Record<string, unknown> {
+    const body = req?.body;
+    return body && typeof body === "object" && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : {};
+  }
+
+  private mutationOperationId(): string {
+    return globalThis.crypto?.randomUUID?.() ?? `operon-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  private cacheMutation(
+    idempotencyKey: string,
+    signature: string,
+    payload: Record<string, unknown>,
+  ): void {
+    this.mutationResults.set(idempotencyKey, { signature, payload });
+    if (this.mutationResults.size <= 500) return;
+    const oldest = this.mutationResults.keys().next().value;
+    if (oldest) this.mutationResults.delete(oldest);
+  }
+
+  private cachedMutationResult(
+    idempotencyKey: string,
+    signature: string,
+    requested: Record<string, unknown>,
+  ): { httpStatus: number; payload: Record<string, unknown> } | null {
+    const cached = this.mutationResults.get(idempotencyKey);
+    if (!cached) return null;
+    if (cached.signature === signature) {
+      return { httpStatus: 200, payload: { ...cached.payload, replayed: true } };
+    }
+    return {
+      httpStatus: 409,
+      payload: {
+        ok: false,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId: this.mutationOperationId(),
+        idempotencyKey,
+        status: "conflict",
+        before: null,
+        requested,
+        after: null,
+        error: {
+          code: "idempotency_key_reused",
+          message: "idempotencyKey was already used for a different mutation request.",
+        },
+        retryable: false,
+        source: "operon-live",
+        stale: false,
+      },
+    };
+  }
+
+  private requireMutationRuntime(capability: "create" | "update" | "transition" | "convert"): OperonRuntime {
+    const runtime = this.requireRuntime();
+    const available = runtime.api?.capabilities();
+    if (!runtime.api || !available?.ready || !available[capability]) {
+      throw new Error(`Operon Public API v1 capability is unavailable: ${capability}.`);
+    }
+    return runtime;
+  }
+
+  private async executeExistingMutation(
+    capability: "update" | "transition" | "convert",
+    operonId: string,
+    body: Record<string, unknown>,
+    requested: Record<string, unknown>,
+    apply: (api: OperonPublicApiV1) => Promise<OperonPublicMutationResult>,
+  ): Promise<{ httpStatus: number; payload: Record<string, unknown> }> {
+    const idempotencyKey = String(body.idempotencyKey ?? "").trim();
+    if (!idempotencyKey) {
+      return { httpStatus: 400, payload: errorPayload(new Error("idempotencyKey is required."), "validation_error") };
+    }
+    const signature = stableJson({
+      capability,
+      operonId,
+      expectedRevision: body.expectedRevision,
+      dryRun: body.dryRun !== false,
+      requested,
+    });
+    const cached = this.cachedMutationResult(idempotencyKey, signature, requested);
+    if (cached) return cached;
+
+    const runtime = this.requireMutationRuntime(capability);
+    const beforeRead = await this.oneTask(operonId, true);
+    if (!beforeRead.task) {
+      return { httpStatus: 404, payload: errorPayload(new Error(`Operon task not found: ${operonId}`), "not_found") };
+    }
+    const expectedRevision = String(body.expectedRevision ?? "").trim();
+    if (!expectedRevision) {
+      return { httpStatus: 400, payload: errorPayload(new Error("expectedRevision is required."), "validation_error") };
+    }
+    const operationId = this.mutationOperationId();
+    if (expectedRevision !== beforeRead.task.revision) {
+      const payload = {
+        ok: false,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: "conflict",
+        before: beforeRead.task,
+        requested,
+        after: beforeRead.task,
+        error: { code: "revision_conflict", message: "expectedRevision does not match the live task revision." },
+        retryable: true,
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: 409, payload };
+    }
+    if (body.dryRun !== false) {
+      const payload = {
+        ok: true,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: "planned",
+        before: beforeRead.task,
+        requested,
+        after: null,
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: 200, payload };
+    }
+
+    const result = await apply(runtime.api!);
+    let afterRead: Awaited<ReturnType<OptimikeOperonBridgePlugin["oneTask"]>>;
+    try {
+      afterRead = await this.oneTaskAfterMutation(operonId, true);
+    } catch (error) {
+      const payload = {
+        ok: false,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: "failed",
+        before: beforeRead.task,
+        requested,
+        after: null,
+        error: {
+          code: "outcome_unverified",
+          message: `Operon returned ${result.code}, but the final indexed state could not be proven: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        retryable: false,
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: 500, payload };
+    }
+    const payload = {
+      ok: result.ok,
+      contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+      operationId,
+      idempotencyKey,
+      status: result.ok ? "applied" : "rejected",
+      before: beforeRead.task,
+      requested,
+      after: afterRead.task,
+      error: result.ok ? undefined : { code: result.code, message: result.message ?? "Operon rejected the mutation." },
+      retryable: result.code === "not-ready" || result.code === "failed",
+      source: "operon-live",
+      stale: false,
+    };
+    this.cacheMutation(idempotencyKey, signature, payload);
+    return { httpStatus: result.ok ? 200 : 422, payload };
+  }
+
+  private async executeCreateMutation(
+    body: Record<string, unknown>,
+  ): Promise<{ httpStatus: number; payload: Record<string, unknown> }> {
+    const idempotencyKey = String(body.idempotencyKey ?? "").trim();
+    if (!idempotencyKey) {
+      return { httpStatus: 400, payload: errorPayload(new Error("idempotencyKey is required."), "validation_error") };
+    }
+    const requested = body.task && typeof body.task === "object" && !Array.isArray(body.task)
+      ? body.task as Record<string, unknown>
+      : {};
+    const signature = stableJson({
+      capability: "create",
+      dryRun: body.dryRun !== false,
+      requested,
+    });
+    const cached = this.cachedMutationResult(idempotencyKey, signature, requested);
+    if (cached) return cached;
+    const runtime = this.requireMutationRuntime("create");
+    const operationId = this.mutationOperationId();
+    if (body.dryRun !== false) {
+      const payload = {
+        ok: true,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: "planned",
+        before: null,
+        requested,
+        after: null,
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: 200, payload };
+    }
+    const result = await runtime.api!.createTask(requested);
+    let afterRead: Awaited<ReturnType<OptimikeOperonBridgePlugin["oneTask"]>> | null = null;
+    if (result.operonId) {
+      try {
+        afterRead = await this.oneTaskAfterMutation(result.operonId, true);
+      } catch (error) {
+        const payload = {
+          ok: false,
+          contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+          operationId,
+          idempotencyKey,
+          status: "failed",
+          before: null,
+          requested,
+          after: null,
+          error: {
+            code: "outcome_unverified",
+            message: `Operon returned ${result.code}, but the created task could not be proven in the final index: ${error instanceof Error ? error.message : String(error)}`,
+          },
+          retryable: false,
+          source: "operon-live",
+          stale: false,
+        };
+        this.cacheMutation(idempotencyKey, signature, payload);
+        return { httpStatus: 500, payload };
+      }
+    }
+    const payload = {
+      ok: result.ok,
+      contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+      operationId,
+      idempotencyKey,
+      status: result.ok ? "applied" : "rejected",
+      before: null,
+      requested,
+      after: afterRead?.task ?? null,
+      error: result.ok ? undefined : { code: result.code, message: result.message ?? "Operon rejected task creation." },
+      retryable: result.code === "not-ready" || result.code === "failed",
+      source: "operon-live",
+      stale: false,
+    };
+    this.cacheMutation(idempotencyKey, signature, payload);
+    return { httpStatus: result.ok ? 200 : 422, payload };
   }
 
   private tryMountRestExtension(): void {
@@ -539,7 +876,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           generation: snapshot.generation,
           settingsSignature: snapshot.settingsSignature,
           ...result,
-          limitations: READ_ONLY_LIMITATIONS,
+          limitations: this.limitations(this.getOperonRuntime(), true),
         });
       } catch (error) {
         sendJson(res, 503, errorPayload(error, "operon_unavailable"));
@@ -566,7 +903,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           generation: result.generation,
           settingsSignature: result.settingsSignature,
           task: result.task,
-          limitations: READ_ONLY_LIMITATIONS,
+          limitations: this.limitations(this.getOperonRuntime(), true),
         });
       } catch (error) {
         sendJson(res, 503, errorPayload(error, "operon_unavailable"));
@@ -586,10 +923,79 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           generation: snapshot.generation,
           settingsSignature: snapshot.settingsSignature,
           ...result,
-          limitations: READ_ONLY_LIMITATIONS,
+          limitations: this.limitations(this.getOperonRuntime(), true),
         });
       } catch (error) {
         sendJson(res, 400, errorPayload(error, "query_error"));
+      }
+    });
+
+    api.addRoute(`${REST_PREFIX}/tasks`).post(async (req: any, res: any) => {
+      try {
+        const result = await this.executeCreateMutation(this.bodyRecord(req));
+        sendJson(res, result.httpStatus, result.payload);
+      } catch (error) {
+        sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+      }
+    });
+
+    api.addRoute(`${REST_PREFIX}/tasks/:operonId/update`).post(async (req: any, res: any) => {
+      try {
+        const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
+        const body = this.bodyRecord(req);
+        const requested = body.patch && typeof body.patch === "object" && !Array.isArray(body.patch)
+          ? body.patch as Record<string, unknown>
+          : {};
+        const result = await this.executeExistingMutation(
+          "update",
+          operonId,
+          body,
+          requested,
+          operonApi => operonApi.updateTask(operonId, requested),
+        );
+        sendJson(res, result.httpStatus, result.payload);
+      } catch (error) {
+        sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+      }
+    });
+
+    api.addRoute(`${REST_PREFIX}/tasks/:operonId/transition`).post(async (req: any, res: any) => {
+      try {
+        const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
+        const body = this.bodyRecord(req);
+        const requested = { status: String(body.status ?? "").trim() };
+        const result = await this.executeExistingMutation(
+          "transition",
+          operonId,
+          body,
+          requested,
+          operonApi => operonApi.transitionTask(operonId, requested),
+        );
+        sendJson(res, result.httpStatus, result.payload);
+      } catch (error) {
+        sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+      }
+    });
+
+    api.addRoute(`${REST_PREFIX}/tasks/:operonId/convert`).post(async (req: any, res: any) => {
+      try {
+        const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
+        const body = this.bodyRecord(req);
+        const requested = {
+          target: String(body.target ?? "").trim(),
+          ...(body.fileTemplateId ? { fileTemplateId: String(body.fileTemplateId) } : {}),
+          ...(body.targetPath ? { targetPath: String(body.targetPath) } : {}),
+        };
+        const result = await this.executeExistingMutation(
+          "convert",
+          operonId,
+          body,
+          requested,
+          operonApi => operonApi.convertTask(operonId, requested),
+        );
+        sendJson(res, result.httpStatus, result.payload);
+      } catch (error) {
+        sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
       }
     });
 
@@ -614,7 +1020,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
     this.clearMountTimers();
     console.info(
-      `[${EXTENSION_ID}] Read-only REST contract v${OPERON_BRIDGE_CONTRACT_VERSION} mounted at ${REST_PREFIX}.`,
+      `[${EXTENSION_ID}] REST contract v${OPERON_BRIDGE_CONTRACT_VERSION} mounted at ${REST_PREFIX}.`,
     );
   }
 }
