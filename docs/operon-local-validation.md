@@ -7,7 +7,7 @@ This recipe is the remaining Desktop proof. Run it only in a disposable validati
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `2.4.x` enabled
+- Operon `2.4.0` enabled
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
@@ -19,10 +19,8 @@ From the MCP repository:
 ```bash
 npm ci
 npm run test:runtime
-npm run test:operon-contract
+npm run check:operon
 npm pack --dry-run
-npm --prefix plugins/obsidian-operon-bridge install
-npm --prefix plugins/obsidian-operon-bridge run check
 ```
 
 Expected: every command exits `0`.
@@ -68,7 +66,9 @@ PASS when:
 
 - `ok=true`;
 - Operon is present and compatible;
-- index is ready;
+- index generation is greater than zero;
+- diagnostics report `health=healthy`, `runtimePhase=idle`,
+  `verifiedThisSession=true`, and `dirtySourceCount=0`;
 - mutation capabilities are all false;
 - duplicate conflict count is zero.
 
@@ -129,7 +129,9 @@ curl -X POST \
   }'
 ```
 
-PASS: only expected tasks are returned and pagination is stable.
+PASS: only expected tasks are returned; every page reports the same generation
+and settings signature; changing a task during a forced multi-page refresh
+causes that refresh to be rejected rather than storing a mixed snapshot.
 
 ## 7. Live validation
 
@@ -186,7 +188,7 @@ FAIL if cached data is presented as live.
 
 ## 11. Incompatibility test
 
-Disable Operon or use a test manifest version below `2.4.0`.
+Disable Operon or use any test manifest version other than `2.4.0`.
 
 PASS:
 

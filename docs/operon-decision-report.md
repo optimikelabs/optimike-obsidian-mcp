@@ -39,6 +39,10 @@
 - stale cache fallback;
 - duplicate/P0 refusal;
 - incomplete-pagination refusal;
+- startup/recovery/sync/dirty-index readiness refusal;
+- exact Operon `2.4.0` compatibility allowlist;
+- generation/settings coherence across pagination, validation, and final status;
+- reproducible Bridge install and installable CI artifact;
 - built contract and snapshot-service tests;
 - CI workflow;
 - ADR, contracts, validation recipe, migration and rollback plan.
@@ -65,6 +69,8 @@
 | MCP Operon contract smoke | PASS — GitHub Actions |
 | MCP SQLite refresh/generation/stale/property/duplicate/P0/incomplete-page smoke | PASS — GitHub Actions |
 | Package dry run | PASS — GitHub Actions |
+| Bridge `npm audit --audit-level=high` | PASS — 0 vulnerability |
+| MCP root `npm audit --audit-level=high` | FAIL — 10 pre-existing lockfile findings (4 moderate, 4 high, 2 critical); this branch does not change root dependencies |
 | Runtime workflow on Ubuntu Node 22 | PASS — GitHub Actions |
 | Runtime workflow on Windows Node 22 | PASS — GitHub Actions |
 | Obsidian Desktop recipe | NOT RUN |
@@ -78,11 +84,17 @@
 - Duplicate `operonId`: blocks snapshot replacement.
 - Incomplete pagination: blocks snapshot replacement.
 - Contract/version mismatch: blocks live refresh.
+- Index not proven healthy, idle, session-verified, and clean: blocks live refresh.
+- Generation or settings drift during refresh: preserves the previous snapshot.
 
 ### P1
 
 - Runtime index shape is public in JavaScript but not a documented versioned API.
-- A future Operon 2.x release may change internals without a major version change.
+- The root MCP dependency lock has pre-existing npm advisories, including two
+  critical findings; remediate in a separate dependency-security change with
+  its own regression run.
+- A future Operon release requires explicit qualification before it enters the
+  allowlist.
 - File-task property parity still needs Desktop proof.
 - Four ÉLYSIA cockpit equivalents still need pilot proof.
 

@@ -1,5 +1,6 @@
 export const OPERON_BRIDGE_CONTRACT_VERSION = "1" as const;
 export const OPERON_BRIDGE_TESTED_VERSION = "2.4.0" as const;
+export const OPERON_BRIDGE_SUPPORTED_VERSIONS = [OPERON_BRIDGE_TESTED_VERSION] as const;
 
 export type OperonTaskSource = "inline" | "file";
 export type OperonCheckboxState = "open" | "done" | "cancelled";
@@ -151,6 +152,8 @@ export interface OperonTaskPage {
   contractVersion: typeof OPERON_BRIDGE_CONTRACT_VERSION;
   source: "operon-live";
   stale: false;
+  generation: number;
+  settingsSignature: string;
   total: number;
   count: number;
   cursor: string;
@@ -164,11 +167,32 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
 export function isVersionCompatible(version: string): boolean {
-  const match = /^(\d+)\.(\d+)\.(\d+)/u.exec(version.trim());
-  if (!match) return false;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  return major === 2 && minor >= 4;
+  return (OPERON_BRIDGE_SUPPORTED_VERSIONS as readonly string[]).includes(version.trim());
+}
+
+export interface RuntimeIndexDiagnostics {
+  health?: string;
+  runtimePhase?: string;
+  verifiedThisSession?: boolean;
+  taskCount?: number;
+  dirtySourceCount?: number;
+}
+
+export function isIndexReady(options: {
+  compatible: boolean;
+  generation: number | null;
+  diagnostics: RuntimeIndexDiagnostics | null;
+}): boolean {
+  const { compatible, generation, diagnostics } = options;
+  return Boolean(
+    compatible &&
+      Number.isInteger(generation) &&
+      (generation ?? 0) > 0 &&
+      diagnostics?.health === "healthy" &&
+      diagnostics.runtimePhase === "idle" &&
+      diagnostics.verifiedThisSession === true &&
+      (diagnostics.dirtySourceCount ?? 0) === 0,
+  );
 }
 
 export function parseListValue(value: string | undefined): string[] {
@@ -457,7 +481,16 @@ export function parseCursor(cursor: string | undefined): number {
 export function paginateTasks(
   tasks: OperonBridgeTask[],
   query: Pick<OperonTaskQuery, "cursor" | "limit">,
-): Omit<OperonTaskPage, "contractVersion" | "source" | "stale" | "limitations" | "ok"> {
+): Omit<
+  OperonTaskPage,
+  | "contractVersion"
+  | "source"
+  | "stale"
+  | "generation"
+  | "settingsSignature"
+  | "limitations"
+  | "ok"
+> {
   const offset = parseCursor(query.cursor);
   const limit = Math.max(1, Math.min(MAX_LIMIT, query.limit ?? DEFAULT_LIMIT));
   const page = tasks.slice(offset, offset + limit);
@@ -475,7 +508,16 @@ export function paginateTasks(
 export function queryTasks(
   tasks: OperonBridgeTask[],
   query: OperonTaskQuery,
-): Omit<OperonTaskPage, "contractVersion" | "source" | "stale" | "limitations" | "ok"> {
+): Omit<
+  OperonTaskPage,
+  | "contractVersion"
+  | "source"
+  | "stale"
+  | "generation"
+  | "settingsSignature"
+  | "limitations"
+  | "ok"
+> {
   return paginateTasks(sortTasks(filterTasks(tasks, query), query.sort), query);
 }
 

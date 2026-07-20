@@ -45,5 +45,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+          cache: npm
+          cache-dependency-path: plugins/obsidian-operon-bridge/package-lock.json
+      - run: npm ci
       - run: npm run check
+      - name: Upload installable Bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimike-operon-bridge
+          path: |
+            plugins/obsidian-operon-bridge/build/main.js
+            plugins/obsidian-operon-bridge/build/manifest.json
+          if-no-files-found: error

@@ -62,13 +62,19 @@ const tasks = [makeTask("a"), makeTask("b")];
 const state = {
   mode: "normal",
   generation: 1,
+  statusCalls: 0,
   postCalls: 0,
   validationCalls: 0,
 };
 
 function statusPayload() {
+  state.statusCalls += 1;
+  const generation =
+    state.mode === "status-drift" && state.statusCalls >= 3
+      ? state.generation + 1
+      : state.generation;
   return {
-    ok: state.mode !== "incompatible",
+    ok: state.mode !== "incompatible" && state.mode !== "initializing",
     contractVersion: "1",
     bridge: { id: "optimike-operon-bridge", version: "0.1.0", mode: "read-only" },
     operon: {
@@ -76,11 +82,11 @@ function statusPayload() {
       version: "2.4.0",
       compatible: state.mode !== "incompatible",
       testedAgainst: "2.4.0",
-      supportedRange: ">=2.4.0 <3.0.0",
+      supportedRange: "2.4.0",
     },
     index: {
-      ready: state.mode !== "incompatible",
-      generation: state.generation,
+      ready: state.mode !== "incompatible" && state.mode !== "initializing",
+      generation,
       taskCount: tasks.length,
       duplicateConflictCount: state.mode === "duplicate" ? 1 : 0,
     },
@@ -101,6 +107,8 @@ function validationPayload() {
     source: "operon-runtime",
     stale: false,
     taskCount: tasks.length,
+    generation: state.mode === "validation-drift" ? state.generation + 1 : state.generation,
+    settingsSignature: "fnv1a32:settings",
     summary: { P0, P1: 0, P2: 0 },
     violations: P0 ? [{ severity: "P0", code: "fixture_p0" }] : [],
     limitations: ["read-only"],
@@ -135,16 +143,25 @@ const server = http.createServer((request, response) => {
     request.on("end", () => {
       const params = body ? JSON.parse(body) : {};
       const incomplete = state.mode === "incomplete";
-      const pageTasks = incomplete ? [tasks[0]] : tasks;
+      const generationDrift = state.mode === "generation-drift";
+      const secondPage = String(params.cursor ?? "0") === "1";
+      const pageTasks = incomplete
+        ? [tasks[0]]
+        : generationDrift
+          ? [secondPage ? tasks[1] : tasks[0]]
+          : tasks;
       sendJson(response, 200, {
         ok: true,
         contractVersion: "1",
         source: "operon-live",
         stale: false,
+        generation: generationDrift && secondPage ? state.generation + 1 : state.generation,
+        settingsSignature: "fnv1a32:settings",
         total: tasks.length,
         count: pageTasks.length,
         cursor: String(params.cursor ?? "0"),
-        hasMore: false,
+        nextCursor: generationDrift && !secondPage ? "1" : undefined,
+        hasMore: generationDrift && !secondPage,
         tasks: pageTasks,
         limitations: ["read-only"],
       });
@@ -224,8 +241,37 @@ try {
   assert.equal(afterIncomplete.snapshotAt, firstSnapshotAt);
   assert.equal(afterIncomplete.tasks.length, 2);
 
+  state.mode = "initializing";
+  state.generation = 0;
+  const duringStartup = await service.ensureSnapshot(true);
+  assert.equal(duringStartup.source, "operon-cache");
+  assert.equal(duringStartup.snapshotAt, firstSnapshotAt);
+  assert.equal(duringStartup.tasks.length, 2);
+
+  state.mode = "generation-drift";
+  state.generation = 5;
+  const afterGenerationDrift = await service.ensureSnapshot(true);
+  assert.equal(afterGenerationDrift.source, "operon-cache");
+  assert.equal(afterGenerationDrift.snapshotAt, firstSnapshotAt);
+  assert.equal(afterGenerationDrift.tasks.length, 2);
+
+  state.mode = "validation-drift";
+  state.generation = 6;
+  const afterValidationDrift = await service.ensureSnapshot(true);
+  assert.equal(afterValidationDrift.source, "operon-cache");
+  assert.equal(afterValidationDrift.snapshotAt, firstSnapshotAt);
+  assert.equal(afterValidationDrift.tasks.length, 2);
+
+  state.mode = "status-drift";
+  state.generation = 7;
+  state.statusCalls = 0;
+  const afterStatusDrift = await service.ensureSnapshot(true);
+  assert.equal(afterStatusDrift.source, "operon-cache");
+  assert.equal(afterStatusDrift.snapshotAt, firstSnapshotAt);
+  assert.equal(afterStatusDrift.tasks.length, 2);
+
   console.log(
-    "PASS: Operon snapshot refresh, generation reuse, stale fallback, property gating, duplicate/P0 refusal, and incomplete-pagination preservation",
+    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, and pagination/validation/final-status drift preservation",
   );
 } finally {
   await new Promise((resolve, reject) =>

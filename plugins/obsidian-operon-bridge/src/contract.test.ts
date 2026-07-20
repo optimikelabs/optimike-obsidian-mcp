@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   filterTasks,
+  isIndexReady,
   isVersionCompatible,
   normalizeTask,
   paginateTasks,
@@ -63,11 +64,40 @@ function normalized(): OperonBridgeTask {
   });
 }
 
-test("version compatibility is intentionally bounded to Operon 2.4+", () => {
+test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("2.4.0"), true);
-  assert.equal(isVersionCompatible("2.9.1"), true);
+  assert.equal(isVersionCompatible("2.4.1"), false);
+  assert.equal(isVersionCompatible("2.9.1"), false);
   assert.equal(isVersionCompatible("2.3.9"), false);
   assert.equal(isVersionCompatible("3.0.0"), false);
+});
+
+test("index readiness refuses startup, recovery, sync, and dirty states", () => {
+  const healthy = {
+    health: "healthy",
+    runtimePhase: "idle",
+    verifiedThisSession: true,
+    dirtySourceCount: 0,
+  };
+  assert.equal(isIndexReady({ compatible: true, generation: 1, diagnostics: healthy }), true);
+  assert.equal(isIndexReady({ compatible: true, generation: 0, diagnostics: healthy }), false);
+  assert.equal(
+    isIndexReady({
+      compatible: true,
+      generation: 1,
+      diagnostics: { ...healthy, runtimePhase: "sync-settling" },
+    }),
+    false,
+  );
+  assert.equal(
+    isIndexReady({
+      compatible: true,
+      generation: 1,
+      diagnostics: { ...healthy, dirtySourceCount: 1 },
+    }),
+    false,
+  );
+  assert.equal(isIndexReady({ compatible: true, generation: 1, diagnostics: null }), false);
 });
 
 test("workflow resolution uses configured pipeline labels", () => {

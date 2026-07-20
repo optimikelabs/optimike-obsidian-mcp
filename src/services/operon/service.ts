@@ -379,7 +379,37 @@ export class OperonService {
     return parsed.data;
   }
 
-  private async fetchAllLiveTasks(): Promise<OperonTask[]> {
+  private assertStableStatus(
+    expected: OperonStatus,
+    observed: OperonStatus,
+    phase: string,
+  ): void {
+    const changed =
+      observed.index.generation !== expected.index.generation ||
+      observed.index.taskCount !== expected.index.taskCount ||
+      observed.settingsSignature !== expected.settingsSignature ||
+      observed.operon.version !== expected.operon.version ||
+      observed.bridge.version !== expected.bridge.version;
+    if (changed) {
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        `Operon index or settings changed during ${phase}; retry after the index settles.`,
+        this.requestContext("assertStableOperonStatus", {
+          phase,
+          expectedGeneration: expected.index.generation,
+          observedGeneration: observed.index.generation,
+          expectedTaskCount: expected.index.taskCount,
+          observedTaskCount: observed.index.taskCount,
+          expectedSettingsSignature: expected.settingsSignature,
+          observedSettingsSignature: observed.settingsSignature,
+        }),
+      );
+    }
+  }
+
+  private async fetchAllLiveTasks(
+    expectedStatus: OperonStatus,
+  ): Promise<{ tasks: OperonTask[]; settledStatus: OperonStatus }> {
     const tasks: OperonTask[] = [];
     const seenCursors = new Set<string>();
     let cursor: string | undefined = undefined;
@@ -407,6 +437,22 @@ export class OperonService {
         );
       }
       const page: OperonBridgePage = parsed.data;
+      if (
+        page.generation !== expectedStatus.index.generation ||
+        page.settingsSignature !== expectedStatus.settingsSignature
+      ) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Operon generation or settings changed between snapshot pages.",
+          this.requestContext("fetchAllLiveOperonTasks", {
+            pageIndex,
+            expectedGeneration: expectedStatus.index.generation,
+            observedGeneration: page.generation,
+            expectedSettingsSignature: expectedStatus.settingsSignature,
+            observedSettingsSignature: page.settingsSignature,
+          }),
+        );
+      }
       expectedTotal ??= page.total;
       if (page.total !== expectedTotal) {
         throw new McpError(
@@ -432,7 +478,11 @@ export class OperonService {
       cursor = page.nextCursor;
     }
 
-    if (expectedTotal === null) return [];
+    if (expectedTotal === null) {
+      const settledStatus = await this.fetchLiveStatus();
+      this.assertStableStatus(expectedStatus, settledStatus, "empty snapshot pagination");
+      return { tasks: [], settledStatus };
+    }
     if (tasks.length !== expectedTotal) {
       throw new McpError(
         BaseErrorCode.PARSING_ERROR,
@@ -440,7 +490,9 @@ export class OperonService {
         this.requestContext("fetchAllLiveOperonTasks"),
       );
     }
-    return tasks;
+    const settledStatus = await this.fetchLiveStatus();
+    this.assertStableStatus(expectedStatus, settledStatus, "snapshot pagination");
+    return { tasks, settledStatus };
   }
 
   private sameLiveGeneration(snapshot: OperonSnapshotEnvelope | null, status: OperonStatus): boolean {
@@ -456,8 +508,23 @@ export class OperonService {
 
   private async refreshLiveSnapshot(status?: OperonStatus): Promise<OperonSnapshotEnvelope> {
     const liveStatus = status ?? (await this.fetchLiveStatus());
-    const tasks = await this.fetchAllLiveTasks();
+    const pageResult = await this.fetchAllLiveTasks(liveStatus);
     const validation = await this.fetchLiveValidation();
+    if (
+      validation.generation !== pageResult.settledStatus.index.generation ||
+      validation.settingsSignature !== pageResult.settledStatus.settingsSignature
+    ) {
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "Operon generation or settings changed before validation completed.",
+        this.requestContext("refreshLiveOperonSnapshot", {
+          expectedGeneration: pageResult.settledStatus.index.generation,
+          observedGeneration: validation.generation,
+          expectedSettingsSignature: pageResult.settledStatus.settingsSignature,
+          observedSettingsSignature: validation.settingsSignature,
+        }),
+      );
+    }
     if (!validation.ok || validation.summary.P0 > 0) {
       throw new McpError(
         BaseErrorCode.CONFLICT,
@@ -465,7 +532,9 @@ export class OperonService {
         this.requestContext("refreshLiveOperonSnapshot", { summary: validation.summary }),
       );
     }
-    this.saveSnapshot(liveStatus, tasks, validation);
+    const finalStatus = await this.fetchLiveStatus();
+    this.assertStableStatus(pageResult.settledStatus, finalStatus, "snapshot validation");
+    this.saveSnapshot(finalStatus, pageResult.tasks, validation);
     const snapshot = this.loadSnapshot("operon-live");
     if (!snapshot) {
       throw new McpError(

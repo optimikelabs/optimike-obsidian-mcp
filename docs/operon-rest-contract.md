@@ -16,7 +16,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 
 - Bridge contract: `1`
 - Tested Operon version: `2.4.0`
-- Accepted read range: `>=2.4.0 <3.0.0`
+- Accepted read allowlist: `2.4.0`
 - Mutation capabilities: always `false` in v1
 
 A future Operon version is not assumed compatible merely because its Markdown looks similar.
@@ -39,13 +39,19 @@ Returns:
     "version": "2.4.0",
     "compatible": true,
     "testedAgainst": "2.4.0",
-    "supportedRange": ">=2.4.0 <3.0.0"
+    "supportedRange": "2.4.0"
   },
   "index": {
     "ready": true,
     "generation": 42,
     "taskCount": 120,
-    "duplicateConflictCount": 0
+    "duplicateConflictCount": 0,
+    "diagnostics": {
+      "health": "healthy",
+      "runtimePhase": "idle",
+      "verifiedThisSession": true,
+      "dirtySourceCount": 0
+    }
   },
   "settingsSignature": "fnv1a32:...",
   "capabilities": {
@@ -65,7 +71,10 @@ Returns:
 }
 ```
 
-`ok=false` is returned when Operon is absent, its runtime index is unavailable, or the version is outside the tested range.
+`ok=false` is returned when Operon is absent, its runtime index is unavailable,
+its diagnostics do not prove a healthy and idle index verified during the
+current session, or its version is outside the tested allowlist. Generation
+zero is never considered ready.
 
 ## Task object
 
@@ -129,7 +138,10 @@ Parameters:
 - `limit` — `1..500`, default `100`
 - `includeProperties` — boolean, default `false`
 
-Response contains `total`, `count`, `cursor`, optional `nextCursor`, `hasMore`, and `tasks`.
+Response contains `total`, `count`, `cursor`, optional `nextCursor`, `hasMore`,
+`generation`, `settingsSignature`, and `tasks`. Every page is tied to the same
+live generation and settings signature; the MCP rejects the refresh if either
+changes before pagination and validation settle.
 
 ## `GET /tasks/:operonId`
 
@@ -202,6 +214,9 @@ Live validation reports:
 - unknown configured workflow statuses;
 - missing parents;
 - missing blocker references.
+
+The validation response carries the same `generation` and `settingsSignature`
+coherence markers as task pages.
 
 Severity:
 

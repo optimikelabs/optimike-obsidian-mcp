@@ -1,7 +1,9 @@
 import { Plugin, TFile } from "obsidian";
 import {
   OPERON_BRIDGE_CONTRACT_VERSION,
+  OPERON_BRIDGE_SUPPORTED_VERSIONS,
   OPERON_BRIDGE_TESTED_VERSION,
+  isIndexReady,
   isVersionCompatible,
   normalizeTask,
   queryTasks,
@@ -9,6 +11,7 @@ import {
   type OperonBridgeTask,
   type OperonTaskQuery,
   type RuntimeIndexedTask,
+  type RuntimeIndexDiagnostics,
   type RuntimeKeyMapping,
   type RuntimePipeline,
 } from "./contract";
@@ -27,7 +30,8 @@ interface OperonRuntime {
   indexer: {
     getAllTasks: () => RuntimeIndexedTask[];
     getTask: (operonId: string) => RuntimeIndexedTask | undefined;
-    getGeneration?: () => number;
+    getGeneration: () => number;
+    getIndexV8Diagnostics: () => Promise<RuntimeIndexDiagnostics>;
     getDuplicateRegistry?: () => {
       revision?: number;
       totalConflictCount?: number;
@@ -49,6 +53,12 @@ interface BridgeCapabilities {
   update: false;
   transition: false;
   convert: false;
+}
+
+interface StableTaskRead {
+  tasks: OperonBridgeTask[];
+  generation: number;
+  settingsSignature: string;
 }
 
 const READ_ONLY_LIMITATIONS = [
@@ -200,7 +210,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (
       !indexer ||
       typeof indexer.getAllTasks !== "function" ||
-      typeof indexer.getTask !== "function"
+      typeof indexer.getTask !== "function" ||
+      typeof indexer.getGeneration !== "function" ||
+      typeof indexer.getIndexV8Diagnostics !== "function"
     ) {
       return null;
     }
@@ -214,8 +226,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
-  private capabilities(runtime: OperonRuntime | null): BridgeCapabilities {
-    const readable = Boolean(runtime?.compatible);
+  private capabilities(runtime: OperonRuntime | null, ready = false): BridgeCapabilities {
+    const readable = Boolean(runtime?.compatible && ready);
     return {
       status: true,
       list: readable,
@@ -229,17 +241,40 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
-  private statusPayload(): Record<string, unknown> {
+  private async indexState(runtime: OperonRuntime | null): Promise<{
+    ready: boolean;
+    generation: number | null;
+    diagnostics: RuntimeIndexDiagnostics | null;
+  }> {
+    if (!runtime?.compatible) return { ready: false, generation: null, diagnostics: null };
+    const generation = runtime.indexer.getGeneration();
+    let diagnostics: RuntimeIndexDiagnostics | null = null;
+    try {
+      diagnostics = await runtime.indexer.getIndexV8Diagnostics();
+    } catch (error) {
+      console.warn(`[${EXTENSION_ID}] Operon index diagnostics unavailable.`, error);
+    }
+    return {
+      generation,
+      diagnostics,
+      ready: isIndexReady({ compatible: runtime.compatible, generation, diagnostics }),
+    };
+  }
+
+  private async statusPayload(): Promise<Record<string, unknown>> {
     const runtime = this.getOperonRuntime();
+    const indexState = await this.indexState(runtime);
     const registry = runtime?.indexer.getDuplicateRegistry?.();
     const taskCount = runtime
       ? typeof runtime.indexer.taskCount === "number"
         ? runtime.indexer.taskCount
         : runtime.indexer.getAllTasks().length
       : 0;
-    const generation = runtime?.indexer.getGeneration?.() ?? registry?.revision ?? null;
+    const ready = Boolean(
+      indexState.ready && indexState.diagnostics?.taskCount === taskCount,
+    );
     return {
-      ok: Boolean(runtime?.compatible),
+      ok: Boolean(runtime?.compatible && ready),
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
       bridge: {
         id: this.manifest.id,
@@ -251,18 +286,19 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         version: runtime?.version ?? null,
         compatible: Boolean(runtime?.compatible),
         testedAgainst: OPERON_BRIDGE_TESTED_VERSION,
-        supportedRange: ">=2.4.0 <3.0.0",
+        supportedRange: OPERON_BRIDGE_SUPPORTED_VERSIONS.join(", "),
       },
       index: {
-        ready: Boolean(runtime?.compatible),
-        generation,
+        ready,
+        generation: indexState.generation,
         taskCount,
         duplicateConflictCount: registry?.totalConflictCount ?? 0,
+        diagnostics: indexState.diagnostics,
       },
       settingsSignature: runtime
         ? settingsSignature(runtime.pipelines, runtime.keyMappings)
         : null,
-      capabilities: this.capabilities(runtime),
+      capabilities: this.capabilities(runtime, ready),
       source: "operon-runtime",
       stale: false,
       limitations: READ_ONLY_LIMITATIONS,
@@ -276,7 +312,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     if (!runtime.compatible) {
       throw new Error(
-        `Operon ${runtime.version || "unknown"} is outside the tested Bridge range >=2.4.0 <3.0.0.`,
+        `Operon ${runtime.version || "unknown"} is not in the tested Bridge allowlist (${OPERON_BRIDGE_SUPPORTED_VERSIONS.join(", ")}).`,
       );
     }
     return runtime;
@@ -305,22 +341,58 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     });
   }
 
-  private allTasks(includeProperties: boolean): OperonBridgeTask[] {
+  private async allTasksSnapshot(includeProperties: boolean): Promise<StableTaskRead> {
     const runtime = this.requireRuntime();
-    return runtime.indexer
+    const before = await this.indexState(runtime);
+    if (!before.ready || before.generation === null) {
+      throw new Error("Operon index is still initializing or is not in a verified idle state.");
+    }
+    const beforeSettings = settingsSignature(runtime.pipelines, runtime.keyMappings);
+    const tasks = runtime.indexer
       .getAllTasks()
       .map((task) => this.normalizeRuntimeTask(runtime, task, includeProperties));
+    const after = await this.indexState(runtime);
+    const afterSettings = settingsSignature(runtime.pipelines, runtime.keyMappings);
+    if (
+      !after.ready ||
+      after.generation !== before.generation ||
+      afterSettings !== beforeSettings ||
+      before.diagnostics?.taskCount !== tasks.length ||
+      after.diagnostics?.taskCount !== tasks.length
+    ) {
+      throw new Error("Operon generation or settings changed during the read; retry after the index settles.");
+    }
+    return { tasks, generation: before.generation, settingsSignature: beforeSettings };
   }
 
-  private oneTask(operonId: string, includeProperties: boolean): OperonBridgeTask | null {
+  private async oneTask(operonId: string, includeProperties: boolean): Promise<{
+    task: OperonBridgeTask | null;
+    generation: number;
+    settingsSignature: string;
+  }> {
     const runtime = this.requireRuntime();
+    const state = await this.indexState(runtime);
+    if (!state.ready || state.generation === null) {
+      throw new Error("Operon index is still initializing or is not in a verified idle state.");
+    }
+    const signature = settingsSignature(runtime.pipelines, runtime.keyMappings);
     const task = runtime.indexer.getTask(operonId);
-    return task ? this.normalizeRuntimeTask(runtime, task, includeProperties) : null;
+    const normalized = task ? this.normalizeRuntimeTask(runtime, task, includeProperties) : null;
+    const after = await this.indexState(runtime);
+    if (
+      !after.ready ||
+      after.generation !== state.generation ||
+      settingsSignature(runtime.pipelines, runtime.keyMappings) !== signature
+    ) {
+      throw new Error("Operon generation or settings changed during the read; retry after the index settles.");
+    }
+    return { task: normalized, generation: state.generation, settingsSignature: signature };
   }
 
-  private validationPayload(includeProperties = false): Record<string, unknown> {
+  private async validationPayload(includeProperties = false): Promise<Record<string, unknown>> {
     const runtime = this.requireRuntime();
-    const tasks = this.allTasks(includeProperties);
+    const snapshot = await this.allTasksSnapshot(includeProperties);
+    const tasks = snapshot.tasks;
     const ids = new Set(tasks.map((task) => task.operonId));
     const registry = runtime.indexer.getDuplicateRegistry?.();
     const violations: Array<Record<string, unknown>> = [];
@@ -379,6 +451,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       source: "operon-runtime",
       stale: false,
       taskCount: tasks.length,
+      generation: snapshot.generation,
+      settingsSignature: snapshot.settingsSignature,
       summary: {
         P0: countSeverity("P0"),
         P1: countSeverity("P1"),
@@ -400,23 +474,30 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const api = getPublicApi(this.manifest);
     if (!api || typeof api.addRoute !== "function") return;
 
-    api.addRoute(`${REST_PREFIX}/status`).get((_req: any, res: any) => {
-      sendJson(res, 200, this.statusPayload());
+    api.addRoute(`${REST_PREFIX}/status`).get(async (_req: any, res: any) => {
+      try {
+        sendJson(res, 200, await this.statusPayload());
+      } catch (error) {
+        sendJson(res, 503, errorPayload(error, "operon_unavailable"));
+      }
     });
 
-    api.addRoute(`${REST_PREFIX}/tasks`).get((req: any, res: any) => {
+    api.addRoute(`${REST_PREFIX}/tasks`).get(async (req: any, res: any) => {
       try {
         const query: OperonTaskQuery = {
           cursor: String(readQueryValue(req, "cursor") ?? "0"),
           limit: numberValue(readQueryValue(req, "limit")),
           includeProperties: boolValue(readQueryValue(req, "includeProperties")),
         };
-        const result = queryTasks(this.allTasks(Boolean(query.includeProperties)), query);
+        const snapshot = await this.allTasksSnapshot(Boolean(query.includeProperties));
+        const result = queryTasks(snapshot.tasks, query);
         sendJson(res, 200, {
           ok: true,
           contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
           source: "operon-live",
           stale: false,
+          generation: snapshot.generation,
+          settingsSignature: snapshot.settingsSignature,
           ...result,
           limitations: READ_ONLY_LIMITATIONS,
         });
@@ -425,15 +506,15 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
-    api.addRoute(`${REST_PREFIX}/tasks/:operonId`).get((req: any, res: any) => {
+    api.addRoute(`${REST_PREFIX}/tasks/:operonId`).get(async (req: any, res: any) => {
       try {
         const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
         if (!operonId) {
           sendJson(res, 400, errorPayload(new Error("operonId is required."), "validation_error"));
           return;
         }
-        const task = this.oneTask(operonId, boolValue(readQueryValue(req, "includeProperties")));
-        if (!task) {
+        const result = await this.oneTask(operonId, boolValue(readQueryValue(req, "includeProperties")));
+        if (!result.task) {
           sendJson(res, 404, errorPayload(new Error(`Operon task not found: ${operonId}`), "not_found"));
           return;
         }
@@ -442,7 +523,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
           source: "operon-live",
           stale: false,
-          task,
+          generation: result.generation,
+          settingsSignature: result.settingsSignature,
+          task: result.task,
           limitations: READ_ONLY_LIMITATIONS,
         });
       } catch (error) {
@@ -450,15 +533,18 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
-    api.addRoute(`${REST_PREFIX}/tasks/query`).post((req: any, res: any) => {
+    api.addRoute(`${REST_PREFIX}/tasks/query`).post(async (req: any, res: any) => {
       try {
         const query = sanitizeQuery(req?.body ?? {});
-        const result = queryTasks(this.allTasks(Boolean(query.includeProperties)), query);
+        const snapshot = await this.allTasksSnapshot(Boolean(query.includeProperties));
+        const result = queryTasks(snapshot.tasks, query);
         sendJson(res, 200, {
           ok: true,
           contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
           source: "operon-live",
           stale: false,
+          generation: snapshot.generation,
+          settingsSignature: snapshot.settingsSignature,
           ...result,
           limitations: READ_ONLY_LIMITATIONS,
         });
@@ -467,12 +553,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
-    api.addRoute(`${REST_PREFIX}/validate`).get((req: any, res: any) => {
+    api.addRoute(`${REST_PREFIX}/validate`).get(async (req: any, res: any) => {
       try {
         sendJson(
           res,
           200,
-          this.validationPayload(boolValue(readQueryValue(req, "includeProperties"))),
+          await this.validationPayload(boolValue(readQueryValue(req, "includeProperties"))),
         );
       } catch (error) {
         sendJson(res, 503, errorPayload(error, "operon_unavailable"));

@@ -108,7 +108,7 @@ Use Operon manually and keep agent operation on Tasks/TaskNotes.
 Implement Option A as a strict read-only integration:
 
 ```text
-Operon official 2.4.x
+Operon official 2.4.0
     ↓ live runtime index
 Optimike Operon Bridge (Obsidian companion plugin)
     ↓ Local REST API extension, contract v1
@@ -143,14 +143,17 @@ No Operon mutation tool is registered in this decision.
 
 ## REST compatibility contract
 
-The Bridge is tested against Operon `2.4.0` and accepts `>=2.4.0 <3.0.0`. This is a compatibility claim for the specific read surface only, not a guarantee about future Operon releases.
+The Bridge uses an explicit tested-version allowlist containing Operon `2.4.0`.
+No later release is assumed compatible: it must pass the contract tests and
+Desktop validation recipe before being added.
 
 The Bridge probes:
 
 - plugin presence and version;
 - `indexer.getAllTasks()`;
 - `indexer.getTask()`;
-- optional generation and duplicate-registry methods;
+- required generation and V8 index diagnostics;
+- duplicate-registry methods;
 - configured pipelines and key mappings.
 
 An absent, incompatible, or incomplete runtime returns a structured unavailable status. It never falls back to parsing Markdown inside the Bridge.
@@ -162,9 +165,12 @@ The MCP stores a reconstructible snapshot in the existing shared SQLite database
 A refresh is accepted only when:
 
 1. the Bridge status contract validates;
-2. Operon reports a compatible and ready index;
+2. Operon reports generation greater than zero and V8 diagnostics proving a
+   healthy, idle, session-verified index with no dirty sources;
 3. no duplicate `operonId` conflict is reported;
-4. pagination is stable and complete;
+4. pagination is complete and the generation, task count, settings signature,
+   Operon version, and Bridge version stay coherent through a final status
+   recheck;
 5. every task validates against contract v1;
 6. live validation reports zero P0 violations.
 

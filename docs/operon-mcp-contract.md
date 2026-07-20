@@ -50,7 +50,10 @@ operon_task_snapshot
 operon_snapshot_meta
 ```
 
-A refresh is transactional. The previous snapshot survives malformed payloads, incomplete pagination, duplicate IDs, version incompatibility, or P0 validation failures.
+A refresh is transactional. The previous snapshot survives malformed payloads,
+incomplete pagination, generation/settings drift during pagination or
+validation, duplicate IDs, version incompatibility, an unready index, or P0
+validation failures.
 
 The tables are cache state, not canonical task storage.
 
