@@ -398,15 +398,21 @@ export class OperonService {
 
     if (action === "create") {
       const task = payload.task as Record<string, unknown> | undefined;
-      if (task?.source !== "file" || typeof task.targetFolder !== "string" || !task.targetFolder.trim()) {
+      if (task?.source === "file" && typeof task.targetFolder === "string" && task.targetFolder.trim()) {
+        this.assertAllowedMutationPath(task.targetFolder, "create targetFolder");
+        return;
+      }
+      if (task?.source === "inline" && typeof task.targetPath === "string" && task.targetPath.trim()) {
+        this.assertAllowedMutationPath(task.targetPath, "create targetPath");
+        return;
+      }
+      {
         throw new McpError(
           BaseErrorCode.FORBIDDEN,
-          "Scoped Operon mutations require file task creation with an explicit targetFolder.",
+          "Scoped Operon mutations require an explicit targetFolder for file tasks or targetPath for inline tasks.",
           this.requestContext("assertOperonMutationPathScope", { action }),
         );
       }
-      this.assertAllowedMutationPath(task.targetFolder, "create targetFolder");
-      return;
     }
 
     if (!operonId) {

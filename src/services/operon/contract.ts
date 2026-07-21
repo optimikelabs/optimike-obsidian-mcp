@@ -215,6 +215,14 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
     fileTemplateId: z.string().optional(),
     targetDateKey: z.string().optional(),
     targetFolder: z.string().optional(),
+    targetPath: z.string().optional(),
+  }).superRefine((value, context) => {
+  if (value.source === "file" && value.targetPath?.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetPath"], message: "targetPath is supported only for inline tasks." });
+  }
+  if (value.source === "inline" && value.targetFolder?.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetFolder"], message: "targetFolder is supported only for file tasks." });
+  }
   }),
 });
 

@@ -361,6 +361,18 @@ try {
   );
   assert.equal(state.mutationCalls, 1, "scope rejection must happen before the Bridge call");
 
+  const scopedInline = await service.createTask({
+    idempotencyKey: "test-scope-inline-target",
+    dryRun: true,
+    task: {
+      source: "inline",
+      description: "Explicit scoped inline target",
+      targetPath: "Efforts/Projets/Internes/Operon Pilot/Pilot.md",
+    },
+  });
+  assert.equal(scopedInline.status, "planned");
+  assert.equal(state.mutationCalls, 2, "explicit allowed inline target must reach the Bridge");
+
   const concurrentInput = {
     idempotencyKey: "test-concurrent-idempotency",
     dryRun: true,
