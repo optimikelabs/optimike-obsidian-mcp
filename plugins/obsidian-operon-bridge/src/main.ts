@@ -985,6 +985,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           target: String(body.target ?? "").trim(),
           ...(body.fileTemplateId ? { fileTemplateId: String(body.fileTemplateId) } : {}),
           ...(body.targetPath ? { targetPath: String(body.targetPath) } : {}),
+          ...(body.targetFolder ? { targetFolder: String(body.targetFolder) } : {}),
         };
         const result = await this.executeExistingMutation(
           "convert",
