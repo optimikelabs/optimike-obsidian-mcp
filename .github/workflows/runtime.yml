@@ -22,4 +22,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:runtime
+      - run: npm run test:profiles
       - run: npm pack --dry-run
