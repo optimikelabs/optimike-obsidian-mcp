@@ -5,6 +5,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const apply = (process.env.OPERON_MUTATION_SMOKE_APPLY ?? "false").toLowerCase() === "true";
 const runId = process.env.OPERON_MUTATION_SMOKE_RUN_ID ?? `smoke-${Date.now()}`;
+const targetFolder = process.env.OPERON_MUTATION_TARGET_FOLDER;
 
 function parseTool(result) {
   const block = result.content?.find((item) => item.type === "text");
@@ -47,6 +48,7 @@ async function main() {
         tags: ["mcp-smoke"],
         fields: { priority: "C", status: "Project.Planned" },
         properties: { north_star: false },
+        ...(targetFolder ? { targetFolder } : {}),
       },
     });
     if (created.status !== (apply ? "applied" : "planned")) {
