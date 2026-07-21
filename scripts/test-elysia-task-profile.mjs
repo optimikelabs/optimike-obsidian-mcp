@@ -16,6 +16,8 @@ const rejectedProfiles = [
   { name: "duplicate canonical filter id", mutate: value => { value.filters[4].id = value.filters[0].id; } },
   { name: "filter without conditions", mutate: value => { value.filters[0].all = []; } },
   { name: "condition without field or operator", mutate: value => { value.filters[0].all[0] = {}; } },
+  { name: "folder filter without current-folder scope", mutate: value => { delete value.filters[4].scope; } },
+  { name: "non-folder filter with folder scope", mutate: value => { value.filters[0].scope = "current-folder"; } },
 ];
 
 for (const testCase of rejectedProfiles) {

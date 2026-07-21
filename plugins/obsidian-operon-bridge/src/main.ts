@@ -398,7 +398,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       pluginName: resolved.name,
       api: this.readPublicApi(plugin),
       version,
-      compatible: isVersionCompatible(version),
+      compatible: isVersionCompatible(resolved.id, version),
       indexer,
       pipelines: Array.isArray(plugin?.settings?.pipelines)
         ? plugin.settings.pipelines
@@ -717,7 +717,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         version: runtime?.version ?? null,
         compatible: Boolean(runtime?.compatible),
         testedAgainst: OPERON_BRIDGE_TESTED_VERSION,
-        supportedRange: OPERON_BRIDGE_SUPPORTED_VERSIONS.join(", "),
+        supportedRange: Object.entries(OPERON_BRIDGE_SUPPORTED_VERSIONS)
+          .map(([pluginId, versions]) => `${pluginId}: ${versions.join(", ")}`)
+          .join("; "),
       },
       index: {
         ready,
@@ -746,7 +748,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     if (!runtime.compatible) {
       throw new Error(
-        `${runtime.pluginName} ${runtime.version || "unknown"} is not in the tested Bridge allowlist (${OPERON_BRIDGE_SUPPORTED_VERSIONS.join(", ")}).`,
+        `${runtime.pluginName} ${runtime.version || "unknown"} is not in the tested Bridge allowlist (${Object.entries(OPERON_BRIDGE_SUPPORTED_VERSIONS).map(([pluginId, versions]) => `${pluginId}: ${versions.join(", ")}`).join("; ")}).`,
       );
     }
     return runtime;
