@@ -1,5 +1,7 @@
 # Bascule contrôlée d’Operon vers Kairélys
 
+La première version distribuée est Kairélys `2.5.1`, basée sur Operon `2.5.0`. Ce numéro distinct évite toute collision entre les tags et packs de langue du fork et ceux d’upstream.
+
 Kairélys utilise un identifiant Obsidian distinct (`kairelys`). Les tâches restent dans le Markdown
 et conservent leurs `operonId`; seuls le plugin, ses réglages et son état durable changent de dossier.
 
@@ -9,7 +11,7 @@ et conservent leurs `operonId`; seuls le plugin, ses réglages et son état dura
 - `data/` : données durables telles que les fichiers de presets Table ;
 - `state/` : état durable, rappels et journaux internes nécessaires.
 
-`runtime/` et `cache/` ne sont pas copiés. Kairélys les reconstruit depuis le coffre.
+L’index de `runtime/` et `cache/` ne sont pas copiés. Kairélys les reconstruit depuis le coffre. Le script peut toutefois préinstaller le pack de langue généré par le build exact afin que la première ouverture reste localisée avant la publication du tag GitHub.
 
 ## Dry-run
 
