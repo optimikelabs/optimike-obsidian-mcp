@@ -21,10 +21,10 @@ import {
   type OperonSemanticConfiguration,
   type OperonWorkflowTaxonomy,
 } from "./contract";
+import { resolveTaskEnginePlugin } from "./task-engine-runtime";
 
 const EXTENSION_ID = "optimike-operon-bridge";
 const REST_PREFIX = `/extensions/${EXTENSION_ID}/v1`;
-const OPERON_PLUGIN_ID = "operon";
 const LOCAL_REST_PLUGIN_ID = "obsidian-local-rest-api";
 const MAX_MOUNT_WAIT_MS = 30_000;
 const MOUNT_RETRY_MS = 500;
@@ -48,7 +48,7 @@ class OptimikeOperonBridgeSettingTab extends PluginSettingTab {
   display(): void {
     this.containerEl.empty();
     new Setting(this.containerEl)
-      .setName("Mutations agentiques Operon")
+      .setName("Mutations agentiques Kairélys / Operon")
       .setDesc(
         "Autorise les routes de création et modification. Désactivé par défaut ; les lectures restent disponibles.",
       )
@@ -62,6 +62,8 @@ class OptimikeOperonBridgeSettingTab extends PluginSettingTab {
 
 interface OperonRuntime {
   plugin: any;
+  pluginId: "kairelys" | "operon";
+  pluginName: string;
   api: OperonPublicApiV1 | null;
   version: string;
   compatible: boolean;
@@ -376,8 +378,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   }
 
   private getOperonRuntime(): OperonRuntime | null {
-    const plugin = this.getCommunityPlugin(OPERON_PLUGIN_ID);
-    if (!plugin) return null;
+    const resolved = resolveTaskEnginePlugin((this.app as any).plugins);
+    if (!resolved) return null;
+    const plugin = resolved.plugin as any;
     const version = String(plugin?.manifest?.version ?? "").trim();
     const indexer = plugin?.indexer;
     if (
@@ -391,6 +394,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     return {
       plugin,
+      pluginId: resolved.id,
+      pluginName: resolved.name,
       api: this.readPublicApi(plugin),
       version,
       compatible: isVersionCompatible(version),
@@ -707,6 +712,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       },
       operon: {
         present: Boolean(runtime),
+        pluginId: runtime?.pluginId ?? null,
+        pluginName: runtime?.pluginName ?? null,
         version: runtime?.version ?? null,
         compatible: Boolean(runtime?.compatible),
         testedAgainst: OPERON_BRIDGE_TESTED_VERSION,
@@ -734,12 +741,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const runtime = this.getOperonRuntime();
     if (!runtime) {
       throw new Error(
-        "Operon is not loaded or its current runtime index surface is unavailable.",
+        "Kairélys or Operon is not loaded, or its current runtime index surface is unavailable.",
       );
     }
     if (!runtime.compatible) {
       throw new Error(
-        `Operon ${runtime.version || "unknown"} is not in the tested Bridge allowlist (${OPERON_BRIDGE_SUPPORTED_VERSIONS.join(", ")}).`,
+        `${runtime.pluginName} ${runtime.version || "unknown"} is not in the tested Bridge allowlist (${OPERON_BRIDGE_SUPPORTED_VERSIONS.join(", ")}).`,
       );
     }
     return runtime;

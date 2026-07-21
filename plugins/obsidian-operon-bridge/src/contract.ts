@@ -1,6 +1,6 @@
 export const OPERON_BRIDGE_CONTRACT_VERSION = "1" as const;
-export const OPERON_BRIDGE_TESTED_VERSION = "2.5.0" as const;
-export const OPERON_BRIDGE_SUPPORTED_VERSIONS = ["2.4.0", OPERON_BRIDGE_TESTED_VERSION] as const;
+export const OPERON_BRIDGE_TESTED_VERSION = "2.5.1" as const;
+export const OPERON_BRIDGE_SUPPORTED_VERSIONS = ["2.4.0", "2.5.0", OPERON_BRIDGE_TESTED_VERSION] as const;
 
 export type OperonTaskSource = "inline" | "file";
 export type OperonCheckboxState = "open" | "done" | "cancelled";
