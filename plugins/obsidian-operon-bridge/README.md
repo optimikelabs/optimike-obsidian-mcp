@@ -2,7 +2,7 @@
 
 Obsidian companion plugin exposing Operon's live task engine through the extension API of Obsidian Local REST API.
 
-Reads use Operon's in-memory V8 index. Mutations are advertised only when the loaded Operon plugin exposes versioned `OperonPublicApiV1`; official Operon remains read-only and no Markdown/private-method fallback exists.
+Reads use Operon's in-memory V8 index. Mutations are advertised only when the loaded Operon plugin exposes versioned `OperonPublicApiV1` and the operator enables them in Bridge settings. No Markdown/private-method fallback exists.
 
 ## Requirements
 
@@ -19,14 +19,18 @@ Prefix: `/extensions/optimike-operon-bridge/v1`
 - `GET /tasks`
 - `GET /tasks/:operonId`
 - `POST /tasks/query`
+- `POST /tasks/filter`
 - `GET /validate`
 - `POST /tasks/adopt`
 - `POST /tasks`
 - `POST /tasks/:operonId/update`
 - `POST /tasks/:operonId/transition`
 - `POST /tasks/:operonId/convert`
+- `POST /tasks/:operonId/relocate`
 
-All routes inherit Local REST API authentication and local TLS settings. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine`. Dry-run is the default.
+All routes inherit Local REST API authentication and local TLS settings. Saved filters run through Operon's native filter evaluator. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine`. Dry-run is the default.
+
+Mutation apply is disabled by default. Enable **Allow task mutations** in the plugin settings only after the live validation recipe passes. The MCP runtime has a separate `OPERON_MUTATIONS_ENABLED` opt-in.
 
 ## Build
 

@@ -1,20 +1,23 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import os from "node:os";
 import path from "node:path";
 
-const tempRoot = mkdtempSync(path.join(os.tmpdir(), "optimike-operon-service-"));
+const tempRoot = mkdtempSync(
+  path.join(os.tmpdir(), "optimike-operon-service-"),
+);
 const dbPath = path.join(tempRoot, "shared-cache.sqlite");
 
 const capabilities = {
   status: true,
-	configuration: true,
+  configuration: true,
   list: true,
   get: true,
   query: true,
   validate: true,
-	adopt: false,
+  adopt: false,
   create: false,
   update: false,
   transition: false,
@@ -51,8 +54,15 @@ const semanticConfiguration = {
     fileRepeatDestination: "same-folder",
     fileRepeatCustomFolder: "",
   },
-  indexing: { excludedFolders: ["tmp"], fullReindexOnStartup: false, indexEventDebounceMs: 250 },
-  docs: { folder: "X/Logiciels/Obsidian/Plugins/Operon/Docs", autoUpdateEnabled: true },
+  indexing: {
+    excludedFolders: ["tmp"],
+    fullReindexOnStartup: false,
+    indexEventDebounceMs: 250,
+  },
+  docs: {
+    folder: "X/Logiciels/Obsidian/Plugins/Operon/Docs",
+    autoUpdateEnabled: true,
+  },
   views: { filters: [] },
 };
 
@@ -131,7 +141,11 @@ function statusPayload() {
   return {
     ok: state.mode !== "incompatible" && state.mode !== "initializing",
     contractVersion: "1",
-    bridge: { id: "optimike-operon-bridge", version: "0.1.0", mode: "read-only" },
+    bridge: {
+      id: "optimike-operon-bridge",
+      version: "0.1.0",
+      mode: "read-only",
+    },
     operon: {
       present: state.mode !== "absent",
       version: "2.4.0",
@@ -147,7 +161,14 @@ function statusPayload() {
     },
     settingsSignature: "fnv1a32:settings",
     capabilities: state.mutations
-      ? { ...capabilities, adopt: true, create: true, update: true, transition: true, convert: true }
+      ? {
+          ...capabilities,
+          adopt: true,
+          create: true,
+          update: true,
+          transition: true,
+          convert: true,
+        }
       : capabilities,
     source: "operon-runtime",
     stale: false,
@@ -164,7 +185,10 @@ function validationPayload() {
     source: "operon-runtime",
     stale: false,
     taskCount: tasks.length,
-    generation: state.mode === "validation-drift" ? state.generation + 1 : state.generation,
+    generation:
+      state.mode === "validation-drift"
+        ? state.generation + 1
+        : state.generation,
     settingsSignature: "fnv1a32:settings",
     summary: { P0, P1: 0, P2: 0 },
     violations: P0 ? [{ severity: "P0", code: "fixture_p0" }] : [],
@@ -177,6 +201,21 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
+  if (value && typeof value === "object") {
+    return (
+      "{" +
+      Object.keys(value)
+        .sort()
+        .map((key) => JSON.stringify(key) + ":" + stableJson(value[key]))
+        .join(",") +
+      "}"
+    );
+  }
+  return JSON.stringify(value);
+}
+
 const server = http.createServer((request, response) => {
   if (state.mode === "offline") {
     sendJson(response, 503, { error: "offline" });
@@ -187,10 +226,10 @@ const server = http.createServer((request, response) => {
     sendJson(response, 200, statusPayload());
     return;
   }
-	if (request.method === "GET" && url.pathname.endsWith("/configuration")) {
-		sendJson(response, 200, configurationPayload());
-		return;
-	}
+  if (request.method === "GET" && url.pathname.endsWith("/configuration")) {
+    sendJson(response, 200, configurationPayload());
+    return;
+  }
   if (request.method === "GET" && url.pathname.endsWith("/validate")) {
     sendJson(response, 200, validationPayload());
     return;
@@ -216,7 +255,10 @@ const server = http.createServer((request, response) => {
         contractVersion: "1",
         source: "operon-live",
         stale: false,
-        generation: generationDrift && secondPage ? state.generation + 1 : state.generation,
+        generation:
+          generationDrift && secondPage
+            ? state.generation + 1
+            : state.generation,
         settingsSignature: "fnv1a32:settings",
         total: tasks.length,
         count: pageTasks.length,
@@ -230,27 +272,27 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "POST" && url.pathname.endsWith("/tasks/adopt")) {
-	state.mutationCalls += 1;
-	let body = "";
-	request.on("data", (chunk) => {
-		body += chunk;
-	});
-	request.on("end", () => {
-		const params = body ? JSON.parse(body) : {};
-		sendJson(response, 200, {
-			ok: true,
-			contractVersion: "1",
-			operationId: `operation-adopt-${state.mutationCalls}`,
-			idempotencyKey: params.idempotencyKey,
-			status: "planned",
-			before: null,
-			requested: params.adoption,
-			after: null,
-			source: "operon-live",
-			stale: false,
-		});
-	});
-	return;
+    state.mutationCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-adopt-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: "planned",
+        before: null,
+        requested: params.adoption,
+        after: null,
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
   }
   if (request.method === "POST" && url.pathname.endsWith("/tasks")) {
     state.mutationCalls += 1;
@@ -280,7 +322,8 @@ const server = http.createServer((request, response) => {
 
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const address = server.address();
-if (!address || typeof address === "string") throw new Error("Test server did not bind.");
+if (!address || typeof address === "string")
+  throw new Error("Test server did not bind.");
 
 process.env.OBSIDIAN_RUNTIME_MODE = "hybrid";
 process.env.OBSIDIAN_API_KEY = "test-operon-key";
@@ -289,7 +332,8 @@ process.env.OBSIDIAN_VERIFY_SSL = "false";
 process.env.OBSIDIAN_VAULT = tempRoot;
 process.env.OBSIDIAN_SHARED_CACHE_DB_PATH = dbPath;
 process.env.MCP_WRITE_MODE = "readonly";
-process.env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES = "Efforts/Projets/Internes/Operon Pilot";
+process.env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES =
+  "Efforts/Projets/Internes/Operon Pilot";
 process.env.SEMANTIC_SEARCH_PREWARM = "false";
 
 const { OperonService } = await import("../dist/services/operon/service.js");
@@ -308,8 +352,16 @@ try {
   const reused = await service.ensureSnapshot(false);
   assert.equal(reused.source, "operon-live");
   assert.equal(reused.snapshotAt, firstSnapshotAt);
-  assert.equal(state.postCalls, 1, "unchanged generation must not repage all tasks");
-  assert.equal(state.validationCalls, 1, "unchanged generation must not rerun full validation");
+  assert.equal(
+    state.postCalls,
+    1,
+    "unchanged generation must not repage all tasks",
+  );
+  assert.equal(
+    state.validationCalls,
+    1,
+    "unchanged generation must not rerun full validation",
+  );
 
   const propertyQuery = await service.query({
     propertyEquals: { north_star: true },
@@ -318,7 +370,11 @@ try {
   });
   assert.equal(propertyQuery.total, 1);
   assert.equal(propertyQuery.tasks[0].operonId, "a");
-  const stripped = await service.query({ operonIds: ["a"], includeProperties: false, limit: 1 });
+  const stripped = await service.query({
+    operonIds: ["a"],
+    includeProperties: false,
+    limit: 1,
+  });
   assert.equal("properties" in stripped.tasks[0], false);
 
   state.mode = "offline";
@@ -327,6 +383,9 @@ try {
   assert.equal(offline.stale, true);
   assert.equal(offline.tasks.length, 2);
 
+  assert.equal(offline.capabilities.create, false);
+  assert.equal(offline.capabilities.update, false);
+  assert.equal(offline.capabilities.relocate, false);
   state.mode = "duplicate";
   state.generation = 2;
   const afterDuplicate = await service.ensureSnapshot(true);
@@ -393,18 +452,18 @@ try {
   assert.equal(planned.status, "planned");
   assert.equal(state.mutationCalls, 1);
 
-	const adoptionPlanned = await service.adoptTask({
-		idempotencyKey: "test-adopt-idempotency",
-		dryRun: true,
-		adoption: {
-			targetPath: "Efforts/Projets/Internes/Operon Pilot/Pilot.md",
-			line: 3,
-			expectedLine: "- [ ] Legacy task 📅 2026-07-31",
-			statusId: "st_project_planned",
-		},
-	});
-	assert.equal(adoptionPlanned.status, "planned");
-	assert.equal(state.mutationCalls, 2);
+  const adoptionPlanned = await service.adoptTask({
+    idempotencyKey: "test-adopt-idempotency",
+    dryRun: true,
+    adoption: {
+      targetPath: "Efforts/Projets/Internes/Operon Pilot/Pilot.md",
+      line: 3,
+      expectedLine: "- [ ] Legacy task 📅 2026-07-31",
+      statusId: "st_project_planned",
+    },
+  });
+  assert.equal(adoptionPlanned.status, "planned");
+  assert.equal(state.mutationCalls, 2);
   const replayed = await service.createTask({
     idempotencyKey: "test-create-idempotency",
     dryRun: true,
@@ -416,7 +475,11 @@ try {
   });
   assert.equal(replayed.replayed, true);
   assert.equal(replayed.operationId, planned.operationId);
-  assert.equal(state.mutationCalls, 2, "journal replay must not call the Bridge twice");
+  assert.equal(
+    state.mutationCalls,
+    2,
+    "journal replay must not call the Bridge twice",
+  );
 
   await assert.rejects(
     service.createTask({
@@ -430,7 +493,49 @@ try {
     }),
     (error) => error?.code === "CONFLICT",
   );
-  assert.equal(state.mutationCalls, 2, "mismatched idempotency reuse must be rejected locally");
+  assert.equal(
+    state.mutationCalls,
+    2,
+    "mismatched idempotency reuse must be rejected locally",
+  );
+
+  await assert.rejects(
+    service.createTask({
+      idempotencyKey: "test-apply-opt-in",
+      dryRun: false,
+      task: {
+        source: "file",
+        description: "Apply disabled by default",
+        targetFolder: "Efforts/Projets/Internes/Operon Pilot",
+      },
+    }),
+    (error) => error?.code === "FORBIDDEN",
+  );
+
+  await assert.rejects(
+    service.createTask({
+      idempotencyKey: "test-scope-traversal",
+      dryRun: true,
+      task: {
+        source: "inline",
+        description: "Traversal",
+        targetPath: "Efforts/Projets/../../Atlas/Test.md",
+      },
+    }),
+  );
+  await assert.rejects(
+    service.createTask({
+      idempotencyKey: "test-protected-frontmatter",
+      dryRun: true,
+      task: {
+        source: "file",
+        description: "Protected property",
+        targetFolder: "Efforts/Projets/Internes/Operon Pilot",
+        properties: { création: "2020-01-01" },
+      },
+    }),
+    (error) => error?.code === "FORBIDDEN",
+  );
 
   await assert.rejects(
     service.createTask({
@@ -452,7 +557,11 @@ try {
     }),
     (error) => error?.code === "FORBIDDEN",
   );
-  assert.equal(state.mutationCalls, 2, "scope rejection must happen before the Bridge call");
+  assert.equal(
+    state.mutationCalls,
+    2,
+    "scope rejection must happen before the Bridge call",
+  );
 
   const scopedInline = await service.createTask({
     idempotencyKey: "test-scope-inline-target",
@@ -464,7 +573,11 @@ try {
     },
   });
   assert.equal(scopedInline.status, "planned");
-  assert.equal(state.mutationCalls, 3, "explicit allowed inline target must reach the Bridge");
+  assert.equal(
+    state.mutationCalls,
+    3,
+    "explicit allowed inline target must reach the Bridge",
+  );
 
   const concurrentInput = {
     idempotencyKey: "test-concurrent-idempotency",
@@ -487,8 +600,53 @@ try {
     "concurrent identical requests must share one Bridge operation",
   );
 
+  const interruptedInput = {
+    idempotencyKey: "test-restart-uncertain-idempotency",
+    dryRun: true,
+    task: {
+      source: "file",
+      description: "Interrupted dry run",
+      targetFolder: "Efforts/Projets/Internes/Operon Pilot",
+    },
+  };
+  const interruptedDb = new DatabaseSync(dbPath);
+  try {
+    interruptedDb
+      .prepare(
+        "INSERT INTO operon_mutation_journal (" +
+          "operation_id, idempotency_key, operon_id, action, requested_json, " +
+          "result_json, status, created_at, completed_at" +
+          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "pending:" + interruptedInput.idempotencyKey,
+        interruptedInput.idempotencyKey,
+        null,
+        "create",
+        stableJson(interruptedInput),
+        "null",
+        "in_progress",
+        Date.now(),
+        Date.now(),
+      );
+  } finally {
+    interruptedDb.close();
+  }
+  const restartedService = new OperonService();
+  const callsBeforeRestartRetry = state.mutationCalls;
+  await assert.rejects(
+    restartedService.createTask(interruptedInput),
+    (error) =>
+      error?.code === "CONFLICT" && /uncertain outcome/.test(error.message),
+  );
+  assert.equal(
+    state.mutationCalls,
+    callsBeforeRestartRetry,
+    "restart-safe reservation must block a blind Bridge retry",
+  );
+
   console.log(
-    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, pagination/validation drift preservation, scoped mutations, and bound/concurrent mutation idempotency",
+    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, pagination/validation drift preservation, scoped mutations, and durable/concurrent mutation idempotency",
   );
 } finally {
   await new Promise((resolve, reject) =>

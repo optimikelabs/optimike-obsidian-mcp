@@ -32,7 +32,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Mutations appear
 - `KEEP` — Tasks and TaskNotes during the pilot and until a separate production cutover gate.
 - `ADD` — companion Bridge for live reads and guarded mutations.
 - `ADD` — minimal Operon GPL fork exposing only generic Public API v1 wrappers over existing domain orchestrators.
-- `ADD` — eleven Operon MCP tools, snapshot tables, and mutation journal.
+- `ADD` — thirteen Operon MCP tools, snapshot tables, and durable mutation journal.
 - `REJECT` — MCP-side Operon parser/domain reimplementation.
 - `REJECT` — raw Markdown/YAML mutation fallback.
 - `REJECT` — reflective production calls to private Operon methods.
@@ -52,9 +52,9 @@ If live access fails, the last snapshot may be returned only as `operon-cache` w
 
 ## Mutation model
 
-Every apply requires a live Bridge and Public API v1. Existing Operon-task mutations require `expectedRevision`; legacy checkbox adoption requires an exact source path, one-based line and `expectedLine`; every request requires `idempotencyKey`; `dryRun` defaults to true.
+Every apply requires a live Bridge, Public API v1, the Bridge mutation toggle, and `OPERON_MUTATIONS_ENABLED=true`. Existing Operon-task mutations require `expectedRevision`; legacy checkbox adoption requires an exact source path, one-based line and `expectedLine`; every request requires `idempotencyKey`; `dryRun` defaults to true.
 
-The Bridge returns before/requested/after and waits for a verified idle index after apply. The MCP stores the result in `operon_mutation_journal`; the same idempotency key and request never call the Bridge twice, while reuse with a different request is rejected as a conflict.
+The Bridge returns before/requested/after and waits for a verified idle index after apply. The MCP reserves the idempotency key durably before the Bridge call, stores the result in `operon_mutation_journal`, and blocks blind retry after an uncertain timeout/restart. The same completed key and request never call the Bridge twice, while reuse with a different request is rejected as a conflict.
 
 To avoid false atomicity, update accepts exactly one group per operation: description, managed fields/tags, or one unmanaged file property. Status uses the dedicated transition operation. Conversion requires full write mode.
 

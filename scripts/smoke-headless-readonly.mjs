@@ -13,7 +13,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "12000");
+const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "60000");
 const modeArg =
   process.argv.find((arg) => arg.startsWith("--mode="))?.split("=")[1] ??
   "headless-readonly";

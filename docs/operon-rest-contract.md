@@ -40,17 +40,22 @@ The `revision` covers the normalized projection and source mtime. Every existing
 - `GET /tasks?cursor=0&limit=100&includeProperties=false`
 - `GET /tasks/:operonId?includeProperties=false`
 - `POST /tasks/query`
+- `POST /tasks/filter`
 - `GET /validate?includeProperties=false`
 
 Query supports task IDs, language-stable `statusIds` / `pipelineIds`, visible status/pipeline values, text, source, checkbox, priority, tier, paths, tags, parent, ISO dates, managed-field equality, unmanaged-property equality, sorting, cursor, and limit. Agents should prefer stable workflow IDs whenever the intent is semantic rather than presentational.
 
 `GET /configuration` is the live source of task semantics. It exposes only an explicit safe subset of Operon settings: UI language; pipeline/status IDs, labels and semantic flags; priorities; canonical-to-visible key mappings; creation targets and available file-task templates; task automation rules; excluded folders; Operon Docs location; and saved filter definitions. Its deterministic `settingsSignature` is also attached to task pages. A semantic setting change therefore invalidates an in-flight read instead of being silently interpreted with stale assumptions.
 
+`POST /tasks/filter` accepts a saved `filterSetId` plus optional scope and pagination. It evaluates through Operon's native filter engine and is never synthesized from the stale MCP snapshot.
+
 Live validation reports duplicate IDs, missing sources, unknown workflow statuses, missing parents, and missing blockers. P0 prevents a new MCP snapshot from replacing the last known-good one.
 
 ## Mutation controls
 
 All mutation routes require `idempotencyKey`. The key is bound to the canonical request: an identical replay returns the cached result, while reuse for different input returns HTTP 409 with `idempotency_key_reused`. Existing-task routes also require `expectedRevision`. `dryRun` defaults to `true`; apply occurs only with `dryRun: false`.
+
+Mutation capabilities remain false until **Allow task mutations** is explicitly enabled in Bridge settings. The MCP has a separate `OPERON_MUTATIONS_ENABLED` apply opt-in.
 
 Responses use:
 
@@ -160,6 +165,19 @@ Exactly one of stable `statusId` or the current configured `Pipeline.Status` str
 ```
 
 Inline-to-file accepts an optional `fileTemplateId`. File-to-inline requires an explicit different Markdown `targetPath`. Conversion uses Operon's transition-safe paths; no copy/delete logic lives in the MCP.
+
+### `POST /tasks/:operonId/relocate`
+
+```json
+{
+  "idempotencyKey": "relocate-001",
+  "expectedRevision": "fnv1a32:...",
+  "dryRun": false,
+  "targetPath": "Efforts/Projets/Projet B.md"
+}
+```
+
+Relocation is limited to inline tasks. Operon writes the target and removes the source through a compensated domain operation, preserving `operonId`; the Bridge then proves the final indexed source/path before returning `applied`.
 
 ## Errors
 

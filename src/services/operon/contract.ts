@@ -42,7 +42,10 @@ export const OperonTaskSchema = z.object({
   fields: z.record(z.string()),
   properties: z.record(z.unknown()).optional(),
   plainCheckboxProgress: z
-    .object({ total: z.number().int().nonnegative(), completed: z.number().int().nonnegative() })
+    .object({
+      total: z.number().int().nonnegative(),
+      completed: z.number().int().nonnegative(),
+    })
     .optional(),
   revision: z.string().min(1),
   sourceKind: z.literal("operon-index"),
@@ -54,119 +57,133 @@ export type OperonTask = z.infer<typeof OperonTaskSchema>;
 
 export const OperonCapabilitiesSchema = z.object({
   status: z.boolean(),
-	configuration: z.boolean(),
+  configuration: z.boolean(),
   list: z.boolean(),
   get: z.boolean(),
   query: z.boolean(),
   validate: z.boolean(),
-	adopt: z.boolean().optional().default(false),
+  adopt: z.boolean().optional().default(false),
   create: z.boolean(),
   update: z.boolean(),
   transition: z.boolean(),
   convert: z.boolean(),
+  filterQuery: z.boolean().optional().default(false),
+  relocate: z.boolean().optional().default(false),
 });
 
 export const OperonWorkflowTaxonomySchema = z.object({
-	language: z.string(),
-	defaultPipelineName: z.string().nullable(),
-	pipelines: z.array(z.object({
-		id: z.string().nullable(),
-		name: z.string(),
-		description: z.string().nullable(),
-		statuses: z.array(z.object({
-			id: z.string().nullable(),
-			label: z.string(),
-			value: z.string(),
-			isFinished: z.boolean(),
-			isCancelled: z.boolean(),
-			isScheduledTarget: z.boolean(),
-			isTrackingTarget: z.boolean(),
-		})),
-	})),
+  language: z.string(),
+  defaultPipelineName: z.string().nullable(),
+  pipelines: z.array(
+    z.object({
+      id: z.string().nullable(),
+      name: z.string(),
+      description: z.string().nullable(),
+      statuses: z.array(
+        z.object({
+          id: z.string().nullable(),
+          label: z.string(),
+          value: z.string(),
+          isFinished: z.boolean(),
+          isCancelled: z.boolean(),
+          isScheduledTarget: z.boolean(),
+          isTrackingTarget: z.boolean(),
+        }),
+      ),
+    }),
+  ),
 });
 
 export const OperonSemanticConfigurationSchema = z.object({
-	language: z.string(),
-	workflow: OperonWorkflowTaxonomySchema,
-	priorities: z.object({
-		defaultPriority: z.string().nullable(),
-		items: z.array(z.object({
-			id: z.string().nullable(),
-			label: z.string(),
-			color: z.string().nullable(),
-			description: z.string().nullable(),
-		})),
-	}),
-	keys: z.array(z.object({
-		canonicalKey: z.string(),
-		visiblePropertyName: z.string(),
-		type: z.string().nullable(),
-		sync: z.string().nullable(),
-		enabled: z.boolean(),
-		isSystem: z.boolean(),
-		isInternal: z.boolean(),
-	})),
-	creation: z.object({
-		fileTasksFolder: z.string(),
-		inlineTaskSaveMode: z.string(),
-		inlineTaskUseDailyNote: z.boolean(),
-		inlineTaskTargetFile: z.string(),
-		inlineTaskHeading: z.string(),
-		inlineTaskDailyNoteAddStartDate: z.boolean(),
-		inlineTaskDailyNoteAddScheduledDate: z.boolean(),
-		taskCreatorDefaultToFileTask: z.boolean(),
-		taskCreatorDefaultFileTemplateId: z.string().nullable(),
-		fileTaskTemplateFolder: z.string(),
-		fileTaskParentInlineTargetMode: z.string(),
-		fileTaskParentFileTargetMode: z.string(),
-		availableFileTaskTemplates: z.array(z.object({
-			id: z.string(),
-			name: z.string(),
-			path: z.string().nullable(),
-			kind: z.string(),
-			pipelineId: z.string().nullable(),
-			description: z.string().nullable(),
-		})),
-	}),
-	automation: z.object({
-		autoCompleteParentWhenAllChildrenTerminal: z.boolean(),
-		cascadeCancelToDescendants: z.boolean(),
-		fileTaskAutoArchiveEnabled: z.boolean(),
-		fileTaskArchiveFolder: z.string(),
-		fileTaskArchiveDelaySeconds: z.number().nonnegative(),
-		fileTaskArchiveOnlyFromFileTasksFolder: z.boolean(),
-		fileRepeatDestination: z.string(),
-		fileRepeatCustomFolder: z.string(),
-	}),
-	indexing: z.object({
-		excludedFolders: z.array(z.string()),
-		fullReindexOnStartup: z.boolean(),
-		indexEventDebounceMs: z.number().nonnegative(),
-	}),
-	docs: z.object({
-		folder: z.string(),
-		autoUpdateEnabled: z.boolean(),
-	}),
-	views: z.object({
-		filters: z.array(z.object({
-			id: z.string(),
-			name: z.string(),
-			icon: z.string().nullable(),
-			definition: z.record(z.unknown()),
-		})),
-	}),
+  language: z.string(),
+  workflow: OperonWorkflowTaxonomySchema,
+  priorities: z.object({
+    defaultPriority: z.string().nullable(),
+    items: z.array(
+      z.object({
+        id: z.string().nullable(),
+        label: z.string(),
+        color: z.string().nullable(),
+        description: z.string().nullable(),
+      }),
+    ),
+  }),
+  keys: z.array(
+    z.object({
+      canonicalKey: z.string(),
+      visiblePropertyName: z.string(),
+      type: z.string().nullable(),
+      sync: z.string().nullable(),
+      enabled: z.boolean(),
+      isSystem: z.boolean(),
+      isInternal: z.boolean(),
+    }),
+  ),
+  creation: z.object({
+    fileTasksFolder: z.string(),
+    inlineTaskSaveMode: z.string(),
+    inlineTaskUseDailyNote: z.boolean(),
+    inlineTaskTargetFile: z.string(),
+    inlineTaskHeading: z.string(),
+    inlineTaskDailyNoteAddStartDate: z.boolean(),
+    inlineTaskDailyNoteAddScheduledDate: z.boolean(),
+    taskCreatorDefaultToFileTask: z.boolean(),
+    taskCreatorDefaultFileTemplateId: z.string().nullable(),
+    fileTaskTemplateFolder: z.string(),
+    fileTaskParentInlineTargetMode: z.string(),
+    fileTaskParentFileTargetMode: z.string(),
+    availableFileTaskTemplates: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        path: z.string().nullable(),
+        kind: z.string(),
+        pipelineId: z.string().nullable(),
+        description: z.string().nullable(),
+      }),
+    ),
+  }),
+  automation: z.object({
+    autoCompleteParentWhenAllChildrenTerminal: z.boolean(),
+    cascadeCancelToDescendants: z.boolean(),
+    fileTaskAutoArchiveEnabled: z.boolean(),
+    fileTaskArchiveFolder: z.string(),
+    fileTaskArchiveDelaySeconds: z.number().nonnegative(),
+    fileTaskArchiveOnlyFromFileTasksFolder: z.boolean(),
+    fileRepeatDestination: z.string(),
+    fileRepeatCustomFolder: z.string(),
+  }),
+  indexing: z.object({
+    excludedFolders: z.array(z.string()),
+    fullReindexOnStartup: z.boolean(),
+    indexEventDebounceMs: z.number().nonnegative(),
+  }),
+  docs: z.object({
+    folder: z.string(),
+    autoUpdateEnabled: z.boolean(),
+  }),
+  views: z.object({
+    filters: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        icon: z.string().nullable(),
+        definition: z.record(z.unknown()),
+      }),
+    ),
+  }),
 });
 
 export const OperonConfigurationSchema = z.object({
-	ok: z.literal(true),
-	contractVersion: z.literal(OPERON_CONTRACT_VERSION),
-	source: z.literal("operon-runtime"),
-	stale: z.literal(false),
-	operonVersion: z.string(),
-	bridgeVersion: z.string(),
-	settingsSignature: z.string().min(1),
-	configuration: OperonSemanticConfigurationSchema,
-	limitations: z.array(z.string()),
+  ok: z.literal(true),
+  contractVersion: z.literal(OPERON_CONTRACT_VERSION),
+  source: z.literal("operon-runtime"),
+  stale: z.literal(false),
+  operonVersion: z.string(),
+  bridgeVersion: z.string(),
+  settingsSignature: z.string().min(1),
+  configuration: OperonSemanticConfigurationSchema,
+  limitations: z.array(z.string()),
 });
 
 export type OperonConfiguration = z.infer<typeof OperonConfigurationSchema>;
@@ -194,7 +211,7 @@ export const OperonStatusSchema = z.object({
     diagnostics: z.record(z.unknown()).nullable().optional(),
   }),
   settingsSignature: z.string().nullable(),
-	taxonomy: OperonWorkflowTaxonomySchema.nullable().optional(),
+  taxonomy: OperonWorkflowTaxonomySchema.nullable().optional(),
   capabilities: OperonCapabilitiesSchema,
   source: z.literal("operon-runtime"),
   stale: z.literal(false),
@@ -317,67 +334,114 @@ const MutationControlSchema = z.object({
   dryRun: z.boolean().optional().default(true),
 });
 
-export const OperonAdoptTaskSchema = MutationControlSchema.extend({
-	adoption: z.object({
-		targetPath: z.string().trim().min(1),
-		line: z.number().int().positive(),
-		expectedLine: z.string().min(1).max(20_000).refine(
-			value => !/[\r\n]/u.test(value),
-			"expectedLine must contain exactly one source line.",
-		),
-		statusId: z.string().trim().min(1).optional(),
-	}),
+export const OperonVaultRelativePathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .superRefine((value, context) => {
+    const normalized = value.replace(/\\/gu, "/");
+    if (
+      /^(?:\/|[a-z]:\/)/iu.test(normalized) ||
+      normalized
+        .split("/")
+        .some((segment) => segment === "." || segment === "..")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Path must be vault-relative without '.' or '..' segments.",
+      });
+    }
+  });
+export const OperonFilterQuerySchema = z.object({
+  filterSetId: z.string().trim().min(1),
+  scopePath: OperonVaultRelativePathSchema.optional(),
+  includeProperties: z.boolean().optional().default(false),
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(500).optional().default(100),
 });
 
-export const OperonCreateTaskSchema = MutationControlSchema.extend({
-  task: z.object({
-    source: OperonTaskSourceSchema,
-    description: z.string().trim().min(1),
-	statusId: z.string().trim().min(1).optional(),
-    tags: z.array(z.string()).optional(),
-    fields: z.record(z.string()).optional(),
-    properties: z.record(OperonRawPropertyValueSchema).optional(),
-    fileTemplateId: z.string().optional(),
-    targetDateKey: z.string().optional(),
-    targetFolder: z.string().optional(),
-    targetPath: z.string().optional(),
-  }).superRefine((value, context) => {
-  if (value.source === "file" && value.targetPath?.trim()) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetPath"], message: "targetPath is supported only for inline tasks." });
-  }
-  if (value.source === "inline" && value.targetFolder?.trim()) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetFolder"], message: "targetFolder is supported only for file tasks." });
-  }
-	if (value.statusId && value.fields?.status?.trim()) {
-		context.addIssue({ code: z.ZodIssueCode.custom, path: ["statusId"], message: "Provide at most one of fields.status or statusId." });
-	}
+export const OperonAdoptTaskSchema = MutationControlSchema.extend({
+  adoption: z.object({
+    targetPath: OperonVaultRelativePathSchema,
+    line: z.number().int().positive(),
+    expectedLine: z
+      .string()
+      .min(1)
+      .max(20_000)
+      .refine(
+        (value) => !/[\r\n]/u.test(value),
+        "expectedLine must contain exactly one source line.",
+      ),
+    statusId: z.string().trim().min(1).optional(),
   }),
 });
 
-export const OperonUpdatePatchSchema = z.object({
-  description: z.string().trim().min(1).optional(),
-  tags: z.array(z.string()).optional(),
-  fields: z.record(z.string()).optional(),
-  properties: z.record(OperonRawPropertyValueSchema).optional(),
-}).superRefine((value, context) => {
-  const groupCount = [
-    value.description !== undefined,
-    value.tags !== undefined || value.fields !== undefined,
-    value.properties !== undefined,
-  ].filter(Boolean).length;
-  if (groupCount !== 1) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Provide exactly one mutation group: description, managed fields/tags, or one unmanaged property.",
-    });
-  }
-  if (value.properties && Object.keys(value.properties).length !== 1) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Update exactly one unmanaged property per operation.",
-    });
-  }
+export const OperonCreateTaskSchema = MutationControlSchema.extend({
+  task: z
+    .object({
+      source: OperonTaskSourceSchema,
+      description: z.string().trim().min(1),
+      statusId: z.string().trim().min(1).optional(),
+      tags: z.array(z.string()).optional(),
+      fields: z.record(z.string()).optional(),
+      properties: z.record(OperonRawPropertyValueSchema).optional(),
+      fileTemplateId: z.string().optional(),
+      targetDateKey: z.string().optional(),
+      targetFolder: OperonVaultRelativePathSchema.optional(),
+      targetPath: OperonVaultRelativePathSchema.optional(),
+    })
+    .superRefine((value, context) => {
+      if (value.source === "file" && value.targetPath?.trim()) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["targetPath"],
+          message: "targetPath is supported only for inline tasks.",
+        });
+      }
+      if (value.source === "inline" && value.targetFolder?.trim()) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["targetFolder"],
+          message: "targetFolder is supported only for file tasks.",
+        });
+      }
+      if (value.statusId && value.fields?.status?.trim()) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["statusId"],
+          message: "Provide at most one of fields.status or statusId.",
+        });
+      }
+    }),
 });
+
+export const OperonUpdatePatchSchema = z
+  .object({
+    description: z.string().trim().min(1).optional(),
+    tags: z.array(z.string()).optional(),
+    fields: z.record(z.string()).optional(),
+    properties: z.record(OperonRawPropertyValueSchema).optional(),
+  })
+  .superRefine((value, context) => {
+    const groupCount = [
+      value.description !== undefined,
+      value.tags !== undefined || value.fields !== undefined,
+      value.properties !== undefined,
+    ].filter(Boolean).length;
+    if (groupCount !== 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Provide exactly one mutation group: description, managed fields/tags, or one unmanaged property.",
+      });
+    }
+    if (value.properties && Object.keys(value.properties).length !== 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Update exactly one unmanaged property per operation.",
+      });
+    }
+  });
 
 export const OperonUpdateTaskSchema = MutationControlSchema.extend({
   operonId: z.string().min(1),
@@ -388,42 +452,60 @@ export const OperonUpdateTaskSchema = MutationControlSchema.extend({
 export const OperonTransitionTaskInputSchema = MutationControlSchema.extend({
   operonId: z.string().min(1),
   expectedRevision: z.string().min(1),
-	status: z.string().trim().min(1).optional(),
-	statusId: z.string().trim().min(1).optional(),
+  status: z.string().trim().min(1).optional(),
+  statusId: z.string().trim().min(1).optional(),
 });
 
-export const OperonTransitionTaskSchema = OperonTransitionTaskInputSchema.superRefine((value, ctx) => {
-	if (Boolean(value.status) === Boolean(value.statusId)) {
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			message: "Provide exactly one of status or statusId.",
-		});
-	}
-});
+export const OperonTransitionTaskSchema =
+  OperonTransitionTaskInputSchema.superRefine((value, ctx) => {
+    if (Boolean(value.status) === Boolean(value.statusId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of status or statusId.",
+      });
+    }
+  });
 
 export const OperonConvertTaskInputSchema = MutationControlSchema.extend({
   operonId: z.string().min(1),
   expectedRevision: z.string().min(1),
   target: OperonTaskSourceSchema,
   fileTemplateId: z.string().optional(),
-  targetPath: z.string().optional(),
-  targetFolder: z.string().optional(),
+  targetPath: OperonVaultRelativePathSchema.optional(),
+  targetFolder: OperonVaultRelativePathSchema.optional(),
 });
 
-export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine((value, context) => {
-  if (value.target === "inline" && !value.targetPath?.trim()) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["targetPath"],
-      message: "targetPath is required for file-to-inline conversion.",
-    });
-  }
-  if (value.target === "inline" && value.targetFolder?.trim()) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetFolder"], message: "targetFolder is supported only for inline-to-file conversion." });
-  }
-  if (value.target === "file" && value.targetPath?.trim()) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetPath"], message: "targetPath is supported only for file-to-inline conversion." });
-  }
+export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine(
+  (value, context) => {
+    if (value.target === "inline" && !value.targetPath?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["targetPath"],
+        message: "targetPath is required for file-to-inline conversion.",
+      });
+    }
+    if (value.target === "inline" && value.targetFolder?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["targetFolder"],
+        message:
+          "targetFolder is supported only for inline-to-file conversion.",
+      });
+    }
+    if (value.target === "file" && value.targetPath?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["targetPath"],
+        message: "targetPath is supported only for file-to-inline conversion.",
+      });
+    }
+  },
+);
+
+export const OperonRelocateTaskSchema = MutationControlSchema.extend({
+  operonId: z.string().min(1),
+  expectedRevision: z.string().min(1),
+  targetPath: OperonVaultRelativePathSchema,
 });
 
 export const OperonMutationResultSchema = z.object({
@@ -447,6 +529,8 @@ export type OperonAdoptTask = z.infer<typeof OperonAdoptTaskSchema>;
 export type OperonUpdateTask = z.infer<typeof OperonUpdateTaskSchema>;
 export type OperonTransitionTask = z.infer<typeof OperonTransitionTaskSchema>;
 export type OperonConvertTask = z.infer<typeof OperonConvertTaskSchema>;
+export type OperonFilterQuery = z.infer<typeof OperonFilterQuerySchema>;
+export type OperonRelocateTask = z.infer<typeof OperonRelocateTaskSchema>;
 export type OperonMutationResult = z.infer<typeof OperonMutationResultSchema>;
 
 export interface OperonSnapshotEnvelope {
@@ -483,7 +567,9 @@ export interface OperonTaskPage {
 }
 
 function normalizeNeedle(value: unknown): string {
-  return String(value ?? "").trim().toLocaleLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLocaleLowerCase();
 }
 
 function stableValue(value: unknown): unknown {
@@ -503,7 +589,10 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(stableValue(value));
 }
 
-function dateValue(task: OperonTask, field: OperonDateFilter["field"]): string | null {
+function dateValue(
+  task: OperonTask,
+  field: OperonDateFilter["field"],
+): string | null {
   return task.dates[field];
 }
 
@@ -519,7 +608,10 @@ function tagSet(task: OperonTask): Set<string> {
   return new Set(task.tags.map(normalizeNeedle));
 }
 
-export function filterOperonTasks(tasks: OperonTask[], query: OperonQuery): OperonTask[] {
+export function filterOperonTasks(
+  tasks: OperonTask[],
+  query: OperonQuery,
+): OperonTask[] {
   const ids = new Set(query.operonIds ?? []);
   const sources = new Set(query.sources ?? []);
   const checkboxes = new Set(query.checkboxes ?? []);
@@ -535,32 +627,68 @@ export function filterOperonTasks(tasks: OperonTask[], query: OperonQuery): Oper
     if (ids.size > 0 && !ids.has(task.operonId)) return false;
     if (sources.size > 0 && !sources.has(task.source)) return false;
     if (checkboxes.size > 0 && !checkboxes.has(task.checkbox)) return false;
-    if (statuses.size > 0 && !statuses.has(normalizeNeedle(task.status))) return false;
-    if (statusIds.size > 0 && !statusIds.has(normalizeNeedle(task.statusId))) return false;
-    if (pipelines.size > 0 && !pipelines.has(normalizeNeedle(task.pipeline))) return false;
-    if (pipelineIds.size > 0 && !pipelineIds.has(normalizeNeedle(task.pipelineId))) return false;
-    if (priorities.size > 0 && !priorities.has(normalizeNeedle(task.priority))) return false;
+    if (statuses.size > 0 && !statuses.has(normalizeNeedle(task.status)))
+      return false;
+    if (statusIds.size > 0 && !statusIds.has(normalizeNeedle(task.statusId)))
+      return false;
+    if (pipelines.size > 0 && !pipelines.has(normalizeNeedle(task.pipeline)))
+      return false;
+    if (
+      pipelineIds.size > 0 &&
+      !pipelineIds.has(normalizeNeedle(task.pipelineId))
+    )
+      return false;
+    if (priorities.size > 0 && !priorities.has(normalizeNeedle(task.priority)))
+      return false;
     if (tiers.size > 0 && !tiers.has(task.tier)) return false;
-    if ((query.pathIncludes ?? []).some((value: string) => !normalizeNeedle(task.path).includes(normalizeNeedle(value)))) {
+    if (
+      (query.pathIncludes ?? []).some(
+        (value: string) =>
+          !normalizeNeedle(task.path).includes(normalizeNeedle(value)),
+      )
+    ) {
       return false;
     }
-    if ((query.pathExcludes ?? []).some((value: string) => normalizeNeedle(task.path).includes(normalizeNeedle(value)))) {
+    if (
+      (query.pathExcludes ?? []).some((value: string) =>
+        normalizeNeedle(task.path).includes(normalizeNeedle(value)),
+      )
+    ) {
       return false;
     }
     const tags = tagSet(task);
-    if ((query.tagsAny?.length ?? 0) > 0 && !(query.tagsAny ?? []).some((tag: string) => tags.has(normalizeNeedle(tag)))) {
+    if (
+      (query.tagsAny?.length ?? 0) > 0 &&
+      !(query.tagsAny ?? []).some((tag: string) =>
+        tags.has(normalizeNeedle(tag)),
+      )
+    ) {
       return false;
     }
-    if ((query.tagsAll?.length ?? 0) > 0 && !(query.tagsAll ?? []).every((tag: string) => tags.has(normalizeNeedle(tag)))) {
+    if (
+      (query.tagsAll?.length ?? 0) > 0 &&
+      !(query.tagsAll ?? []).every((tag: string) =>
+        tags.has(normalizeNeedle(tag)),
+      )
+    ) {
       return false;
     }
-    if (query.parentTask !== undefined && task.parentTask !== query.parentTask) return false;
-    if ((query.dates ?? []).some((filter: OperonDateFilter) => !matchDate(dateValue(task, filter.field), filter))) return false;
+    if (query.parentTask !== undefined && task.parentTask !== query.parentTask)
+      return false;
+    if (
+      (query.dates ?? []).some(
+        (filter: OperonDateFilter) =>
+          !matchDate(dateValue(task, filter.field), filter),
+      )
+    )
+      return false;
     for (const [key, expected] of Object.entries(query.fieldEquals ?? {})) {
-      if (normalizeNeedle(task.fields[key]) !== normalizeNeedle(expected)) return false;
+      if (normalizeNeedle(task.fields[key]) !== normalizeNeedle(expected))
+        return false;
     }
     for (const [key, expected] of Object.entries(query.propertyEquals ?? {})) {
-      if (stableStringify(task.properties?.[key]) !== stableStringify(expected)) return false;
+      if (stableStringify(task.properties?.[key]) !== stableStringify(expected))
+        return false;
     }
     if (search) {
       const searchable = [
@@ -586,7 +714,10 @@ export function filterOperonTasks(tasks: OperonTask[], query: OperonQuery): Oper
   });
 }
 
-function sortValue(task: OperonTask, field: OperonSort["field"]): string | number {
+function sortValue(
+  task: OperonTask,
+  field: OperonSort["field"],
+): string | number {
   switch (field) {
     case "description":
       return task.description;
@@ -613,7 +744,10 @@ function sortValue(task: OperonTask, field: OperonSort["field"]): string | numbe
   }
 }
 
-export function sortOperonTasks(tasks: OperonTask[], query: OperonQuery): OperonTask[] {
+export function sortOperonTasks(
+  tasks: OperonTask[],
+  query: OperonQuery,
+): OperonTask[] {
   const rules = query.sort?.length
     ? query.sort
     : [
@@ -655,7 +789,10 @@ export function queryOperonSnapshot(
   queryInput: unknown,
 ): OperonTaskPage {
   const query = OperonQuerySchema.parse(queryInput);
-  const filtered = sortOperonTasks(filterOperonTasks(snapshot.tasks, query), query);
+  const filtered = sortOperonTasks(
+    filterOperonTasks(snapshot.tasks, query),
+    query,
+  );
   const offset = parseOperonCursor(query.cursor);
   const page = filtered.slice(offset, offset + query.limit);
   const nextOffset = offset + page.length;

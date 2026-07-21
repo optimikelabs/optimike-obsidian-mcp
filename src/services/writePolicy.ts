@@ -15,11 +15,12 @@ export type WriteOperation =
   | "bases_create"
   | "bases_upsert_config"
   | "bases_upsert_rows"
-	| "operon_adopt_task"
+  | "operon_adopt_task"
   | "operon_create_task"
   | "operon_update_task"
   | "operon_transition_task"
-  | "operon_convert_task";
+  | "operon_convert_task"
+  | "operon_relocate_task";
 
 type GuardCheck = {
   operation: WriteOperation;
@@ -63,6 +64,13 @@ function reject(check: GuardCheck, reason: string): never {
 }
 
 export function assertWriteAllowed(check: GuardCheck): void {
+  const blockedKeys = protectedKeyMatches(check.frontmatterKeys);
+  if (blockedKeys.length > 0) {
+    reject(
+      check,
+      `protected frontmatter keys cannot be modified: ${blockedKeys.join(", ")}`,
+    );
+  }
   if (config.mcpWriteMode === "full") {
     return;
   }
@@ -104,14 +112,6 @@ export function assertWriteAllowed(check: GuardCheck): void {
     reject(
       check,
       `batch contains ${check.batchCount} operations, above MCP_GUARDED_MAX_BATCH_OPERATIONS=${config.mcpGuardedMaxBatchOperations}`,
-    );
-  }
-
-  const blockedKeys = protectedKeyMatches(check.frontmatterKeys);
-  if (blockedKeys.length > 0) {
-    reject(
-      check,
-      `protected frontmatter keys cannot be modified in guarded mode: ${blockedKeys.join(", ")}`,
     );
   }
 

@@ -1,4 +1,4 @@
-import { Plugin, TFile } from "obsidian";
+import { App, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import {
   OPERON_BRIDGE_CONTRACT_VERSION,
   OPERON_BRIDGE_SUPPORTED_VERSIONS,
@@ -29,6 +29,37 @@ const LOCAL_REST_PLUGIN_ID = "obsidian-local-rest-api";
 const MAX_MOUNT_WAIT_MS = 30_000;
 const MOUNT_RETRY_MS = 500;
 
+interface OptimikeOperonBridgeSettings {
+  mutationsEnabled: boolean;
+}
+
+const DEFAULT_BRIDGE_SETTINGS: OptimikeOperonBridgeSettings = {
+  mutationsEnabled: false,
+};
+
+class OptimikeOperonBridgeSettingTab extends PluginSettingTab {
+  constructor(
+    app: App,
+    private readonly bridge: OptimikeOperonBridgePlugin,
+  ) {
+    super(app, bridge);
+  }
+
+  display(): void {
+    this.containerEl.empty();
+    new Setting(this.containerEl)
+      .setName("Mutations agentiques Operon")
+      .setDesc(
+        "Autorise les routes de création et modification. Désactivé par défaut ; les lectures restent disponibles.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.bridge.settings.mutationsEnabled)
+          .onChange(async (value) => this.bridge.setMutationsEnabled(value)),
+      );
+  }
+}
+
 interface OperonRuntime {
   plugin: any;
   api: OperonPublicApiV1 | null;
@@ -49,29 +80,38 @@ interface OperonRuntime {
   };
   pipelines: RuntimePipeline[];
   keyMappings: RuntimeKeyMapping[];
-	priorities: RuntimePriorityDefinition[];
-	language: string;
-	defaultPipelineName: string | null;
+  priorities: RuntimePriorityDefinition[];
+  language: string;
+  defaultPipelineName: string | null;
 }
 
 interface BridgeCapabilities {
   status: boolean;
-	configuration: boolean;
+  configuration: boolean;
   list: boolean;
   get: boolean;
   query: boolean;
   validate: boolean;
-	adopt: boolean;
+  adopt: boolean;
   create: boolean;
   update: boolean;
   transition: boolean;
   convert: boolean;
+  filterQuery: boolean;
+  relocate: boolean;
 }
 
 interface OperonPublicMutationResult {
   ok: boolean;
   operonId: string | null;
-  code: "applied" | "not-ready" | "not-found" | "invalid-input" | "conflict" | "rejected" | "failed";
+  code:
+    | "applied"
+    | "not-ready"
+    | "not-found"
+    | "invalid-input"
+    | "conflict"
+    | "rejected"
+    | "failed";
   message?: string;
 }
 
@@ -79,17 +119,42 @@ interface OperonPublicApiV1 {
   version: "1";
   capabilities: () => {
     ready: boolean;
-		adopt: boolean;
+    adopt: boolean;
     create: boolean;
     update: boolean;
     transition: boolean;
     convert: boolean;
+    filterQuery: boolean;
+    relocate: boolean;
   };
-	adoptInlineTask: (input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
-  createTask: (input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
-  updateTask: (operonId: string, input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
-  transitionTask: (operonId: string, input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
-  convertTask: (operonId: string, input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
+  adoptInlineTask: (
+    input: Record<string, unknown>,
+  ) => Promise<OperonPublicMutationResult>;
+  createTask: (
+    input: Record<string, unknown>,
+  ) => Promise<OperonPublicMutationResult>;
+  updateTask: (
+    operonId: string,
+    input: Record<string, unknown>,
+  ) => Promise<OperonPublicMutationResult>;
+  transitionTask: (
+    operonId: string,
+    input: Record<string, unknown>,
+  ) => Promise<OperonPublicMutationResult>;
+  convertTask: (
+    operonId: string,
+    input: Record<string, unknown>,
+  ) => Promise<OperonPublicMutationResult>;
+  queryFilterSet: (input: Record<string, unknown>) => Promise<{
+    ok: boolean;
+    code: "ok" | "not-ready" | "not-found" | "invalid-input" | "failed";
+    operonIds: string[];
+    message?: string;
+  }>;
+  relocateTask: (
+    operonId: string,
+    input: Record<string, unknown>,
+  ) => Promise<OperonPublicMutationResult>;
 }
 
 interface StableTaskRead {
@@ -110,7 +175,7 @@ const BASE_LIMITATIONS = [
 
 const READ_ONLY_LIMITATIONS = [
   ...BASE_LIMITATIONS,
-  "Mutations require Operon Public API v1; official Operon 2.5.0 does not expose it.",
+  "Mutations require Operon Public API v1 and an explicit opt-in in Optimike Operon Bridge settings.",
 ];
 
 function boolValue(value: unknown): boolean {
@@ -163,7 +228,10 @@ function sendJson(res: any, status: number, payload: unknown): void {
   throw new Error("Local REST API response does not expose json().");
 }
 
-function errorPayload(error: unknown, code = "bridge_error"): Record<string, unknown> {
+function errorPayload(
+  error: unknown,
+  code = "bridge_error",
+): Record<string, unknown> {
   return {
     ok: false,
     contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
@@ -205,17 +273,30 @@ function sanitizeQuery(input: unknown): OperonTaskQuery {
   if (source.parentTask === null || typeof source.parentTask === "string") {
     query.parentTask = source.parentTask;
   }
-  if (Array.isArray(source.dates)) query.dates = source.dates as OperonTaskQuery["dates"];
-  if (source.fieldEquals && typeof source.fieldEquals === "object" && !Array.isArray(source.fieldEquals)) {
+  if (Array.isArray(source.dates))
+    query.dates = source.dates as OperonTaskQuery["dates"];
+  if (
+    source.fieldEquals &&
+    typeof source.fieldEquals === "object" &&
+    !Array.isArray(source.fieldEquals)
+  ) {
     query.fieldEquals = Object.fromEntries(
-      Object.entries(source.fieldEquals as Record<string, unknown>).map(([key, value]) => [key, String(value)]),
+      Object.entries(source.fieldEquals as Record<string, unknown>).map(
+        ([key, value]) => [key, String(value)],
+      ),
     );
   }
-  if (source.propertyEquals && typeof source.propertyEquals === "object" && !Array.isArray(source.propertyEquals)) {
+  if (
+    source.propertyEquals &&
+    typeof source.propertyEquals === "object" &&
+    !Array.isArray(source.propertyEquals)
+  ) {
     query.propertyEquals = source.propertyEquals as Record<string, unknown>;
   }
-  if (Array.isArray(source.sort)) query.sort = source.sort as OperonTaskQuery["sort"];
-  if (typeof source.includeProperties === "boolean") query.includeProperties = source.includeProperties;
+  if (Array.isArray(source.sort))
+    query.sort = source.sort as OperonTaskQuery["sort"];
+  if (typeof source.includeProperties === "boolean")
+    query.includeProperties = source.includeProperties;
   if (typeof source.cursor === "string") query.cursor = source.cursor;
   const limit = numberValue(source.limit);
   if (limit !== undefined) query.limit = limit;
@@ -223,6 +304,7 @@ function sanitizeQuery(input: unknown): OperonTaskQuery {
 }
 
 export default class OptimikeOperonBridgePlugin extends Plugin {
+  settings: OptimikeOperonBridgeSettings = { ...DEFAULT_BRIDGE_SETTINGS };
   private restCleanup: (() => void) | null = null;
   private mountInterval: number | null = null;
   private mountTimeout: number | null = null;
@@ -230,10 +312,17 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private mutationResults = new Map<string, CachedMutation>();
 
   async onload(): Promise<void> {
+    const stored =
+      (await this.loadData()) as Partial<OptimikeOperonBridgeSettings> | null;
+    this.settings = { ...DEFAULT_BRIDGE_SETTINGS, ...(stored ?? {}) };
+    this.addSettingTab(new OptimikeOperonBridgeSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
       this.tryMountRestExtension();
       if (this.restCleanup) return;
-      this.mountInterval = window.setInterval(() => this.tryMountRestExtension(), MOUNT_RETRY_MS);
+      this.mountInterval = window.setInterval(
+        () => this.tryMountRestExtension(),
+        MOUNT_RETRY_MS,
+      );
       this.mountTimeout = window.setTimeout(() => {
         if (!this.restCleanup) {
           console.warn(
@@ -251,6 +340,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     });
   }
 
+  async setMutationsEnabled(value: boolean): Promise<void> {
+    this.settings.mutationsEnabled = value;
+    this.mutationResults.clear();
+    await this.saveData(this.settings);
+  }
   private clearMountTimers(): void {
     if (this.mountInterval !== null) window.clearInterval(this.mountInterval);
     if (this.mountTimeout !== null) window.clearTimeout(this.mountTimeout);
@@ -269,10 +363,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       api?.version !== "1" ||
       typeof api.capabilities !== "function" ||
       typeof api.createTask !== "function" ||
-		typeof api.adoptInlineTask !== "function" ||
+      typeof api.adoptInlineTask !== "function" ||
       typeof api.updateTask !== "function" ||
       typeof api.transitionTask !== "function" ||
-      typeof api.convertTask !== "function"
+      typeof api.convertTask !== "function" ||
+      typeof api.queryFilterSet !== "function" ||
+      typeof api.relocateTask !== "function"
     ) {
       return null;
     }
@@ -299,160 +395,222 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       version,
       compatible: isVersionCompatible(version),
       indexer,
-      pipelines: Array.isArray(plugin?.settings?.pipelines) ? plugin.settings.pipelines : [],
-      keyMappings: Array.isArray(plugin?.settings?.keyMappings) ? plugin.settings.keyMappings : [],
-		priorities: Array.isArray(plugin?.settings?.priorities) ? plugin.settings.priorities : [],
-		language: String(plugin?.settings?.language ?? "auto").trim() || "auto",
-		defaultPipelineName: typeof plugin?.settings?.defaultPipelineName === "string"
-			? plugin.settings.defaultPipelineName
-			: null,
+      pipelines: Array.isArray(plugin?.settings?.pipelines)
+        ? plugin.settings.pipelines
+        : [],
+      keyMappings: Array.isArray(plugin?.settings?.keyMappings)
+        ? plugin.settings.keyMappings
+        : [],
+      priorities: Array.isArray(plugin?.settings?.priorities)
+        ? plugin.settings.priorities
+        : [],
+      language: String(plugin?.settings?.language ?? "auto").trim() || "auto",
+      defaultPipelineName:
+        typeof plugin?.settings?.defaultPipelineName === "string"
+          ? plugin.settings.defaultPipelineName
+          : null,
     };
   }
 
-	private workflowTaxonomy(runtime: OperonRuntime | null): OperonWorkflowTaxonomy | null {
-		if (!runtime) return null;
-		return {
-			language: runtime.language,
-			defaultPipelineName: runtime.defaultPipelineName,
-			pipelines: runtime.pipelines.map((pipeline) => ({
-				id: typeof pipeline.id === "string" ? pipeline.id : null,
-				name: pipeline.name,
-				description: typeof pipeline.description === "string" ? pipeline.description : null,
-				statuses: pipeline.statuses.map((status) => ({
-					id: typeof status.id === "string" ? status.id : null,
-					label: status.label,
-					value: `${pipeline.name}.${status.label}`,
-					isFinished: status.isFinished === true,
-					isCancelled: status.isCancelled === true,
-					isScheduledTarget: status.isScheduledTarget === true,
-					isTrackingTarget: status.isTrackingTarget === true,
-				})),
-			})),
-		};
-	}
+  private workflowTaxonomy(
+    runtime: OperonRuntime | null,
+  ): OperonWorkflowTaxonomy | null {
+    if (!runtime) return null;
+    return {
+      language: runtime.language,
+      defaultPipelineName: runtime.defaultPipelineName,
+      pipelines: runtime.pipelines.map((pipeline) => ({
+        id: typeof pipeline.id === "string" ? pipeline.id : null,
+        name: pipeline.name,
+        description:
+          typeof pipeline.description === "string"
+            ? pipeline.description
+            : null,
+        statuses: pipeline.statuses.map((status) => ({
+          id: typeof status.id === "string" ? status.id : null,
+          label: status.label,
+          value: `${pipeline.name}.${status.label}`,
+          isFinished: status.isFinished === true,
+          isCancelled: status.isCancelled === true,
+          isScheduledTarget: status.isScheduledTarget === true,
+          isTrackingTarget: status.isTrackingTarget === true,
+        })),
+      })),
+    };
+  }
 
-	private semanticConfiguration(runtime: OperonRuntime): OperonSemanticConfiguration {
-		const settings = runtime.plugin?.settings ?? {};
-		const templates = typeof runtime.plugin?.getFileTaskTemplateOptions === "function"
-			? runtime.plugin.getFileTaskTemplateOptions() as RuntimeFileTaskTemplate[]
-			: [];
-		const filterSets = Array.isArray(settings.filterSets) ? settings.filterSets : [];
-		return {
-			language: runtime.language,
-			workflow: this.workflowTaxonomy(runtime)!,
-			priorities: {
-				defaultPriority: typeof settings.defaultPriority === "string" ? settings.defaultPriority : null,
-				items: runtime.priorities.map(priority => ({
-					id: typeof priority.id === "string" ? priority.id : null,
-					label: String(priority.label ?? ""),
-					color: typeof priority.color === "string" ? priority.color : null,
-					description: typeof priority.description === "string" ? priority.description : null,
-				})),
-			},
-			keys: runtime.keyMappings.map(mapping => ({
-				canonicalKey: String(mapping.canonicalKey ?? ""),
-				visiblePropertyName: String(mapping.visiblePropertyName ?? ""),
-				type: typeof mapping.type === "string" ? mapping.type : null,
-				sync: typeof mapping.sync === "string" ? mapping.sync : null,
-				enabled: mapping.enabled !== false,
-				isSystem: mapping.isSystem === true,
-				isInternal: mapping.isInternal === true,
-			})),
-			creation: {
-				fileTasksFolder: String(settings.fileTasksFolder ?? ""),
-				inlineTaskSaveMode: String(settings.inlineTaskSaveMode ?? ""),
-				inlineTaskUseDailyNote: settings.inlineTaskUseDailyNote === true,
-				inlineTaskTargetFile: String(settings.inlineTaskTargetFile ?? ""),
-				inlineTaskHeading: String(settings.inlineTaskHeading ?? ""),
-				inlineTaskDailyNoteAddStartDate: settings.inlineTaskDailyNoteAddStartDate === true,
-				inlineTaskDailyNoteAddScheduledDate: settings.inlineTaskDailyNoteAddScheduledDate === true,
-				taskCreatorDefaultToFileTask: settings.taskCreatorDefaultToFileTask === true,
-				taskCreatorDefaultFileTemplateId: typeof settings.taskCreatorDefaultFileTemplateId === "string"
-					? settings.taskCreatorDefaultFileTemplateId
-					: null,
-				fileTaskTemplateFolder: String(settings.fileTaskTemplateFolder ?? ""),
-				fileTaskParentInlineTargetMode: String(settings.fileTaskParentInlineTargetMode ?? ""),
-				fileTaskParentFileTargetMode: String(settings.fileTaskParentFileTargetMode ?? ""),
-				availableFileTaskTemplates: templates.map(template => ({
-					id: String(template.id ?? ""),
-					name: String(template.name ?? ""),
-					path: typeof template.path === "string" ? template.path : null,
-					kind: String(template.kind ?? ""),
-					pipelineId: typeof template.pipelineId === "string" ? template.pipelineId : null,
-					description: typeof template.description === "string" ? template.description : null,
-				})),
-			},
-			automation: {
-				autoCompleteParentWhenAllChildrenTerminal: settings.autoCompleteParentWhenAllChildrenTerminal === true,
-				cascadeCancelToDescendants: settings.cascadeCancelToDescendants === true,
-				fileTaskAutoArchiveEnabled: settings.fileTaskAutoArchiveEnabled === true,
-				fileTaskArchiveFolder: String(settings.fileTaskArchiveFolder ?? ""),
-				fileTaskArchiveDelaySeconds: numberValue(settings.fileTaskArchiveDelaySeconds) ?? 0,
-				fileTaskArchiveOnlyFromFileTasksFolder: settings.fileTaskArchiveOnlyFromFileTasksFolder === true,
-				fileRepeatDestination: String(settings.fileRepeatDestination ?? ""),
-				fileRepeatCustomFolder: String(settings.fileRepeatCustomFolder ?? ""),
-			},
-			indexing: {
-				excludedFolders: Array.isArray(settings.excludedFolders)
-					? settings.excludedFolders.map((value: unknown) => String(value)).filter(Boolean)
-					: [],
-				fullReindexOnStartup: settings.fullReindexOnStartup === true,
-				indexEventDebounceMs: numberValue(settings.indexEventDebounceMs) ?? 0,
-			},
-			docs: {
-				folder: String(settings.operonDocsFolder ?? ""),
-				autoUpdateEnabled: settings.operonDocsAutoUpdateEnabled === true,
-			},
-			views: {
-				filters: filterSets.map((filter: Record<string, unknown>) => ({
-					id: String(filter.id ?? ""),
-					name: String(filter.name ?? ""),
-					icon: typeof filter.icon === "string" ? filter.icon : null,
-					definition: JSON.parse(JSON.stringify(filter)) as Record<string, unknown>,
-				})).filter((filter: { id: string }) => Boolean(filter.id)),
-			},
-		};
-	}
+  private semanticConfiguration(
+    runtime: OperonRuntime,
+  ): OperonSemanticConfiguration {
+    const settings = runtime.plugin?.settings ?? {};
+    const templates =
+      typeof runtime.plugin?.getFileTaskTemplateOptions === "function"
+        ? (runtime.plugin.getFileTaskTemplateOptions() as RuntimeFileTaskTemplate[])
+        : [];
+    const filterSets = Array.isArray(settings.filterSets)
+      ? settings.filterSets
+      : [];
+    return {
+      language: runtime.language,
+      workflow: this.workflowTaxonomy(runtime)!,
+      priorities: {
+        defaultPriority:
+          typeof settings.defaultPriority === "string"
+            ? settings.defaultPriority
+            : null,
+        items: runtime.priorities.map((priority) => ({
+          id: typeof priority.id === "string" ? priority.id : null,
+          label: String(priority.label ?? ""),
+          color: typeof priority.color === "string" ? priority.color : null,
+          description:
+            typeof priority.description === "string"
+              ? priority.description
+              : null,
+        })),
+      },
+      keys: runtime.keyMappings.map((mapping) => ({
+        canonicalKey: String(mapping.canonicalKey ?? ""),
+        visiblePropertyName: String(mapping.visiblePropertyName ?? ""),
+        type: typeof mapping.type === "string" ? mapping.type : null,
+        sync: typeof mapping.sync === "string" ? mapping.sync : null,
+        enabled: mapping.enabled !== false,
+        isSystem: mapping.isSystem === true,
+        isInternal: mapping.isInternal === true,
+      })),
+      creation: {
+        fileTasksFolder: String(settings.fileTasksFolder ?? ""),
+        inlineTaskSaveMode: String(settings.inlineTaskSaveMode ?? ""),
+        inlineTaskUseDailyNote: settings.inlineTaskUseDailyNote === true,
+        inlineTaskTargetFile: String(settings.inlineTaskTargetFile ?? ""),
+        inlineTaskHeading: String(settings.inlineTaskHeading ?? ""),
+        inlineTaskDailyNoteAddStartDate:
+          settings.inlineTaskDailyNoteAddStartDate === true,
+        inlineTaskDailyNoteAddScheduledDate:
+          settings.inlineTaskDailyNoteAddScheduledDate === true,
+        taskCreatorDefaultToFileTask:
+          settings.taskCreatorDefaultToFileTask === true,
+        taskCreatorDefaultFileTemplateId:
+          typeof settings.taskCreatorDefaultFileTemplateId === "string"
+            ? settings.taskCreatorDefaultFileTemplateId
+            : null,
+        fileTaskTemplateFolder: String(settings.fileTaskTemplateFolder ?? ""),
+        fileTaskParentInlineTargetMode: String(
+          settings.fileTaskParentInlineTargetMode ?? "",
+        ),
+        fileTaskParentFileTargetMode: String(
+          settings.fileTaskParentFileTargetMode ?? "",
+        ),
+        availableFileTaskTemplates: templates.map((template) => ({
+          id: String(template.id ?? ""),
+          name: String(template.name ?? ""),
+          path: typeof template.path === "string" ? template.path : null,
+          kind: String(template.kind ?? ""),
+          pipelineId:
+            typeof template.pipelineId === "string"
+              ? template.pipelineId
+              : null,
+          description:
+            typeof template.description === "string"
+              ? template.description
+              : null,
+        })),
+      },
+      automation: {
+        autoCompleteParentWhenAllChildrenTerminal:
+          settings.autoCompleteParentWhenAllChildrenTerminal === true,
+        cascadeCancelToDescendants:
+          settings.cascadeCancelToDescendants === true,
+        fileTaskAutoArchiveEnabled:
+          settings.fileTaskAutoArchiveEnabled === true,
+        fileTaskArchiveFolder: String(settings.fileTaskArchiveFolder ?? ""),
+        fileTaskArchiveDelaySeconds:
+          numberValue(settings.fileTaskArchiveDelaySeconds) ?? 0,
+        fileTaskArchiveOnlyFromFileTasksFolder:
+          settings.fileTaskArchiveOnlyFromFileTasksFolder === true,
+        fileRepeatDestination: String(settings.fileRepeatDestination ?? ""),
+        fileRepeatCustomFolder: String(settings.fileRepeatCustomFolder ?? ""),
+      },
+      indexing: {
+        excludedFolders: Array.isArray(settings.excludedFolders)
+          ? settings.excludedFolders
+              .map((value: unknown) => String(value))
+              .filter(Boolean)
+          : [],
+        fullReindexOnStartup: settings.fullReindexOnStartup === true,
+        indexEventDebounceMs: numberValue(settings.indexEventDebounceMs) ?? 0,
+      },
+      docs: {
+        folder: String(settings.operonDocsFolder ?? ""),
+        autoUpdateEnabled: settings.operonDocsAutoUpdateEnabled === true,
+      },
+      views: {
+        filters: filterSets
+          .map((filter: Record<string, unknown>) => ({
+            id: String(filter.id ?? ""),
+            name: String(filter.name ?? ""),
+            icon: typeof filter.icon === "string" ? filter.icon : null,
+            definition: JSON.parse(JSON.stringify(filter)) as Record<
+              string,
+              unknown
+            >,
+          }))
+          .filter((filter: { id: string }) => Boolean(filter.id)),
+      },
+    };
+  }
 
-	private currentSettingsSignature(runtime: OperonRuntime): string {
-		return settingsSignature(this.semanticConfiguration(runtime));
-	}
+  private currentSettingsSignature(runtime: OperonRuntime): string {
+    return settingsSignature(this.semanticConfiguration(runtime));
+  }
 
-	private configurationPayload(runtime: OperonRuntime): OperonBridgeConfiguration {
-		const configuration = this.semanticConfiguration(runtime);
-		return {
-			ok: true,
-			contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-			source: "operon-runtime",
-			stale: false,
-			operonVersion: runtime.version,
-			bridgeVersion: this.manifest.version,
-			settingsSignature: settingsSignature(configuration),
-			configuration,
-			limitations: this.limitations(runtime, true),
-		};
-	}
+  private configurationPayload(
+    runtime: OperonRuntime,
+  ): OperonBridgeConfiguration {
+    const configuration = this.semanticConfiguration(runtime);
+    return {
+      ok: true,
+      contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+      source: "operon-runtime",
+      stale: false,
+      operonVersion: runtime.version,
+      bridgeVersion: this.manifest.version,
+      settingsSignature: settingsSignature(configuration),
+      configuration,
+      limitations: this.limitations(runtime, true),
+    };
+  }
 
-  private capabilities(runtime: OperonRuntime | null, ready = false): BridgeCapabilities {
+  private capabilities(
+    runtime: OperonRuntime | null,
+    ready = false,
+  ): BridgeCapabilities {
     const readable = Boolean(runtime?.compatible && ready);
-    const mutation = readable && runtime?.api ? runtime.api.capabilities() : null;
+    const publicCapabilities =
+      readable && runtime?.api ? runtime.api.capabilities() : null;
+    const mutation = this.settings.mutationsEnabled ? publicCapabilities : null;
     return {
       status: true,
-		configuration: Boolean(runtime?.compatible),
+      configuration: Boolean(runtime?.compatible),
       list: readable,
       get: readable,
       query: readable,
       validate: readable,
-		adopt: Boolean(mutation?.ready && mutation.adopt),
+      adopt: Boolean(mutation?.ready && mutation.adopt),
       create: Boolean(mutation?.ready && mutation.create),
       update: Boolean(mutation?.ready && mutation.update),
       transition: Boolean(mutation?.ready && mutation.transition),
+      filterQuery: Boolean(
+        publicCapabilities?.ready && publicCapabilities.filterQuery,
+      ),
+      relocate: Boolean(mutation?.ready && mutation.relocate),
       convert: Boolean(mutation?.ready && mutation.convert),
     };
   }
 
   private limitations(runtime: OperonRuntime | null, ready: boolean): string[] {
-    return this.capabilities(runtime, ready).update ? BASE_LIMITATIONS : READ_ONLY_LIMITATIONS;
+    return this.capabilities(runtime, ready).update
+      ? BASE_LIMITATIONS
+      : READ_ONLY_LIMITATIONS;
   }
 
   private async indexState(runtime: OperonRuntime | null): Promise<{
@@ -460,13 +618,17 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     generation: number | null;
     diagnostics: RuntimeIndexDiagnostics | null;
   }> {
-    if (!runtime?.compatible) return { ready: false, generation: null, diagnostics: null };
+    if (!runtime?.compatible)
+      return { ready: false, generation: null, diagnostics: null };
     const generation = runtime.indexer.getGeneration();
     let diagnostics: RuntimeIndexDiagnostics | null = null;
     try {
       diagnostics = await runtime.indexer.getIndexV8Diagnostics();
     } catch (error) {
-      console.warn(`[${EXTENSION_ID}] Operon index diagnostics unavailable.`, error);
+      console.warn(
+        `[${EXTENSION_ID}] Operon index diagnostics unavailable.`,
+        error,
+      );
     }
     if (
       shouldAttemptIndexValidation({
@@ -480,13 +642,20 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       try {
         diagnostics = await runtime.indexer.getIndexV8Diagnostics();
       } catch (error) {
-        console.warn(`[${EXTENSION_ID}] Operon index diagnostics unavailable after validation.`, error);
+        console.warn(
+          `[${EXTENSION_ID}] Operon index diagnostics unavailable after validation.`,
+          error,
+        );
       }
     }
     return {
       generation,
       diagnostics,
-      ready: isIndexReady({ compatible: runtime.compatible, generation, diagnostics }),
+      ready: isIndexReady({
+        compatible: runtime.compatible,
+        generation,
+        diagnostics,
+      }),
     };
   }
 
@@ -503,7 +672,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           }
         })
         .catch((error: unknown) => {
-          console.warn(`[${EXTENSION_ID}] Operon index validation failed.`, error);
+          console.warn(
+            `[${EXTENSION_ID}] Operon index validation failed.`,
+            error,
+          );
         })
         .finally(() => {
           this.indexValidationInFlight = null;
@@ -550,7 +722,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       settingsSignature: runtime
         ? this.currentSettingsSignature(runtime)
         : null,
-		taxonomy: this.workflowTaxonomy(runtime),
+      taxonomy: this.workflowTaxonomy(runtime),
       capabilities,
       source: "operon-runtime",
       stale: false,
@@ -561,7 +733,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private requireRuntime(): OperonRuntime {
     const runtime = this.getOperonRuntime();
     if (!runtime) {
-      throw new Error("Operon is not loaded or its current runtime index surface is unavailable.");
+      throw new Error(
+        "Operon is not loaded or its current runtime index surface is unavailable.",
+      );
     }
     if (!runtime.compatible) {
       throw new Error(
@@ -576,11 +750,15 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     task: RuntimeIndexedTask,
     includeProperties: boolean,
   ): OperonBridgeTask {
-    const abstract = this.app.vault.getAbstractFileByPath(task.primary.filePath);
+    const abstract = this.app.vault.getAbstractFileByPath(
+      task.primary.filePath,
+    );
     const file = abstract instanceof TFile ? abstract : null;
     const frontmatter =
       includeProperties && task.primary.format === "yaml" && file
-        ? (this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined)
+        ? (this.app.metadataCache.getFileCache(file)?.frontmatter as
+            | Record<string, unknown>
+            | undefined)
         : undefined;
     return normalizeTask({
       task,
@@ -594,16 +772,22 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     });
   }
 
-  private async allTasksSnapshot(includeProperties: boolean): Promise<StableTaskRead> {
+  private async allTasksSnapshot(
+    includeProperties: boolean,
+  ): Promise<StableTaskRead> {
     const runtime = this.requireRuntime();
     const before = await this.indexState(runtime);
     if (!before.ready || before.generation === null) {
-      throw new Error("Operon index is still initializing or is not in a verified idle state.");
+      throw new Error(
+        "Operon index is still initializing or is not in a verified idle state.",
+      );
     }
     const beforeSettings = this.currentSettingsSignature(runtime);
     const tasks = runtime.indexer
       .getAllTasks()
-      .map((task) => this.normalizeRuntimeTask(runtime, task, includeProperties));
+      .map((task) =>
+        this.normalizeRuntimeTask(runtime, task, includeProperties),
+      );
     const after = await this.indexState(runtime);
     const afterSettings = this.currentSettingsSignature(runtime);
     if (
@@ -613,12 +797,21 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       before.diagnostics?.taskCount !== tasks.length ||
       after.diagnostics?.taskCount !== tasks.length
     ) {
-      throw new Error("Operon generation or settings changed during the read; retry after the index settles.");
+      throw new Error(
+        "Operon generation or settings changed during the read; retry after the index settles.",
+      );
     }
-    return { tasks, generation: before.generation, settingsSignature: beforeSettings };
+    return {
+      tasks,
+      generation: before.generation,
+      settingsSignature: beforeSettings,
+    };
   }
 
-  private async oneTask(operonId: string, includeProperties: boolean): Promise<{
+  private async oneTask(
+    operonId: string,
+    includeProperties: boolean,
+  ): Promise<{
     task: OperonBridgeTask | null;
     generation: number;
     settingsSignature: string;
@@ -626,23 +819,36 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const runtime = this.requireRuntime();
     const state = await this.indexState(runtime);
     if (!state.ready || state.generation === null) {
-      throw new Error("Operon index is still initializing or is not in a verified idle state.");
+      throw new Error(
+        "Operon index is still initializing or is not in a verified idle state.",
+      );
     }
     const signature = this.currentSettingsSignature(runtime);
     const task = runtime.indexer.getTask(operonId);
-    const normalized = task ? this.normalizeRuntimeTask(runtime, task, includeProperties) : null;
+    const normalized = task
+      ? this.normalizeRuntimeTask(runtime, task, includeProperties)
+      : null;
     const after = await this.indexState(runtime);
     if (
       !after.ready ||
       after.generation !== state.generation ||
       this.currentSettingsSignature(runtime) !== signature
     ) {
-      throw new Error("Operon generation or settings changed during the read; retry after the index settles.");
+      throw new Error(
+        "Operon generation or settings changed during the read; retry after the index settles.",
+      );
     }
-    return { task: normalized, generation: state.generation, settingsSignature: signature };
+    return {
+      task: normalized,
+      generation: state.generation,
+      settingsSignature: signature,
+    };
   }
 
-  private async oneTaskAfterMutation(operonId: string, includeProperties: boolean): Promise<{
+  private async oneTaskAfterMutation(
+    operonId: string,
+    includeProperties: boolean,
+  ): Promise<{
     task: OperonBridgeTask | null;
     generation: number;
     settingsSignature: string;
@@ -661,7 +867,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       : new Error("Operon did not reach a verified idle state after mutation.");
   }
 
-  private async validationPayload(includeProperties = false): Promise<Record<string, unknown>> {
+  private async validationPayload(
+    includeProperties = false,
+  ): Promise<Record<string, unknown>> {
     const runtime = this.requireRuntime();
     const snapshot = await this.allTasksSnapshot(includeProperties);
     const tasks = snapshot.tasks;
@@ -738,12 +946,15 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private bodyRecord(req: any): Record<string, unknown> {
     const body = req?.body;
     return body && typeof body === "object" && !Array.isArray(body)
-      ? body as Record<string, unknown>
+      ? (body as Record<string, unknown>)
       : {};
   }
 
   private mutationOperationId(): string {
-    return globalThis.crypto?.randomUUID?.() ?? `operon-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return (
+      globalThis.crypto?.randomUUID?.() ??
+      `operon-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    );
   }
 
   private cacheMutation(
@@ -765,7 +976,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const cached = this.mutationResults.get(idempotencyKey);
     if (!cached) return null;
     if (cached.signature === signature) {
-      return { httpStatus: 200, payload: { ...cached.payload, replayed: true } };
+      return {
+        httpStatus: 200,
+        payload: { ...cached.payload, replayed: true },
+      };
     }
     return {
       httpStatus: 409,
@@ -780,7 +994,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         after: null,
         error: {
           code: "idempotency_key_reused",
-          message: "idempotencyKey was already used for a different mutation request.",
+          message:
+            "idempotencyKey was already used for a different mutation request.",
         },
         retryable: false,
         source: "operon-live",
@@ -789,150 +1004,315 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
-  private requireMutationRuntime(capability: "adopt" | "create" | "update" | "transition" | "convert"): OperonRuntime {
+  private requireMutationRuntime(
+    capability:
+      | "adopt"
+      | "create"
+      | "update"
+      | "transition"
+      | "convert"
+      | "relocate",
+  ): OperonRuntime {
+    if (!this.settings.mutationsEnabled) {
+      throw new Error(
+        "Operon Bridge mutations are disabled in plugin settings.",
+      );
+    }
     const runtime = this.requireRuntime();
     const available = runtime.api?.capabilities();
     if (!runtime.api || !available?.ready || !available[capability]) {
-      throw new Error(`Operon Public API v1 capability is unavailable: ${capability}.`);
+      throw new Error(
+        `Operon Public API v1 capability is unavailable: ${capability}.`,
+      );
     }
     return runtime;
   }
 
-	private async executeAdoptMutation(
-		body: Record<string, unknown>,
-	): Promise<{ httpStatus: number; payload: Record<string, unknown> }> {
-		const idempotencyKey = String(body.idempotencyKey ?? "").trim();
-		if (!idempotencyKey) {
-			return { httpStatus: 400, payload: errorPayload(new Error("idempotencyKey is required."), "validation_error") };
-		}
-		const requested = body.adoption && typeof body.adoption === "object" && !Array.isArray(body.adoption)
-			? body.adoption as Record<string, unknown>
-			: {};
-		const targetPath = String(requested.targetPath ?? "").trim();
-		const line = Number(requested.line);
-		const expectedLine = String(requested.expectedLine ?? "");
-		if (!targetPath || !Number.isInteger(line) || line < 1 || !expectedLine || /[\r\n]/u.test(expectedLine)) {
-			return {
-				httpStatus: 400,
-				payload: errorPayload(new Error("adoption requires targetPath, a positive one-based line, and one exact expectedLine."), "validation_error"),
-			};
-		}
-		const signature = stableJson({ capability: "adopt", dryRun: body.dryRun !== false, requested });
-		const cached = this.cachedMutationResult(idempotencyKey, signature, requested);
-		if (cached) return cached;
-		const runtime = this.requireMutationRuntime("adopt");
-		const file = this.app.vault.getAbstractFileByPath(targetPath);
-		if (!(file instanceof TFile)) {
-			return { httpStatus: 404, payload: errorPayload(new Error(`Markdown source file not found: ${targetPath}`), "not_found") };
-		}
-		const content = await this.app.vault.cachedRead(file);
-		const currentLine = content.split("\n")[line - 1];
-		const normalizedCurrentLine = currentLine?.endsWith("\r") ? currentLine.slice(0, -1) : currentLine;
-		const operationId = this.mutationOperationId();
-		if (normalizedCurrentLine !== expectedLine) {
-			const payload = {
-				ok: false,
-				contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-				operationId,
-				idempotencyKey,
-				status: "conflict",
-				before: null,
-				requested,
-				after: null,
-				error: { code: "source_line_conflict", message: "expectedLine does not match the live source line." },
-				retryable: true,
-				source: "operon-live",
-				stale: false,
-			};
-			this.cacheMutation(idempotencyKey, signature, payload);
-			return { httpStatus: 409, payload };
-		}
-		if (body.dryRun !== false) {
-			const payload = {
-				ok: true,
-				contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-				operationId,
-				idempotencyKey,
-				status: "planned",
-				before: null,
-				requested,
-				after: null,
-				source: "operon-live",
-				stale: false,
-			};
-			this.cacheMutation(idempotencyKey, signature, payload);
-			return { httpStatus: 200, payload };
-		}
+  private async executeAdoptMutation(
+    body: Record<string, unknown>,
+  ): Promise<{ httpStatus: number; payload: Record<string, unknown> }> {
+    const idempotencyKey = String(body.idempotencyKey ?? "").trim();
+    if (!idempotencyKey) {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(
+          new Error("idempotencyKey is required."),
+          "validation_error",
+        ),
+      };
+    }
+    const requested =
+      body.adoption &&
+      typeof body.adoption === "object" &&
+      !Array.isArray(body.adoption)
+        ? (body.adoption as Record<string, unknown>)
+        : {};
+    const targetPath = String(requested.targetPath ?? "").trim();
+    const line = Number(requested.line);
+    const expectedLine = String(requested.expectedLine ?? "");
+    if (
+      !targetPath ||
+      !Number.isInteger(line) ||
+      line < 1 ||
+      !expectedLine ||
+      /[\r\n]/u.test(expectedLine)
+    ) {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(
+          new Error(
+            "adoption requires targetPath, a positive one-based line, and one exact expectedLine.",
+          ),
+          "validation_error",
+        ),
+      };
+    }
+    const signature = stableJson({
+      capability: "adopt",
+      dryRun: body.dryRun !== false,
+      requested,
+    });
+    const cached = this.cachedMutationResult(
+      idempotencyKey,
+      signature,
+      requested,
+    );
+    if (cached) return cached;
+    const runtime = this.requireMutationRuntime("adopt");
+    const file = this.app.vault.getAbstractFileByPath(targetPath);
+    if (!(file instanceof TFile)) {
+      return {
+        httpStatus: 404,
+        payload: errorPayload(
+          new Error(`Markdown source file not found: ${targetPath}`),
+          "not_found",
+        ),
+      };
+    }
+    const content = await this.app.vault.cachedRead(file);
+    const currentLine = content.split("\n")[line - 1];
+    const normalizedCurrentLine = currentLine?.endsWith("\r")
+      ? currentLine.slice(0, -1)
+      : currentLine;
+    const operationId = this.mutationOperationId();
+    if (normalizedCurrentLine !== expectedLine) {
+      const payload = {
+        ok: false,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: "conflict",
+        before: null,
+        requested,
+        after: null,
+        error: {
+          code: "source_line_conflict",
+          message: "expectedLine does not match the live source line.",
+        },
+        retryable: true,
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: 409, payload };
+    }
+    if (body.dryRun !== false) {
+      const payload = {
+        ok: true,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: "planned",
+        before: null,
+        requested,
+        after: null,
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: 200, payload };
+    }
 
-		const result = await runtime.api!.adoptInlineTask(requested);
-		if (!result.ok || !result.operonId) {
-			const conflict = result.code === "conflict";
-			const payload = {
-				ok: false,
-				contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-				operationId,
-				idempotencyKey,
-				status: conflict ? "conflict" : "rejected",
-				before: null,
-				requested,
-				after: null,
-				error: { code: result.code, message: result.message ?? "Operon rejected checkbox adoption." },
-				retryable: conflict || result.code === "not-ready" || result.code === "failed",
-				source: "operon-live",
-				stale: false,
-			};
-			this.cacheMutation(idempotencyKey, signature, payload);
-			return { httpStatus: conflict ? 409 : 422, payload };
-		}
+    const result = await runtime.api!.adoptInlineTask(requested);
+    if (!result.ok || !result.operonId) {
+      const conflict = result.code === "conflict";
+      const payload = {
+        ok: false,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: conflict ? "conflict" : "rejected",
+        before: null,
+        requested,
+        after: null,
+        error: {
+          code: result.code,
+          message: result.message ?? "Operon rejected checkbox adoption.",
+        },
+        retryable:
+          conflict || result.code === "not-ready" || result.code === "failed",
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: conflict ? 409 : 422, payload };
+    }
 
-		let afterRead: Awaited<ReturnType<OptimikeOperonBridgePlugin["oneTask"]>>;
-		try {
-			afterRead = await this.oneTaskAfterMutation(result.operonId, true);
-		} catch (error) {
-			const payload = {
-				ok: false,
-				contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-				operationId,
-				idempotencyKey,
-				status: "failed",
-				before: null,
-				requested,
-				after: null,
-				error: {
-					code: "outcome_unverified",
-					message: `Operon adopted ${result.operonId}, but the final indexed state could not be proven: ${error instanceof Error ? error.message : String(error)}`,
-				},
-				retryable: false,
-				source: "operon-live",
-				stale: false,
-			};
-			this.cacheMutation(idempotencyKey, signature, payload);
-			return { httpStatus: 500, payload };
-		}
-		const after = afterRead.task;
-		const locationMatches = after?.path === targetPath && after.line === line;
-		const payload = {
-			ok: Boolean(after && locationMatches),
-			contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-			operationId,
-			idempotencyKey,
-			status: after && locationMatches ? "applied" : "failed",
-			before: null,
-			requested,
-			after,
-			...(!after || !locationMatches ? {
-				error: { code: "outcome_mismatch", message: "The adopted task was not found at the requested source line." },
-				retryable: false,
-			} : {}),
-			source: "operon-live",
-			stale: false,
-		};
-		this.cacheMutation(idempotencyKey, signature, payload);
-		return { httpStatus: after && locationMatches ? 200 : 500, payload };
-	}
+    let afterRead: Awaited<ReturnType<OptimikeOperonBridgePlugin["oneTask"]>>;
+    try {
+      afterRead = await this.oneTaskAfterMutation(result.operonId, true);
+    } catch (error) {
+      const payload = {
+        ok: false,
+        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+        operationId,
+        idempotencyKey,
+        status: "failed",
+        before: null,
+        requested,
+        after: null,
+        error: {
+          code: "outcome_unverified",
+          message: `Operon adopted ${result.operonId}, but the final indexed state could not be proven: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        retryable: false,
+        source: "operon-live",
+        stale: false,
+      };
+      this.cacheMutation(idempotencyKey, signature, payload);
+      return { httpStatus: 500, payload };
+    }
+    const after = afterRead.task;
+    const locationMatches = after?.path === targetPath && after.line === line;
+    const payload = {
+      ok: Boolean(after && locationMatches),
+      contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+      operationId,
+      idempotencyKey,
+      status: after && locationMatches ? "applied" : "failed",
+      before: null,
+      requested,
+      after,
+      ...(!after || !locationMatches
+        ? {
+            error: {
+              code: "outcome_mismatch",
+              message:
+                "The adopted task was not found at the requested source line.",
+            },
+            retryable: false,
+          }
+        : {}),
+      source: "operon-live",
+      stale: false,
+    };
+    this.cacheMutation(idempotencyKey, signature, payload);
+    return { httpStatus: after && locationMatches ? 200 : 500, payload };
+  }
+
+  private mutationOutcomeMismatch(
+    capability: "create" | "update" | "transition" | "convert" | "relocate",
+    after: OperonBridgeTask | null,
+    requested: Record<string, unknown>,
+  ): string | null {
+    if (!after) return "The final indexed task is missing.";
+    if (capability === "create") {
+      if (
+        typeof requested.description === "string" &&
+        after.description !== requested.description.trim()
+      ) {
+        return "Created task description does not match the request.";
+      }
+      if (
+        (requested.source === "inline" || requested.source === "file") &&
+        after.source !== requested.source
+      ) {
+        return "Created task source does not match the request.";
+      }
+    }
+    if (capability === "update" || capability === "create") {
+      if (
+        typeof requested.description === "string" &&
+        after.description !== requested.description.trim()
+      ) {
+        return "Task description does not match the request.";
+      }
+      if (Array.isArray(requested.tags)) {
+        const expectedTags = requested.tags
+          .map(String)
+          .map((tag) => tag.replace(/^#/u, "").trim())
+          .filter(Boolean)
+          .sort();
+        const actualTags = [...after.tags].sort();
+        if (stableJson(actualTags) !== stableJson(expectedTags))
+          return "Task tags do not match the request.";
+      }
+      const requestedFields =
+        requested.fields &&
+        typeof requested.fields === "object" &&
+        !Array.isArray(requested.fields)
+          ? (requested.fields as Record<string, unknown>)
+          : {};
+      for (const [key, value] of Object.entries(requestedFields)) {
+        if (key === "status") continue;
+        if (after.fields[key] !== String(value))
+          return `Managed field '${key}' does not match the request.`;
+      }
+      const requestedProperties =
+        requested.properties &&
+        typeof requested.properties === "object" &&
+        !Array.isArray(requested.properties)
+          ? (requested.properties as Record<string, unknown>)
+          : {};
+      for (const [key, value] of Object.entries(requestedProperties)) {
+        if (stableJson(after.properties?.[key]) !== stableJson(value)) {
+          return `Unmanaged property '${key}' does not match the request.`;
+        }
+      }
+    }
+    if (capability === "transition" || capability === "create") {
+      if (
+        typeof requested.status === "string" &&
+        after.status !== requested.status.trim()
+      ) {
+        return "Task status does not match the requested status value.";
+      }
+      if (
+        typeof requested.statusId === "string" &&
+        after.statusId !== requested.statusId.trim()
+      ) {
+        return "Task status does not match the requested stable status id.";
+      }
+    }
+    if (capability === "convert") {
+      if (
+        (requested.target === "inline" || requested.target === "file") &&
+        after.source !== requested.target
+      ) {
+        return "Converted task source does not match the request.";
+      }
+      if (
+        requested.target === "inline" &&
+        typeof requested.targetPath === "string" &&
+        after.path !== requested.targetPath.trim()
+      ) {
+        return "Converted inline task path does not match targetPath.";
+      }
+    }
+    if (capability === "relocate") {
+      if (
+        after.source !== "inline" ||
+        typeof requested.targetPath !== "string" ||
+        after.path !== requested.targetPath.trim()
+      ) {
+        return "Relocated task was not found at targetPath.";
+      }
+    }
+    return null;
+  }
 
   private async executeExistingMutation(
-    capability: "update" | "transition" | "convert",
+    capability: "update" | "transition" | "convert" | "relocate",
     operonId: string,
     body: Record<string, unknown>,
     requested: Record<string, unknown>,
@@ -940,7 +1320,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   ): Promise<{ httpStatus: number; payload: Record<string, unknown> }> {
     const idempotencyKey = String(body.idempotencyKey ?? "").trim();
     if (!idempotencyKey) {
-      return { httpStatus: 400, payload: errorPayload(new Error("idempotencyKey is required."), "validation_error") };
+      return {
+        httpStatus: 400,
+        payload: errorPayload(
+          new Error("idempotencyKey is required."),
+          "validation_error",
+        ),
+      };
     }
     const signature = stableJson({
       capability,
@@ -949,17 +1335,33 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       dryRun: body.dryRun !== false,
       requested,
     });
-    const cached = this.cachedMutationResult(idempotencyKey, signature, requested);
+    const cached = this.cachedMutationResult(
+      idempotencyKey,
+      signature,
+      requested,
+    );
     if (cached) return cached;
 
     const runtime = this.requireMutationRuntime(capability);
     const beforeRead = await this.oneTask(operonId, true);
     if (!beforeRead.task) {
-      return { httpStatus: 404, payload: errorPayload(new Error(`Operon task not found: ${operonId}`), "not_found") };
+      return {
+        httpStatus: 404,
+        payload: errorPayload(
+          new Error(`Operon task not found: ${operonId}`),
+          "not_found",
+        ),
+      };
     }
     const expectedRevision = String(body.expectedRevision ?? "").trim();
     if (!expectedRevision) {
-      return { httpStatus: 400, payload: errorPayload(new Error("expectedRevision is required."), "validation_error") };
+      return {
+        httpStatus: 400,
+        payload: errorPayload(
+          new Error("expectedRevision is required."),
+          "validation_error",
+        ),
+      };
     }
     const operationId = this.mutationOperationId();
     if (expectedRevision !== beforeRead.task.revision) {
@@ -972,7 +1374,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         before: beforeRead.task,
         requested,
         after: beforeRead.task,
-        error: { code: "revision_conflict", message: "expectedRevision does not match the live task revision." },
+        error: {
+          code: "revision_conflict",
+          message: "expectedRevision does not match the live task revision.",
+        },
         retryable: true,
         source: "operon-live",
         stale: false,
@@ -1022,22 +1427,33 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       this.cacheMutation(idempotencyKey, signature, payload);
       return { httpStatus: 500, payload };
     }
+    const mismatch = result.ok
+      ? this.mutationOutcomeMismatch(capability, afterRead.task, requested)
+      : null;
+    const applied = result.ok && !mismatch;
     const payload = {
-      ok: result.ok,
+      ok: applied,
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
       operationId,
       idempotencyKey,
-      status: result.ok ? "applied" : "rejected",
+      status: applied ? "applied" : mismatch ? "failed" : "rejected",
       before: beforeRead.task,
       requested,
       after: afterRead.task,
-      error: result.ok ? undefined : { code: result.code, message: result.message ?? "Operon rejected the mutation." },
+      error: mismatch
+        ? { code: "outcome_mismatch", message: mismatch }
+        : result.ok
+          ? undefined
+          : {
+              code: result.code,
+              message: result.message ?? "Operon rejected the mutation.",
+            },
       retryable: result.code === "not-ready" || result.code === "failed",
       source: "operon-live",
       stale: false,
     };
     this.cacheMutation(idempotencyKey, signature, payload);
-    return { httpStatus: result.ok ? 200 : 422, payload };
+    return { httpStatus: applied ? 200 : mismatch ? 500 : 422, payload };
   }
 
   private async executeCreateMutation(
@@ -1045,17 +1461,28 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   ): Promise<{ httpStatus: number; payload: Record<string, unknown> }> {
     const idempotencyKey = String(body.idempotencyKey ?? "").trim();
     if (!idempotencyKey) {
-      return { httpStatus: 400, payload: errorPayload(new Error("idempotencyKey is required."), "validation_error") };
+      return {
+        httpStatus: 400,
+        payload: errorPayload(
+          new Error("idempotencyKey is required."),
+          "validation_error",
+        ),
+      };
     }
-    const requested = body.task && typeof body.task === "object" && !Array.isArray(body.task)
-      ? body.task as Record<string, unknown>
-      : {};
+    const requested =
+      body.task && typeof body.task === "object" && !Array.isArray(body.task)
+        ? (body.task as Record<string, unknown>)
+        : {};
     const signature = stableJson({
       capability: "create",
       dryRun: body.dryRun !== false,
       requested,
     });
-    const cached = this.cachedMutationResult(idempotencyKey, signature, requested);
+    const cached = this.cachedMutationResult(
+      idempotencyKey,
+      signature,
+      requested,
+    );
     if (cached) return cached;
     const runtime = this.requireMutationRuntime("create");
     const operationId = this.mutationOperationId();
@@ -1076,7 +1503,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       return { httpStatus: 200, payload };
     }
     const result = await runtime.api!.createTask(requested);
-    let afterRead: Awaited<ReturnType<OptimikeOperonBridgePlugin["oneTask"]>> | null = null;
+    let afterRead: Awaited<
+      ReturnType<OptimikeOperonBridgePlugin["oneTask"]>
+    > | null = null;
     if (result.operonId) {
       try {
         afterRead = await this.oneTaskAfterMutation(result.operonId, true);
@@ -1102,22 +1531,37 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         return { httpStatus: 500, payload };
       }
     }
+    const mismatch = result.ok
+      ? this.mutationOutcomeMismatch(
+          "create",
+          afterRead?.task ?? null,
+          requested,
+        )
+      : null;
+    const applied = result.ok && !mismatch;
     const payload = {
-      ok: result.ok,
+      ok: applied,
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
       operationId,
       idempotencyKey,
-      status: result.ok ? "applied" : "rejected",
+      status: applied ? "applied" : mismatch ? "failed" : "rejected",
       before: null,
       requested,
       after: afterRead?.task ?? null,
-      error: result.ok ? undefined : { code: result.code, message: result.message ?? "Operon rejected task creation." },
+      error: mismatch
+        ? { code: "outcome_mismatch", message: mismatch }
+        : result.ok
+          ? undefined
+          : {
+              code: result.code,
+              message: result.message ?? "Operon rejected task creation.",
+            },
       retryable: result.code === "not-ready" || result.code === "failed",
       source: "operon-live",
       stale: false,
     };
     this.cacheMutation(idempotencyKey, signature, payload);
-    return { httpStatus: result.ok ? 200 : 422, payload };
+    return { httpStatus: applied ? 200 : mismatch ? 500 : 422, payload };
   }
 
   private tryMountRestExtension(): void {
@@ -1139,23 +1583,33 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
-	api.addRoute(`${REST_PREFIX}/configuration`).get(async (_req: any, res: any) => {
-		try {
-			const runtime = this.requireRuntime();
-			sendJson(res, 200, this.configurationPayload(runtime));
-		} catch (error) {
-			sendJson(res, 503, errorPayload(error, "operon_configuration_unavailable"));
-		}
-	});
+    api
+      .addRoute(`${REST_PREFIX}/configuration`)
+      .get(async (_req: any, res: any) => {
+        try {
+          const runtime = this.requireRuntime();
+          sendJson(res, 200, this.configurationPayload(runtime));
+        } catch (error) {
+          sendJson(
+            res,
+            503,
+            errorPayload(error, "operon_configuration_unavailable"),
+          );
+        }
+      });
 
     api.addRoute(`${REST_PREFIX}/tasks`).get(async (req: any, res: any) => {
       try {
         const query: OperonTaskQuery = {
           cursor: String(readQueryValue(req, "cursor") ?? "0"),
           limit: numberValue(readQueryValue(req, "limit")),
-          includeProperties: boolValue(readQueryValue(req, "includeProperties")),
+          includeProperties: boolValue(
+            readQueryValue(req, "includeProperties"),
+          ),
         };
-        const snapshot = await this.allTasksSnapshot(Boolean(query.includeProperties));
+        const snapshot = await this.allTasksSnapshot(
+          Boolean(query.includeProperties),
+        );
         const result = queryTasks(snapshot.tasks, query);
         sendJson(res, 200, {
           ok: true,
@@ -1172,52 +1626,174 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
-    api.addRoute(`${REST_PREFIX}/tasks/:operonId`).get(async (req: any, res: any) => {
-      try {
-        const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
-        if (!operonId) {
-          sendJson(res, 400, errorPayload(new Error("operonId is required."), "validation_error"));
-          return;
+    api
+      .addRoute(`${REST_PREFIX}/tasks/:operonId`)
+      .get(async (req: any, res: any) => {
+        try {
+          const operonId = decodeURIComponent(
+            String(req?.params?.operonId ?? ""),
+          ).trim();
+          if (!operonId) {
+            sendJson(
+              res,
+              400,
+              errorPayload(
+                new Error("operonId is required."),
+                "validation_error",
+              ),
+            );
+            return;
+          }
+          const result = await this.oneTask(
+            operonId,
+            boolValue(readQueryValue(req, "includeProperties")),
+          );
+          if (!result.task) {
+            sendJson(
+              res,
+              404,
+              errorPayload(
+                new Error(`Operon task not found: ${operonId}`),
+                "not_found",
+              ),
+            );
+            return;
+          }
+          sendJson(res, 200, {
+            ok: true,
+            contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+            source: "operon-live",
+            stale: false,
+            generation: result.generation,
+            settingsSignature: result.settingsSignature,
+            task: result.task,
+            limitations: this.limitations(this.getOperonRuntime(), true),
+          });
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "operon_unavailable"));
         }
-        const result = await this.oneTask(operonId, boolValue(readQueryValue(req, "includeProperties")));
-        if (!result.task) {
-          sendJson(res, 404, errorPayload(new Error(`Operon task not found: ${operonId}`), "not_found"));
-          return;
-        }
-        sendJson(res, 200, {
-          ok: true,
-          contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-          source: "operon-live",
-          stale: false,
-          generation: result.generation,
-          settingsSignature: result.settingsSignature,
-          task: result.task,
-          limitations: this.limitations(this.getOperonRuntime(), true),
-        });
-      } catch (error) {
-        sendJson(res, 503, errorPayload(error, "operon_unavailable"));
-      }
-    });
+      });
 
-    api.addRoute(`${REST_PREFIX}/tasks/query`).post(async (req: any, res: any) => {
-      try {
-        const query = sanitizeQuery(req?.body ?? {});
-        const snapshot = await this.allTasksSnapshot(Boolean(query.includeProperties));
-        const result = queryTasks(snapshot.tasks, query);
-        sendJson(res, 200, {
-          ok: true,
-          contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-          source: "operon-live",
-          stale: false,
-          generation: snapshot.generation,
-          settingsSignature: snapshot.settingsSignature,
-          ...result,
-          limitations: this.limitations(this.getOperonRuntime(), true),
-        });
-      } catch (error) {
-        sendJson(res, 400, errorPayload(error, "query_error"));
-      }
-    });
+    api
+      .addRoute(`${REST_PREFIX}/tasks/query`)
+      .post(async (req: any, res: any) => {
+        try {
+          const query = sanitizeQuery(req?.body ?? {});
+          const snapshot = await this.allTasksSnapshot(
+            Boolean(query.includeProperties),
+          );
+          const result = queryTasks(snapshot.tasks, query);
+          sendJson(res, 200, {
+            ok: true,
+            contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+            source: "operon-live",
+            stale: false,
+            generation: snapshot.generation,
+            settingsSignature: snapshot.settingsSignature,
+            ...result,
+            limitations: this.limitations(this.getOperonRuntime(), true),
+          });
+        } catch (error) {
+          sendJson(res, 400, errorPayload(error, "query_error"));
+        }
+      });
+
+    api
+      .addRoute(`${REST_PREFIX}/tasks/filter`)
+      .post(async (req: any, res: any) => {
+        try {
+          const body = this.bodyRecord(req);
+          const filterSetId = String(body.filterSetId ?? "").trim();
+          if (!filterSetId) {
+            sendJson(
+              res,
+              400,
+              errorPayload(
+                new Error("filterSetId is required."),
+                "validation_error",
+              ),
+            );
+            return;
+          }
+          const runtime = this.requireRuntime();
+          const publicCapabilities = runtime.api?.capabilities();
+          if (
+            !runtime.api ||
+            !publicCapabilities?.ready ||
+            !publicCapabilities.filterQuery
+          ) {
+            sendJson(
+              res,
+              503,
+              errorPayload(
+                new Error(
+                  "Operon saved-filter query capability is unavailable.",
+                ),
+                "mutation_unavailable",
+              ),
+            );
+            return;
+          }
+          const queryGeneration = runtime.indexer.getGeneration();
+          const nativeResult = await runtime.api.queryFilterSet({
+            filterSetId,
+            ...(typeof body.scopePath === "string" && body.scopePath.trim()
+              ? { scopePath: body.scopePath.trim() }
+              : {}),
+          });
+          if (!nativeResult.ok) {
+            sendJson(
+              res,
+              nativeResult.code === "not-found" ? 404 : 422,
+              errorPayload(
+                new Error(nativeResult.message ?? nativeResult.code),
+                nativeResult.code,
+              ),
+            );
+            return;
+          }
+          const snapshot = await this.allTasksSnapshot(
+            boolValue(body.includeProperties),
+          );
+          if (snapshot.generation !== queryGeneration) {
+            throw new Error(
+              "Operon generation changed while evaluating the saved filter; retry.",
+            );
+          }
+          const taskById = new Map(
+            snapshot.tasks.map((task) => [task.operonId, task]),
+          );
+          const orderedTasks = nativeResult.operonIds
+            .map((operonId) => taskById.get(operonId))
+            .filter((task): task is OperonBridgeTask => Boolean(task));
+          const cursor = Math.max(0, Math.trunc(numberValue(body.cursor) ?? 0));
+          const limit = Math.min(
+            500,
+            Math.max(1, Math.trunc(numberValue(body.limit) ?? 100)),
+          );
+          const tasks = orderedTasks.slice(cursor, cursor + limit);
+          const nextCursor = cursor + tasks.length;
+          sendJson(res, 200, {
+            ok: true,
+            contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+            source: "operon-live",
+            stale: false,
+            generation: snapshot.generation,
+            settingsSignature: snapshot.settingsSignature,
+            total: orderedTasks.length,
+            count: tasks.length,
+            cursor: String(cursor),
+            ...(nextCursor < orderedTasks.length
+              ? { nextCursor: String(nextCursor) }
+              : {}),
+            hasMore: nextCursor < orderedTasks.length,
+            tasks,
+            limitations: this.limitations(runtime, true),
+          });
+        } catch (error) {
+          sendJson(res, 400, errorPayload(error, "filter_query_error"));
+        }
+      });
 
     api.addRoute(`${REST_PREFIX}/tasks`).post(async (req: any, res: any) => {
       try {
@@ -1228,85 +1804,136 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
-	api.addRoute(`${REST_PREFIX}/tasks/adopt`).post(async (req: any, res: any) => {
-		try {
-			const result = await this.executeAdoptMutation(this.bodyRecord(req));
-			sendJson(res, result.httpStatus, result.payload);
-		} catch (error) {
-			sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
-		}
-	});
+    api
+      .addRoute(`${REST_PREFIX}/tasks/adopt`)
+      .post(async (req: any, res: any) => {
+        try {
+          const result = await this.executeAdoptMutation(this.bodyRecord(req));
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+        }
+      });
 
-    api.addRoute(`${REST_PREFIX}/tasks/:operonId/update`).post(async (req: any, res: any) => {
-      try {
-        const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
-        const body = this.bodyRecord(req);
-        const requested = body.patch && typeof body.patch === "object" && !Array.isArray(body.patch)
-          ? body.patch as Record<string, unknown>
-          : {};
-        const result = await this.executeExistingMutation(
-          "update",
-          operonId,
-          body,
-          requested,
-          operonApi => operonApi.updateTask(operonId, requested),
-        );
-        sendJson(res, result.httpStatus, result.payload);
-      } catch (error) {
-        sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
-      }
-    });
+    api
+      .addRoute(`${REST_PREFIX}/tasks/:operonId/update`)
+      .post(async (req: any, res: any) => {
+        try {
+          const operonId = decodeURIComponent(
+            String(req?.params?.operonId ?? ""),
+          ).trim();
+          const body = this.bodyRecord(req);
+          const requested =
+            body.patch &&
+            typeof body.patch === "object" &&
+            !Array.isArray(body.patch)
+              ? (body.patch as Record<string, unknown>)
+              : {};
+          const result = await this.executeExistingMutation(
+            "update",
+            operonId,
+            body,
+            requested,
+            (operonApi) => operonApi.updateTask(operonId, requested),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+        }
+      });
 
-    api.addRoute(`${REST_PREFIX}/tasks/:operonId/transition`).post(async (req: any, res: any) => {
-      try {
-        const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
-        const body = this.bodyRecord(req);
-		const requested = {
-			...(String(body.status ?? "").trim() ? { status: String(body.status).trim() } : {}),
-			...(String(body.statusId ?? "").trim() ? { statusId: String(body.statusId).trim() } : {}),
-		};
-        const result = await this.executeExistingMutation(
-          "transition",
-          operonId,
-          body,
-          requested,
-          operonApi => operonApi.transitionTask(operonId, requested),
-        );
-        sendJson(res, result.httpStatus, result.payload);
-      } catch (error) {
-        sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
-      }
-    });
+    api
+      .addRoute(`${REST_PREFIX}/tasks/:operonId/transition`)
+      .post(async (req: any, res: any) => {
+        try {
+          const operonId = decodeURIComponent(
+            String(req?.params?.operonId ?? ""),
+          ).trim();
+          const body = this.bodyRecord(req);
+          const requested = {
+            ...(String(body.status ?? "").trim()
+              ? { status: String(body.status).trim() }
+              : {}),
+            ...(String(body.statusId ?? "").trim()
+              ? { statusId: String(body.statusId).trim() }
+              : {}),
+          };
+          const result = await this.executeExistingMutation(
+            "transition",
+            operonId,
+            body,
+            requested,
+            (operonApi) => operonApi.transitionTask(operonId, requested),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+        }
+      });
 
-    api.addRoute(`${REST_PREFIX}/tasks/:operonId/convert`).post(async (req: any, res: any) => {
-      try {
-        const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
-        const body = this.bodyRecord(req);
-        const requested = {
-          target: String(body.target ?? "").trim(),
-          ...(body.fileTemplateId ? { fileTemplateId: String(body.fileTemplateId) } : {}),
-          ...(body.targetPath ? { targetPath: String(body.targetPath) } : {}),
-          ...(body.targetFolder ? { targetFolder: String(body.targetFolder) } : {}),
-        };
-        const result = await this.executeExistingMutation(
-          "convert",
-          operonId,
-          body,
-          requested,
-          operonApi => operonApi.convertTask(operonId, requested),
-        );
-        sendJson(res, result.httpStatus, result.payload);
-      } catch (error) {
-        sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
-      }
-    });
+    api
+      .addRoute(`${REST_PREFIX}/tasks/:operonId/convert`)
+      .post(async (req: any, res: any) => {
+        try {
+          const operonId = decodeURIComponent(
+            String(req?.params?.operonId ?? ""),
+          ).trim();
+          const body = this.bodyRecord(req);
+          const requested = {
+            target: String(body.target ?? "").trim(),
+            ...(body.fileTemplateId
+              ? { fileTemplateId: String(body.fileTemplateId) }
+              : {}),
+            ...(body.targetPath ? { targetPath: String(body.targetPath) } : {}),
+            ...(body.targetFolder
+              ? { targetFolder: String(body.targetFolder) }
+              : {}),
+          };
+          const result = await this.executeExistingMutation(
+            "convert",
+            operonId,
+            body,
+            requested,
+            (operonApi) => operonApi.convertTask(operonId, requested),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+        }
+      });
+
+    api
+      .addRoute(`${REST_PREFIX}/tasks/:operonId/relocate`)
+      .post(async (req: any, res: any) => {
+        try {
+          const operonId = decodeURIComponent(
+            String(req?.params?.operonId ?? ""),
+          ).trim();
+          const body = this.bodyRecord(req);
+          const requested = {
+            targetPath: String(body.targetPath ?? "").trim(),
+          };
+          const result = await this.executeExistingMutation(
+            "relocate",
+            operonId,
+            body,
+            requested,
+            (operonApi) => operonApi.relocateTask(operonId, requested),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+        }
+      });
 
     api.addRoute(`${REST_PREFIX}/validate`).get(async (req: any, res: any) => {
       try {
         sendJson(
           res,
           200,
-          await this.validationPayload(boolValue(readQueryValue(req, "includeProperties"))),
+          await this.validationPayload(
+            boolValue(readQueryValue(req, "includeProperties")),
+          ),
         );
       } catch (error) {
         sendJson(res, 503, errorPayload(error, "operon_unavailable"));
@@ -1317,7 +1944,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       try {
         api.unregister?.();
       } catch (error) {
-        console.warn(`[${EXTENSION_ID}] Failed to unregister Local REST API routes.`, error);
+        console.warn(
+          `[${EXTENSION_ID}] Failed to unregister Local REST API routes.`,
+          error,
+        );
       }
     };
     this.clearMountTimers();

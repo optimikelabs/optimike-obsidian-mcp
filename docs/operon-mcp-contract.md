@@ -2,19 +2,21 @@
 
 ## Surface
 
-The main MCP server registers eleven Operon tools:
+The main MCP server registers thirteen Operon tools:
 
 - `operon_status`
 - `operon_get_configuration`
 - `operon_list_tasks`
 - `operon_get_task`
 - `operon_query_tasks`
+- `operon_query_saved_filter`
 - `operon_validate`
 - `operon_adopt_task`
 - `operon_create_task`
 - `operon_update_task`
 - `operon_transition_task`
 - `operon_convert_task`
+- `operon_relocate_task`
 
 There is no second MCP server.
 
@@ -28,6 +30,8 @@ Every read response declares `source`, `stale`, snapshot time/age, Operon and Br
 - `operon-cache`: last validated SQLite snapshot; always stale and never proof of a mutation.
 
 SQLite cache state lives in `operon_task_snapshot` and `operon_snapshot_meta`. Malformed payloads, incomplete pagination, generation drift, duplicate IDs, incompatible versions, unready index, or P0 validation never replace the last known-good snapshot.
+
+`operon_query_saved_filter` is intentionally live-only: it delegates to Operon's native filter evaluator and never pretends that a headless parser can reproduce plugin semantics.
 
 The cached metadata also stores the configuration used for that snapshot. Tasks project `statusId` and `pipelineId`, and queries accept `statusIds` / `pipelineIds`. Agents must prefer those stable IDs and canonical key names from `operon_get_configuration`; visible French or English labels are presentation values, not durable API identifiers.
 
@@ -45,12 +49,14 @@ Common controls:
 - the MCP refreshes its SQLite snapshot;
 - no mutation is available from a stale/headless snapshot.
 
-Durable results are stored in `operon_mutation_journal`. Reusing an idempotency key with the same canonical request returns the original `operationId` and result without calling the Bridge again. Reusing it for a different request is rejected as `CONFLICT`. Revision mismatch returns `conflict` without writing.
+Durable results are stored in `operon_mutation_journal`. A reservation is committed before the Bridge call. Reusing an idempotency key with the same completed request returns the original `operationId` and result without calling the Bridge again. A restart or timeout that leaves the reservation `in_progress` is treated as an uncertain outcome and blocks blind retry. Reusing a key for a different request is rejected as `CONFLICT`. Revision mismatch returns `conflict` without writing.
+
+Apply additionally requires `OPERON_MUTATIONS_ENABLED=true` and the Bridge setting **Allow task mutations**. This two-sided opt-in prevents an accidental package upgrade from enabling writes.
 
 ### Write policy
 
 - `MCP_WRITE_MODE=readonly`: dry-run only.
-- `MCP_WRITE_MODE=guarded`: adopt, create, update, and transition apply are allowed with their normal preconditions.
+- `MCP_WRITE_MODE=guarded`: adopt, create, update, transition, and inline relocation apply are allowed with their normal preconditions.
 - `MCP_WRITE_MODE=full`: conversion apply is additionally allowed.
 
 `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for file tasks or `targetPath` for inline tasks. Scoped conversion apply is allowed in guarded mode only when the current source and explicit destination are both inside the allowlist.
@@ -68,6 +74,8 @@ Conversion remains classified as destructive because file-to-inline moves the so
 `operon_transition_task` prefers a stable status ID from `operon_get_configuration`, while still accepting exactly one current configured workflow value for compatibility. It preserves Operon's dependency, recurrence, aggregate, terminal-date, archive, and auto-unpin semantics.
 
 `operon_convert_task` converts inline ↔ file through Operon's transition-safe paths. File-to-inline requires an explicit `targetPath`; scoped inline-to-file conversion requires an explicit `targetFolder`.
+
+`operon_relocate_task` moves an inline task to an explicit Markdown `targetPath` through Operon while preserving `operonId`. Source and target are verified after the index settles.
 
 ## Verified pilot behavior
 

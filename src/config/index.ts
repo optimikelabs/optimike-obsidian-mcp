@@ -75,124 +75,144 @@ const RuntimeModeSchema = z
 
 const EnvSchema = z
   .object({
-  MCP_SERVER_NAME: z.string().optional(),
-  MCP_SERVER_VERSION: z.string().optional(),
-  MCP_LOG_LEVEL: z.string().default("info"),
-  LOGS_DIR: z.string().default(path.join(projectRoot, "logs")),
-  NODE_ENV: z.string().default("development"),
-  MCP_TRANSPORT_TYPE: z.enum(["stdio", "http"]).default("stdio"),
-  MCP_HTTP_PORT: z.coerce.number().int().positive().default(3010),
-  MCP_HTTP_HOST: z.string().default("127.0.0.1"),
-  MCP_ALLOWED_ORIGINS: z.string().optional(),
-  MCP_AUTH_MODE: z.enum(["jwt", "oauth"]).optional(),
-  MCP_AUTH_SECRET_KEY: z
-    .string()
-    .min(
-      32,
-      "MCP_AUTH_SECRET_KEY must be at least 32 characters long for security",
-    )
-    .optional(),
-  OAUTH_ISSUER_URL: z.string().url().optional(),
-  OAUTH_AUDIENCE: z.string().optional(),
-  OAUTH_JWKS_URI: z.string().url().optional(),
-  // --- Obsidian Specific Config ---
-  OBSIDIAN_RUNTIME_MODE: RuntimeModeSchema,
-  OBSIDIAN_API_KEY: z.string().optional(),
-  OBSIDIAN_BASE_URL: z.string().url().default("http://127.0.0.1:27123"),
-  OBSIDIAN_VERIFY_SSL: z
-    .string()
-    .transform((val) => val.toLowerCase() === "true")
-    .default("false"),
-  OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(10),
-  OBSIDIAN_ENABLE_CACHE: z
-    .string()
-    .transform((val) => val.toLowerCase() === "true")
-    .default("true"),
-  OBSIDIAN_API_SEARCH_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(30000),
-  OBSIDIAN_CACHE_SOURCE: z
-    .enum(["auto", "rest", "filesystem"])
-    .default("auto"),
-  OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
-  OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
-  OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
-  OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(64),
-  OBSIDIAN_STARTUP_MAX_RETRIES: z.coerce.number().int().positive().default(5),
-  OBSIDIAN_STARTUP_RETRY_DELAY_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(3000),
-  OBSIDIAN_STARTUP_BLOCKING: z
-    .string()
-    .transform((val) => val.toLowerCase() === "true")
-    .default("true"),
-  // --- Public runtime safety ---
-  MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).optional(),
-  MCP_GUARDED_MAX_WRITE_CHARS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(100000),
-  MCP_GUARDED_MAX_BATCH_OPERATIONS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(25),
-  MCP_PROTECTED_FRONTMATTER_KEYS: z
-    .string()
-    .default("création,modification"),
-  OPERON_MUTATION_ALLOWED_PATH_PREFIXES: z.string().optional().superRefine((raw, ctx) => {
-    for (const value of (raw ?? "").split(/[\r\n,]+/u)) {
-      const prefix = value.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, "");
-      if (!prefix) continue;
-      if (/^(?:\/|[a-z]:\/)/iu.test(prefix) || prefix.split("/").includes("..")) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Operon mutation prefix must be vault-relative without '..': ${value.trim()}`,
-        });
-      }
-    }
-  }),
-  // --- Smart Connections Semantic Search ---
-  SMART_SEARCH_MODE: z.enum(["plugin", "smartenv", "files"]).default("plugin"),
-  SMART_ENV_DIR: z.string().optional(),
-  ENABLE_QUERY_EMBEDDING: z
-    .string()
-    .transform((val) => val.toLowerCase() === "true")
-    .default("true"),
-  // Preferred: "auto" (aligns query embedder to vault embeddings)
-  QUERY_EMBEDDER: z.string().default("auto"),
-  // Strongest override: forces model regardless of vault detected model.
-  QUERY_EMBEDDER_MODEL: z.string().optional(),
-  QUERY_EMBEDDER_MODEL_HINT: z.string().optional(),
-  // Ollama query embedding support (when vault embeddings were produced via Ollama / Smart Connections)
-  OLLAMA_BASE_URL: z.string().optional(),
-  // OpenAI query embedding support
-  OPENAI_API_KEY: z.string().optional(),
-  OPENAI_BASE_URL: z.string().optional(),
-  OPENAI_EMBEDDING_DIMENSIONS: z.string().optional(),
-  SMART_ENV_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(60000),
-  SEMANTIC_SEARCH_PREWARM: z
-    .string()
-    .transform((val) => val.toLowerCase() === "true")
-    .default("true"),
-  SEMANTIC_SEARCH_PREWARM_TEXT: z
-    .string()
-    .default("optimike semantic search warmup"),
-  OBSIDIAN_VAULT: z.string().optional(),
-})
+    MCP_SERVER_NAME: z.string().optional(),
+    MCP_SERVER_VERSION: z.string().optional(),
+    MCP_LOG_LEVEL: z.string().default("info"),
+    LOGS_DIR: z.string().default(path.join(projectRoot, "logs")),
+    NODE_ENV: z.string().default("development"),
+    MCP_TRANSPORT_TYPE: z.enum(["stdio", "http"]).default("stdio"),
+    MCP_HTTP_PORT: z.coerce.number().int().positive().default(3010),
+    MCP_HTTP_HOST: z.string().default("127.0.0.1"),
+    MCP_ALLOWED_ORIGINS: z.string().optional(),
+    MCP_AUTH_MODE: z.enum(["jwt", "oauth"]).optional(),
+    MCP_AUTH_SECRET_KEY: z
+      .string()
+      .min(
+        32,
+        "MCP_AUTH_SECRET_KEY must be at least 32 characters long for security",
+      )
+      .optional(),
+    OAUTH_ISSUER_URL: z.string().url().optional(),
+    OAUTH_AUDIENCE: z.string().optional(),
+    OAUTH_JWKS_URI: z.string().url().optional(),
+    // --- Obsidian Specific Config ---
+    OBSIDIAN_RUNTIME_MODE: RuntimeModeSchema,
+    OBSIDIAN_API_KEY: z.string().optional(),
+    OBSIDIAN_BASE_URL: z.string().url().default("http://127.0.0.1:27123"),
+    OBSIDIAN_VERIFY_SSL: z
+      .string()
+      .transform((val) => val.toLowerCase() === "true")
+      .default("false"),
+    OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(10),
+    OBSIDIAN_ENABLE_CACHE: z
+      .string()
+      .transform((val) => val.toLowerCase() === "true")
+      .default("true"),
+    OBSIDIAN_API_SEARCH_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30000),
+    OBSIDIAN_CACHE_SOURCE: z
+      .enum(["auto", "rest", "filesystem"])
+      .default("auto"),
+    OBSIDIAN_CACHE_CONCURRENCY: z.coerce.number().int().positive().default(8),
+    OBSIDIAN_VAULT_EXCLUDE_PATTERNS: z.string().optional(),
+    OBSIDIAN_SHARED_CACHE_DB_PATH: z.string().optional(),
+    OBSIDIAN_CONTENT_HOT_CACHE_LIMIT: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(64),
+    OBSIDIAN_STARTUP_MAX_RETRIES: z.coerce.number().int().positive().default(5),
+    OBSIDIAN_STARTUP_RETRY_DELAY_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(3000),
+    OBSIDIAN_STARTUP_BLOCKING: z
+      .string()
+      .transform((val) => val.toLowerCase() === "true")
+      .default("true"),
+    // --- Public runtime safety ---
+    MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).optional(),
+    MCP_GUARDED_MAX_WRITE_CHARS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(100000),
+    MCP_GUARDED_MAX_BATCH_OPERATIONS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(25),
+    MCP_PROTECTED_FRONTMATTER_KEYS: z.string().default("création,modification"),
+    OPERON_MUTATIONS_ENABLED: z
+      .string()
+      .transform((val) => val.toLowerCase() === "true")
+      .default("false"),
+    OPERON_MUTATION_ALLOWED_PATH_PREFIXES: z
+      .string()
+      .optional()
+      .superRefine((raw, ctx) => {
+        for (const value of (raw ?? "").split(/[\r\n,]+/u)) {
+          const prefix = value
+            .trim()
+            .replace(/\\/gu, "/")
+            .replace(/^\.\//u, "")
+            .replace(/\/+$/u, "");
+          if (!prefix) continue;
+          if (
+            /^(?:\/|[a-z]:\/)/iu.test(prefix) ||
+            prefix
+              .split("/")
+              .some((segment) => segment === "." || segment === "..")
+          ) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Operon mutation prefix must be vault-relative without '..': ${value.trim()}`,
+            });
+          }
+        }
+      }),
+    // --- Smart Connections Semantic Search ---
+    SMART_SEARCH_MODE: z
+      .enum(["plugin", "smartenv", "files"])
+      .default("plugin"),
+    SMART_ENV_DIR: z.string().optional(),
+    ENABLE_QUERY_EMBEDDING: z
+      .string()
+      .transform((val) => val.toLowerCase() === "true")
+      .default("true"),
+    // Preferred: "auto" (aligns query embedder to vault embeddings)
+    QUERY_EMBEDDER: z.string().default("auto"),
+    // Strongest override: forces model regardless of vault detected model.
+    QUERY_EMBEDDER_MODEL: z.string().optional(),
+    QUERY_EMBEDDER_MODEL_HINT: z.string().optional(),
+    // Ollama query embedding support (when vault embeddings were produced via Ollama / Smart Connections)
+    OLLAMA_BASE_URL: z.string().optional(),
+    // OpenAI query embedding support
+    OPENAI_API_KEY: z.string().optional(),
+    OPENAI_BASE_URL: z.string().optional(),
+    OPENAI_EMBEDDING_DIMENSIONS: z.string().optional(),
+    SMART_ENV_CACHE_TTL_MS: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .default(60000),
+    SEMANTIC_SEARCH_PREWARM: z
+      .string()
+      .transform((val) => val.toLowerCase() === "true")
+      .default("true"),
+    SEMANTIC_SEARCH_PREWARM_TEXT: z
+      .string()
+      .default("optimike semantic search warmup"),
+    OBSIDIAN_VAULT: z.string().optional(),
+  })
   .superRefine((env, ctx) => {
     if (env.OBSIDIAN_RUNTIME_MODE === "live" && !env.OBSIDIAN_API_KEY) {
       ctx.addIssue({
@@ -361,18 +381,27 @@ export const config = {
     (env.OBSIDIAN_RUNTIME_MODE === "headless-guarded"
       ? "guarded"
       : env.OBSIDIAN_RUNTIME_MODE === "headless-filesystem"
-      ? "guarded"
-      : env.OBSIDIAN_RUNTIME_MODE === "headless-readonly"
-        ? "readonly"
-        : "full"),
+        ? "guarded"
+        : env.OBSIDIAN_RUNTIME_MODE === "headless-readonly"
+          ? "readonly"
+          : "full"),
   mcpGuardedMaxWriteChars: env.MCP_GUARDED_MAX_WRITE_CHARS,
   mcpGuardedMaxBatchOperations: env.MCP_GUARDED_MAX_BATCH_OPERATIONS,
   mcpProtectedFrontmatterKeys: env.MCP_PROTECTED_FRONTMATTER_KEYS.split(",")
     .map((key) => key.trim())
     .filter(Boolean),
-  operonMutationAllowedPathPrefixes: (env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES ?? "")
+  operonMutationsEnabled: env.OPERON_MUTATIONS_ENABLED,
+  operonMutationAllowedPathPrefixes: (
+    env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES ?? ""
+  )
     .split(/[\r\n,]+/u)
-    .map((prefix) => prefix.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, ""))
+    .map((prefix) =>
+      prefix
+        .trim()
+        .replace(/\\/gu, "/")
+        .replace(/^\.\//u, "")
+        .replace(/\/+$/u, ""),
+    )
     .filter(Boolean),
   smartSearchMode: env.SMART_SEARCH_MODE,
   smartEnvDir: env.SMART_ENV_DIR,

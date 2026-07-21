@@ -18,9 +18,11 @@ import {
   OperonValidationSchema,
   queryOperonSnapshot,
   OperonCapabilitiesSchema,
-	OperonAdoptTaskSchema,
+  OperonAdoptTaskSchema,
   OperonConvertTaskSchema,
   OperonCreateTaskSchema,
+  OperonFilterQuerySchema,
+  OperonRelocateTaskSchema,
   OperonMutationResultSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
@@ -32,9 +34,11 @@ import {
   type OperonTask,
   type OperonTaskPage,
   type OperonValidation,
-	type OperonAdoptTask,
+  type OperonAdoptTask,
   type OperonConvertTask,
   type OperonCreateTask,
+  type OperonFilterQuery,
+  type OperonRelocateTask,
   type OperonMutationResult,
   type OperonTransitionTask,
   type OperonUpdateTask,
@@ -44,8 +48,14 @@ import type { z } from "zod";
 const BRIDGE_PREFIX = "/extensions/optimike-operon-bridge/v1";
 const PAGE_SIZE = 500;
 const MAX_PAGES = 10_000;
-const normalizeVaultRelativePath = (value: string): string =>
-  value.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, "");
+const normalizeVaultRelativePath = (value: string): string | null => {
+  const normalized = value.trim().replace(/\\/gu, "/").replace(/\/+$/u, "");
+  if (!normalized || /^(?:\/|[a-z]:\/)/iu.test(normalized)) return null;
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === "." || segment === ".."))
+    return null;
+  return segments.join("/");
+};
 const SNAPSHOT_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS operon_task_snapshot (
   operon_id TEXT PRIMARY KEY,
@@ -100,7 +110,7 @@ interface SnapshotMeta {
   contractVersion: string;
   status: OperonStatus | null;
   validation: OperonValidation | null;
-	configuration: OperonConfiguration | null;
+  configuration: OperonConfiguration | null;
 }
 
 type OperonCapabilities = z.infer<typeof OperonCapabilitiesSchema>;
@@ -121,16 +131,18 @@ function liveModeConfigured(): boolean {
 function readOnlyCapabilities(): OperonCapabilities {
   return {
     status: true,
-	configuration: true,
+    configuration: true,
     list: true,
     get: true,
     query: true,
     validate: true,
-		adopt: false,
+    adopt: false,
     create: false,
     update: false,
     transition: false,
     convert: false,
+    filterQuery: false,
+    relocate: false,
   };
 }
 
@@ -165,12 +177,18 @@ interface MutationJournalEntry {
 export class OperonService {
   private readonly dbPath = config.obsidianSharedCacheDbPath;
   private client: AxiosInstance | null = null;
-  private readonly mutationInFlight = new Map<string, {
-    signature: string;
-    promise: Promise<OperonMutationResult>;
-  }>();
+  private readonly mutationInFlight = new Map<
+    string,
+    {
+      signature: string;
+      promise: Promise<OperonMutationResult>;
+    }
+  >();
 
-  private requestContext(operation: string, extra: Record<string, unknown> = {}) {
+  private requestContext(
+    operation: string,
+    extra: Record<string, unknown> = {},
+  ) {
     return requestContextService.createRequestContext({
       operation,
       component: "OperonService",
@@ -195,7 +213,9 @@ export class OperonService {
         "Content-Type": "application/json",
       },
       timeout: 60_000,
-      httpsAgent: new https.Agent({ rejectUnauthorized: config.obsidianVerifySsl }),
+      httpsAgent: new https.Agent({
+        rejectUnauthorized: config.obsidianVerifySsl,
+      }),
     });
     return this.client;
   }
@@ -210,21 +230,29 @@ export class OperonService {
     return db;
   }
 
-  private readMutationJournal(idempotencyKey: string): MutationJournalEntry | null {
+  private readMutationJournal(
+    idempotencyKey: string,
+  ): MutationJournalEntry | null {
     const db = this.openDb();
     try {
-      const row = db.prepare(
-        `SELECT action, operon_id as operonId, requested_json as requestedJson,
+      const row = db
+        .prepare(
+          `SELECT action, operon_id as operonId, requested_json as requestedJson,
                 result_json as resultJson
          FROM operon_mutation_journal WHERE idempotency_key = ?`,
-      ).get(idempotencyKey) as {
-        action?: string;
-        operonId?: string | null;
-        requestedJson?: string;
-        resultJson?: string;
-      } | undefined;
+        )
+        .get(idempotencyKey) as
+        | {
+            action?: string;
+            operonId?: string | null;
+            requestedJson?: string;
+            resultJson?: string;
+          }
+        | undefined;
       if (!row?.resultJson) return null;
-      const parsed = OperonMutationResultSchema.safeParse(JSON.parse(row.resultJson));
+      const parsed = OperonMutationResultSchema.safeParse(
+        JSON.parse(row.resultJson),
+      );
       if (!parsed.success || !row.action || !row.requestedJson) return null;
       return {
         action: row.action,
@@ -232,6 +260,82 @@ export class OperonService {
         requestedJson: row.requestedJson,
         result: { ...parsed.data, replayed: true },
       };
+    } finally {
+      db.close();
+    }
+  }
+
+  private reserveMutationJournal(
+    action: string,
+    operonId: string | null,
+    idempotencyKey: string,
+    requested: unknown,
+  ): MutationJournalEntry | null {
+    const requestedJson = stableJson(requested);
+    const now = Date.now();
+    const db = this.openDb();
+    try {
+      const inserted = db
+        .prepare(
+          `INSERT OR IGNORE INTO operon_mutation_journal (
+          operation_id, idempotency_key, operon_id, action, requested_json,
+          result_json, status, created_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          `pending:${idempotencyKey}`,
+          idempotencyKey,
+          operonId,
+          action,
+          requestedJson,
+          "null",
+          "in_progress",
+          now,
+          now,
+        ) as { changes: number | bigint };
+      if (Number(inserted.changes) === 1) return null;
+
+      const row = db
+        .prepare(
+          `SELECT action, operon_id as operonId, requested_json as requestedJson,
+                result_json as resultJson, status
+         FROM operon_mutation_journal WHERE idempotency_key = ?`,
+        )
+        .get(idempotencyKey) as
+        | {
+            action?: string;
+            operonId?: string | null;
+            requestedJson?: string;
+            resultJson?: string;
+            status?: string;
+          }
+        | undefined;
+      if (
+        !row ||
+        row.action !== action ||
+        row.requestedJson !== requestedJson
+      ) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Idempotency key was already reserved for a different Operon mutation request.",
+          this.requestContext(`operon_${action}`, { operonId, idempotencyKey }),
+        );
+      }
+      const parsedResult = safeJsonParse(row.resultJson);
+      const parsed = OperonMutationResultSchema.safeParse(parsedResult);
+      if (row.status !== "in_progress" && parsed.success) {
+        return {
+          action,
+          operonId: row.operonId ?? null,
+          requestedJson,
+          result: { ...parsed.data, replayed: true },
+        };
+      }
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "A previous Operon mutation attempt with this idempotency key has an uncertain outcome; inspect the live task before choosing a new key.",
+        this.requestContext(`operon_${action}`, { operonId, idempotencyKey }),
+      );
     } finally {
       db.close();
     }
@@ -246,30 +350,45 @@ export class OperonService {
     const now = Date.now();
     const db = this.openDb();
     try {
-      db.prepare(
-        `INSERT INTO operon_mutation_journal (
-          operation_id, idempotency_key, operon_id, action, requested_json,
-          result_json, status, created_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(idempotency_key) DO NOTHING`,
-      ).run(
-        result.operationId,
-        result.idempotencyKey,
-        operonId,
-        action,
-        stableJson(requested),
-        JSON.stringify(result),
-        result.status,
-        now,
-        now,
-      );
+      const updated = db
+        .prepare(
+          `UPDATE operon_mutation_journal
+         SET operation_id = ?, operon_id = ?, result_json = ?, status = ?, completed_at = ?
+         WHERE idempotency_key = ? AND action = ? AND requested_json = ?`,
+        )
+        .run(
+          result.operationId,
+          operonId,
+          JSON.stringify(result),
+          result.status,
+          now,
+          result.idempotencyKey,
+          action,
+          stableJson(requested),
+        ) as { changes: number | bigint };
+      if (Number(updated.changes) !== 1) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Operon mutation journal reservation was lost before completion.",
+          this.requestContext(`operon_${action}`, {
+            operonId,
+            idempotencyKey: result.idempotencyKey,
+          }),
+        );
+      }
     } finally {
       db.close();
     }
   }
 
   private async executeMutation(
-    action: "adopt" | "create" | "update" | "transition" | "convert",
+    action:
+      | "adopt"
+      | "create"
+      | "update"
+      | "transition"
+      | "convert"
+      | "relocate",
     operonId: string | null,
     idempotencyKey: string,
     dryRun: boolean,
@@ -280,7 +399,10 @@ export class OperonService {
     const signature = stableJson({ action, operonId, payload });
     const existing = this.readMutationJournal(idempotencyKey);
     if (existing) {
-      if (existing.action !== action || existing.requestedJson !== requestedJson) {
+      if (
+        existing.action !== action ||
+        existing.requestedJson !== requestedJson
+      ) {
         throw new McpError(
           BaseErrorCode.CONFLICT,
           "Idempotency key was already used for a different Operon mutation request.",
@@ -300,7 +422,14 @@ export class OperonService {
       }
       return inFlight.promise;
     }
-    const promise = this.performMutation(action, operonId, idempotencyKey, dryRun, path, payload);
+    const promise = this.performMutation(
+      action,
+      operonId,
+      idempotencyKey,
+      dryRun,
+      path,
+      payload,
+    );
     this.mutationInFlight.set(idempotencyKey, { signature, promise });
     try {
       return await promise;
@@ -311,8 +440,130 @@ export class OperonService {
     }
   }
 
+  private mutationOutcomeMismatch(
+    action:
+      | "adopt"
+      | "create"
+      | "update"
+      | "transition"
+      | "convert"
+      | "relocate",
+    payload: Record<string, unknown>,
+    after: OperonTask,
+  ): string | null {
+    const requested =
+      action === "adopt"
+        ? payload.adoption
+        : action === "create"
+          ? payload.task
+          : action === "update"
+            ? payload.patch
+            : payload;
+    const request =
+      requested && typeof requested === "object" && !Array.isArray(requested)
+        ? (requested as Record<string, unknown>)
+        : {};
+    if (action === "adopt") {
+      if (
+        typeof request.targetPath !== "string" ||
+        after.path !== request.targetPath.trim()
+      )
+        return "Adopted task path does not match targetPath.";
+      if (typeof request.line !== "number" || after.line !== request.line)
+        return "Adopted task line does not match the requested line.";
+    }
+    if (action === "create") {
+      if (
+        typeof request.description === "string" &&
+        after.description !== request.description.trim()
+      )
+        return "Created task description does not match the request.";
+      if (
+        (request.source === "inline" || request.source === "file") &&
+        after.source !== request.source
+      )
+        return "Created task source does not match the request.";
+    }
+    if (action === "update" || action === "create") {
+      if (
+        typeof request.description === "string" &&
+        after.description !== request.description.trim()
+      )
+        return "Task description does not match the request.";
+      if (Array.isArray(request.tags)) {
+        const expectedTags = request.tags
+          .map(String)
+          .map((tag) => tag.replace(/^#/u, "").trim())
+          .filter(Boolean)
+          .sort();
+        if (stableJson([...after.tags].sort()) !== stableJson(expectedTags))
+          return "Task tags do not match the request.";
+      }
+      const fields =
+        request.fields &&
+        typeof request.fields === "object" &&
+        !Array.isArray(request.fields)
+          ? (request.fields as Record<string, unknown>)
+          : {};
+      for (const [key, value] of Object.entries(fields)) {
+        if (key !== "status" && after.fields[key] !== String(value))
+          return `Managed field '${key}' does not match the request.`;
+      }
+      const properties =
+        request.properties &&
+        typeof request.properties === "object" &&
+        !Array.isArray(request.properties)
+          ? (request.properties as Record<string, unknown>)
+          : {};
+      for (const [key, value] of Object.entries(properties)) {
+        if (stableJson(after.properties?.[key]) !== stableJson(value))
+          return `Unmanaged property '${key}' does not match the request.`;
+      }
+    }
+    if (action === "transition" || action === "create") {
+      if (
+        typeof request.status === "string" &&
+        after.status !== request.status.trim()
+      )
+        return "Task status does not match the request.";
+      if (
+        typeof request.statusId === "string" &&
+        after.statusId !== request.statusId.trim()
+      )
+        return "Task status id does not match the request.";
+    }
+    if (action === "convert") {
+      if (
+        (request.target === "inline" || request.target === "file") &&
+        after.source !== request.target
+      )
+        return "Converted task source does not match the request.";
+      if (
+        request.target === "inline" &&
+        typeof request.targetPath === "string" &&
+        after.path !== request.targetPath.trim()
+      )
+        return "Converted task path does not match targetPath.";
+    }
+    if (
+      action === "relocate" &&
+      (after.source !== "inline" ||
+        typeof request.targetPath !== "string" ||
+        after.path !== request.targetPath.trim())
+    ) {
+      return "Relocated task was not found at targetPath.";
+    }
+    return null;
+  }
+
   private async performMutation(
-    action: "adopt" | "create" | "update" | "transition" | "convert",
+    action:
+      | "adopt"
+      | "create"
+      | "update"
+      | "transition"
+      | "convert"
+      | "relocate",
     operonId: string | null,
     idempotencyKey: string,
     dryRun: boolean,
@@ -326,16 +577,51 @@ export class OperonService {
         this.requestContext(`operon_${action}`, { operonId }),
       );
     }
+    if (!dryRun && !config.operonMutationsEnabled) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "Operon apply is disabled. Set OPERON_MUTATIONS_ENABLED=true after validating the live Bridge.",
+        this.requestContext(`operon_${action}`, { operonId }),
+      );
+    }
     const status = await this.fetchLiveStatus();
     if (!status.capabilities[action]) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
         `Operon Bridge capability is unavailable: ${action}.`,
-        this.requestContext(`operon_${action}`, { operonId, capabilities: status.capabilities }),
+        this.requestContext(`operon_${action}`, {
+          operonId,
+          capabilities: status.capabilities,
+        }),
       );
     }
     await this.assertMutationPathScope(action, operonId, payload, dryRun);
     const operation = `operon_${action}_task` as const;
+    const mutationData =
+      action === "create"
+        ? payload.task
+        : action === "update"
+          ? payload.patch
+          : null;
+    const mutationRecord =
+      mutationData &&
+      typeof mutationData === "object" &&
+      !Array.isArray(mutationData)
+        ? (mutationData as Record<string, unknown>)
+        : {};
+    const frontmatterKeys = [
+      ...Object.keys(
+        mutationRecord.fields && typeof mutationRecord.fields === "object"
+          ? mutationRecord.fields
+          : {},
+      ),
+      ...Object.keys(
+        mutationRecord.properties &&
+          typeof mutationRecord.properties === "object"
+          ? mutationRecord.properties
+          : {},
+      ),
+    ];
     assertWriteAllowed({
       operation,
       action: dryRun ? "dry_run" : "apply",
@@ -343,9 +629,19 @@ export class OperonService {
       destructive: action === "convert" && !dryRun,
       allowInReadonly: dryRun,
       allowInGuarded:
-        dryRun || action !== "convert" || config.operonMutationAllowedPathPrefixes.length > 0,
+        dryRun ||
+        action !== "convert" ||
+        config.operonMutationAllowedPathPrefixes.length > 0,
+      frontmatterKeys,
       context: this.requestContext(operation, { operonId, idempotencyKey }),
     });
+    const reservedResult = this.reserveMutationJournal(
+      action,
+      operonId,
+      idempotencyKey,
+      payload,
+    );
+    if (reservedResult) return reservedResult.result;
     const response = await this.getClient().post(path, payload, {
       validateStatus: () => true,
     });
@@ -354,22 +650,62 @@ export class OperonService {
       throw new McpError(
         BaseErrorCode.PARSING_ERROR,
         `Invalid Operon mutation response (${response.status}).`,
-        this.requestContext(operation, { operonId, issues: parsed.error.issues, response: response.data }),
+        this.requestContext(operation, {
+          operonId,
+          issues: parsed.error.issues,
+          response: response.data,
+        }),
       );
     }
     const result = parsed.data;
-    if (result.status === "applied" && result.after) {
+    if (result.status === "applied") {
+      if (!result.after) {
+        throw new McpError(
+          BaseErrorCode.PARSING_ERROR,
+          "Operon Bridge reported an applied mutation without a final indexed task.",
+          this.requestContext(operation, {
+            operonId,
+            operationId: result.operationId,
+          }),
+        );
+      }
+      const mismatch = this.mutationOutcomeMismatch(
+        action,
+        payload,
+        result.after,
+      );
+      if (mismatch) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          `Operon mutation outcome could not be proven: ${mismatch}`,
+          this.requestContext(operation, {
+            operonId,
+            operationId: result.operationId,
+          }),
+        );
+      }
       this.assertAllowedMutationPath(result.after.path, `${action} result`);
     }
-    this.writeMutationJournal(action, operonId ?? result.after?.operonId ?? null, payload, result);
+    this.writeMutationJournal(
+      action,
+      operonId ?? result.after?.operonId ?? null,
+      payload,
+      result,
+    );
     if (result.status === "applied") {
       try {
         await this.ensureSnapshot(true);
       } catch (error) {
-        logger.warning("Operon mutation succeeded but snapshot refresh failed.", {
-          ...this.requestContext(operation, { operonId, operationId: result.operationId }),
-          error: errorMessage(error),
-        });
+        logger.warning(
+          "Operon mutation succeeded but snapshot refresh failed.",
+          {
+            ...this.requestContext(operation, {
+              operonId,
+              operationId: result.operationId,
+            }),
+            error: errorMessage(error),
+          },
+        );
       }
     }
     return result;
@@ -377,12 +713,20 @@ export class OperonService {
 
   private isAllowedMutationPath(candidate: string): boolean {
     const normalized = normalizeVaultRelativePath(candidate);
+    if (!normalized) return false;
     return config.operonMutationAllowedPathPrefixes.some(
       (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
     );
   }
 
   private assertAllowedMutationPath(candidate: string, label: string): void {
+    if (!normalizeVaultRelativePath(candidate)) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        `Operon ${label} must be a canonical vault-relative path without '.' or '..': ${candidate}`,
+        this.requestContext("assertOperonMutationPathScope", { candidate }),
+      );
+    }
     if (config.operonMutationAllowedPathPrefixes.length === 0) return;
     if (!this.isAllowedMutationPath(candidate)) {
       throw new McpError(
@@ -397,7 +741,13 @@ export class OperonService {
   }
 
   private async assertMutationPathScope(
-    action: "adopt" | "create" | "update" | "transition" | "convert",
+    action:
+      | "adopt"
+      | "create"
+      | "update"
+      | "transition"
+      | "convert"
+      | "relocate",
     operonId: string | null,
     payload: Record<string, unknown>,
     dryRun: boolean,
@@ -405,25 +755,39 @@ export class OperonService {
     if (config.operonMutationAllowedPathPrefixes.length === 0) return;
 
     if (action === "adopt") {
-		const adoption = payload.adoption as Record<string, unknown> | undefined;
-		if (typeof adoption?.targetPath === "string" && adoption.targetPath.trim()) {
-			this.assertAllowedMutationPath(adoption.targetPath, "adopt targetPath");
-			return;
-		}
-		throw new McpError(
-			BaseErrorCode.FORBIDDEN,
-			"Scoped Operon adoption requires an explicit targetPath.",
-			this.requestContext("assertOperonMutationPathScope", { action }),
-		);
-	}
-
-	if (action === "create") {
-      const task = payload.task as Record<string, unknown> | undefined;
-      if (task?.source === "file" && typeof task.targetFolder === "string" && task.targetFolder.trim()) {
-        this.assertAllowedMutationPath(task.targetFolder, "create targetFolder");
+      const adoption = payload.adoption as Record<string, unknown> | undefined;
+      if (
+        typeof adoption?.targetPath === "string" &&
+        adoption.targetPath.trim()
+      ) {
+        this.assertAllowedMutationPath(adoption.targetPath, "adopt targetPath");
         return;
       }
-      if (task?.source === "inline" && typeof task.targetPath === "string" && task.targetPath.trim()) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "Scoped Operon adoption requires an explicit targetPath.",
+        this.requestContext("assertOperonMutationPathScope", { action }),
+      );
+    }
+
+    if (action === "create") {
+      const task = payload.task as Record<string, unknown> | undefined;
+      if (
+        task?.source === "file" &&
+        typeof task.targetFolder === "string" &&
+        task.targetFolder.trim()
+      ) {
+        this.assertAllowedMutationPath(
+          task.targetFolder,
+          "create targetFolder",
+        );
+        return;
+      }
+      if (
+        task?.source === "inline" &&
+        typeof task.targetPath === "string" &&
+        task.targetPath.trim()
+      ) {
         this.assertAllowedMutationPath(task.targetPath, "create targetPath");
         return;
       }
@@ -446,23 +810,61 @@ export class OperonService {
     const response = await this.getClient().get(
       `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(operonId)}?includeProperties=false`,
     );
-    const task = OperonTaskSchema.parse((response.data as { task?: unknown }).task);
+    const task = OperonTaskSchema.parse(
+      (response.data as { task?: unknown }).task,
+    );
     this.assertAllowedMutationPath(task.path, `${action} source`);
 
-    if (action === "convert" && !dryRun) {
+    if (action === "convert") {
       const target = payload.target;
-      if (target === "file" && typeof payload.targetFolder === "string" && payload.targetFolder.trim()) {
-        this.assertAllowedMutationPath(payload.targetFolder, "convert targetFolder");
+      if (
+        target === "file" &&
+        typeof payload.targetFolder === "string" &&
+        payload.targetFolder.trim()
+      ) {
+        this.assertAllowedMutationPath(
+          payload.targetFolder,
+          "convert targetFolder",
+        );
         return;
       }
-      if (target === "inline" && typeof payload.targetPath === "string" && payload.targetPath.trim()) {
-        this.assertAllowedMutationPath(payload.targetPath, "convert targetPath");
+      if (
+        target === "inline" &&
+        typeof payload.targetPath === "string" &&
+        payload.targetPath.trim()
+      ) {
+        this.assertAllowedMutationPath(
+          payload.targetPath,
+          "convert targetPath",
+        );
         return;
       }
       throw new McpError(
         BaseErrorCode.FORBIDDEN,
         "Scoped Operon conversion requires targetFolder for inline-to-file or targetPath for file-to-inline.",
-        this.requestContext("assertOperonMutationPathScope", { action, operonId, target }),
+        this.requestContext("assertOperonMutationPathScope", {
+          action,
+          operonId,
+          target,
+        }),
+      );
+    }
+
+    if (action === "relocate") {
+      if (typeof payload.targetPath === "string" && payload.targetPath.trim()) {
+        this.assertAllowedMutationPath(
+          payload.targetPath,
+          "relocate targetPath",
+        );
+        return;
+      }
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "Scoped Operon relocation requires targetPath.",
+        this.requestContext("assertOperonMutationPathScope", {
+          action,
+          operonId,
+        }),
       );
     }
   }
@@ -475,9 +877,10 @@ export class OperonService {
     const snapshotAt = Number(values.get("snapshot_at"));
     if (!Number.isFinite(snapshotAt) || snapshotAt <= 0) return null;
     const generationRaw = values.get("generation");
-    const generation = generationRaw === undefined || generationRaw === "null"
-      ? null
-      : Number(generationRaw);
+    const generation =
+      generationRaw === undefined || generationRaw === "null"
+        ? null
+        : Number(generationRaw);
     const parsedStatus = safeJsonParse(values.get("status_json"));
     const statusResult = parsedStatus
       ? OperonStatusSchema.safeParse(parsedStatus)
@@ -486,10 +889,10 @@ export class OperonService {
     const validationResult = parsedValidation
       ? OperonValidationSchema.safeParse(parsedValidation)
       : { success: false as const };
-	const parsedConfiguration = safeJsonParse(values.get("configuration_json"));
-	const configurationResult = parsedConfiguration
-		? OperonConfigurationSchema.safeParse(parsedConfiguration)
-		: { success: false as const };
+    const parsedConfiguration = safeJsonParse(values.get("configuration_json"));
+    const configurationResult = parsedConfiguration
+      ? OperonConfigurationSchema.safeParse(parsedConfiguration)
+      : { success: false as const };
     return {
       snapshotAt,
       generation: Number.isFinite(generation) ? generation : null,
@@ -499,11 +902,15 @@ export class OperonService {
       contractVersion: values.get("contract_version") ?? "unknown",
       status: statusResult.success ? statusResult.data : null,
       validation: validationResult.success ? validationResult.data : null,
-		configuration: configurationResult.success ? configurationResult.data : null,
+      configuration: configurationResult.success
+        ? configurationResult.data
+        : null,
     };
   }
 
-  private loadSnapshot(source: "operon-live" | "operon-cache"): OperonSnapshotEnvelope | null {
+  private loadSnapshot(
+    source: "operon-live" | "operon-cache",
+  ): OperonSnapshotEnvelope | null {
     const db = this.openDb();
     try {
       const meta = this.readMeta(db);
@@ -540,7 +947,9 @@ export class OperonService {
           throw new McpError(
             BaseErrorCode.CONFLICT,
             `Duplicate operonId in MCP snapshot: ${parsed.data.operonId}.`,
-            this.requestContext("loadOperonSnapshot", { operonId: parsed.data.operonId }),
+            this.requestContext("loadOperonSnapshot", {
+              operonId: parsed.data.operonId,
+            }),
           );
         }
         seen.add(parsed.data.operonId);
@@ -558,10 +967,17 @@ export class OperonService {
         contractVersion: OPERON_CONTRACT_VERSION,
         settingsSignature: meta.settingsSignature,
         generation: meta.generation,
-        capabilities: meta.status?.capabilities ?? readOnlyCapabilities(),
+        capabilities: stale
+          ? readOnlyCapabilities()
+          : (meta.status?.capabilities ?? readOnlyCapabilities()),
         limitations: stale
-          ? [...new Set([...(meta.status?.limitations ?? []), ...CACHE_LIMITATIONS])]
-          : meta.status?.limitations ?? [],
+          ? [
+              ...new Set([
+                ...(meta.status?.limitations ?? []),
+                ...CACHE_LIMITATIONS,
+              ]),
+            ]
+          : (meta.status?.limitations ?? []),
         tasks,
       };
     } finally {
@@ -581,7 +997,7 @@ export class OperonService {
     status: OperonStatus,
     tasks: OperonTask[],
     validation: OperonValidation | null,
-	configuration: OperonConfiguration,
+    configuration: OperonConfiguration,
   ): void {
     const seen = new Set<string>();
     for (const task of tasks) {
@@ -589,7 +1005,9 @@ export class OperonService {
         throw new McpError(
           BaseErrorCode.CONFLICT,
           `Live Operon Bridge returned duplicate operonId ${task.operonId}; existing snapshot was preserved.`,
-          this.requestContext("saveOperonSnapshot", { operonId: task.operonId }),
+          this.requestContext("saveOperonSnapshot", {
+            operonId: task.operonId,
+          }),
         );
       }
       seen.add(task.operonId);
@@ -627,7 +1045,11 @@ export class OperonService {
           snapshotAt,
         );
       }
-      this.writeMeta(db, "snapshot_schema_version", String(OPERON_SNAPSHOT_SCHEMA_VERSION));
+      this.writeMeta(
+        db,
+        "snapshot_schema_version",
+        String(OPERON_SNAPSHOT_SCHEMA_VERSION),
+      );
       this.writeMeta(db, "snapshot_at", String(snapshotAt));
       this.writeMeta(db, "generation", String(status.index.generation));
       this.writeMeta(db, "settings_signature", status.settingsSignature ?? "");
@@ -635,8 +1057,9 @@ export class OperonService {
       this.writeMeta(db, "bridge_version", status.bridge.version);
       this.writeMeta(db, "contract_version", status.contractVersion);
       this.writeMeta(db, "status_json", JSON.stringify(status));
-      if (validation) this.writeMeta(db, "validation_json", JSON.stringify(validation));
-		this.writeMeta(db, "configuration_json", JSON.stringify(configuration));
+      if (validation)
+        this.writeMeta(db, "validation_json", JSON.stringify(validation));
+      this.writeMeta(db, "configuration_json", JSON.stringify(configuration));
       db.exec("COMMIT");
     } catch (error) {
       try {
@@ -657,10 +1080,16 @@ export class OperonService {
       throw new McpError(
         BaseErrorCode.PARSING_ERROR,
         "Operon Bridge /status returned an incompatible payload.",
-        this.requestContext("fetchLiveOperonStatus", { issues: parsed.error.issues }),
+        this.requestContext("fetchLiveOperonStatus", {
+          issues: parsed.error.issues,
+        }),
       );
     }
-    if (!parsed.data.ok || !parsed.data.operon.compatible || !parsed.data.index.ready) {
+    if (
+      !parsed.data.ok ||
+      !parsed.data.operon.compatible ||
+      !parsed.data.index.ready
+    ) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
         `Operon Bridge is not ready (present=${parsed.data.operon.present}, version=${parsed.data.operon.version ?? "unknown"}, compatible=${parsed.data.operon.compatible}).`,
@@ -693,24 +1122,30 @@ export class OperonService {
       throw new McpError(
         BaseErrorCode.PARSING_ERROR,
         "Operon Bridge /validate returned an incompatible payload.",
-        this.requestContext("fetchLiveOperonValidation", { issues: parsed.error.issues }),
+        this.requestContext("fetchLiveOperonValidation", {
+          issues: parsed.error.issues,
+        }),
       );
     }
     return parsed.data;
   }
 
-	private async fetchLiveConfiguration(): Promise<OperonConfiguration> {
-		const response = await this.getClient().get(`${BRIDGE_PREFIX}/configuration`);
-		const parsed = OperonConfigurationSchema.safeParse(response.data);
-		if (!parsed.success) {
-			throw new McpError(
-				BaseErrorCode.PARSING_ERROR,
-				"Operon Bridge /configuration returned an incompatible payload.",
-				this.requestContext("fetchLiveOperonConfiguration", { issues: parsed.error.issues }),
-			);
-		}
-		return parsed.data;
-	}
+  private async fetchLiveConfiguration(): Promise<OperonConfiguration> {
+    const response = await this.getClient().get(
+      `${BRIDGE_PREFIX}/configuration`,
+    );
+    const parsed = OperonConfigurationSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        "Operon Bridge /configuration returned an incompatible payload.",
+        this.requestContext("fetchLiveOperonConfiguration", {
+          issues: parsed.error.issues,
+        }),
+      );
+    }
+    return parsed.data;
+  }
 
   private assertStableStatus(
     expected: OperonStatus,
@@ -749,15 +1184,18 @@ export class OperonService {
     let expectedTotal: number | null = null;
 
     for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-      const response = (await this.getClient().post(`${BRIDGE_PREFIX}/tasks/query`, {
-        cursor,
-        limit: PAGE_SIZE,
-        includeProperties: true,
-        sort: [
-          { field: "path", direction: "asc" },
-          { field: "line", direction: "asc" },
-        ],
-      })) as { data: unknown };
+      const response = (await this.getClient().post(
+        `${BRIDGE_PREFIX}/tasks/query`,
+        {
+          cursor,
+          limit: PAGE_SIZE,
+          includeProperties: true,
+          sort: [
+            { field: "path", direction: "asc" },
+            { field: "line", direction: "asc" },
+          ],
+        },
+      )) as { data: unknown };
       const parsed = OperonBridgePageSchema.safeParse(response.data);
       if (!parsed.success) {
         throw new McpError(
@@ -804,7 +1242,10 @@ export class OperonService {
         throw new McpError(
           BaseErrorCode.PARSING_ERROR,
           "Operon Bridge returned an invalid or repeated pagination cursor.",
-          this.requestContext("fetchAllLiveOperonTasks", { pageIndex, cursor: page.nextCursor }),
+          this.requestContext("fetchAllLiveOperonTasks", {
+            pageIndex,
+            cursor: page.nextCursor,
+          }),
         );
       }
       seenCursors.add(page.nextCursor);
@@ -813,7 +1254,11 @@ export class OperonService {
 
     if (expectedTotal === null) {
       const settledStatus = await this.fetchLiveStatus();
-      this.assertStableStatus(expectedStatus, settledStatus, "empty snapshot pagination");
+      this.assertStableStatus(
+        expectedStatus,
+        settledStatus,
+        "empty snapshot pagination",
+      );
       return { tasks: [], settledStatus };
     }
     if (tasks.length !== expectedTotal) {
@@ -824,11 +1269,18 @@ export class OperonService {
       );
     }
     const settledStatus = await this.fetchLiveStatus();
-    this.assertStableStatus(expectedStatus, settledStatus, "snapshot pagination");
+    this.assertStableStatus(
+      expectedStatus,
+      settledStatus,
+      "snapshot pagination",
+    );
     return { tasks, settledStatus };
   }
 
-  private sameLiveGeneration(snapshot: OperonSnapshotEnvelope | null, status: OperonStatus): boolean {
+  private sameLiveGeneration(
+    snapshot: OperonSnapshotEnvelope | null,
+    status: OperonStatus,
+  ): boolean {
     return Boolean(
       snapshot &&
         snapshot.generation === status.index.generation &&
@@ -839,13 +1291,16 @@ export class OperonService {
     );
   }
 
-  private async refreshLiveSnapshot(status?: OperonStatus): Promise<OperonSnapshotEnvelope> {
+  private async refreshLiveSnapshot(
+    status?: OperonStatus,
+  ): Promise<OperonSnapshotEnvelope> {
     const liveStatus = status ?? (await this.fetchLiveStatus());
     const pageResult = await this.fetchAllLiveTasks(liveStatus);
     const validation = await this.fetchLiveValidation();
     if (
       validation.generation !== pageResult.settledStatus.index.generation ||
-      validation.settingsSignature !== pageResult.settledStatus.settingsSignature
+      validation.settingsSignature !==
+        pageResult.settledStatus.settingsSignature
     ) {
       throw new McpError(
         BaseErrorCode.CONFLICT,
@@ -862,22 +1317,28 @@ export class OperonService {
       throw new McpError(
         BaseErrorCode.CONFLICT,
         `Operon validation reported ${validation.summary.P0} P0 violation(s); snapshot refresh was refused.`,
-        this.requestContext("refreshLiveOperonSnapshot", { summary: validation.summary }),
+        this.requestContext("refreshLiveOperonSnapshot", {
+          summary: validation.summary,
+        }),
       );
     }
     const finalStatus = await this.fetchLiveStatus();
-    this.assertStableStatus(pageResult.settledStatus, finalStatus, "snapshot validation");
-	const configuration = await this.fetchLiveConfiguration();
-	if (configuration.settingsSignature !== finalStatus.settingsSignature) {
-		throw new McpError(
-			BaseErrorCode.CONFLICT,
-			"Operon configuration changed before the snapshot could be committed.",
-			this.requestContext("refreshLiveOperonSnapshot", {
-				expectedSettingsSignature: finalStatus.settingsSignature,
-				observedSettingsSignature: configuration.settingsSignature,
-			}),
-		);
-	}
+    this.assertStableStatus(
+      pageResult.settledStatus,
+      finalStatus,
+      "snapshot validation",
+    );
+    const configuration = await this.fetchLiveConfiguration();
+    if (configuration.settingsSignature !== finalStatus.settingsSignature) {
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "Operon configuration changed before the snapshot could be committed.",
+        this.requestContext("refreshLiveOperonSnapshot", {
+          expectedSettingsSignature: finalStatus.settingsSignature,
+          observedSettingsSignature: configuration.settingsSignature,
+        }),
+      );
+    }
     this.saveSnapshot(finalStatus, pageResult.tasks, validation, configuration);
     const snapshot = this.loadSnapshot("operon-live");
     if (!snapshot) {
@@ -890,7 +1351,9 @@ export class OperonService {
     return snapshot;
   }
 
-  private async refreshLiveSnapshotCoalesced(status?: OperonStatus): Promise<OperonSnapshotEnvelope> {
+  private async refreshLiveSnapshotCoalesced(
+    status?: OperonStatus,
+  ): Promise<OperonSnapshotEnvelope> {
     if (!sharedRefreshPromise) {
       sharedRefreshPromise = this.refreshLiveSnapshot(status).finally(() => {
         sharedRefreshPromise = null;
@@ -922,18 +1385,24 @@ export class OperonService {
           ...cached!,
           source: "operon-live",
           stale: false,
-          snapshotAgeMs: Math.max(0, Date.now() - Date.parse(cached!.snapshotAt)),
+          snapshotAgeMs: Math.max(
+            0,
+            Date.now() - Date.parse(cached!.snapshotAt),
+          ),
           capabilities: status.capabilities,
           limitations: status.limitations,
         };
       }
       return await this.refreshLiveSnapshotCoalesced(status);
     } catch (error) {
-      logger.warning("Live Operon Bridge unavailable; considering persisted snapshot fallback.", {
-        ...context,
-        error: errorMessage(error),
-        cacheAvailable: Boolean(cached),
-      });
+      logger.warning(
+        "Live Operon Bridge unavailable; considering persisted snapshot fallback.",
+        {
+          ...context,
+          error: errorMessage(error),
+          cacheAvailable: Boolean(cached),
+        },
+      );
       if (cached) return cached;
       if (error instanceof McpError) throw error;
       throw new McpError(
@@ -971,7 +1440,10 @@ export class OperonService {
           ok: Boolean(cached),
           source: cached ? "operon-cache" : "unavailable",
           stale: Boolean(cached),
-          error: { code: "live_bridge_unavailable", message: errorMessage(error) },
+          error: {
+            code: "live_bridge_unavailable",
+            message: errorMessage(error),
+          },
           snapshot: cached ? this.snapshotSummary(cached) : null,
           limitations: CACHE_LIMITATIONS,
         };
@@ -987,71 +1459,75 @@ export class OperonService {
     };
   }
 
-	async configuration(forceRefresh = false): Promise<Record<string, unknown>> {
-		if (forceRefresh) {
-			await this.ensureSnapshot(true);
-		}
+  async configuration(forceRefresh = false): Promise<Record<string, unknown>> {
+    if (forceRefresh) {
+      await this.ensureSnapshot(true);
+    }
 
-		if (liveModeConfigured()) {
-			try {
-				const status = await this.fetchLiveStatus();
-				const configuration = await this.fetchLiveConfiguration();
-				if (configuration.settingsSignature !== status.settingsSignature) {
-					throw new McpError(
-						BaseErrorCode.CONFLICT,
-						"Operon settings changed while reading the configuration; retry after the plugin settles.",
-						this.requestContext("operonConfiguration", {
-							expectedSettingsSignature: status.settingsSignature,
-							observedSettingsSignature: configuration.settingsSignature,
-						}),
-					);
-				}
-				return configuration;
-			} catch (error) {
-				const cached = this.readCachedConfiguration();
-				if (cached) return cached;
-				if (error instanceof McpError) throw error;
-				throw new McpError(
-					BaseErrorCode.SERVICE_UNAVAILABLE,
-					`Operon configuration is unavailable and no cached configuration exists: ${errorMessage(error)}`,
-					this.requestContext("operonConfiguration"),
-				);
-			}
-		}
+    if (liveModeConfigured()) {
+      try {
+        const status = await this.fetchLiveStatus();
+        const configuration = await this.fetchLiveConfiguration();
+        if (configuration.settingsSignature !== status.settingsSignature) {
+          throw new McpError(
+            BaseErrorCode.CONFLICT,
+            "Operon settings changed while reading the configuration; retry after the plugin settles.",
+            this.requestContext("operonConfiguration", {
+              expectedSettingsSignature: status.settingsSignature,
+              observedSettingsSignature: configuration.settingsSignature,
+            }),
+          );
+        }
+        return configuration;
+      } catch (error) {
+        const cached = this.readCachedConfiguration();
+        if (cached) return cached;
+        if (error instanceof McpError) throw error;
+        throw new McpError(
+          BaseErrorCode.SERVICE_UNAVAILABLE,
+          `Operon configuration is unavailable and no cached configuration exists: ${errorMessage(error)}`,
+          this.requestContext("operonConfiguration"),
+        );
+      }
+    }
 
-		const cached = this.readCachedConfiguration();
-		if (cached) return cached;
-		throw new McpError(
-			BaseErrorCode.SERVICE_UNAVAILABLE,
-			"No persisted Operon configuration is available in the current headless runtime.",
-			this.requestContext("operonConfiguration"),
-		);
-	}
+    const cached = this.readCachedConfiguration();
+    if (cached) return cached;
+    throw new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      "No persisted Operon configuration is available in the current headless runtime.",
+      this.requestContext("operonConfiguration"),
+    );
+  }
 
-	private readCachedConfiguration(): Record<string, unknown> | null {
-		const db = this.openDb();
-		try {
-			const meta = this.readMeta(db);
-			if (!meta?.configuration) return null;
-			return {
-				ok: true,
-				contractVersion: OPERON_CONTRACT_VERSION,
-				source: "operon-cache",
-				stale: true,
-				snapshotAt: new Date(meta.snapshotAt).toISOString(),
-				snapshotAgeMs: Math.max(0, Date.now() - meta.snapshotAt),
-				operonVersion: meta.operonVersion,
-				bridgeVersion: meta.bridgeVersion,
-				settingsSignature: meta.configuration.settingsSignature,
-				configuration: meta.configuration.configuration,
-				limitations: [...new Set([...meta.configuration.limitations, ...CACHE_LIMITATIONS])],
-			};
-		} finally {
-			db.close();
-		}
-	}
+  private readCachedConfiguration(): Record<string, unknown> | null {
+    const db = this.openDb();
+    try {
+      const meta = this.readMeta(db);
+      if (!meta?.configuration) return null;
+      return {
+        ok: true,
+        contractVersion: OPERON_CONTRACT_VERSION,
+        source: "operon-cache",
+        stale: true,
+        snapshotAt: new Date(meta.snapshotAt).toISOString(),
+        snapshotAgeMs: Math.max(0, Date.now() - meta.snapshotAt),
+        operonVersion: meta.operonVersion,
+        bridgeVersion: meta.bridgeVersion,
+        settingsSignature: meta.configuration.settingsSignature,
+        configuration: meta.configuration.configuration,
+        limitations: [
+          ...new Set([...meta.configuration.limitations, ...CACHE_LIMITATIONS]),
+        ],
+      };
+    } finally {
+      db.close();
+    }
+  }
 
-  private snapshotSummary(snapshot: OperonSnapshotEnvelope): Record<string, unknown> {
+  private snapshotSummary(
+    snapshot: OperonSnapshotEnvelope,
+  ): Record<string, unknown> {
     return {
       taskCount: snapshot.tasks.length,
       snapshotAt: snapshot.snapshotAt,
@@ -1071,6 +1547,47 @@ export class OperonService {
     return queryOperonSnapshot(snapshot, query);
   }
 
+  async querySavedFilter(input: unknown): Promise<Record<string, unknown>> {
+    const params: OperonFilterQuery = OperonFilterQuerySchema.parse(input);
+    if (!liveModeConfigured()) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Saved Operon filters require the live Obsidian Desktop Bridge.",
+        this.requestContext("operonQuerySavedFilter"),
+      );
+    }
+    const status = await this.fetchLiveStatus();
+    if (!status.capabilities.filterQuery) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Operon saved-filter query capability is unavailable.",
+        this.requestContext("operonQuerySavedFilter"),
+      );
+    }
+    const response = await this.getClient().post(
+      `${BRIDGE_PREFIX}/tasks/filter`,
+      params,
+    );
+    const parsed = OperonBridgePageSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        "Operon Bridge saved-filter query returned an incompatible payload.",
+        this.requestContext("operonQuerySavedFilter", {
+          issues: parsed.error.issues,
+        }),
+      );
+    }
+    return {
+      ...parsed.data,
+      snapshotAt: new Date().toISOString(),
+      snapshotAgeMs: 0,
+      operonVersion: status.operon.version ?? "unknown",
+      bridgeVersion: status.bridge.version,
+      capabilities: status.capabilities,
+    };
+  }
+
   async createTask(input: unknown): Promise<OperonMutationResult> {
     const params: OperonCreateTask = OperonCreateTaskSchema.parse(input);
     return this.executeMutation(
@@ -1083,17 +1600,17 @@ export class OperonService {
     );
   }
 
-	async adoptTask(input: unknown): Promise<OperonMutationResult> {
-		const params: OperonAdoptTask = OperonAdoptTaskSchema.parse(input);
-		return this.executeMutation(
-			"adopt",
-			null,
-			params.idempotencyKey,
-			params.dryRun,
-			`${BRIDGE_PREFIX}/tasks/adopt`,
-			params,
-		);
-	}
+  async adoptTask(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonAdoptTask = OperonAdoptTaskSchema.parse(input);
+    return this.executeMutation(
+      "adopt",
+      null,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/adopt`,
+      params,
+    );
+  }
 
   async updateTask(input: unknown): Promise<OperonMutationResult> {
     const params: OperonUpdateTask = OperonUpdateTaskSchema.parse(input);
@@ -1108,7 +1625,8 @@ export class OperonService {
   }
 
   async transitionTask(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonTransitionTask = OperonTransitionTaskSchema.parse(input);
+    const params: OperonTransitionTask =
+      OperonTransitionTaskSchema.parse(input);
     return this.executeMutation(
       "transition",
       params.operonId,
@@ -1127,6 +1645,18 @@ export class OperonService {
       params.idempotencyKey,
       params.dryRun,
       `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/convert`,
+      params,
+    );
+  }
+
+  async relocateTask(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonRelocateTask = OperonRelocateTaskSchema.parse(input);
+    return this.executeMutation(
+      "relocate",
+      params.operonId,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/relocate`,
       params,
     );
   }
@@ -1177,16 +1707,21 @@ export class OperonService {
           capabilities: snapshot.capabilities,
         };
       } catch (error) {
-        logger.warning("Live Operon validation failed; using snapshot validation.", {
-          ...this.requestContext("validateOperonSnapshot"),
-          error: errorMessage(error),
-        });
+        logger.warning(
+          "Live Operon validation failed; using snapshot validation.",
+          {
+            ...this.requestContext("validateOperonSnapshot"),
+            error: errorMessage(error),
+          },
+        );
       }
     }
     return this.validateSnapshot(snapshot);
   }
 
-  private validateSnapshot(snapshot: OperonSnapshotEnvelope): Record<string, unknown> {
+  private validateSnapshot(
+    snapshot: OperonSnapshotEnvelope,
+  ): Record<string, unknown> {
     const ids = new Set(snapshot.tasks.map((task) => task.operonId));
     const violations: Array<Record<string, unknown>> = [];
     for (const task of snapshot.tasks) {

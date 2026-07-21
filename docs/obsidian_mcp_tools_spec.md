@@ -67,6 +67,7 @@ Related docs:
 - `operon_query_tasks`: filter by task IDs, stable pipeline/status IDs, visible workflow labels, text, source, checkbox, priority,
   tier, paths, tags, parents, dates, canonical/custom fields, or unmanaged file-task
   properties.
+- `operon_query_saved_filter`: evaluate one saved filter through Operon's native live filter engine.
 - `operon_validate`: live duplicate/source/workflow graph validation, or a limited
   snapshot-only validation with explicit caveats.
 - `operon_adopt_task`: upgrade one exact legacy checkbox in place with line-level optimistic locking.
@@ -74,6 +75,7 @@ Related docs:
 - `operon_update_task`: update one mutation group with expected revision.
 - `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards.
 - `operon_convert_task`: convert inline/file shape in `MCP_WRITE_MODE=full`.
+- `operon_relocate_task`: move an inline task to another Markdown note while preserving `operonId`.
 
 Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`,
 Operon/Bridge versions, capabilities, and limitations.
