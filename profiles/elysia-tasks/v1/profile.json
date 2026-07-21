@@ -1,0 +1,160 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "profileId": "elysia.tasks",
+  "profileVersion": "1.0.0",
+  "defaultLocale": "fr",
+  "supportedLocales": ["fr", "en"],
+  "engine": {
+    "preferredPluginId": "kairelys",
+    "fallbackPluginId": "operon",
+    "publicApiVersion": "1",
+    "singleOwnerRequired": true
+  },
+  "paths": {
+    "activeTaskRoots": ["Efforts/Projets", "Efforts/Créations"],
+    "captureRoot": "Calendrier/NOTES PÉRIODIQUES",
+    "excludedFolders": ["tmp", ".trash", "Efforts/Projets/_TaskNotes"]
+  },
+  "workflow": {
+    "id": "pl_project",
+    "name": "ÉLYSIA",
+    "descriptions": {
+      "fr": "Workflow canonique ÉLYSIA : clarifier, planifier, exécuter, terminer, mettre en pause ou abandonner sans confondre état d’exécution et importance stratégique.",
+      "en": "Canonical ÉLYSIA workflow: clarify, plan, execute, finish, pause or drop work without confusing execution state with strategic importance."
+    },
+    "statuses": [
+      {
+        "id": "st_project_brainstorming",
+        "labels": { "fr": "À clarifier", "en": "To clarify" },
+        "semantics": { "finished": false, "cancelled": false, "scheduledTarget": false, "trackingTarget": false }
+      },
+      {
+        "id": "st_project_planned",
+        "labels": { "fr": "Planifié", "en": "Planned" },
+        "semantics": { "finished": false, "cancelled": false, "scheduledTarget": true, "trackingTarget": false }
+      },
+      {
+        "id": "st_project_in_progress",
+        "labels": { "fr": "En cours", "en": "In progress" },
+        "semantics": { "finished": false, "cancelled": false, "scheduledTarget": false, "trackingTarget": true }
+      },
+      {
+        "id": "st_project_finished",
+        "labels": { "fr": "Terminé", "en": "Finished" },
+        "semantics": { "finished": true, "cancelled": false, "scheduledTarget": false, "trackingTarget": false }
+      },
+      {
+        "id": "st_project_paused",
+        "labels": { "fr": "En pause", "en": "Paused" },
+        "semantics": { "finished": false, "cancelled": false, "scheduledTarget": false, "trackingTarget": false }
+      },
+      {
+        "id": "st_project_dropped",
+        "labels": { "fr": "Abandonné", "en": "Dropped" },
+        "semantics": { "finished": false, "cancelled": true, "scheduledTarget": false, "trackingTarget": false }
+      }
+    ]
+  },
+  "priorities": {
+    "defaultId": "pr_c",
+    "items": [
+      { "id": "pr_s", "label": "S", "color": "#e41a1b", "descriptions": { "fr": "Critique : incident, blocage majeur ou coût immédiat.", "en": "Critical: incident, major blocker or immediate cost." } },
+      { "id": "pr_a", "label": "A", "color": "#ff7124", "descriptions": { "fr": "Engagement prioritaire à exécuter très prochainement.", "en": "Priority commitment to execute very soon." } },
+      { "id": "pr_b", "label": "B", "color": "#a1b752", "descriptions": { "fr": "Travail important à placer après les priorités A.", "en": "Important work to schedule after A priorities." } },
+      { "id": "pr_c", "label": "C", "color": "#3f84a8", "descriptions": { "fr": "Travail opérationnel normal ; valeur par défaut.", "en": "Normal operational work; default value." } },
+      { "id": "pr_d", "label": "D", "color": "#0e6175", "descriptions": { "fr": "Maintenance ou amélioration facilement différable.", "en": "Maintenance or improvement that can be deferred easily." } },
+      { "id": "pr_e", "label": "E", "color": "#024959", "descriptions": { "fr": "Backlog crédible, sans engagement actuel.", "en": "Credible backlog without a current commitment." } },
+      { "id": "pr_f", "label": "F", "color": "#504e4e", "descriptions": { "fr": "Travail optionnel ou parqué.", "en": "Optional or parked work." } }
+    ]
+  },
+  "creation": {
+    "inlineTaskSaveMode": "ask-every-time",
+    "defaultToFileTask": false,
+    "fileTasksFolder": "Efforts/Projets/_Operon",
+    "parentInlineTargetMode": "same-folder",
+    "parentFileTargetMode": "same-folder",
+    "template": {
+      "kind": "builtin-pipeline-minimal",
+      "pipelineId": "pl_project",
+      "initialStatusId": "st_project_brainstorming",
+      "requiredCanonicalFields": ["operonId", "datetimeCreated", "datetimeModified", "status", "priority"]
+    }
+  },
+  "automation": {
+    "autoCompleteParentWhenAllChildrenTerminal": false,
+    "cascadeCancelToDescendants": false,
+    "fileTaskAutoArchiveEnabled": false,
+    "fileRepeatDestination": "same-folder"
+  },
+  "filters": [
+    {
+      "id": "fs_elysia_now",
+      "names": { "fr": "ÉLYSIA — Maintenant", "en": "ÉLYSIA — Now" },
+      "icon": "circle-play",
+      "all": [
+        { "field": "checkbox", "operator": "isOpen" },
+        { "field": "folders", "operator": "isInAnyFolderTree", "values": ["Efforts/Projets", "Efforts/Créations"] },
+        { "field": "statusId", "operator": "isNot", "value": "st_project_brainstorming" },
+        { "field": "tags", "operator": "noneContain", "value": "north-star" }
+      ],
+      "sort": ["priority:asc", "dateDue:asc", "dateScheduled:asc"]
+    },
+    {
+      "id": "fs_elysia_inbox",
+      "names": { "fr": "ÉLYSIA — Boîte de réception", "en": "ÉLYSIA — Inbox" },
+      "icon": "inbox",
+      "all": [
+        { "field": "checkbox", "operator": "isOpen" },
+        { "field": "folders", "operator": "isInFolderTree", "value": "Calendrier/NOTES PÉRIODIQUES" },
+        { "field": "statusId", "operator": "is", "value": "st_project_brainstorming" }
+      ],
+      "sort": ["dateCreated:asc"]
+    },
+    {
+      "id": "fs_elysia_north",
+      "names": { "fr": "ÉLYSIA — Étoile du Nord", "en": "ÉLYSIA — North Star" },
+      "icon": "star",
+      "all": [
+        { "field": "checkbox", "operator": "isOpen" },
+        { "field": "tags", "operator": "anyContains", "value": "north-star" }
+      ],
+      "sort": ["priority:asc", "dateDue:asc"]
+    },
+    {
+      "id": "fs_elysia_audit",
+      "names": { "fr": "ÉLYSIA — Audit anti-pollution", "en": "ÉLYSIA — Anti-pollution audit" },
+      "icon": "shield-alert",
+      "all": [
+        { "field": "checkbox", "operator": "isOpen" },
+        { "field": "folders", "operator": "isOutsideAllFolderTrees", "values": ["Efforts/Projets", "Efforts/Créations", "Calendrier/NOTES PÉRIODIQUES"] }
+      ],
+      "sort": ["folders:asc"]
+    },
+    {
+      "id": "fs_elysia_folder_open",
+      "names": { "fr": "ÉLYSIA — Tâches ouvertes du dossier", "en": "ÉLYSIA — Open tasks in folder" },
+      "icon": "list-todo",
+      "scope": "current-folder",
+      "all": [{ "field": "checkbox", "operator": "isOpen" }],
+      "sort": ["dateDue:asc", "priority:asc", "dateScheduled:asc"]
+    }
+  ],
+  "agentContract": {
+    "readConfigurationBeforeQueries": true,
+    "queryAndTransitionByStableIds": true,
+    "mutationsRequireExpectedRevision": true,
+    "mutationsRequireIdempotencyKey": true,
+    "dryRunBeforeApply": true,
+    "rawMarkdownMutationAllowed": false
+  },
+  "excludedFromProfile": [
+    "plugin data.json",
+    "runtime and cache state",
+    "documentation folder",
+    "absolute vault paths",
+    "user interface layout",
+    "personal saved filters",
+    "task content and identifiers"
+  ]
+}

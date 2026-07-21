@@ -522,6 +522,7 @@ Keep auto mode and let each user override via env vars.
 - Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
 - Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
 - Current tool surface: [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
+- Public ÉLYSIA task-management profile (French): [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
 - French README: [README.fr.md](README.fr.md)
 
 ## Credits

@@ -484,6 +484,7 @@ Garder le mode auto et laisser chaque utilisateur surcharger par variables d’e
 - Profil serveur headless dédié : [docs/headless-server-profile.fr.md](docs/headless-server-profile.fr.md)
 - Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
 - Surface actuelle des tools : [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
+- Profil public de gestion des tâches ÉLYSIA : [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
 - README anglais : [README.md](README.md)
 
 ## Crédits
