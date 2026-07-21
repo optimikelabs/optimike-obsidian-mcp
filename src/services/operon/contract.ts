@@ -269,6 +269,7 @@ export const OperonConvertTaskInputSchema = MutationControlSchema.extend({
   target: OperonTaskSourceSchema,
   fileTemplateId: z.string().optional(),
   targetPath: z.string().optional(),
+  targetFolder: z.string().optional(),
 });
 
 export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine((value, context) => {
@@ -278,6 +279,12 @@ export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine(
       path: ["targetPath"],
       message: "targetPath is required for file-to-inline conversion.",
     });
+  }
+  if (value.target === "inline" && value.targetFolder?.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetFolder"], message: "targetFolder is supported only for inline-to-file conversion." });
+  }
+  if (value.target === "file" && value.targetPath?.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetPath"], message: "targetPath is supported only for file-to-inline conversion." });
   }
 });
 

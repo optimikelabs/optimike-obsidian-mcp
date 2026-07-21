@@ -335,7 +335,8 @@ export class OperonService {
       target: operonId ?? "new-task",
       destructive: action === "convert" && !dryRun,
       allowInReadonly: dryRun,
-      allowInGuarded: dryRun || action !== "convert",
+      allowInGuarded:
+        dryRun || action !== "convert" || config.operonMutationAllowedPathPrefixes.length > 0,
       context: this.requestContext(operation, { operonId, idempotencyKey }),
     });
     const response = await this.getClient().post(path, payload, {
@@ -429,10 +430,19 @@ export class OperonService {
     this.assertAllowedMutationPath(task.path, `${action} source`);
 
     if (action === "convert" && !dryRun) {
+      const target = payload.target;
+      if (target === "file" && typeof payload.targetFolder === "string" && payload.targetFolder.trim()) {
+        this.assertAllowedMutationPath(payload.targetFolder, "convert targetFolder");
+        return;
+      }
+      if (target === "inline" && typeof payload.targetPath === "string" && payload.targetPath.trim()) {
+        this.assertAllowedMutationPath(payload.targetPath, "convert targetPath");
+        return;
+      }
       throw new McpError(
         BaseErrorCode.FORBIDDEN,
-        "Operon conversion apply is disabled while a mutation path allowlist is active.",
-        this.requestContext("assertOperonMutationPathScope", { action, operonId }),
+        "Scoped Operon conversion requires targetFolder for inline-to-file or targetPath for file-to-inline.",
+        this.requestContext("assertOperonMutationPathScope", { action, operonId, target }),
       );
     }
   }

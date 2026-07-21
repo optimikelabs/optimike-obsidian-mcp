@@ -46,7 +46,7 @@ Durable results are stored in `operon_mutation_journal`. Reusing an idempotency 
 - `MCP_WRITE_MODE=guarded`: create, update, and transition apply are allowed with their normal preconditions.
 - `MCP_WRITE_MODE=full`: conversion apply is additionally allowed.
 
-`OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for file tasks or `targetPath` for inline tasks. Conversion apply remains disabled in this scoped mode until both source and destination routing can be proven before the write.
+`OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for file tasks or `targetPath` for inline tasks. Scoped conversion apply is allowed in guarded mode only when the current source and explicit destination are both inside the allowlist.
 
 Conversion remains classified as destructive because file-to-inline moves the source file to trash and inline-to-file replaces the source line with a durable link.
 
@@ -58,7 +58,7 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 `operon_transition_task` accepts an exact configured workflow status and preserves Operon's dependency, recurrence, aggregate, terminal-date, archive, and auto-unpin semantics.
 
-`operon_convert_task` converts inline ↔ file through Operon's transition-safe paths. File-to-inline requires an explicit target note.
+`operon_convert_task` converts inline ↔ file through Operon's transition-safe paths. File-to-inline requires an explicit `targetPath`; scoped inline-to-file conversion requires an explicit `targetFolder`.
 
 ## Verified pilot behavior
 
