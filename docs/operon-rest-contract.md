@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, and with Kairélys `2.5.1` (based on Operon `2.5.0`). Mutations are exposed only when the loaded instance implements `OperonPublicApiV1`; there is no raw Markdown or private-reflection fallback.
+The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, and with Kairélys `2.5.1` or `2.5.2` (based on Operon `2.5.0`). Mutations are exposed only when the loaded instance implements `OperonPublicApiV1`; there is no raw Markdown or private-reflection fallback.
 
 Prefix:
 
@@ -15,11 +15,11 @@ All routes inherit Local REST API authentication and TLS behavior.
 ## Compatibility and capabilities
 
 - Bridge contract: `1`
-- Latest tested compatible engine version: Kairélys `2.5.1`
-- Read allowlist: `2.4.0`, `2.5.0`, `2.5.1`
+- Latest tested compatible engine version: Kairélys `2.5.2`
+- Read allowlist: `2.4.0`, `2.5.0`, `2.5.1`, `2.5.2`
 - Mutation contract: Operon Public API `1`
 - Official Operon `2.5.0`: read-only
-- Kairélys `2.5.1` with Public API v1: read-write
+- Kairélys `2.5.1` or `2.5.2` with Public API v1: read-write
 
 `GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future Operon version is not assumed compatible merely because its Markdown looks similar.
 

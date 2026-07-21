@@ -105,7 +105,8 @@ test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("2.4.0"), true);
   assert.equal(isVersionCompatible("2.5.0"), true);
   assert.equal(isVersionCompatible("2.5.1"), true);
-  assert.equal(isVersionCompatible("2.5.2"), false);
+  assert.equal(isVersionCompatible("2.5.2"), true);
+  assert.equal(isVersionCompatible("2.5.3"), false);
   assert.equal(isVersionCompatible("2.9.1"), false);
   assert.equal(isVersionCompatible("2.3.9"), false);
   assert.equal(isVersionCompatible("3.0.0"), false);
