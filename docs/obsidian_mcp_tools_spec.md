@@ -9,20 +9,24 @@ Related docs:
 - Runtime modes: [runtime-capability-matrix.md](runtime-capability-matrix.md)
 - Operations: [../OPERATIONS.md](../OPERATIONS.md)
 - Agent routing: [mcp-routing-guide.md](mcp-routing-guide.md)
+- Operon contract: [operon-mcp-contract.md](operon-mcp-contract.md)
 
 ## Runtime Rules
 
 - `live`: Obsidian Desktop + Local REST API. Full REST-backed note and Bases
-  surface.
+  surface. Operon tools use the live Optimike Operon Bridge when installed.
 - `hybrid`: cache/filesystem read surface first; live REST tools appear when
-  `OBSIDIAN_API_KEY` is configured and the API is available.
+  `OBSIDIAN_API_KEY` is configured and the API is available. Operon tools validate
+  their snapshot against the live Bridge when reachable.
 - `headless-readonly`: read/search/tasks/semantic/runtime/format validation and
-  local readonly Bases fallback.
+  local readonly Bases fallback. Operon tools can only serve a previously
+  validated stale snapshot.
 - `headless-guarded`: `headless-readonly` plus bounded filesystem writes for
-  note append/prepend, exact search-replace, and frontmatter `set`.
+  note append/prepend, exact search-replace, and frontmatter `set`. Operon remains
+  read-only.
 - `headless-filesystem`: `headless-guarded` plus explicit local filesystem
   features: tags, admin move/archive/delete, batch frontmatter, minimal Bases
-  writes, and JSON Canvas helpers.
+  writes, and JSON Canvas helpers. Operon remains read-only.
 
 ## Core Notes
 
@@ -49,8 +53,37 @@ Related docs:
 
 - `list_all_tasks`: parse Obsidian Tasks-compatible Markdown tasks from the
   shared cache/filesystem.
-- `query_tasks`: query cached task data with status, date, tag, description, and
+- `query_tasks`: query cached Tasks data with status, date, tag, description, and
   path filters.
+
+## Operon (contract v1)
+
+- `operon_status`: inspect live Bridge compatibility and persisted snapshot state;
+- `operon_get_configuration`: read the live task-semantic Operon settings and their signed stale fallback;
+  optional `forceRefresh` requests a complete live rebuild.
+- `operon_list_tasks`: list tasks from a live-generation-validated snapshot or an
+  explicitly stale persisted fallback.
+- `operon_get_task`: read one task by durable `operonId`.
+- `operon_query_tasks`: filter by task IDs, stable pipeline/status IDs, visible workflow labels, text, source, checkbox, priority,
+  tier, paths, tags, parents, dates, canonical/custom fields, or unmanaged file-task
+  properties.
+- `operon_query_saved_filter`: evaluate one saved filter through Operon's native live filter engine.
+- `operon_validate`: live duplicate/source/workflow graph validation, or a limited
+  snapshot-only validation with explicit caveats.
+- `operon_adopt_task`: upgrade one exact legacy checkbox in place with line-level optimistic locking.
+- `operon_create_task`: create inline/file tasks through Operon Public API v1.
+- `operon_update_task`: update one mutation group with expected revision.
+- `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards.
+- `operon_convert_task`: convert inline/file shape in `MCP_WRITE_MODE=full`.
+- `operon_relocate_task`: move an inline task to another Markdown note while preserving `operonId`.
+
+Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`,
+Operon/Bridge versions, capabilities, and limitations.
+
+Mutations require a live Bridge and Operon Public API v1. Official Operon remains
+read-only; the minimal Optimike fork supplies the API. Dry-run is the default,
+idempotency is mandatory, existing tasks require `expectedRevision`, and there
+is no direct Markdown fallback.
 
 ## Semantic Search
 

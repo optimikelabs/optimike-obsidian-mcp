@@ -1,0 +1,19 @@
+{
+  "name": "optimike-operon-bridge",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/contract.test.ts",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "1.13.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}

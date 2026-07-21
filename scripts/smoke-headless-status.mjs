@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
-const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "20000");
+const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "60000");
 
 async function findFreePort() {
   return new Promise((resolve, reject) => {

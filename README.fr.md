@@ -6,7 +6,7 @@ Guide d’exploitation anglais : [OPERATIONS.md](OPERATIONS.md)
 
 ![Hero Optimike Obsidian MCP](docs/assets/hero-optimike-obsidian-mcp.png)
 
-Serveur MCP (Model Context Protocol) pour Obsidian avec cache local partagé, outils Tasks intégrés et recherche sémantique basée sur Smart Connections.
+Serveur MCP (Model Context Protocol) pour Obsidian avec cache local partagé, outils Operon sécurisés, compatibilité Tasks historique, Bases et recherche sémantique Smart Connections.
 
 ## TL;DR
 
@@ -26,6 +26,7 @@ Recommandation Codex : pointer la config MCP vers `dist/stdio-proxy.js`, pas dir
   - Local REST API (obligatoire pour les outils REST live) : https://github.com/coddingtonbear/obsidian-local-rest-api
   - Smart Connections (obligatoire pour la recherche sémantique) : https://github.com/brianpetro/obsidian-smart-connections
   - Bases Bridge (REST) (obligatoire pour les outils `.base` live/plugin-backed, inclus dans ce repo)
+  - Operon `2.5.0` avec Public API v1 et Optimike Operon Bridge (requis pour les mutations Operon live ; Bridge inclus dans ce repo)
   - plugin Obsidian Tasks (obligatoire pour un comportement Tasks canonique)
 - Pour la recherche sémantique, assure-toi que ton vault contient un dossier `.smart-env`
 
@@ -60,6 +61,7 @@ Optimike Obsidian MCP donne aux agents une façon structurée de travailler avec
 - lire, lister, modifier et rechercher des notes
 - gérer le frontmatter et les tags
 - interroger et mettre à jour les Bases Obsidian via le Bases Bridge inclus
+- gérer les tâches Operon avec 13 outils index-aware sans écriture Markdown brute
 - inspecter et requêter les tâches Obsidian Tasks
 - lancer une recherche sémantique sur un index Smart Connections
 - vérifier la santé du serveur, l'état du cache, le mode dégradé et la politique d'écriture
@@ -77,6 +79,7 @@ Le MCP devient donc une frontière pratique entre les agents et Obsidian : les a
 ## Points forts
 
 - Outils MCP complets (notes, frontmatter, tags, recherche globale, etc.)
+- Treize outils Operon avec identités de workflow stables, filtres natifs, mutations sécurisées et fallback stale en lecture seule
 - Outils Tasks intégrés : `list_all_tasks` et `query_tasks`
 - Recherche sémantique locale `smart_semantic_search`
 - Outils de santé/état du serveur : `obsidian_runtime_status` et `obsidian_runtime_maintenance`
@@ -148,6 +151,27 @@ Le serveur expose des tools MCP “Base” via Obsidian MCP :
 `bases_upsert_rows` est conçu pour les écritures Obsidian live en lot : préflight Local REST/Bases Bridge, `dryRun`, `chunkSize`, `delayMs`, `maxRetries`, `retryBackoffMs`, `requestTimeoutMs`, puis `summary` structuré avec `changed_count`, `failed_count`, `failed_operations` et métadonnées de retry. Pour un lot sensible, commencer par `dryRun: true`, puis écrire avec `chunkSize: 1`, `continueOnError: true` et `maxRetries: 2`.
 
 Les clés protégées ou virtuelles (`file.*`, `formula.*`, `création`/`creation`, `modification`) sont refusées avant écriture. Les timeouts `processFrontMatter` du Bridge remontent en `write_timeout` retryable : les traiter d’abord comme signal “Obsidian occupé/indexing/locked”, pas comme une donnée forcément invalide.
+
+## Moteur de tâches Operon
+
+Operon reste le moteur métier des tâches et l’interface humaine. L’Optimike Operon Bridge inclus projette son index live et sa Public API versionnée via Local REST API ; le MCP ajoute validation, snapshots stale, politique d’écriture, révisions optimistes, idempotence durable et journal d’audit.
+
+Les 13 outils sont :
+
+```text
+operon_status, operon_get_configuration, operon_list_tasks,
+operon_get_task, operon_query_tasks, operon_query_saved_filter,
+operon_validate, operon_adopt_task, operon_create_task,
+operon_update_task, operon_transition_task, operon_convert_task,
+operon_relocate_task
+```
+
+L’application des mutations est désactivée par défaut. Après validation live, l’activer aux deux endroits :
+
+```text
+Réglages Optimike Operon Bridge → Autoriser les mutations de tâches
+OPERON_MUTATIONS_ENABLED=true
+```
 
 ## Modèle runtime final
 

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-07-21
+
+### Added
+
+- Thirteen Operon MCP tools for live configuration, indexed reads, native saved-filter queries, validation, adoption, creation, update, workflow transition, inline/file conversion, and identity-preserving inline relocation.
+- Bundled Optimike Operon Bridge \`0.3.0\`, exposing a versioned REST contract through Obsidian Local REST API.
+- Durable SQLite snapshots and mutation journal with optimistic revisions and idempotency reservations that survive process restarts.
+- Stable pipeline/status IDs so French and English UI labels do not become automation identifiers.
+
+### Changed
+
+- Operon apply now requires two explicit operator opt-ins: the Bridge setting and \`OPERON_MUTATIONS_ENABLED=true\` in the MCP runtime.
+- Stale Operon snapshots are always read-only, regardless of the capabilities cached while Obsidian was live.
+- Mutation results are accepted only after the final indexed task matches the requested fields, status, source, and destination.
+
+### Security
+
+- Operon mutations are dry-run-first, path-scoped, revision-checked, and pass through the central MCP write policy.
+- Protected frontmatter keys are refused in every write mode, including \`full\` and dry-run.
+- Vault-relative paths reject absolute paths and \`.\`/\`..\` traversal segments.
+- No mutation falls back to raw Markdown or private Operon methods.
+
 ## [2.2.0] - 2026-05-21
 
 ### Added

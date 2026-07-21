@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { collectRuntimeStatus, runRuntimeMaintenance } from "../../../services/runtimeState.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
+import { registerOperonTools } from "../operonTools/index.js";
 
 const MaintenanceInputSchema = z.object({
   action: z
@@ -57,4 +58,6 @@ export async function registerRuntimeTools(
       isError: false,
     }),
   );
+
+  await registerOperonTools(server);
 }

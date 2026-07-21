@@ -1,0 +1,10 @@
+{
+  "id": "optimike-operon-bridge",
+  "name": "Optimike Operon Bridge",
+  "version": "0.3.0",
+  "minAppVersion": "1.7.2",
+  "description": "Versioned Local REST API bridge from Operon's live task engine to Optimike Obsidian MCP.",
+  "author": "Optimike",
+  "authorUrl": "https://github.com/optimikelabs",
+  "isDesktopOnly": true
+}
