@@ -198,6 +198,8 @@ export const OperonStatusSchema = z.object({
   }),
   operon: z.object({
     present: z.boolean(),
+    pluginId: z.enum(["kairelys", "operon"]).nullable().optional(),
+    pluginName: z.string().nullable().optional(),
     version: z.string().nullable(),
     compatible: z.boolean(),
     testedAgainst: z.string(),

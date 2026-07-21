@@ -1,14 +1,21 @@
-# Optimike Operon Bridge
+# Optimike Kairélys / Operon Bridge
 
-Obsidian companion plugin exposing Operon's live task engine through the extension API of Obsidian Local REST API.
+Obsidian companion plugin exposing Kairélys or Operon's live task engine through the extension API of Obsidian Local REST API.
 
-Reads use Operon's in-memory V8 index. Mutations are advertised only when the loaded Operon plugin exposes versioned `OperonPublicApiV1` and the operator enables them in Bridge settings. No Markdown/private-method fallback exists.
+Reads use the loaded engine's in-memory V8 index. Mutations are advertised only when the loaded plugin exposes versioned `OperonPublicApiV1` and the operator enables them in Bridge settings. No Markdown/private-method fallback exists.
+
+The Bridge accepts exactly one loaded task engine:
+
+- Kairélys (`kairelys`), the temporary Optimike fork;
+- official Operon (`operon`), for upstream convergence and rollback.
+
+If both plugins are enabled, the Bridge refuses to choose an owner. Disable one before reading or mutating tasks.
 
 ## Requirements
 
 - Obsidian Desktop
 - Operon `2.4.0` or `2.5.0` for reads
-- Optimike Operon `2.5.0` with Public API v1 for mutations
+- Kairélys `2.5.0` or the temporary Optimike Operon build with Public API v1 for mutations
 - Obsidian Local REST API
 
 ## Routes
