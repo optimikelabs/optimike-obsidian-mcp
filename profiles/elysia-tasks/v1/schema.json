@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/optimikelabs/optimike-obsidian-mcp/blob/main/profiles/elysia-tasks/v1/schema.json",
+  "title": "ÉLYSIA task management profile",
+  "type": "object",
+  "required": ["schemaVersion", "profileId", "profileVersion", "defaultLocale", "engine", "paths", "workflow", "priorities", "creation", "automation", "filters", "agentContract"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "profileId": { "const": "elysia.tasks" },
+    "profileVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "defaultLocale": { "enum": ["fr", "en"] },
+    "supportedLocales": { "type": "array", "items": { "enum": ["fr", "en"] }, "uniqueItems": true },
+    "engine": { "type": "object" },
+    "paths": { "type": "object" },
+    "workflow": { "type": "object" },
+    "priorities": { "type": "object" },
+    "creation": { "type": "object" },
+    "automation": { "type": "object" },
+    "filters": { "type": "array" },
+    "agentContract": { "type": "object" },
+    "excludedFromProfile": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

@@ -24,6 +24,7 @@
     "docs/operon-migration-plan.md",
     "docs/operon-rest-contract.md",
     "docs/kairelys-cutover.fr.md",
+    "profiles/elysia-tasks",
     "plugins/obsidian-operon-bridge/build",
     "plugins/obsidian-operon-bridge/manifest.json",
     "plugins/obsidian-operon-bridge/README.md",
