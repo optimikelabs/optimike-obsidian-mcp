@@ -214,6 +214,7 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
     properties: z.record(OperonRawPropertyValueSchema).optional(),
     fileTemplateId: z.string().optional(),
     targetDateKey: z.string().optional(),
+    targetFolder: z.string().optional(),
   }),
 });
 

@@ -209,6 +209,7 @@ process.env.OBSIDIAN_VERIFY_SSL = "false";
 process.env.OBSIDIAN_VAULT = tempRoot;
 process.env.OBSIDIAN_SHARED_CACHE_DB_PATH = dbPath;
 process.env.MCP_WRITE_MODE = "readonly";
+process.env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES = "Efforts/Projets/Internes/Operon Pilot";
 process.env.SEMANTIC_SEARCH_PREWARM = "false";
 
 const { OperonService } = await import("../dist/services/operon/service.js");
@@ -303,14 +304,22 @@ try {
   const planned = await service.createTask({
     idempotencyKey: "test-create-idempotency",
     dryRun: true,
-    task: { source: "file", description: "Dry run task" },
+    task: {
+      source: "file",
+      description: "Dry run task",
+      targetFolder: "Efforts/Projets/Internes/Operon Pilot",
+    },
   });
   assert.equal(planned.status, "planned");
   assert.equal(state.mutationCalls, 1);
   const replayed = await service.createTask({
     idempotencyKey: "test-create-idempotency",
     dryRun: true,
-    task: { source: "file", description: "Dry run task" },
+    task: {
+      source: "file",
+      description: "Dry run task",
+      targetFolder: "Efforts/Projets/Internes/Operon Pilot",
+    },
   });
   assert.equal(replayed.replayed, true);
   assert.equal(replayed.operationId, planned.operationId);
@@ -320,16 +329,46 @@ try {
     service.createTask({
       idempotencyKey: "test-create-idempotency",
       dryRun: true,
-      task: { source: "file", description: "Different request" },
+      task: {
+        source: "file",
+        description: "Different request",
+        targetFolder: "Efforts/Projets/Internes/Operon Pilot",
+      },
     }),
     (error) => error?.code === "CONFLICT",
   );
   assert.equal(state.mutationCalls, 1, "mismatched idempotency reuse must be rejected locally");
 
+  await assert.rejects(
+    service.createTask({
+      idempotencyKey: "test-scope-outside",
+      dryRun: true,
+      task: {
+        source: "file",
+        description: "Outside scope",
+        targetFolder: "Atlas",
+      },
+    }),
+    (error) => error?.code === "FORBIDDEN",
+  );
+  await assert.rejects(
+    service.createTask({
+      idempotencyKey: "test-scope-inline",
+      dryRun: true,
+      task: { source: "inline", description: "No explicit scoped destination" },
+    }),
+    (error) => error?.code === "FORBIDDEN",
+  );
+  assert.equal(state.mutationCalls, 1, "scope rejection must happen before the Bridge call");
+
   const concurrentInput = {
     idempotencyKey: "test-concurrent-idempotency",
     dryRun: true,
-    task: { source: "inline", description: "Concurrent dry run" },
+    task: {
+      source: "file",
+      description: "Concurrent dry run",
+      targetFolder: "Efforts/Projets/Internes/Operon Pilot",
+    },
   };
   const mutationCallsBeforeConcurrent = state.mutationCalls;
   const [concurrentA, concurrentB] = await Promise.all([
@@ -344,7 +383,7 @@ try {
   );
 
   console.log(
-    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, pagination/validation drift preservation, and bound/concurrent mutation idempotency",
+    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, pagination/validation drift preservation, scoped mutations, and bound/concurrent mutation idempotency",
   );
 } finally {
   await new Promise((resolve, reject) =>

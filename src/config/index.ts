@@ -153,6 +153,18 @@ const EnvSchema = z
   MCP_PROTECTED_FRONTMATTER_KEYS: z
     .string()
     .default("création,modification"),
+  OPERON_MUTATION_ALLOWED_PATH_PREFIXES: z.string().optional().superRefine((raw, ctx) => {
+    for (const value of (raw ?? "").split(/[\r\n,]+/u)) {
+      const prefix = value.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, "");
+      if (!prefix) continue;
+      if (/^(?:\/|[a-z]:\/)/iu.test(prefix) || prefix.split("/").includes("..")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Operon mutation prefix must be vault-relative without '..': ${value.trim()}`,
+        });
+      }
+    }
+  }),
   // --- Smart Connections Semantic Search ---
   SMART_SEARCH_MODE: z.enum(["plugin", "smartenv", "files"]).default("plugin"),
   SMART_ENV_DIR: z.string().optional(),
@@ -357,6 +369,10 @@ export const config = {
   mcpGuardedMaxBatchOperations: env.MCP_GUARDED_MAX_BATCH_OPERATIONS,
   mcpProtectedFrontmatterKeys: env.MCP_PROTECTED_FRONTMATTER_KEYS.split(",")
     .map((key) => key.trim())
+    .filter(Boolean),
+  operonMutationAllowedPathPrefixes: (env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES ?? "")
+    .split(/[\r\n,]+/u)
+    .map((prefix) => prefix.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, ""))
     .filter(Boolean),
   smartSearchMode: env.SMART_SEARCH_MODE,
   smartEnvDir: env.SMART_ENV_DIR,

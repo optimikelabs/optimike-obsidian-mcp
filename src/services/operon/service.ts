@@ -40,6 +40,8 @@ import type { z } from "zod";
 const BRIDGE_PREFIX = "/extensions/optimike-operon-bridge/v1";
 const PAGE_SIZE = 500;
 const MAX_PAGES = 10_000;
+const normalizeVaultRelativePath = (value: string): string =>
+  value.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, "");
 const SNAPSHOT_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS operon_task_snapshot (
   operon_id TEXT PRIMARY KEY,
@@ -325,6 +327,7 @@ export class OperonService {
         this.requestContext(`operon_${action}`, { operonId, capabilities: status.capabilities }),
       );
     }
+    await this.assertMutationPathScope(action, operonId, payload, dryRun);
     const operation = `operon_${action}_task` as const;
     assertWriteAllowed({
       operation,
@@ -347,6 +350,9 @@ export class OperonService {
       );
     }
     const result = parsed.data;
+    if (result.status === "applied" && result.after) {
+      this.assertAllowedMutationPath(result.after.path, `${action} result`);
+    }
     this.writeMutationJournal(action, operonId ?? result.after?.operonId ?? null, payload, result);
     if (result.status === "applied") {
       try {
@@ -359,6 +365,70 @@ export class OperonService {
       }
     }
     return result;
+  }
+
+  private isAllowedMutationPath(candidate: string): boolean {
+    const normalized = normalizeVaultRelativePath(candidate);
+    return config.operonMutationAllowedPathPrefixes.some(
+      (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
+    );
+  }
+
+  private assertAllowedMutationPath(candidate: string, label: string): void {
+    if (config.operonMutationAllowedPathPrefixes.length === 0) return;
+    if (!this.isAllowedMutationPath(candidate)) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        `Operon ${label} is outside OPERON_MUTATION_ALLOWED_PATH_PREFIXES: ${candidate}`,
+        this.requestContext("assertOperonMutationPathScope", {
+          candidate,
+          allowedPathPrefixes: config.operonMutationAllowedPathPrefixes,
+        }),
+      );
+    }
+  }
+
+  private async assertMutationPathScope(
+    action: "create" | "update" | "transition" | "convert",
+    operonId: string | null,
+    payload: Record<string, unknown>,
+    dryRun: boolean,
+  ): Promise<void> {
+    if (config.operonMutationAllowedPathPrefixes.length === 0) return;
+
+    if (action === "create") {
+      const task = payload.task as Record<string, unknown> | undefined;
+      if (task?.source !== "file" || typeof task.targetFolder !== "string" || !task.targetFolder.trim()) {
+        throw new McpError(
+          BaseErrorCode.FORBIDDEN,
+          "Scoped Operon mutations require file task creation with an explicit targetFolder.",
+          this.requestContext("assertOperonMutationPathScope", { action }),
+        );
+      }
+      this.assertAllowedMutationPath(task.targetFolder, "create targetFolder");
+      return;
+    }
+
+    if (!operonId) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        `Operon ${action} requires an operonId.`,
+        this.requestContext("assertOperonMutationPathScope", { action }),
+      );
+    }
+    const response = await this.getClient().get(
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(operonId)}?includeProperties=false`,
+    );
+    const task = OperonTaskSchema.parse((response.data as { task?: unknown }).task);
+    this.assertAllowedMutationPath(task.path, `${action} source`);
+
+    if (action === "convert" && !dryRun) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "Operon conversion apply is disabled while a mutation path allowlist is active.",
+        this.requestContext("assertOperonMutationPathScope", { action, operonId }),
+      );
+    }
   }
 
   private readMeta(db: DatabaseSync): SnapshotMeta | null {

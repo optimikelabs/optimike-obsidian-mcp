@@ -46,11 +46,13 @@ Durable results are stored in `operon_mutation_journal`. Reusing an idempotency 
 - `MCP_WRITE_MODE=guarded`: create, update, and transition apply are allowed with their normal preconditions.
 - `MCP_WRITE_MODE=full`: conversion apply is additionally allowed.
 
+`OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation is restricted to file tasks with an explicit `targetFolder` under an allowed prefix. Conversion apply remains disabled in this scoped mode until both source and destination routing can be proven before the write.
+
 Conversion remains classified as destructive because file-to-inline moves the source file to trash and inline-to-file replaces the source line with a durable link.
 
 ### Tool-specific rules
 
-`operon_create_task` creates inline or file tasks through Operon's creator services. File tasks may include unmanaged YAML properties.
+`operon_create_task` creates inline or file tasks through Operon's creator services. File tasks may include unmanaged YAML properties and an explicit vault-relative `targetFolder`.
 
 `operon_update_task` accepts exactly one group per call: description, managed fields/tags, or one unmanaged file property. Status transitions use the dedicated tool.
 
