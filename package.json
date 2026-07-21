@@ -79,7 +79,8 @@
     "build:operon-bridge": "npm --prefix plugins/obsidian-operon-bridge run build",
     "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && npm --prefix plugins/obsidian-operon-bridge run check",
     "smoke:operon-mutations": "node scripts/smoke-operon-mutations.mjs",
-    "smoke:operon-rich-mutations": "node scripts/smoke-operon-rich-mutations.mjs"
+    "smoke:operon-rich-mutations": "node scripts/smoke-operon-rich-mutations.mjs",
+    "test:profiles": "node scripts/test-elysia-task-profile.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
@@ -130,6 +131,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
+    "ajv": "^8.17.1",
     "prettier": "^3.5.3",
     "ts-node": "^10.9.2",
     "typedoc": "^0.28.5",
