@@ -2,9 +2,10 @@
 
 ## Surface
 
-The main MCP server registers nine Operon tools:
+The main MCP server registers ten Operon tools:
 
 - `operon_status`
+- `operon_get_configuration`
 - `operon_list_tasks`
 - `operon_get_task`
 - `operon_query_tasks`
@@ -16,6 +17,8 @@ The main MCP server registers nine Operon tools:
 
 There is no second MCP server.
 
+`operon_get_configuration` is the agent-facing equivalent of the historical Tasks settings loader. It reads the live Operon runtime through the Bridge instead of duplicating `data.json` parsing in Node. The response includes the settings that change task meaning or creation behavior, a deterministic signature, and an explicitly stale cached fallback for headless use.
+
 ## Reads and freshness
 
 Every read response declares `source`, `stale`, snapshot time/age, Operon and Bridge versions, contract version, capabilities, and limitations.
@@ -24,6 +27,8 @@ Every read response declares `source`, `stale`, snapshot time/age, Operon and Br
 - `operon-cache`: last validated SQLite snapshot; always stale and never proof of a mutation.
 
 SQLite cache state lives in `operon_task_snapshot` and `operon_snapshot_meta`. Malformed payloads, incomplete pagination, generation drift, duplicate IDs, incompatible versions, unready index, or P0 validation never replace the last known-good snapshot.
+
+The cached metadata also stores the configuration used for that snapshot. Agents must prefer stable status IDs and canonical key names from `operon_get_configuration`; visible French or English labels are presentation values, not durable API identifiers.
 
 ## Mutations
 
@@ -52,11 +57,11 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 ### Tool-specific rules
 
-`operon_create_task` creates inline or file tasks through Operon's creator services. File tasks may include unmanaged YAML properties and an explicit vault-relative `targetFolder`; inline tasks may use an explicit vault-relative Markdown `targetPath`.
+`operon_create_task` creates inline or file tasks through Operon's creator services. File tasks may include unmanaged YAML properties and an explicit vault-relative `targetFolder`; inline tasks may use an explicit vault-relative Markdown `targetPath`. `statusId` is supported at creation so automations do not hard-code translated labels.
 
 `operon_update_task` accepts exactly one group per call: description, managed fields/tags, or one unmanaged file property. Status transitions use the dedicated tool.
 
-`operon_transition_task` accepts an exact configured workflow status and preserves Operon's dependency, recurrence, aggregate, terminal-date, archive, and auto-unpin semantics.
+`operon_transition_task` prefers a stable status ID from `operon_get_configuration`, while still accepting exactly one current configured workflow value for compatibility. It preserves Operon's dependency, recurrence, aggregate, terminal-date, archive, and auto-unpin semantics.
 
 `operon_convert_task` converts inline ↔ file through Operon's transition-safe paths. File-to-inline requires an explicit `targetPath`; scoped inline-to-file conversion requires an explicit `targetFolder`.
 

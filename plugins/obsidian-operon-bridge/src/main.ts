@@ -15,6 +15,11 @@ import {
   type RuntimeIndexDiagnostics,
   type RuntimeKeyMapping,
   type RuntimePipeline,
+  type RuntimePriorityDefinition,
+  type RuntimeFileTaskTemplate,
+  type OperonBridgeConfiguration,
+  type OperonSemanticConfiguration,
+  type OperonWorkflowTaxonomy,
 } from "./contract";
 
 const EXTENSION_ID = "optimike-operon-bridge";
@@ -44,10 +49,14 @@ interface OperonRuntime {
   };
   pipelines: RuntimePipeline[];
   keyMappings: RuntimeKeyMapping[];
+	priorities: RuntimePriorityDefinition[];
+	language: string;
+	defaultPipelineName: string | null;
 }
 
 interface BridgeCapabilities {
   status: boolean;
+	configuration: boolean;
   list: boolean;
   get: boolean;
   query: boolean;
@@ -286,14 +295,144 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       indexer,
       pipelines: Array.isArray(plugin?.settings?.pipelines) ? plugin.settings.pipelines : [],
       keyMappings: Array.isArray(plugin?.settings?.keyMappings) ? plugin.settings.keyMappings : [],
+		priorities: Array.isArray(plugin?.settings?.priorities) ? plugin.settings.priorities : [],
+		language: String(plugin?.settings?.language ?? "auto").trim() || "auto",
+		defaultPipelineName: typeof plugin?.settings?.defaultPipelineName === "string"
+			? plugin.settings.defaultPipelineName
+			: null,
     };
   }
+
+	private workflowTaxonomy(runtime: OperonRuntime | null): OperonWorkflowTaxonomy | null {
+		if (!runtime) return null;
+		return {
+			language: runtime.language,
+			defaultPipelineName: runtime.defaultPipelineName,
+			pipelines: runtime.pipelines.map((pipeline) => ({
+				id: typeof pipeline.id === "string" ? pipeline.id : null,
+				name: pipeline.name,
+				description: typeof pipeline.description === "string" ? pipeline.description : null,
+				statuses: pipeline.statuses.map((status) => ({
+					id: typeof status.id === "string" ? status.id : null,
+					label: status.label,
+					value: `${pipeline.name}.${status.label}`,
+					isFinished: status.isFinished === true,
+					isCancelled: status.isCancelled === true,
+					isScheduledTarget: status.isScheduledTarget === true,
+					isTrackingTarget: status.isTrackingTarget === true,
+				})),
+			})),
+		};
+	}
+
+	private semanticConfiguration(runtime: OperonRuntime): OperonSemanticConfiguration {
+		const settings = runtime.plugin?.settings ?? {};
+		const templates = typeof runtime.plugin?.getFileTaskTemplateOptions === "function"
+			? runtime.plugin.getFileTaskTemplateOptions() as RuntimeFileTaskTemplate[]
+			: [];
+		const filterSets = Array.isArray(settings.filterSets) ? settings.filterSets : [];
+		return {
+			language: runtime.language,
+			workflow: this.workflowTaxonomy(runtime)!,
+			priorities: {
+				defaultPriority: typeof settings.defaultPriority === "string" ? settings.defaultPriority : null,
+				items: runtime.priorities.map(priority => ({
+					id: typeof priority.id === "string" ? priority.id : null,
+					label: String(priority.label ?? ""),
+					color: typeof priority.color === "string" ? priority.color : null,
+					description: typeof priority.description === "string" ? priority.description : null,
+				})),
+			},
+			keys: runtime.keyMappings.map(mapping => ({
+				canonicalKey: String(mapping.canonicalKey ?? ""),
+				visiblePropertyName: String(mapping.visiblePropertyName ?? ""),
+				type: typeof mapping.type === "string" ? mapping.type : null,
+				sync: typeof mapping.sync === "string" ? mapping.sync : null,
+				enabled: mapping.enabled !== false,
+				isSystem: mapping.isSystem === true,
+				isInternal: mapping.isInternal === true,
+			})),
+			creation: {
+				fileTasksFolder: String(settings.fileTasksFolder ?? ""),
+				inlineTaskSaveMode: String(settings.inlineTaskSaveMode ?? ""),
+				inlineTaskUseDailyNote: settings.inlineTaskUseDailyNote === true,
+				inlineTaskTargetFile: String(settings.inlineTaskTargetFile ?? ""),
+				inlineTaskHeading: String(settings.inlineTaskHeading ?? ""),
+				inlineTaskDailyNoteAddStartDate: settings.inlineTaskDailyNoteAddStartDate === true,
+				inlineTaskDailyNoteAddScheduledDate: settings.inlineTaskDailyNoteAddScheduledDate === true,
+				taskCreatorDefaultToFileTask: settings.taskCreatorDefaultToFileTask === true,
+				taskCreatorDefaultFileTemplateId: typeof settings.taskCreatorDefaultFileTemplateId === "string"
+					? settings.taskCreatorDefaultFileTemplateId
+					: null,
+				fileTaskTemplateFolder: String(settings.fileTaskTemplateFolder ?? ""),
+				fileTaskParentInlineTargetMode: String(settings.fileTaskParentInlineTargetMode ?? ""),
+				fileTaskParentFileTargetMode: String(settings.fileTaskParentFileTargetMode ?? ""),
+				availableFileTaskTemplates: templates.map(template => ({
+					id: String(template.id ?? ""),
+					name: String(template.name ?? ""),
+					path: typeof template.path === "string" ? template.path : null,
+					kind: String(template.kind ?? ""),
+					pipelineId: typeof template.pipelineId === "string" ? template.pipelineId : null,
+					description: typeof template.description === "string" ? template.description : null,
+				})),
+			},
+			automation: {
+				autoCompleteParentWhenAllChildrenTerminal: settings.autoCompleteParentWhenAllChildrenTerminal === true,
+				cascadeCancelToDescendants: settings.cascadeCancelToDescendants === true,
+				fileTaskAutoArchiveEnabled: settings.fileTaskAutoArchiveEnabled === true,
+				fileTaskArchiveFolder: String(settings.fileTaskArchiveFolder ?? ""),
+				fileTaskArchiveDelaySeconds: numberValue(settings.fileTaskArchiveDelaySeconds) ?? 0,
+				fileTaskArchiveOnlyFromFileTasksFolder: settings.fileTaskArchiveOnlyFromFileTasksFolder === true,
+				fileRepeatDestination: String(settings.fileRepeatDestination ?? ""),
+				fileRepeatCustomFolder: String(settings.fileRepeatCustomFolder ?? ""),
+			},
+			indexing: {
+				excludedFolders: Array.isArray(settings.excludedFolders)
+					? settings.excludedFolders.map((value: unknown) => String(value)).filter(Boolean)
+					: [],
+				fullReindexOnStartup: settings.fullReindexOnStartup === true,
+				indexEventDebounceMs: numberValue(settings.indexEventDebounceMs) ?? 0,
+			},
+			docs: {
+				folder: String(settings.operonDocsFolder ?? ""),
+				autoUpdateEnabled: settings.operonDocsAutoUpdateEnabled === true,
+			},
+			views: {
+				filters: filterSets.map((filter: Record<string, unknown>) => ({
+					id: String(filter.id ?? ""),
+					name: String(filter.name ?? ""),
+					icon: typeof filter.icon === "string" ? filter.icon : null,
+					definition: JSON.parse(JSON.stringify(filter)) as Record<string, unknown>,
+				})).filter((filter: { id: string }) => Boolean(filter.id)),
+			},
+		};
+	}
+
+	private currentSettingsSignature(runtime: OperonRuntime): string {
+		return settingsSignature(this.semanticConfiguration(runtime));
+	}
+
+	private configurationPayload(runtime: OperonRuntime): OperonBridgeConfiguration {
+		const configuration = this.semanticConfiguration(runtime);
+		return {
+			ok: true,
+			contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+			source: "operon-runtime",
+			stale: false,
+			operonVersion: runtime.version,
+			bridgeVersion: this.manifest.version,
+			settingsSignature: settingsSignature(configuration),
+			configuration,
+			limitations: this.limitations(runtime, true),
+		};
+	}
 
   private capabilities(runtime: OperonRuntime | null, ready = false): BridgeCapabilities {
     const readable = Boolean(runtime?.compatible && ready);
     const mutation = readable && runtime?.api ? runtime.api.capabilities() : null;
     return {
       status: true,
+		configuration: Boolean(runtime?.compatible),
       list: readable,
       get: readable,
       query: readable,
@@ -402,8 +541,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         diagnostics: indexState.diagnostics,
       },
       settingsSignature: runtime
-        ? settingsSignature(runtime.pipelines, runtime.keyMappings)
+        ? this.currentSettingsSignature(runtime)
         : null,
+		taxonomy: this.workflowTaxonomy(runtime),
       capabilities,
       source: "operon-runtime",
       stale: false,
@@ -453,12 +593,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (!before.ready || before.generation === null) {
       throw new Error("Operon index is still initializing or is not in a verified idle state.");
     }
-    const beforeSettings = settingsSignature(runtime.pipelines, runtime.keyMappings);
+    const beforeSettings = this.currentSettingsSignature(runtime);
     const tasks = runtime.indexer
       .getAllTasks()
       .map((task) => this.normalizeRuntimeTask(runtime, task, includeProperties));
     const after = await this.indexState(runtime);
-    const afterSettings = settingsSignature(runtime.pipelines, runtime.keyMappings);
+    const afterSettings = this.currentSettingsSignature(runtime);
     if (
       !after.ready ||
       after.generation !== before.generation ||
@@ -481,14 +621,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (!state.ready || state.generation === null) {
       throw new Error("Operon index is still initializing or is not in a verified idle state.");
     }
-    const signature = settingsSignature(runtime.pipelines, runtime.keyMappings);
+    const signature = this.currentSettingsSignature(runtime);
     const task = runtime.indexer.getTask(operonId);
     const normalized = task ? this.normalizeRuntimeTask(runtime, task, includeProperties) : null;
     const after = await this.indexState(runtime);
     if (
       !after.ready ||
       after.generation !== state.generation ||
-      settingsSignature(runtime.pipelines, runtime.keyMappings) !== signature
+      this.currentSettingsSignature(runtime) !== signature
     ) {
       throw new Error("Operon generation or settings changed during the read; retry after the index settles.");
     }
@@ -859,6 +999,15 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
+	api.addRoute(`${REST_PREFIX}/configuration`).get(async (_req: any, res: any) => {
+		try {
+			const runtime = this.requireRuntime();
+			sendJson(res, 200, this.configurationPayload(runtime));
+		} catch (error) {
+			sendJson(res, 503, errorPayload(error, "operon_configuration_unavailable"));
+		}
+	});
+
     api.addRoute(`${REST_PREFIX}/tasks`).get(async (req: any, res: any) => {
       try {
         const query: OperonTaskQuery = {
@@ -963,7 +1112,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       try {
         const operonId = decodeURIComponent(String(req?.params?.operonId ?? "")).trim();
         const body = this.bodyRecord(req);
-        const requested = { status: String(body.status ?? "").trim() };
+		const requested = {
+			...(String(body.status ?? "").trim() ? { status: String(body.status).trim() } : {}),
+			...(String(body.statusId ?? "").trim() ? { statusId: String(body.statusId).trim() } : {}),
+		};
         const result = await this.executeExistingMutation(
           "transition",
           operonId,

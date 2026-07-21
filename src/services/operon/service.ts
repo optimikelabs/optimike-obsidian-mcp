@@ -11,6 +11,7 @@ import {
   OPERON_CONTRACT_VERSION,
   OPERON_SNAPSHOT_SCHEMA_VERSION,
   OperonBridgePageSchema,
+  OperonConfigurationSchema,
   OperonQuerySchema,
   OperonStatusSchema,
   OperonTaskSchema,
@@ -23,6 +24,7 @@ import {
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
   type OperonBridgePage,
+  type OperonConfiguration,
   type OperonQuery,
   type OperonSnapshotEnvelope,
   type OperonStatus,
@@ -96,6 +98,7 @@ interface SnapshotMeta {
   contractVersion: string;
   status: OperonStatus | null;
   validation: OperonValidation | null;
+	configuration: OperonConfiguration | null;
 }
 
 type OperonCapabilities = z.infer<typeof OperonCapabilitiesSchema>;
@@ -116,6 +119,7 @@ function liveModeConfigured(): boolean {
 function readOnlyCapabilities(): OperonCapabilities {
   return {
     status: true,
+	configuration: true,
     list: true,
     get: true,
     query: true,
@@ -466,6 +470,10 @@ export class OperonService {
     const validationResult = parsedValidation
       ? OperonValidationSchema.safeParse(parsedValidation)
       : { success: false as const };
+	const parsedConfiguration = safeJsonParse(values.get("configuration_json"));
+	const configurationResult = parsedConfiguration
+		? OperonConfigurationSchema.safeParse(parsedConfiguration)
+		: { success: false as const };
     return {
       snapshotAt,
       generation: Number.isFinite(generation) ? generation : null,
@@ -475,6 +483,7 @@ export class OperonService {
       contractVersion: values.get("contract_version") ?? "unknown",
       status: statusResult.success ? statusResult.data : null,
       validation: validationResult.success ? validationResult.data : null,
+		configuration: configurationResult.success ? configurationResult.data : null,
     };
   }
 
@@ -556,6 +565,7 @@ export class OperonService {
     status: OperonStatus,
     tasks: OperonTask[],
     validation: OperonValidation | null,
+	configuration: OperonConfiguration,
   ): void {
     const seen = new Set<string>();
     for (const task of tasks) {
@@ -610,6 +620,7 @@ export class OperonService {
       this.writeMeta(db, "contract_version", status.contractVersion);
       this.writeMeta(db, "status_json", JSON.stringify(status));
       if (validation) this.writeMeta(db, "validation_json", JSON.stringify(validation));
+		this.writeMeta(db, "configuration_json", JSON.stringify(configuration));
       db.exec("COMMIT");
     } catch (error) {
       try {
@@ -671,6 +682,19 @@ export class OperonService {
     }
     return parsed.data;
   }
+
+	private async fetchLiveConfiguration(): Promise<OperonConfiguration> {
+		const response = await this.getClient().get(`${BRIDGE_PREFIX}/configuration`);
+		const parsed = OperonConfigurationSchema.safeParse(response.data);
+		if (!parsed.success) {
+			throw new McpError(
+				BaseErrorCode.PARSING_ERROR,
+				"Operon Bridge /configuration returned an incompatible payload.",
+				this.requestContext("fetchLiveOperonConfiguration", { issues: parsed.error.issues }),
+			);
+		}
+		return parsed.data;
+	}
 
   private assertStableStatus(
     expected: OperonStatus,
@@ -827,7 +851,18 @@ export class OperonService {
     }
     const finalStatus = await this.fetchLiveStatus();
     this.assertStableStatus(pageResult.settledStatus, finalStatus, "snapshot validation");
-    this.saveSnapshot(finalStatus, pageResult.tasks, validation);
+	const configuration = await this.fetchLiveConfiguration();
+	if (configuration.settingsSignature !== finalStatus.settingsSignature) {
+		throw new McpError(
+			BaseErrorCode.CONFLICT,
+			"Operon configuration changed before the snapshot could be committed.",
+			this.requestContext("refreshLiveOperonSnapshot", {
+				expectedSettingsSignature: finalStatus.settingsSignature,
+				observedSettingsSignature: configuration.settingsSignature,
+			}),
+		);
+	}
+    this.saveSnapshot(finalStatus, pageResult.tasks, validation, configuration);
     const snapshot = this.loadSnapshot("operon-live");
     if (!snapshot) {
       throw new McpError(
@@ -935,6 +970,70 @@ export class OperonService {
       limitations: CACHE_LIMITATIONS,
     };
   }
+
+	async configuration(forceRefresh = false): Promise<Record<string, unknown>> {
+		if (forceRefresh) {
+			await this.ensureSnapshot(true);
+		}
+
+		if (liveModeConfigured()) {
+			try {
+				const status = await this.fetchLiveStatus();
+				const configuration = await this.fetchLiveConfiguration();
+				if (configuration.settingsSignature !== status.settingsSignature) {
+					throw new McpError(
+						BaseErrorCode.CONFLICT,
+						"Operon settings changed while reading the configuration; retry after the plugin settles.",
+						this.requestContext("operonConfiguration", {
+							expectedSettingsSignature: status.settingsSignature,
+							observedSettingsSignature: configuration.settingsSignature,
+						}),
+					);
+				}
+				return configuration;
+			} catch (error) {
+				const cached = this.readCachedConfiguration();
+				if (cached) return cached;
+				if (error instanceof McpError) throw error;
+				throw new McpError(
+					BaseErrorCode.SERVICE_UNAVAILABLE,
+					`Operon configuration is unavailable and no cached configuration exists: ${errorMessage(error)}`,
+					this.requestContext("operonConfiguration"),
+				);
+			}
+		}
+
+		const cached = this.readCachedConfiguration();
+		if (cached) return cached;
+		throw new McpError(
+			BaseErrorCode.SERVICE_UNAVAILABLE,
+			"No persisted Operon configuration is available in the current headless runtime.",
+			this.requestContext("operonConfiguration"),
+		);
+	}
+
+	private readCachedConfiguration(): Record<string, unknown> | null {
+		const db = this.openDb();
+		try {
+			const meta = this.readMeta(db);
+			if (!meta?.configuration) return null;
+			return {
+				ok: true,
+				contractVersion: OPERON_CONTRACT_VERSION,
+				source: "operon-cache",
+				stale: true,
+				snapshotAt: new Date(meta.snapshotAt).toISOString(),
+				snapshotAgeMs: Math.max(0, Date.now() - meta.snapshotAt),
+				operonVersion: meta.operonVersion,
+				bridgeVersion: meta.bridgeVersion,
+				settingsSignature: meta.configuration.settingsSignature,
+				configuration: meta.configuration.configuration,
+				limitations: [...new Set([...meta.configuration.limitations, ...CACHE_LIMITATIONS])],
+			};
+		} finally {
+			db.close();
+		}
+	}
 
   private snapshotSummary(snapshot: OperonSnapshotEnvelope): Record<string, unknown> {
     return {

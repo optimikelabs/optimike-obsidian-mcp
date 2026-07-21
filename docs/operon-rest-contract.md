@@ -36,12 +36,15 @@ The `revision` covers the normalized projection and source mtime. Every existing
 ## Read routes
 
 - `GET /status`
+- `GET /configuration`
 - `GET /tasks?cursor=0&limit=100&includeProperties=false`
 - `GET /tasks/:operonId?includeProperties=false`
 - `POST /tasks/query`
 - `GET /validate?includeProperties=false`
 
 Query supports IDs, text, source, checkbox, status, pipeline, priority, tier, paths, tags, parent, ISO dates, managed-field equality, unmanaged-property equality, sorting, cursor, and limit.
+
+`GET /configuration` is the live source of task semantics. It exposes only an explicit safe subset of Operon settings: UI language; pipeline/status IDs, labels and semantic flags; priorities; canonical-to-visible key mappings; creation targets and available file-task templates; task automation rules; excluded folders; Operon Docs location; and saved filter definitions. Its deterministic `settingsSignature` is also attached to task pages. A semantic setting change therefore invalidates an in-flight read instead of being silently interpreted with stale assumptions.
 
 Live validation reports duplicate IDs, missing sources, unknown workflow statuses, missing parents, and missing blockers. P0 prevents a new MCP snapshot from replacing the last known-good one.
 
@@ -78,14 +81,17 @@ The Bridge waits for Operon's index to return to a verified idle state before pr
   "task": {
     "source": "file",
     "description": "Ship bridge",
+    "statusId": "st_project_planned",
     "tags": ["elysia"],
-    "fields": { "status": "Project.Planned", "priority": "A" },
+    "fields": { "priority": "A" },
     "properties": { "north_star": true }
   }
 }
 ```
 
 Creation uses Operon's Task Creator paths, template resolution, identity generation, indexing, dependency reconciliation, aggregates, and workflow transition logic.
+
+`statusId` is preferred over `fields.status`: it remains stable when a vault translates the displayed pipeline and status labels. Supplying both is rejected. An explicit `targetDateKey` forces the configured Obsidian daily-note path rather than opening Operon's interactive target picker; an explicit `targetPath` remains available for vault-specific periodic-note layouts.
 
 ### `POST /tasks/:operonId/update`
 
@@ -118,11 +124,11 @@ Status is not accepted by `update`; use the transition route.
   "idempotencyKey": "transition-001",
   "expectedRevision": "fnv1a32:...",
   "dryRun": false,
-  "status": "Project.Finished"
+  "statusId": "st_project_finished"
 }
 ```
 
-The exact configured status is resolved by Operon. Checkbox, terminal dates, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, and view refreshes remain Operon's responsibility.
+Exactly one of stable `statusId` or the current configured `Pipeline.Status` string is required. Checkbox, terminal dates, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, and view refreshes remain Operon's responsibility.
 
 ### `POST /tasks/:operonId/convert`
 

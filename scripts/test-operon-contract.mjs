@@ -3,6 +3,7 @@ import {
   OPERON_CONTRACT_VERSION,
   OperonBridgePageSchema,
   OperonConvertTaskSchema,
+  OperonConfigurationSchema,
   OperonCreateTaskSchema,
   OperonQuerySchema,
   OperonStatusSchema,
@@ -14,6 +15,7 @@ import {
 
 const capabilities = {
   status: true,
+	configuration: true,
   list: true,
   get: true,
   query: true,
@@ -23,6 +25,76 @@ const capabilities = {
   transition: false,
   convert: false,
 };
+
+const semanticConfiguration = {
+  language: "fr",
+  workflow: {
+    language: "fr",
+    defaultPipelineName: "Project",
+    pipelines: [{
+      id: "pl_project",
+      name: "Project",
+      description: "Workflow projet ÉLYSIA",
+      statuses: [{
+        id: "st_project_finished",
+        label: "Terminé",
+        value: "Project.Terminé",
+        isFinished: true,
+        isCancelled: false,
+        isScheduledTarget: false,
+        isTrackingTarget: false,
+      }],
+    }],
+  },
+  priorities: { defaultPriority: "C", items: [] },
+  keys: [],
+  creation: {
+    fileTasksFolder: "Efforts/Projets/_Operon",
+    inlineTaskSaveMode: "ask-every-time",
+    inlineTaskUseDailyNote: false,
+    inlineTaskTargetFile: "Operon/Tasks/Operon Inbox.md",
+    inlineTaskHeading: "",
+    inlineTaskDailyNoteAddStartDate: false,
+    inlineTaskDailyNoteAddScheduledDate: false,
+    taskCreatorDefaultToFileTask: false,
+    taskCreatorDefaultFileTemplateId: null,
+    fileTaskTemplateFolder: "",
+    fileTaskParentInlineTargetMode: "same-folder",
+    fileTaskParentFileTargetMode: "same-folder",
+    availableFileTaskTemplates: [],
+  },
+  automation: {
+    autoCompleteParentWhenAllChildrenTerminal: false,
+    cascadeCancelToDescendants: true,
+    fileTaskAutoArchiveEnabled: false,
+    fileTaskArchiveFolder: "Operon/Archives",
+    fileTaskArchiveDelaySeconds: 30,
+    fileTaskArchiveOnlyFromFileTasksFolder: true,
+    fileRepeatDestination: "same-folder",
+    fileRepeatCustomFolder: "",
+  },
+  indexing: { excludedFolders: ["tmp"], fullReindexOnStartup: false, indexEventDebounceMs: 250 },
+  docs: { folder: "X/Logiciels/Obsidian/Plugins/Operon/Docs", autoUpdateEnabled: true },
+  views: { filters: [{
+    id: "fs_elysia_now",
+    name: "ÉLYSIA — Now",
+    icon: "circle-play",
+    definition: { id: "fs_elysia_now", conditions: [] },
+  }] },
+};
+
+const configuration = OperonConfigurationSchema.parse({
+  ok: true,
+  contractVersion: OPERON_CONTRACT_VERSION,
+  source: "operon-runtime",
+  stale: false,
+  operonVersion: "2.5.0",
+  bridgeVersion: "0.2.0",
+  settingsSignature: "fnv1a32:01234567",
+  configuration: semanticConfiguration,
+  limitations: [],
+});
+assert.equal(configuration.configuration.workflow.pipelines[0].statuses[0].id, "st_project_finished");
 
 const task = OperonTaskSchema.parse({
   operonId: "abc1234",
@@ -77,6 +149,24 @@ const status = OperonStatusSchema.parse({
   },
   index: { ready: true, generation: 42, taskCount: 1, duplicateConflictCount: 0 },
   settingsSignature: "fnv1a32:01234567",
+	taxonomy: {
+		language: "fr",
+		defaultPipelineName: "Project",
+		pipelines: [{
+			id: "pl_project",
+			name: "Project",
+			description: "Workflow projet ÉLYSIA",
+			statuses: [{
+				id: "st_project_finished",
+				label: "Terminé",
+				value: "Project.Terminé",
+				isFinished: true,
+				isCancelled: false,
+				isScheduledTarget: false,
+				isTrackingTarget: false,
+			}],
+		}],
+	},
   capabilities,
   source: "operon-runtime",
   stale: false,
@@ -189,7 +279,44 @@ const transition = OperonTransitionTaskSchema.parse({
   idempotencyKey: "contract-transition-1",
   status: "Project.Finished",
 });
+
+const createByStatusId = OperonCreateTaskSchema.parse({
+  idempotencyKey: "contract-create-status-id",
+  task: {
+    source: "inline",
+    description: "Créer avec un statut stable",
+    statusId: "st_project_planned",
+    targetPath: "Efforts/Projets/Test.md",
+  },
+});
+assert.equal(createByStatusId.task.statusId, "st_project_planned");
+assert.throws(() => OperonCreateTaskSchema.parse({
+  idempotencyKey: "contract-create-status-conflict",
+  task: {
+    source: "inline",
+    description: "Conflit de statut",
+    statusId: "st_project_planned",
+    fields: { status: "Project.Planned" },
+    targetPath: "Efforts/Projets/Test.md",
+  },
+}));
 assert.equal(transition.dryRun, true);
+const transitionById = OperonTransitionTaskSchema.parse({
+	operonId: task.operonId,
+	expectedRevision: task.revision,
+	idempotencyKey: "contract-transition-id-1",
+	statusId: "st_project_finished",
+});
+assert.equal(transitionById.statusId, "st_project_finished");
+assert.equal(OperonTransitionTaskSchema.safeParse({
+	...transitionById,
+	status: "Project.Finished",
+}).success, false);
+assert.equal(OperonTransitionTaskSchema.safeParse({
+	operonId: task.operonId,
+	expectedRevision: task.revision,
+	idempotencyKey: "contract-transition-missing-1",
+}).success, false);
 assert.equal(
   OperonConvertTaskSchema.safeParse({
     operonId: task.operonId,

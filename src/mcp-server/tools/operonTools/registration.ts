@@ -6,6 +6,7 @@ import {
   OperonCreateTaskSchema,
   OperonQuerySchema,
   OperonTransitionTaskSchema,
+	OperonTransitionTaskInputSchema,
   OperonUpdateTaskSchema,
 } from "../../../services/operon/contract.js";
 import { OperonService } from "../../../services/operon/service.js";
@@ -58,6 +59,14 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
       runTool(() => service.status(params.forceRefresh)),
   );
 
+	server.tool(
+		"operon_get_configuration",
+		"Read the task-semantic Operon configuration from the live plugin runtime: language, stable workflow/status IDs, priority definitions, canonical-to-visible key mappings, creation targets/templates, task automations, excluded folders, documentation location, and saved filter catalog. Falls back only to an explicitly stale persisted snapshot.",
+		ForceRefreshSchema.shape,
+		async (params: z.infer<typeof ForceRefreshSchema>) =>
+			runTool(() => service.configuration(params.forceRefresh)),
+	);
+
   server.tool(
     "operon_list_tasks",
     "List Operon tasks from a live-generation-validated snapshot or an explicitly stale persisted fallback. Supports pagination and optional filters. No task mutation is performed.",
@@ -108,8 +117,8 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_transition_task",
-    "Transition an Operon task to an exact configured workflow status through Operon's dependency, recurrence, aggregate, and workflow guards. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
-    OperonTransitionTaskSchema.shape,
+	"Transition an Operon task through Operon's dependency, recurrence, aggregate, and workflow guards. Prefer stable statusId from operon_status taxonomy; exact configured status remains supported. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+	OperonTransitionTaskInputSchema.shape,
     async (params: z.infer<typeof OperonTransitionTaskSchema>) =>
       runTool(() => service.transitionTask(params)),
   );

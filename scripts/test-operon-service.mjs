@@ -9,6 +9,7 @@ const dbPath = path.join(tempRoot, "shared-cache.sqlite");
 
 const capabilities = {
   status: true,
+	configuration: true,
   list: true,
   get: true,
   query: true,
@@ -18,6 +19,55 @@ const capabilities = {
   transition: false,
   convert: false,
 };
+
+const semanticConfiguration = {
+  language: "fr",
+  workflow: { language: "fr", defaultPipelineName: "Project", pipelines: [] },
+  priorities: { defaultPriority: "C", items: [] },
+  keys: [],
+  creation: {
+    fileTasksFolder: "Efforts/Projets/_Operon",
+    inlineTaskSaveMode: "ask-every-time",
+    inlineTaskUseDailyNote: false,
+    inlineTaskTargetFile: "Operon/Tasks/Operon Inbox.md",
+    inlineTaskHeading: "",
+    inlineTaskDailyNoteAddStartDate: false,
+    inlineTaskDailyNoteAddScheduledDate: false,
+    taskCreatorDefaultToFileTask: false,
+    taskCreatorDefaultFileTemplateId: null,
+    fileTaskTemplateFolder: "",
+    fileTaskParentInlineTargetMode: "same-folder",
+    fileTaskParentFileTargetMode: "same-folder",
+    availableFileTaskTemplates: [],
+  },
+  automation: {
+    autoCompleteParentWhenAllChildrenTerminal: false,
+    cascadeCancelToDescendants: true,
+    fileTaskAutoArchiveEnabled: false,
+    fileTaskArchiveFolder: "Operon/Archives",
+    fileTaskArchiveDelaySeconds: 30,
+    fileTaskArchiveOnlyFromFileTasksFolder: true,
+    fileRepeatDestination: "same-folder",
+    fileRepeatCustomFolder: "",
+  },
+  indexing: { excludedFolders: ["tmp"], fullReindexOnStartup: false, indexEventDebounceMs: 250 },
+  docs: { folder: "X/Logiciels/Obsidian/Plugins/Operon/Docs", autoUpdateEnabled: true },
+  views: { filters: [] },
+};
+
+function configurationPayload() {
+  return {
+    ok: true,
+    contractVersion: "1",
+    source: "operon-runtime",
+    stale: false,
+    operonVersion: "2.4.0",
+    bridgeVersion: "0.1.0",
+    settingsSignature: "fnv1a32:settings",
+    configuration: semanticConfiguration,
+    limitations: ["read-only"],
+  };
+}
 
 function makeTask(operonId, overrides = {}) {
   return {
@@ -134,6 +184,10 @@ const server = http.createServer((request, response) => {
     sendJson(response, 200, statusPayload());
     return;
   }
+	if (request.method === "GET" && url.pathname.endsWith("/configuration")) {
+		sendJson(response, 200, configurationPayload());
+		return;
+	}
   if (request.method === "GET" && url.pathname.endsWith("/validate")) {
     sendJson(response, 200, validationPayload());
     return;

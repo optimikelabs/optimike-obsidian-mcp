@@ -59,6 +59,7 @@ Related docs:
 ## Operon (contract v1)
 
 - `operon_status`: inspect live Bridge compatibility and persisted snapshot state;
+- `operon_get_configuration`: read the live task-semantic Operon settings and their signed stale fallback;
   optional `forceRefresh` requests a complete live rebuild.
 - `operon_list_tasks`: list tasks from a live-generation-validated snapshot or an
   explicitly stale persisted fallback.
@@ -70,7 +71,7 @@ Related docs:
   snapshot-only validation with explicit caveats.
 - `operon_create_task`: create inline/file tasks through Operon Public API v1.
 - `operon_update_task`: update one mutation group with expected revision.
-- `operon_transition_task`: apply an exact workflow transition through Operon's guards.
+- `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards.
 - `operon_convert_task`: convert inline/file shape in `MCP_WRITE_MODE=full`.
 
 Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`,

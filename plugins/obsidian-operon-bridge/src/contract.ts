@@ -29,9 +29,12 @@ export interface RuntimeIndexedTask {
 }
 
 export interface RuntimeStatusDefinition {
+	id?: string;
   label: string;
   isFinished?: boolean;
   isCancelled?: boolean;
+	isScheduledTarget?: boolean;
+	isTrackingTarget?: boolean;
 }
 
 export interface RuntimePipeline {
@@ -39,6 +42,125 @@ export interface RuntimePipeline {
   name: string;
   description?: string;
   statuses: RuntimeStatusDefinition[];
+}
+
+export interface RuntimePriorityDefinition {
+	id?: string;
+	label: string;
+	color?: string;
+	description?: string;
+}
+
+export interface RuntimeFileTaskTemplate {
+	id: string;
+	name: string;
+	path: string | null;
+	kind: string;
+	pipelineId?: string;
+	description?: string;
+}
+
+export interface OperonWorkflowTaxonomy {
+	language: string;
+	defaultPipelineName: string | null;
+	pipelines: Array<{
+		id: string | null;
+		name: string;
+		description: string | null;
+		statuses: Array<{
+			id: string | null;
+			label: string;
+			value: string;
+			isFinished: boolean;
+			isCancelled: boolean;
+			isScheduledTarget: boolean;
+			isTrackingTarget: boolean;
+		}>;
+	}>;
+}
+
+export interface OperonSemanticConfiguration {
+	language: string;
+	workflow: OperonWorkflowTaxonomy;
+	priorities: {
+		defaultPriority: string | null;
+		items: Array<{
+			id: string | null;
+			label: string;
+			color: string | null;
+			description: string | null;
+		}>;
+	};
+	keys: Array<{
+		canonicalKey: string;
+		visiblePropertyName: string;
+		type: string | null;
+		sync: string | null;
+		enabled: boolean;
+		isSystem: boolean;
+		isInternal: boolean;
+	}>;
+	creation: {
+		fileTasksFolder: string;
+		inlineTaskSaveMode: string;
+		inlineTaskUseDailyNote: boolean;
+		inlineTaskTargetFile: string;
+		inlineTaskHeading: string;
+		inlineTaskDailyNoteAddStartDate: boolean;
+		inlineTaskDailyNoteAddScheduledDate: boolean;
+		taskCreatorDefaultToFileTask: boolean;
+		taskCreatorDefaultFileTemplateId: string | null;
+		fileTaskTemplateFolder: string;
+		fileTaskParentInlineTargetMode: string;
+		fileTaskParentFileTargetMode: string;
+		availableFileTaskTemplates: Array<{
+			id: string;
+			name: string;
+			path: string | null;
+			kind: string;
+			pipelineId: string | null;
+			description: string | null;
+		}>;
+	};
+	automation: {
+		autoCompleteParentWhenAllChildrenTerminal: boolean;
+		cascadeCancelToDescendants: boolean;
+		fileTaskAutoArchiveEnabled: boolean;
+		fileTaskArchiveFolder: string;
+		fileTaskArchiveDelaySeconds: number;
+		fileTaskArchiveOnlyFromFileTasksFolder: boolean;
+		fileRepeatDestination: string;
+		fileRepeatCustomFolder: string;
+	};
+	indexing: {
+		excludedFolders: string[];
+		fullReindexOnStartup: boolean;
+		indexEventDebounceMs: number;
+	};
+	docs: {
+		folder: string;
+		autoUpdateEnabled: boolean;
+	};
+	views: {
+		filters: Array<{
+			id: string;
+			name: string;
+			icon: string | null;
+			definition: Record<string, unknown>;
+		}>;
+	};
+}
+
+export interface OperonBridgeConfiguration {
+	ok: true;
+	contractVersion: typeof OPERON_BRIDGE_CONTRACT_VERSION;
+	source: 'operon-runtime';
+	stale: false;
+	operonVersion: string;
+	bridgeVersion: string;
+	settingsSignature: string;
+	configuration: OperonSemanticConfiguration;
+	limitations: string[];
 }
 
 export interface RuntimeKeyMapping {
@@ -540,9 +662,6 @@ export function queryTasks(
   return paginateTasks(sortTasks(filterTasks(tasks, query), query.sort), query);
 }
 
-export function settingsSignature(
-  pipelines: RuntimePipeline[],
-  keyMappings: RuntimeKeyMapping[],
-): string {
-  return `fnv1a32:${fnv1a32(stableStringify({ pipelines, keyMappings }))}`;
+export function settingsSignature(configuration: OperonSemanticConfiguration): string {
+  return `fnv1a32:${fnv1a32(stableStringify(configuration))}`;
 }

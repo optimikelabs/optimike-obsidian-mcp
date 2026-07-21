@@ -25,6 +25,41 @@ const pipelines = [
   },
 ];
 
+const semanticConfiguration = {
+  language: "en",
+  workflow: { language: "en", defaultPipelineName: "Project", pipelines: [] },
+  priorities: { defaultPriority: "C", items: [] },
+  keys: [],
+  creation: {
+    fileTasksFolder: "Operon/Tasks",
+    inlineTaskSaveMode: "ask-every-time",
+    inlineTaskUseDailyNote: false,
+    inlineTaskTargetFile: "Operon/Inbox.md",
+    inlineTaskHeading: "",
+    inlineTaskDailyNoteAddStartDate: false,
+    inlineTaskDailyNoteAddScheduledDate: false,
+    taskCreatorDefaultToFileTask: false,
+    taskCreatorDefaultFileTemplateId: null,
+    fileTaskTemplateFolder: "",
+    fileTaskParentInlineTargetMode: "same-folder",
+    fileTaskParentFileTargetMode: "same-folder",
+    availableFileTaskTemplates: [],
+  },
+  automation: {
+    autoCompleteParentWhenAllChildrenTerminal: false,
+    cascadeCancelToDescendants: true,
+    fileTaskAutoArchiveEnabled: false,
+    fileTaskArchiveFolder: "Operon/Archives",
+    fileTaskArchiveDelaySeconds: 30,
+    fileTaskArchiveOnlyFromFileTasksFolder: true,
+    fileRepeatDestination: "same-folder",
+    fileRepeatCustomFolder: "",
+  },
+  indexing: { excludedFolders: [], fullReindexOnStartup: false, indexEventDebounceMs: 250 },
+  docs: { folder: "Operon/Docs", autoUpdateEnabled: false },
+  views: { filters: [] },
+};
+
 const task: RuntimeIndexedTask = {
   operonId: "abc1234",
   description: "Ship bridge",
@@ -195,7 +230,10 @@ test("pagination and stable default sorting are deterministic", () => {
 });
 
 test("settings signature changes when the workflow contract changes", () => {
-  const before = settingsSignature(pipelines, []);
-  const after = settingsSignature([{ name: "Project", statuses: [{ label: "Todo" }] }], []);
+  const before = settingsSignature(semanticConfiguration);
+  const after = settingsSignature({
+    ...semanticConfiguration,
+    workflow: { ...semanticConfiguration.workflow, defaultPipelineName: "ÉLYSIA" },
+  });
   assert.notEqual(before, after);
 });

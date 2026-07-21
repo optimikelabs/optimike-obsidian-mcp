@@ -52,6 +52,7 @@ export type OperonTask = z.infer<typeof OperonTaskSchema>;
 
 export const OperonCapabilitiesSchema = z.object({
   status: z.boolean(),
+	configuration: z.boolean(),
   list: z.boolean(),
   get: z.boolean(),
   query: z.boolean(),
@@ -61,6 +62,111 @@ export const OperonCapabilitiesSchema = z.object({
   transition: z.boolean(),
   convert: z.boolean(),
 });
+
+export const OperonWorkflowTaxonomySchema = z.object({
+	language: z.string(),
+	defaultPipelineName: z.string().nullable(),
+	pipelines: z.array(z.object({
+		id: z.string().nullable(),
+		name: z.string(),
+		description: z.string().nullable(),
+		statuses: z.array(z.object({
+			id: z.string().nullable(),
+			label: z.string(),
+			value: z.string(),
+			isFinished: z.boolean(),
+			isCancelled: z.boolean(),
+			isScheduledTarget: z.boolean(),
+			isTrackingTarget: z.boolean(),
+		})),
+	})),
+});
+
+export const OperonSemanticConfigurationSchema = z.object({
+	language: z.string(),
+	workflow: OperonWorkflowTaxonomySchema,
+	priorities: z.object({
+		defaultPriority: z.string().nullable(),
+		items: z.array(z.object({
+			id: z.string().nullable(),
+			label: z.string(),
+			color: z.string().nullable(),
+			description: z.string().nullable(),
+		})),
+	}),
+	keys: z.array(z.object({
+		canonicalKey: z.string(),
+		visiblePropertyName: z.string(),
+		type: z.string().nullable(),
+		sync: z.string().nullable(),
+		enabled: z.boolean(),
+		isSystem: z.boolean(),
+		isInternal: z.boolean(),
+	})),
+	creation: z.object({
+		fileTasksFolder: z.string(),
+		inlineTaskSaveMode: z.string(),
+		inlineTaskUseDailyNote: z.boolean(),
+		inlineTaskTargetFile: z.string(),
+		inlineTaskHeading: z.string(),
+		inlineTaskDailyNoteAddStartDate: z.boolean(),
+		inlineTaskDailyNoteAddScheduledDate: z.boolean(),
+		taskCreatorDefaultToFileTask: z.boolean(),
+		taskCreatorDefaultFileTemplateId: z.string().nullable(),
+		fileTaskTemplateFolder: z.string(),
+		fileTaskParentInlineTargetMode: z.string(),
+		fileTaskParentFileTargetMode: z.string(),
+		availableFileTaskTemplates: z.array(z.object({
+			id: z.string(),
+			name: z.string(),
+			path: z.string().nullable(),
+			kind: z.string(),
+			pipelineId: z.string().nullable(),
+			description: z.string().nullable(),
+		})),
+	}),
+	automation: z.object({
+		autoCompleteParentWhenAllChildrenTerminal: z.boolean(),
+		cascadeCancelToDescendants: z.boolean(),
+		fileTaskAutoArchiveEnabled: z.boolean(),
+		fileTaskArchiveFolder: z.string(),
+		fileTaskArchiveDelaySeconds: z.number().nonnegative(),
+		fileTaskArchiveOnlyFromFileTasksFolder: z.boolean(),
+		fileRepeatDestination: z.string(),
+		fileRepeatCustomFolder: z.string(),
+	}),
+	indexing: z.object({
+		excludedFolders: z.array(z.string()),
+		fullReindexOnStartup: z.boolean(),
+		indexEventDebounceMs: z.number().nonnegative(),
+	}),
+	docs: z.object({
+		folder: z.string(),
+		autoUpdateEnabled: z.boolean(),
+	}),
+	views: z.object({
+		filters: z.array(z.object({
+			id: z.string(),
+			name: z.string(),
+			icon: z.string().nullable(),
+			definition: z.record(z.unknown()),
+		})),
+	}),
+});
+
+export const OperonConfigurationSchema = z.object({
+	ok: z.literal(true),
+	contractVersion: z.literal(OPERON_CONTRACT_VERSION),
+	source: z.literal("operon-runtime"),
+	stale: z.literal(false),
+	operonVersion: z.string(),
+	bridgeVersion: z.string(),
+	settingsSignature: z.string().min(1),
+	configuration: OperonSemanticConfigurationSchema,
+	limitations: z.array(z.string()),
+});
+
+export type OperonConfiguration = z.infer<typeof OperonConfigurationSchema>;
 
 export const OperonStatusSchema = z.object({
   ok: z.boolean(),
@@ -85,6 +191,7 @@ export const OperonStatusSchema = z.object({
     diagnostics: z.record(z.unknown()).nullable().optional(),
   }),
   settingsSignature: z.string().nullable(),
+	taxonomy: OperonWorkflowTaxonomySchema.nullable().optional(),
   capabilities: OperonCapabilitiesSchema,
   source: z.literal("operon-runtime"),
   stale: z.literal(false),
@@ -209,6 +316,7 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
   task: z.object({
     source: OperonTaskSourceSchema,
     description: z.string().trim().min(1),
+	statusId: z.string().trim().min(1).optional(),
     tags: z.array(z.string()).optional(),
     fields: z.record(z.string()).optional(),
     properties: z.record(OperonRawPropertyValueSchema).optional(),
@@ -223,6 +331,9 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
   if (value.source === "inline" && value.targetFolder?.trim()) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["targetFolder"], message: "targetFolder is supported only for file tasks." });
   }
+	if (value.statusId && value.fields?.status?.trim()) {
+		context.addIssue({ code: z.ZodIssueCode.custom, path: ["statusId"], message: "Provide at most one of fields.status or statusId." });
+	}
   }),
 });
 
@@ -257,10 +368,20 @@ export const OperonUpdateTaskSchema = MutationControlSchema.extend({
   patch: OperonUpdatePatchSchema,
 });
 
-export const OperonTransitionTaskSchema = MutationControlSchema.extend({
+export const OperonTransitionTaskInputSchema = MutationControlSchema.extend({
   operonId: z.string().min(1),
   expectedRevision: z.string().min(1),
-  status: z.string().trim().min(1),
+	status: z.string().trim().min(1).optional(),
+	statusId: z.string().trim().min(1).optional(),
+});
+
+export const OperonTransitionTaskSchema = OperonTransitionTaskInputSchema.superRefine((value, ctx) => {
+	if (Boolean(value.status) === Boolean(value.statusId)) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message: "Provide exactly one of status or statusId.",
+		});
+	}
 });
 
 export const OperonConvertTaskInputSchema = MutationControlSchema.extend({
