@@ -15,7 +15,7 @@ If both plugins are enabled, the Bridge refuses to choose an owner. Disable one 
 
 - Obsidian Desktop
 - Operon `2.4.0` or `2.5.0` for reads
-- Kairélys `2.5.1` (based on Operon `2.5.0`) with Public API v1 for mutations
+- Kairélys `2.5.1` and `2.5.2` (based on Operon `2.5.0`) with Public API v1 for mutations
 - Obsidian Local REST API
 
 ## Routes

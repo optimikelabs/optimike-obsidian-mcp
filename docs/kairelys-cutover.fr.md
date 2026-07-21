@@ -1,6 +1,6 @@
 # Bascule contrôlée d’Operon vers Kairélys
 
-La première version distribuée est Kairélys `2.5.1`, basée sur Operon `2.5.0`. Ce numéro distinct évite toute collision entre les tags et packs de langue du fork et ceux d’upstream.
+La première version distribuée est Kairélys `2.5.1`, basée sur Operon `2.5.0`. Kairélys `2.5.2` durcit le cycle de vie de l’API publique et les transitions terminales avec timer actif, sans changer le format des tâches. Ces numéros distincts évitent toute collision entre les tags et packs de langue du fork et ceux d’upstream.
 
 Kairélys utilise un identifiant Obsidian distinct (`kairelys`). Les tâches restent dans le Markdown
 et conservent leurs `operonId`; seuls le plugin, ses réglages et son état durable changent de dossier.
