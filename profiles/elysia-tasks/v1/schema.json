@@ -87,6 +87,17 @@
           "items": { "type": "string", "pattern": "^[^:]+:(asc|desc)$" }
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": { "id": { "const": "fs_elysia_folder_open" } },
+            "required": ["id"]
+          },
+          "then": { "type": "object", "properties": { "scope": { "const": "current-folder" } }, "required": ["scope"] },
+          "else": { "not": { "type": "object", "properties": { "scope": {} }, "required": ["scope"] } }
+        }
+      ],
       "additionalProperties": false
     }
   },

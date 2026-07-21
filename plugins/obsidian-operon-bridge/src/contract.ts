@@ -1,6 +1,9 @@
 export const OPERON_BRIDGE_CONTRACT_VERSION = "1" as const;
-export const OPERON_BRIDGE_TESTED_VERSION = "2.5.2" as const;
-export const OPERON_BRIDGE_SUPPORTED_VERSIONS = ["2.4.0", "2.5.0", "2.5.1", OPERON_BRIDGE_TESTED_VERSION] as const;
+export const OPERON_BRIDGE_TESTED_VERSION = "2.5.3" as const;
+export const OPERON_BRIDGE_SUPPORTED_VERSIONS = {
+  operon: ["2.4.0", "2.5.0"],
+  kairelys: ["2.5.1", "2.5.2", OPERON_BRIDGE_TESTED_VERSION],
+} as const;
 
 export type OperonTaskSource = "inline" | "file";
 export type OperonCheckboxState = "open" | "done" | "cancelled";
@@ -292,8 +295,8 @@ export interface OperonTaskPage {
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
-export function isVersionCompatible(version: string): boolean {
-  return (OPERON_BRIDGE_SUPPORTED_VERSIONS as readonly string[]).includes(version.trim());
+export function isVersionCompatible(pluginId: "kairelys" | "operon", version: string): boolean {
+  return (OPERON_BRIDGE_SUPPORTED_VERSIONS[pluginId] as readonly string[]).includes(version.trim());
 }
 
 export interface RuntimeIndexDiagnostics {

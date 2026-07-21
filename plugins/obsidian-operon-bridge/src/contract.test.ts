@@ -102,14 +102,15 @@ function normalized(): OperonBridgeTask {
 }
 
 test("version compatibility is an explicit tested-version allowlist", () => {
-  assert.equal(isVersionCompatible("2.4.0"), true);
-  assert.equal(isVersionCompatible("2.5.0"), true);
-  assert.equal(isVersionCompatible("2.5.1"), true);
-  assert.equal(isVersionCompatible("2.5.2"), true);
-  assert.equal(isVersionCompatible("2.5.3"), false);
-  assert.equal(isVersionCompatible("2.9.1"), false);
-  assert.equal(isVersionCompatible("2.3.9"), false);
-  assert.equal(isVersionCompatible("3.0.0"), false);
+  assert.equal(isVersionCompatible("operon", "2.4.0"), true);
+  assert.equal(isVersionCompatible("operon", "2.5.0"), true);
+  assert.equal(isVersionCompatible("operon", "2.5.1"), false);
+  assert.equal(isVersionCompatible("operon", "2.5.2"), false);
+  assert.equal(isVersionCompatible("kairelys", "2.5.0"), false);
+  assert.equal(isVersionCompatible("kairelys", "2.5.1"), true);
+  assert.equal(isVersionCompatible("kairelys", "2.5.2"), true);
+  assert.equal(isVersionCompatible("kairelys", "2.5.3"), true);
+  assert.equal(isVersionCompatible("kairelys", "2.5.4"), false);
 });
 
 test("index readiness refuses startup, recovery, sync, and dirty states", () => {
