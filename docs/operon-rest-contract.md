@@ -27,7 +27,7 @@ Readiness requires a compatible plugin, positive generation, healthy idle V8 ind
 
 ## Stable task projection
 
-Each task includes durable `operonId`, inline/file source, path and one-based line, description, checkbox, workflow, priority, tags, parent, dependency edges, normalized dates, managed fields, source mtime, and deterministic `revision`.
+Each task includes durable `operonId`, inline/file source, path and one-based line, description, checkbox, workflow, priority, tags, parent, dependency edges, normalized dates, managed fields, source mtime, and deterministic `revision`. Workflow projection includes both visible values (`pipeline`, `status`, `statusLabel`) and language-stable `pipelineId` / `statusId` values resolved from the live Operon settings.
 
 For file tasks, `includeProperties=true` also returns unmanaged YAML properties such as `north_star` and `rang`. Raw note bodies and raw task lines are never exposed.
 
@@ -42,7 +42,7 @@ The `revision` covers the normalized projection and source mtime. Every existing
 - `POST /tasks/query`
 - `GET /validate?includeProperties=false`
 
-Query supports IDs, text, source, checkbox, status, pipeline, priority, tier, paths, tags, parent, ISO dates, managed-field equality, unmanaged-property equality, sorting, cursor, and limit.
+Query supports task IDs, language-stable `statusIds` / `pipelineIds`, visible status/pipeline values, text, source, checkbox, priority, tier, paths, tags, parent, ISO dates, managed-field equality, unmanaged-property equality, sorting, cursor, and limit. Agents should prefer stable workflow IDs whenever the intent is semantic rather than presentational.
 
 `GET /configuration` is the live source of task semantics. It exposes only an explicit safe subset of Operon settings: UI language; pipeline/status IDs, labels and semantic flags; priorities; canonical-to-visible key mappings; creation targets and available file-task templates; task automation rules; excluded folders; Operon Docs location; and saved filter definitions. Its deterministic `settingsSignature` is also attached to task pages. A semantic setting change therefore invalidates an in-flight read instead of being silently interpreted with stale assumptions.
 

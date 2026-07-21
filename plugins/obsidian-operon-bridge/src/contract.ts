@@ -194,8 +194,10 @@ export interface OperonBridgeTask {
   description: string;
   checkbox: OperonCheckboxState;
   status: string | null;
+  statusId: string | null;
   statusLabel: string | null;
   pipeline: string | null;
+  pipelineId: string | null;
   priority: string | null;
   tier: OperonTier;
   tags: string[];
@@ -252,7 +254,9 @@ export interface OperonTaskQuery {
   sources?: OperonTaskSource[];
   checkboxes?: OperonCheckboxState[];
   statuses?: string[];
+  statusIds?: string[];
   pipelines?: string[];
+  pipelineIds?: string[];
   priorities?: string[];
   tiers?: OperonTier[];
   pathIncludes?: string[];
@@ -347,17 +351,22 @@ export function parseListValue(value: string | undefined): string[] {
 export function resolveWorkflow(
   statusValue: string | undefined,
   pipelines: RuntimePipeline[],
-): { pipeline: string | null; statusLabel: string | null } {
+): { pipeline: string | null; pipelineId: string | null; statusLabel: string | null; statusId: string | null } {
   const value = statusValue?.trim();
-  if (!value) return { pipeline: null, statusLabel: null };
+  if (!value) return { pipeline: null, pipelineId: null, statusLabel: null, statusId: null };
   for (const pipeline of pipelines) {
     for (const status of pipeline.statuses ?? []) {
       if (`${pipeline.name}.${status.label}` === value) {
-        return { pipeline: pipeline.name, statusLabel: status.label };
+        return {
+          pipeline: pipeline.name,
+          pipelineId: pipeline.id?.trim() || null,
+          statusLabel: status.label,
+          statusId: status.id?.trim() || null,
+        };
       }
     }
   }
-  return { pipeline: null, statusLabel: null };
+  return { pipeline: null, pipelineId: null, statusLabel: null, statusId: null };
 }
 
 function stableValue(value: unknown): unknown {
@@ -437,8 +446,10 @@ export function normalizeTask(options: {
     description: task.description,
     checkbox: task.checkbox,
     status,
+    statusId: workflow.statusId,
     statusLabel: workflow.statusLabel,
     pipeline: workflow.pipeline,
+    pipelineId: workflow.pipelineId,
     priority: fields.priority?.trim() || null,
     tier: task.tier,
     tags: [...new Set(task.tags.map((tag) => tag.replace(/^#/u, "").trim()).filter(Boolean))].sort(),
@@ -510,7 +521,9 @@ export function filterTasks(
   const sources = new Set(query.sources ?? []);
   const checkboxes = new Set(query.checkboxes ?? []);
   const statuses = new Set((query.statuses ?? []).map(normalizeNeedle));
+  const statusIds = new Set((query.statusIds ?? []).map(normalizeNeedle));
   const pipelines = new Set((query.pipelines ?? []).map(normalizeNeedle));
+  const pipelineIds = new Set((query.pipelineIds ?? []).map(normalizeNeedle));
   const priorities = new Set((query.priorities ?? []).map(normalizeNeedle));
   const tiers = new Set(query.tiers ?? []);
 
@@ -519,7 +532,9 @@ export function filterTasks(
     if (sources.size > 0 && !sources.has(task.source)) return false;
     if (checkboxes.size > 0 && !checkboxes.has(task.checkbox)) return false;
     if (statuses.size > 0 && !statuses.has(normalizeNeedle(task.status))) return false;
+    if (statusIds.size > 0 && !statusIds.has(normalizeNeedle(task.statusId))) return false;
     if (pipelines.size > 0 && !pipelines.has(normalizeNeedle(task.pipeline))) return false;
+    if (pipelineIds.size > 0 && !pipelineIds.has(normalizeNeedle(task.pipelineId))) return false;
     if (priorities.size > 0 && !priorities.has(normalizeNeedle(task.priority))) return false;
     if (tiers.size > 0 && !tiers.has(task.tier)) return false;
     if ((query.pathIncludes ?? []).some((needle) => !normalizeNeedle(task.path).includes(normalizeNeedle(needle)))) {
@@ -544,8 +559,10 @@ export function filterTasks(
         task.description,
         task.path,
         task.status,
+        task.statusId,
         task.statusLabel,
         task.pipeline,
+        task.pipelineId,
         task.priority,
         task.parentTask,
         ...task.tags,

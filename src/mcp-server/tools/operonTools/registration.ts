@@ -77,7 +77,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_query_tasks",
-    "Query Operon tasks by identity, text, source, checkbox, workflow, priority, tier, path, tags, parent, dates, canonical/custom fields, or unmanaged file-task properties. Responses always declare source and freshness.",
+    "Query Operon tasks by identity, text, source, checkbox, stable workflow/status IDs, visible workflow labels, priority, tier, path, tags, parent, dates, canonical/custom fields, or unmanaged file-task properties. Prefer pipelineIds/statusIds from operon_get_configuration so UI language changes do not break automations. Responses always declare source and freshness.",
     OperonQuerySchema.shape,
     async (params: z.infer<typeof OperonQuerySchema>) =>
       runTool(() => service.query(params)),

@@ -16,11 +16,12 @@ import {
 
 const pipelines = [
   {
+    id: "pl_project",
     name: "Project",
     statuses: [
-      { label: "Planned" },
-      { label: "InProgress" },
-      { label: "Finished", isFinished: true },
+      { id: "st_project_planned", label: "Planned" },
+      { id: "st_project_in_progress", label: "InProgress" },
+      { id: "st_project_finished", label: "Finished", isFinished: true },
     ],
   },
 ];
@@ -185,11 +186,15 @@ test("index validation is attempted only for a settled unverified snapshot", () 
 test("workflow resolution uses configured pipeline labels", () => {
   assert.deepEqual(resolveWorkflow("Project.InProgress", pipelines), {
     pipeline: "Project",
+    pipelineId: "pl_project",
     statusLabel: "InProgress",
+    statusId: "st_project_in_progress",
   });
   assert.deepEqual(resolveWorkflow("Unknown.State", pipelines), {
     pipeline: null,
+    pipelineId: null,
     statusLabel: null,
+    statusId: null,
   });
 });
 
@@ -198,7 +203,9 @@ test("normalization preserves canonical/custom fields and unmanaged file propert
   assert.equal(value.source, "inline");
   assert.equal(value.line, 5);
   assert.equal(value.pipeline, "Project");
+  assert.equal(value.pipelineId, "pl_project");
   assert.equal(value.statusLabel, "InProgress");
+  assert.equal(value.statusId, "st_project_in_progress");
   assert.deepEqual(value.blockedBy, ["dep1", "dep2"]);
   assert.equal(value.fields.custom, "signal");
   assert.deepEqual(value.properties, { north_star: true, rang: 4 });
@@ -215,6 +222,8 @@ test("filtering supports paths, tags, fields, properties, dates, and search", ()
   assert.equal(filterTasks(tasks, { dates: [{ field: "due", before: "2026-08-01" }] }).length, 1);
   assert.equal(filterTasks(tasks, { search: "ship bridge" }).length, 1);
   assert.equal(filterTasks(tasks, { statuses: ["Project.Planned"] }).length, 0);
+  assert.equal(filterTasks(tasks, { statusIds: ["st_project_in_progress"] }).length, 1);
+  assert.equal(filterTasks(tasks, { pipelineIds: ["pl_project"] }).length, 1);
 });
 
 test("pagination and stable default sorting are deterministic", () => {

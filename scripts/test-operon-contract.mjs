@@ -105,8 +105,10 @@ const task = OperonTaskSchema.parse({
   description: "Ship Operon Bridge",
   checkbox: "open",
   status: "Project.InProgress",
+  statusId: "st_project_in_progress",
   statusLabel: "InProgress",
   pipeline: "Project",
+  pipelineId: "pl_project",
   priority: "A",
   tier: "hot",
   tags: ["elysia", "bridge"],
@@ -191,6 +193,8 @@ const bridgePage = OperonBridgePageSchema.parse({
 assert.equal(bridgePage.tasks[0].operonId, "abc1234");
 
 const query = OperonQuerySchema.parse({
+  pipelineIds: ["pl_project"],
+  statusIds: ["st_project_in_progress"],
   pathIncludes: ["Efforts/Projets"],
   tagsAll: ["elysia"],
   fieldEquals: { custom: "signal" },
@@ -218,6 +222,7 @@ const page = queryOperonSnapshot(
   query,
 );
 assert.equal(page.total, 1);
+assert.equal(page.tasks[0].statusId, "st_project_in_progress");
 assert.equal(page.tasks[0].properties?.north_star, true);
 
 const stripped = queryOperonSnapshot(

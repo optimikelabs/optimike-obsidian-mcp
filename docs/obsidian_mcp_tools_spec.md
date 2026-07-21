@@ -64,7 +64,7 @@ Related docs:
 - `operon_list_tasks`: list tasks from a live-generation-validated snapshot or an
   explicitly stale persisted fallback.
 - `operon_get_task`: read one task by durable `operonId`.
-- `operon_query_tasks`: filter by IDs, text, source, checkbox, workflow, priority,
+- `operon_query_tasks`: filter by task IDs, stable pipeline/status IDs, visible workflow labels, text, source, checkbox, priority,
   tier, paths, tags, parents, dates, canonical/custom fields, or unmanaged file-task
   properties.
 - `operon_validate`: live duplicate/source/workflow graph validation, or a limited

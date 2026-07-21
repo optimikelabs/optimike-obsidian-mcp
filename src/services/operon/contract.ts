@@ -28,8 +28,10 @@ export const OperonTaskSchema = z.object({
   description: z.string(),
   checkbox: OperonCheckboxSchema,
   status: z.string().nullable(),
+  statusId: z.string().nullable().optional().default(null),
   statusLabel: z.string().nullable(),
   pipeline: z.string().nullable(),
+  pipelineId: z.string().nullable().optional().default(null),
   priority: z.string().nullable(),
   tier: OperonTierSchema,
   tags: z.array(z.string()),
@@ -279,7 +281,9 @@ export const OperonQuerySchema = z.object({
   sources: z.array(OperonTaskSourceSchema).optional(),
   checkboxes: z.array(OperonCheckboxSchema).optional(),
   statuses: z.array(z.string()).optional(),
+  statusIds: z.array(z.string()).optional(),
   pipelines: z.array(z.string()).optional(),
+  pipelineIds: z.array(z.string()).optional(),
   priorities: z.array(z.string()).optional(),
   tiers: z.array(OperonTierSchema).optional(),
   pathIncludes: z.array(z.string()).optional(),
@@ -506,7 +510,9 @@ export function filterOperonTasks(tasks: OperonTask[], query: OperonQuery): Oper
   const sources = new Set(query.sources ?? []);
   const checkboxes = new Set(query.checkboxes ?? []);
   const statuses = new Set((query.statuses ?? []).map(normalizeNeedle));
+  const statusIds = new Set((query.statusIds ?? []).map(normalizeNeedle));
   const pipelines = new Set((query.pipelines ?? []).map(normalizeNeedle));
+  const pipelineIds = new Set((query.pipelineIds ?? []).map(normalizeNeedle));
   const priorities = new Set((query.priorities ?? []).map(normalizeNeedle));
   const tiers = new Set(query.tiers ?? []);
   const search = normalizeNeedle(query.search);
@@ -516,7 +522,9 @@ export function filterOperonTasks(tasks: OperonTask[], query: OperonQuery): Oper
     if (sources.size > 0 && !sources.has(task.source)) return false;
     if (checkboxes.size > 0 && !checkboxes.has(task.checkbox)) return false;
     if (statuses.size > 0 && !statuses.has(normalizeNeedle(task.status))) return false;
+    if (statusIds.size > 0 && !statusIds.has(normalizeNeedle(task.statusId))) return false;
     if (pipelines.size > 0 && !pipelines.has(normalizeNeedle(task.pipeline))) return false;
+    if (pipelineIds.size > 0 && !pipelineIds.has(normalizeNeedle(task.pipelineId))) return false;
     if (priorities.size > 0 && !priorities.has(normalizeNeedle(task.priority))) return false;
     if (tiers.size > 0 && !tiers.has(task.tier)) return false;
     if ((query.pathIncludes ?? []).some((value: string) => !normalizeNeedle(task.path).includes(normalizeNeedle(value)))) {
@@ -546,8 +554,10 @@ export function filterOperonTasks(tasks: OperonTask[], query: OperonQuery): Oper
         task.description,
         task.path,
         task.status,
+        task.statusId,
         task.statusLabel,
         task.pipeline,
+        task.pipelineId,
         task.priority,
         task.parentTask,
         ...task.tags,

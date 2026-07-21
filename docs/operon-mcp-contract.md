@@ -28,7 +28,7 @@ Every read response declares `source`, `stale`, snapshot time/age, Operon and Br
 
 SQLite cache state lives in `operon_task_snapshot` and `operon_snapshot_meta`. Malformed payloads, incomplete pagination, generation drift, duplicate IDs, incompatible versions, unready index, or P0 validation never replace the last known-good snapshot.
 
-The cached metadata also stores the configuration used for that snapshot. Agents must prefer stable status IDs and canonical key names from `operon_get_configuration`; visible French or English labels are presentation values, not durable API identifiers.
+The cached metadata also stores the configuration used for that snapshot. Tasks project `statusId` and `pipelineId`, and queries accept `statusIds` / `pipelineIds`. Agents must prefer those stable IDs and canonical key names from `operon_get_configuration`; visible French or English labels are presentation values, not durable API identifiers.
 
 ## Mutations
 
