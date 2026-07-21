@@ -2,11 +2,12 @@
 
 ## Current decision
 
-`PILOT Operon`, not `SWITCH Operon`.
+`SWITCH Operon` as soon as every automated and backed-up live production gate is green.
 
-This plan is intentionally unapplied. The integration branch registers guarded
-mutation tools for disposable/pilot vaults, but performs no production-vault
-installation, mutation activation, or migration.
+The repository changes do not mutate the production vault by themselves. The
+cutover is applied only through the backed-up sequence below, with no arbitrary
+seven-day waiting period once the technical, Sync, cockpit, and rollback gates
+have passed.
 
 ## Existing canon to preserve
 
@@ -90,15 +91,15 @@ The project pivot remains a project note, not a task file.
 
 ## Mapping draft
 
-| Tasks source | Operon target | Notes |
-|---|---|---|
-| `[ ]` Todo | open + `Execution.Todo` | Preserve links, due/scheduled dates, priority |
-| `[/]` In Progress | open + `Execution.Doing` | Must not survive in sleeping/closed projects |
-| `[n]` Note | open + `Execution.Inbox` and capture marker | Remains daily-note inbox, not production work |
-| `[*]` Étoile du Nord | normal execution status + `north_star: true` | Strategic importance is not a workflow stage |
-| `[-]` Cancelled | cancelled + `Execution.Cancelled` | Preserve cancellation evidence/date |
-| `[x]` Done | done + `Execution.Done` | Preserve completion date |
-| `[?]`, `[!]`, ritual checklists | no Operon task by default | Keep checklist/text unless an executable action is proven |
+| Tasks source                    | Operon target                                | Notes                                                     |
+| ------------------------------- | -------------------------------------------- | --------------------------------------------------------- |
+| `[ ]` Todo                      | open + `Execution.Todo`                      | Preserve links, due/scheduled dates, priority             |
+| `[/]` In Progress               | open + `Execution.Doing`                     | Must not survive in sleeping/closed projects              |
+| `[n]` Note                      | open + `Execution.Inbox` and capture marker  | Remains daily-note inbox, not production work             |
+| `[*]` Étoile du Nord            | normal execution status + `north_star: true` | Strategic importance is not a workflow stage              |
+| `[-]` Cancelled                 | cancelled + `Execution.Cancelled`            | Preserve cancellation evidence/date                       |
+| `[x]` Done                      | done + `Execution.Done`                      | Preserve completion date                                  |
+| `[?]`, `[!]`, ritual checklists | no Operon task by default                    | Keep checklist/text unless an executable action is proven |
 
 ## Pilot inventory
 
@@ -155,8 +156,8 @@ The pilot must show equivalent counts and explain every difference from the Task
 8. Reindex Operon.
 9. Compare counts, fields, links, dates, parents, dependencies, and cockpits.
 10. Run the local validation recipe after restart and Sync settlement.
-11. Observe for 7–14 calendar days.
-12. Decide KEEP / extend pilot / switch.
+11. If every gate is green, cut over immediately and disable the legacy task engines.
+12. If any gate fails, roll back and keep Tasks + TaskNotes until the failure is resolved.
 
 ## Rollback package required before apply
 

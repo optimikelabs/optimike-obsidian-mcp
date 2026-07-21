@@ -1,6 +1,6 @@
 # Operon Bridge — local validation recipe
 
-This recipe is the remaining Desktop proof. Run it only in a disposable validation vault or a copied Sync vault, never directly in the production ÉLYSIA vault.
+This recipe is the Desktop proof. Run destructive fixtures only in a disposable or copied vault. In production ÉLYSIA, use the backed-up, reversible smoke scope defined by the migration plan and never touch unrelated tasks.
 
 ## Preconditions
 
@@ -149,15 +149,23 @@ Run the MCP in `live` or `hybrid` with API credentials and inspect:
 
 ```text
 operon_status
+operon_get_configuration
 operon_list_tasks
 operon_get_task
 operon_query_tasks
+operon_query_saved_filter
 operon_validate
+operon_adopt_task
+operon_create_task
+operon_update_task
+operon_transition_task
+operon_convert_task
+operon_relocate_task
 ```
 
 PASS when:
 
-- all five tools are registered;
+- all thirteen tools are registered;
 - the first complete call creates a snapshot;
 - subsequent calls with unchanged generation do not rewrite the full snapshot;
 - responses say `source=operon-live`, `stale=false`.
@@ -230,7 +238,7 @@ Review Local REST routes, MCP tools, and the loaded Operon capability probe.
 PASS:
 
 - official Operon without Public API v1 remains read-only;
-- the minimal Operon fork exposes adopt/create/update/transition/convert through a versioned API;
+- the minimal Operon fork exposes native saved-filter queries plus adopt/create/update/transition/convert/relocate through a versioned API;
 - dry-run is the default;
 - apply requires live capabilities and an idempotency key;
 - existing Operon-task apply requires the live expected revision;
@@ -256,17 +264,17 @@ PASS:
 
 ## Executed pilot result — 2026-07-21
 
-| Check | Result |
-|---|---|
-| Operon 2.5 Public API v1 capability probe | PASS — adopt/create/update/transition/convert true |
-| Guarded MCP smoke | PASS — create/update/transition/replay/conflict |
-| Rich full MCP smoke | PASS — hierarchy/dependency/inline/file/conversion |
-| Full reindex | PASS — generation 36 → 37, task count 13 → 13 |
-| Plugin restart | PASS — generation reset to 1, 13 tasks, read-write restored |
-| Stale fallback | PASS — `operon-live` → `operon-cache`, same ID/path/revision |
-| Duplicate fixture | PASS — one P0 `duplicate_operon_id`, last good cache retained |
-| Duplicate cleanup | PASS — P0/P1/P2 = 0/0/0, 13 tasks |
-| Actual Sync topology | NOT RUN |
+| Check                                     | Result                                                                  |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| Operon 2.5 Public API v1 capability probe | PASS — filterQuery/adopt/create/update/transition/convert/relocate true |
+| Guarded MCP smoke                         | PASS — create/update/transition/replay/conflict                         |
+| Rich full MCP smoke                       | PASS — hierarchy/dependency/inline/file/conversion                      |
+| Full reindex                              | PASS — generation 36 → 37, task count 13 → 13                           |
+| Plugin restart                            | PASS — generation reset to 1, 13 tasks, read-write restored             |
+| Stale fallback                            | PASS — `operon-live` → `operon-cache`, same ID/path/revision            |
+| Duplicate fixture                         | PASS — one P0 `duplicate_operon_id`, last good cache retained           |
+| Duplicate cleanup                         | PASS — P0/P1/P2 = 0/0/0, 13 tasks                                       |
+| Actual Sync topology                      | NOT RUN                                                                 |
 
 ## Evidence record
 
