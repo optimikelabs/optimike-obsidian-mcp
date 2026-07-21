@@ -20,12 +20,13 @@ Prefix: `/extensions/optimike-operon-bridge/v1`
 - `GET /tasks/:operonId`
 - `POST /tasks/query`
 - `GET /validate`
+- `POST /tasks/adopt`
 - `POST /tasks`
 - `POST /tasks/:operonId/update`
 - `POST /tasks/:operonId/transition`
 - `POST /tasks/:operonId/convert`
 
-All routes inherit Local REST API authentication and local TLS settings. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected. Existing-task mutations require the live revision; dry-run is the default.
+All routes inherit Local REST API authentication and local TLS settings. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine`. Dry-run is the default.
 
 ## Build
 

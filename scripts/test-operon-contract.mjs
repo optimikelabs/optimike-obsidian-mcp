@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   OPERON_CONTRACT_VERSION,
+	OperonAdoptTaskSchema,
   OperonBridgePageSchema,
   OperonConvertTaskSchema,
   OperonConfigurationSchema,
@@ -20,6 +21,7 @@ const capabilities = {
   get: true,
   query: true,
   validate: true,
+	adopt: false,
   create: false,
   update: false,
   transition: false,
@@ -255,6 +257,22 @@ const create = OperonCreateTaskSchema.parse({
   },
 });
 assert.equal(create.dryRun, true);
+
+const adopt = OperonAdoptTaskSchema.parse({
+	idempotencyKey: "contract-adopt-1",
+	adoption: {
+		targetPath: "Efforts/Projets/Test.md",
+		line: 7,
+		expectedLine: "- [ ] Migrer cette action 📅 2026-07-31",
+		statusId: "st_project_planned",
+	},
+});
+assert.equal(adopt.dryRun, true);
+assert.equal(adopt.adoption.line, 7);
+assert.equal(OperonAdoptTaskSchema.safeParse({
+	...adopt,
+	adoption: { ...adopt.adoption, expectedLine: "- [ ] ligne 1\n- [ ] ligne 2" },
+}).success, false);
 
 const update = OperonUpdateTaskSchema.parse({
   operonId: task.operonId,

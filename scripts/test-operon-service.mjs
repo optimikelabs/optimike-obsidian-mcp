@@ -14,6 +14,7 @@ const capabilities = {
   get: true,
   query: true,
   validate: true,
+	adopt: false,
   create: false,
   update: false,
   transition: false,
@@ -146,7 +147,7 @@ function statusPayload() {
     },
     settingsSignature: "fnv1a32:settings",
     capabilities: state.mutations
-      ? { ...capabilities, create: true, update: true, transition: true, convert: true }
+      ? { ...capabilities, adopt: true, create: true, update: true, transition: true, convert: true }
       : capabilities,
     source: "operon-runtime",
     stale: false,
@@ -227,6 +228,29 @@ const server = http.createServer((request, response) => {
       });
     });
     return;
+  }
+  if (request.method === "POST" && url.pathname.endsWith("/tasks/adopt")) {
+	state.mutationCalls += 1;
+	let body = "";
+	request.on("data", (chunk) => {
+		body += chunk;
+	});
+	request.on("end", () => {
+		const params = body ? JSON.parse(body) : {};
+		sendJson(response, 200, {
+			ok: true,
+			contractVersion: "1",
+			operationId: `operation-adopt-${state.mutationCalls}`,
+			idempotencyKey: params.idempotencyKey,
+			status: "planned",
+			before: null,
+			requested: params.adoption,
+			after: null,
+			source: "operon-live",
+			stale: false,
+		});
+	});
+	return;
   }
   if (request.method === "POST" && url.pathname.endsWith("/tasks")) {
     state.mutationCalls += 1;
@@ -368,6 +392,19 @@ try {
   });
   assert.equal(planned.status, "planned");
   assert.equal(state.mutationCalls, 1);
+
+	const adoptionPlanned = await service.adoptTask({
+		idempotencyKey: "test-adopt-idempotency",
+		dryRun: true,
+		adoption: {
+			targetPath: "Efforts/Projets/Internes/Operon Pilot/Pilot.md",
+			line: 3,
+			expectedLine: "- [ ] Legacy task 📅 2026-07-31",
+			statusId: "st_project_planned",
+		},
+	});
+	assert.equal(adoptionPlanned.status, "planned");
+	assert.equal(state.mutationCalls, 2);
   const replayed = await service.createTask({
     idempotencyKey: "test-create-idempotency",
     dryRun: true,
@@ -379,7 +416,7 @@ try {
   });
   assert.equal(replayed.replayed, true);
   assert.equal(replayed.operationId, planned.operationId);
-  assert.equal(state.mutationCalls, 1, "journal replay must not call the Bridge twice");
+  assert.equal(state.mutationCalls, 2, "journal replay must not call the Bridge twice");
 
   await assert.rejects(
     service.createTask({
@@ -393,7 +430,7 @@ try {
     }),
     (error) => error?.code === "CONFLICT",
   );
-  assert.equal(state.mutationCalls, 1, "mismatched idempotency reuse must be rejected locally");
+  assert.equal(state.mutationCalls, 2, "mismatched idempotency reuse must be rejected locally");
 
   await assert.rejects(
     service.createTask({
@@ -415,7 +452,7 @@ try {
     }),
     (error) => error?.code === "FORBIDDEN",
   );
-  assert.equal(state.mutationCalls, 1, "scope rejection must happen before the Bridge call");
+  assert.equal(state.mutationCalls, 2, "scope rejection must happen before the Bridge call");
 
   const scopedInline = await service.createTask({
     idempotencyKey: "test-scope-inline-target",
@@ -427,7 +464,7 @@ try {
     },
   });
   assert.equal(scopedInline.status, "planned");
-  assert.equal(state.mutationCalls, 2, "explicit allowed inline target must reach the Bridge");
+  assert.equal(state.mutationCalls, 3, "explicit allowed inline target must reach the Bridge");
 
   const concurrentInput = {
     idempotencyKey: "test-concurrent-idempotency",

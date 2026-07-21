@@ -70,7 +70,7 @@ PASS when:
 - diagnostics report `health=healthy`, `runtimePhase=idle`,
   `verifiedThisSession=true`, and `dirtySourceCount=0`;
 - official Operon reports mutation capabilities false, while the minimal
-  Public API v1 fork reports create/update/transition/convert true;
+  Public API v1 fork reports adopt/create/update/transition/convert true;
 - duplicate conflict count is zero.
 
 FAIL if the route claims compatibility while Operon is absent or incompatible.
@@ -230,10 +230,11 @@ Review Local REST routes, MCP tools, and the loaded Operon capability probe.
 PASS:
 
 - official Operon without Public API v1 remains read-only;
-- the minimal Operon fork exposes create/update/transition/convert through a versioned API;
+- the minimal Operon fork exposes adopt/create/update/transition/convert through a versioned API;
 - dry-run is the default;
 - apply requires live capabilities and an idempotency key;
-- existing-task apply requires the live expected revision;
+- existing Operon-task apply requires the live expected revision;
+- legacy checkbox adoption requires an exact path, one-based line, and source-line precondition;
 - the MCP write policy blocks conversion outside `full` mode;
 - no raw Markdown, direct writer, UI command, or private-reflection fallback exists.
 
@@ -257,7 +258,7 @@ PASS:
 
 | Check | Result |
 |---|---|
-| Operon 2.5 Public API v1 capability probe | PASS — create/update/transition/convert true |
+| Operon 2.5 Public API v1 capability probe | PASS — adopt/create/update/transition/convert true |
 | Guarded MCP smoke | PASS — create/update/transition/replay/conflict |
 | Rich full MCP smoke | PASS — hierarchy/dependency/inline/file/conversion |
 | Full reindex | PASS — generation 36 → 37, task count 13 → 13 |

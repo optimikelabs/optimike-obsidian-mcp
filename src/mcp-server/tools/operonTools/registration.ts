@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
+	OperonAdoptTaskSchema,
   OperonConvertTaskSchema,
   OperonConvertTaskInputSchema,
   OperonCreateTaskSchema,
@@ -97,6 +98,14 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     ForceRefreshSchema.shape,
     async (params: z.infer<typeof ForceRefreshSchema>) =>
       runTool(() => service.validate(params.forceRefresh)),
+  );
+
+  server.tool(
+	"operon_adopt_task",
+	"Adopt one existing plain Markdown or Obsidian Tasks checkbox in place as an Operon inline task. Requires an exact one-based line and expectedLine precondition, plus idempotencyKey; dryRun defaults to true. The live Operon domain path preserves supported Tasks metadata and no raw Markdown fallback exists.",
+	OperonAdoptTaskSchema.shape,
+	async (params: z.infer<typeof OperonAdoptTaskSchema>) =>
+		runTool(() => service.adoptTask(params)),
   );
 
   server.tool(

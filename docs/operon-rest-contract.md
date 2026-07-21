@@ -72,6 +72,23 @@ Responses use:
 
 The Bridge waits for Operon's index to return to a verified idle state before proving `after`. If the final state cannot be proven, it records `failed/outcome_unverified` and does not invite a blind retry.
 
+### `POST /tasks/adopt`
+
+```json
+{
+  "idempotencyKey": "adopt-001",
+  "dryRun": false,
+  "adoption": {
+    "targetPath": "Efforts/Projets/Projet.md",
+    "line": 42,
+    "expectedLine": "- [ ] Publier la version validée 📅 2026-07-31",
+    "statusId": "st_project_planned"
+  }
+}
+```
+
+Adoption upgrades one existing checkbox in place through Operon. `line` is one-based and `expectedLine` is an exact optimistic-lock precondition. A moved or edited line returns HTTP 409 without writing. Operon converts supported Tasks metadata, creates the durable identity, applies the optional stable status ID, reindexes the source, and the Bridge proves the resulting task at the same path and line.
+
 ### `POST /tasks`
 
 ```json

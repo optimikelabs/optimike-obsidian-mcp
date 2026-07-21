@@ -32,7 +32,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Mutations appear
 - `KEEP` — Tasks and TaskNotes during the pilot and until a separate production cutover gate.
 - `ADD` — companion Bridge for live reads and guarded mutations.
 - `ADD` — minimal Operon GPL fork exposing only generic Public API v1 wrappers over existing domain orchestrators.
-- `ADD` — nine Operon MCP tools, snapshot tables, and mutation journal.
+- `ADD` — eleven Operon MCP tools, snapshot tables, and mutation journal.
 - `REJECT` — MCP-side Operon parser/domain reimplementation.
 - `REJECT` — raw Markdown/YAML mutation fallback.
 - `REJECT` — reflective production calls to private Operon methods.
@@ -40,7 +40,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Mutations appear
 
 ## Public API boundary
 
-`OperonPublicApiV1` exposes capability discovery plus create, update, transition, and convert. The implementation stays inside Operon and calls its existing creator, workflow, writer, dependency, recurrence, aggregate, archive, and conversion paths.
+`OperonPublicApiV1` exposes capability discovery plus in-place checkbox adoption, create, update, transition, and convert. The implementation stays inside Operon and calls its existing parser/converter, creator, workflow, writer, dependency, recurrence, aggregate, archive, and conversion paths.
 
 The fork delta must remain limited to this generic API and contract tests. No ÉLYSIA-specific workflow, UX, view, calendar, Kanban, or data-model logic belongs in the fork. An upstream PR remains preferred; the fork is the production fallback.
 
@@ -52,7 +52,7 @@ If live access fails, the last snapshot may be returned only as `operon-cache` w
 
 ## Mutation model
 
-Every apply requires a live Bridge and Public API v1. Existing-task mutations require `expectedRevision`; every request requires `idempotencyKey`; `dryRun` defaults to true.
+Every apply requires a live Bridge and Public API v1. Existing Operon-task mutations require `expectedRevision`; legacy checkbox adoption requires an exact source path, one-based line and `expectedLine`; every request requires `idempotencyKey`; `dryRun` defaults to true.
 
 The Bridge returns before/requested/after and waits for a verified idle index after apply. The MCP stores the result in `operon_mutation_journal`; the same idempotency key and request never call the Bridge twice, while reuse with a different request is rejected as a conflict.
 
@@ -63,7 +63,7 @@ To avoid false atomicity, update accepts exactly one group per operation: descri
 - Live/hybrid with API: exact reads and mutations according to capabilities.
 - Headless: cached reads only; no mutation.
 - `readonly`: dry-run only.
-- `guarded`: create/update/transition apply.
+- `guarded`: adopt/create/update/transition apply.
 - `full`: conversion apply in addition.
 
 ## Evidence gates

@@ -8,8 +8,8 @@
 
 - Operon Public API v1 in a minimal GPL 2.5.0 fork;
 - Bridge read/write capability probe;
-- REST list/get/query/validate/create/update/transition/convert;
-- nine MCP tools in the canonical server;
+- REST list/get/query/validate/adopt/create/update/transition/convert;
+- eleven MCP tools in the canonical server;
 - dry-run by default;
 - live expected-revision conflicts;
 - Bridge and durable MCP idempotency;

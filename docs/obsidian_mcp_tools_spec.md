@@ -69,6 +69,7 @@ Related docs:
   properties.
 - `operon_validate`: live duplicate/source/workflow graph validation, or a limited
   snapshot-only validation with explicit caveats.
+- `operon_adopt_task`: upgrade one exact legacy checkbox in place with line-level optimistic locking.
 - `operon_create_task`: create inline/file tasks through Operon Public API v1.
 - `operon_update_task`: update one mutation group with expected revision.
 - `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards.

@@ -15,6 +15,7 @@ export type WriteOperation =
   | "bases_create"
   | "bases_upsert_config"
   | "bases_upsert_rows"
+	| "operon_adopt_task"
   | "operon_create_task"
   | "operon_update_task"
   | "operon_transition_task"

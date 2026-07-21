@@ -2,7 +2,7 @@
 
 ## Surface
 
-The main MCP server registers ten Operon tools:
+The main MCP server registers eleven Operon tools:
 
 - `operon_status`
 - `operon_get_configuration`
@@ -10,6 +10,7 @@ The main MCP server registers ten Operon tools:
 - `operon_get_task`
 - `operon_query_tasks`
 - `operon_validate`
+- `operon_adopt_task`
 - `operon_create_task`
 - `operon_update_task`
 - `operon_transition_task`
@@ -38,7 +39,8 @@ Common controls:
 
 - `dryRun` defaults to `true`;
 - `idempotencyKey` is mandatory;
-- existing tasks require `expectedRevision`;
+- existing Operon tasks require `expectedRevision`;
+- legacy checkbox adoption requires an exact one-based `line` and `expectedLine` precondition;
 - after apply, the Bridge rereads the verified live index;
 - the MCP refreshes its SQLite snapshot;
 - no mutation is available from a stale/headless snapshot.
@@ -48,7 +50,7 @@ Durable results are stored in `operon_mutation_journal`. Reusing an idempotency 
 ### Write policy
 
 - `MCP_WRITE_MODE=readonly`: dry-run only.
-- `MCP_WRITE_MODE=guarded`: create, update, and transition apply are allowed with their normal preconditions.
+- `MCP_WRITE_MODE=guarded`: adopt, create, update, and transition apply are allowed with their normal preconditions.
 - `MCP_WRITE_MODE=full`: conversion apply is additionally allowed.
 
 `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for file tasks or `targetPath` for inline tasks. Scoped conversion apply is allowed in guarded mode only when the current source and explicit destination are both inside the allowlist.
@@ -56,6 +58,8 @@ Durable results are stored in `operon_mutation_journal`. Reusing an idempotency 
 Conversion remains classified as destructive because file-to-inline moves the source file to trash and inline-to-file replaces the source line with a durable link.
 
 ### Tool-specific rules
+
+`operon_adopt_task` upgrades one existing plain Markdown or Obsidian Tasks checkbox in place. The target file, one-based line, and exact source line must still match; otherwise the operation returns `conflict` without writing. Supported Tasks dates, priority and tags are translated by Operon before the line is indexed, and optional `statusId` uses the live language-stable workflow identity. The final task must be proven at the same path and line.
 
 `operon_create_task` creates inline or file tasks through Operon's creator services. File tasks may include unmanaged YAML properties and an explicit vault-relative `targetFolder`; inline tasks may use an explicit vault-relative Markdown `targetPath`. `statusId` is supported at creation so automations do not hard-code translated labels.
 

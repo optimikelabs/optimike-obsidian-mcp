@@ -18,6 +18,7 @@ import {
   OperonValidationSchema,
   queryOperonSnapshot,
   OperonCapabilitiesSchema,
+	OperonAdoptTaskSchema,
   OperonConvertTaskSchema,
   OperonCreateTaskSchema,
   OperonMutationResultSchema,
@@ -31,6 +32,7 @@ import {
   type OperonTask,
   type OperonTaskPage,
   type OperonValidation,
+	type OperonAdoptTask,
   type OperonConvertTask,
   type OperonCreateTask,
   type OperonMutationResult,
@@ -124,6 +126,7 @@ function readOnlyCapabilities(): OperonCapabilities {
     get: true,
     query: true,
     validate: true,
+		adopt: false,
     create: false,
     update: false,
     transition: false,
@@ -266,7 +269,7 @@ export class OperonService {
   }
 
   private async executeMutation(
-    action: "create" | "update" | "transition" | "convert",
+    action: "adopt" | "create" | "update" | "transition" | "convert",
     operonId: string | null,
     idempotencyKey: string,
     dryRun: boolean,
@@ -309,7 +312,7 @@ export class OperonService {
   }
 
   private async performMutation(
-    action: "create" | "update" | "transition" | "convert",
+    action: "adopt" | "create" | "update" | "transition" | "convert",
     operonId: string | null,
     idempotencyKey: string,
     dryRun: boolean,
@@ -394,14 +397,27 @@ export class OperonService {
   }
 
   private async assertMutationPathScope(
-    action: "create" | "update" | "transition" | "convert",
+    action: "adopt" | "create" | "update" | "transition" | "convert",
     operonId: string | null,
     payload: Record<string, unknown>,
     dryRun: boolean,
   ): Promise<void> {
     if (config.operonMutationAllowedPathPrefixes.length === 0) return;
 
-    if (action === "create") {
+    if (action === "adopt") {
+		const adoption = payload.adoption as Record<string, unknown> | undefined;
+		if (typeof adoption?.targetPath === "string" && adoption.targetPath.trim()) {
+			this.assertAllowedMutationPath(adoption.targetPath, "adopt targetPath");
+			return;
+		}
+		throw new McpError(
+			BaseErrorCode.FORBIDDEN,
+			"Scoped Operon adoption requires an explicit targetPath.",
+			this.requestContext("assertOperonMutationPathScope", { action }),
+		);
+	}
+
+	if (action === "create") {
       const task = payload.task as Record<string, unknown> | undefined;
       if (task?.source === "file" && typeof task.targetFolder === "string" && task.targetFolder.trim()) {
         this.assertAllowedMutationPath(task.targetFolder, "create targetFolder");
@@ -1066,6 +1082,18 @@ export class OperonService {
       params,
     );
   }
+
+	async adoptTask(input: unknown): Promise<OperonMutationResult> {
+		const params: OperonAdoptTask = OperonAdoptTaskSchema.parse(input);
+		return this.executeMutation(
+			"adopt",
+			null,
+			params.idempotencyKey,
+			params.dryRun,
+			`${BRIDGE_PREFIX}/tasks/adopt`,
+			params,
+		);
+	}
 
   async updateTask(input: unknown): Promise<OperonMutationResult> {
     const params: OperonUpdateTask = OperonUpdateTaskSchema.parse(input);

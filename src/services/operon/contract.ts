@@ -59,6 +59,7 @@ export const OperonCapabilitiesSchema = z.object({
   get: z.boolean(),
   query: z.boolean(),
   validate: z.boolean(),
+	adopt: z.boolean().optional().default(false),
   create: z.boolean(),
   update: z.boolean(),
   transition: z.boolean(),
@@ -316,6 +317,18 @@ const MutationControlSchema = z.object({
   dryRun: z.boolean().optional().default(true),
 });
 
+export const OperonAdoptTaskSchema = MutationControlSchema.extend({
+	adoption: z.object({
+		targetPath: z.string().trim().min(1),
+		line: z.number().int().positive(),
+		expectedLine: z.string().min(1).max(20_000).refine(
+			value => !/[\r\n]/u.test(value),
+			"expectedLine must contain exactly one source line.",
+		),
+		statusId: z.string().trim().min(1).optional(),
+	}),
+});
+
 export const OperonCreateTaskSchema = MutationControlSchema.extend({
   task: z.object({
     source: OperonTaskSourceSchema,
@@ -430,6 +443,7 @@ export const OperonMutationResultSchema = z.object({
 });
 
 export type OperonCreateTask = z.infer<typeof OperonCreateTaskSchema>;
+export type OperonAdoptTask = z.infer<typeof OperonAdoptTaskSchema>;
 export type OperonUpdateTask = z.infer<typeof OperonUpdateTaskSchema>;
 export type OperonTransitionTask = z.infer<typeof OperonTransitionTaskSchema>;
 export type OperonConvertTask = z.infer<typeof OperonConvertTaskSchema>;

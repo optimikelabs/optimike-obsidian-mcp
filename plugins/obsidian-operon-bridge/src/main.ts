@@ -61,6 +61,7 @@ interface BridgeCapabilities {
   get: boolean;
   query: boolean;
   validate: boolean;
+	adopt: boolean;
   create: boolean;
   update: boolean;
   transition: boolean;
@@ -70,7 +71,7 @@ interface BridgeCapabilities {
 interface OperonPublicMutationResult {
   ok: boolean;
   operonId: string | null;
-  code: "applied" | "not-ready" | "not-found" | "invalid-input" | "rejected" | "failed";
+  code: "applied" | "not-ready" | "not-found" | "invalid-input" | "conflict" | "rejected" | "failed";
   message?: string;
 }
 
@@ -78,11 +79,13 @@ interface OperonPublicApiV1 {
   version: "1";
   capabilities: () => {
     ready: boolean;
+		adopt: boolean;
     create: boolean;
     update: boolean;
     transition: boolean;
     convert: boolean;
   };
+	adoptInlineTask: (input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
   createTask: (input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
   updateTask: (operonId: string, input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
   transitionTask: (operonId: string, input: Record<string, unknown>) => Promise<OperonPublicMutationResult>;
@@ -266,6 +269,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       api?.version !== "1" ||
       typeof api.capabilities !== "function" ||
       typeof api.createTask !== "function" ||
+		typeof api.adoptInlineTask !== "function" ||
       typeof api.updateTask !== "function" ||
       typeof api.transitionTask !== "function" ||
       typeof api.convertTask !== "function"
@@ -439,6 +443,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       get: readable,
       query: readable,
       validate: readable,
+		adopt: Boolean(mutation?.ready && mutation.adopt),
       create: Boolean(mutation?.ready && mutation.create),
       update: Boolean(mutation?.ready && mutation.update),
       transition: Boolean(mutation?.ready && mutation.transition),
@@ -784,7 +789,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
-  private requireMutationRuntime(capability: "create" | "update" | "transition" | "convert"): OperonRuntime {
+  private requireMutationRuntime(capability: "adopt" | "create" | "update" | "transition" | "convert"): OperonRuntime {
     const runtime = this.requireRuntime();
     const available = runtime.api?.capabilities();
     if (!runtime.api || !available?.ready || !available[capability]) {
@@ -792,6 +797,139 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     return runtime;
   }
+
+	private async executeAdoptMutation(
+		body: Record<string, unknown>,
+	): Promise<{ httpStatus: number; payload: Record<string, unknown> }> {
+		const idempotencyKey = String(body.idempotencyKey ?? "").trim();
+		if (!idempotencyKey) {
+			return { httpStatus: 400, payload: errorPayload(new Error("idempotencyKey is required."), "validation_error") };
+		}
+		const requested = body.adoption && typeof body.adoption === "object" && !Array.isArray(body.adoption)
+			? body.adoption as Record<string, unknown>
+			: {};
+		const targetPath = String(requested.targetPath ?? "").trim();
+		const line = Number(requested.line);
+		const expectedLine = String(requested.expectedLine ?? "");
+		if (!targetPath || !Number.isInteger(line) || line < 1 || !expectedLine || /[\r\n]/u.test(expectedLine)) {
+			return {
+				httpStatus: 400,
+				payload: errorPayload(new Error("adoption requires targetPath, a positive one-based line, and one exact expectedLine."), "validation_error"),
+			};
+		}
+		const signature = stableJson({ capability: "adopt", dryRun: body.dryRun !== false, requested });
+		const cached = this.cachedMutationResult(idempotencyKey, signature, requested);
+		if (cached) return cached;
+		const runtime = this.requireMutationRuntime("adopt");
+		const file = this.app.vault.getAbstractFileByPath(targetPath);
+		if (!(file instanceof TFile)) {
+			return { httpStatus: 404, payload: errorPayload(new Error(`Markdown source file not found: ${targetPath}`), "not_found") };
+		}
+		const content = await this.app.vault.cachedRead(file);
+		const currentLine = content.split("\n")[line - 1];
+		const normalizedCurrentLine = currentLine?.endsWith("\r") ? currentLine.slice(0, -1) : currentLine;
+		const operationId = this.mutationOperationId();
+		if (normalizedCurrentLine !== expectedLine) {
+			const payload = {
+				ok: false,
+				contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+				operationId,
+				idempotencyKey,
+				status: "conflict",
+				before: null,
+				requested,
+				after: null,
+				error: { code: "source_line_conflict", message: "expectedLine does not match the live source line." },
+				retryable: true,
+				source: "operon-live",
+				stale: false,
+			};
+			this.cacheMutation(idempotencyKey, signature, payload);
+			return { httpStatus: 409, payload };
+		}
+		if (body.dryRun !== false) {
+			const payload = {
+				ok: true,
+				contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+				operationId,
+				idempotencyKey,
+				status: "planned",
+				before: null,
+				requested,
+				after: null,
+				source: "operon-live",
+				stale: false,
+			};
+			this.cacheMutation(idempotencyKey, signature, payload);
+			return { httpStatus: 200, payload };
+		}
+
+		const result = await runtime.api!.adoptInlineTask(requested);
+		if (!result.ok || !result.operonId) {
+			const conflict = result.code === "conflict";
+			const payload = {
+				ok: false,
+				contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+				operationId,
+				idempotencyKey,
+				status: conflict ? "conflict" : "rejected",
+				before: null,
+				requested,
+				after: null,
+				error: { code: result.code, message: result.message ?? "Operon rejected checkbox adoption." },
+				retryable: conflict || result.code === "not-ready" || result.code === "failed",
+				source: "operon-live",
+				stale: false,
+			};
+			this.cacheMutation(idempotencyKey, signature, payload);
+			return { httpStatus: conflict ? 409 : 422, payload };
+		}
+
+		let afterRead: Awaited<ReturnType<OptimikeOperonBridgePlugin["oneTask"]>>;
+		try {
+			afterRead = await this.oneTaskAfterMutation(result.operonId, true);
+		} catch (error) {
+			const payload = {
+				ok: false,
+				contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+				operationId,
+				idempotencyKey,
+				status: "failed",
+				before: null,
+				requested,
+				after: null,
+				error: {
+					code: "outcome_unverified",
+					message: `Operon adopted ${result.operonId}, but the final indexed state could not be proven: ${error instanceof Error ? error.message : String(error)}`,
+				},
+				retryable: false,
+				source: "operon-live",
+				stale: false,
+			};
+			this.cacheMutation(idempotencyKey, signature, payload);
+			return { httpStatus: 500, payload };
+		}
+		const after = afterRead.task;
+		const locationMatches = after?.path === targetPath && after.line === line;
+		const payload = {
+			ok: Boolean(after && locationMatches),
+			contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+			operationId,
+			idempotencyKey,
+			status: after && locationMatches ? "applied" : "failed",
+			before: null,
+			requested,
+			after,
+			...(!after || !locationMatches ? {
+				error: { code: "outcome_mismatch", message: "The adopted task was not found at the requested source line." },
+				retryable: false,
+			} : {}),
+			source: "operon-live",
+			stale: false,
+		};
+		this.cacheMutation(idempotencyKey, signature, payload);
+		return { httpStatus: after && locationMatches ? 200 : 500, payload };
+	}
 
   private async executeExistingMutation(
     capability: "update" | "transition" | "convert",
@@ -1089,6 +1227,15 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
       }
     });
+
+	api.addRoute(`${REST_PREFIX}/tasks/adopt`).post(async (req: any, res: any) => {
+		try {
+			const result = await this.executeAdoptMutation(this.bodyRecord(req));
+			sendJson(res, result.httpStatus, result.payload);
+		} catch (error) {
+			sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+		}
+	});
 
     api.addRoute(`${REST_PREFIX}/tasks/:operonId/update`).post(async (req: any, res: any) => {
       try {
