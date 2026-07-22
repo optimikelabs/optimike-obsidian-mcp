@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- ÉLYSIA Tasks profile 1.1 with global Inbox, This Week, bounded Now, Backlog, periodic-note leakage detection, and a P90-J admission gate.
+- Public task-governor guidance for distinct dry-run/apply idempotency keys and post-mutation visibility proof.
+- Regression coverage for Obsidian wikilink normalization in the Bases Bridge.
+
+### Fixed
+
+- Bases Bridge now evaluates `collection.contains(link(...))` correctly when frontmatter stores Obsidian wikilinks such as `[[Projets]]`.
+
 ## [2.3.0] - 2026-07-21
 
 ### Added

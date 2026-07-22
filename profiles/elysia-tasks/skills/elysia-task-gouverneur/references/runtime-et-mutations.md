@@ -47,12 +47,17 @@ Mutation :
 Pour une tâche existante :
 
 1. Lire la tâche et sa `revision`.
-2. Construire une `idempotencyKey` liée à l’intention.
-3. Exécuter le même outil avec `dryRun: true` et `expectedRevision`.
-4. Présenter l’avant, la demande et l’après attendu.
+2. Construire une clé de plan : `<intention>-plan-<nonce>`.
+3. Exécuter l’outil avec `dryRun: true` et `expectedRevision`.
+4. Présenter l’avant, la demande, l’après attendu, le WIP et les avertissements.
 5. Attendre une validation humaine explicite.
-6. Appliquer avec la révision encore valide.
-7. Relire la tâche et appeler `operon_validate`.
+6. Relire la tâche et sa révision ; arrêter ou recalculer si elle a changé.
+7. Construire une clé d’application distincte : `<intention>-apply-<nonce>`.
+8. Appliquer avec `dryRun: false` et la révision actuelle.
+9. Relire la tâche, vérifier le filtre attendu et appeler `operon_validate`.
+10. Si la tâche apparaît dans `fs_elysia_now`, prouver sa présence dans `fs_elysia_week` et rapporter `invisible: false`.
+
+Ne jamais réutiliser la clé du dry-run pour l’apply : `dryRun` fait partie de la requête canonique.
 
 Pour une création, aucune révision antérieure n’existe : destination, pipeline, statut initial et clé d’idempotence doivent être explicites. Pour une adoption, verrouiller le chemin, la ligne et le contenu attendu de la checkbox.
 

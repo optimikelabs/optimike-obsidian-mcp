@@ -15,8 +15,11 @@ Pour un audit de conformité ÉLYSIA, ouvrir `profiles/elysia-tasks/v1/profile.j
 
 - `fs_elysia_now`
 - `fs_elysia_inbox`
+- `fs_elysia_week`
+- `fs_elysia_backlog`
 - `fs_elysia_north`
 - `fs_elysia_audit`
+- `fs_elysia_periodic_leakage`
 - `fs_elysia_folder_open` avec un `scopePath` explicite
 
 Appeler `operon_query_saved_filter` ; ne pas reconstruire la logique du filtre côté agent.
@@ -28,5 +31,6 @@ Appeler `operon_query_saved_filter` ; ne pas reconstruire la logique du filtre c
 3. Interroger le saved filter ou les tâches concernées.
 4. Séparer faits, écarts au profil, politique locale et interprétation.
 5. Proposer uniquement les mutations nécessaires.
+6. Pour un audit complet, comparer toutes les tâches ouvertes à l’union des surfaces et exiger `open_without_surface = 0`, `now_not_in_week = 0` et `periodic_non_inbox = 0`.
 
 `apply_propose: aucun` est une conclusion valide. Les comptages avant/après ne sont rapportés que s’ils ont été réellement mesurés.

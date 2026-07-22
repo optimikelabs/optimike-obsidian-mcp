@@ -15,9 +15,9 @@ const rejectedProfiles = [
   { name: "empty filter catalog", mutate: value => { value.filters = []; } },
   { name: "missing canonical filter", mutate: value => { value.filters.pop(); } },
   { name: "duplicate canonical filter id", mutate: value => { value.filters[4].id = value.filters[0].id; } },
-  { name: "filter without conditions", mutate: value => { value.filters[0].all = []; } },
-  { name: "condition without field or operator", mutate: value => { value.filters[0].all[0] = {}; } },
-  { name: "folder filter without current-folder scope", mutate: value => { delete value.filters[4].scope; } },
+  { name: "filter without conditions", mutate: value => { value.filters[0].where.children = []; } },
+  { name: "condition without field or operator", mutate: value => { value.filters[0].where.children[0] = {}; } },
+  { name: "folder filter without current-folder scope", mutate: value => { delete value.filters[7].scope; } },
   { name: "non-folder filter with folder scope", mutate: value => { value.filters[0].scope = "current-folder"; } },
 ];
 
@@ -37,7 +37,7 @@ assert.ok(frontmatterMatch, "public task skill must have YAML frontmatter");
 const frontmatter = parseYaml(frontmatterMatch[1]);
 
 assert.equal(frontmatter.name, "elysia-task-gouverneur");
-assert.equal(frontmatter.metadata.version, "1.0.0");
+assert.equal(frontmatter.metadata.version, "1.1.0");
 assert.equal(frontmatter.metadata.skill_structure, "graph");
 assert.equal(frontmatter.metadata.portability_class, "profile-bound-portable");
 assert.equal(frontmatter.metadata.profile_id, profile.profileId);
@@ -62,7 +62,7 @@ for (const token of requiredSkillTokens) {
 
 const markdownLinks = [...skill.matchAll(/\]\(([^)]+)\)/g)].map(match => match[1]);
 const referenceLinks = markdownLinks.filter(link => link.startsWith("references/"));
-assert.equal(new Set(referenceLinks).size, 6, "public task skill must expose six graph modules");
+assert.equal(new Set(referenceLinks).size, 7, "public task skill must expose seven graph modules");
 for (const link of markdownLinks) {
   await readFile(new URL(link, skillUrl), "utf8");
 }
@@ -90,5 +90,5 @@ for (const marker of forbiddenPrivateMarkers) {
 }
 
 console.log(
-  `ÉLYSIA task profile and public skill tests passed: ${rejectedProfiles.length + 1} profile assertions, 6 skill modules`,
+  `ÉLYSIA task profile and public skill tests passed: ${rejectedProfiles.length + 1} profile assertions, 7 skill modules`,
 );

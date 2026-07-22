@@ -19,14 +19,17 @@
     "automation": { "type": "object" },
     "filters": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 8,
+      "maxItems": 8,
       "items": { "$ref": "#/$defs/filter" },
       "allOf": [
         { "contains": { "type": "object", "properties": { "id": { "const": "fs_elysia_now" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
         { "contains": { "type": "object", "properties": { "id": { "const": "fs_elysia_inbox" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "type": "object", "properties": { "id": { "const": "fs_elysia_week" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "type": "object", "properties": { "id": { "const": "fs_elysia_backlog" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
         { "contains": { "type": "object", "properties": { "id": { "const": "fs_elysia_north" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
         { "contains": { "type": "object", "properties": { "id": { "const": "fs_elysia_audit" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "type": "object", "properties": { "id": { "const": "fs_elysia_periodic_leakage" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
         { "contains": { "type": "object", "properties": { "id": { "const": "fs_elysia_folder_open" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 }
       ]
     },
@@ -55,31 +58,48 @@
       "anyOf": [
         { "type": "object", "properties": { "value": {} }, "required": ["value"] },
         { "type": "object", "properties": { "values": { "type": "array" } }, "required": ["values"] },
-        { "type": "object", "properties": { "operator": { "const": "isOpen" } } }
+        { "type": "object", "properties": { "operator": { "enum": ["isOpen", "beforeToday", "isToday", "thisWeek"] } } }
       ],
       "additionalProperties": false
     },
+    "filterNode": {
+      "oneOf": [
+        { "$ref": "#/$defs/condition" },
+        {
+          "type": "object",
+          "required": ["logic", "children"],
+          "properties": {
+            "logic": { "enum": ["all", "any", "none"] },
+            "children": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/filterNode" }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "filter": {
       "type": "object",
-      "required": ["id", "names", "icon", "all", "sort"],
+      "required": ["id", "names", "icon", "where", "sort"],
       "properties": {
         "id": {
           "enum": [
             "fs_elysia_now",
             "fs_elysia_inbox",
+            "fs_elysia_week",
+            "fs_elysia_backlog",
             "fs_elysia_north",
             "fs_elysia_audit",
+            "fs_elysia_periodic_leakage",
             "fs_elysia_folder_open"
           ]
         },
         "names": { "$ref": "#/$defs/localizedNames" },
         "icon": { "type": "string", "minLength": 1 },
         "scope": { "const": "current-folder" },
-        "all": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/$defs/condition" }
-        },
+        "where": { "$ref": "#/$defs/filterNode" },
         "sort": {
           "type": "array",
           "minItems": 1,

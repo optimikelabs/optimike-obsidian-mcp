@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "schemaVersion": 1,
   "profileId": "elysia.tasks",
-  "profileVersion": "1.0.0",
+  "profileVersion": "1.1.0",
   "defaultLocale": "fr",
   "supportedLocales": ["fr", "en"],
   "engine": {
@@ -89,54 +89,123 @@
   },
   "filters": [
     {
-      "id": "fs_elysia_now",
-      "names": { "fr": "ÉLYSIA — Maintenant", "en": "ÉLYSIA — Now" },
-      "icon": "circle-play",
-      "all": [
-        { "field": "checkbox", "operator": "isOpen" },
-        { "field": "folders", "operator": "isInAnyFolderTree", "values": ["Efforts/Projets", "Efforts/Créations"] },
-        { "field": "statusId", "operator": "isNot", "value": "st_project_brainstorming" },
-        { "field": "tags", "operator": "noneContain", "value": "north-star" }
-      ],
-      "sort": ["priority:asc", "dateDue:asc", "dateScheduled:asc"]
-    },
-    {
       "id": "fs_elysia_inbox",
       "names": { "fr": "ÉLYSIA — Boîte de réception", "en": "ÉLYSIA — Inbox" },
       "icon": "inbox",
-      "all": [
+      "where": { "logic": "all", "children": [
         { "field": "checkbox", "operator": "isOpen" },
-        { "field": "folders", "operator": "isInFolderTree", "value": "Calendrier/NOTES PÉRIODIQUES" },
         { "field": "statusId", "operator": "is", "value": "st_project_brainstorming" }
-      ],
+      ] },
       "sort": ["dateCreated:asc"]
+    },
+    {
+      "id": "fs_elysia_week",
+      "names": { "fr": "ÉLYSIA — Cette semaine", "en": "ÉLYSIA — This week" },
+      "icon": "calendar-range",
+      "where": { "logic": "all", "children": [
+        { "field": "checkbox", "operator": "isOpen" },
+        { "logic": "any", "children": [
+          { "field": "folders", "operator": "isInFolderTree", "value": "Efforts/Projets" },
+          { "field": "folders", "operator": "isInFolderTree", "value": "Efforts/Créations" }
+        ] },
+        { "field": "statusId", "operator": "isNot", "value": "st_project_brainstorming" },
+        { "field": "statusId", "operator": "isNot", "value": "st_project_paused" },
+        { "logic": "any", "children": [
+          { "field": "statusId", "operator": "is", "value": "st_project_in_progress" },
+          { "field": "dateScheduled", "operator": "beforeToday" },
+          { "field": "dateScheduled", "operator": "thisWeek" },
+          { "field": "dateDue", "operator": "beforeToday" },
+          { "field": "dateDue", "operator": "thisWeek" }
+        ] }
+      ] },
+      "sort": ["dateScheduled:asc", "dateDue:asc", "priority:asc"]
+    },
+    {
+      "id": "fs_elysia_now",
+      "names": { "fr": "ÉLYSIA — Maintenant", "en": "ÉLYSIA — Now" },
+      "icon": "circle-play",
+      "where": { "logic": "all", "children": [
+        { "field": "checkbox", "operator": "isOpen" },
+        { "logic": "any", "children": [
+          { "field": "folders", "operator": "isInFolderTree", "value": "Efforts/Projets" },
+          { "field": "folders", "operator": "isInFolderTree", "value": "Efforts/Créations" }
+        ] },
+        { "field": "statusId", "operator": "isNot", "value": "st_project_brainstorming" },
+        { "field": "statusId", "operator": "isNot", "value": "st_project_paused" },
+        { "logic": "any", "children": [
+          { "field": "statusId", "operator": "is", "value": "st_project_in_progress" },
+          { "field": "dateScheduled", "operator": "beforeToday" },
+          { "field": "dateScheduled", "operator": "isToday" },
+          { "field": "dateDue", "operator": "beforeToday" },
+          { "field": "dateDue", "operator": "isToday" }
+        ] }
+      ] },
+      "sort": ["dateDue:asc", "dateScheduled:asc", "priority:asc"]
     },
     {
       "id": "fs_elysia_north",
       "names": { "fr": "ÉLYSIA — Étoile du Nord", "en": "ÉLYSIA — North Star" },
       "icon": "star",
-      "all": [
+      "where": { "logic": "all", "children": [
         { "field": "checkbox", "operator": "isOpen" },
         { "field": "tags", "operator": "anyContains", "value": "north-star" }
-      ],
+      ] },
       "sort": ["priority:asc", "dateDue:asc"]
+    },
+    {
+      "id": "fs_elysia_backlog",
+      "names": { "fr": "ÉLYSIA — Backlog", "en": "ÉLYSIA — Backlog" },
+      "icon": "archive",
+      "where": { "logic": "all", "children": [
+        { "field": "checkbox", "operator": "isOpen" },
+        { "logic": "any", "children": [
+          { "field": "folders", "operator": "isInFolderTree", "value": "Efforts/Projets" },
+          { "field": "folders", "operator": "isInFolderTree", "value": "Efforts/Créations" }
+        ] },
+        { "logic": "any", "children": [
+          { "field": "statusId", "operator": "is", "value": "st_project_paused" },
+          { "logic": "all", "children": [
+            { "field": "statusId", "operator": "is", "value": "st_project_planned" },
+            { "logic": "none", "children": [
+              { "field": "dateScheduled", "operator": "beforeToday" },
+              { "field": "dateScheduled", "operator": "isToday" },
+              { "field": "dateScheduled", "operator": "thisWeek" },
+              { "field": "dateDue", "operator": "beforeToday" },
+              { "field": "dateDue", "operator": "isToday" },
+              { "field": "dateDue", "operator": "thisWeek" }
+            ] }
+          ] }
+        ] }
+      ] },
+      "sort": ["priority:asc", "dateCreated:desc"]
     },
     {
       "id": "fs_elysia_audit",
       "names": { "fr": "ÉLYSIA — Audit anti-pollution", "en": "ÉLYSIA — Anti-pollution audit" },
       "icon": "shield-alert",
-      "all": [
+      "where": { "logic": "all", "children": [
         { "field": "checkbox", "operator": "isOpen" },
         { "field": "folders", "operator": "isOutsideAllFolderTrees", "values": ["Efforts/Projets", "Efforts/Créations", "Calendrier/NOTES PÉRIODIQUES"] }
-      ],
+      ] },
       "sort": ["folders:asc"]
+    },
+    {
+      "id": "fs_elysia_periodic_leakage",
+      "names": { "fr": "ÉLYSIA — Fuite des notes périodiques", "en": "ÉLYSIA — Periodic-note leakage" },
+      "icon": "shield-x",
+      "where": { "logic": "all", "children": [
+        { "field": "checkbox", "operator": "isOpen" },
+        { "field": "folders", "operator": "isInFolderTree", "value": "Calendrier/NOTES PÉRIODIQUES" },
+        { "field": "statusId", "operator": "isNot", "value": "st_project_brainstorming" }
+      ] },
+      "sort": ["datetimeModified:asc"]
     },
     {
       "id": "fs_elysia_folder_open",
       "names": { "fr": "ÉLYSIA — Tâches ouvertes du dossier", "en": "ÉLYSIA — Open tasks in folder" },
       "icon": "list-todo",
       "scope": "current-folder",
-      "all": [{ "field": "checkbox", "operator": "isOpen" }],
+      "where": { "logic": "all", "children": [{ "field": "checkbox", "operator": "isOpen" }] },
       "sort": ["dateDue:asc", "priority:asc", "dateScheduled:asc"]
     }
   ],
@@ -145,7 +214,10 @@
     "queryAndTransitionByStableIds": true,
     "mutationsRequireExpectedRevision": true,
     "mutationsRequireIdempotencyKey": true,
+    "dryRunAndApplyUseDistinctIdempotencyKeys": true,
     "dryRunBeforeApply": true,
+    "taskAdmissionRequired": true,
+    "postMutationVisibilityProofRequired": true,
     "rawMarkdownMutationAllowed": false
   },
   "excludedFromProfile": [

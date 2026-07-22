@@ -2,7 +2,7 @@
 name: elysia-task-gouverneur
 description: 'Orchestre les tâches d’un coffre compatible avec le profil public ÉLYSIA Tasks : opérations ponctuelles, audits, triage, cycle de vie et santé du runtime Kairélys/Operon via les outils operon_*, avec IDs stables, dry-run et validation humaine.'
 metadata:
-  version: '1.0.0'
+  version: '1.1.0'
   skill_structure: graph
   portability_class: profile-bound-portable
   profile_id: elysia.tasks
@@ -31,19 +31,22 @@ Utilise le profil public `elysia.tasks` et la configuration live du moteur pour 
 - Toute mutation d’une tâche existante passe par `expectedRevision`, `idempotencyKey`, dry-run, validation humaine, apply, relecture et `operon_validate`.
 - Runtime stale/non-live, capacité absente ou référence critique inaccessible : lecture seulement.
 - Une tâche appartient à un seul moteur. Ne jamais écrire en miroir dans Operon, Tasks et TaskNotes.
+- Toute création ou adoption passe par [admission-p90-j.md](references/admission-p90-j.md). Un plan ou une liste n’autorise pas automatiquement la création de tâches.
 
 ## Reference Gate Map
 
 | Intention | `module_route` | Modules obligatoires |
 |---|---|---|
-| Créer, adopter, modifier, terminer, convertir, déplacer | `operation-ponctuelle` | [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
+| Créer ou adopter | `operation-ponctuelle` | [admission-p90-j.md](references/admission-p90-j.md) + [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
+| Modifier, terminer, convertir, déplacer | `operation-ponctuelle` | [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
 | Audit, triage, conformité ou saved filters | `audit-triage` | [audits-et-triage.md](references/audits-et-triage.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
 | Changement de phase d’un projet ou nettoyage de backlog | `cycle-vie-projet` | [cycle-de-vie-projet.md](references/cycle-de-vie-projet.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
 | Cache stale, incident, incompatibilité ou lenteur | `sante-performance` | [sante-et-performance.md](references/sante-et-performance.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
 
 ## Routage rapide
 
-- Opération sur une tâche -> ouvrir `operations-ponctuelles` puis `runtime-et-mutations`.
+- Création ou adoption -> ouvrir `admission-p90-j`, `operations-ponctuelles`, puis `runtime-et-mutations`.
+- Autre opération sur une tâche -> ouvrir `operations-ponctuelles` puis `runtime-et-mutations`.
 - Audit ou cockpit -> ouvrir `audits-et-triage` puis `runtime-et-mutations`.
 - Projet qui change de phase -> ouvrir `cycle-de-vie-projet` puis `runtime-et-mutations`.
 - Runtime stale ou incident -> ouvrir `sante-et-performance` puis `runtime-et-mutations`.
@@ -86,6 +89,7 @@ Appliquer [contrat-de-sortie.md](references/contrat-de-sortie.md) et renseigner 
 ## Navigation
 
 - Runtime et mutations : [runtime-et-mutations.md](references/runtime-et-mutations.md)
+- Admission P90-J : [admission-p90-j.md](references/admission-p90-j.md)
 - Opérations ponctuelles : [operations-ponctuelles.md](references/operations-ponctuelles.md)
 - Audits et triage : [audits-et-triage.md](references/audits-et-triage.md)
 - Cycle de vie projet : [cycle-de-vie-projet.md](references/cycle-de-vie-projet.md)
