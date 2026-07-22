@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { MUTATING_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
+import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
   VaultCacheService,
@@ -45,7 +45,7 @@ export const registerObsidianManageFrontmatterTool = async (
         toolName,
         toolDescription,
         ObsidianManageFrontmatterInputSchemaShape,
-        MUTATING_TOOL_ANNOTATIONS,
+        DESTRUCTIVE_TOOL_ANNOTATIONS,
         async (params: ObsidianManageFrontmatterInput) => {
           const handlerContext: RequestContext =
             requestContextService.createRequestContext({

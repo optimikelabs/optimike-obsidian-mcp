@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { MUTATING_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
+import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -34,7 +34,7 @@ export async function registerBasesCreateTool(
         TOOL_NAME,
         TOOL_DESCRIPTION,
         BasesCreateInputSchema.shape,
-        MUTATING_TOOL_ANNOTATIONS,
+        DESTRUCTIVE_TOOL_ANNOTATIONS,
         async (params: BasesCreateInput) => {
           const handlerContext = requestContextService.createRequestContext({
             parentContext: registrationContext,

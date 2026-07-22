@@ -14,6 +14,8 @@ const output = execFileSync(command, args, {
 const report = JSON.parse(output);
 const files = new Set(report.flatMap((entry) => entry.files.map((file) => file.path)));
 const requiredFiles = [
+  "dist/index.js",
+  "dist/stdio-proxy.js",
   "plugins/obsidian-bases-bridge/build/main.js",
   "plugins/obsidian-bases-bridge/build/manifest.json",
   "plugins/obsidian-operon-bridge/build/main.js",
@@ -25,4 +27,6 @@ if (missing.length > 0) {
   throw new Error(`Package is missing installable Bridge artifacts: ${missing.join(", ")}`);
 }
 
-console.log(`PASS: package contains ${requiredFiles.length} installable Bridge artifacts`);
+console.log(
+  `PASS: package contains ${requiredFiles.length} runnable server and Bridge artifacts`,
+);

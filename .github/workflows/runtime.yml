@@ -46,6 +46,8 @@ jobs:
         run: npm ci
       - name: Test Bases Bridge
         run: npm run check:bases-bridge
+      - name: Build MCP server
+        run: npm run build
       - name: Build installable Bridges
         run: npm run build:bridges
       - name: Verify npm package contents
