@@ -3,6 +3,9 @@
 La première version distribuée est Kairélys `2.5.1`, basée sur Operon `2.5.0`. Kairélys `2.5.2` durcit le cycle de vie de l’API publique et les transitions terminales avec timer actif ; `2.5.3` ajoute une protection contre le remplacement concurrent du timer. Ces versions ne changent pas le format des tâches. Leurs numéros distincts évitent toute collision entre les tags et packs de langue du fork et ceux d’upstream.
 
 Kairélys `2.6.1` reprend le moteur complet d’Operon `2.6.0` tout en conservant la Public API V1.
+Kairélys `2.6.2` corrige la parité des filtres enregistrés exposés aux agents, refuse les descriptions
+et tags multilignes susceptibles de scinder une tâche inline, et bloque l'écriture directe des champs
+dérivés ou maintenus par le moteur.
 Le format Markdown et les `operonId` restent identiques : la mise à niveau ne demande aucune
 migration des tâches. Le Bridge conserve une allowlist exacte et n’assimile pas automatiquement une
 version officielle d’Operon dépourvue de l’API publique.
