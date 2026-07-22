@@ -26,7 +26,7 @@ Recommandation Codex : pointer la config MCP vers `dist/stdio-proxy.js`, pas dir
   - Local REST API (obligatoire pour les outils REST live) : https://github.com/coddingtonbear/obsidian-local-rest-api
   - Smart Connections (obligatoire pour la recherche sémantique) : https://github.com/brianpetro/obsidian-smart-connections
   - Bases Bridge (REST) (obligatoire pour les outils `.base` live/plugin-backed, inclus dans ce repo)
-  - Operon `2.5.0` avec Public API v1 et Optimike Operon Bridge (requis pour les mutations Operon live ; Bridge inclus dans ce repo)
+  - Kairélys `2.5.3`, ou une release Operon compatible avec Public API v1, et Optimike Operon Bridge (requis pour les mutations live ; Bridge inclus dans ce repo)
   - plugin Obsidian Tasks (obligatoire pour un comportement Tasks canonique)
 - Pour la recherche sémantique, assure-toi que ton vault contient un dossier `.smart-env`
 
@@ -152,9 +152,9 @@ Le serveur expose des tools MCP “Base” via Obsidian MCP :
 
 Les clés protégées ou virtuelles (`file.*`, `formula.*`, `création`/`creation`, `modification`) sont refusées avant écriture. Les timeouts `processFrontMatter` du Bridge remontent en `write_timeout` retryable : les traiter d’abord comme signal “Obsidian occupé/indexing/locked”, pas comme une donnée forcément invalide.
 
-## Moteur de tâches Operon
+## Moteur de tâches Kairélys / Operon
 
-Operon reste le moteur métier des tâches et l’interface humaine. L’Optimike Operon Bridge inclus projette son index live et sa Public API versionnée via Local REST API ; le MCP ajoute validation, snapshots stale, politique d’écriture, révisions optimistes, idempotence durable et journal d’audit.
+Kairélys ou une release Operon compatible reste le moteur métier des tâches et l’interface humaine. L’Optimike Operon Bridge inclus projette son index live et sa Public API versionnée via Local REST API ; le MCP ajoute validation, snapshots stale, politique d’écriture, révisions optimistes, idempotence durable et journal d’audit.
 
 Les 13 outils sont :
 
@@ -484,7 +484,7 @@ Garder le mode auto et laisser chaque utilisateur surcharger par variables d’e
 - Profil serveur headless dédié : [docs/headless-server-profile.fr.md](docs/headless-server-profile.fr.md)
 - Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
 - Surface actuelle des tools : [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
-- Profil public de gestion des tâches ÉLYSIA : [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
+- Profil public de gestion des tâches ÉLYSIA et skill agentique portable : [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
 - README anglais : [README.md](README.md)
 
 ## Crédits

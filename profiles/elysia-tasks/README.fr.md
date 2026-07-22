@@ -36,3 +36,27 @@ La V1 est un contrat documenté et validable, pas un importeur aveugle. Avant ap
 5. valider avec `operon_validate` et les cinq filtres canoniques.
 
 Le fichier de référence est [`v1/profile.json`](v1/profile.json).
+
+## Skill agentique publique
+
+La skill portable [`elysia-task-gouverneur`](skills/elysia-task-gouverneur/SKILL.md) permet à un agent de piloter ce profil via les 13 outils `operon_*` du MCP Optimike.
+
+Elle couvre :
+
+- création, adoption, mise à jour, transition, conversion et relocalisation ;
+- audit et triage par saved filters ;
+- cycle de vie des backlogs de projet ;
+- diagnostic du runtime et du cache ;
+- dry-run, révisions optimistes, idempotence et preuve après application.
+
+La skill ne contient aucun chemin absolu, aucune tâche réelle, aucun identifiant privé et aucune copie de configuration `data.json`. Les règles propres à un coffre doivent être fournies comme politique locale au moment de l’exécution.
+
+La version publique suit son propre versionnement et n’est pas un miroir automatique d’une configuration privée. Toute évolution doit être promue après contrôle de portabilité et de non-régression.
+
+Pour l’installer dans un runtime Agent Skills, copier le dossier complet :
+
+```text
+profiles/elysia-tasks/skills/elysia-task-gouverneur/
+```
+
+Conserver aussi `profiles/elysia-tasks/v1/profile.json` accessible à l’agent lorsqu’il doit vérifier ou installer la conformité complète au profil.
