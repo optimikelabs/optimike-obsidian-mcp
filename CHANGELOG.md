@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Semantic-search tools now declare `openWorldHint: true` because OpenAI can be selected as the query embedder.
 - Bases Bridge now evaluates `collection.contains(link(...))` correctly when frontmatter stores Obsidian wikilinks such as `[[Projets]]`.
 - Bases Bridge now treats the Bases literal `null` as a missing value instead of the string `"null"`, restoring missing-property filters and dependent formulas.
 - Bases Bridge now evaluates bare `file.*`, `note.*`, and `formula.*` truthy references used by negated filters such as `!formula.next_action_ok`.
