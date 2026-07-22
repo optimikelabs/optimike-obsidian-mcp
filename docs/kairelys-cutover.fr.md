@@ -11,11 +11,16 @@ QuickAdd, Templater ou CustomJS qui accède directement à `app.plugins.plugins.
 
 ```js
 const plugins = app.plugins?.plugins;
-const taskEngine = [plugins?.kairelys, plugins?.operon]
-  .find((plugin) => plugin?.api?.version === "1");
+const taskEngines = [plugins?.kairelys, plugins?.operon]
+  .filter((plugin) => plugin?.api?.version === "1");
+if (taskEngines.length !== 1) {
+  throw new Error(`Un moteur de tâches V1 doit être actif, trouvé : ${taskEngines.length}.`);
+}
+const [taskEngine] = taskEngines;
 ```
 
-Les commandes MCP restent dans le namespace stable `operon_*`.
+Les commandes MCP restent dans le namespace stable `operon_*`. L’automatisation refuse donc le
+double chargement, comme le Bridge, au lieu de choisir silencieusement le premier moteur.
 
 ## Ce qui est transféré
 

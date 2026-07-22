@@ -27,13 +27,19 @@ plutôt que figer un seul identifiant de plugin :
 
 ```js
 const plugins = app.plugins?.plugins;
-const taskEngine = [plugins?.kairelys, plugins?.operon]
-  .find((plugin) => plugin?.api?.version === "1");
+const taskEngines = [plugins?.kairelys, plugins?.operon]
+  .filter((plugin) => plugin?.api?.version === "1");
+if (taskEngines.length !== 1) {
+  throw new Error(`Un moteur de tâches V1 doit être actif, trouvé : ${taskEngines.length}.`);
+}
+const [taskEngine] = taskEngines;
 ```
 
 Les automatisations utilisent ensuite les IDs stables du profil, notamment
 `st_project_brainstorming` pour une capture à clarifier. Elles ne doivent dépendre ni du libellé
-français/anglais, ni de l’ordre visuel des statuts.
+français/anglais, ni de l’ordre visuel des statuts. Elles doivent refuser d’agir si Kairélys et
+Operon sont tous les deux chargés, conformément au contrat `singleOwnerRequired` du profil et au
+comportement du Bridge.
 
 ## Templates
 
