@@ -6,6 +6,7 @@ import {
   parseYaml,
   stringifyYaml,
 } from "obsidian";
+import { normalizeLinkish } from "./link-normalization.mjs";
 
 /** -------- Engine V2 (flag + cache) -------- */
 type EngineRow = Record<string, any>;
@@ -213,16 +214,6 @@ function parseStringListLiteral(inner: string): string[] {
     if (v) values.push(v);
   }
   return values;
-}
-
-function normalizeLinkish(value: string): string {
-  let v = String(value ?? "").trim();
-  const wiki = v.match(/^\\[\\[(.*)\\]\\]$/);
-  if (wiki) v = wiki[1];
-  v = v.split("|")[0] ?? v;
-  v = v.split("#")[0] ?? v;
-  v = v.replace(/\\.md$/i, "");
-  return v.trim();
 }
 
 function splitTopLevelCommas(input: string): string[] {
