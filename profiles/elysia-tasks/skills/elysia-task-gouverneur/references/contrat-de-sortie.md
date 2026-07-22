@@ -35,6 +35,8 @@ preuve_application:
   operation_id: identifiant retourné
   relecture_effectuee: true | false
   resultat_attendu_obtenu: true | false | incertain
+  filtre_attendu_verifie: true | false | non_applicable
+  invisible: false | true | non_applicable
   operon_validate: résultat réel
   divergence: aucune | description
 ```

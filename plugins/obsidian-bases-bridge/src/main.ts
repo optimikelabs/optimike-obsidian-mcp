@@ -6,6 +6,13 @@ import {
   parseYaml,
   stringifyYaml,
 } from "obsidian";
+import {
+  compareFilterValues,
+  isTruthyFilterReference,
+  isTruthyFilterValue,
+  parseComparisonLiteral,
+} from "./filter-comparison.mjs";
+import { normalizeLinkish } from "./link-normalization.mjs";
 
 /** -------- Engine V2 (flag + cache) -------- */
 type EngineRow = Record<string, any>;
@@ -213,16 +220,6 @@ function parseStringListLiteral(inner: string): string[] {
     if (v) values.push(v);
   }
   return values;
-}
-
-function normalizeLinkish(value: string): string {
-  let v = String(value ?? "").trim();
-  const wiki = v.match(/^\\[\\[(.*)\\]\\]$/);
-  if (wiki) v = wiki[1];
-  v = v.split("|")[0] ?? v;
-  v = v.split("#")[0] ?? v;
-  v = v.replace(/\\.md$/i, "");
-  return v.trim();
 }
 
 function splitTopLevelCommas(input: string): string[] {
@@ -888,46 +885,15 @@ export default class BasesBridgePlugin extends Plugin {
       const rightRaw = opMatch[3].trim();
 
       const left = this.getValueForRef(file, leftRef, schema);
-      let right: any = stripQuotes(rightRaw);
-      if (/^(true|false)$/i.test(rightRaw)) right = /^true$/i.test(rightRaw);
-      else if (/^-?\d+(\.\d+)?$/.test(rightRaw)) right = Number(rightRaw);
-
-      const leftNum = typeof left === "number" ? left : Number(left);
-      const rightNum = typeof right === "number" ? right : Number(right);
-      const bothNumeric = Number.isFinite(leftNum) && Number.isFinite(rightNum);
-      const numericOp = op === ">" || op === "<" || op === ">=" || op === "<=";
-      if (numericOp && typeof right === "number" && !Number.isFinite(leftNum)) {
-        return { ok: false, warnings };
-      }
-
-      switch (op) {
-        case "==":
-        case "=":
-          return { ok: bothNumeric ? leftNum === rightNum : String(left) === String(right), warnings };
-        case "!=":
-          return { ok: bothNumeric ? leftNum !== rightNum : String(left) !== String(right), warnings };
-        case ">":
-          return { ok: bothNumeric ? leftNum > rightNum : String(left) > String(right), warnings };
-        case "<":
-          return { ok: bothNumeric ? leftNum < rightNum : String(left) < String(right), warnings };
-        case ">=":
-          return { ok: bothNumeric ? leftNum >= rightNum : String(left) >= String(right), warnings };
-        case "<=":
-          return { ok: bothNumeric ? leftNum <= rightNum : String(left) <= String(right), warnings };
-      }
+      const right = parseComparisonLiteral(rightRaw);
+      return { ok: compareFilterValues(left, op, right), warnings };
     }
 
     // Bare identifier: treat as "truthy" frontmatter key (used a lot in Bases configs)
     // Ex: `- groupe_réunion` or `- sas_statut`
-    if (/^[\p{L}\p{N}_-]+$/u.test(raw)) {
+    if (isTruthyFilterReference(raw)) {
       const v = this.getValueForRef(file, raw, schema);
-      const ok =
-        v === true ||
-        (typeof v === "string" && v.trim().length > 0) ||
-        (typeof v === "number" && Number.isFinite(v)) ||
-        (Array.isArray(v) && v.length > 0) ||
-        (v && typeof v === "object" && Object.keys(v).length > 0);
-      return { ok, warnings };
+      return { ok: isTruthyFilterValue(v), warnings };
     }
 
     warnings.push(`Filter non reconnu: ${raw}`);
@@ -1173,11 +1139,14 @@ export default class BasesBridgePlugin extends Plugin {
 
           const viewName = typeof body?.view === "string" ? body.view : undefined;
           const view = viewName ? schema.views.find((v) => v.name === viewName) : schema.views[0];
+          const viewLookupWarning =
+            viewName && !view ? `Vue introuvable: ${JSON.stringify(viewName)}.` : undefined;
 
           const limit = clampInt(body?.limit ?? view?.limit ?? 20, 20, 1, 500);
           const page = clampInt(body?.page ?? 1, 1, 1, 1_000_000);
 
           const warningsSet = new Set<string>();
+          if (viewLookupWarning) warningsSet.add(viewLookupWarning);
           let warningsTruncated = false;
           const addWarnings = (ws: string[]) => {
             for (const w of ws) {

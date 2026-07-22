@@ -8,7 +8,7 @@ Le profil décrit :
 - les libellés français et anglais ;
 - les racines autorisées pour les tâches actives et les captures ;
 - la politique de création et de template ;
-- les cinq filtres canoniques ;
+- les huit filtres canoniques : Inbox, Cette semaine, Maintenant, Backlog, Étoile du Nord, Audit, Fuite périodique et tâches du dossier ;
 - le contrat de mutation pour les agents.
 
 Il ne contient ni tâche, ni `operonId` réel, ni chemin absolu, ni layout personnel, ni cache, ni réglage privé.
@@ -33,7 +33,7 @@ La V1 est un contrat documenté et validable, pas un importeur aveugle. Avant ap
 2. comparer les IDs, chemins et sémantiques ;
 3. produire un dry-run des changements ;
 4. appliquer par petits lots via l’API publique du moteur ;
-5. valider avec `operon_validate` et les cinq filtres canoniques.
+5. valider avec `operon_validate`, les huit filtres canoniques et les invariants `open_without_surface = 0`, `now_not_in_week = 0`, `periodic_non_inbox = 0`.
 
 Le fichier de référence est [`v1/profile.json`](v1/profile.json).
 
@@ -48,6 +48,7 @@ Elle couvre :
 - cycle de vie des backlogs de projet ;
 - diagnostic du runtime et du cache ;
 - dry-run, révisions optimistes, idempotence et preuve après application.
+- admission P90-J avant création/adoption et clés d’idempotence distinctes pour le plan et l’application.
 
 La skill ne contient aucun chemin absolu, aucune tâche réelle, aucun identifiant privé et aucune copie de configuration `data.json`. Les règles propres à un coffre doivent être fournies comme politique locale au moment de l’exécution.
 
