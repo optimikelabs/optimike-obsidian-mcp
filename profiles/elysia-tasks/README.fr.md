@@ -41,6 +41,19 @@ français/anglais, ni de l’ordre visuel des statuts.
 
 Cette séparation évite qu’une modification de template Obsidian change silencieusement la sémantique MCP des tâches.
 
+## Bascule Kairélys ↔ Operon
+
+Le format Markdown et les `operonId` restent communs aux deux moteurs. La procédure complète se
+trouve dans [`docs/kairelys-cutover.fr.md`](../../docs/kairelys-cutover.fr.md) avec deux scripts
+symétriques :
+
+- `scripts/migrate-operon-to-kairelys.ps1` pour installer le fork temporaire ;
+- `scripts/migrate-kairelys-to-operon.ps1` pour revenir à Operon officiel après intégration de l’API publique V1.
+
+Les deux chemins commencent par un dry-run, utilisent le hash de `data.json` comme précondition,
+sauvegardent la cible existante et transfèrent uniquement les réglages et états durables. Les tâches
+elles-mêmes ne sont ni copiées ni reconverties.
+
 ## Application
 
 La V1 est un contrat documenté et validable, pas un importeur aveugle. Avant application dans un coffre :

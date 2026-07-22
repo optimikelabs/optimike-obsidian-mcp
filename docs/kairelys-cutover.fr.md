@@ -52,12 +52,25 @@ Kairélys est encore actif.
 
 ## Rollback
 
-1. Désactiver Kairélys.
-2. Réactiver Operon.
-3. Recharger le Bridge.
-4. Recharger les plugins d’automatisation concernés ; le fallback `operon` doit reprendre sans modifier les scripts.
-5. Vérifier `operon_status` et la configuration.
+Quand Operon officiel expose l’API publique V1 compatible, préparer son build ou son dossier de release,
+puis exécuter d’abord le retour en dry-run :
 
-Les tâches ne nécessitent aucune reconversion : leur format reste celui d’Operon. Si un retour
-intervient après des modifications de réglages dans Kairélys, exporter ou recopier explicitement la
-configuration voulue avant de reprendre Operon.
+```powershell
+pwsh -File scripts/migrate-kairelys-to-operon.ps1 `
+  -VaultPath "F:\OBSIDIAN\ÉLYSIA" `
+  -OperonBuildPath "C:\chemin\vers\operon-officiel"
+```
+
+Le plan retourne le hash SHA-256 de `kairelys/data.json`. Pour appliquer :
+
+1. Désactiver Kairélys et vérifier qu’Operon est également désactivé.
+2. Relancer le script avec `-Apply` et `-ExpectedSourceDataSha256`.
+3. Activer Operon.
+4. Recharger le Bridge.
+5. Recharger les plugins d’automatisation concernés ; le fallback `operon` doit reprendre sans modifier les scripts.
+6. Vérifier `operon_status`, `operon_get_configuration`, `operon_validate`, le nombre de tâches et la signature des réglages.
+
+Le script sauvegarde tout dossier Operon existant dans `.obsidian/plugins/.optimike-backups/`,
+transfère les réglages et états durables modifiés sous Kairélys, et laisse `runtime/` ainsi que `cache/`
+être reconstruits. Les tâches ne nécessitent aucune reconversion : leur Markdown et leurs `operonId`
+restent inchangés.
