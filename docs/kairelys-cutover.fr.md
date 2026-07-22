@@ -39,7 +39,8 @@ pwsh -File scripts/migrate-operon-to-kairelys.ps1 `
 ```
 
 Le plan affiche le hash SHA-256 de `operon/data.json`. Pour l’application, réutiliser ce hash comme
-précondition.
+précondition. Le dossier de build doit rester extérieur à `.obsidian/plugins/kairelys`, car la cible
+existante peut être déplacée vers la sauvegarde pendant l’application.
 
 ## Application
 
@@ -67,6 +68,9 @@ pwsh -File scripts/migrate-kairelys-to-operon.ps1 `
 ```
 
 Le plan retourne le hash SHA-256 de `kairelys/data.json`. Pour appliquer :
+
+Le dossier de build officiel doit rester extérieur à `.obsidian/plugins/operon` ; le dry-run expose
+`buildPathSafeForApply` et l’application refuse une source située dans la cible qu’elle remplace.
 
 1. Désactiver Kairélys et vérifier qu’Operon est également désactivé.
 2. Relancer le script avec `-Apply` et `-ExpectedSourceDataSha256`.

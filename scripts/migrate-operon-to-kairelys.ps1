@@ -41,6 +41,12 @@ Assert-ChildPath $vault $pluginsRoot "pluginsRoot"
 Assert-ChildPath $pluginsRoot $sourceRoot "sourceRoot"
 Assert-ChildPath $pluginsRoot $targetRoot "targetRoot"
 
+$buildFull = [System.IO.Path]::GetFullPath($build).TrimEnd('\')
+$targetFull = [System.IO.Path]::GetFullPath($targetRoot).TrimEnd('\')
+$buildPathSafeForApply =
+  $buildFull -ne $targetFull -and
+  -not $buildFull.StartsWith($targetFull + '\', [System.StringComparison]::OrdinalIgnoreCase)
+
 if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) {
   throw "Operon source plugin folder not found: $sourceRoot"
 }
@@ -91,6 +97,7 @@ $plan = [ordered]@{
   excludedRebuildableEntries = $excludedEntries
   activeTaskEngines = $activeEngines
   targetExists = Test-Path -LiteralPath $targetRoot
+  buildPathSafeForApply = $buildPathSafeForApply
 }
 
 if (-not $Apply) {
@@ -100,6 +107,9 @@ if (-not $Apply) {
 
 if ($activeEngines.Count -gt 0) {
   throw "Disable Operon and Kairélys before applying migration. Active: $($activeEngines -join ', ')"
+}
+if (-not $buildPathSafeForApply) {
+  throw "KairelysBuildPath must be outside the target plugin folder before applying: $targetRoot"
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
