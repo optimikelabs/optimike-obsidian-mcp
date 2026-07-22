@@ -5,6 +5,25 @@ La première version distribuée est Kairélys `2.5.1`, basée sur Operon `2.5.0
 Kairélys utilise un identifiant Obsidian distinct (`kairelys`). Les tâches restent dans le Markdown
 et conservent leurs `operonId`; seuls le plugin, ses réglages et son état durable changent de dossier.
 
+Les automatisations locales Obsidian ne sont pas migrées par le changement de dossier. Un script
+QuickAdd, Templater ou CustomJS qui accède directement à `app.plugins.plugins.operon` doit résoudre
+`kairelys` en priorité et conserver `operon` comme fallback :
+
+```js
+const plugins = app.plugins?.plugins;
+const loadedTaskEngines = [plugins?.kairelys, plugins?.operon].filter(Boolean);
+if (loadedTaskEngines.length !== 1) {
+  throw new Error(`Un seul moteur de tâches doit être chargé, trouvé : ${loadedTaskEngines.length}.`);
+}
+const [taskEngine] = loadedTaskEngines;
+if (taskEngine.api?.version !== "1") {
+  throw new Error("Le moteur chargé n’expose pas la Public API V1.");
+}
+```
+
+Les commandes MCP restent dans le namespace stable `operon_*`. L’automatisation refuse donc le
+double chargement, comme le Bridge, au lieu de choisir silencieusement le premier moteur.
+
 ## Ce qui est transféré
 
 - `data.json` : réglages, langue, pipelines, statuts, priorités, key mappings et profils d’interface ;
@@ -22,7 +41,8 @@ pwsh -File scripts/migrate-operon-to-kairelys.ps1 `
 ```
 
 Le plan affiche le hash SHA-256 de `operon/data.json`. Pour l’application, réutiliser ce hash comme
-précondition.
+précondition. Le dossier de build doit rester extérieur à `.obsidian/plugins/kairelys`, car la cible
+existante peut être déplacée vers la sauvegarde pendant l’application.
 
 ## Application
 
@@ -32,6 +52,7 @@ précondition.
 4. Recharger `optimike-operon-bridge`.
 5. Vérifier `operon_status`, puis `operon_get_configuration`.
 6. Confirmer le même pipeline, les mêmes statuts, priorités, key mappings et nombre de tâches.
+7. Recharger les plugins d’automatisation concernés et tester une capture sans dépendre d’un libellé visible.
 
 Le script sauvegarde tout dossier Kairélys existant dans
 `.obsidian/plugins/.optimike-backups/`. Il n’active aucun plugin et refuse d’écrire si Operon ou
@@ -39,11 +60,28 @@ Kairélys est encore actif.
 
 ## Rollback
 
-1. Désactiver Kairélys.
-2. Réactiver Operon.
-3. Recharger le Bridge.
-4. Vérifier `operon_status` et la configuration.
+Quand Operon officiel expose l’API publique V1 compatible, préparer son build ou son dossier de release,
+puis exécuter d’abord le retour en dry-run :
 
-Les tâches ne nécessitent aucune reconversion : leur format reste celui d’Operon. Si un retour
-intervient après des modifications de réglages dans Kairélys, exporter ou recopier explicitement la
-configuration voulue avant de reprendre Operon.
+```powershell
+pwsh -File scripts/migrate-kairelys-to-operon.ps1 `
+  -VaultPath "F:\OBSIDIAN\ÉLYSIA" `
+  -OperonBuildPath "C:\chemin\vers\operon-officiel"
+```
+
+Le plan retourne le hash SHA-256 de `kairelys/data.json`. Pour appliquer :
+
+Le dossier de build officiel doit rester extérieur à `.obsidian/plugins/operon` ; le dry-run expose
+`buildPathSafeForApply` et l’application refuse une source située dans la cible qu’elle remplace.
+
+1. Désactiver Kairélys et vérifier qu’Operon est également désactivé.
+2. Relancer le script avec `-Apply` et `-ExpectedSourceDataSha256`.
+3. Activer Operon.
+4. Recharger le Bridge.
+5. Recharger les plugins d’automatisation concernés ; le fallback `operon` doit reprendre sans modifier les scripts.
+6. Vérifier `operon_status`, `operon_get_configuration`, `operon_validate`, le nombre de tâches et la signature des réglages.
+
+Le script sauvegarde tout dossier Operon existant dans `.obsidian/plugins/.optimike-backups/`,
+transfère les réglages et états durables modifiés sous Kairélys, et laisse `runtime/` ainsi que `cache/`
+être reconstruits. Les tâches ne nécessitent aucune reconversion : leur Markdown et leurs `operonId`
+restent inchangés.

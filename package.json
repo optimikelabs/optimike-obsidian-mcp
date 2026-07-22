@@ -80,7 +80,8 @@
     "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && npm --prefix plugins/obsidian-operon-bridge run check",
     "smoke:operon-mutations": "node scripts/smoke-operon-mutations.mjs",
     "smoke:operon-rich-mutations": "node scripts/smoke-operon-rich-mutations.mjs",
-    "test:profiles": "node scripts/test-elysia-task-profile.mjs"
+    "test:profiles": "node scripts/test-elysia-task-profile.mjs",
+    "test:migrations:windows": "pwsh -NoProfile -File scripts/test-task-engine-migrations.ps1"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",

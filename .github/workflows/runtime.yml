@@ -23,4 +23,6 @@ jobs:
       - run: npm ci
       - run: npm run test:runtime
       - run: npm run test:profiles
+      - if: runner.os == 'Windows'
+        run: npm run test:migrations:windows
       - run: npm pack --dry-run
