@@ -11,12 +11,14 @@ QuickAdd, Templater ou CustomJS qui accède directement à `app.plugins.plugins.
 
 ```js
 const plugins = app.plugins?.plugins;
-const taskEngines = [plugins?.kairelys, plugins?.operon]
-  .filter((plugin) => plugin?.api?.version === "1");
-if (taskEngines.length !== 1) {
-  throw new Error(`Un moteur de tâches V1 doit être actif, trouvé : ${taskEngines.length}.`);
+const loadedTaskEngines = [plugins?.kairelys, plugins?.operon].filter(Boolean);
+if (loadedTaskEngines.length !== 1) {
+  throw new Error(`Un seul moteur de tâches doit être chargé, trouvé : ${loadedTaskEngines.length}.`);
 }
-const [taskEngine] = taskEngines;
+const [taskEngine] = loadedTaskEngines;
+if (taskEngine.api?.version !== "1") {
+  throw new Error("Le moteur chargé n’expose pas la Public API V1.");
+}
 ```
 
 Les commandes MCP restent dans le namespace stable `operon_*`. L’automatisation refuse donc le
