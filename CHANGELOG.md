@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ÉLYSIA Tasks profile 1.1 with global Inbox, This Week, bounded Now, Backlog, periodic-note leakage detection, and a P90-J admission gate.
 - Public task-governor guidance for distinct dry-run/apply idempotency keys and post-mutation visibility proof.
 - Regression coverage for Obsidian wikilink normalization in the Bases Bridge.
+- CI coverage and installable package artifacts for both the Bases and Operon Bridges.
+- MCP safety annotations for all tool registrations, with regression coverage.
+- A production dependency audit gate that fails on high or critical findings.
 
 ### Fixed
 
@@ -19,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bases Bridge now treats the Bases literal `null` as a missing value instead of the string `"null"`, restoring missing-property filters and dependent formulas.
 - Bases Bridge now evaluates bare `file.*`, `note.*`, and `formula.*` truthy references used by negated filters such as `!formula.next_action_ok`.
 - Bases Bridge now warns when a requested view does not exist instead of silently returning an unfiltered view result.
+
+### Security
+
+- Marked every legacy MCP tool as read-only, mutating, maintenance, or destructive for approval-aware clients.
+- Moved MCP Inspector to development dependencies and updated `fast-uri` to a patched release, removing the high-severity production audit finding.
 
 ## [2.3.0] - 2026-07-21
 

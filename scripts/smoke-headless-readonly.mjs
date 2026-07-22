@@ -339,6 +339,23 @@ async function main() {
 
     const tools = await withTimeout(client.listTools(), "listTools");
     const toolNames = tools.tools.map((tool) => tool.name).sort();
+    const unannotatedTools = tools.tools.filter((tool) => {
+      const annotations = tool.annotations;
+      return (
+        !annotations ||
+        typeof annotations.readOnlyHint !== "boolean" ||
+        typeof annotations.destructiveHint !== "boolean" ||
+        typeof annotations.idempotentHint !== "boolean" ||
+        typeof annotations.openWorldHint !== "boolean"
+      );
+    });
+    if (unannotatedTools.length > 0) {
+      throw new Error(
+        `MCP tools missing complete safety annotations: ${unannotatedTools
+          .map((tool) => tool.name)
+          .join(", ")}`,
+      );
+    }
     const expected = [
       "obsidian_list_notes",
       "obsidian_read_note",

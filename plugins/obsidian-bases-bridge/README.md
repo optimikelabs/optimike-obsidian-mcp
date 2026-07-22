@@ -4,10 +4,13 @@ Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « B
 
 ## Installation rapide
 
-1. Copier ce dossier dans `.obsidian/plugins/`.
-2. Lancer Obsidian → *Settings → Community plugins* → activer **Bases Bridge (REST)**.
-3. Vérifier que le plugin **Local REST API** est actif (v3.x) et que le coffre est autorisé.
-4. Dans chaque base ciblée, activer la vue « Bridge (Headless) » pour profiter des valeurs évaluées par l’engine.
+1. Télécharger l’artefact CI `obsidian-bases-bridge`, ou construire le plugin avec `npm ci` puis `npm run check` dans ce dossier.
+2. Créer `.obsidian/plugins/obsidian-bases-bridge/` et y copier `main.js` et `manifest.json` depuis l’artefact ou depuis `build/`.
+3. Lancer Obsidian → *Settings → Community plugins* → activer **Bases Bridge (REST)**.
+4. Vérifier que le plugin **Local REST API** est actif (v3.x) et que le coffre est autorisé.
+5. Dans chaque base ciblée, activer la vue « Bridge (Headless) » pour profiter des valeurs évaluées par l’engine.
+
+La CI exécute les tests, construit le plugin et publie ces deux fichiers installables. Le package MCP vérifie également qu’ils sont bien présents avant distribution.
 
 ## Endpoints exposés
 

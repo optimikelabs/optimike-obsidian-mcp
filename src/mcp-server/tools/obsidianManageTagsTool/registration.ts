@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { MUTATING_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
   VaultCacheService,
@@ -44,6 +45,7 @@ export const registerObsidianManageTagsTool = async (
         toolName,
         toolDescription,
         ObsidianManageTagsInputSchemaShape,
+        MUTATING_TOOL_ANNOTATIONS,
         async (params: ObsidianManageTagsInput) => {
           const handlerContext: RequestContext =
             requestContextService.createRequestContext({

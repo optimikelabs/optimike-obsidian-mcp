@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -63,6 +64,7 @@ export const registerObsidianReadNoteTool = async (
         toolName,
         toolDescription,
         ObsidianReadNoteInputSchema.shape, // Provide the Zod schema shape for input definition.
+        READ_ONLY_TOOL_ANNOTATIONS,
         /**
          * The handler function executed when the 'obsidian_read_note' tool is called by the client.
          *

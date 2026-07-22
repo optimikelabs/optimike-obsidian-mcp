@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
   VaultCacheService,
@@ -64,6 +65,7 @@ export const registerObsidianDeleteNoteTool = async (
         toolName,
         toolDescription,
         ObsidianDeleteNoteInputSchema.shape, // Provide the Zod schema shape for input definition.
+        DESTRUCTIVE_TOOL_ANNOTATIONS,
         /**
          * The handler function executed when the 'obsidian_delete_note' tool is called by the client.
          *

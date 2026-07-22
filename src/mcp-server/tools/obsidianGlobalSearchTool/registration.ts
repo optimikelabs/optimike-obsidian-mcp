@@ -5,6 +5,7 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js"; // Import VaultCacheService type
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -56,6 +57,7 @@ export async function registerObsidianGlobalSearchTool(
         toolName,
         toolDescription,
         ObsidianGlobalSearchInputSchemaShape,
+        READ_ONLY_TOOL_ANNOTATIONS,
         async (
           params: ObsidianGlobalSearchInput,
           handlerInvocationContext: any,
