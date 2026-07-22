@@ -19,6 +19,22 @@ Le profil est français par défaut. Les automatisations doivent utiliser les ID
 
 Changer les libellés d’un pipeline déjà utilisé modifie les valeurs visibles stockées dans les tâches. Une migration FR ↔ EN doit donc être faite comme une migration de données : inventaire, dry-run, transitions par `statusId`, validation puis application. Changer seulement la langue de l’interface Kairélys ne nécessite pas de réécrire les tâches.
 
+## Automatisations Obsidian
+
+Le profil déclare `kairelys` comme plugin préféré et `operon` comme fallback. Une automatisation
+QuickAdd, Templater ou CustomJS doit appliquer la même résolution et vérifier l’API publique V1,
+plutôt que figer un seul identifiant de plugin :
+
+```js
+const plugins = app.plugins?.plugins;
+const taskEngine = [plugins?.kairelys, plugins?.operon]
+  .find((plugin) => plugin?.api?.version === "1");
+```
+
+Les automatisations utilisent ensuite les IDs stables du profil, notamment
+`st_project_brainstorming` pour une capture à clarifier. Elles ne doivent dépendre ni du libellé
+français/anglais, ni de l’ordre visuel des statuts.
+
 ## Templates
 
 ÉLYSIA utilise le template minimal natif du pipeline. Il doit ajouter uniquement les champs canoniques nécessaires : `operonId`, création, modification, statut et priorité. Les conventions de projet, de création ou de note quotidienne restent la responsabilité des templates ÉLYSIA/Obsidian ; elles ne doivent pas être recopiées dans un template de tâche Kairélys.
