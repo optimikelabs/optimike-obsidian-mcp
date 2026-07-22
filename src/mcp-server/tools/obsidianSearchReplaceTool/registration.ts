@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
   VaultCacheService,
@@ -68,6 +69,7 @@ export const registerObsidianSearchReplaceTool = async (
         toolName,
         toolDescription,
         ObsidianSearchReplaceInputSchemaShape, // Provide the base Zod schema shape for input definition.
+        DESTRUCTIVE_TOOL_ANNOTATIONS,
         /**
          * The handler function executed when the 'obsidian_search_replace' tool is called by the client.
          *

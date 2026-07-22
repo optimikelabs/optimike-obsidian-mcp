@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -35,6 +36,7 @@ export async function registerBasesQueryTool(
         TOOL_NAME,
         TOOL_DESCRIPTION,
         BasesQueryInputSchema.shape,
+        READ_ONLY_TOOL_ANNOTATIONS,
         async (params: BasesQueryInput) => {
           const handlerContext = requestContextService.createRequestContext({
             parentContext: registrationContext,

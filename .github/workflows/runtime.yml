@@ -23,6 +23,40 @@ jobs:
       - run: npm ci
       - run: npm run test:runtime
       - run: npm run test:profiles
+      - run: npm run test:tool-annotations
       - if: runner.os == 'Windows'
         run: npm run test:migrations:windows
-      - run: npm pack --dry-run
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Audit production dependencies
+        run: npm run audit:production
+      - name: Install Bases Bridge dependencies
+        working-directory: plugins/obsidian-bases-bridge
+        run: npm ci
+      - name: Install Operon Bridge dependencies
+        working-directory: plugins/obsidian-operon-bridge
+        run: npm ci
+      - name: Test Bases Bridge
+        run: npm run check:bases-bridge
+      - name: Build MCP server
+        run: npm run build
+      - name: Build installable Bridges
+        run: npm run build:bridges
+      - name: Verify npm package contents
+        run: npm run test:package
+      - name: Upload Bases Bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obsidian-bases-bridge
+          path: |
+            plugins/obsidian-bases-bridge/build/main.js
+            plugins/obsidian-bases-bridge/build/manifest.json
+          if-no-files-found: error

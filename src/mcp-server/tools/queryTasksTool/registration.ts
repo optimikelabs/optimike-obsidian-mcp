@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { VaultCacheService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -36,6 +37,7 @@ export const registerQueryTasksTool = async (
         toolName,
         toolDescription,
         QueryTasksInputSchemaShape,
+        READ_ONLY_TOOL_ANNOTATIONS,
         async (params: QueryTasksInput) => {
           const handlerContext =
             requestContextService.createRequestContext({

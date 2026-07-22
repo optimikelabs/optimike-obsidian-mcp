@@ -339,6 +339,49 @@ async function main() {
 
     const tools = await withTimeout(client.listTools(), "listTools");
     const toolNames = tools.tools.map((tool) => tool.name).sort();
+    const unannotatedTools = tools.tools.filter((tool) => {
+      const annotations = tool.annotations;
+      return (
+        !annotations ||
+        typeof annotations.readOnlyHint !== "boolean" ||
+        typeof annotations.destructiveHint !== "boolean" ||
+        typeof annotations.idempotentHint !== "boolean" ||
+        typeof annotations.openWorldHint !== "boolean"
+      );
+    });
+    if (unannotatedTools.length > 0) {
+      throw new Error(
+        `MCP tools missing complete safety annotations: ${unannotatedTools
+          .map((tool) => tool.name)
+          .join(", ")}`,
+      );
+    }
+    const overwriteCapableTools = new Set([
+      "bases_create",
+      "bases_upsert_config",
+      "bases_upsert_rows",
+      "obsidian_admin_filesystem",
+      "obsidian_batch_frontmatter",
+      "obsidian_delete_note",
+      "obsidian_manage_canvas",
+      "obsidian_manage_frontmatter",
+      "obsidian_manage_tags",
+      "obsidian_move_note",
+      "obsidian_search_replace",
+      "obsidian_update_note",
+    ]);
+    const unsafeOverwriteAnnotations = tools.tools.filter(
+      (tool) =>
+        overwriteCapableTools.has(tool.name) &&
+        tool.annotations?.destructiveHint !== true,
+    );
+    if (unsafeOverwriteAnnotations.length > 0) {
+      throw new Error(
+        `Overwrite-capable MCP tools not marked destructive: ${unsafeOverwriteAnnotations
+          .map((tool) => tool.name)
+          .join(", ")}`,
+      );
+    }
     const expected = [
       "obsidian_list_notes",
       "obsidian_read_note",

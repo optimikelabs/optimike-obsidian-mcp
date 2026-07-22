@@ -1,5 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {
+  MAINTENANCE_TOOL_ANNOTATIONS,
+  READ_ONLY_TOOL_ANNOTATIONS,
+} from "../../toolAnnotations.js";
 import { collectRuntimeStatus, runRuntimeMaintenance } from "../../../services/runtimeState.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { registerOperonTools } from "../operonTools/index.js";
@@ -25,6 +29,7 @@ export async function registerRuntimeTools(
     "obsidian_runtime_status",
     "Returns the current local runtime status for the shared cache, semantic cache, degraded-mode capabilities, and local process health.",
     {},
+    READ_ONLY_TOOL_ANNOTATIONS,
     async () => ({
       content: [
         {
@@ -44,6 +49,7 @@ export async function registerRuntimeTools(
     "obsidian_runtime_maintenance",
     "Runs integrity checks, maintenance, or cache refresh actions for the local shared runtime.",
     MaintenanceInputSchema.shape,
+    MAINTENANCE_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof MaintenanceInputSchema>) => ({
       content: [
         {

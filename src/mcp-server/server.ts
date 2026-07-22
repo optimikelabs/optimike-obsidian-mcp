@@ -60,6 +60,10 @@ import { registerBasesUpsertConfigTool } from "./tools/basesUpsertConfigTool/ind
 import { registerListAllTasksTool } from "./tools/listAllTasksTool/index.js";
 import { registerQueryTasksTool } from "./tools/queryTasksTool/index.js";
 import { registerRuntimeTools } from "./tools/runtimeTools/index.js";
+import {
+  DESTRUCTIVE_TOOL_ANNOTATIONS,
+  READ_ONLY_TOOL_ANNOTATIONS,
+} from "./toolAnnotations.js";
 // Import transport setup functions.
 import { startHttpTransport } from "./transports/httpTransport.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
@@ -144,6 +148,7 @@ function registerFormatValidationTool(server: McpServer): void {
       filePath: z.string().optional(),
       content: z.string().optional(),
     },
+    READ_ONLY_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "obsidianValidateFormat",
@@ -198,6 +203,7 @@ function registerHeadlessGuardedWriteTools(
       expectedMtime: z.number().optional(),
       returnContent: z.boolean().optional().default(false),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedUpdateNote",
@@ -265,6 +271,7 @@ function registerHeadlessGuardedWriteTools(
       expectedMtime: z.number().optional(),
       returnContent: z.boolean().optional().default(false),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedSearchReplace",
@@ -331,6 +338,7 @@ function registerHeadlessGuardedWriteTools(
       expectedHash: z.string().optional(),
       expectedMtime: z.number().optional(),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedManageFrontmatter",
@@ -393,6 +401,7 @@ function registerHeadlessGuardedWriteTools(
       expectedHash: z.string().optional(),
       expectedMtime: z.number().optional(),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedDeleteNote",
@@ -462,6 +471,7 @@ function registerHeadlessGuardedWriteTools(
       expectedHash: z.string().optional(),
       expectedMtime: z.number().optional(),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedManageTags",
@@ -687,6 +697,7 @@ function registerHeadlessGuardedWriteTools(
       expectedMtime: z.number().optional(),
       dryRun: z.boolean().default(false),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessFilesystemMoveNote",
@@ -807,6 +818,7 @@ function registerHeadlessGuardedWriteTools(
       dryRun: z.boolean().default(true),
       continueOnError: z.boolean().default(false),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessFilesystemBatchFrontmatter",
@@ -918,6 +930,7 @@ function registerHeadlessGuardedWriteTools(
         .min(1),
       continueOnError: z.boolean().default(false),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessFilesystemAdmin",
@@ -1072,6 +1085,7 @@ function registerHeadlessGuardedWriteTools(
       expectedHash: z.string().optional(),
       expectedMtime: z.number().optional(),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessManageCanvas",
@@ -1301,6 +1315,7 @@ function registerHeadlessGuardedWriteTools(
       expectedHash: z.string().optional(),
       expectedMtime: z.number().optional(),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedBasesCreate",
@@ -1393,6 +1408,7 @@ function registerHeadlessGuardedWriteTools(
       expectedHash: z.string().optional(),
       expectedMtime: z.number().optional(),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedBasesUpsertConfig",
@@ -1489,6 +1505,7 @@ function registerHeadlessGuardedWriteTools(
         .min(1),
       continueOnError: z.boolean().default(false),
     },
+    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedBasesUpsertRows",
