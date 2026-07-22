@@ -1,8 +1,8 @@
 export const OPERON_BRIDGE_CONTRACT_VERSION = "1" as const;
-export const OPERON_BRIDGE_TESTED_VERSION = "2.5.3" as const;
+export const OPERON_BRIDGE_TESTED_VERSION = "2.6.1" as const;
 export const OPERON_BRIDGE_SUPPORTED_VERSIONS = {
   operon: ["2.4.0", "2.5.0"],
-  kairelys: ["2.5.1", "2.5.2", OPERON_BRIDGE_TESTED_VERSION],
+  kairelys: ["2.5.1", "2.5.2", "2.5.3", OPERON_BRIDGE_TESTED_VERSION],
 } as const;
 
 export type OperonTaskSource = "inline" | "file";
