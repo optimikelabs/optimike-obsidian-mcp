@@ -382,6 +382,23 @@ async function main() {
           .join(", ")}`,
       );
     }
+    const semanticSearchAliases = new Set([
+      "smart-search",
+      "smart_search",
+      "smart_semantic_search",
+    ]);
+    const closedWorldSemanticSearchTools = tools.tools.filter(
+      (tool) =>
+        semanticSearchAliases.has(tool.name) &&
+        tool.annotations?.openWorldHint !== true,
+    );
+    if (closedWorldSemanticSearchTools.length > 0) {
+      throw new Error(
+        `Semantic search tools not marked open-world: ${closedWorldSemanticSearchTools
+          .map((tool) => tool.name)
+          .join(", ")}`,
+      );
+    }
     const expected = [
       "obsidian_list_notes",
       "obsidian_read_note",

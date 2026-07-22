@@ -17,7 +17,7 @@ import { getQueryEmbedder } from "../../../adapters/embed/index.js";
 import { resolveNoteAbsolutePath } from "./resolvePath.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
-import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
+import { READ_ONLY_OPEN_WORLD_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 
 const In = z.object({
   query: z.string().min(2, "query too short"),
@@ -556,7 +556,7 @@ export const registerSemanticSearchTool = async (
       name,
       description,
       In.shape,
-      READ_ONLY_TOOL_ANNOTATIONS,
+      READ_ONLY_OPEN_WORLD_TOOL_ANNOTATIONS,
       async (params: InType, _extra: unknown) => {
         try {
           const payload = await handleSearchRequest(params);
