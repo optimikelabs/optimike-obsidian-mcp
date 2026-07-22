@@ -26,7 +26,7 @@ Recommended for Codex: point your MCP config to `dist/stdio-proxy.js`, not direc
   - Local REST API (required for live REST tools): https://github.com/coddingtonbear/obsidian-local-rest-api
   - Smart Connections (required for semantic search): https://github.com/brianpetro/obsidian-smart-connections
   - Bases Bridge (REST) (required for live/plugin-backed `.base` tools, bundled in this repo)
-  - Operon `2.5.0` with Public API v1 plus Optimike Operon Bridge (required for live Operon mutations; Bridge bundled in this repo)
+  - Kairélys `2.5.3`, or a compatible Operon release with Public API v1, plus Optimike Operon Bridge (required for live task mutations; Bridge bundled in this repo)
   - Obsidian Tasks plugin (required for canonical Tasks behavior)
 - For semantic search, make sure your vault has a `.smart-env` folder
 
@@ -152,9 +152,9 @@ This server exposes “Base” MCP tools:
 
 Protected or virtual keys (`file.*`, `formula.*`, `création`/`creation`, `modification`) are refused before writing. Bridge-side `processFrontMatter` timeouts are surfaced as retryable `write_timeout` errors; treat them as an Obsidian busy/indexing/locked signal before blaming the payload.
 
-## Operon task engine
+## Kairélys / Operon task engine
 
-Operon remains the task-domain engine and human UI. The bundled Optimike Operon Bridge projects its live index and versioned Public API through Local REST API; the MCP adds validation, stale snapshots, write policy, optimistic revisions, durable idempotency, and audit records.
+Kairélys or a compatible Operon release remains the task-domain engine and human UI. The bundled Optimike Operon Bridge projects its live index and versioned Public API through Local REST API; the MCP adds validation, stale snapshots, write policy, optimistic revisions, durable idempotency, and audit records.
 
 The 13 tools are:
 
@@ -522,7 +522,7 @@ Keep auto mode and let each user override via env vars.
 - Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
 - Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
 - Current tool surface: [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
-- Public ÉLYSIA task-management profile (French): [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
+- Public ÉLYSIA task-management profile and portable agent skill (French): [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
 - French README: [README.fr.md](README.fr.md)
 
 ## Credits
