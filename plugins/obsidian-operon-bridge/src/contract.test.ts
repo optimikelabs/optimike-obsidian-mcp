@@ -12,7 +12,8 @@ import {
   resolveWorkflow,
 	settingsSignature,
 	shouldAttemptIndexValidation,
-	mutationPathValidationError,
+  mutationPathValidationError,
+  resolveMutationPreflight,
   type OperonBridgeTask,
   type RuntimeIndexedTask,
 } from "./contract";
@@ -188,6 +189,65 @@ test("mutation paths are rejected instead of normalized at the Bridge boundary",
 		}),
 		null,
 	);
+});
+
+test("consumed idempotency keys take precedence over replacement validation", () => {
+	const cached = {
+		signature: "original-signature",
+		payload: { ok: true, status: "planned", operationId: "original-operation" },
+	};
+	let validationCalled = false;
+	const conflict = resolveMutationPreflight({
+		cached,
+		idempotencyKey: "stable-idempotency-key",
+		signature: "different-signature",
+		requested: { targetPath: "Efforts/Projets/Test.md " },
+		validate: () => {
+			validationCalled = true;
+			return "invalid path";
+		},
+		operationId: () => "conflict-operation",
+	});
+	assert.equal(conflict.kind, "response");
+	if (conflict.kind === "response") {
+		assert.equal(conflict.response.httpStatus, 409);
+		assert.equal(
+			(conflict.response.payload.error as { code?: string }).code,
+			"idempotency_key_reused",
+		);
+	}
+	assert.equal(validationCalled, false);
+
+	const replay = resolveMutationPreflight({
+		cached,
+		idempotencyKey: "stable-idempotency-key",
+		signature: "original-signature",
+		requested: { targetPath: "Efforts/Projets/Test.md" },
+		validate: () => {
+			validationCalled = true;
+			return "must not run";
+		},
+		operationId: () => "unused-operation",
+	});
+	assert.equal(replay.kind, "response");
+	if (replay.kind === "response") {
+		assert.equal(replay.response.httpStatus, 200);
+		assert.equal(replay.response.payload.replayed, true);
+	}
+	assert.equal(validationCalled, false);
+
+	const invalidFreshRequest = resolveMutationPreflight({
+		cached: undefined,
+		idempotencyKey: "fresh-idempotency-key",
+		signature: "fresh-signature",
+		requested: { targetPath: "Efforts/Projets/Test.md " },
+		validate: () => "invalid path",
+		operationId: () => "unused-operation",
+	});
+	assert.deepEqual(invalidFreshRequest, {
+		kind: "validation-error",
+		message: "invalid path",
+	});
 });
 
 test("index readiness refuses startup, recovery, sync, and dirty states", () => {

@@ -85,6 +85,69 @@ export function mutationPathValidationError(
 	return null;
 }
 
+export interface CachedMutation {
+	signature: string;
+	payload: Record<string, unknown>;
+}
+
+export type MutationPreflightDecision =
+	| {
+		kind: "response";
+		response: { httpStatus: number; payload: Record<string, unknown> };
+	}
+	| { kind: "validation-error"; message: string }
+	| { kind: "continue" };
+
+export function resolveMutationPreflight(options: {
+	cached: CachedMutation | undefined;
+	idempotencyKey: string;
+	signature: string;
+	requested: Record<string, unknown>;
+	validate: () => string | null;
+	operationId: () => string;
+}): MutationPreflightDecision {
+	const { cached, idempotencyKey, signature, requested } = options;
+	if (cached?.signature === signature) {
+		return {
+			kind: "response",
+			response: {
+				httpStatus: 200,
+				payload: { ...cached.payload, replayed: true },
+			},
+		};
+	}
+	if (cached) {
+		return {
+			kind: "response",
+			response: {
+				httpStatus: 409,
+				payload: {
+					ok: false,
+					contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+					operationId: options.operationId(),
+					idempotencyKey,
+					status: "conflict",
+					before: null,
+					requested,
+					after: null,
+					error: {
+						code: "idempotency_key_reused",
+						message:
+							"idempotencyKey was already used for a different mutation request.",
+					},
+					retryable: false,
+					source: "operon-live",
+					stale: false,
+				},
+			},
+		};
+	}
+	const validationError = options.validate();
+	return validationError
+		? { kind: "validation-error", message: validationError }
+		: { kind: "continue" };
+}
+
 export type OperonTaskSource = "inline" | "file";
 export type OperonCheckboxState = "open" | "done" | "cancelled";
 export type OperonTier = "hot" | "warm" | "cold";

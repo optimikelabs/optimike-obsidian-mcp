@@ -6,6 +6,7 @@ import {
   isIndexReady,
   isCanonicalVaultMarkdownPath,
   mutationPathValidationError,
+  resolveMutationPreflight,
   isVersionCompatible,
   normalizeTask,
   queryTasks,
@@ -22,6 +23,7 @@ import {
   type OperonBridgeConfiguration,
   type OperonSemanticConfiguration,
   type OperonWorkflowTaxonomy,
+  type CachedMutation,
 } from "./contract";
 import { resolveTaskEnginePlugin } from "./task-engine-runtime";
 
@@ -165,11 +167,6 @@ interface StableTaskRead {
   tasks: OperonBridgeTask[];
   generation: number;
   settingsSignature: string;
-}
-
-interface CachedMutation {
-  signature: string;
-  payload: Record<string, unknown>;
 }
 
 const BASE_LIMITATIONS = [
@@ -979,40 +976,20 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (oldest) this.mutationResults.delete(oldest);
   }
 
-  private cachedMutationResult(
+  private mutationPreflight(
     idempotencyKey: string,
     signature: string,
     requested: Record<string, unknown>,
-  ): { httpStatus: number; payload: Record<string, unknown> } | null {
-    const cached = this.mutationResults.get(idempotencyKey);
-    if (!cached) return null;
-    if (cached.signature === signature) {
-      return {
-        httpStatus: 200,
-        payload: { ...cached.payload, replayed: true },
-      };
-    }
-    return {
-      httpStatus: 409,
-      payload: {
-        ok: false,
-        contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
-        operationId: this.mutationOperationId(),
-        idempotencyKey,
-        status: "conflict",
-        before: null,
-        requested,
-        after: null,
-        error: {
-          code: "idempotency_key_reused",
-          message:
-            "idempotencyKey was already used for a different mutation request.",
-        },
-        retryable: false,
-        source: "operon-live",
-        stale: false,
-      },
-    };
+    validate: () => string | null,
+  ) {
+    return resolveMutationPreflight({
+      cached: this.mutationResults.get(idempotencyKey),
+      idempotencyKey,
+      signature,
+      requested,
+      validate,
+      operationId: () => this.mutationOperationId(),
+    });
   }
 
   private requireMutationRuntime(
@@ -1058,44 +1035,45 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       !Array.isArray(body.adoption)
         ? (body.adoption as Record<string, unknown>)
         : {};
-    const targetPath = requested.targetPath;
-    const line = Number(requested.line);
-    const expectedLine = String(requested.expectedLine ?? "");
-    if (
-      !isCanonicalVaultMarkdownPath(targetPath) ||
-      !Number.isInteger(line) ||
-      line < 1 ||
-      !expectedLine ||
-      /[\r\n]/u.test(expectedLine)
-    ) {
-      return {
-        httpStatus: 400,
-        payload: errorPayload(
-          new Error(
-            "adoption requires targetPath, a positive one-based line, and one exact expectedLine.",
-          ),
-          "validation_error",
-        ),
-      };
-    }
     const signature = stableJson({
       capability: "adopt",
       dryRun: body.dryRun !== false,
       requested,
     });
-    const cached = this.cachedMutationResult(
+    const targetPath = requested.targetPath;
+    const line = Number(requested.line);
+    const expectedLine = String(requested.expectedLine ?? "");
+    const preflight = this.mutationPreflight(
       idempotencyKey,
       signature,
       requested,
+      () =>
+        !isCanonicalVaultMarkdownPath(targetPath) ||
+        !Number.isInteger(line) ||
+        line < 1 ||
+        !expectedLine ||
+        /[\r\n]/u.test(expectedLine)
+          ? "adoption requires targetPath, a positive one-based line, and one exact expectedLine."
+          : null,
     );
-    if (cached) return cached;
+    if (preflight.kind === "response") return preflight.response;
+    if (preflight.kind === "validation-error") {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(
+          new Error(preflight.message),
+          "validation_error",
+        ),
+      };
+    }
+    const canonicalTargetPath = targetPath as string;
     const runtime = this.requireMutationRuntime("adopt");
-    const file = this.app.vault.getAbstractFileByPath(targetPath);
+    const file = this.app.vault.getAbstractFileByPath(canonicalTargetPath);
     if (!(file instanceof TFile)) {
       return {
         httpStatus: 404,
         payload: errorPayload(
-          new Error(`Markdown source file not found: ${targetPath}`),
+          new Error(`Markdown source file not found: ${canonicalTargetPath}`),
           "not_found",
         ),
       };
@@ -1194,7 +1172,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       return { httpStatus: 500, payload };
     }
     const after = afterRead.task;
-    const locationMatches = after?.path === targetPath && after.line === line;
+    const locationMatches =
+      after?.path === canonicalTargetPath && after?.line === line;
     const payload = {
       ok: Boolean(after && locationMatches),
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
@@ -1339,13 +1318,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ),
       };
     }
-    const pathError = mutationPathValidationError(capability, requested);
-    if (pathError) {
-      return {
-        httpStatus: 400,
-        payload: errorPayload(new Error(pathError), "validation_error"),
-      };
-    }
     const signature = stableJson({
       capability,
       operonId,
@@ -1353,12 +1325,19 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       dryRun: body.dryRun !== false,
       requested,
     });
-    const cached = this.cachedMutationResult(
+    const preflight = this.mutationPreflight(
       idempotencyKey,
       signature,
       requested,
+      () => mutationPathValidationError(capability, requested),
     );
-    if (cached) return cached;
+    if (preflight.kind === "response") return preflight.response;
+    if (preflight.kind === "validation-error") {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(new Error(preflight.message), "validation_error"),
+      };
+    }
 
     const runtime = this.requireMutationRuntime(capability);
     const beforeRead = await this.oneTask(operonId, true);
@@ -1491,24 +1470,24 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       body.task && typeof body.task === "object" && !Array.isArray(body.task)
         ? (body.task as Record<string, unknown>)
         : {};
-    const pathError = mutationPathValidationError("create", requested);
-    if (pathError) {
-      return {
-        httpStatus: 400,
-        payload: errorPayload(new Error(pathError), "validation_error"),
-      };
-    }
     const signature = stableJson({
       capability: "create",
       dryRun: body.dryRun !== false,
       requested,
     });
-    const cached = this.cachedMutationResult(
+    const preflight = this.mutationPreflight(
       idempotencyKey,
       signature,
       requested,
+      () => mutationPathValidationError("create", requested),
     );
-    if (cached) return cached;
+    if (preflight.kind === "response") return preflight.response;
+    if (preflight.kind === "validation-error") {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(new Error(preflight.message), "validation_error"),
+      };
+    }
     const runtime = this.requireMutationRuntime("create");
     const operationId = this.mutationOperationId();
     if (body.dryRun !== false) {
