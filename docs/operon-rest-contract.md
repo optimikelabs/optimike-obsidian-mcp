@@ -54,7 +54,7 @@ Live validation reports duplicate IDs, missing sources, unknown workflow statuse
 
 ## Mutation controls
 
-All mutation routes require `idempotencyKey`. The key is bound to the canonical request: an identical replay returns the cached result, while reuse for different input returns HTTP 409 with `idempotency_key_reused`. Existing-task routes also require `expectedRevision`. `dryRun` defaults to `true`; apply occurs only with `dryRun: false`.
+All mutation routes require `idempotencyKey`. The key is bound to the canonical request: an identical replay returns the cached result, while reuse for different input returns HTTP 409 with `idempotency_key_reused` before later payload validation. Existing-task routes also require `expectedRevision`. `dryRun` defaults to `true`; apply occurs only with `dryRun: false`.
 
 Every mutation destination is validated without normalization at both the MCP and Bridge boundaries. `targetPath` must be an exact vault-relative Markdown path; `targetFolder` must be an exact vault-relative folder path. Leading or trailing whitespace, backslashes, absolute paths, empty segments, trailing separators, `.` and `..` are rejected before any call to the task engine.
 
