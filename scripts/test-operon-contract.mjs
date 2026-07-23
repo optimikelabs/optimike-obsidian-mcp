@@ -486,9 +486,10 @@ for (const schemaAndValue of [
 }
 const filterQuery = OperonFilterQuerySchema.parse({
   filterSetId: "fs_elysia_now",
-  scopePath: "Efforts/Projets",
+  scopePath: " Efforts/Projets ",
 });
 assert.equal(filterQuery.limit, 100);
+assert.equal(filterQuery.scopePath, "Efforts/Projets");
 assert.equal(
   OperonFilterQuerySchema.safeParse({
     filterSetId: "fs_elysia_now",

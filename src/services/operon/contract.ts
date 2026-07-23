@@ -376,13 +376,32 @@ export const OperonVaultRelativePathSchema = z
       "Path must be an exact canonical vault-relative path without whitespace normalization, backslashes, empty, '.' or '..' segments.",
   });
 
+const OperonVaultRelativeReadPathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .superRefine((value, context) => {
+    const normalized = value.replace(/\\/gu, "/");
+    if (
+      /^(?:\/|[a-z]:\/)/iu.test(normalized) ||
+      normalized
+        .split("/")
+        .some((segment) => segment === "." || segment === "..")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Path must be vault-relative without '.' or '..' segments.",
+      });
+    }
+  });
+
 export const OperonVaultMarkdownPathSchema =
   OperonVaultRelativePathSchema.refine(isCanonicalOperonVaultMarkdownPath, {
     message: "Path must identify a canonical vault-relative Markdown file.",
   });
 export const OperonFilterQuerySchema = z.object({
   filterSetId: z.string().trim().min(1),
-  scopePath: OperonVaultRelativePathSchema.optional(),
+  scopePath: OperonVaultRelativeReadPathSchema.optional(),
   includeProperties: z.boolean().optional().default(false),
   cursor: z.string().optional(),
   limit: z.number().int().positive().max(500).optional().default(100),
