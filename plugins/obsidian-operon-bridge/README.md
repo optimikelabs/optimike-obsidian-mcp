@@ -38,6 +38,8 @@ Prefix: `/extensions/optimike-operon-bridge/v1`
 
 All routes inherit Local REST API authentication and local TLS settings. Saved filters run through Operon's native filter evaluator. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine`. Dry-run is the default.
 
+Mutation paths are strict, exact vault-relative paths. The MCP and Bridge reject leading or trailing whitespace, backslashes, absolute paths, empty segments, traversal, and non-Markdown `targetPath` values; they never trim or rewrite an invalid destination into a valid one.
+
 Mutation apply is disabled by default. Enable **Allow task mutations** in the plugin settings only after the live validation recipe passes. The MCP runtime has a separate `OPERON_MUTATIONS_ENABLED` opt-in.
 
 ## Build

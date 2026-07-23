@@ -4,6 +4,8 @@ import {
   OPERON_BRIDGE_SUPPORTED_VERSIONS,
   OPERON_BRIDGE_TESTED_VERSION,
   isIndexReady,
+  isCanonicalVaultMarkdownPath,
+  mutationPathValidationError,
   isVersionCompatible,
   normalizeTask,
   queryTasks,
@@ -1056,11 +1058,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       !Array.isArray(body.adoption)
         ? (body.adoption as Record<string, unknown>)
         : {};
-    const targetPath = String(requested.targetPath ?? "").trim();
+    const targetPath = requested.targetPath;
     const line = Number(requested.line);
     const expectedLine = String(requested.expectedLine ?? "");
     if (
-      !targetPath ||
+      !isCanonicalVaultMarkdownPath(targetPath) ||
       !Number.isInteger(line) ||
       line < 1 ||
       !expectedLine ||
@@ -1303,7 +1305,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       if (
         requested.target === "inline" &&
         typeof requested.targetPath === "string" &&
-        after.path !== requested.targetPath.trim()
+        after.path !== requested.targetPath
       ) {
         return "Converted inline task path does not match targetPath.";
       }
@@ -1312,7 +1314,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       if (
         after.source !== "inline" ||
         typeof requested.targetPath !== "string" ||
-        after.path !== requested.targetPath.trim()
+        after.path !== requested.targetPath
       ) {
         return "Relocated task was not found at targetPath.";
       }
@@ -1335,6 +1337,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           new Error("idempotencyKey is required."),
           "validation_error",
         ),
+      };
+    }
+    const pathError = mutationPathValidationError(capability, requested);
+    if (pathError) {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(new Error(pathError), "validation_error"),
       };
     }
     const signature = stableJson({
@@ -1482,6 +1491,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       body.task && typeof body.task === "object" && !Array.isArray(body.task)
         ? (body.task as Record<string, unknown>)
         : {};
+    const pathError = mutationPathValidationError("create", requested);
+    if (pathError) {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(new Error(pathError), "validation_error"),
+      };
+    }
     const signature = stableJson({
       capability: "create",
       dryRun: body.dryRun !== false,
@@ -1920,7 +1936,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ).trim();
           const body = this.bodyRecord(req);
           const requested = {
-            targetPath: String(body.targetPath ?? "").trim(),
+            targetPath: body.targetPath,
           };
           const result = await this.executeExistingMutation(
             "relocate",

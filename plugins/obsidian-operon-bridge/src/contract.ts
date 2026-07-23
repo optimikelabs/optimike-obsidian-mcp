@@ -5,6 +5,86 @@ export const OPERON_BRIDGE_SUPPORTED_VERSIONS = {
   kairelys: ["2.5.1", "2.5.2", "2.5.3", "2.6.1", "2.6.2", OPERON_BRIDGE_TESTED_VERSION],
 } as const;
 
+export function isCanonicalVaultRelativePath(value: unknown): value is string {
+	if (
+		typeof value !== "string" ||
+		value.length === 0 ||
+		value !== value.trim() ||
+		/[\\\r\n\0]/u.test(value) ||
+		/^(?:\/|[a-z]:\/)/iu.test(value) ||
+		value.endsWith("/")
+	) {
+		return false;
+	}
+	const segments = value.split("/");
+	return segments.every(
+		(segment) =>
+			segment.length > 0 &&
+			segment === segment.trim() &&
+			segment !== "." &&
+			segment !== "..",
+	);
+}
+
+export function isCanonicalVaultMarkdownPath(value: unknown): value is string {
+	return (
+		isCanonicalVaultRelativePath(value) &&
+		value.toLocaleLowerCase().endsWith(".md")
+	);
+}
+
+export function mutationPathValidationError(
+	capability: "create" | "update" | "transition" | "convert" | "relocate",
+	requested: Record<string, unknown>,
+): string | null {
+	const has = (key: string): boolean =>
+		Object.prototype.hasOwnProperty.call(requested, key);
+	if (capability === "create") {
+		if (requested.source !== "inline" && requested.source !== "file") {
+			return "source must be either inline or file.";
+		}
+		if (has("targetPath") && !isCanonicalVaultMarkdownPath(requested.targetPath)) {
+			return "targetPath must be an exact canonical vault-relative Markdown path.";
+		}
+		if (has("targetFolder") && !isCanonicalVaultRelativePath(requested.targetFolder)) {
+			return "targetFolder must be an exact canonical vault-relative folder path.";
+		}
+		if (requested.source === "file" && has("targetPath")) {
+			return "targetPath is supported only for inline task creation.";
+		}
+		if (requested.source === "inline" && has("targetFolder")) {
+			return "targetFolder is supported only for file task creation.";
+		}
+	}
+	if (capability === "convert") {
+		if (requested.target !== "inline" && requested.target !== "file") {
+			return "target must be either inline or file.";
+		}
+		if (has("targetPath") && !isCanonicalVaultMarkdownPath(requested.targetPath)) {
+			return "targetPath must be an exact canonical vault-relative Markdown path.";
+		}
+		if (has("targetFolder") && !isCanonicalVaultRelativePath(requested.targetFolder)) {
+			return "targetFolder must be an exact canonical vault-relative folder path.";
+		}
+		if (requested.target === "inline" && !has("targetPath")) {
+			return "targetPath is required for file-to-inline conversion.";
+		}
+		if (requested.target === "inline" && has("targetFolder")) {
+			return "targetFolder is supported only for inline-to-file conversion.";
+		}
+		if (requested.target === "file" && has("targetPath")) {
+			return "targetPath is supported only for file-to-inline conversion.";
+		}
+	}
+	if (
+		capability === "relocate" &&
+		!isCanonicalVaultMarkdownPath(requested.targetPath)
+	) {
+		return "targetPath must be an exact canonical vault-relative Markdown path.";
+	}
+	return null;
+}
+
 export type OperonTaskSource = "inline" | "file";
 export type OperonCheckboxState = "open" | "done" | "cancelled";
 export type OperonTier = "hot" | "warm" | "cold";

@@ -563,6 +563,24 @@ try {
     "scope rejection must happen before the Bridge call",
   );
 
+  await assert.rejects(
+    service.createTask({
+      idempotencyKey: "test-canonical-path-preservation",
+      dryRun: false,
+      task: {
+        source: "inline",
+        description: "Must never be normalized into a valid destination",
+        targetPath: "Efforts/Projets/Internes/Operon Pilot/Pilot.md ",
+      },
+    }),
+    (error) => error?.name === "ZodError",
+  );
+  assert.equal(
+    state.mutationCalls,
+    2,
+    "non-canonical paths must be rejected before any Bridge request",
+  );
+
   const scopedInline = await service.createTask({
     idempotencyKey: "test-scope-inline-target",
     dryRun: true,

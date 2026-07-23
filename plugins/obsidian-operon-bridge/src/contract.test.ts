@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  filterTasks,
-  isIndexReady,
+	filterTasks,
+	isCanonicalVaultMarkdownPath,
+	isCanonicalVaultRelativePath,
+	isIndexReady,
   isVersionCompatible,
   normalizeTask,
   paginateTasks,
   queryTasks,
   resolveWorkflow,
-  settingsSignature,
-  shouldAttemptIndexValidation,
+	settingsSignature,
+	shouldAttemptIndexValidation,
+	mutationPathValidationError,
   type OperonBridgeTask,
   type RuntimeIndexedTask,
 } from "./contract";
@@ -116,6 +119,75 @@ test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("kairelys", "2.6.2"), true);
   assert.equal(isVersionCompatible("kairelys", "2.6.3"), true);
   assert.equal(isVersionCompatible("kairelys", "2.6.4"), false);
+});
+
+test("mutation paths are rejected instead of normalized at the Bridge boundary", () => {
+	assert.equal(isCanonicalVaultRelativePath("Efforts/Projets"), true);
+	assert.equal(isCanonicalVaultMarkdownPath("Efforts/Projets/Test.md"), true);
+	for (const invalidPath of [
+		" Efforts/Projets/Test.md",
+		"Efforts/Projets/Test.md ",
+		"Efforts\\Projets\\Test.md",
+		"/Efforts/Projets/Test.md",
+		"C:/Efforts/Projets/Test.md",
+		"Efforts//Projets/Test.md",
+		"Efforts/./Projets/Test.md",
+		"Efforts/Projets/../Atlas/Test.md",
+	]) {
+		assert.equal(isCanonicalVaultMarkdownPath(invalidPath), false);
+	}
+	assert.match(
+		mutationPathValidationError("create", {
+			source: "inline",
+			targetPath: "Efforts/Projets/Test.md ",
+		}) ?? "",
+		/targetPath/u,
+	);
+	assert.match(
+		mutationPathValidationError("convert", {
+			target: "file",
+			targetFolder: "Efforts/Projets/ ",
+		}) ?? "",
+		/targetFolder/u,
+	);
+	assert.match(
+		mutationPathValidationError("convert", { target: "inline" }) ?? "",
+		/required/u,
+	);
+	assert.match(
+		mutationPathValidationError("create", {
+			source: "file",
+			targetPath: "Efforts/Projets/Test.md",
+		}) ?? "",
+		/only for inline/u,
+	);
+	assert.match(
+		mutationPathValidationError("convert", {
+			target: "file",
+			targetPath: "Efforts/Projets/Test.md",
+		}) ?? "",
+		/only for file-to-inline/u,
+	);
+	assert.match(
+		mutationPathValidationError("relocate", {
+			targetPath: "Efforts/Projets/Test.md ",
+		}) ?? "",
+		/targetPath/u,
+	);
+	assert.equal(
+		mutationPathValidationError("create", {
+			source: "inline",
+			targetPath: "Efforts/Projets/Test.md",
+		}),
+		null,
+	);
+	assert.equal(
+		mutationPathValidationError("convert", {
+			target: "inline",
+			targetPath: "Efforts/Projets/Test.md",
+		}),
+		null,
+	);
 });
 
 test("index readiness refuses startup, recovery, sync, and dirty states", () => {
