@@ -336,7 +336,47 @@ const MutationControlSchema = z.object({
   dryRun: z.boolean().optional().default(true),
 });
 
+export function isCanonicalOperonVaultRelativePath(
+  value: unknown,
+): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value !== value.trim() ||
+    /[\\\r\n\0]/u.test(value) ||
+    /^(?:\/|[a-z]:\/)/iu.test(value) ||
+    value.endsWith("/")
+  ) {
+    return false;
+  }
+  const segments = value.split("/");
+  return segments.every(
+    (segment) =>
+      segment.length > 0 &&
+      segment === segment.trim() &&
+      segment !== "." &&
+      segment !== "..",
+  );
+}
+
+export function isCanonicalOperonVaultMarkdownPath(
+  value: unknown,
+): value is string {
+  return (
+    isCanonicalOperonVaultRelativePath(value) &&
+    value.toLocaleLowerCase().endsWith(".md")
+  );
+}
+
 export const OperonVaultRelativePathSchema = z
+  .string()
+  .min(1)
+  .refine(isCanonicalOperonVaultRelativePath, {
+    message:
+      "Path must be an exact canonical vault-relative path without whitespace normalization, backslashes, empty, '.' or '..' segments.",
+  });
+
+const OperonVaultRelativeReadPathSchema = z
   .string()
   .trim()
   .min(1)
@@ -354,9 +394,14 @@ export const OperonVaultRelativePathSchema = z
       });
     }
   });
+
+export const OperonVaultMarkdownPathSchema =
+  OperonVaultRelativePathSchema.refine(isCanonicalOperonVaultMarkdownPath, {
+    message: "Path must identify a canonical vault-relative Markdown file.",
+  });
 export const OperonFilterQuerySchema = z.object({
   filterSetId: z.string().trim().min(1),
-  scopePath: OperonVaultRelativePathSchema.optional(),
+  scopePath: OperonVaultRelativeReadPathSchema.optional(),
   includeProperties: z.boolean().optional().default(false),
   cursor: z.string().optional(),
   limit: z.number().int().positive().max(500).optional().default(100),
@@ -364,7 +409,7 @@ export const OperonFilterQuerySchema = z.object({
 
 export const OperonAdoptTaskSchema = MutationControlSchema.extend({
   adoption: z.object({
-    targetPath: OperonVaultRelativePathSchema,
+    targetPath: OperonVaultMarkdownPathSchema,
     line: z.number().int().positive(),
     expectedLine: z
       .string()
@@ -390,17 +435,17 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
       fileTemplateId: z.string().optional(),
       targetDateKey: z.string().optional(),
       targetFolder: OperonVaultRelativePathSchema.optional(),
-      targetPath: OperonVaultRelativePathSchema.optional(),
+      targetPath: OperonVaultMarkdownPathSchema.optional(),
     })
     .superRefine((value, context) => {
-      if (value.source === "file" && value.targetPath?.trim()) {
+      if (value.source === "file" && value.targetPath) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["targetPath"],
           message: "targetPath is supported only for inline tasks.",
         });
       }
-      if (value.source === "inline" && value.targetFolder?.trim()) {
+      if (value.source === "inline" && value.targetFolder) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["targetFolder"],
@@ -473,20 +518,20 @@ export const OperonConvertTaskInputSchema = MutationControlSchema.extend({
   expectedRevision: z.string().min(1),
   target: OperonTaskSourceSchema,
   fileTemplateId: z.string().optional(),
-  targetPath: OperonVaultRelativePathSchema.optional(),
+  targetPath: OperonVaultMarkdownPathSchema.optional(),
   targetFolder: OperonVaultRelativePathSchema.optional(),
 });
 
 export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine(
   (value, context) => {
-    if (value.target === "inline" && !value.targetPath?.trim()) {
+    if (value.target === "inline" && !value.targetPath) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["targetPath"],
         message: "targetPath is required for file-to-inline conversion.",
       });
     }
-    if (value.target === "inline" && value.targetFolder?.trim()) {
+    if (value.target === "inline" && value.targetFolder) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["targetFolder"],
@@ -494,7 +539,7 @@ export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine(
           "targetFolder is supported only for inline-to-file conversion.",
       });
     }
-    if (value.target === "file" && value.targetPath?.trim()) {
+    if (value.target === "file" && value.targetPath) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["targetPath"],
@@ -507,7 +552,7 @@ export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine(
 export const OperonRelocateTaskSchema = MutationControlSchema.extend({
   operonId: z.string().min(1),
   expectedRevision: z.string().min(1),
-  targetPath: OperonVaultRelativePathSchema,
+  targetPath: OperonVaultMarkdownPathSchema,
 });
 
 export const OperonMutationResultSchema = z.object({

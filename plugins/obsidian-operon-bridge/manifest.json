@@ -1,7 +1,7 @@
 {
   "id": "optimike-operon-bridge",
   "name": "Optimike Kairélys / Operon Bridge",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "minAppVersion": "1.7.2",
   "description": "Versioned Local REST API bridge from Kairélys or Operon's live task engine to Optimike Obsidian MCP.",
   "author": "Optimike",

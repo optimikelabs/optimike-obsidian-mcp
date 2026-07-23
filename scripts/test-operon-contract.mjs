@@ -13,6 +13,8 @@ import {
   OperonTaskSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
+  OperonVaultMarkdownPathSchema,
+  OperonVaultRelativePathSchema,
   queryOperonSnapshot,
 } from "../dist/services/operon/contract.js";
 
@@ -404,11 +406,90 @@ assert.equal(
   }).success,
   false,
 );
+for (const invalidPath of [
+  " Efforts/Projets/Test.md",
+  "Efforts/Projets/Test.md ",
+  "Efforts\\Projets\\Test.md",
+  "/Efforts/Projets/Test.md",
+  "C:/Efforts/Projets/Test.md",
+  "Efforts//Projets/Test.md",
+  "Efforts/./Projets/Test.md",
+  "Efforts/Projets/../Atlas/Test.md",
+  "Efforts/Projets/Test",
+]) {
+  assert.equal(
+    OperonVaultMarkdownPathSchema.safeParse(invalidPath).success,
+    false,
+    `must reject non-canonical Markdown path: ${JSON.stringify(invalidPath)}`,
+  );
+}
+for (const invalidPath of [
+  " Efforts/Projets",
+  "Efforts/Projets ",
+  "Efforts\\Projets",
+  "Efforts//Projets",
+  "Efforts/Projets/",
+]) {
+  assert.equal(
+    OperonVaultRelativePathSchema.safeParse(invalidPath).success,
+    false,
+    `must reject non-canonical vault path: ${JSON.stringify(invalidPath)}`,
+  );
+}
+for (const schemaAndValue of [
+  [
+    OperonAdoptTaskSchema,
+    {
+      ...adopt,
+      adoption: {
+        ...adopt.adoption,
+        targetPath: `${adopt.adoption.targetPath} `,
+      },
+    },
+  ],
+  [
+    OperonCreateTaskSchema,
+    {
+      idempotencyKey: "contract-create-path-space",
+      task: {
+        source: "inline",
+        description: "Do not normalize",
+        targetPath: "Efforts/Projets/Test.md ",
+      },
+    },
+  ],
+  [
+    OperonConvertTaskSchema,
+    {
+      operonId: task.operonId,
+      expectedRevision: task.revision,
+      idempotencyKey: "contract-convert-path-space",
+      target: "inline",
+      targetPath: "Efforts/Projets/Test.md ",
+    },
+  ],
+  [
+    OperonRelocateTaskSchema,
+    {
+      operonId: task.operonId,
+      expectedRevision: task.revision,
+      idempotencyKey: "contract-relocate-path-space",
+      targetPath: "Efforts/Projets/Cible.md ",
+    },
+  ],
+]) {
+  assert.equal(
+    schemaAndValue[0].safeParse(schemaAndValue[1]).success,
+    false,
+    "mutation schemas must reject rather than normalize non-canonical paths",
+  );
+}
 const filterQuery = OperonFilterQuerySchema.parse({
   filterSetId: "fs_elysia_now",
-  scopePath: "Efforts/Projets",
+  scopePath: " Efforts/Projets ",
 });
 assert.equal(filterQuery.limit, 100);
+assert.equal(filterQuery.scopePath, "Efforts/Projets");
 assert.equal(
   OperonFilterQuerySchema.safeParse({
     filterSetId: "fs_elysia_now",

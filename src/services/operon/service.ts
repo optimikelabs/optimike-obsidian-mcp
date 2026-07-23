@@ -26,6 +26,7 @@ import {
   OperonMutationResultSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
+  isCanonicalOperonVaultRelativePath,
   type OperonBridgePage,
   type OperonConfiguration,
   type OperonQuery,
@@ -48,13 +49,8 @@ import type { z } from "zod";
 const BRIDGE_PREFIX = "/extensions/optimike-operon-bridge/v1";
 const PAGE_SIZE = 500;
 const MAX_PAGES = 10_000;
-const normalizeVaultRelativePath = (value: string): string | null => {
-  const normalized = value.trim().replace(/\\/gu, "/").replace(/\/+$/u, "");
-  if (!normalized || /^(?:\/|[a-z]:\/)/iu.test(normalized)) return null;
-  const segments = normalized.split("/");
-  if (segments.some((segment) => segment === "." || segment === ".."))
-    return null;
-  return segments.join("/");
+const canonicalVaultRelativePathOrNull = (value: string): string | null => {
+  return isCanonicalOperonVaultRelativePath(value) ? value : null;
 };
 const SNAPSHOT_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS operon_task_snapshot (
@@ -466,7 +462,7 @@ export class OperonService {
     if (action === "adopt") {
       if (
         typeof request.targetPath !== "string" ||
-        after.path !== request.targetPath.trim()
+        after.path !== request.targetPath
       )
         return "Adopted task path does not match targetPath.";
       if (typeof request.line !== "number" || after.line !== request.line)
@@ -541,7 +537,7 @@ export class OperonService {
       if (
         request.target === "inline" &&
         typeof request.targetPath === "string" &&
-        after.path !== request.targetPath.trim()
+        after.path !== request.targetPath
       )
         return "Converted task path does not match targetPath.";
     }
@@ -549,7 +545,7 @@ export class OperonService {
       action === "relocate" &&
       (after.source !== "inline" ||
         typeof request.targetPath !== "string" ||
-        after.path !== request.targetPath.trim())
+        after.path !== request.targetPath)
     ) {
       return "Relocated task was not found at targetPath.";
     }
@@ -712,7 +708,7 @@ export class OperonService {
   }
 
   private isAllowedMutationPath(candidate: string): boolean {
-    const normalized = normalizeVaultRelativePath(candidate);
+    const normalized = canonicalVaultRelativePathOrNull(candidate);
     if (!normalized) return false;
     return config.operonMutationAllowedPathPrefixes.some(
       (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
@@ -720,7 +716,7 @@ export class OperonService {
   }
 
   private assertAllowedMutationPath(candidate: string, label: string): void {
-    if (!normalizeVaultRelativePath(candidate)) {
+    if (!canonicalVaultRelativePathOrNull(candidate)) {
       throw new McpError(
         BaseErrorCode.VALIDATION_ERROR,
         `Operon ${label} must be a canonical vault-relative path without '.' or '..': ${candidate}`,
@@ -758,7 +754,7 @@ export class OperonService {
       const adoption = payload.adoption as Record<string, unknown> | undefined;
       if (
         typeof adoption?.targetPath === "string" &&
-        adoption.targetPath.trim()
+        adoption.targetPath.length > 0
       ) {
         this.assertAllowedMutationPath(adoption.targetPath, "adopt targetPath");
         return;
@@ -775,7 +771,7 @@ export class OperonService {
       if (
         task?.source === "file" &&
         typeof task.targetFolder === "string" &&
-        task.targetFolder.trim()
+        task.targetFolder.length > 0
       ) {
         this.assertAllowedMutationPath(
           task.targetFolder,
@@ -786,7 +782,7 @@ export class OperonService {
       if (
         task?.source === "inline" &&
         typeof task.targetPath === "string" &&
-        task.targetPath.trim()
+        task.targetPath.length > 0
       ) {
         this.assertAllowedMutationPath(task.targetPath, "create targetPath");
         return;
@@ -820,7 +816,7 @@ export class OperonService {
       if (
         target === "file" &&
         typeof payload.targetFolder === "string" &&
-        payload.targetFolder.trim()
+        payload.targetFolder.length > 0
       ) {
         this.assertAllowedMutationPath(
           payload.targetFolder,
@@ -831,7 +827,7 @@ export class OperonService {
       if (
         target === "inline" &&
         typeof payload.targetPath === "string" &&
-        payload.targetPath.trim()
+        payload.targetPath.length > 0
       ) {
         this.assertAllowedMutationPath(
           payload.targetPath,
@@ -851,7 +847,10 @@ export class OperonService {
     }
 
     if (action === "relocate") {
-      if (typeof payload.targetPath === "string" && payload.targetPath.trim()) {
+      if (
+        typeof payload.targetPath === "string" &&
+        payload.targetPath.length > 0
+      ) {
         this.assertAllowedMutationPath(
           payload.targetPath,
           "relocate targetPath",
