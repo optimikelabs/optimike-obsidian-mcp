@@ -26,7 +26,7 @@ Recommandation Codex : pointer la config MCP vers `dist/stdio-proxy.js`, pas dir
   - Local REST API (obligatoire pour les outils REST live) : https://github.com/coddingtonbear/obsidian-local-rest-api
   - Smart Connections (obligatoire pour la recherche sémantique) : https://github.com/brianpetro/obsidian-smart-connections
   - Bases Bridge (REST) (obligatoire pour les outils `.base` live/plugin-backed, inclus dans ce repo)
-  - Kairélys `2.6.2`, ou une release Operon compatible avec Public API v1, et Optimike Operon Bridge (requis pour les mutations live ; Bridge inclus dans ce repo)
+  - Kairélys `2.6.3`, ou une release Operon compatible avec Public API v1, et Optimike Operon Bridge (requis pour les mutations live ; Bridge inclus dans ce repo)
   - plugin Obsidian Tasks (obligatoire pour un comportement Tasks canonique)
 - Pour la recherche sémantique, assure-toi que ton vault contient un dossier `.smart-env`
 

@@ -114,7 +114,8 @@ test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("kairelys", "2.6.0"), false);
   assert.equal(isVersionCompatible("kairelys", "2.6.1"), true);
   assert.equal(isVersionCompatible("kairelys", "2.6.2"), true);
-  assert.equal(isVersionCompatible("kairelys", "2.6.3"), false);
+  assert.equal(isVersionCompatible("kairelys", "2.6.3"), true);
+  assert.equal(isVersionCompatible("kairelys", "2.6.4"), false);
 });
 
 test("index readiness refuses startup, recovery, sync, and dirty states", () => {

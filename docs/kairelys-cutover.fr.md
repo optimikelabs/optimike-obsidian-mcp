@@ -6,6 +6,9 @@ Kairélys `2.6.1` reprend le moteur complet d’Operon `2.6.0` tout en conservan
 Kairélys `2.6.2` corrige la parité des filtres enregistrés exposés aux agents, refuse les descriptions
 et tags multilignes susceptibles de scinder une tâche inline, et bloque l'écriture directe des champs
 dérivés ou maintenus par le moteur.
+Kairélys `2.6.3` formalise la politique d'écriture de toutes les clés canoniques : les rappels restent
+éditables par les agents, tandis que le statut et les dates terminales passent obligatoirement par
+`transitionTask` afin de préserver leurs invariants.
 Le format Markdown et les `operonId` restent identiques : la mise à niveau ne demande aucune
 migration des tâches. Le Bridge conserve une allowlist exacte et n’assimile pas automatiquement une
 version officielle d’Operon dépourvue de l’API publique.
