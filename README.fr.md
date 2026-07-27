@@ -208,6 +208,7 @@ Variables utiles :
 - `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` pour ajouter des exclusions façon gitignore, séparées par virgules ou retours ligne, au-dessus de la politique de sécurité intégrée
 - `MCP_WRITE_MODE=readonly|guarded|full` pour imposer la sécurité d’écriture côté serveur (`full` est le défaut ; définir explicitement `guarded` ou `readonly` pour durcir un hôte)
 - `MCP_GUARDED_MAX_WRITE_CHARS` et `MCP_GUARDED_MAX_BATCH_OPERATIONS` pour régler les limites du mode guarded
+- `MCP_EXTERNAL_ROOTS_FILE` pour activer des racines documentaires externes locales et bornées
 
 Pour tester sur un vrai coffre, définir `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du coffre afin que les bases SQLite de validation ne polluent pas l’arbre synchronisé.
 
@@ -220,6 +221,32 @@ Politique d’exclusion du vault :
 
 Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
 Les refreshs sémantiques à chaud relisent SQLite d’abord, puis seulement `.smart-env` si nécessaire.
+
+## Racines documentaires externes
+
+Les racines externes sont désactivées par défaut. Pour les activer, copier
+[`docs/external-roots.example.json`](docs/external-roots.example.json) vers un
+emplacement propre à la machine, adapter les racines et limites, puis renseigner
+son chemin absolu dans `MCP_EXTERNAL_ROOTS_FILE`. Ne jamais committer la vraie
+configuration.
+
+La première version expose des outils bornés et read-only pour l’état, la liste,
+les métadonnées, le SHA-256 et la lecture UTF-8. `external_handoff` peut remettre
+le chemin physique vérifié d’un seul fichier uniquement à un client stdio local,
+et seulement si la racine possède `readable` et `handoff`.
+
+Le cœur MCP n’embarque aucun moteur PDF, Office ou OCR. Codex, Claude Code,
+Gemini CLI, OpenClaw ou Hermes Agent peuvent utiliser leurs propres outils
+documentaires après un handoff explicite. Le handoff est refusé en HTTP.
+
+Validation :
+
+```bash
+npm run test:external-roots
+MCP_EXTERNAL_ROOTS_FILE=/chemin/absolu/external-roots.json npm run smoke:external-roots
+```
+
+Voir [ADR — External document roots](docs/adr/ADR-External-Document-Roots.md).
 
 Scripts utiles :
 

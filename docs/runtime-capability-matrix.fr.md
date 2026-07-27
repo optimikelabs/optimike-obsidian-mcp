@@ -29,6 +29,7 @@ Optimike Obsidian MCP a cinq contrats runtime. Les modes headless tournent au-de
 | Tasks list/query                       | Cache/filesystem               | Cache/filesystem                      | Cache/filesystem          | Cache/filesystem                | Cache/filesystem                    | Cache/filesystem                                                           |
 | Recherche sémantique Smart Connections | Si `.smart-env` existe         | Si `.smart-env` existe                | Si `.smart-env` existe    | Si `.smart-env` existe          | Si `.smart-env` existe              | Si `.smart-env` existe                                                     |
 | Status/maintenance runtime             | Oui                            | Oui                                   | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
+| Racines documentaires externes         | Config locale optionnelle      | Config locale optionnelle             | Config locale optionnelle | Config locale optionnelle       | Config locale optionnelle           | Config locale optionnelle                                                   |
 | Validation de format                   | Markdown/Base/Canvas           | Markdown/Base/Canvas                  | Markdown/Base/Canvas      | Markdown/Base/Canvas            | Markdown/Base/Canvas                | Markdown/Base/Canvas                                                       |
 | Update note                            | Outil REST complet             | Outil REST complet                    | Non                       | Non                             | Append/prepend seulement            | Append/prepend seulement                                                   |
 | Search/replace                         | Outil REST complet             | Outil REST complet                    | Non                       | Non                             | Remplacements exacts par `filePath` | Remplacements exacts par `filePath`                                        |
@@ -43,6 +44,12 @@ Optimike Obsidian MCP a cinq contrats runtime. Les modes headless tournent au-de
 | Parité plugins Obsidian                | Plugins Desktop                | Plugins Desktop tant que l’API répond | Non                       | Non                             | Non                                 | Non                                                                        |
 
 ## Registre des tools par mode
+
+Tous les modes enregistrent aussi `external_runtime_status`,
+`external_roots_list`, `external_list`, `external_stat`, `external_read` et
+`external_handoff`. Sans `MCP_EXTERNAL_ROOTS_FILE`, le statut reste désactivé et
+les opérations échouent fermées. Le handoff du chemin physique est limité à
+stdio.
 
 | Mode runtime                     | Tools enregistrées                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

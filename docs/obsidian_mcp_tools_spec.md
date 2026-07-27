@@ -123,6 +123,25 @@ properties, plugin-specific filters, or exact UI view semantics.
   policy status.
 - `obsidian_runtime_maintenance`: integrity checks and cache refresh actions.
 
+## External Document Roots
+
+External roots are disabled unless `MCP_EXTERNAL_ROOTS_FILE` points to a valid
+machine-local JSON configuration.
+
+- `external_runtime_status`: report enablement, stdio handoff policy, logical
+  root IDs, capabilities, limits, and availability without physical paths.
+- `external_roots_list`: list logical root IDs without physical paths.
+- `external_list`: bounded root-relative directory listing; links and junctions
+  are visible but never followed.
+- `external_stat`: bounded metadata and optional SHA-256.
+- `external_read`: bounded UTF-8 text read.
+- `external_handoff`: explicit verified physical-path handoff to a local stdio
+  client that has its own PDF or Office tooling.
+
+The core MCP does not parse PDF or Office files. Handoff requires both
+`readable` and `handoff`; it is denied on HTTP. See
+[ADR-External-Document-Roots.md](adr/ADR-External-Document-Roots.md).
+
 ## Filesystem Admin
 
 - `obsidian_admin_filesystem`: archive, batch move, and batch delete operations

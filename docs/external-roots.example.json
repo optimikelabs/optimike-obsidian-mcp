@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "roots": [
+    {
+      "id": "example.documents",
+      "path": "/srv/documents/example",
+      "capabilities": ["visible", "readable", "handoff"],
+      "include": [
+        "**/*.md",
+        "**/*.txt",
+        "**/*.csv",
+        "**/*.json",
+        "**/*.pdf",
+        "**/*.docx",
+        "**/*.xlsx",
+        "**/*.pptx"
+      ],
+      "exclude": ["**/.git/**", "**/node_modules/**", "**/~$*", "**/*.zip"],
+      "limits": {
+        "maxDepth": 6,
+        "maxFileBytes": 52428800,
+        "maxListEntries": 500,
+        "maxTextChars": 200000
+      }
+    }
+  ]
+}

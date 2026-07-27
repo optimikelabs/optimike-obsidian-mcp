@@ -17,6 +17,7 @@
     "docs/headless-server-profile.fr.md",
     "docs/mcp-routing-guide.md",
     "docs/mcp-routing-guide.fr.md",
+    "docs/external-roots.example.json",
     "docs/adr/ADR-External-Document-Roots.md",
     "docs/adr/ADR-Operon-Bridge.md",
     "docs/operon-decision-report.md",
@@ -90,6 +91,9 @@
     "smoke:operon-rich-mutations": "node scripts/smoke-operon-rich-mutations.mjs",
     "test:profiles": "node scripts/test-elysia-task-profile.mjs",
     "test:tool-annotations": "node scripts/test-tool-annotations.mjs",
+    "test:external-roots": "npm run build && node scripts/test-external-roots.mjs",
+    "smoke:external-roots": "npm run build && node scripts/smoke-external-roots.mjs",
+    "smoke:external-roots:mcp": "npm run build && node scripts/smoke-external-roots-mcp.mjs",
     "test:migrations:windows": "pwsh -NoProfile -File scripts/test-task-engine-migrations.ps1",
     "test:package": "node scripts/test-package-contents.mjs"
   },
