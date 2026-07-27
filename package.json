@@ -17,6 +17,7 @@
     "docs/headless-server-profile.fr.md",
     "docs/mcp-routing-guide.md",
     "docs/mcp-routing-guide.fr.md",
+    "docs/adr/ADR-External-Document-Roots.md",
     "docs/adr/ADR-Operon-Bridge.md",
     "docs/operon-decision-report.md",
     "docs/operon-local-validation.md",
