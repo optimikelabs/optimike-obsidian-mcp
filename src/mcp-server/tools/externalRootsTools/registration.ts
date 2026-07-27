@@ -6,18 +6,20 @@ import {
 } from "../../../services/externalRootsService.js";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 
-const RootPathSchema = z.object({
-  rootId: z
-    .string()
-    .min(1)
-    .describe("Stable logical ID of a configured external root."),
-  relativePath: z
-    .string()
-    .default("")
-    .describe(
-      "Path relative to the external root. Absolute paths are rejected.",
-    ),
-});
+const RootPathSchema = z
+  .object({
+    rootId: z
+      .string()
+      .min(1)
+      .describe("Stable logical ID of a configured external root."),
+    relativePath: z
+      .string()
+      .default("")
+      .describe(
+        "Path relative to the external root. Absolute paths are rejected.",
+      ),
+  })
+  .strict();
 
 const ListSchema = RootPathSchema.extend({
   depth: z.number().int().min(0).max(20).default(1),
@@ -32,7 +34,7 @@ const ReadSchema = RootPathSchema.extend({
   maxChars: z.number().int().positive().max(2_000_000).optional(),
 });
 
-const HandoffSchema = RootPathSchema.extend({
+export const ExternalHandoffSchema = RootPathSchema.extend({
   includeHash: z.boolean().default(true),
 });
 
@@ -43,7 +45,7 @@ function disabledError(): ExternalRootError {
   );
 }
 
-function asResult(operation: () => Promise<unknown>) {
+export function externalRootsResult(operation: () => Promise<unknown>) {
   return async () => {
     try {
       return {
@@ -90,7 +92,7 @@ export async function registerExternalRootsTools(
     "Reports whether explicitly configured external document roots are enabled and available. Physical root paths are never returned.",
     {},
     READ_ONLY_TOOL_ANNOTATIONS,
-    asResult(async () => ({
+    externalRootsResult(async () => ({
       enabled: Boolean(service),
       mode: "read-only",
       localHandoffAllowed,
@@ -103,7 +105,7 @@ export async function registerExternalRootsTools(
     "Lists configured external document root IDs, capabilities, limits, and availability without disclosing physical paths.",
     {},
     READ_ONLY_TOOL_ANNOTATIONS,
-    asResult(async () => ({
+    externalRootsResult(async () => ({
       roots: service ? await service.listRoots() : [],
     })),
   );
@@ -114,7 +116,7 @@ export async function registerExternalRootsTools(
     ListSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ListSchema>) =>
-      asResult(() =>
+      externalRootsResult(() =>
         service
           ? service.list(
               params.rootId,
@@ -132,7 +134,7 @@ export async function registerExternalRootsTools(
     StatSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof StatSchema>) =>
-      asResult(() =>
+      externalRootsResult(() =>
         service
           ? service.getStat(
               params.rootId,
@@ -145,11 +147,11 @@ export async function registerExternalRootsTools(
 
   server.tool(
     "external_read",
-    "Reads bounded UTF-8 text from one explicitly allowed root-relative file. Binary and Office documents must use external_extract.",
+    "Reads bounded UTF-8 text from one explicitly allowed root-relative file. For binary and Office documents, a local stdio client can explicitly request external_handoff and use its own document tools.",
     ReadSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ReadSchema>) =>
-      asResult(() =>
+      externalRootsResult(() =>
         service
           ? service.readText(
               params.rootId,
@@ -163,10 +165,10 @@ export async function registerExternalRootsTools(
   server.tool(
     "external_handoff",
     "Returns a verified local file path for an explicitly allowed stdio client so that its own document tools can process the file. Physical paths are disclosed only by this explicit handoff.",
-    HandoffSchema.shape,
+    ExternalHandoffSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof HandoffSchema>) =>
-      asResult(() =>
+    async (params: z.infer<typeof ExternalHandoffSchema>) =>
+      externalRootsResult(() =>
         !localHandoffAllowed
           ? Promise.reject(
               new ExternalRootError(

@@ -426,7 +426,7 @@ export class ExternalRootsService {
     if (!textExtensions.has(extension)) {
       throw new ExternalRootError(
         "unsupported",
-        "external_read supports UTF-8 text files. Use external_extract for supported documents.",
+        "external_read supports UTF-8 text files. A local stdio client can request external_handoff and use its own document tools for supported binary documents.",
       );
     }
     const buffer = await this.readBuffer(runtime, relativePath);

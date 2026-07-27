@@ -12,7 +12,15 @@ import {
   CompatibilityCallToolResultSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ExternalHandoffSchema,
+  externalRootsResult,
+} from "./mcp-server/tools/externalRootsTools/registration.js";
 import { ensureLocalBackendRunning } from "./runtime/localBackend.js";
+import {
+  ExternalRootError,
+  ExternalRootsService,
+} from "./services/externalRootsService.js";
 
 type PackageInfo = { name?: string; version?: string };
 type BackendClient = {
@@ -26,7 +34,9 @@ const packageInfo = JSON.parse(
 
 const packageName = packageInfo.name ?? "optimike-obsidian-mcp";
 const packageVersion = packageInfo.version ?? "0.0.0";
-const projectRoot = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
+const projectRoot = path.dirname(
+  fileURLToPath(new URL("../package.json", import.meta.url)),
+);
 
 const host = process.env.MCP_HTTP_HOST || "127.0.0.1";
 const port = Number(process.env.MCP_HTTP_PORT || "3010");
@@ -39,6 +49,7 @@ const proxyServer = new Server(
 );
 
 let backend: BackendClient | undefined;
+let externalRootsService: ExternalRootsService | undefined;
 
 function isReconnectableBackendError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -59,7 +70,10 @@ async function ensureBackendConnected(forceReconnect = false): Promise<Client> {
   }
 
   if (backend) {
-    await Promise.allSettled([backend.client.close(), backend.transport.close()]);
+    await Promise.allSettled([
+      backend.client.close(),
+      backend.transport.close(),
+    ]);
     backend = undefined;
   }
 
@@ -124,17 +138,73 @@ async function shutdown(signal: string) {
 }
 
 async function start() {
+  externalRootsService = process.env.MCP_EXTERNAL_ROOTS_FILE
+    ? await ExternalRootsService.fromConfigFile(
+        process.env.MCP_EXTERNAL_ROOTS_FILE,
+      )
+    : undefined;
+
   await ensureBackendConnected();
 
   proxyServer.setRequestHandler(ListToolsRequestSchema, async (request) =>
     withBackendRetry("listTools", (client) => client.listTools(request.params)),
   );
 
-  proxyServer.setRequestHandler(CallToolRequestSchema, async (request) =>
-    withBackendRetry("callTool", (client) =>
+  proxyServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (request.params.name === "external_runtime_status") {
+      return externalRootsResult(async () => ({
+        enabled: Boolean(externalRootsService),
+        mode: "read-only",
+        localHandoffAllowed: true,
+        roots: externalRootsService
+          ? await externalRootsService.listRoots()
+          : [],
+      }))();
+    }
+
+    if (request.params.name === "external_handoff") {
+      const parsed = ExternalHandoffSchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "path_invalid",
+                  message: `Invalid external_handoff arguments: ${parsed.error.message}`,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      return externalRootsResult(() =>
+        externalRootsService
+          ? externalRootsService.handoff(
+              parsed.data.rootId,
+              parsed.data.relativePath,
+              parsed.data.includeHash,
+            )
+          : Promise.reject(
+              new ExternalRootError(
+                "configuration_invalid",
+                "External roots are disabled. Configure MCP_EXTERNAL_ROOTS_FILE to enable them.",
+              ),
+            ),
+      )();
+    }
+
+    return withBackendRetry("callTool", (client) =>
       client.callTool(request.params, CompatibilityCallToolResultSchema),
-    ),
-  );
+    );
+  });
 
   const stdioTransport = new StdioServerTransport();
   await proxyServer.connect(stdioTransport);
