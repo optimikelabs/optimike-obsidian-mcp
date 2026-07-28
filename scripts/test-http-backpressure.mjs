@@ -57,7 +57,11 @@ async function testGlobalAndPerIdentityLimits() {
   });
   b.release();
   await sleep(0);
-  assert.equal(queuedAResolved, false, "identity A remains capped while A is active");
+  assert.equal(
+    queuedAResolved,
+    false,
+    "identity A remains capped while A is active",
+  );
   a.release();
   const a2 = await queuedA;
   assert.equal(a2.queued, true);
@@ -76,16 +80,20 @@ async function testExpensiveAndMutationLimits() {
     identityKey: "b",
     operationClass: "expensive",
   });
-  const standardB = await admission.acquire({
-    identityKey: "b",
+
+  // An unrelated standard operation can still use remaining global capacity
+  // while the expensive pool is saturated.
+  const standardC = await admission.acquire({
+    identityKey: "c",
     operationClass: "standard",
   });
   assert.equal(admission.getSnapshot().expensiveInFlight, 1);
   assert.equal(admission.getSnapshot().inFlight, 2);
+
   expensiveA.release();
   const expensiveB = await expensiveBPromise;
   assert.equal(admission.getSnapshot().expensiveInFlight, 1);
-  standardB.release();
+  standardC.release();
   expensiveB.release();
 
   const mutationA = await admission.acquire({
@@ -139,6 +147,41 @@ async function testQueueBoundsTimeoutAndCancellation() {
   held.release();
   held.release();
   assert.equal(bounded.getSnapshot().inFlight, 0, "release is idempotent");
+}
+
+async function testRemovalRedispatchesSameIdentityQueue() {
+  const admission = controller({
+    maxInFlight: 2,
+    maxInFlightPerIdentity: 2,
+    expensiveMaxInFlight: 1,
+    expensiveMaxInFlightPerIdentity: 1,
+    queueWaitTimeoutMs: 30,
+  });
+  const expensiveA = await admission.acquire({
+    identityKey: "a",
+    operationClass: "expensive",
+  });
+  const blockedExpensiveB = admission.acquire({
+    identityKey: "b",
+    operationClass: "expensive",
+  });
+  const standardBehindIt = admission.acquire({
+    identityKey: "b",
+    operationClass: "standard",
+  });
+
+  await expectReason(blockedExpensiveB, "timeout");
+  const standardB = await Promise.race([
+    standardBehindIt,
+    sleep(200).then(() => {
+      throw new Error("queue did not redispatch after the timed-out head item");
+    }),
+  ]);
+  assert.equal(standardB.queued, true);
+  standardB.release();
+  expensiveA.release();
+  assert.equal(admission.getSnapshot().queued, 0);
+  assert.equal(admission.getSnapshot().inFlight, 0);
 }
 
 async function testRoundRobinFairness() {
@@ -232,7 +275,10 @@ async function testDeterministicLoad() {
     return (async () => {
       const lease = await admission.acquire({ identityKey, operationClass });
       active += 1;
-      activeByIdentity.set(identityKey, (activeByIdentity.get(identityKey) ?? 0) + 1);
+      activeByIdentity.set(
+        identityKey,
+        (activeByIdentity.get(identityKey) ?? 0) + 1,
+      );
       if (operationClass !== "standard") expensiveActive += 1;
       if (operationClass === "mutation") mutationActive += 1;
       assert.ok(active <= 6);
@@ -241,7 +287,10 @@ async function testDeterministicLoad() {
       assert.ok(mutationActive <= 1);
       await sleep((index % 3) + 1);
       active -= 1;
-      activeByIdentity.set(identityKey, activeByIdentity.get(identityKey) - 1);
+      activeByIdentity.set(
+        identityKey,
+        activeByIdentity.get(identityKey) - 1,
+      );
       if (operationClass !== "standard") expensiveActive -= 1;
       if (operationClass === "mutation") mutationActive -= 1;
       lease.release();
@@ -255,6 +304,17 @@ async function testDeterministicLoad() {
   assert.equal(snapshot.admitted, 120);
   assert.ok(snapshot.maxObservedInFlight <= 6);
   assert.ok(snapshot.maxObservedQueued > 0);
+}
+
+function attachTestIdentity(c, key) {
+  getHttpRequestState(c.req.raw).identity = {
+    key,
+    pseudonym: `client_${key}`,
+    clientId: key,
+    subject: key,
+    issuer: "test",
+    source: "claims",
+  };
 }
 
 async function testRealMiddlewareResponses() {
@@ -271,15 +331,7 @@ async function testRealMiddlewareResponses() {
   });
   const app = new Hono();
   app.use("*", async (c, next) => {
-    const key = c.req.header("x-test-identity") ?? "anonymous";
-    getHttpRequestState(c.req.raw).identity = {
-      key,
-      pseudonym: `client_${key}`,
-      clientId: key,
-      subject: key,
-      issuer: "test",
-      source: "claims",
-    };
+    attachTestIdentity(c, c.req.header("x-test-identity") ?? "anonymous");
     await next();
   });
   app.use("/mcp", createHttpBackpressureMiddleware(admission));
@@ -327,14 +379,42 @@ async function testRealMiddlewareResponses() {
   );
 }
 
+async function testDownstreamAdmissionErrorIsNotReclassified() {
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    attachTestIdentity(c, "downstream");
+    await next();
+  });
+  app.use("/mcp", createHttpBackpressureMiddleware(controller()));
+  app.onError((error, c) =>
+    c.json({ downstreamErrorName: error.name }, 599),
+  );
+  app.post("/mcp", () => {
+    throw new AdmissionRejectedError("queue-full", 1);
+  });
+
+  const response = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }),
+  });
+  assert.equal(response.status, 599);
+  assert.equal(
+    (await response.json()).downstreamErrorName,
+    "AdmissionRejectedError",
+  );
+}
+
 await testGlobalAndPerIdentityLimits();
 await testExpensiveAndMutationLimits();
 await testQueueBoundsTimeoutAndCancellation();
+await testRemovalRedispatchesSameIdentityQueue();
 await testRoundRobinFairness();
 await testReleaseAfterError();
 await testDeterministicLoad();
 await testRealMiddlewareResponses();
+await testDownstreamAdmissionErrorIsNotReclassified();
 
 console.log(
-  "PASS: HTTP admission is globally bounded, isolated per verified identity, separately protects expensive operations and mutations, uses a bounded fair queue, times out and cancels safely, always releases slots, returns deterministic retry semantics, and remains bounded under deterministic load",
+  "PASS: HTTP admission is globally bounded, isolated per verified identity, separately protects expensive operations and mutations, uses a bounded fair queue, redispatches after timeout and cancellation, always releases slots, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
 );
