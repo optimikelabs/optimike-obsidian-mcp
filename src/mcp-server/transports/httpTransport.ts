@@ -1,10 +1,14 @@
 /**
  * @fileoverview Configures and starts the Streamable HTTP MCP transport using Hono.
  *
- * The transport owns the MCP lifecycle endpoint and the optional authenticated
- * download endpoint used by transportable external-artifact handoff. The latter
- * accepts only an opaque ticket in a dedicated header; source paths and tickets
- * never appear in URLs.
+ * The HTTP boundary applies two independent protections:
+ *
+ * 1. a bounded pre-authentication source-address limiter;
+ * 2. a bounded functional limiter keyed by verified authentication claims.
+ *
+ * Proxy headers are ignored unless the immediate peer belongs to the explicit
+ * `MCP_TRUSTED_PROXIES` allowlist. MCP sessions are bound to the verified identity
+ * that initialized them. Raw bearer tokens are never used as keys or log fields.
  *
  * @module src/mcp-server/transports/httpTransport
  */
@@ -29,7 +33,6 @@ import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCach
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import {
   logger,
-  rateLimiter,
   RequestContext,
   requestContextService,
 } from "../../utils/index.js";
@@ -39,17 +42,37 @@ import {
   type AuthInfo,
 } from "./auth/index.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
+import {
+  authenticatedIdentityLimiter,
+  deriveVerifiedHttpIdentity,
+  httpProtectionConfig,
+  isLoopbackAddress,
+  loopbackPreAuthSourceLimiter,
+  preAuthSourceLimiter,
+  pseudonymizeClientAddress,
+  type RateLimitDecision,
+  resolveClientAddress,
+} from "./httpProtection.js";
+import {
+  getHttpRequestState,
+  type HttpQuotaState,
+  type VerifiedHttpIdentity,
+} from "./httpRequestState.js";
 
 const HTTP_PORT = config.mcpHttpPort;
 const HTTP_HOST = config.mcpHttpHost;
 const MCP_ENDPOINT_PATH = "/mcp";
 const MAX_PORT_RETRIES = parsePortRetries();
-const TRUST_PROXY =
-  (process.env.MCP_TRUST_PROXY ?? "false").toLowerCase() === "true";
 
-// Active sessions are intentionally in-memory. This profile is a single-process
-// service and is not a serverless or clustered deployment contract.
-const transports: Record<string, WebStandardStreamableHTTPServerTransport> = {};
+type HttpSession = {
+  transport: WebStandardStreamableHTTPServerTransport;
+  identityKey: string;
+  identityPseudonym: string;
+};
+
+// The session store is intentionally process-local. It is bounded so a single
+// process cannot grow without limit under initialization churn.
+const transports = new Map<string, HttpSession>();
 
 function parsePortRetries(): number {
   const raw = process.env.MCP_HTTP_PORT_RETRIES ?? "0";
@@ -66,14 +89,6 @@ function originAllowed(origin: string): boolean {
   return (config.mcpAllowedOrigins ?? []).includes(origin);
 }
 
-function clientIp(c: Context<{ Bindings: HttpBindings }>): string {
-  if (TRUST_PROXY) {
-    const forwarded = c.req.header("x-forwarded-for")?.split(",")[0].trim();
-    if (forwarded) return forwarded;
-  }
-  return c.env.incoming.socket.remoteAddress ?? "unknown_ip";
-}
-
 async function authMiddleware(
   c: Context<{ Bindings: HttpBindings }>,
   next: Next,
@@ -83,18 +98,173 @@ async function authMiddleware(
     : jwtAuthMiddleware(c, next);
 }
 
-async function rateLimitMiddleware(
+function quotaState(
+  scope: HttpQuotaState["scope"],
+  decision: RateLimitDecision,
+): HttpQuotaState {
+  return {
+    scope,
+    limit: decision.limit,
+    remaining: decision.remaining,
+    resetAt: decision.resetAt,
+    outcome: decision.outcome,
+  };
+}
+
+async function requestJsonRpcId(c: Context): Promise<string | number | null> {
+  if (c.req.method !== "POST") return null;
+  try {
+    const body = (await c.req.raw.clone().json()) as { id?: unknown };
+    return typeof body.id === "string" || typeof body.id === "number"
+      ? body.id
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function rateLimitResponse(
+  c: Context,
+  scope: HttpQuotaState["scope"],
+  decision: RateLimitDecision,
+): Promise<Response> {
+  const requestState = getHttpRequestState(c.req.raw);
+  c.header("Retry-After", String(decision.retryAfterSeconds));
+  c.header("RateLimit-Limit", String(decision.limit));
+  c.header("RateLimit-Remaining", String(decision.remaining));
+  c.header("RateLimit-Reset", String(Math.ceil(decision.resetAt / 1000)));
+  c.header("X-Optimike-Rate-Limit-Scope", scope);
+  c.header("X-Request-Id", requestState.requestId);
+
+  logger.warning("HTTP request rejected by bounded rate limiting.", {
+    requestId: requestState.requestId,
+    operation: "httpRateLimitRejected",
+    scope,
+    outcome: decision.outcome,
+    retryAfterSeconds: decision.retryAfterSeconds,
+    clientIdentity: requestState.identity?.pseudonym,
+    sourceAddress: requestState.clientAddress
+      ? pseudonymizeClientAddress(requestState.clientAddress)
+      : undefined,
+  });
+
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      error: {
+        code: BaseErrorCode.RATE_LIMITED,
+        message:
+          decision.outcome === "capacity"
+            ? "Rate-limit state capacity is temporarily exhausted."
+            : "Rate limit exceeded.",
+      },
+      id: await requestJsonRpcId(c),
+    },
+    429,
+  );
+}
+
+async function preAuthRateLimitMiddleware(
   c: Context<{ Bindings: HttpBindings }>,
   next: Next,
-): Promise<void> {
-  const ipAddress = clientIp(c);
-  const context = requestContextService.createRequestContext({
-    operation: "httpRateLimitCheck",
-    ipAddress,
-    trustedProxyHeaders: TRUST_PROXY,
+): Promise<void | Response> {
+  const requestState = getHttpRequestState(c.req.raw);
+  const address = resolveClientAddress({
+    remoteAddress: c.env.incoming.socket.remoteAddress,
+    forwarded: c.req.header("forwarded"),
+    xForwardedFor: c.req.header("x-forwarded-for"),
   });
-  rateLimiter.check(ipAddress, context);
+  requestState.clientAddress = address.address;
+  requestState.clientAddressSource = address.source;
+  requestState.trustedProxyHeaders = address.trustedProxyHeaders;
+
+  const loopback = isLoopbackAddress(address.address);
+  const scope: HttpQuotaState["scope"] = loopback
+    ? "loopback-source-ip"
+    : "source-ip";
+  const limiter = loopback
+    ? loopbackPreAuthSourceLimiter
+    : preAuthSourceLimiter;
+  const decision = limiter.check(pseudonymizeClientAddress(address.address));
+  requestState.quotas.push(quotaState(scope, decision));
+  if (!decision.allowed) {
+    return rateLimitResponse(c, scope, decision);
+  }
   await next();
+}
+
+async function authenticatedIdentityRateLimitMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void | Response> {
+  const authInfo = c.env.incoming.auth as AuthInfo | undefined;
+  if (!authInfo) {
+    throw new McpError(
+      BaseErrorCode.UNAUTHORIZED,
+      "A verified client identity is required for Streamable HTTP.",
+    );
+  }
+
+  const requestState = getHttpRequestState(c.req.raw);
+  const identity = deriveVerifiedHttpIdentity(authInfo);
+  requestState.authInfo = authInfo;
+  requestState.identity = identity;
+  const decision = authenticatedIdentityLimiter.check(identity.key);
+  requestState.quotas.push(quotaState("client-identity", decision));
+  if (!decision.allowed) {
+    return rateLimitResponse(c, "client-identity", decision);
+  }
+  await next();
+}
+
+function requireIdentity(c: Context): VerifiedHttpIdentity {
+  const identity = getHttpRequestState(c.req.raw).identity;
+  if (!identity) {
+    throw new McpError(
+      BaseErrorCode.UNAUTHORIZED,
+      "Verified client identity is unavailable.",
+    );
+  }
+  return identity;
+}
+
+function sessionForRequest(
+  c: Context,
+  sessionId: string | undefined,
+): HttpSession | undefined {
+  if (!sessionId) return undefined;
+  const session = transports.get(sessionId);
+  if (!session) return undefined;
+  const identity = requireIdentity(c);
+  if (session.identityKey !== identity.key) {
+    logger.warning("HTTP session identity mismatch rejected.", {
+      requestId: getHttpRequestState(c.req.raw).requestId,
+      operation: "httpSessionIdentityMismatch",
+      clientIdentity: identity.pseudonym,
+    });
+    throw new McpError(
+      BaseErrorCode.NOT_FOUND,
+      "Invalid or expired session ID.",
+    );
+  }
+  return session;
+}
+
+function sessionCapacityResponse(c: Context): Response {
+  const state = getHttpRequestState(c.req.raw);
+  c.header("Retry-After", "1");
+  c.header("X-Request-Id", state.requestId);
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      error: {
+        code: BaseErrorCode.SERVICE_UNAVAILABLE,
+        message: "HTTP session capacity is temporarily exhausted.",
+      },
+      id: null,
+    },
+    503,
+  );
 }
 
 async function isPortInUse(
@@ -191,8 +361,6 @@ export async function startHttpTransport(
     component: "HttpTransportSetup",
   });
 
-  // MCP requires Origin validation to mitigate browser-based DNS rebinding.
-  // Requests without Origin remain valid for non-browser MCP clients.
   app.use("*", async (c: Context, next: Next) => {
     const origin = c.req.header("origin");
     if (origin && !originAllowed(origin)) {
@@ -220,6 +388,12 @@ export async function startHttpTransport(
         "Content-Disposition",
         "Content-Length",
         "X-Artifact-SHA256",
+        "Retry-After",
+        "RateLimit-Limit",
+        "RateLimit-Remaining",
+        "RateLimit-Reset",
+        "X-Optimike-Rate-Limit-Scope",
+        "X-Request-Id",
       ],
       credentials: true,
     }),
@@ -228,9 +402,11 @@ export async function startHttpTransport(
   app.use("*", async (c: Context, next: Next) => {
     c.res.headers.set("X-Content-Type-Options", "nosniff");
     c.res.headers.set("Referrer-Policy", "no-referrer");
+    c.res.headers.set("X-Request-Id", getHttpRequestState(c.req.raw).requestId);
     await next();
   });
 
+  // Backward-compatible liveness only. M3 adds readiness and detailed state.
   app.get("/healthz", (c: Context) => {
     return c.json({
       ok: true,
@@ -240,16 +416,19 @@ export async function startHttpTransport(
     });
   });
 
-  app.use(MCP_ENDPOINT_PATH, rateLimitMiddleware);
-  app.use(externalHandoffEndpoint, rateLimitMiddleware);
+  app.use(MCP_ENDPOINT_PATH, preAuthRateLimitMiddleware);
+  app.use(externalHandoffEndpoint, preAuthRateLimitMiddleware);
   app.use(MCP_ENDPOINT_PATH, authMiddleware);
   app.use(externalHandoffEndpoint, authMiddleware);
+  app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);
+  app.use(externalHandoffEndpoint, authenticatedIdentityRateLimitMiddleware);
 
   app.onError(httpErrorHandler);
 
   app.get(externalHandoffEndpoint, async (c: Context) => {
     const ticket = c.req.header(externalHandoffTicketHeader);
     const authInfo = c.env.incoming.auth as AuthInfo | undefined;
+    const state = getHttpRequestState(c.req.raw);
     if (!ticket || !authInfo) {
       return c.json(
         {
@@ -276,8 +455,9 @@ export async function startHttpTransport(
     } catch (error) {
       logger.warning("HTTP artifact transfer denied or unavailable.", {
         ...transportContext,
+        requestId: state.requestId,
         operation: "consumeExternalHandoffTicket",
-        clientId: authInfo.clientId,
+        clientIdentity: state.identity?.pseudonym,
         errorCode:
           error instanceof ExternalRootError ? error.code : "non_verifiable",
       });
@@ -292,42 +472,55 @@ export async function startHttpTransport(
   });
 
   app.post(MCP_ENDPOINT_PATH, async (c: Context) => {
+    const state = getHttpRequestState(c.req.raw);
+    const identity = requireIdentity(c);
     const postContext = requestContextService.createRequestContext({
       ...transportContext,
+      requestId: state.requestId,
       operation: "handlePost",
+      clientIdentity: identity.pseudonym,
     });
     const body = await c.req.raw.clone().json();
     const sessionId = c.req.header("mcp-session-id");
-    let transport: WebStandardStreamableHTTPServerTransport | undefined =
-      sessionId ? transports[sessionId] : undefined;
+    let session = sessionForRequest(c, sessionId);
+    let transport = session?.transport;
 
     if (isInitializeRequest(body)) {
       if (transport) {
         logger.warning("Re-initializing existing session.", {
           ...postContext,
-          sessionId,
+          sessionPresent: true,
         });
         await transport.close();
+      } else if (transports.size >= httpProtectionConfig.maxSessions) {
+        return sessionCapacityResponse(c);
       }
 
       const newTransport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (newId) => {
-          transports[newId] = newTransport;
-          logger.info(`HTTP Session created: ${newId}`, {
+          transports.set(newId, {
+            transport: newTransport,
+            identityKey: identity.key,
+            identityPseudonym: identity.pseudonym,
+          });
+          logger.info("HTTP session created.", {
             ...postContext,
-            newSessionId: newId,
+            sessionCount: transports.size,
           });
         },
       });
 
       newTransport.onclose = () => {
         const closedSessionId = newTransport.sessionId;
-        if (closedSessionId && transports[closedSessionId]) {
-          delete transports[closedSessionId];
-          logger.info(`HTTP Session closed: ${closedSessionId}`, {
+        const current = closedSessionId
+          ? transports.get(closedSessionId)
+          : undefined;
+        if (closedSessionId && current?.transport === newTransport) {
+          transports.delete(closedSessionId);
+          logger.info("HTTP session closed.", {
             ...postContext,
-            closedSessionId,
+            sessionCount: transports.size,
           });
         }
       };
@@ -335,6 +528,11 @@ export async function startHttpTransport(
       const server = await createServerInstanceFn();
       await server.connect(newTransport);
       transport = newTransport;
+      session = {
+        transport: newTransport,
+        identityKey: identity.key,
+        identityPseudonym: identity.pseudonym,
+      };
     } else if (!transport) {
       throw new McpError(
         BaseErrorCode.NOT_FOUND,
@@ -352,16 +550,16 @@ export async function startHttpTransport(
     c: Context<{ Bindings: HttpBindings }>,
   ) => {
     const sessionId = c.req.header("mcp-session-id");
-    const transport = sessionId ? transports[sessionId] : undefined;
+    const session = sessionForRequest(c, sessionId);
 
-    if (!transport) {
+    if (!session) {
       throw new McpError(
         BaseErrorCode.NOT_FOUND,
         "Session not found or expired.",
       );
     }
 
-    return await transport.handleRequest(c.req.raw, {
+    return await session.transport.handleRequest(c.req.raw, {
       authInfo: c.env.incoming.auth,
     });
   };
