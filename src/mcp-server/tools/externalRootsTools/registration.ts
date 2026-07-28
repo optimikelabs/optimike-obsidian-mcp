@@ -1,7 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
-import { config } from "../../../config/index.js";
 import {
   ExternalRootError,
   ExternalRootsService,
@@ -48,15 +47,13 @@ function disabledError(): ExternalRootError {
   );
 }
 
-function secureHttpIdentityConfigured(): boolean {
-  return (
-    config.mcpAuthMode === "oauth" ||
-    (config.mcpAuthMode === "jwt" && Boolean(config.mcpAuthSecretKey))
+function secureHttpIdentity(authInfo: AuthInfo | undefined): authInfo is AuthInfo {
+  return Boolean(
+    authInfo &&
+      authInfo.token !== "dev-mode-placeholder-token" &&
+      authInfo.clientId !== "dev-client-id" &&
+      !authInfo.scopes.includes("dev-scope"),
   );
-}
-
-function httpHandoffAvailable(): boolean {
-  return externalTransferBroker.enabled && secureHttpIdentityConfigured();
 }
 
 async function deliverExternalHandoff(
@@ -81,16 +78,10 @@ async function deliverExternalHandoff(
       "HTTP handoff is disabled. The direct HTTP profile can still use status, listing, stat, hashing, and bounded UTF-8 reads.",
     );
   }
-  if (!secureHttpIdentityConfigured()) {
+  if (!secureHttpIdentity(authInfo)) {
     throw new ExternalRootError(
       "capability_denied",
-      "HTTP handoff requires JWT with a configured secret or OAuth with a validated issuer and audience.",
-    );
-  }
-  if (!authInfo) {
-    throw new ExternalRootError(
-      "capability_denied",
-      "HTTP handoff requires an authenticated client identity.",
+      "HTTP handoff requires a non-development authenticated client identity.",
     );
   }
 
@@ -162,14 +153,14 @@ export async function registerExternalRootsTools(
       localHandoffAllowed,
       handoffModes: [
         ...(localHandoffAllowed ? (["local_path"] as const) : []),
-        ...(!localHandoffAllowed && httpHandoffAvailable()
+        ...(!localHandoffAllowed && externalTransferBroker.enabled
           ? (["http_ticket"] as const)
           : []),
       ],
       httpHandoff: {
         ...externalTransferBroker.publicStatus(),
-        available: httpHandoffAvailable(),
         authenticatedIdentityRequired: true,
+        developmentBypassAccepted: false,
       },
       roots: service ? await service.listRoots() : [],
     })),
@@ -242,10 +233,7 @@ export async function registerExternalRootsTools(
     "Prepares one verified temporary copy of an explicitly allowed file. Stdio returns a local path; an authenticated HTTP profile may return a short-lived opaque download ticket. The source path is never returned over HTTP.",
     ExternalHandoffSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (
-      params: z.infer<typeof ExternalHandoffSchema>,
-      extra,
-    ) =>
+    async (params: z.infer<typeof ExternalHandoffSchema>, extra) =>
       externalRootsResult(() =>
         deliverExternalHandoff(
           service,
