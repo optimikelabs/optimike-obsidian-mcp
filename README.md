@@ -6,7 +6,10 @@ Guide d’exploitation (FR): [OPERATIONS.fr.md](OPERATIONS.fr.md)
 
 ![Optimike Obsidian MCP hero](docs/assets/hero-optimike-obsidian-mcp.png)
 
-MCP (Model Context Protocol) server for Obsidian with shared local caching, guarded Operon and legacy Tasks tools, Bases support, and semantic search powered by Smart Connections.
+MCP (Model Context Protocol) server for Obsidian with shared local caching,
+guarded Operon and legacy Tasks tools, Bases support, Smart Connections
+semantic search, and explicit read-only access to configured document roots
+outside the vault.
 
 ## TL;DR
 
@@ -53,6 +56,8 @@ node dist/stdio-proxy.js
 - Expose Obsidian REST tools (read/write, frontmatter, tags, search)
 - Provide local vector search via Smart Connections (`.smart-env`)
 - Keep one durable local backend instead of re-spawning heavy state on every stdio run
+- Give local agents bounded, default-deny access to explicitly configured
+  documents outside the vault without turning them into Obsidian notes
 
 ## What it can do
 
@@ -65,6 +70,7 @@ Optimike Obsidian MCP gives agents a structured way to work with an Obsidian vau
 - inspect and query Obsidian Tasks
 - run semantic search against a Smart Connections index
 - check server health, cache state, degraded mode, and write policy
+- list, hash, read, or explicitly hand off allowed documents outside the vault
 
 In short: it does more than read notes. It exposes the vault as an operational MCP surface, with read/write tools, structured metadata operations, Tasks, Bases, semantic search, and server health/status observability.
 
@@ -83,6 +89,8 @@ This makes the MCP a practical boundary between agents and Obsidian: agents call
 - Integrated Tasks tools: `list_all_tasks` and `query_tasks`
 - Local semantic search `smart_semantic_search`
 - Server health/status tools: `obsidian_runtime_status` and `obsidian_runtime_maintenance`
+- Read-only external document tools with logical root IDs and stdio-only
+  temporary handoff
 - Read-only degraded mode for `obsidian_read_note` and `obsidian_list_notes` when Obsidian REST is down
 - Shared SQLite store for vault content, task cache, and semantic manifest data
 - Embedder‑agnostic: query embedding aligned to the vault model
@@ -91,10 +99,14 @@ This makes the MCP a practical boundary between agents and Obsidian: agents call
 ## Architecture (overview)
 
 1. **Obsidian** + plugins (Local REST API, Bases Bridge, Smart Connections)
-2. **Optimike Obsidian MCP** (this server)
-3. **MCP Agents** (Codex, IDEs, etc.)
+2. Optional machine-local **external document roots**
+3. **Optimike Obsidian MCP** (this server)
+4. **MCP Agents** (Codex, IDEs, etc.)
 
-The server acts as a **bridge** between agents and Obsidian, adds a “Base” layer for `.base` files, and persists shared runtime state locally so Codex can stay fast and stable across runs.
+The server acts as a **bridge** between agents and Obsidian, and as a separate
+default-deny read broker for configured external roots. It adds a “Base” layer
+for `.base` files and persists shared runtime state locally so Codex can stay
+fast and stable across runs.
 
 ## Bases Bridge (REST) — why & how
 
@@ -247,6 +259,9 @@ MCP_EXTERNAL_ROOTS_FILE=/absolute/path/external-roots.json npm run smoke:externa
 ```
 
 See [ADR — External document roots](docs/adr/ADR-External-Document-Roots.md).
+For the complete schema, Windows and Unix client examples, verification,
+rollback, and troubleshooting, see
+[External document roots — setup and operations](docs/external-roots-setup.md).
 
 ## Runtime modes
 
@@ -358,6 +373,9 @@ MCP_HTTP_PORT = "3010"
 MCP_PROXY_START_TIMEOUT_MS = "20000"
 OBSIDIAN_VAULT = "/path/to/<vault>"
 
+# Optional read-only document roots outside the vault
+# MCP_EXTERNAL_ROOTS_FILE = "/absolute/path/to/external-roots.json"
+
 # Smart Connections
 SMART_ENV_DIR = "/path/to/<vault>/.smart-env"
 ENABLE_QUERY_EMBEDDING = "true"
@@ -385,6 +403,8 @@ Notes:
 - Keep this config local in `~/.codex/config.toml` (do not commit personal machine paths).
 - Use logical placeholders in documentation (`/path/to/...`) and keep real paths only in local config.
 - `dist/index.js` is still the backend entrypoint, but Codex should point to `dist/stdio-proxy.js`.
+- External-root configuration is loaded at process startup. Restart the MCP
+  client/server after changing `MCP_EXTERNAL_ROOTS_FILE` or its JSON file.
 
 ## Obsidian Local REST API Setup
 
@@ -445,6 +465,8 @@ The main MCP now includes:
 - Tasks tools: `list_all_tasks`, `query_tasks`
 - semantic tools: `smart_semantic_search`, `smart_search`, `smart-search`
 - server health/status tools: `obsidian_runtime_status`, `obsidian_runtime_maintenance`
+- external document tools: `external_runtime_status`, `external_roots_list`,
+  `external_list`, `external_stat`, `external_read`, `external_handoff`
 
 ## Tasks Integration
 
@@ -553,7 +575,8 @@ Keep auto mode and let each user override via env vars.
 - Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
 - Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
 - Current tool surface: [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
-- Proposed external document roots boundary: [docs/adr/ADR-External-Document-Roots.md](docs/adr/ADR-External-Document-Roots.md)
+- External document roots setup and operations: [docs/external-roots-setup.md](docs/external-roots-setup.md)
+- External document roots architecture: [docs/adr/ADR-External-Document-Roots.md](docs/adr/ADR-External-Document-Roots.md)
 - Public ÉLYSIA task-management profile and portable agent skill (French): [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
 - French README: [README.fr.md](README.fr.md)
 

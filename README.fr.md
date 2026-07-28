@@ -6,7 +6,10 @@ Guide d’exploitation anglais : [OPERATIONS.md](OPERATIONS.md)
 
 ![Hero Optimike Obsidian MCP](docs/assets/hero-optimike-obsidian-mcp.png)
 
-Serveur MCP (Model Context Protocol) pour Obsidian avec cache local partagé, outils Operon sécurisés, compatibilité Tasks historique, Bases et recherche sémantique Smart Connections.
+Serveur MCP (Model Context Protocol) pour Obsidian avec cache local partagé,
+outils Operon sécurisés, compatibilité Tasks historique, Bases, recherche
+sémantique Smart Connections et accès explicite en lecture seule à des racines
+documentaires configurées hors du coffre.
 
 ## TL;DR
 
@@ -53,6 +56,8 @@ node dist/stdio-proxy.js
 - Exposer les outils REST Obsidian (lecture/écriture, frontmatter, tags, recherche)
 - Offrir une recherche vectorielle locale via Smart Connections (`.smart-env`)
 - Garder un backend local durable au lieu de respawner tout l’état lourd à chaque run stdio
+- Donner aux agents locaux un accès borné et default-deny à des documents
+  explicitement configurés hors du coffre sans les transformer en notes Obsidian
 
 ## Ce qu'il sait faire
 
@@ -65,6 +70,7 @@ Optimike Obsidian MCP donne aux agents une façon structurée de travailler avec
 - inspecter et requêter les tâches Obsidian Tasks
 - lancer une recherche sémantique sur un index Smart Connections
 - vérifier la santé du serveur, l'état du cache, le mode dégradé et la politique d'écriture
+- lister, hasher, lire ou remettre explicitement des documents autorisés hors du coffre
 
 En clair : il ne fait pas seulement de la lecture de notes. Il expose le coffre comme une vraie surface MCP opérationnelle, avec outils de lecture/écriture, opérations structurées sur les métadonnées, Tasks, Bases, recherche sémantique et observabilité de l'état du serveur.
 
@@ -83,6 +89,8 @@ Le MCP devient donc une frontière pratique entre les agents et Obsidian : les a
 - Outils Tasks intégrés : `list_all_tasks` et `query_tasks`
 - Recherche sémantique locale `smart_semantic_search`
 - Outils de santé/état du serveur : `obsidian_runtime_status` et `obsidian_runtime_maintenance`
+- Outils documentaires externes en lecture seule avec identifiants logiques et
+  handoff temporaire réservé au stdio
 - Mode dégradé lecture seule pour `obsidian_read_note` et `obsidian_list_notes` si Obsidian REST tombe
 - Store SQLite partagé pour le contenu du vault, le cache Tasks et le manifest sémantique
 - Embedder-agnostic : aligne automatiquement la requête sur le modèle du vault
@@ -91,10 +99,14 @@ Le MCP devient donc une frontière pratique entre les agents et Obsidian : les a
 ## Architecture (vue d'ensemble)
 
 1. **Obsidian** + plugins (Local REST API, Bases Bridge, Smart Connections)
-2. **Optimike Obsidian MCP** (ce serveur)
-3. **Agents MCP** (Codex, IDE, etc.)
+2. Racines documentaires externes locales optionnelles
+3. **Optimike Obsidian MCP** (ce serveur)
+4. **Agents MCP** (Codex, IDE, etc.)
 
-Le serveur agit comme un **pont** entre tes agents et Obsidian, ajoute une couche “Base” pour les fichiers `.base`, et persiste l’état runtime local pour garder Codex rapide et stable au fil des sessions.
+Le serveur agit comme un **pont** entre les agents et Obsidian, et comme un
+courtier en lecture séparé et default-deny pour les racines externes configurées.
+Il ajoute une couche « Base » pour les fichiers `.base` et persiste l’état
+runtime local pour garder Codex rapide et stable au fil des sessions.
 
 ## Bases Bridge (REST) — pourquoi et comment
 
@@ -253,6 +265,9 @@ MCP_EXTERNAL_ROOTS_FILE=/chemin/absolu/external-roots.json npm run smoke:externa
 ```
 
 Voir [ADR — External document roots](docs/adr/ADR-External-Document-Roots.md).
+Pour le schéma complet, les exemples Windows et Unix, la validation, le rollback
+et le dépannage, voir
+[Racines documentaires externes — configuration et exploitation](docs/external-roots-setup.fr.md).
 
 Scripts utiles :
 
@@ -351,6 +366,9 @@ MCP_HTTP_PORT = "3010"
 MCP_PROXY_START_TIMEOUT_MS = "20000"
 OBSIDIAN_VAULT = "/chemin/vers/<vault>"
 
+# Racines documentaires optionnelles en lecture seule hors du coffre
+# MCP_EXTERNAL_ROOTS_FILE = "/chemin/absolu/vers/external-roots.json"
+
 # Smart Connections
 SMART_ENV_DIR = "/chemin/vers/<vault>/.smart-env"
 ENABLE_QUERY_EMBEDDING = "true"
@@ -378,6 +396,9 @@ Notes :
 - Garde cette config en local dans `~/.codex/config.toml` (ne pas commit des chemins machine personnels).
 - Dans la doc, utilise des chemins logiques (`/chemin/vers/...`) et garde les chemins réels uniquement en local.
 - `dist/index.js` reste l’entrypoint backend, mais Codex doit pointer vers `dist/stdio-proxy.js`.
+- La configuration external-roots est chargée au démarrage du processus.
+  Redémarre le client/serveur MCP après toute modification de
+  `MCP_EXTERNAL_ROOTS_FILE` ou de son JSON.
 
 ## Réglage Local REST API (Obsidian)
 
@@ -438,6 +459,9 @@ Le MCP principal inclut maintenant :
 - outils Tasks : `list_all_tasks`, `query_tasks`
 - outils sémantiques : `smart_semantic_search`, `smart_search`, `smart-search`
 - outils santé/état du serveur : `obsidian_runtime_status`, `obsidian_runtime_maintenance`
+- outils documentaires externes : `external_runtime_status`,
+  `external_roots_list`, `external_list`, `external_stat`, `external_read`,
+  `external_handoff`
 
 ## Plugins Obsidian requis ou utiles
 
@@ -517,7 +541,8 @@ Garder le mode auto et laisser chaque utilisateur surcharger par variables d’e
 - Profil serveur headless dédié : [docs/headless-server-profile.fr.md](docs/headless-server-profile.fr.md)
 - Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
 - Surface actuelle des tools : [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
-- Frontière proposée pour les racines documentaires externes : [docs/adr/ADR-External-Document-Roots.md](docs/adr/ADR-External-Document-Roots.md)
+- Configuration et exploitation des racines documentaires externes : [docs/external-roots-setup.fr.md](docs/external-roots-setup.fr.md)
+- Architecture des racines documentaires externes : [docs/adr/ADR-External-Document-Roots.md](docs/adr/ADR-External-Document-Roots.md)
 - Profil public de gestion des tâches ÉLYSIA et skill agentique portable : [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
 - README anglais : [README.md](README.md)
 

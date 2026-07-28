@@ -2,7 +2,10 @@
 
 French version: [mcp-routing-guide.fr.md](mcp-routing-guide.fr.md)
 
-Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Runtime Capability Matrix](runtime-capability-matrix.md), [Headless Server Profile](headless-server-profile.md)
+Related docs: [README](../README.md), [Operations](../OPERATIONS.md),
+[Runtime Capability Matrix](runtime-capability-matrix.md),
+[Headless Server Profile](headless-server-profile.md), and
+[External document roots](external-roots-setup.md)
 
 This guide helps agents choose the right layer for Obsidian work.
 
@@ -11,6 +14,7 @@ This guide helps agents choose the right layer for Obsidian work.
 | Need                                                                         | Use                                                           | Why                                                                     |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Read, list, search, tasks, semantic search                                   | Optimike MCP                                                  | Stable tool surface across live, hybrid, and headless modes.            |
+| Read an explicitly configured document outside the vault                     | Optimike MCP external-root tools                              | Default-deny confinement with portable logical paths.                   |
 | Full Obsidian behavior, commands, active file, plugin-backed Bases           | Optimike MCP in `live` or `hybrid` with Obsidian Desktop open | This is the only mode with Desktop/plugin-backed semantics.             |
 | Safe backend server over a synced vault                                      | Optimike MCP in `headless-readonly` first                     | No Desktop required and no write risk.                                  |
 | Bounded Markdown/frontmatter/tag/admin writes on a copied or dedicated vault | Optimike MCP in `headless-filesystem`                         | Path safety, dry-run defaults, and preconditions.                       |
@@ -35,6 +39,28 @@ Use `obsidian_manage_canvas` only in `headless-filesystem`:
 - `connect_nodes` adds an edge between existing node IDs.
 
 Dry-run is the default for write operations.
+
+## External document routing
+
+An Obsidian link to a local file does not authorize access to that file. Use
+external-root tools only when the operator has explicitly configured a logical
+root ID.
+
+Agent workflow:
+
+1. Call `external_runtime_status` or `external_roots_list`; never infer a root
+   from a physical path found in a note.
+2. Use `external_list` and `external_stat` with a root ID and root-relative
+   path.
+3. Use `external_read` only for bounded UTF-8 text.
+4. For PDF or Office content, request `external_handoff` explicitly, then pass
+   the returned temporary copy to a suitable local client tool.
+5. Preserve the logical root ID, relative path, and SHA-256 as provenance.
+   Never persist the temporary path.
+
+Do not promise extraction merely because handoff succeeds: extraction depends
+on the calling client. Do not silently copy external content into the vault,
+merge it into vault search, or treat the configured root as a backup.
 
 ## What Headless Can Validate But Not Guarantee
 

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Default-deny external document roots with logical root IDs, bounded listing,
+  metadata, hashing, UTF-8 reads, and explicit local stdio handoff for clients
+  with their own PDF or Office tools.
+- Bilingual external-roots setup and operations guides with Windows and Unix
+  examples, schema limits, client compatibility, verification, rollback, and
+  troubleshooting.
 - ÉLYSIA Tasks profile 1.1 with global Inbox, This Week, bounded Now, Backlog, periodic-note leakage detection, and a P90-J admission gate.
 - Public task-governor guidance for distinct dry-run/apply idempotency keys and post-mutation visibility proof.
 - Regression coverage for Obsidian wikilink normalization in the Bases Bridge.
@@ -26,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- External-root access uses canonical-path confinement, strict include/exclude
+  policies, link/junction rejection, handle identity revalidation, path-redacted
+  responses, and HTTP handoff denial.
+- Handoff returns a verified process-owned temporary copy instead of the source
+  path, with a one-hour TTL, five-minute sweep, 16-file/512-MiB caps, stale-owner
+  scavenging, and regression coverage on Linux and Windows.
 - Marked every legacy MCP tool as read-only, mutating, maintenance, or destructive for approval-aware clients.
 - Moved MCP Inspector to development dependencies and updated `fast-uri` to a patched release, removing the high-severity production audit finding.
 

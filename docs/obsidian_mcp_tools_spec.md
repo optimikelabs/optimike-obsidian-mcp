@@ -140,6 +140,7 @@ machine-local JSON configuration.
 
 The core MCP does not parse PDF or Office files. Handoff requires both
 `readable` and `handoff`; it is denied on HTTP. See
+[External document roots — setup and operations](external-roots-setup.md) and
 [ADR-External-Document-Roots.md](adr/ADR-External-Document-Roots.md).
 
 ## Filesystem Admin

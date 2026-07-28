@@ -1,8 +1,9 @@
 # ADR — External document roots
 
-- Status: implemented locally, pending product promotion
+- Status: accepted and implemented on `main`
 - Date: 2026-07-28
-- MCP baseline: `optimikelabs/optimike-obsidian-mcp@13969990e5c6b0da455a70a2ed7a40ae0e1ea399`
+- MCP implementation baseline:
+  `optimikelabs/optimike-obsidian-mcp@7c2eaad5bf958fa0315d69a067f9972910f6c39d`
 - Related product contract: ÉLYSIA OS external spaces and artifacts boundary
 
 ## Problem
@@ -22,7 +23,7 @@ portable agent output.
 
 ## Decision
 
-If external document access is implemented, it will use an explicit
+External document access uses an explicit
 `external_roots` subsystem with these invariants:
 
 - default deny;
@@ -63,7 +64,9 @@ A root configuration must be local and must not be committed:
 
 Initial capability vocabulary:
 
-- `visible`: disclose root metadata and bounded directory entries;
+- root IDs, capabilities, availability, and limits are disclosed by runtime
+  status and root listing independently of `visible`;
+- `visible`: disclose bounded directory entries and file metadata;
 - `readable`: hash or read an explicitly requested UTF-8 text file;
 - `handoff`: create one verified temporary local copy for an explicitly
   requesting local stdio client so that it can use its own document tools.
@@ -75,7 +78,8 @@ are not implemented by the core service.
 it requires a separate ADR, threat model, mutation journal, optimistic
 preconditions, dry-run contract, explicit apply gate, and rollback evidence.
 
-The absence of a capability is a denial.
+The absence of a capability denies the corresponding file operation; root
+discovery remains available as described above.
 
 ## Confinement
 
@@ -86,15 +90,17 @@ Every path request must:
 3. resolve the physical root and candidate to canonical paths;
 4. prove that the candidate remains inside the canonical root;
 5. apply platform-aware case and separator rules;
-6. reject or explicitly govern symlinks, junctions, reparse points and mounted
-   paths;
+6. reject detectable symlink, junction, and reparse-point escapes supported by
+   the current platform;
 7. apply include, exclude, depth, size and entry-count limits;
 8. log the decision without exposing secrets or unnecessary physical paths.
 
 The server must not infer a new root from a path found in a note.
 
-UNC paths, network mounts and cloud placeholders remain unsupported until
-separate availability, identity and timeout behavior is specified.
+UNC-prefixed paths are rejected. Mapped drives, network filesystems mounted
+behind ordinary local-looking paths, and cloud placeholders cannot be detected
+reliably and remain outside supported identity and consistency guarantees until
+provider-specific connectors exist.
 
 ## Read and client-handoff boundary
 
@@ -157,8 +163,8 @@ Current first-release tool surface:
 - `external_handoff`
 - `external_runtime_status`
 
-These tools are implemented on the local feature branch. All are read-only and
-carry read-only MCP annotations.
+These tools are implemented on `main`. All are read-only and carry read-only
+MCP annotations.
 
 ## Runtime and deployment policy
 
@@ -172,22 +178,26 @@ carry read-only MCP annotations.
 - Runtime status reports root IDs, capabilities and health states without
   returning full physical paths by default.
 
-## Required evidence before product promotion
+## Product-promotion evidence
 
-1. Configuration schema validation with duplicate-ID and network-root rejection.
-2. Traversal, absolute-path, include/exclude, capability, and size-limit tests.
-3. Windows junction escape rejection.
-4. Public status/list/stat/read outputs without physical paths.
-5. Explicit handoff copy as the only physical-path disclosure.
-6. Stdio-only handoff policy.
-7. Read-only annotations on every MCP tool.
-8. Disposable-root tests plus a limited AMEX pilot.
-9. Packaging scan proving that no machine-local root is published.
-10. Cross-platform CI coverage before claiming macOS or Linux support.
+The promoted implementation provides:
+
+1. configuration schema validation with duplicate-ID and UNC-prefix rejection;
+2. traversal, absolute-path, strict include/exclude, capability, and size-limit
+   tests;
+3. Windows junction escape rejection;
+4. public status/list/stat/read outputs without physical paths;
+5. a verified temporary copy as the only physical-path disclosure;
+6. stdio-only handoff policy;
+7. read-only annotations on every MCP tool;
+8. disposable-root tests plus a limited AMEX pilot;
+9. packaging checks proving that no machine-local root configuration is
+   published;
+10. Linux and Windows CI coverage for the external-roots regression suite.
 
 ## Phased backlog
 
-### Phase 0 — Contract — complete locally
+### Phase 0 — Contract — complete
 
 - configuration schema;
 - threat model;
@@ -195,14 +205,14 @@ carry read-only MCP annotations.
 - portable output contract;
 - test fixtures with synthetic documents only.
 
-### Phase 1 — Visibility — complete locally
+### Phase 1 — Visibility — complete
 
 - list configured roots;
 - bounded list and stat;
 - no file content;
 - redacted health diagnostics.
 
-### Phase 2 — Read and handoff — complete locally
+### Phase 2 — Read and handoff — complete
 
 - explicit single-file read;
 - SHA-256 and bounded metadata;

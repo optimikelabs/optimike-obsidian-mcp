@@ -22,6 +22,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:runtime
+      - run: npm run test:external-roots
       - run: npm run test:profiles
       - run: npm run test:tool-annotations
       - if: runner.os == 'Windows'
