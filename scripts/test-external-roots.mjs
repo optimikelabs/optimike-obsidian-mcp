@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  access,
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   rm,
   symlink,
   writeFile,
@@ -115,6 +117,43 @@ try {
   assert.notEqual(handoff.localPath, path.join(rootPath, "hello.txt"));
   assert.equal(await readFile(handoff.localPath, "utf8"), "Bonjour ÉLYSIA");
   assert.equal(handoff.sha256, read.sha256);
+
+  for (let index = 0; index < 16; index += 1) {
+    await service.handoff("pilot.docs", "hello.txt", false);
+  }
+  await assert.rejects(() => access(handoff.localPath));
+  const retainedCopies = (
+    await readdir(path.dirname(handoff.localPath))
+  ).filter((name) => name !== ".owner.json");
+  assert.equal(retainedCopies.length, 16);
+
+  const abandonedHandoffDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-external-handoff-"),
+  );
+  await writeFile(
+    path.join(abandonedHandoffDirectory, ".owner.json"),
+    JSON.stringify({ pid: 2_147_483_647 }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(abandonedHandoffDirectory, "sensitive.txt"),
+    "stale",
+    "utf8",
+  );
+  const scavengingService = ExternalRootsService.fromConfig({
+    version: 1,
+    roots: [
+      {
+        id: "scavenger",
+        path: rootPath,
+        capabilities: ["visible", "readable", "handoff"],
+        include: ["**/*.txt"],
+        limits: { maxFileBytes: 1024 },
+      },
+    ],
+  });
+  await scavengingService.handoff("scavenger", "hello.txt", false);
+  await assert.rejects(() => access(abandonedHandoffDirectory));
 
   const handlers = new Map();
   const annotations = new Map();
@@ -297,7 +336,7 @@ try {
   assert.equal(JSON.stringify(redacted).includes(rootPath), false);
 
   console.log(
-    `PASS: external roots confinement, strict allowlists, handle identity, redaction, limits, hashing and explicit local handoff${linkCreated ? ", including junction rejection" : ""}`,
+    `PASS: external roots confinement, strict allowlists, handle identity, redaction, limits, bounded handoff copies, stale-directory scavenging and explicit local handoff${linkCreated ? ", including junction rejection" : ""}`,
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });

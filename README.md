@@ -230,7 +230,9 @@ metadata, SHA-256, and UTF-8 text reads. `external_handoff` can return one
 verified temporary local copy only to a local stdio client and only when the
 root has both `readable` and `handoff`. The copy is tied to the verified file
 handle and its process-owned temporary directory is removed when the MCP
-process exits.
+process exits. Copies expire after one hour, are swept every five minutes, and
+are capped at 16 files and 512 MiB per process; abandoned directories from dead
+processes are scavenged on the next handoff service startup.
 
 The MCP core does not embed PDF, Office, or OCR engines. Agent clients such as
 Codex, Claude Code, Gemini CLI, OpenClaw, or Hermes Agent can use their own

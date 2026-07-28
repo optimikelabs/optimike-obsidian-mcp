@@ -108,7 +108,10 @@ filesystem identity is revalidated after open, writes a process-owned temporary
 copy, and is available only over stdio. Returning a verified copy avoids
 re-opening a source path whose ancestors could be swapped after validation. The
 temporary directory is removed when the MCP process exits. Lists, status, stat,
-and text reads remain portable and never expose the machine path.
+and text reads remain portable and never expose the machine path. The handoff
+cache expires copies after one hour, sweeps every five minutes, evicts the
+oldest entries above 16 files or 512 MiB, and scavenges directories owned by
+dead processes on the next service startup.
 
 This preserves a clean responsibility boundary:
 

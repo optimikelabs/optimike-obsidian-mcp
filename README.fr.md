@@ -235,7 +235,10 @@ les métadonnées, le SHA-256 et la lecture UTF-8. `external_handoff` peut remet
 une copie locale temporaire vérifiée d’un seul fichier uniquement à un client
 stdio local, et seulement si la racine possède `readable` et `handoff`. La copie
 est liée au handle vérifié et son dossier temporaire, détenu par le processus,
-est supprimé à l’arrêt du MCP.
+est supprimé à l’arrêt du MCP. Les copies expirent après une heure, sont
+nettoyées toutes les cinq minutes et restent limitées à 16 fichiers et 512 Mio
+par processus ; les dossiers abandonnés par un processus mort sont récupérés au
+prochain démarrage d’un service de handoff.
 
 Le cœur MCP n’embarque aucun moteur PDF, Office ou OCR. Codex, Claude Code,
 Gemini CLI, OpenClaw ou Hermes Agent peuvent utiliser leurs propres outils
