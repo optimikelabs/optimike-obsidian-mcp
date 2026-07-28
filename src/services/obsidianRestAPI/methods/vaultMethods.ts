@@ -6,12 +6,14 @@
 
 import { RequestContext } from "../../../utils/index.js";
 import {
+  DocumentMap,
   NoteJson,
   FileListResponse,
   NoteStat,
   RequestFunction,
 } from "../types.js";
 import { encodeVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
+import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 
 /**
  * Gets the content of a specific file in the vault.
@@ -38,6 +40,94 @@ export async function getFileContent(
     },
     context,
     "getFileContent",
+  );
+}
+
+/**
+ * Gets the markdown-patch 2.x document map for a vault file.
+ *
+ * The returned version token can be supplied to
+ * {@link replaceFileContentIfMatch} for an atomic read-modify-write cycle.
+ */
+export async function getFileDocumentMap(
+  _request: RequestFunction,
+  filePath: string,
+  context: RequestContext,
+): Promise<DocumentMap> {
+  const encodedPath = encodeVaultPath(filePath);
+  const documentMap = await _request<DocumentMap>(
+    {
+      method: "GET",
+      url: `/vault${encodedPath}`,
+      headers: {
+        Accept: "application/vnd.olrapi.document-map+json",
+      },
+    },
+    context,
+    "getFileDocumentMap",
+  );
+
+  if (
+    !documentMap ||
+    typeof documentMap.version !== "string" ||
+    documentMap.version.trim().length === 0
+  ) {
+    throw new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      "Obsidian Local REST API did not return a document version. Conditional writes require markdown-patch 2.x support.",
+      { filePath },
+    );
+  }
+
+  return documentMap;
+}
+
+/**
+ * Replaces an existing vault file only if its document version still matches.
+ *
+ * This uses markdown-patch 2.x raw-content mode. A stale version is returned by
+ * Local REST API as HTTP 412 and mapped by the service to CONFLICT.
+ *
+ * Empty content is rejected deliberately: raw-content mode treats an empty
+ * body as a missing payload rather than an instruction to clear the note.
+ */
+export async function replaceFileContentIfMatch(
+  _request: RequestFunction,
+  filePath: string,
+  content: string,
+  expectedVersion: string,
+  context: RequestContext,
+): Promise<void> {
+  const normalizedVersion = expectedVersion.trim();
+  if (!normalizedVersion) {
+    throw new McpError(
+      BaseErrorCode.VALIDATION_ERROR,
+      "A non-empty document version is required for a conditional write.",
+      { filePath },
+    );
+  }
+  if (content.length === 0) {
+    throw new McpError(
+      BaseErrorCode.VALIDATION_ERROR,
+      "Conditional raw-content replacement cannot use an empty payload.",
+      { filePath },
+    );
+  }
+
+  const encodedPath = encodeVaultPath(filePath);
+  await _request<void>(
+    {
+      method: "PATCH",
+      url: `/vault${encodedPath}`,
+      headers: {
+        "Content-Type": "text/markdown",
+        Operation: "replace",
+        "If-Match": normalizedVersion,
+      },
+      data: content,
+    },
+    context,
+    "replaceFileContentIfMatch",
   );
 }
 

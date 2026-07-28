@@ -6,7 +6,10 @@ import {
   ExternalRootsService,
 } from "../../../services/externalRootsService.js";
 import { externalTransferBroker } from "../../../services/externalTransferBroker.js";
-import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
+import {
+  DESTRUCTIVE_TOOL_ANNOTATIONS,
+  READ_ONLY_TOOL_ANNOTATIONS,
+} from "../../toolAnnotations.js";
 
 export const ExternalRootPathSchema = z
   .object({
@@ -39,6 +42,38 @@ export const ExternalReadSchema = ExternalRootPathSchema.extend({
 export const ExternalHandoffSchema = ExternalRootPathSchema.extend({
   includeHash: z.boolean().default(true),
 });
+
+export const ExternalReferencesScanSchema = ExternalRootPathSchema.extend({
+  searchInPath: z
+    .string()
+    .default("")
+    .describe(
+      "Optional vault-relative directory in which to inventory references.",
+    ),
+});
+
+export const ExternalMovePlanSchema = z
+  .object({
+    rootId: z.string().min(1),
+    sourceRelativePath: z.string().min(1),
+    targetRelativePath: z.string().min(1),
+    searchInPath: z.string().default(""),
+    idempotencyKey: z.string().min(8).max(200),
+  })
+  .strict();
+
+export const ExternalMoveApplySchema = z
+  .object({
+    planId: z.string().uuid(),
+    idempotencyKey: z.string().min(8).max(200),
+  })
+  .strict();
+
+export const ExternalMoveStatusSchema = z
+  .object({ planId: z.string().uuid() })
+  .strict();
+
+export const ExternalMoveRollbackSchema = ExternalMoveApplySchema;
 
 function disabledError(): ExternalRootError {
   return new ExternalRootError(
@@ -271,4 +306,57 @@ export async function registerExternalRootsTools(
         ),
       )(),
   );
+
+  for (const definition of [
+    {
+      name: "external_references_scan",
+      description:
+        "Inventories canonical and ambiguous ÉLYSIA references to one external file. This stdio-only operation never mutates either surface.",
+      schema: ExternalReferencesScanSchema.shape,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    {
+      name: "external_move_plan",
+      description:
+        "Builds a durable stdio-only plan for a same-root external file move and exact ÉLYSIA link repairs. Ambiguous references block apply.",
+      schema: ExternalMovePlanSchema.shape,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    {
+      name: "external_move_status",
+      description:
+        "Returns the durable status and redacted receipt for one external move plan.",
+      schema: ExternalMoveStatusSchema.shape,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    {
+      name: "external_move_apply",
+      description:
+        "Applies a previously verified same-root file move and its exact ÉLYSIA repairs. Requires stdio, MCP_WRITE_MODE=full, the move root capability, and MCP_EXTERNAL_MOVE_ENABLED=true.",
+      schema: ExternalMoveApplySchema.shape,
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+    },
+    {
+      name: "external_move_rollback",
+      description:
+        "Rolls back an applied external move and its ÉLYSIA repairs when every stored precondition still holds.",
+      schema: ExternalMoveRollbackSchema.shape,
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+    },
+  ] as const) {
+    server.tool(
+      definition.name,
+      definition.description,
+      definition.schema,
+      definition.annotations,
+      externalRootsResult(() =>
+        Promise.reject(
+          new ExternalRootError(
+            "capability_denied",
+            "External reference mutations and their plans are available only through the local stdio proxy.",
+          ),
+        ),
+      ),
+    );
+  }
 }

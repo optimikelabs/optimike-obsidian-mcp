@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compatibility, verification, rollback, and troubleshooting.
 - Architecture decision record covering direct HTTP profiles, transport-aware
   delivery, the external-mutation hold, threat model, and rollback.
+- Local-stdio external reference integrity workflow with
+  `external_references_scan`, durable move plan/status, guarded apply and
+  rollback for one same-root regular file.
+- Canonical adjacent reference identity
+  `external-ref:<rootId>::<percent-encoded-relative-path>` for exact repair of
+  clickable `file:///` links without turning physical paths into authority.
+- Machine-local SQLite move journal, idempotency binding, exact note preimages,
+  no-clobber hard-link/unlink file moves, conditional note repairs and
+  compensating rollback.
+- Bilingual ADR and operator guidance for the external move/repair pilot,
+  including HTTP denial and the explicit create/replace/upload/delete/sync
+  exclusions.
 - ÉLYSIA Tasks profile 1.1 with global Inbox, This Week, bounded Now, Backlog, periodic-note leakage detection, and a P90-J admission gate.
 - Public task-governor guidance for distinct dry-run/apply idempotency keys and post-mutation visibility proof.
 - Regression coverage for Obsidian wikilink normalization in the Bases Bridge.
@@ -33,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP and pilot-only remote HTTP without contradictory stdio-only claims.
 - Runtime matrices now describe Operon as a common tool family and restrict
   Canvas, move and admin tools to the modes that actually register them.
+- External-root documentation now distinguishes the default read/handoff
+  contract from the separately gated local-stdio move/repair transaction.
 - The bundled Inspector HTTP example is now explicitly development-only instead
   of presenting an unused JWT secret as authentication.
 - HTTP and Inspector launch scripts now use cross-platform Node wrappers.
@@ -61,8 +75,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP ticket snapshots have independent file, aggregate-memory, count and TTL
   limits, including reservations for requests still buffering. The broker does
   not delete or mutate the local handoff cache owned by `ExternalRootsService`.
-- No upload, create, replace, move, delete or sync capability is introduced for
-  external roots.
+- No upload, create, replace, directory/cross-root move, overwrite, delete or
+  sync capability is introduced for external roots. The only mutation is an
+  opt-in same-root regular-file move through local stdio.
+- External move apply and rollback require `MCP_WRITE_MODE=full`,
+  `MCP_EXTERNAL_MOVE_ENABLED=true` and the root `move` capability. Ambiguous,
+  legacy or historical references block apply.
+- The move verifies source size, mtime and SHA-256, requires an absent target
+  under an existing real parent, and uses a no-clobber same-volume
+  hard-link/unlink sequence.
+- Exact note repairs use SHA-256 preconditions and Local REST API Markdown Patch
+  2.x `If-Match` in live mode. Direct HTTP refuses scan, plan/status, apply and
+  rollback.
 - Marked every legacy MCP tool as read-only, mutating, maintenance, or destructive for approval-aware clients.
 - Moved MCP Inspector to development dependencies and updated `fast-uri` to a patched release, removing the high-severity production audit finding.
 

@@ -16,6 +16,7 @@ Ce guide aide les agents à choisir la bonne couche pour travailler avec Obsidia
 | -------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Lire, lister, rechercher, Tasks, recherche sémantique                      | Optimike MCP                                                    | Surface stable entre live, hybrid et headless.                                    |
 | Lire un document explicitement configuré hors du coffre                    | Outils external-roots du MCP                                    | Confinement default-deny avec chemins logiques portables.                         |
+| Déplacer un fichier externe sans casser silencieusement ses liens ÉLYSIA   | Workflow de move externe en stdio local                         | Inventaire, plan durable, réparations CAS exactes, reçu et rollback.              |
 | Comportement Obsidian complet, commandes, active file, Bases via plugin    | Optimike MCP en `live` ou `hybrid` avec Obsidian Desktop ouvert | C'est le seul mode avec sémantique Desktop/plugin.                                |
 | Serveur backend sûr au-dessus d'un vault synchronisé                       | Optimike MCP en `headless-readonly` d'abord                     | Pas besoin de Desktop et aucun risque d'écriture.                                 |
 | Écritures Markdown/frontmatter/tags/admin bornées sur copie ou vault dédié | Optimike MCP en `headless-filesystem`                           | Sécurité de chemins, dry-run par défaut et préconditions.                         |
@@ -63,8 +64,31 @@ Workflow agent :
 5. Conserver comme provenance l’identifiant logique, le chemin relatif, la
    taille et le SHA-256. Ne jamais persister le chemin temporaire ni le ticket.
 
+Pour un move gouverné par ÉLYSIA :
+
+1. vérifier que le lien `file:///` cliquable possède l’identité canonique
+   adjacente `external-ref:<rootId>::<chemin-relatif-encode-en-pourcentage>` ;
+2. employer `external_references_scan`, puis `external_move_plan` ;
+3. s’arrêter si `manualReview` n’est pas vide ; ne jamais réparer
+   automatiquement une occurrence legacy ou ambiguë ;
+4. examiner `external_move_status`, puis appeler `external_move_apply`
+   uniquement avec les gates write locaux explicites et la même clé
+   d’idempotence ;
+5. vérifier le fichier cible et les notes réparées ; employer
+   `external_move_rollback` seulement tant que ses préconditions persistées
+   tiennent encore.
+
+Cette transaction est réservée au stdio local. Elle accepte un fichier régulier,
+une cible absente dans un dossier parent existant, et un move sans écrasement
+dans la même racine et sur le même volume. Les éditions concurrentes de notes
+sont protégées par SHA-256 et, en mode live, par `If-Match` de la Local REST API.
+Ne pas router create, replace, upload, delete, sync, dossier, cross-root ou
+cross-volume dans ce workflow.
+
 Toute opération external-root en HTTP direct exige `external:read`. Le HTTP
 distant reste pilote derrière un proxy TLS et des contrôles réseau revus.
+Le HTTP direct refuse scan de références, plan/status de move, apply et
+rollback ; un ticket d’artefact autorise uniquement le téléchargement.
 
 Ne pas promettre l’extraction au seul motif que le handoff fonctionne :
 l’extraction dépend du client appelant. Ne pas copier silencieusement le contenu

@@ -37,6 +37,7 @@ import {
   BaseUpsertRequest,
   BaseUpsertResponse,
   ComplexSearchResult,
+  DocumentMap,
   NoteJson,
   NoteStat,
   ObsidianCommand,
@@ -159,6 +160,11 @@ export class ObsidianRestApiService {
                 errorCode = BaseErrorCode.VALIDATION_ERROR; // Method not allowed often implies incorrect usage
                 errorMessage = `Obsidian API Method Not Allowed: ${requestConfig.method} on ${requestConfig.url}`;
                 break;
+              case 412:
+                errorCode = BaseErrorCode.CONFLICT;
+                errorMessage =
+                  "Obsidian API Precondition Failed: the note changed after it was read.";
+                break;
               case 503:
                 errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;
                 errorMessage = "Obsidian API Service Unavailable.";
@@ -243,6 +249,38 @@ export class ObsidianRestApiService {
       this._request.bind(this),
       filePath,
       format,
+      context,
+    );
+  }
+
+  /**
+   * Gets the markdown-patch 2.x document map and optimistic-concurrency token.
+   */
+  async getFileDocumentMap(
+    filePath: string,
+    context: RequestContext,
+  ): Promise<DocumentMap> {
+    return vaultMethods.getFileDocumentMap(
+      this._request.bind(this),
+      filePath,
+      context,
+    );
+  }
+
+  /**
+   * Replaces an existing file only when its document version is unchanged.
+   */
+  async replaceFileContentIfMatch(
+    filePath: string,
+    content: string,
+    expectedVersion: string,
+    context: RequestContext,
+  ): Promise<void> {
+    return vaultMethods.replaceFileContentIfMatch(
+      this._request.bind(this),
+      filePath,
+      content,
+      expectedVersion,
       context,
     );
   }
@@ -430,11 +468,7 @@ export class ObsidianRestApiService {
     payload: BaseCreateRequest,
     context: RequestContext,
   ): Promise<BaseCreateResponse> {
-    return basesMethods.createBase(
-      this._request.bind(this),
-      payload,
-      context,
-    );
+    return basesMethods.createBase(this._request.bind(this), payload, context);
   }
 
   /**

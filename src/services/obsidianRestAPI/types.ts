@@ -47,6 +47,25 @@ export interface NoteJson {
 }
 
 /**
+ * Recursive heading tree returned by markdown-patch 2.x document maps.
+ */
+export interface DocumentHeadingTree {
+  [heading: string]: DocumentHeadingTree;
+}
+
+/**
+ * Document map returned by Obsidian Local REST API 5.x and later.
+ *
+ * The version is a content-hash token suitable for optimistic concurrency.
+ */
+export interface DocumentMap {
+  headings: DocumentHeadingTree;
+  blocks: string[];
+  frontmatterFields: string[];
+  version: string;
+}
+
+/**
  * Response structure for listing files in a directory.
  */
 export interface FileListResponse {

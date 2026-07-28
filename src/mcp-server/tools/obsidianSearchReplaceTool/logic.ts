@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path"; // For file path fallback logic using POSIX separators
 import { z } from "zod";
 import {
@@ -113,6 +114,13 @@ const BaseObsidianSearchReplaceInputSchema = z.object({
     .default(false)
     .describe(
       "If true, returns the final content of the file in the response. Defaults to false.",
+    ),
+  expectedSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .optional()
+    .describe(
+      "Optional SHA-256 precondition for a filePath target. Requires Local REST document-map CAS.",
     ),
 });
 
@@ -372,6 +380,7 @@ export const processObsidianSearchReplace = async (
 
   // --- Step 1: Read Initial Content (with case-insensitive fallback for filePath) ---
   let originalContent: string;
+  let conditionalDocumentVersion: string | undefined;
   const readContext = { ...context, operation: "readFileContent" };
   try {
     if (targetType === "filePath") {
@@ -384,6 +393,14 @@ export const processObsidianSearchReplace = async (
         );
       }
       targetDescription = targetIdentifier; // Initial description
+      if (params.expectedSha256) {
+        conditionalDocumentVersion = (
+          await obsidianService.getFileDocumentMap(
+            targetIdentifier,
+            readContext,
+          )
+        ).version;
+      }
       try {
         // Attempt 1: Case-sensitive read
         logger.debug(
@@ -514,6 +531,39 @@ export const processObsidianSearchReplace = async (
       `${errorMessage}: ${error instanceof Error ? error.message : String(error)}`,
       readContext,
     );
+  }
+
+  if (params.expectedSha256) {
+    if (targetType !== "filePath" || !effectiveFilePath) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        "expectedSha256 is supported only for an explicit filePath target.",
+        context,
+      );
+    }
+    const actualSha256 = createHash("sha256")
+      .update(originalContent, "utf8")
+      .digest("hex");
+    if (actualSha256 !== params.expectedSha256) {
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "The note content does not match expectedSha256.",
+        context,
+      );
+    }
+    const versionAfterRead = (
+      await obsidianService.getFileDocumentMap(effectiveFilePath, context)
+    ).version;
+    if (
+      !conditionalDocumentVersion ||
+      versionAfterRead !== conditionalDocumentVersion
+    ) {
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "The note changed while the conditional replacement was being prepared.",
+        context,
+      );
+    }
   }
 
   // --- Step 2: Perform Sequential Replacements ---
@@ -733,11 +783,20 @@ export const processObsidianSearchReplace = async (
       );
       // Use the effectiveFilePath determined during the read phase for filePath targets
       if (targetType === "filePath") {
-        await obsidianService.updateFileContent(
-          effectiveFilePath!,
-          modifiedContent,
-          writeContext,
-        );
+        if (params.expectedSha256 && conditionalDocumentVersion) {
+          await obsidianService.replaceFileContentIfMatch(
+            effectiveFilePath!,
+            modifiedContent,
+            conditionalDocumentVersion,
+            writeContext,
+          );
+        } else {
+          await obsidianService.updateFileContent(
+            effectiveFilePath!,
+            modifiedContent,
+            writeContext,
+          );
+        }
         if (vaultCacheService) {
           await vaultCacheService.updateCacheForFile(
             effectiveFilePath!,

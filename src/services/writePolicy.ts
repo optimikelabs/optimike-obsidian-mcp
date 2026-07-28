@@ -20,7 +20,9 @@ export type WriteOperation =
   | "operon_update_task"
   | "operon_transition_task"
   | "operon_convert_task"
-  | "operon_relocate_task";
+  | "operon_relocate_task"
+  | "external_move_apply"
+  | "external_move_rollback";
 
 type GuardCheck = {
   operation: WriteOperation;

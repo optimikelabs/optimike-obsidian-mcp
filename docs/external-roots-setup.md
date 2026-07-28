@@ -6,14 +6,17 @@ External document roots let an MCP client discover and read explicitly allowed
 files that remain outside the Obsidian vault. Typical examples are PDFs, Office
 documents, datasets, project folders, and application-managed libraries.
 
-This feature is a read-only broker, not a second vault:
+This feature is primarily a read broker, not a second vault or a general file
+manager:
 
 - the MCP authorizes logical root IDs and confines every request to one root;
 - it can list, stat, hash, and read bounded UTF-8 text;
 - `external_handoff` can prepare one verified snapshot for a client that owns the
   appropriate PDF, Office, OCR, or binary tooling;
-- it does not index, synchronize, move, rename, write, or back up external
-  documents.
+- one separately gated local-stdio workflow can move a regular file inside the
+  same root and repair exact ÉLYSIA references;
+- it does not index, synchronize, upload, create, replace, delete, or back up
+  external documents.
 
 Handoff delivery depends on the transport:
 
@@ -24,6 +27,8 @@ Handoff delivery depends on the transport:
 
 See [ADR — External document roots](adr/ADR-External-Document-Roots.md) and
 [ADR — Governed HTTP delivery for external artifacts](adr/ADR-HTTP-External-Artifact-Delivery.md).
+The move/repair boundary is owned by
+[ADR — External reference integrity](adr/ADR-External-Reference-Integrity.md).
 
 ## 1. Create a machine-local configuration
 
@@ -91,14 +96,14 @@ The top-level object is strict:
 
 Each root is also strict:
 
-| Field          | Contract                                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `id`           | Stable lowercase logical ID: letters, digits, `.`, `_`, and `-`.                                                                |
-| `path`         | Absolute directory. UNC-prefixed paths are rejected; mapped or mounted network storage is not detected and remains unsupported. |
-| `capabilities` | One or more of `visible`, `readable`, `handoff`. `handoff` requires `readable`.                                                 |
-| `include`      | Git-style glob allowlist. Default: `["**"]`. A file that matches no include pattern is denied, including extensionless files.   |
-| `exclude`      | Git-style glob denylist. Default: `.git` and `node_modules`. Exclude wins over include.                                         |
-| `limits`       | Optional bounded limits described below. Unknown fields are rejected.                                                           |
+| Field          | Contract                                                                                                                         |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | Stable lowercase logical ID: letters, digits, `.`, `_`, and `-`.                                                                 |
+| `path`         | Absolute directory. UNC-prefixed paths are rejected; mapped or mounted network storage is not detected and remains unsupported.  |
+| `capabilities` | One or more of `visible`, `readable`, `handoff`, `move`. `handoff` requires `readable`; `move` is an independent positive grant. |
+| `include`      | Git-style glob allowlist. Default: `["**"]`. A file that matches no include pattern is denied, including extensionless files.    |
+| `exclude`      | Git-style glob denylist. Default: `.git` and `node_modules`. Exclude wins over include.                                          |
+| `limits`       | Optional bounded limits described below. Unknown fields are rejected.                                                            |
 
 Capabilities are independent:
 
@@ -108,6 +113,8 @@ Capabilities are independent:
 - `readable` permits hashing and direct UTF-8 reads;
 - `handoff` permits one verified snapshot through a delivery mode supported by
   the active transport.
+- `move` permits planning one same-root regular-file move. Apply and rollback
+  still require the two process-level write gates and local stdio.
 
 Limit defaults and schema ceilings:
 
@@ -346,15 +353,82 @@ ticket is swept without delivery.
 Portable provenance is the logical root ID, root-relative path, size,
 modification time, and SHA-256, not a local path or ticket.
 
-## 8. Mutations remain out of scope
+## 8. Governed local move and reference repair
 
-The current `external_roots` surface has no upload, create, replace, move, delete,
-or sync operation.
+The only external-root mutation is a local stdio transaction for one regular
+file. It is designed to preserve ÉLYSIA references, not to replace filesystem
+tools.
 
-A future mutation proposal requires a separate ADR, granular positive
-capabilities, expected-hash preconditions, plan and explicit apply calls,
-idempotency, atomic replacement, journal, backup, post-write proof, crash tests,
-and rollback evidence.
+### Add the stable identity next to the clickable link
+
+```md
+- [Open the brief](file:///B:/Documents/Project/brief%20final.docx) — `external-ref:project.documents::brief%20final.docx`
+```
+
+The link remains clickable. The adjacent inline-code token carries the logical
+root ID and the canonically percent-encoded root-relative path. `/` separates
+encoded path segments. The token neither exposes the configured root path nor
+authorizes access by itself.
+
+Only an exact token/link pair in the same active Markdown paragraph can be
+repaired automatically. Bare physical paths, mismatched or orphan tokens,
+multiple candidates, unsupported syntax and historical/example/archive/release
+sections are classified for manual review. One manual-review occurrence blocks
+apply.
+
+### Enable the pilot explicitly
+
+Keep the ordinary examples above read-only. For one non-sensitive pilot root,
+add `move` deliberately:
+
+```json
+"capabilities": ["visible", "readable", "handoff", "move"]
+```
+
+Then configure the local stdio process:
+
+```text
+MCP_WRITE_MODE=full
+MCP_EXTERNAL_MOVE_ENABLED=true
+MCP_EXTERNAL_MOVE_JOURNAL_PATH=<optional-absolute-local-sqlite-path>
+```
+
+All three grants are required for apply and rollback: full write mode, the
+feature flag and the root `move` capability. Scan, plan and status do not move
+the file, but remain stdio-only because the proxy owns the local root and
+journal.
+
+### Use the transaction
+
+1. Call `external_references_scan` with `rootId`, `relativePath` and an optional
+   vault-relative `searchInPath`.
+2. Call `external_move_plan` with `sourceRelativePath`,
+   `targetRelativePath`, `searchInPath` and a unique `idempotencyKey`.
+3. Inspect `external_move_status`; proceed only when `readyToApply` is true and
+   `manualReview` is empty.
+4. Call `external_move_apply` with the returned `planId` and the same
+   `idempotencyKey`.
+5. Verify the target and repaired notes. If the verified result must be undone,
+   call `external_move_rollback` with the same identifiers before changing the
+   file or repaired notes.
+
+The target parent must already exist. Source and target must be regular-file
+paths in the same logical root and filesystem volume, and the target must be
+absent. Apply revalidates the source size, modification time and SHA-256. It
+uses a no-clobber hard-link/unlink sequence and fails closed when the filesystem
+cannot prove the move.
+
+Each note repair is planned with an expected SHA-256. Live Obsidian writes use
+the Local REST API document version and Markdown Patch 2.x `If-Match`; a
+concurrent edit produces a conflict rather than an overwrite. The machine-local
+SQLite journal persists plan state and note preimages for compensation. Treat
+that journal as sensitive local data and never commit or share it.
+
+Direct HTTP refuses scan, plan, status, apply and rollback. HTTP tickets remain
+read-only handoffs.
+
+There is still no external-root upload, create, replace, directory move,
+cross-root/cross-volume move, overwrite, delete, trash or sync operation.
 
 Cloud, synchronized, mapped, or mounted network storage does not inherit local
 filesystem mutation guarantees. SharePoint, Google Drive, OneDrive and similar
@@ -383,6 +457,8 @@ Common failures:
 | `capability_denied`     | The root declares the required capability; HTTP ticket mode is enabled and uses real auth.              |
 | `path_not_allowed`      | The relative file path matches `include` and does not match `exclude`.                                  |
 | `path_link_unsupported` | Remove symlinks or junctions from the requested path.                                                   |
+| `target_exists`         | Choose an absent target; overwrite is never allowed.                                                    |
+| `precondition_failed`   | Re-scan and create a new plan after a source, note or plan-state change.                                |
 | `too_large`             | Root limits plus the local or HTTP aggregate handoff budget.                                            |
 | `unsupported`           | Use UTF-8 text for `external_read`, or a supported handoff mode for binary content.                     |
 | HTTP ticket unavailable | Check feature flag, auth mode, bearer identity, TTL, one-use semantics, and service restart.            |
@@ -390,3 +466,5 @@ Common failures:
 | Remote client failure   | Verify TLS proxy, Origin allowlist, auth metadata, forwarding trust, firewall and client compatibility. |
 
 The server never infers a new root from a path found in an Obsidian note.
+Disable move without affecting reads by setting `MCP_EXTERNAL_MOVE_ENABLED=false`
+or removing `move` from the root, then restarting the stdio process.

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import {
   type FileHandle,
+  link,
   lstat,
   mkdtemp,
   open,
@@ -11,16 +12,19 @@ import {
   rename,
   rm,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 export const ExternalRootCapabilitySchema = z.enum([
   "visible",
   "readable",
   "handoff",
+  "move",
 ]);
 
 const ExternalRootLimitsSchema = z
@@ -116,6 +120,8 @@ export type ExternalRootErrorCode =
   | "not_found"
   | "not_a_file"
   | "not_a_directory"
+  | "target_exists"
+  | "precondition_failed"
   | "too_large"
   | "unsupported"
   | "encrypted"
@@ -144,6 +150,15 @@ export type ExternalEntry = {
   type: "file" | "directory" | "link";
   size?: number;
   modifiedAt?: string;
+};
+
+export type ExternalMoveSnapshot = {
+  rootId: string;
+  sourceRelativePath: string;
+  targetRelativePath: string;
+  size: number;
+  modifiedAt: string;
+  sha256: string;
 };
 
 const textExtensions = new Set([
@@ -517,6 +532,256 @@ export class ExternalRootsService {
       }
       return response;
     });
+  }
+
+  async planMove(
+    rootId: string,
+    requestedSourcePath: string,
+    requestedTargetPath: string,
+  ): Promise<ExternalMoveSnapshot> {
+    const runtime = this.requireCapability(rootId, "move");
+    const sourceRelativePath = normalizeRelativePath(requestedSourcePath);
+    const targetRelativePath = normalizeRelativePath(requestedTargetPath);
+    if (!sourceRelativePath || !targetRelativePath) {
+      throw new ExternalRootError(
+        "path_invalid",
+        "External move paths must identify regular files.",
+      );
+    }
+    if (sourceRelativePath === targetRelativePath) {
+      throw new ExternalRootError(
+        "path_invalid",
+        "External move source and target must be different.",
+      );
+    }
+
+    const sourcePath = await this.resolvePath(runtime, sourceRelativePath);
+    const sourceStat = await stat(sourcePath, { bigint: true });
+    if (!sourceStat.isFile()) {
+      throw new ExternalRootError(
+        "not_a_file",
+        "Only regular external files can be moved.",
+      );
+    }
+    this.assertAllowed(runtime, targetRelativePath);
+    const rootPath = await this.canonicalRoot(runtime);
+    const targetPath = path.join(rootPath, ...targetRelativePath.split("/"));
+    if (!isInsideRoot(rootPath, targetPath)) {
+      throw new ExternalRootError(
+        "path_outside_root",
+        "The target path is outside the configured external root.",
+      );
+    }
+    const parentPath = path.dirname(targetPath);
+    const parentRealPath = await realpath(parentPath).catch(() => undefined);
+    if (!parentRealPath || !isInsideRoot(rootPath, parentRealPath)) {
+      throw new ExternalRootError(
+        "not_a_directory",
+        "The target parent directory must already exist inside the root.",
+      );
+    }
+    const parentStat = await lstat(parentRealPath);
+    if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+      throw new ExternalRootError(
+        "path_link_unsupported",
+        "The target parent must be a real directory, not a link or junction.",
+      );
+    }
+    try {
+      await lstat(targetPath);
+      throw new ExternalRootError(
+        "target_exists",
+        "The external move target already exists.",
+      );
+    } catch (error) {
+      if (error instanceof ExternalRootError) throw error;
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? String(error.code)
+          : "";
+      if (code !== "ENOENT") {
+        throw new ExternalRootError(
+          "non_verifiable",
+          "The external move target could not be verified.",
+        );
+      }
+    }
+
+    return this.inspectMoveSource(
+      rootId,
+      sourceRelativePath,
+      targetRelativePath,
+    );
+  }
+
+  async inspectMoveSource(
+    rootId: string,
+    requestedSourcePath: string,
+    targetRelativePath = "",
+  ): Promise<ExternalMoveSnapshot> {
+    const runtime = this.requireCapability(rootId, "move");
+    const sourceRelativePath = normalizeRelativePath(requestedSourcePath);
+    if (!sourceRelativePath) {
+      throw new ExternalRootError(
+        "path_invalid",
+        "The external source must identify a regular file.",
+      );
+    }
+    const verified = await this.readVerifiedBuffer(runtime, sourceRelativePath);
+    return {
+      rootId,
+      sourceRelativePath,
+      targetRelativePath,
+      size: verified.buffer.length,
+      modifiedAt: verified.modifiedAt,
+      sha256: sha256(verified.buffer),
+    };
+  }
+
+  async applyMove(snapshot: ExternalMoveSnapshot): Promise<void> {
+    const current = await this.planMove(
+      snapshot.rootId,
+      snapshot.sourceRelativePath,
+      snapshot.targetRelativePath,
+    );
+    if (
+      current.size !== snapshot.size ||
+      current.modifiedAt !== snapshot.modifiedAt ||
+      current.sha256 !== snapshot.sha256
+    ) {
+      throw new ExternalRootError(
+        "precondition_failed",
+        "The external source changed after the move was planned.",
+      );
+    }
+    const runtime = this.requireCapability(snapshot.rootId, "move");
+    const rootPath = await this.canonicalRoot(runtime);
+    const sourcePath = await this.resolvePath(
+      runtime,
+      snapshot.sourceRelativePath,
+    );
+    const targetPath = path.join(
+      rootPath,
+      ...snapshot.targetRelativePath.split("/"),
+    );
+    try {
+      // link() is no-clobber and keeps the operation on one filesystem. The
+      // source is removed only after the target identity is verified.
+      await link(sourcePath, targetPath);
+      const sourceStat = await stat(sourcePath, { bigint: true });
+      const targetStat = await stat(targetPath, { bigint: true });
+      if (
+        sourceStat.dev !== targetStat.dev ||
+        sourceStat.ino !== targetStat.ino
+      ) {
+        throw new ExternalRootError(
+          "non_verifiable",
+          "The external move target is not the verified source object.",
+        );
+      }
+      await unlink(sourcePath);
+    } catch (error) {
+      if (error instanceof ExternalRootError) {
+        await unlink(targetPath).catch(() => undefined);
+        throw error;
+      }
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? String(error.code)
+          : "";
+      if (code === "EEXIST") {
+        throw new ExternalRootError(
+          "target_exists",
+          "The external move target already exists.",
+        );
+      }
+      await unlink(targetPath).catch(() => undefined);
+      throw new ExternalRootError(
+        code === "EXDEV" || code === "ENOTSUP"
+          ? "unsupported"
+          : "non_verifiable",
+        "The filesystem cannot complete a verified no-clobber move.",
+      );
+    }
+  }
+
+  async rollbackMove(snapshot: ExternalMoveSnapshot): Promise<void> {
+    const runtime = this.requireCapability(snapshot.rootId, "move");
+    const rootPath = await this.canonicalRoot(runtime);
+    const sourcePath = path.join(
+      rootPath,
+      ...snapshot.sourceRelativePath.split("/"),
+    );
+    const targetPath = await this.resolvePath(
+      runtime,
+      snapshot.targetRelativePath,
+    );
+    try {
+      await lstat(sourcePath);
+      throw new ExternalRootError(
+        "target_exists",
+        "The original external source path is already occupied.",
+      );
+    } catch (error) {
+      if (error instanceof ExternalRootError) throw error;
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? String(error.code)
+          : "";
+      if (code !== "ENOENT") {
+        throw new ExternalRootError(
+          "non_verifiable",
+          "The original external source path could not be verified.",
+        );
+      }
+    }
+    const verified = await this.readVerifiedBuffer(
+      runtime,
+      snapshot.targetRelativePath,
+    );
+    if (
+      verified.buffer.length !== snapshot.size ||
+      sha256(verified.buffer) !== snapshot.sha256
+    ) {
+      throw new ExternalRootError(
+        "precondition_failed",
+        "The moved external file changed and cannot be rolled back safely.",
+      );
+    }
+    await link(targetPath, sourcePath);
+    await unlink(targetPath);
+  }
+
+  async getPrivateReferenceLocation(
+    rootId: string,
+    requestedPath: string,
+  ): Promise<{ absolutePath: string; fileUri: string }> {
+    const runtime = this.requireCapability(rootId, "move");
+    const relativePath = normalizeRelativePath(requestedPath);
+    const absolutePath = await this.resolvePath(runtime, relativePath);
+    return {
+      absolutePath,
+      fileUri: pathToFileURL(absolutePath).href,
+    };
+  }
+
+  async getPrivateMoveLocations(
+    snapshot: ExternalMoveSnapshot,
+  ): Promise<{ sourceFileUri: string; targetFileUri: string }> {
+    const runtime = this.requireCapability(snapshot.rootId, "move");
+    const rootPath = await this.canonicalRoot(runtime);
+    const sourcePath = await this.resolvePath(
+      runtime,
+      snapshot.sourceRelativePath,
+    );
+    const targetPath = path.join(
+      rootPath,
+      ...snapshot.targetRelativePath.split("/"),
+    );
+    return {
+      sourceFileUri: pathToFileURL(sourcePath).href,
+      targetFileUri: pathToFileURL(targetPath).href,
+    };
   }
 
   private async withHandoffLock<T>(operation: () => Promise<T>): Promise<T> {

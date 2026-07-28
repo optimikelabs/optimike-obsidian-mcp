@@ -7,30 +7,30 @@ question.
 
 ## Commencer selon son rôle
 
-| Je suis…                        | Commencer ici                                            | Puis utiliser                                                                                                      |
-| ------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Nouvel utilisateur local        | [Présentation](../README.fr.md)                          | [Exploitation](../OPERATIONS.fr.md)                                                                                |
-| Opérateur Codex ou agent local  | [Exploitation](../OPERATIONS.fr.md)                      | [Routage agentique](mcp-routing-guide.fr.md)                                                                       |
-| Opérateur headless/serveur      | [Profil serveur headless](headless-server-profile.fr.md) | [Matrice runtime](runtime-capability-matrix.fr.md), [Sécurité](../SECURITY.fr.md)                                  |
-| Intégrateur d’un client MCP     | [Surface des outils](obsidian_mcp_tools_spec.md)         | [Matrice runtime](runtime-capability-matrix.fr.md)                                                                 |
-| Opérateur de documents externes | [Configuration des racines](external-roots-setup.fr.md)  | [ADR racines externes](adr/ADR-External-Document-Roots.md), [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md) |
-| Opérateur Tasks/Operon          | [Contrat MCP Operon](operon-mcp-contract.md)             | [Validation locale](operon-local-validation.md), [profil public ÉLYSIA](../profiles/elysia-tasks/README.fr.md)     |
-| Contributeur ou relecteur       | [Décisions d’architecture](adr/README.md)                | [Arbre du dépôt](tree.md), README des plugins                                                                      |
+| Je suis…                        | Commencer ici                                            | Puis utiliser                                                                                                                          |
+| ------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Nouvel utilisateur local        | [Présentation](../README.fr.md)                          | [Exploitation](../OPERATIONS.fr.md)                                                                                                    |
+| Opérateur Codex ou agent local  | [Exploitation](../OPERATIONS.fr.md)                      | [Routage agentique](mcp-routing-guide.fr.md)                                                                                           |
+| Opérateur headless/serveur      | [Profil serveur headless](headless-server-profile.fr.md) | [Matrice runtime](runtime-capability-matrix.fr.md), [Sécurité](../SECURITY.fr.md)                                                      |
+| Intégrateur d’un client MCP     | [Surface des outils](obsidian_mcp_tools_spec.md)         | [Matrice runtime](runtime-capability-matrix.fr.md)                                                                                     |
+| Opérateur de documents externes | [Configuration des racines](external-roots-setup.fr.md)  | [ADR racines externes](adr/ADR-External-Document-Roots.md), [ADR intégrité des références](adr/ADR-External-Reference-Integrity.fr.md) |
+| Opérateur Tasks/Operon          | [Contrat MCP Operon](operon-mcp-contract.md)             | [Validation locale](operon-local-validation.md), [profil public ÉLYSIA](../profiles/elysia-tasks/README.fr.md)                         |
+| Contributeur ou relecteur       | [Décisions d’architecture](adr/README.md)                | [Arbre du dépôt](tree.md), README des plugins                                                                                          |
 
 ## Trouver la page qui fait foi
 
-| Question                                                         | Autorité                                                                                |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Quels outils existent ?                                          | [Surface des outils](obsidian_mcp_tools_spec.md)                                        |
-| Quels outils sont disponibles dans chaque runtime ?              | [Matrice des capacités](runtime-capability-matrix.fr.md)                                |
-| Comment lancer et maintenir le service ?                         | [Exploitation](../OPERATIONS.fr.md)                                                     |
-| Quelle surface un agent doit-il utiliser ?                       | [Guide de routage](mcp-routing-guide.fr.md)                                             |
-| Comment fonctionner sans Obsidian Desktop ?                      | [Profil serveur headless](headless-server-profile.fr.md)                                |
-| Comment fonctionne le handoff de documents externes ?            | [Configuration des racines](external-roots-setup.fr.md)                                 |
-| Quelle frontière de sécurité HTTP est supportée ?                | [Sécurité](../SECURITY.fr.md) et [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md) |
-| Comment les lectures et mutations Operon sont-elles gouvernées ? | [Contrat MCP Operon](operon-mcp-contract.md)                                            |
-| Pourquoi une décision d’architecture a-t-elle été prise ?        | [Index des ADR](adr/README.md)                                                          |
-| Qu’est-ce qui a changé ?                                         | [Changelog](../CHANGELOG.md)                                                            |
+| Question                                                                      | Autorité                                                                                |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Quels outils existent ?                                                       | [Surface des outils](obsidian_mcp_tools_spec.md)                                        |
+| Quels outils sont disponibles dans chaque runtime ?                           | [Matrice des capacités](runtime-capability-matrix.fr.md)                                |
+| Comment lancer et maintenir le service ?                                      | [Exploitation](../OPERATIONS.fr.md)                                                     |
+| Quelle surface un agent doit-il utiliser ?                                    | [Guide de routage](mcp-routing-guide.fr.md)                                             |
+| Comment fonctionner sans Obsidian Desktop ?                                   | [Profil serveur headless](headless-server-profile.fr.md)                                |
+| Comment fonctionnent lecture, handoff, move et réparation de liens externes ? | [Configuration des racines](external-roots-setup.fr.md)                                 |
+| Quelle frontière de sécurité HTTP est supportée ?                             | [Sécurité](../SECURITY.fr.md) et [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md) |
+| Comment les lectures et mutations Operon sont-elles gouvernées ?              | [Contrat MCP Operon](operon-mcp-contract.md)                                            |
+| Pourquoi une décision d’architecture a-t-elle été prise ?                     | [Index des ADR](adr/README.md)                                                          |
+| Qu’est-ce qui a changé ?                                                      | [Changelog](../CHANGELOG.md)                                                            |
 
 ## Familles de capacités
 
@@ -57,7 +57,9 @@ question.
 
 - configuration et parcours clients : [Configuration des racines](external-roots-setup.fr.md) ;
 - routage agentique : [Guide de routage](mcp-routing-guide.fr.md#routage-des-documents-externes) ;
-- sécurité et cycle de vie : [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md).
+- frontière de livraison HTTP : [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md) ;
+- move local, réparation exacte des liens et rollback :
+  [ADR intégrité des références](adr/ADR-External-Reference-Integrity.fr.md).
 
 ## Propriété documentaire
 

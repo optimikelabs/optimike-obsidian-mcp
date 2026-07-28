@@ -30,6 +30,8 @@ Optimike Obsidian MCP has five runtime contracts. Headless modes run over a sync
 | Smart semantic search            | If `.smart-env` exists | If `.smart-env` exists                  | If `.smart-env` exists   | If `.smart-env` exists  | If `.smart-env` exists           | If `.smart-env` exists                                                   |
 | Runtime status/maintenance       | Yes                    | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
 | External document roots          | Optional local config  | Optional local config                   | Optional local config    | Optional local config   | Optional local config            | Optional local config                                                    |
+| External reference scan/plan     | Local stdio            | Local stdio                             | Local stdio              | Local stdio             | Local stdio                      | Local stdio                                                              |
+| External move apply/rollback     | Stdio + three opt-ins  | Stdio + API + three opt-ins             | No                       | No                      | Stdio + explicit `full` override | Stdio + explicit `full` override                                         |
 | Format validation                | Markdown/Base/Canvas   | Markdown/Base/Canvas                    | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                     |
 | Update note                      | REST full tool         | REST full tool                          | No                       | No                      | Append/prepend only              | Append/prepend only                                                      |
 | Search/replace                   | REST full tool         | REST full tool                          | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                         |
@@ -47,9 +49,18 @@ Optimike Obsidian MCP has five runtime contracts. Headless modes run over a sync
 ## Tool Registry By Mode
 
 Every mode also registers `external_runtime_status`, `external_roots_list`,
-`external_list`, `external_stat`, `external_read`, and `external_handoff`.
+`external_list`, `external_stat`, `external_read`, `external_handoff`,
+`external_references_scan`, `external_move_plan`, `external_move_status`,
+`external_move_apply`, and `external_move_rollback`.
 Without `MCP_EXTERNAL_ROOTS_FILE`, status remains disabled and operations fail
 closed.
+
+The direct HTTP server registers the five reference-integrity names only to
+return an explicit stdio-only denial. The local stdio proxy implements them.
+Scan, plan and status are read-only. Apply and rollback additionally require
+`MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, the root `move`
+capability, and a backend mode that exposes conditional
+`obsidian_search_replace`.
 
 Every mode also registers the 13 Operon contract tools:
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
@@ -68,8 +79,10 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
   operation requires `external:read`;
 - HTTP ticket delivery remains read-only, path-redacted, bounded, single-use and
   disabled by default;
-- no runtime mode gains external-root upload, create, replace, move, delete or
-  sync from this delivery profile.
+- no runtime mode gains external-root upload, create, replace, delete or sync
+  from this delivery profile;
+- the separate local-stdio move contract is one same-root regular file with an
+  absent target, exact ÉLYSIA reference repair and rollback.
 
 | Runtime mode                    | Tools registered                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -98,5 +111,11 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 - Public `/healthz` is liveness-only and path-free; detailed runtime and integrity state remains behind the authenticated MCP tool.
 - A remote HTTP profile is pilot-only behind reviewed TLS, authentication, proxy and network controls. Direct public exposure is not supported.
 - HTTP artifact tickets require a real authenticated identity with
-  `external:read` and never authorize external-root mutation.
+  `external:read` and never authorize external-root mutation. Direct HTTP also
+  refuses reference scan, move plan/status, apply and rollback.
+- Automatic external-link repair requires an exact adjacent
+  `external-ref:<rootId>::<percent-encoded-relative-path>` token. Any ambiguous,
+  historical or unsupported occurrence blocks apply.
+- External move uses a no-clobber same-volume hard-link/unlink sequence and
+  conditional note writes. Live writes use Local REST API `If-Match`.
 - Headless write validation should create a new draft file in a sandbox folder. It should not edit existing notes in a real vault.
