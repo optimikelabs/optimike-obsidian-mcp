@@ -128,6 +128,11 @@ try {
     await readdir(path.dirname(handoff.localPath))
   ).filter((name) => name !== ".owner.json");
   assert.equal(retainedCopies.length, 16);
+  await service.pruneHandoffDirectory(path.dirname(handoff.localPath), 0);
+  const retainedAfterSweep = (await readdir(path.dirname(handoff.localPath)))
+    .filter((name) => name !== ".owner.json")
+    .sort();
+  assert.deepEqual(retainedAfterSweep, retainedCopies.sort());
 
   const abandonedHandoffDirectory = await mkdtemp(
     path.join(os.tmpdir(), "optimike-external-handoff-"),

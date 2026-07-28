@@ -623,7 +623,7 @@ export class ExternalRootsService {
     files.sort((a, b) => a.modifiedAt - b.modifiedAt);
     let totalBytes = files.reduce((total, file) => total + file.size, 0);
     while (
-      files.length >= HANDOFF_MAX_FILES ||
+      files.length + (incomingBytes > 0 ? 1 : 0) > HANDOFF_MAX_FILES ||
       totalBytes + incomingBytes > HANDOFF_MAX_TOTAL_BYTES
     ) {
       const oldest = files.shift();
