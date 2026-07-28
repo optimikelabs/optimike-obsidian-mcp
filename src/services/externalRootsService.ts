@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import {
+  type FileHandle,
   lstat,
   mkdtemp,
   open,
@@ -858,6 +859,21 @@ export class ExternalRootsService {
     return (await this.readVerifiedBuffer(runtime, relativePath)).buffer;
   }
 
+  private async readOpenedFile(
+    handle: FileHandle,
+    size: number,
+  ): Promise<Buffer> {
+    const buffer = Buffer.alloc(size);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== buffer.length) {
+      throw new ExternalRootError(
+        "non_verifiable",
+        "The file could not be read completely.",
+      );
+    }
+    return buffer;
+  }
+
   private async readVerifiedBuffer(
     runtime: RootRuntime,
     relativePath: string,
@@ -912,12 +928,24 @@ export class ExternalRootsService {
         );
       }
 
-      const buffer = Buffer.alloc(Number(openedStat.size));
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-      if (bytesRead !== buffer.length) {
+      const buffer = await this.readOpenedFile(handle, Number(openedStat.size));
+      const postReadStat = await handle.stat({ bigint: true });
+      const finalPath = await this.resolvePath(runtime, relativePath);
+      const finalPathStat = await stat(finalPath, { bigint: true });
+      if (
+        !postReadStat.isFile() ||
+        !finalPathStat.isFile() ||
+        postReadStat.dev !== openedStat.dev ||
+        postReadStat.ino !== openedStat.ino ||
+        postReadStat.size !== openedStat.size ||
+        postReadStat.mtimeNs !== openedStat.mtimeNs ||
+        postReadStat.ctimeNs !== openedStat.ctimeNs ||
+        finalPathStat.dev !== postReadStat.dev ||
+        finalPathStat.ino !== postReadStat.ino
+      ) {
         throw new ExternalRootError(
           "non_verifiable",
-          "The file could not be read completely.",
+          "The file changed while it was being read.",
         );
       }
       return {

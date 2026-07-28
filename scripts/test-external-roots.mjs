@@ -161,6 +161,21 @@ try {
   ]);
   service.readVerifiedBuffer = originalReadVerifiedBuffer;
   assert.equal(maxConcurrentHandoffReads, 1);
+  const originalReadOpenedFile = service.readOpenedFile.bind(service);
+  service.readOpenedFile = async (...args) => {
+    const buffer = await originalReadOpenedFile(...args);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const changed = Buffer.from(buffer);
+    changed[0] ^= 1;
+    await writeFile(path.join(rootPath, "hello.txt"), changed);
+    return buffer;
+  };
+  await expectCode(
+    () => service.handoff("pilot.docs", "hello.txt", false),
+    "non_verifiable",
+  );
+  service.readOpenedFile = originalReadOpenedFile;
+  await writeFile(path.join(rootPath, "hello.txt"), "Bonjour ÉLYSIA", "utf8");
 
   for (let index = 0; index < 16; index += 1) {
     await service.handoff("pilot.docs", "hello.txt", false);
