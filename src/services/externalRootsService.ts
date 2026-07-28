@@ -535,9 +535,10 @@ export class ExternalRootsService {
     return this.withHandoffLock(async () => {
       const directory = await this.getHandoffDirectory();
       await this.pruneHandoffDirectory(directory, buffer.length, true);
+      const sourceExtension = path.extname(relativePath);
       const localPath = path.join(
         directory,
-        `${randomUUID()}-${path.basename(relativePath)}`,
+        `${randomUUID()}${sourceExtension}`,
       );
       await writeFile(localPath, buffer, {
         flag: "wx",

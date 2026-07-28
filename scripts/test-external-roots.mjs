@@ -40,6 +40,8 @@ try {
   await mkdir(outsidePath, { recursive: true });
   await writeFile(path.join(rootPath, "hello.txt"), "Bonjour ÉLYSIA", "utf8");
   await writeFile(path.join(rootPath, "empty.txt"), "", "utf8");
+  const longSourceName = `${"a".repeat(230)}.txt`;
+  await writeFile(path.join(rootPath, longSourceName), "long name", "utf8");
   await writeFile(path.join(rootPath, "LICENSE"), "private license", "utf8");
   await writeFile(
     path.join(rootPath, "docs", "note.md"),
@@ -120,6 +122,13 @@ try {
   assert.notEqual(handoff.localPath, path.join(rootPath, "hello.txt"));
   assert.equal(await readFile(handoff.localPath, "utf8"), "Bonjour ÉLYSIA");
   assert.equal(handoff.sha256, read.sha256);
+  const longNameHandoff = await service.handoff(
+    "pilot.docs",
+    longSourceName,
+    false,
+  );
+  assert.match(path.basename(longNameHandoff.localPath), /^[0-9a-f-]{36}\.txt$/);
+  assert.equal(await readFile(longNameHandoff.localPath, "utf8"), "long name");
 
   for (let index = 0; index < 16; index += 1) {
     await service.handoff("pilot.docs", "hello.txt", false);
