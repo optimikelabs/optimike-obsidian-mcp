@@ -68,8 +68,9 @@ Exemple JSON Windows :
 }
 ```
 
-Les antislashs JSON doivent être doublés. Les racines UNC et réseau ne sont pas
-supportées.
+Les antislashs JSON doivent être doublés. Les chemins préfixés UNC sont refusés.
+Un lecteur réseau mappé ou un système réseau monté derrière un chemin d’apparence
+locale ne peut pas être détecté de manière fiable et reste hors garanties.
 
 ## 2. Contrat de configuration
 
@@ -82,18 +83,21 @@ L’objet racine est strict :
 
 Chaque racine est également stricte :
 
-| Champ          | Contrat                                                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `id`           | Identifiant logique stable en minuscules : lettres, chiffres, `.`, `_` et `-`.                                                  |
-| `path`         | Dossier absolu local à la machine. Les chemins UNC/réseau sont refusés.                                                         |
-| `capabilities` | Une ou plusieurs valeurs parmi `visible`, `readable`, `handoff`. `handoff` exige `readable`.                                    |
-| `include`      | Allowlist de globs de style Git. Défaut : `["**"]`. Un fichier qui ne correspond à aucun motif est refusé, même sans extension. |
-| `exclude`      | Denylist de globs. Défaut : `.git` et `node_modules`. `exclude` l’emporte sur `include`.                                        |
-| `limits`       | Limites bornées optionnelles décrites ci-dessous. Les champs inconnus sont refusés.                                             |
+| Champ          | Contrat                                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | Identifiant logique stable en minuscules : lettres, chiffres, `.`, `_` et `-`.                                                     |
+| `path`         | Dossier absolu. Les chemins préfixés UNC sont refusés ; un stockage réseau mappé ou monté n’est pas détecté et reste non supporté. |
+| `capabilities` | Une ou plusieurs valeurs parmi `visible`, `readable`, `handoff`. `handoff` exige `readable`.                                       |
+| `include`      | Allowlist de globs de style Git. Défaut : `["**"]`. Un fichier qui ne correspond à aucun motif est refusé, même sans extension.    |
+| `exclude`      | Denylist de globs. Défaut : `.git` et `node_modules`. `exclude` l’emporte sur `include`.                                           |
+| `limits`       | Limites bornées optionnelles décrites ci-dessous. Les champs inconnus sont refusés.                                                |
 
 Les capacités sont distinctes :
 
-- `visible` autorise l’état, le listing borné et les métadonnées ;
+- les identifiants, capacités, états de disponibilité et limites des racines
+  sont toujours exposés par `external_runtime_status` et
+  `external_roots_list` ;
+- `visible` autorise le listing borné et les métadonnées de fichiers ;
 - `readable` autorise le hash et la lecture UTF-8 directe ;
 - `handoff` autorise une copie temporaire vérifiée, uniquement en stdio local.
 

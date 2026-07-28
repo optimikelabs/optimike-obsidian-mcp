@@ -64,7 +64,9 @@ Windows JSON example:
 }
 ```
 
-JSON backslashes must be escaped. UNC and network roots are not supported.
+JSON backslashes must be escaped. Paths with a UNC prefix are rejected. A
+mapped drive or a network filesystem mounted behind an ordinary local-looking
+path cannot be detected reliably and remains outside the supported guarantees.
 
 ## 2. Configuration contract
 
@@ -77,18 +79,20 @@ The top-level object is strict:
 
 Each root is also strict:
 
-| Field          | Contract                                                                                                                      |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `id`           | Stable lowercase logical ID: letters, digits, `.`, `_`, and `-`.                                                              |
-| `path`         | Absolute machine-local directory. UNC/network paths are rejected.                                                             |
-| `capabilities` | One or more of `visible`, `readable`, `handoff`. `handoff` requires `readable`.                                               |
-| `include`      | Git-style glob allowlist. Default: `["**"]`. A file that matches no include pattern is denied, including extensionless files. |
-| `exclude`      | Git-style glob denylist. Default: `.git` and `node_modules`. Exclude wins over include.                                       |
-| `limits`       | Optional bounded limits described below. Unknown fields are rejected.                                                         |
+| Field          | Contract                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | Stable lowercase logical ID: letters, digits, `.`, `_`, and `-`.                                                                |
+| `path`         | Absolute directory. UNC-prefixed paths are rejected; mapped or mounted network storage is not detected and remains unsupported. |
+| `capabilities` | One or more of `visible`, `readable`, `handoff`. `handoff` requires `readable`.                                                 |
+| `include`      | Git-style glob allowlist. Default: `["**"]`. A file that matches no include pattern is denied, including extensionless files.   |
+| `exclude`      | Git-style glob denylist. Default: `.git` and `node_modules`. Exclude wins over include.                                         |
+| `limits`       | Optional bounded limits described below. Unknown fields are rejected.                                                           |
 
 Capabilities are independent:
 
-- `visible` permits root status, bounded listing, and metadata;
+- root IDs, capabilities, availability, and limits are always disclosed by
+  `external_runtime_status` and `external_roots_list`;
+- `visible` permits bounded directory listing and file metadata;
 - `readable` permits hashing and direct UTF-8 reads;
 - `handoff` permits a verified temporary copy over local stdio only.
 

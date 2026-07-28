@@ -94,8 +94,10 @@ Every path request must:
 
 The server must not infer a new root from a path found in a note.
 
-UNC paths, network mounts and cloud placeholders remain unsupported until
-separate availability, identity and timeout behavior is specified.
+UNC-prefixed paths are rejected. Mapped drives, network filesystems mounted
+behind ordinary local-looking paths, and cloud placeholders cannot be detected
+reliably and remain outside supported identity and consistency guarantees until
+provider-specific connectors exist.
 
 ## Read and client-handoff boundary
 
@@ -177,7 +179,7 @@ MCP annotations.
 
 The promoted implementation provides:
 
-1. configuration schema validation with duplicate-ID and network-root rejection;
+1. configuration schema validation with duplicate-ID and UNC-prefix rejection;
 2. traversal, absolute-path, strict include/exclude, capability, and size-limit
    tests;
 3. Windows junction escape rejection;
