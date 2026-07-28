@@ -238,7 +238,8 @@ est liée au handle vérifié et son dossier temporaire, détenu par le processu
 est supprimé à l’arrêt du MCP. Les copies expirent après une heure, sont
 nettoyées toutes les cinq minutes et restent limitées à 16 fichiers et 512 Mio
 par processus ; les dossiers abandonnés par un processus mort sont récupérés au
-prochain démarrage d’un service de handoff.
+prochain démarrage d’un service configuré. Un heartbeat borné évite qu’un PID
+réutilisé soit confondu durablement avec le processus propriétaire.
 
 Le cœur MCP n’embarque aucun moteur PDF, Office ou OCR. Codex, Claude Code,
 Gemini CLI, OpenClaw ou Hermes Agent peuvent utiliser leurs propres outils

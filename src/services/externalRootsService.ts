@@ -164,6 +164,7 @@ const HANDOFF_MAX_FILES = 16;
 const HANDOFF_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 const HANDOFF_TTL_MS = 60 * 60 * 1000;
 const HANDOFF_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const HANDOFF_OWNER_HEARTBEAT_GRACE_MS = 20 * 60 * 1000;
 const UNOWNED_STALE_DIRECTORY_MS = 24 * 60 * 60 * 1000;
 
 function normalizeRelativePath(value: string): string {
@@ -227,10 +228,14 @@ export class ExternalRootsService {
   private handoffDirectory?: string;
   private handoffLock: Promise<void> = Promise.resolve();
   private handoffSweepTimer?: ReturnType<typeof setInterval>;
+  private readonly startupScavenge: Promise<void>;
 
   private constructor(config: ExternalRootsConfig) {
     this.roots = new Map(
       config.roots.map((root) => [root.id, { config: root }]),
+    );
+    this.startupScavenge = this.scavengeStaleHandoffDirectories().catch(
+      () => undefined,
     );
   }
 
@@ -274,6 +279,7 @@ export class ExternalRootsService {
       limits: ExternalRootConfig["limits"];
     }>
   > {
+    await this.startupScavenge;
     const result = [];
     for (const runtime of this.roots.values()) {
       let available = false;
@@ -542,24 +548,26 @@ export class ExternalRootsService {
   }
 
   private async getHandoffDirectory(): Promise<string> {
-    if (this.handoffDirectory) return this.handoffDirectory;
+    await this.startupScavenge;
+    if (this.handoffDirectory) {
+      try {
+        if ((await stat(this.handoffDirectory)).isDirectory()) {
+          return this.handoffDirectory;
+        }
+      } catch {
+        this.handoffDirectory = undefined;
+      }
+    }
 
-    await this.scavengeStaleHandoffDirectories();
     const directory = await mkdtemp(
       path.join(os.tmpdir(), HANDOFF_DIRECTORY_PREFIX),
     );
-    await writeFile(
-      path.join(directory, HANDOFF_OWNER_FILE),
-      JSON.stringify({
-        pid: process.pid,
-        createdAt: new Date().toISOString(),
-      }),
-      { encoding: "utf8", flag: "wx", mode: 0o600 },
-    );
+    await this.writeHandoffOwner(directory, "wx");
     this.handoffDirectory = directory;
     this.handoffSweepTimer = setInterval(() => {
       void this.withHandoffLock(async () => {
         if (this.handoffDirectory) {
+          await this.writeHandoffOwner(this.handoffDirectory, "w");
           await this.pruneHandoffDirectory(this.handoffDirectory, 0);
         }
       }).catch(() => undefined);
@@ -570,6 +578,21 @@ export class ExternalRootsService {
       rmSync(directory, { recursive: true, force: true });
     });
     return directory;
+  }
+
+  private async writeHandoffOwner(
+    directory: string,
+    flag: "w" | "wx",
+  ): Promise<void> {
+    await writeFile(
+      path.join(directory, HANDOFF_OWNER_FILE),
+      JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+        heartbeatAt: new Date().toISOString(),
+      }),
+      { encoding: "utf8", flag, mode: 0o600 },
+    );
   }
 
   private async pruneHandoffDirectory(
@@ -628,7 +651,18 @@ export class ExternalRootsService {
       }
       const directory = path.join(temporaryRoot, entry.name);
       const owner = await this.readHandoffOwner(directory);
-      if (owner && this.isProcessAlive(owner.pid)) continue;
+      if (owner && this.isProcessAlive(owner.pid)) {
+        try {
+          const ownerStat = await stat(
+            path.join(directory, HANDOFF_OWNER_FILE),
+          );
+          if (now - ownerStat.mtimeMs < HANDOFF_OWNER_HEARTBEAT_GRACE_MS) {
+            continue;
+          }
+        } catch {
+          // Missing or unreadable owner markers are treated as abandoned.
+        }
+      }
       if (!owner) {
         try {
           const directoryStat = await stat(directory);

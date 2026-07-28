@@ -111,7 +111,9 @@ temporary directory is removed when the MCP process exits. Lists, status, stat,
 and text reads remain portable and never expose the machine path. The handoff
 cache expires copies after one hour, sweeps every five minutes, evicts the
 oldest entries above 16 files or 512 MiB, and scavenges directories owned by
-dead processes on the next service startup.
+dead processes or stale ownership heartbeats on the next configured service
+startup. The heartbeat prevents PID reuse from preserving abandoned copies
+indefinitely.
 
 This preserves a clean responsibility boundary:
 

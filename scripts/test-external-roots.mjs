@@ -8,6 +8,7 @@ import {
   readdir,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -131,11 +132,10 @@ try {
   const abandonedHandoffDirectory = await mkdtemp(
     path.join(os.tmpdir(), "optimike-external-handoff-"),
   );
-  await writeFile(
-    path.join(abandonedHandoffDirectory, ".owner.json"),
-    JSON.stringify({ pid: 2_147_483_647 }),
-    "utf8",
-  );
+  const abandonedOwner = path.join(abandonedHandoffDirectory, ".owner.json");
+  await writeFile(abandonedOwner, JSON.stringify({ pid: process.pid }), "utf8");
+  const staleHeartbeat = new Date(Date.now() - 21 * 60 * 1000);
+  await utimes(abandonedOwner, staleHeartbeat, staleHeartbeat);
   await writeFile(
     path.join(abandonedHandoffDirectory, "sensitive.txt"),
     "stale",
@@ -153,7 +153,7 @@ try {
       },
     ],
   });
-  await scavengingService.handoff("scavenger", "hello.txt", false);
+  await scavengingService.listRoots();
   await assert.rejects(() => access(abandonedHandoffDirectory));
 
   const handlers = new Map();
