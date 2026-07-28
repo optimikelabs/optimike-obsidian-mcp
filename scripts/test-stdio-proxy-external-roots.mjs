@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -53,17 +53,25 @@ const sandbox = await mkdtemp(
 );
 const vaultPath = path.join(sandbox, "vault");
 const externalPath = path.join(sandbox, "external");
+const backendExternalPath = path.join(sandbox, "backend-external");
 const configPath = path.join(sandbox, "external-roots.json");
+const backendConfigPath = path.join(sandbox, "backend-external-roots.json");
 const port = await unusedPort();
 const httpUrl = new URL(`http://127.0.0.1:${port}/mcp`);
 const healthUrl = new URL(`http://127.0.0.1:${port}/healthz`);
 
 await mkdir(path.join(vaultPath, ".obsidian"), { recursive: true });
 await mkdir(externalPath, { recursive: true });
+await mkdir(backendExternalPath, { recursive: true });
 await writeFile(path.join(vaultPath, "Smoke.md"), "# Smoke\n", "utf8");
 await writeFile(
   path.join(externalPath, "hello.txt"),
   "Bonjour depuis le proxy",
+  "utf8",
+);
+await writeFile(
+  path.join(backendExternalPath, "backend.txt"),
+  "Ancienne configuration backend",
   "utf8",
 );
 await writeFile(
@@ -87,6 +95,21 @@ await writeFile(
   }),
   "utf8",
 );
+await writeFile(
+  backendConfigPath,
+  JSON.stringify({
+    version: 1,
+    roots: [
+      {
+        id: "backend.pilot",
+        path: backendExternalPath,
+        capabilities: ["visible", "readable"],
+        include: ["**/*.txt"],
+      },
+    ],
+  }),
+  "utf8",
+);
 
 const commonEnv = {
   ...process.env,
@@ -100,7 +123,7 @@ const commonEnv = {
   MCP_HTTP_HOST: "127.0.0.1",
   MCP_HTTP_PORT: String(port),
   MCP_LOG_LEVEL: "error",
-  MCP_EXTERNAL_ROOTS_FILE: configPath,
+  MCP_EXTERNAL_ROOTS_FILE: backendConfigPath,
 };
 
 const backend = spawn(process.execPath, ["dist/index.js"], {
@@ -115,6 +138,7 @@ const proxyTransport = new StdioClientTransport({
   cwd: process.cwd(),
   env: {
     ...commonEnv,
+    MCP_EXTERNAL_ROOTS_FILE: configPath,
     MCP_PROXY_START_TIMEOUT_MS: "20000",
   },
 });
@@ -140,6 +164,17 @@ try {
   assert.equal(status.enabled, true);
   assert.equal(status.localHandoffAllowed, true);
   assert.equal(JSON.stringify(status).includes(externalPath), false);
+
+  const roots = jsonOf(
+    await proxyClient.callTool({
+      name: "external_roots_list",
+      arguments: {},
+    }),
+  );
+  assert.deepEqual(
+    roots.roots.map((root) => root.id),
+    ["proxy.pilot"],
+  );
 
   const listing = jsonOf(
     await proxyClient.callTool({
@@ -190,7 +225,12 @@ try {
       },
     }),
   );
-  assert.equal(handoff.localPath, path.join(externalPath, "hello.txt"));
+  assert.equal(path.isAbsolute(handoff.localPath), true);
+  assert.notEqual(handoff.localPath, path.join(externalPath, "hello.txt"));
+  assert.equal(
+    await readFile(handoff.localPath, "utf8"),
+    "Bonjour depuis le proxy",
+  );
   assert.equal(handoff.sha256, read.sha256);
 
   const invalidHandoff = await proxyClient.callTool({
@@ -226,7 +266,7 @@ try {
   }
 
   console.log(
-    "PASS: stdio proxy owns explicit handoff, HTTP denies it, and delegated external list/stat/read remain path-redacted",
+    "PASS: stdio proxy owns one external-roots configuration for status/list/stat/read/handoff, HTTP denies handoff, and responses remain path-redacted",
   );
 } finally {
   await proxyClient.close().catch(() => undefined);

@@ -1,12 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
 import {
   lstat,
+  mkdtemp,
   open,
   readdir,
   readFile,
   realpath,
   stat,
+  writeFile,
 } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 
@@ -211,6 +215,7 @@ function decodeUtf8(buffer: Buffer): string {
 
 export class ExternalRootsService {
   private readonly roots: Map<string, RootRuntime>;
+  private handoffDirectory?: Promise<string>;
 
   private constructor(config: ExternalRootsConfig) {
     this.roots = new Map(
@@ -461,20 +466,16 @@ export class ExternalRootsService {
     const runtime = this.requireCapability(rootId, "handoff");
     this.assertCapability(runtime, "readable");
     const relativePath = normalizeRelativePath(requestedPath);
-    const localPath = await this.resolvePath(runtime, relativePath);
-    const fileStat = await stat(localPath);
-    if (!fileStat.isFile()) {
-      throw new ExternalRootError(
-        "not_a_file",
-        "Only files can be handed off to a local client.",
-      );
-    }
-    if (fileStat.size > runtime.config.limits.maxFileBytes) {
-      throw new ExternalRootError(
-        "too_large",
-        `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
-      );
-    }
+    const verified = await this.readVerifiedBuffer(runtime, relativePath);
+    const handoffRoot = await this.getHandoffDirectory();
+    const localPath = path.join(
+      handoffRoot,
+      `${randomUUID()}-${path.basename(relativePath)}`,
+    );
+    await writeFile(localPath, verified.buffer, {
+      flag: "wx",
+      mode: 0o600,
+    });
     const response: {
       rootId: string;
       path: string;
@@ -486,13 +487,27 @@ export class ExternalRootsService {
       rootId,
       path: relativePath,
       localPath,
-      size: fileStat.size,
-      modifiedAt: fileStat.mtime.toISOString(),
+      size: verified.buffer.length,
+      modifiedAt: verified.modifiedAt,
     };
     if (includeHash) {
-      response.sha256 = sha256(await this.readBuffer(runtime, relativePath));
+      response.sha256 = sha256(verified.buffer);
     }
     return response;
+  }
+
+  private async getHandoffDirectory(): Promise<string> {
+    if (!this.handoffDirectory) {
+      this.handoffDirectory = mkdtemp(
+        path.join(os.tmpdir(), "optimike-external-handoff-"),
+      ).then((directory) => {
+        process.once("exit", () => {
+          rmSync(directory, { recursive: true, force: true });
+        });
+        return directory;
+      });
+    }
+    return this.handoffDirectory;
   }
 
   private getRoot(rootId: string): RootRuntime {
@@ -605,8 +620,7 @@ export class ExternalRootsService {
   private assertAllowed(runtime: RootRuntime, relativePath: string): void {
     if (
       matchesAny(relativePath, runtime.config.exclude) ||
-      (!matchesAny(relativePath, runtime.config.include) &&
-        path.extname(relativePath))
+      !matchesAny(relativePath, runtime.config.include)
     ) {
       throw new ExternalRootError(
         "path_not_allowed",
@@ -619,33 +633,51 @@ export class ExternalRootsService {
     runtime: RootRuntime,
     relativePath: string,
   ): Promise<Buffer> {
+    return (await this.readVerifiedBuffer(runtime, relativePath)).buffer;
+  }
+
+  private async readVerifiedBuffer(
+    runtime: RootRuntime,
+    relativePath: string,
+  ): Promise<{ buffer: Buffer; modifiedAt: string }> {
     const absolutePath = await this.resolvePath(runtime, relativePath);
-    const fileStat = await stat(absolutePath);
-    if (!fileStat.isFile()) {
-      throw new ExternalRootError(
-        "not_a_file",
-        "The requested external path is not a file.",
-      );
-    }
-    if (fileStat.size > runtime.config.limits.maxFileBytes) {
-      throw new ExternalRootError(
-        "too_large",
-        `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
-      );
-    }
     const handle = await open(absolutePath, "r");
     try {
-      const openedStat = await handle.stat();
+      const openedStat = await handle.stat({ bigint: true });
+      if (!openedStat.isFile()) {
+        throw new ExternalRootError(
+          "not_a_file",
+          "The requested external path is not a file.",
+        );
+      }
       if (
-        openedStat.size !== fileStat.size ||
-        openedStat.mtimeMs !== fileStat.mtimeMs
+        openedStat.size > BigInt(runtime.config.limits.maxFileBytes) ||
+        openedStat.size > BigInt(Number.MAX_SAFE_INTEGER)
+      ) {
+        throw new ExternalRootError(
+          "too_large",
+          `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
+        );
+      }
+
+      // Re-resolve every path component after opening, then bind the opened
+      // handle to the currently confined object by filesystem identity. If an
+      // ancestor was swapped between validation and open, the identities differ
+      // even if size and timestamps happen to match.
+      const revalidatedPath = await this.resolvePath(runtime, relativePath);
+      const revalidatedStat = await stat(revalidatedPath, { bigint: true });
+      if (
+        !revalidatedStat.isFile() ||
+        openedStat.dev !== revalidatedStat.dev ||
+        openedStat.ino !== revalidatedStat.ino
       ) {
         throw new ExternalRootError(
           "non_verifiable",
-          "The file changed while it was being verified.",
+          "The file identity changed while it was being verified.",
         );
       }
-      const buffer = Buffer.alloc(openedStat.size);
+
+      const buffer = Buffer.alloc(Number(openedStat.size));
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       if (bytesRead !== buffer.length) {
         throw new ExternalRootError(
@@ -653,7 +685,10 @@ export class ExternalRootsService {
           "The file could not be read completely.",
         );
       }
-      return buffer;
+      return {
+        buffer,
+        modifiedAt: new Date(Number(openedStat.mtimeMs)).toISOString(),
+      };
     } finally {
       await handle.close();
     }

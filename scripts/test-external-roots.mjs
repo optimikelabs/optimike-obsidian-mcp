@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -28,6 +35,7 @@ try {
   await mkdir(path.join(rootPath, "secret"), { recursive: true });
   await mkdir(outsidePath, { recursive: true });
   await writeFile(path.join(rootPath, "hello.txt"), "Bonjour ÉLYSIA", "utf8");
+  await writeFile(path.join(rootPath, "LICENSE"), "private license", "utf8");
   await writeFile(
     path.join(rootPath, "docs", "note.md"),
     "# Note\nContenu",
@@ -103,7 +111,9 @@ try {
   assert.equal("localPath" in metadata, false);
 
   const handoff = await service.handoff("pilot.docs", "hello.txt", true);
-  assert.equal(handoff.localPath, path.join(rootPath, "hello.txt"));
+  assert.equal(path.isAbsolute(handoff.localPath), true);
+  assert.notEqual(handoff.localPath, path.join(rootPath, "hello.txt"));
+  assert.equal(await readFile(handoff.localPath, "utf8"), "Bonjour ÉLYSIA");
   assert.equal(handoff.sha256, read.sha256);
 
   const handlers = new Map();
@@ -144,11 +154,37 @@ try {
     () => service.readText("pilot.docs", "secret/hidden.txt"),
     "path_not_allowed",
   );
+  await expectCode(
+    () => service.getStat("pilot.docs", "LICENSE", true),
+    "path_not_allowed",
+  );
+  await expectCode(
+    () => service.handoff("pilot.docs", "LICENSE", true),
+    "path_not_allowed",
+  );
   if (linkCreated) {
     await expectCode(
       () => service.readText("pilot.docs", "escape-link/outside.txt"),
       "path_link_unsupported",
     );
+  }
+
+  const originalResolvePath = service.resolvePath.bind(service);
+  let resolveCount = 0;
+  service.resolvePath = async (...args) => {
+    resolveCount += 1;
+    if (resolveCount === 2) {
+      return path.join(outsidePath, "outside.txt");
+    }
+    return originalResolvePath(...args);
+  };
+  try {
+    await expectCode(
+      () => service.readText("pilot.docs", "hello.txt"),
+      "non_verifiable",
+    );
+  } finally {
+    service.resolvePath = originalResolvePath;
   }
 
   const limitedService = ExternalRootsService.fromConfig({
@@ -236,8 +272,32 @@ try {
       error.code === "configuration_invalid",
   );
 
+  const redactionHandlers = new Map();
+  await registerExternalRootsTools(
+    {
+      tool(name, _description, _schema, _annotations, handler) {
+        redactionHandlers.set(name, handler);
+      },
+    },
+    {
+      async listRoots() {
+        throw new Error(`native failure at ${rootPath}`);
+      },
+    },
+    false,
+  );
+  const redacted = await redactionHandlers.get("external_roots_list")();
+  const redactedPayload = JSON.parse(redacted.content[0].text);
+  assert.equal(redacted.isError, true);
+  assert.equal(redactedPayload.error, "non_verifiable");
+  assert.equal(
+    redactedPayload.message,
+    "The external path could not be verified.",
+  );
+  assert.equal(JSON.stringify(redacted).includes(rootPath), false);
+
   console.log(
-    `PASS: external roots confinement, capabilities, redaction, limits, hashing and explicit local handoff${linkCreated ? ", including junction rejection" : ""}`,
+    `PASS: external roots confinement, strict allowlists, handle identity, redaction, limits, hashing and explicit local handoff${linkCreated ? ", including junction rejection" : ""}`,
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });
