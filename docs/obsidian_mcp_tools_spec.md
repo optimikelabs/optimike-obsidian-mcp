@@ -9,6 +9,7 @@ Related docs:
 - Runtime modes: [runtime-capability-matrix.md](runtime-capability-matrix.md)
 - Operations: [../OPERATIONS.md](../OPERATIONS.md)
 - Agent routing: [mcp-routing-guide.md](mcp-routing-guide.md)
+- External roots: [external-roots-setup.md](external-roots-setup.md)
 - Operon contract: [operon-mcp-contract.md](operon-mcp-contract.md)
 
 ## Runtime Rules
@@ -128,20 +129,30 @@ properties, plugin-specific filters, or exact UI view semantics.
 External roots are disabled unless `MCP_EXTERNAL_ROOTS_FILE` points to a valid
 machine-local JSON configuration.
 
-- `external_runtime_status`: report enablement, stdio handoff policy, logical
+- `external_runtime_status`: report enablement, available handoff modes, logical
   root IDs, capabilities, limits, and availability without physical paths.
 - `external_roots_list`: list logical root IDs without physical paths.
 - `external_list`: bounded root-relative directory listing; links and junctions
   are visible but never followed.
 - `external_stat`: bounded metadata and optional SHA-256.
 - `external_read`: bounded UTF-8 text read.
-- `external_handoff`: explicit handoff of a verified temporary local copy to a
-  local stdio client that has its own PDF or Office tooling.
+- `external_handoff`: prepare one verified snapshot through a delivery mode
+  supported by the active transport:
+  - `local_path` for a local stdio client sharing the server filesystem;
+  - optional `http_ticket` for an authenticated direct HTTP client.
 
 The core MCP does not parse PDF or Office files. Handoff requires both
-`readable` and `handoff`; it is denied on HTTP. See
-[External document roots — setup and operations](external-roots-setup.md) and
-[ADR-External-Document-Roots.md](adr/ADR-External-Document-Roots.md).
+`readable` and `handoff`. HTTP ticket delivery is disabled by default and must be
+explicitly enabled with `MCP_HTTP_HANDOFF_ENABLED=true` on a non-development
+authenticated profile. The ticket is short-lived, identity-bound, single-use,
+bounded, absent from URLs, and never discloses the physical source or temporary
+path.
+
+Neither handoff mode authorizes upload, create, replace, move, delete, or sync.
+The client owns binary extraction and must verify the returned size and SHA-256.
+See [External document roots — setup and operations](external-roots-setup.md),
+[ADR — External document roots](adr/ADR-External-Document-Roots.md), and
+[ADR — Governed HTTP delivery](adr/ADR-HTTP-External-Artifact-Delivery.md).
 
 ## Filesystem Admin
 
