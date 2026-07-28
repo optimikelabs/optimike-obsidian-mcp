@@ -64,7 +64,9 @@ A root configuration must be local and must not be committed:
 
 Initial capability vocabulary:
 
-- `visible`: disclose root metadata and bounded directory entries;
+- root IDs, capabilities, availability, and limits are disclosed by runtime
+  status and root listing independently of `visible`;
+- `visible`: disclose bounded directory entries and file metadata;
 - `readable`: hash or read an explicitly requested UTF-8 text file;
 - `handoff`: create one verified temporary local copy for an explicitly
   requesting local stdio client so that it can use its own document tools.
@@ -76,7 +78,8 @@ are not implemented by the core service.
 it requires a separate ADR, threat model, mutation journal, optimistic
 preconditions, dry-run contract, explicit apply gate, and rollback evidence.
 
-The absence of a capability is a denial.
+The absence of a capability denies the corresponding file operation; root
+discovery remains available as described above.
 
 ## Confinement
 
@@ -87,8 +90,8 @@ Every path request must:
 3. resolve the physical root and candidate to canonical paths;
 4. prove that the candidate remains inside the canonical root;
 5. apply platform-aware case and separator rules;
-6. reject or explicitly govern symlinks, junctions, reparse points and mounted
-   paths;
+6. reject detectable symlink, junction, and reparse-point escapes supported by
+   the current platform;
 7. apply include, exclude, depth, size and entry-count limits;
 8. log the decision without exposing secrets or unnecessary physical paths.
 
