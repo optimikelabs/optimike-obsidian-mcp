@@ -240,7 +240,7 @@ export async function registerExternalRootsTools(
           service,
           localHandoffAllowed,
           params,
-          extra.authInfo,
+          extra?.authInfo,
         ),
       )(),
   );
