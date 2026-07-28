@@ -136,17 +136,20 @@ async function rateLimitResponse(
   c.header("X-Optimike-Rate-Limit-Scope", scope);
   c.header("X-Request-Id", requestState.requestId);
 
-  logger.warning("HTTP request rejected by bounded rate limiting.", {
-    requestId: requestState.requestId,
-    operation: "httpRateLimitRejected",
-    scope,
-    outcome: decision.outcome,
-    retryAfterSeconds: decision.retryAfterSeconds,
-    clientIdentity: requestState.identity?.pseudonym,
-    sourceAddress: requestState.clientAddress
-      ? pseudonymizeClientAddress(requestState.clientAddress)
-      : undefined,
-  });
+  logger.warning(
+    "HTTP request rejected by bounded rate limiting.",
+    requestContextService.createRequestContext({
+      requestId: requestState.requestId,
+      operation: "httpRateLimitRejected",
+      scope,
+      outcome: decision.outcome,
+      retryAfterSeconds: decision.retryAfterSeconds,
+      clientIdentity: requestState.identity?.pseudonym,
+      sourceAddress: requestState.clientAddress
+        ? pseudonymizeClientAddress(requestState.clientAddress)
+        : undefined,
+    }),
+  );
 
   return c.json(
     {
@@ -237,11 +240,14 @@ function sessionForRequest(
   if (!session) return undefined;
   const identity = requireIdentity(c);
   if (session.identityKey !== identity.key) {
-    logger.warning("HTTP session identity mismatch rejected.", {
-      requestId: getHttpRequestState(c.req.raw).requestId,
-      operation: "httpSessionIdentityMismatch",
-      clientIdentity: identity.pseudonym,
-    });
+    logger.warning(
+      "HTTP session identity mismatch rejected.",
+      requestContextService.createRequestContext({
+        requestId: getHttpRequestState(c.req.raw).requestId,
+        operation: "httpSessionIdentityMismatch",
+        clientIdentity: identity.pseudonym,
+      }),
+    );
     throw new McpError(
       BaseErrorCode.NOT_FOUND,
       "Invalid or expired session ID.",
@@ -482,7 +488,7 @@ export async function startHttpTransport(
     });
     const body = await c.req.raw.clone().json();
     const sessionId = c.req.header("mcp-session-id");
-    let session = sessionForRequest(c, sessionId);
+    const session = sessionForRequest(c, sessionId);
     let transport = session?.transport;
 
     if (isInitializeRequest(body)) {
@@ -528,11 +534,6 @@ export async function startHttpTransport(
       const server = await createServerInstanceFn();
       await server.connect(newTransport);
       transport = newTransport;
-      session = {
-        transport: newTransport,
-        identityKey: identity.key,
-        identityPseudonym: identity.pseudonym,
-      };
     } else if (!transport) {
       throw new McpError(
         BaseErrorCode.NOT_FOUND,
