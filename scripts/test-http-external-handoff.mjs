@@ -149,6 +149,38 @@ async function testBrokerLifecycle(sandbox) {
   );
   await access(expiringPath);
   await broker.dispose();
+
+  // Capacity must be reserved before file buffering. Two concurrent requests
+  // cannot transiently exceed the one-ticket/one-payload memory budget.
+  const capacityBroker = new ExternalTransferBroker({
+    enabled: true,
+    ttlMs: 10_000,
+    maxTickets: 1,
+    maxFileBytes: 1024,
+    maxTotalBytes: content.length,
+  });
+  const concurrent = await Promise.allSettled([
+    capacityBroker.issue(prepared, auth),
+    capacityBroker.issue(prepared, auth),
+  ]);
+  const fulfilled = concurrent.filter((result) => result.status === "fulfilled");
+  const rejected = concurrent.filter((result) => result.status === "rejected");
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.match(String(rejected[0].reason), /capacity is currently exhausted/u);
+  const capacityTicket = fulfilled[0].value.ticket;
+  assert.deepEqual(
+    (await capacityBroker.consume(capacityTicket, auth)).buffer,
+    content,
+  );
+
+  // After the claimed ticket releases its budget, a new request succeeds.
+  const afterRelease = await capacityBroker.issue(prepared, auth);
+  assert.deepEqual(
+    (await capacityBroker.consume(afterRelease.ticket, auth)).buffer,
+    content,
+  );
+  await capacityBroker.dispose();
 }
 
 const sandbox = await mkdtemp(
@@ -308,7 +340,7 @@ try {
   assert.equal(missingAuth.status, 401);
 
   console.log(
-    "PASS: authenticated HTTP handoff returns one-use identity-bound tickets, preserves integrity, rejects cross-client use and replay, and discloses no source path",
+    "PASS: authenticated HTTP handoff returns one-use identity-bound tickets, preserves integrity, bounds concurrent buffering, rejects cross-client use and replay, and discloses no source path",
   );
 } finally {
   await client.close().catch(() => undefined);
