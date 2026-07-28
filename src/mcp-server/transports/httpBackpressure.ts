@@ -210,7 +210,7 @@ type QueueItem = {
   enqueuedAt: number;
   resolve: (lease: AdmissionLease) => void;
   reject: (error: AdmissionRejectedError) => void;
-  timeout: NodeJS.Timeout;
+  timeout?: NodeJS.Timeout;
   signal?: AbortSignal;
   abortHandler?: () => void;
   settled: boolean;
@@ -390,19 +390,25 @@ export class FairAdmissionController {
     }
 
     return new Promise<AdmissionLease>((resolve, reject) => {
-      const enqueuedAt = this.now();
       const item: QueueItem = {
         id: this.nextQueueId++,
         identityKey: input.identityKey,
         operationClass: input.operationClass,
-        enqueuedAt,
+        enqueuedAt: this.now(),
         resolve,
         reject,
-        timeout: setTimeout(() => undefined, 0),
         signal: input.signal,
         settled: false,
       };
-      clearTimeout(item.timeout);
+
+      if (identityQueue.length === 0) {
+        this.queueByIdentity.set(input.identityKey, identityQueue);
+        this.identityOrder.push(input.identityKey);
+      }
+      identityQueue.push(item);
+      this.queued += 1;
+      this.maxObservedQueued = Math.max(this.maxObservedQueued, this.queued);
+
       item.timeout = setTimeout(() => {
         if (!this.removeQueuedItem(item)) return;
         this.timedOut += 1;
@@ -412,6 +418,7 @@ export class FairAdmissionController {
             this.limits.retryAfterSeconds,
           ),
         );
+        this.dispatch();
       }, this.limits.queueWaitTimeoutMs);
       item.timeout.unref?.();
 
@@ -425,25 +432,23 @@ export class FairAdmissionController {
               this.limits.retryAfterSeconds,
             ),
           );
+          this.dispatch();
         };
         input.signal.addEventListener("abort", item.abortHandler, {
           once: true,
         });
+        if (input.signal.aborted) {
+          item.abortHandler();
+          return;
+        }
       }
 
-      if (identityQueue.length === 0) {
-        this.queueByIdentity.set(input.identityKey, identityQueue);
-        this.identityOrder.push(input.identityKey);
-      }
-      identityQueue.push(item);
-      this.queued += 1;
-      this.maxObservedQueued = Math.max(this.maxObservedQueued, this.queued);
       this.dispatch();
     });
   }
 
   private cleanupQueueItem(item: QueueItem): void {
-    clearTimeout(item.timeout);
+    if (item.timeout) clearTimeout(item.timeout);
     if (item.signal && item.abortHandler) {
       item.signal.removeEventListener("abort", item.abortHandler);
     }
@@ -632,6 +637,41 @@ function rejectionMessage(reason: AdmissionRejectReason): string {
   }
 }
 
+function admissionRejectionResponse(
+  c: Context<{ Bindings: HttpBindings }>,
+  descriptor: HttpOperationDescriptor,
+  error: AdmissionRejectedError,
+): Response {
+  const state = getHttpRequestState(c.req.raw);
+  state.admission = {
+    operationClass: descriptor.operationClass,
+    operationName: descriptor.operationName,
+    queued: error.reason === "timeout" || error.reason === "cancelled",
+    waitMs: Math.max(0, Date.now() - state.startedAt),
+    outcome: error.reason,
+  };
+  c.header("Retry-After", String(error.retryAfterSeconds));
+  c.header("X-Optimike-Backpressure", error.reason);
+  c.header("X-Optimike-Operation-Class", descriptor.operationClass);
+  c.header("X-Request-Id", state.requestId);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      error: {
+        code: BaseErrorCode.SERVICE_UNAVAILABLE,
+        message: rejectionMessage(error.reason),
+        data: {
+          retryable: error.reason !== "cancelled",
+          admission: error.reason,
+        },
+      },
+      id: descriptor.rpcId,
+    },
+    503,
+  );
+}
+
 export function createHttpBackpressureMiddleware(
   controller: FairAdmissionController = httpAdmissionController,
 ) {
@@ -657,58 +697,38 @@ export function createHttpBackpressureMiddleware(
     }
     const descriptor = await classifyHttpOperation(c);
 
+    let lease: AdmissionLease;
     try {
-      const lease = await controller.acquire({
+      lease = await controller.acquire({
         identityKey: identity.key,
         operationClass: descriptor.operationClass,
-        signal: c.req.raw.signal,
+        // Once a valid external handoff request reaches the server, its one-use
+        // ticket must be consumed even if the socket disappears immediately.
+        // The bounded queue timeout still prevents orphaned work from waiting
+        // indefinitely. Other operations remain abort-aware before admission.
+        signal:
+          c.req.path === "/external-handoff" ? undefined : c.req.raw.signal,
       });
-      state.admission = {
-        operationClass: descriptor.operationClass,
-        operationName: descriptor.operationName,
-        queued: lease.queued,
-        waitMs: lease.waitMs,
-        outcome: "admitted",
-        admittedAt: Date.now(),
-      };
-      c.header("X-Optimike-Operation-Class", descriptor.operationClass);
-      c.header("X-Optimike-Queue-Wait-Ms", String(lease.waitMs));
-      try {
-        await next();
-      } finally {
-        lease.release();
-        if (state.admission) state.admission.releasedAt = Date.now();
-      }
-      return;
     } catch (error) {
       if (!(error instanceof AdmissionRejectedError)) throw error;
-      state.admission = {
-        operationClass: descriptor.operationClass,
-        operationName: descriptor.operationName,
-        queued: error.reason === "timeout" || error.reason === "cancelled",
-        waitMs: Math.max(0, Date.now() - state.startedAt),
-        outcome: error.reason,
-      };
-      c.header("Retry-After", String(error.retryAfterSeconds));
-      c.header("X-Optimike-Backpressure", error.reason);
-      c.header("X-Optimike-Operation-Class", descriptor.operationClass);
-      c.header("X-Request-Id", state.requestId);
-      c.header("Cache-Control", "no-store");
-      return c.json(
-        {
-          jsonrpc: "2.0",
-          error: {
-            code: BaseErrorCode.SERVICE_UNAVAILABLE,
-            message: rejectionMessage(error.reason),
-            data: {
-              retryable: error.reason !== "cancelled",
-              admission: error.reason,
-            },
-          },
-          id: descriptor.rpcId,
-        },
-        503,
-      );
+      return admissionRejectionResponse(c, descriptor, error);
+    }
+
+    state.admission = {
+      operationClass: descriptor.operationClass,
+      operationName: descriptor.operationName,
+      queued: lease.queued,
+      waitMs: lease.waitMs,
+      outcome: "admitted",
+      admittedAt: Date.now(),
+    };
+    c.header("X-Optimike-Operation-Class", descriptor.operationClass);
+    c.header("X-Optimike-Queue-Wait-Ms", String(lease.waitMs));
+    try {
+      await next();
+    } finally {
+      lease.release();
+      if (state.admission) state.admission.releasedAt = Date.now();
     }
   };
 }
