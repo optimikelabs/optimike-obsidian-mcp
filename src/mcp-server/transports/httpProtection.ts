@@ -5,6 +5,7 @@ import type { AuthInfo } from "./auth/index.js";
 import type { VerifiedHttpIdentity } from "./httpRequestState.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const THIRTY_DAYS_MS = 30 * DAY_MS;
 
 function envInteger(defaultValue: number, min: number, max: number) {
   return z.preprocess(
@@ -18,18 +19,57 @@ function envInteger(defaultValue: number, min: number, max: number) {
 
 const HttpProtectionEnvSchema = z
   .object({
-    MCP_HTTP_PREAUTH_RATE_LIMIT_WINDOW_MS: envInteger(15 * 60 * 1000, 1000, DAY_MS),
+    MCP_HTTP_PREAUTH_RATE_LIMIT_WINDOW_MS: envInteger(
+      15 * 60 * 1000,
+      1000,
+      DAY_MS,
+    ),
     MCP_HTTP_PREAUTH_RATE_LIMIT_MAX: envInteger(600, 1, 1_000_000),
     MCP_HTTP_LOOPBACK_POLICY: z
       .enum(["shared", "elevated"])
       .default("elevated"),
-    MCP_HTTP_LOOPBACK_PREAUTH_RATE_LIMIT_MAX: envInteger(3000, 1, 1_000_000),
-    MCP_HTTP_IDENTITY_RATE_LIMIT_WINDOW_MS: envInteger(15 * 60 * 1000, 1000, DAY_MS),
+    MCP_HTTP_LOOPBACK_PREAUTH_RATE_LIMIT_MAX: envInteger(
+      3000,
+      1,
+      1_000_000,
+    ),
+    MCP_HTTP_IDENTITY_RATE_LIMIT_WINDOW_MS: envInteger(
+      15 * 60 * 1000,
+      1000,
+      DAY_MS,
+    ),
     MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: envInteger(100, 1, 1_000_000),
-    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS: envInteger(5000, 1, 1_000_000),
-    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS: envInteger(10_000, 1, 1_000_000),
-    MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS: envInteger(5 * 60 * 1000, 1000, DAY_MS),
+    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS: envInteger(
+      5000,
+      1,
+      1_000_000,
+    ),
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS: envInteger(
+      10_000,
+      1,
+      1_000_000,
+    ),
+    MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS: envInteger(
+      5 * 60 * 1000,
+      1000,
+      DAY_MS,
+    ),
     MCP_HTTP_MAX_SESSIONS: envInteger(500, 1, 100_000),
+    MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: envInteger(
+      30 * 60 * 1000,
+      10,
+      THIRTY_DAYS_MS,
+    ),
+    MCP_HTTP_SESSION_MAX_LIFETIME_MS: envInteger(
+      DAY_MS,
+      10,
+      THIRTY_DAYS_MS,
+    ),
+    MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS: envInteger(
+      60 * 1000,
+      10,
+      DAY_MS,
+    ),
     MCP_TRUSTED_PROXIES: z.string().default(""),
     MCP_TRUST_PROXY: z.string().optional(),
     MCP_HTTP_IDENTITY_HASH_KEY: z.string().min(32).optional(),
@@ -88,6 +128,10 @@ export const httpProtectionConfig = {
   identityMaxKeys: protectionEnv.MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS,
   cleanupIntervalMs: protectionEnv.MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS,
   maxSessions: protectionEnv.MCP_HTTP_MAX_SESSIONS,
+  sessionIdleTimeoutMs: protectionEnv.MCP_HTTP_SESSION_IDLE_TIMEOUT_MS,
+  sessionMaxLifetimeMs: protectionEnv.MCP_HTTP_SESSION_MAX_LIFETIME_MS,
+  sessionCleanupIntervalMs:
+    protectionEnv.MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS,
   trustedProxyRanges: splitCsv(protectionEnv.MCP_TRUSTED_PROXIES).map(
     parseIpRange,
   ),
@@ -140,7 +184,11 @@ function expandIpv4Tail(value: string): string {
   return `${value.slice(0, lastColon)}:${first}:${second}`;
 }
 
-function ipToBigInt(value: string): { version: 4 | 6; bits: number; value: bigint } {
+function ipToBigInt(value: string): {
+  version: 4 | 6;
+  bits: number;
+  value: bigint;
+} {
   const normalized = normalizeIpLiteral(value);
   if (!normalized) throw new Error(`Invalid IP address: ${value}`);
   const version = isIP(normalized);
@@ -168,7 +216,10 @@ function ipToBigInt(value: string): { version: 4 | 6; bits: number; value: bigin
     ...Array.from({ length: missing }, () => "0"),
     ...right,
   ];
-  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/iu.test(group))) {
+  if (
+    groups.length !== 8 ||
+    groups.some((group) => !/^[0-9a-f]{1,4}$/iu.test(group))
+  ) {
     throw new Error(`Invalid IPv6 address: ${value}`);
   }
   const numeric = groups.reduce(
@@ -188,17 +239,24 @@ export type ParsedIpRange = {
 
 export function parseIpRange(source: string): ParsedIpRange {
   const [address, prefixRaw, ...extra] = source.trim().split("/");
-  if (extra.length > 0) throw new Error(`Invalid trusted proxy range: ${source}`);
+  if (extra.length > 0) {
+    throw new Error(`Invalid trusted proxy range: ${source}`);
+  }
   const parsed = ipToBigInt(address);
   const prefixLength =
     prefixRaw === undefined || prefixRaw === ""
       ? parsed.bits
       : Number(prefixRaw);
-  if (!Number.isInteger(prefixLength) || prefixLength < 0 || prefixLength > parsed.bits) {
+  if (
+    !Number.isInteger(prefixLength) ||
+    prefixLength < 0 ||
+    prefixLength > parsed.bits
+  ) {
     throw new Error(`Invalid trusted proxy prefix length: ${source}`);
   }
   const shift = BigInt(parsed.bits - prefixLength);
-  const network = shift === 0n ? parsed.value : (parsed.value >> shift) << shift;
+  const network =
+    shift === 0n ? parsed.value : (parsed.value >> shift) << shift;
   return {
     source,
     version: parsed.version,
@@ -208,7 +266,10 @@ export function parseIpRange(source: string): ParsedIpRange {
   };
 }
 
-export function ipMatchesRange(address: string, range: ParsedIpRange): boolean {
+export function ipMatchesRange(
+  address: string,
+  range: ParsedIpRange,
+): boolean {
   try {
     const parsed = ipToBigInt(address);
     if (parsed.version !== range.version) return false;
@@ -235,7 +296,9 @@ function parseForwardedHeader(value: string): string[] | undefined {
       .map((part) => part.trim())
       .find((part) => /^for=/iu.test(part));
     if (!forPart) return undefined;
-    const normalized = normalizeIpLiteral(forPart.slice(forPart.indexOf("=") + 1));
+    const normalized = normalizeIpLiteral(
+      forPart.slice(forPart.indexOf("=") + 1),
+    );
     if (!normalized) return undefined;
     addresses.push(normalized);
   }
@@ -243,7 +306,9 @@ function parseForwardedHeader(value: string): string[] | undefined {
 }
 
 function parseXForwardedFor(value: string): string[] | undefined {
-  const addresses = value.split(",").map((part) => normalizeIpLiteral(part));
+  const addresses = value
+    .split(",")
+    .map((part) => normalizeIpLiteral(part));
   if (addresses.some((address) => !address)) return undefined;
   return addresses as string[];
 }
@@ -263,7 +328,8 @@ export function resolveClientAddress(input: {
   forwarded?: string;
   xForwardedFor?: string;
 }): ClientAddressResolution {
-  const socketAddress = normalizeIpLiteral(input.remoteAddress ?? "") ?? "unknown_ip";
+  const socketAddress =
+    normalizeIpLiteral(input.remoteAddress ?? "") ?? "unknown_ip";
   if (socketAddress === "unknown_ip" || !isTrustedProxy(socketAddress)) {
     return {
       address: socketAddress,
@@ -329,10 +395,14 @@ export function pseudonymizeClientAddress(address: string): string {
   return `ip_${digest("http-source-ip-v1", address).slice(0, 20)}`;
 }
 
-export function deriveVerifiedHttpIdentity(authInfo: AuthInfo): VerifiedHttpIdentity {
+export function deriveVerifiedHttpIdentity(
+  authInfo: AuthInfo,
+): VerifiedHttpIdentity {
   const issuer = authInfo.issuer?.trim() || "optimike-local";
   const clientId = authInfo.clientId?.trim();
-  if (!clientId) throw new Error("Authenticated request has no verified clientId.");
+  if (!clientId) {
+    throw new Error("Authenticated request has no verified clientId.");
+  }
   const subject = authInfo.subject?.trim() || undefined;
   const tokenFingerprint = subject
     ? undefined
@@ -384,8 +454,14 @@ export class BoundedFixedWindowRateLimiter {
       now?: () => number;
     },
   ) {
-    if (options.windowMs <= 0 || options.maxRequests <= 0 || options.maxKeys <= 0) {
-      throw new Error("Rate limiter window, request limit and key capacity must be positive.");
+    if (
+      options.windowMs <= 0 ||
+      options.maxRequests <= 0 ||
+      options.maxKeys <= 0
+    ) {
+      throw new Error(
+        "Rate limiter window, request limit and key capacity must be positive.",
+      );
     }
     if (options.cleanupIntervalMs && options.cleanupIntervalMs > 0) {
       this.cleanupTimer = setInterval(
@@ -400,7 +476,14 @@ export class BoundedFixedWindowRateLimiter {
     return this.options.now?.() ?? Date.now();
   }
 
-  public check(key: string): RateLimitDecision {
+  public check(
+    key: string,
+    maxRequests = this.options.maxRequests,
+  ): RateLimitDecision {
+    if (!Number.isInteger(maxRequests) || maxRequests <= 0) {
+      throw new Error("Rate-limit request allowance must be a positive integer.");
+    }
+
     const now = this.now();
     let entry = this.entries.get(key);
     if (entry && now >= entry.resetAt) {
@@ -413,16 +496,25 @@ export class BoundedFixedWindowRateLimiter {
         this.cleanupExpiredEntries(now);
       }
       if (this.entries.size >= this.options.maxKeys) {
-        const earliestResetAt = Math.min(
-          ...Array.from(this.entries.values(), (candidate) => candidate.resetAt),
-        );
+        let earliestResetAt = Number.POSITIVE_INFINITY;
+        for (const candidate of this.entries.values()) {
+          if (candidate.resetAt < earliestResetAt) {
+            earliestResetAt = candidate.resetAt;
+          }
+        }
+        if (!Number.isFinite(earliestResetAt)) {
+          earliestResetAt = now + this.options.windowMs;
+        }
         return {
           allowed: false,
           outcome: "capacity",
-          limit: this.options.maxRequests,
+          limit: maxRequests,
           remaining: 0,
           resetAt: earliestResetAt,
-          retryAfterSeconds: Math.max(1, Math.ceil((earliestResetAt - now) / 1000)),
+          retryAfterSeconds: Math.max(
+            1,
+            Math.ceil((earliestResetAt - now) / 1000),
+          ),
         };
       }
       const resetAt = now + this.options.windowMs;
@@ -430,22 +522,25 @@ export class BoundedFixedWindowRateLimiter {
       return {
         allowed: true,
         outcome: "allowed",
-        limit: this.options.maxRequests,
-        remaining: Math.max(0, this.options.maxRequests - 1),
+        limit: maxRequests,
+        remaining: Math.max(0, maxRequests - 1),
         resetAt,
         retryAfterSeconds: 0,
       };
     }
 
     entry.lastSeenAt = now;
-    if (entry.count >= this.options.maxRequests) {
+    if (entry.count >= maxRequests) {
       return {
         allowed: false,
         outcome: "limited",
-        limit: this.options.maxRequests,
+        limit: maxRequests,
         remaining: 0,
         resetAt: entry.resetAt,
-        retryAfterSeconds: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)),
+        retryAfterSeconds: Math.max(
+          1,
+          Math.ceil((entry.resetAt - now) / 1000),
+        ),
       };
     }
 
@@ -453,8 +548,8 @@ export class BoundedFixedWindowRateLimiter {
     return {
       allowed: true,
       outcome: "allowed",
-      limit: this.options.maxRequests,
-      remaining: Math.max(0, this.options.maxRequests - entry.count),
+      limit: maxRequests,
+      remaining: Math.max(0, maxRequests - entry.count),
       resetAt: entry.resetAt,
       retryAfterSeconds: 0,
     };
@@ -485,16 +580,6 @@ export class BoundedFixedWindowRateLimiter {
 export const preAuthSourceLimiter = new BoundedFixedWindowRateLimiter({
   windowMs: httpProtectionConfig.preAuthWindowMs,
   maxRequests: httpProtectionConfig.preAuthMaxRequests,
-  maxKeys: httpProtectionConfig.preAuthMaxKeys,
-  cleanupIntervalMs: httpProtectionConfig.cleanupIntervalMs,
-});
-
-export const loopbackPreAuthSourceLimiter = new BoundedFixedWindowRateLimiter({
-  windowMs: httpProtectionConfig.preAuthWindowMs,
-  maxRequests:
-    httpProtectionConfig.loopbackPolicy === "elevated"
-      ? httpProtectionConfig.loopbackPreAuthMaxRequests
-      : httpProtectionConfig.preAuthMaxRequests,
   maxKeys: httpProtectionConfig.preAuthMaxKeys,
   cleanupIntervalMs: httpProtectionConfig.cleanupIntervalMs,
 });
