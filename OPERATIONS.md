@@ -240,10 +240,10 @@ If a first read/search request arrives while the filesystem cache is still build
 
 ```bash
 curl http://127.0.0.1:3010/healthz
-curl http://127.0.0.1:3010/healthz?integrity=1
 ```
 
-What you get:
+The public endpoint returns only minimal, path-free liveness. Use the
+authenticated MCP runtime tools for:
 
 - runtime mode
 - runtime fingerprint: package version, git sha, Node.js version, `dist` paths, non-sensitive config hash
@@ -276,12 +276,12 @@ npm run smoke:runtime
 
 It verifies:
 
-- `/healthz?integrity=1`
-- runtime fingerprint
-- process freshness compared with the current `dist` files
-- SQLite integrity
+- minimal path-free `/healthz` liveness
 - tool discovery through MCP HTTP
 - tool discovery through `stdio-proxy`
+
+`npm run smoke:headless-status`, included in `npm run test:runtime`, verifies
+authenticated runtime status, process freshness, and shared-cache readiness.
 
 To verify code before a PR or merge:
 

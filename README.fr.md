@@ -321,10 +321,10 @@ Health et maintenance :
 
 ```bash
 curl http://127.0.0.1:3010/healthz
-curl http://127.0.0.1:3010/healthz?integrity=1
 ```
 
-Et via MCP :
+Cette URL publique retourne uniquement un signal de vie minimal sans chemin.
+Les détails passent par MCP authentifié :
 
 - `obsidian_runtime_status`
 - `obsidian_runtime_maintenance`
@@ -348,7 +348,6 @@ Checks typiques :
 
 ```bash
 curl http://127.0.0.1:3010/healthz
-curl http://127.0.0.1:3010/healthz?integrity=1
 ```
 
 ## Configuration Codex minimale

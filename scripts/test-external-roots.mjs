@@ -139,6 +139,28 @@ try {
   );
   assert.match(path.basename(longExtensionCopy), /^[0-9a-f-]{36}$/);
   assert.equal(await readFile(longExtensionCopy, "utf8"), "long extension");
+  const originalReadOpenedFileForLimit = service.readOpenedFile.bind(service);
+  const originalCreateHandoffCopyForLimit =
+    service.createHandoffCopy.bind(service);
+  let openedForOverLimitHandoff = false;
+  let copiedForOverLimitHandoff = false;
+  service.readOpenedFile = async (...args) => {
+    openedForOverLimitHandoff = true;
+    return originalReadOpenedFileForLimit(...args);
+  };
+  service.createHandoffCopy = async (...args) => {
+    copiedForOverLimitHandoff = true;
+    return originalCreateHandoffCopyForLimit(...args);
+  };
+  await expectCode(
+    () => service.handoff("pilot.docs", "hello.txt", true, 1),
+    "too_large",
+  );
+  assert.equal(openedForOverLimitHandoff, false);
+  assert.equal(copiedForOverLimitHandoff, false);
+  service.readOpenedFile = originalReadOpenedFileForLimit;
+  service.createHandoffCopy = originalCreateHandoffCopyForLimit;
+
   const originalReadVerifiedBuffer = service.readVerifiedBuffer.bind(service);
   let activeHandoffReads = 0;
   let maxConcurrentHandoffReads = 0;
@@ -419,7 +441,7 @@ try {
         throw new Error(`native failure at ${rootPath}`);
       },
     },
-    false,
+    true,
   );
   const redacted = await redactionHandlers.get("external_roots_list")();
   const redactedPayload = JSON.parse(redacted.content[0].text);

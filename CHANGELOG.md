@@ -12,9 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default-deny external document roots with logical root IDs, bounded listing,
   metadata, hashing, UTF-8 reads, and explicit local stdio handoff for clients
   with their own PDF or Office tools.
+- Opt-in authenticated HTTP artifact handoff with one-use identity-bound tickets,
+  logical provenance, SHA-256 verification, bounded in-memory snapshots, and no
+  source-path disclosure.
 - Bilingual external-roots setup and operations guides with Windows and Unix
-  examples, schema limits, client compatibility, verification, rollback, and
-  troubleshooting.
+  examples, local and HTTP transport profiles, schema and ticket limits, client
+  compatibility, verification, rollback, and troubleshooting.
+- Architecture decision record covering direct HTTP profiles, transport-aware
+  delivery, the external-mutation hold, threat model, and rollback.
 - ÉLYSIA Tasks profile 1.1 with global Inbox, This Week, bounded Now, Backlog, periodic-note leakage detection, and a P90-J admission gate.
 - Public task-governor guidance for distinct dry-run/apply idempotency keys and post-mutation visibility proof.
 - Regression coverage for Obsidian wikilink normalization in the Bases Bridge.
@@ -24,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Direct HTTP now validates supplied origins, ignores forwarding headers unless a
+  trusted proxy is explicit, and uses a deterministic configured port by default.
 - Semantic-search tools now declare `openWorldHint: true` because OpenAI can be selected as the query embedder.
 - Bases Bridge now evaluates `collection.contains(link(...))` correctly when frontmatter stores Obsidian wikilinks such as `[[Projets]]`.
 - Bases Bridge now treats the Bases literal `null` as a missing value instead of the string `"null"`, restoring missing-property filters and dependent formulas.
@@ -33,11 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - External-root access uses canonical-path confinement, strict include/exclude
-  policies, link/junction rejection, handle identity revalidation, path-redacted
-  responses, and HTTP handoff denial.
-- Handoff returns a verified process-owned temporary copy instead of the source
-  path, with a one-hour TTL, five-minute sweep, 16-file/512-MiB caps, stale-owner
-  scavenging, and regression coverage on Linux and Windows.
+  policies, link/junction rejection, handle identity revalidation, and
+  path-redacted responses.
+- Local stdio handoff returns a verified process-owned temporary copy instead of
+  the source path, with a one-hour TTL, five-minute sweep, 16-file/512-MiB caps,
+  stale-owner scavenging, and regression coverage on Linux and Windows.
+- HTTP handoff remains disabled by default and requires both the root `handoff`
+  capability and a non-development authenticated identity. Tickets are bound to
+  the token fingerprint, client ID and subject, are single-use, short-lived and
+  absent from URLs and logs.
+- HTTP ticket snapshots have independent file, aggregate-memory, count and TTL
+  limits, including reservations for requests still buffering. The broker does
+  not delete or mutate the local handoff cache owned by `ExternalRootsService`.
+- No upload, create, replace, move, delete or sync capability is introduced for
+  external roots.
 - Marked every legacy MCP tool as read-only, mutating, maintenance, or destructive for approval-aware clients.
 - Moved MCP Inspector to development dependencies and updated `fast-uri` to a patched release, removing the high-severity production audit finding.
 

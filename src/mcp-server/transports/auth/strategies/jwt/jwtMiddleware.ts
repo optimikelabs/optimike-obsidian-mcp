@@ -166,18 +166,18 @@ export async function mcpAuthMiddleware(
       );
     }
 
+    const subject = typeof decoded.sub === "string" ? decoded.sub : undefined;
     reqWithAuth.auth = {
       token: rawToken,
       clientId: clientIdFromToken,
       scopes: scopesFromToken,
+      subject,
     };
 
-    const subClaimForLogging =
-      typeof decoded.sub === "string" ? decoded.sub : undefined;
     const authInfo = reqWithAuth.auth;
     logger.debug("JWT verified successfully. AuthInfo attached to request.", {
       ...context,
-      mcpSessionIdContext: subClaimForLogging,
+      mcpSessionIdContext: subject,
       clientId: authInfo.clientId,
       scopes: authInfo.scopes,
     });

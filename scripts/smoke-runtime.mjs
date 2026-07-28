@@ -26,7 +26,7 @@ async function checkHealth() {
   const start = Date.now();
   const timed = withTimeout(
     (signal) =>
-      fetch(`${healthUrl}${healthUrl.includes("?") ? "&" : "?"}integrity=1`, {
+      fetch(healthUrl, {
         headers: { Accept: "application/json" },
         signal,
       }),
@@ -40,35 +40,11 @@ async function checkHealth() {
   if (!body.ok) {
     throw new Error(`healthz returned ok=false: ${JSON.stringify(body)}`);
   }
-  if (body.runtime?.dist?.isNewerThanProcess) {
-    throw new Error(
-      `backend process is older than dist files; restart required. Runtime: ${JSON.stringify(
-        body.runtime,
-      )}`,
-    );
-  }
   return {
     ok: true,
     ms: Date.now() - start,
-    pid: body.pid,
+    status: body.status,
     transport: body.transport,
-    runtime: body.runtime
-      ? {
-          packageVersion: body.runtime.packageVersion,
-          git: body.runtime.git,
-          configHash: body.runtime.configHash,
-          nodeVersion: body.runtime.nodeVersion,
-        }
-      : undefined,
-    sharedCache: body.sharedCache
-      ? {
-          ready: body.sharedCache.ready,
-          dbFileCount: body.sharedCache.dbFileCount,
-          dbTaskCacheFileCount: body.sharedCache.dbTaskCacheFileCount,
-          dbSemanticVectorCount: body.sharedCache.dbSemanticVectorCount,
-          integrity: body.sharedCache.integrity,
-        }
-      : undefined,
   };
 }
 

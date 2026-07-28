@@ -1,9 +1,11 @@
 # Racines documentaires externes — configuration et exploitation
 
+Version anglaise : [external-roots-setup.md](external-roots-setup.md)
+
 Les racines documentaires externes permettent à un client MCP de découvrir et
-lire des fichiers explicitement autorisés qui restent hors du coffre Obsidian :
-PDF, documents Office, jeux de données, dossiers projet ou bibliothèques gérées
-par une autre application.
+de lire des fichiers explicitement autorisés qui restent hors du coffre
+Obsidian : PDF, documents Office, jeux de données, dossiers projet ou
+bibliothèques gérées par une autre application.
 
 Cette fonction est un courtier en lecture seule, pas un second coffre :
 
@@ -11,10 +13,20 @@ Cette fonction est un courtier en lecture seule, pas un second coffre :
   racine ;
 - il sait lister, lire les métadonnées, calculer un hash et lire du texte UTF-8
   dans des limites explicites ;
-- un client stdio local peut demander une copie temporaire vérifiée avec
-  `external_handoff`, puis employer ses propres outils PDF, Office ou OCR ;
+- `external_handoff` peut préparer un snapshot vérifié pour un client qui possède
+  les outils PDF, Office, OCR ou binaires adaptés ;
 - il n’indexe, ne synchronise, ne déplace, ne renomme, n’écrit et ne sauvegarde
   aucun document externe.
+
+Le mode de livraison dépend du transport :
+
+- le stdio local retourne un `local_path` éphémère ;
+- un profil HTTP direct authentifié peut retourner un `http_ticket` optionnel ;
+- aucun mode ne retourne le chemin physique source ;
+- aucun mode ne modifie la source ni n’accorde un droit de copie durable.
+
+Voir [ADR — Racines documentaires externes](adr/ADR-External-Document-Roots.md)
+et [ADR — Livraison HTTP gouvernée des artefacts externes](adr/ADR-HTTP-External-Artifact-Delivery.md).
 
 ## 1. Créer une configuration locale à la machine
 
@@ -99,7 +111,8 @@ Les capacités sont distinctes :
   `external_roots_list` ;
 - `visible` autorise le listing borné et les métadonnées de fichiers ;
 - `readable` autorise le hash et la lecture UTF-8 directe ;
-- `handoff` autorise une copie temporaire vérifiée, uniquement en stdio local.
+- `handoff` autorise un snapshot vérifié via un mode de livraison supporté par
+  le transport actif.
 
 Valeurs par défaut et plafonds du schéma :
 
@@ -115,9 +128,9 @@ Valeurs par défaut et plafonds du schéma :
 `.htm` et `.log`. Pour un document binaire autorisé, employer
 `external_handoff`.
 
-## 3. Configurer un client stdio local
+## 3. Profil stdio local recommandé
 
-L’entrypoint recommandé est `dist/stdio-proxy.js`. Définir
+L’entrypoint local recommandé est `dist/stdio-proxy.js`. Définir
 `MCP_EXTERNAL_ROOTS_FILE` sur ce processus MCP, jamais dans le coffre.
 
 Codex sous Windows :
@@ -142,46 +155,158 @@ args = ["/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js"]
 MCP_EXTERNAL_ROOTS_FILE = "/home/vous/.config/optimike/external-roots.json"
 ```
 
-Claude Code, Gemini CLI, OpenClaw, Hermes Agent et les autres clients MCP locaux
-peuvent employer la même commande stdio et la même variable si leur
-implémentation permet de configurer l’environnement du processus. Leur syntaxe,
-leurs approbations et leur accès au chemin local retourné restent propres au
-client. Le dépôt ne promet pas une parité identique entre eux.
+Le proxy réutilise ou démarre le backend HTTP persistant sur localhost et
+intercepte localement les tools des racines externes. `external_handoff`
+retourne donc un `local_path` vérifié que le même client peut consommer.
 
-| Client              | Intégration visée                                       | Ce que ce dépôt vérifie                                                         |
-| ------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Codex               | Proxy stdio local avec environnement du processus       | Usage de production configuré et workflow pilote.                               |
-| Claude Code         | Serveur stdio local configuré par le client             | Conception compatible avec le protocole ; setup propre au client non testé ici. |
-| Gemini CLI          | Serveur stdio local configuré par le client             | Conception compatible avec le protocole ; setup propre au client non testé ici. |
-| OpenClaw            | Processus MCP local si son déploiement le supporte      | Conception compatible ; accès au chemin dépendant du déploiement.               |
-| Hermes Agent        | Processus MCP local si son déploiement le supporte      | Conception compatible ; accès au chemin dépendant du déploiement.               |
-| Client HTTP distant | Status/list/stat/read selon la politique de déploiement | Handoff de chemin physique toujours refusé.                                     |
+Ne pas enregistrer le proxy et l’endpoint HTTP direct comme deux copies du même
+MCP dans un seul client par défaut. Cela duplique la surface d’outils et rend le
+routage ambigu.
+
+## 4. Profil HTTP direct optionnel
+
+Le Streamable HTTP direct est un profil de service explicite. Il exige un
+backend supervisé déjà démarré ; il n’est pas auto-démarré par un client distant.
+
+Valeurs locales sûres :
+
+```text
+MCP_TRANSPORT_TYPE=http
+MCP_HTTP_HOST=127.0.0.1
+MCP_HTTP_PORT=3010
+MCP_HTTP_PORT_RETRIES=0
+MCP_EXTERNAL_ROOTS_FILE=/chemin/absolu/external-roots.json
+```
+
+Démarrer et vérifier :
+
+```bash
+npm run build
+npm run start:daemon
+curl http://127.0.0.1:3010/healthz
+```
+
+`/healthz` est une sonde de vie non authentifiée et ne retourne volontairement
+qu’un état minimal sans chemin. Utiliser les outils authentifiés
+`obsidian_runtime_status` et `obsidian_runtime_maintenance` pour les détails de
+runtime, cache, configuration ou intégrité.
+
+Le port configuré est déterministe par défaut. Définir
+`MCP_HTTP_PORT_RETRIES` à une valeur bornée uniquement si des ports de repli
+contrôlés sont acceptables.
+
+### Activer le handoff HTTP par ticket
+
+La livraison binaire HTTP est désactivée par défaut. L’activer uniquement sur un
+profil HTTP authentifié :
+
+```text
+MCP_HTTP_HANDOFF_ENABLED=true
+MCP_AUTH_MODE=jwt
+MCP_AUTH_SECRET_KEY=<secret-d-au-moins-32-caracteres>
+```
+
+OAuth peut aussi fournir l’identité authentifiée, mais le déploiement OAuth
+distant reste un pilote tant que les métadonnées de ressource protégée et
+l’interopérabilité client ne sont pas validées.
+
+Réglages bornés optionnels des tickets HTTP :
+
+| Variable                               |  Défaut | Maximum |
+| -------------------------------------- | ------: | ------: |
+| `MCP_HTTP_HANDOFF_TTL_MS`              |  60 000 | 300 000 |
+| `MCP_HTTP_HANDOFF_MAX_TICKETS`         |      16 |     128 |
+| `MCP_HTTP_HANDOFF_MAX_FILE_BYTES`      |  25 Mio | 200 Mio |
+| `MCP_HTTP_HANDOFF_MAX_TOTAL_BYTES`     | 128 Mio |   1 Gio |
+| `MCP_HTTP_HANDOFF_TRANSFER_TIMEOUT_MS` | 120 000 | 600 000 |
+
+Le broker refuse le placeholder d’authentification de développement et exige le
+scope `external:read` sur l’identité authentifiée. Définir
+`MCP_HTTP_HANDOFF_ENABLED=true` sans cette identité réelle et correctement
+scopée n’ouvre pas le handoff binaire.
+
+### Séquence du handoff HTTP
+
+1. Appeler `external_handoff` via la session MCP HTTP authentifiée.
+2. Recevoir `delivery: http_ticket`, la provenance logique, le SHA-256,
+   l’expiration, l’endpoint fixe et le nom du header de ticket.
+3. Envoyer `GET /external-handoff` au même service.
+4. Envoyer la même identité bearer ainsi que
+   `X-External-Handoff-Ticket: <ticket-opaque>`.
+5. Vérifier `Content-Length`, `X-Artifact-SHA256` et les octets téléchargés.
+
+Le ticket :
+
+- porte un seul snapshot mémoire vérifié ;
+- est lié à l’empreinte du token bearer, au client ID et au sujet ;
+- exige le scope `external:read` lors de son émission ;
+- est à usage unique ;
+- expire rapidement ;
+- n’apparaît jamais dans une URL ;
+- ne divulgue aucun chemin source ou temporaire.
+
+Un téléchargement interrompu consomme le ticket. Demander un nouveau handoff au
+lieu de rejouer l’ancien ticket.
+
+### Frontière HTTP distante
+
+Un profil distant reste un pilote derrière un reverse proxy TLS de confiance ou
+une frontière de service équivalente. Il exige une politique d’origines
+explicite, des limites de connexion et de corps, une configuration de confiance
+des headers transmis, une authentification, une supervision du processus et des
+contrôles réseau ou firewall.
+
+Définir `MCP_TRUST_PROXY=true` uniquement si un reverse proxy de confiance
+réécrit les headers de forwarding et si la politique réseau bloque l’accès
+direct au processus Node. Le serveur ignore `X-Forwarded-For` par défaut ; le
+booléen ne suffit pas à authentifier un proxy.
+
+Ne pas exposer directement le serveur Node sur Internet en se contentant de
+lier `MCP_HTTP_HOST=0.0.0.0`.
+
+## 5. Matrice des clients
+
+| Client                           | Intégration visée                                          | Ce que ce dépôt vérifie                                                                                       |
+| -------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Codex                            | Proxy stdio local avec environnement du processus          | Usage de production configuré et workflow de handoff par chemin local.                                        |
+| Claude Code                      | Serveur stdio local configuré par le client                | Conception compatible avec le protocole ; setup propre au client non testé ici.                               |
+| Gemini CLI                       | Serveur stdio local configuré par le client                | Conception compatible avec le protocole ; setup propre au client non testé ici.                               |
+| OpenClaw                         | Processus MCP local si son déploiement le supporte         | Conception compatible ; accès au chemin dépendant du déploiement.                                             |
+| Hermes Agent                     | Processus MCP local si son déploiement le supporte         | Conception compatible ; accès au chemin dépendant du déploiement.                                             |
+| Client HTTP direct sur localhost | Status/list/stat/read et handoff optionnel par ticket      | Tests automatisés Streamable HTTP, JWT, ticket, replay, identité et binaire.                                  |
+| Client HTTP distant              | Même protocole derrière des contrôles de déploiement revus | Architecture et tests serveur automatisés ; interopérabilité avec de vrais clients distants encore en pilote. |
 
 Le cœur MCP n’installe ni ne configure les extracteurs du client. Sans outil PDF
-ou Office local adapté, un client peut toujours lister, lire les métadonnées,
-hasher et lire les documents UTF-8 autorisés, mais pas extraire un binaire.
+ou Office adapté, un client peut toujours lister, lire les métadonnées, hasher et
+lire les documents UTF-8 autorisés, mais pas extraire un binaire.
 
-## 4. Redémarrer et vérifier
+## 6. Redémarrer et vérifier
 
-Le JSON est chargé une seule fois au démarrage du processus MCP. Après toute
-modification du fichier ou de la variable d’environnement, redémarrer le client
-MCP ou son serveur.
+La configuration JSON des racines et les réglages des tickets HTTP sont chargés
+au démarrage du processus. Redémarrer le client MCP ou le service après toute
+modification.
 
 Séquence de vérification recommandée :
 
-1. Appeler `external_runtime_status` ; confirmer `enabled: true`,
-   `localHandoffAllowed: true` et l’identifiant logique attendu.
-2. Appeler `external_roots_list` ; confirmer que la racine est `available`.
-3. Appeler `external_list` avec l’identifiant et une profondeur bornée.
-4. Appeler `external_stat`, puis `external_read` sur un petit fichier pilote
-   UTF-8.
-5. Si nécessaire, appeler `external_handoff` sur un document autorisé et
-   vérifier que le client ouvre bien la copie temporaire retournée.
+1. Appeler `external_runtime_status` et confirmer `enabled: true` ainsi que
+   l’identifiant logique attendu.
+2. Utiliser une identité portant `external:read` pour tout appel HTTP direct de
+   status, list, stat, read, hash ou handoff sur les racines externes.
+3. Examiner `handoffModes` :
+   - le stdio doit exposer `local_path` ;
+   - un service HTTP direct authentifié et activé doit exposer `http_ticket`.
+4. Appeler `external_roots_list` et confirmer que la racine est `available`.
+5. Appeler `external_list` avec l’identifiant et une profondeur bornée.
+6. Appeler `external_stat`, puis `external_read` sur un petit fichier UTF-8.
+7. Si nécessaire, appeler `external_handoff` et consommer le mode retourné.
+8. Confirmer qu’aucun résultat public ne contient le chemin physique de la
+   racine.
 
-Vérifications du dépôt sous Unix :
+Vérifications du dépôt :
 
 ```bash
 npm run test:external-roots
+npm run test:http-external-handoff
 MCP_EXTERNAL_ROOTS_FILE=/chemin/absolu/external-roots.json npm run smoke:external-roots
 MCP_EXTERNAL_ROOTS_FILE=/chemin/absolu/external-roots.json npm run smoke:external-roots:mcp
 ```
@@ -190,6 +315,7 @@ Sous PowerShell :
 
 ```powershell
 npm run test:external-roots
+npm run test:http-external-handoff
 $env:MCP_EXTERNAL_ROOTS_FILE = 'C:\Users\vous\.config\optimike\external-roots.json'
 npm run smoke:external-roots
 npm run smoke:external-roots:mcp
@@ -198,56 +324,81 @@ npm run smoke:external-roots:mcp
 Ces contrôles ne testent pas la même frontière :
 
 - `test:external-roots` emploie des fixtures jetables et teste le confinement,
-  les allowlists, l’identité du handle, la redaction, les limites, le cycle des
-  copies temporaires, le vrai proxy stdio et le refus du handoff HTTP ;
+  les allowlists, l’identité du handle, la redaction, les limites, le cycle du
+  handoff local, le proxy stdio et la livraison HTTP authentifiée par ticket dans
+  les CI Linux et Windows ;
+- `test:http-external-handoff` isole le contrat du broker et du transport HTTP ;
 - `smoke:external-roots` valide le service configuré et une vraie racine pilote ;
 - `smoke:external-roots:mcp` valide le contrat MCP via l’entrypoint stdio direct
   avec la racine configurée ;
-- le client de production doit encore être vérifié via `dist/stdio-proxy.js`
-  avec les cinq appels décrits plus haut.
+- le client de production exige toujours une vérification propre au client.
 
-## 5. Cycle de vie du handoff et sécurité
+## 7. Cycle de vie et sécurité du handoff
 
-`external_handoff` ne retourne pas le chemin source. Il lit via un handle vérifié
-et crée une copie détenue par le processus en mode `0600` sur les plateformes
-qui appliquent les permissions de fichiers POSIX.
+`external_handoff` ne retourne jamais le chemin source.
 
-- le handoff est refusé en HTTP ;
+Le service de handoff local lit via un handle vérifié et possède une copie bornée
+en mode `0600` sur les plateformes qui appliquent les permissions POSIX :
+
 - les copies expirent après une heure et sont nettoyées toutes les cinq minutes ;
-- un service conserve au maximum 16 fichiers et 512 Mio de copies ;
+- un service conserve au maximum 16 fichiers et 512 Mio ;
 - les copies les plus anciennes sont évincées pour libérer de la place ;
 - le processus supprime son dossier lors d’un arrêt normal ;
 - un service configuré ultérieur récupère les dossiers détenus par des processus
   morts ou des heartbeats périmés.
 
-Le chemin retourné est éphémère. Le client doit l’utiliser pendant l’opération
-courante et ne jamais le conserver comme provenance documentaire.
+Le broker HTTP ne possède ni ne supprime ce cache local. Il vérifie la copie et
+conserve un snapshot mémoire borné tant que le ticket est en attente et pendant
+le téléchargement par flux découpé. La réservation de capacité n’est libérée
+qu’à la fin ou à l’annulation du flux ; un ticket inutilisé expiré est nettoyé
+sans livraison.
 
 La provenance portable est l’identifiant logique, le chemin relatif, la taille,
-la date de modification et le SHA-256 lorsqu’il est retourné, pas le chemin
-temporaire.
+la date de modification et le SHA-256, pas un chemin local ni un ticket.
 
-## 6. Retour arrière et dépannage
+## 8. Les mutations restent hors périmètre
 
-Le retour arrière échoue fermé :
+La surface `external_roots` actuelle ne possède aucun upload, create, replace,
+move, delete ou sync.
 
-1. retirer `MCP_EXTERNAL_ROOTS_FILE` de la configuration du client MCP ;
-2. redémarrer le processus MCP ;
-3. appeler `external_runtime_status` et confirmer `enabled: false`.
+Une future proposition de mutation exige un ADR séparé, des capacités positives
+granulaires, des préconditions de hash attendu, un plan et un apply explicite,
+l’idempotence, un remplacement atomique, un journal, une sauvegarde, une preuve
+après écriture, des tests de crash et un rollback démontré.
 
-Cette opération ne supprime ni ne modifie aucun document source. Les éventuelles
-copies temporaires suivent leur cycle de nettoyage normal.
+Les stockages cloud, synchronisés, mappés ou montés n’héritent pas des garanties
+de mutation du filesystem local. SharePoint, Google Drive, OneDrive et services
+similaires ont besoin de connecteurs spécifiques pour des écritures gouvernées.
 
-| Erreur/état             | Vérification                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| `configuration_invalid` | Chemin de config absolu, JSON valide, version `1`, champs connus et règles d’identifiant. |
-| `root_unavailable`      | Le dossier existe et le processus MCP peut y accéder.                                     |
-| `capability_denied`     | La racine déclare la capacité exigée par l’opération.                                     |
-| `path_not_allowed`      | Le chemin relatif correspond à `include` et pas à `exclude`.                              |
-| `path_link_unsupported` | Retirer les symlinks/jonctions du chemin demandé.                                         |
-| `too_large`             | Vérifier `maxFileBytes` et le budget agrégé du handoff.                                   |
-| `unsupported`           | Employer un texte UTF-8 avec `external_read`, ou le handoff stdio pour un binaire.        |
-| Handoff refusé          | Employer un client stdio local ; HTTP ne divulgue volontairement aucun chemin.            |
+## 9. Retour arrière et dépannage
+
+Désactiver la livraison HTTP par ticket sans modifier une racine ni un fichier
+source :
+
+1. retirer `MCP_HTTP_HANDOFF_ENABLED` ou le passer à `false` ;
+2. redémarrer le service HTTP ;
+3. appeler `external_runtime_status` et confirmer l’absence de `http_ticket`.
+
+Désactiver toutes les racines externes :
+
+1. retirer `MCP_EXTERNAL_ROOTS_FILE` de la configuration du client ;
+2. redémarrer le processus ;
+3. confirmer `external_runtime_status.enabled: false`.
+
+Erreurs fréquentes :
+
+| Erreur/état              | Vérification                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `configuration_invalid`  | Chemin de config absolu, JSON valide, version `1`, champs connus et règles d’identifiant.                       |
+| `root_unavailable`       | Le dossier existe et le processus MCP peut y accéder.                                                           |
+| `capability_denied`      | La racine déclare la capacité exigée ; le mode ticket HTTP est activé et utilise une vraie authentification.    |
+| `path_not_allowed`       | Le chemin relatif correspond à `include` et pas à `exclude`.                                                    |
+| `path_link_unsupported`  | Retirer les symlinks ou jonctions du chemin demandé.                                                            |
+| `too_large`              | Limites de racine et budget agrégé du handoff local ou HTTP.                                                    |
+| `unsupported`            | Employer un texte UTF-8 avec `external_read`, ou un mode de handoff supporté pour le binaire.                   |
+| Ticket HTTP indisponible | Vérifier feature flag, auth, identité bearer, TTL, usage unique et redémarrage du service.                      |
+| Port inattendu           | Garder `MCP_HTTP_PORT_RETRIES=0` ou examiner le repli borné configuré.                                          |
+| Échec client distant     | Vérifier proxy TLS, allowlist Origin, métadonnées auth, confiance forwarding, firewall et compatibilité client. |
 
 Le serveur ne déduit jamais une nouvelle racine à partir d’un chemin trouvé dans
 une note Obsidian.
