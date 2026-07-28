@@ -846,7 +846,15 @@ export class ExternalRootsService {
   ): Promise<{ absolutePath: string; fileUri: string }> {
     const runtime = this.requireCapability(rootId, "move");
     const relativePath = normalizeRelativePath(requestedPath);
-    const absolutePath = await this.resolvePath(runtime, relativePath);
+    // Validate against the canonical confined object, but keep the configured
+    // root spelling for the user-facing locator. Windows realpath() may expand
+    // aliases or change drive/path casing even though both names identify the
+    // same configured root.
+    await this.resolvePath(runtime, relativePath);
+    const absolutePath = path.resolve(
+      runtime.config.path,
+      ...relativePath.split("/"),
+    );
     return {
       absolutePath,
       fileUri: pathToFileURL(absolutePath).href,
@@ -857,13 +865,21 @@ export class ExternalRootsService {
     snapshot: ExternalMoveSnapshot,
   ): Promise<{ sourceFileUri: string; targetFileUri: string }> {
     const runtime = this.requireCapability(snapshot.rootId, "move");
-    const sourcePath = await this.resolvePath(
+    await this.resolvePath(
       runtime,
       normalizeRelativePath(snapshot.sourceRelativePath),
     );
-    const targetPath = await this.resolveNewTarget(
+    await this.resolveNewTarget(
       runtime,
       normalizeRelativePath(snapshot.targetRelativePath),
+    );
+    const sourcePath = path.resolve(
+      runtime.config.path,
+      ...normalizeRelativePath(snapshot.sourceRelativePath).split("/"),
+    );
+    const targetPath = path.resolve(
+      runtime.config.path,
+      ...normalizeRelativePath(snapshot.targetRelativePath).split("/"),
     );
     return {
       sourceFileUri: pathToFileURL(sourcePath).href,
