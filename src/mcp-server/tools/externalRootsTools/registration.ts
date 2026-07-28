@@ -4,7 +4,9 @@ import {
   ExternalRootError,
   ExternalRootsService,
 } from "../../../services/externalRootsService.js";
+import { externalTransferBroker } from "../../../services/externalTransferBroker.js";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
+import { authContext } from "../../transports/auth/index.js";
 
 export const ExternalRootPathSchema = z
   .object({
@@ -43,6 +45,46 @@ function disabledError(): ExternalRootError {
     "configuration_invalid",
     "External roots are disabled. Configure MCP_EXTERNAL_ROOTS_FILE to enable them.",
   );
+}
+
+async function deliverExternalHandoff(
+  service: ExternalRootsService | undefined,
+  localHandoffAllowed: boolean,
+  params: z.infer<typeof ExternalHandoffSchema>,
+): Promise<unknown> {
+  if (!service) throw disabledError();
+
+  if (localHandoffAllowed) {
+    return service.handoff(
+      params.rootId,
+      params.relativePath,
+      params.includeHash,
+    );
+  }
+
+  if (!externalTransferBroker.enabled) {
+    throw new ExternalRootError(
+      "capability_denied",
+      "HTTP handoff is disabled. The direct HTTP profile can still use status, listing, stat, hashing, and bounded UTF-8 reads.",
+    );
+  }
+
+  const authInfo = authContext.getStore()?.authInfo;
+  if (!authInfo) {
+    throw new ExternalRootError(
+      "capability_denied",
+      "HTTP handoff requires an authenticated client identity.",
+    );
+  }
+
+  // HTTP delivery always carries an integrity digest, independently of the
+  // caller's includeHash preference, because the ticket contract relies on it.
+  const prepared = await service.handoff(
+    params.rootId,
+    params.relativePath,
+    true,
+  );
+  return externalTransferBroker.issue(prepared, authInfo);
 }
 
 export function externalRootsResult(operation: () => Promise<unknown>) {
@@ -101,6 +143,13 @@ export async function registerExternalRootsTools(
       enabled: Boolean(service),
       mode: "read-only",
       localHandoffAllowed,
+      handoffModes: [
+        ...(localHandoffAllowed ? (["local_path"] as const) : []),
+        ...(!localHandoffAllowed && externalTransferBroker.enabled
+          ? (["http_ticket"] as const)
+          : []),
+      ],
+      httpHandoff: externalTransferBroker.publicStatus(),
       roots: service ? await service.listRoots() : [],
     })),
   );
@@ -152,7 +201,7 @@ export async function registerExternalRootsTools(
 
   server.tool(
     "external_read",
-    "Reads bounded UTF-8 text from one explicitly allowed root-relative file. For binary and Office documents, a local stdio client can explicitly request external_handoff and use its own document tools.",
+    "Reads bounded UTF-8 text from one explicitly allowed root-relative file. Binary and Office documents require an explicit handoff mode supported by the active transport.",
     ExternalReadSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ExternalReadSchema>) =>
@@ -169,25 +218,12 @@ export async function registerExternalRootsTools(
 
   server.tool(
     "external_handoff",
-    "Returns a verified temporary local copy for an explicitly allowed stdio client so that its own document tools can process the file. A physical path is disclosed only by this explicit handoff.",
+    "Prepares one verified temporary copy of an explicitly allowed file. Stdio returns a local path; an authenticated HTTP profile may return a short-lived opaque download ticket. The source path is never returned over HTTP.",
     ExternalHandoffSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ExternalHandoffSchema>) =>
       externalRootsResult(() =>
-        !localHandoffAllowed
-          ? Promise.reject(
-              new ExternalRootError(
-                "capability_denied",
-                "Local path handoff is available only over the stdio transport.",
-              ),
-            )
-          : service
-            ? service.handoff(
-                params.rootId,
-                params.relativePath,
-                params.includeHash,
-              )
-            : Promise.reject(disabledError()),
+        deliverExternalHandoff(service, localHandoffAllowed, params),
       )(),
   );
 }
