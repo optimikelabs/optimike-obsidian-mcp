@@ -3,7 +3,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { readFile, rm, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AuthInfo } from "../mcp-server/transports/auth/core/authTypes.js";
 import { ExternalRootError } from "./externalRootsService.js";
@@ -50,7 +50,7 @@ type TicketEntry = {
   subject?: string;
   rootId: string;
   relativePath: string;
-  localPath: string;
+  buffer: Buffer;
   size: number;
   modifiedAt: string;
   sha256: string;
@@ -160,11 +160,14 @@ function mediaTypeFor(relativePath: string): string {
 }
 
 function safeFilename(relativePath: string): string {
-  const raw = path.basename(relativePath).replace(/[\u0000-\u001f\u007f"\\]/gu, "_");
+  const raw = path
+    .basename(relativePath)
+    .replace(/[\u0000-\u001f\u007f"\\]/gu, "_");
   if (!raw) return "artifact.bin";
   if (Buffer.byteLength(raw, "utf8") <= 160) return raw;
   const extension = path.extname(raw);
-  const boundedExtension = Buffer.byteLength(extension, "utf8") <= 32 ? extension : "";
+  const boundedExtension =
+    Buffer.byteLength(extension, "utf8") <= 32 ? extension : "";
   return `artifact${boundedExtension}`;
 }
 
@@ -180,14 +183,14 @@ export class ExternalTransferBroker {
   private lock: Promise<void> = Promise.resolve();
   private readonly sweepTimer?: ReturnType<typeof setInterval>;
 
-  constructor(options: ExternalTransferBrokerOptions = envOptions()) {
+  constructor(options?: ExternalTransferBrokerOptions) {
     const defaults = envOptions();
-    this.enabled = options.enabled ?? defaults.enabled;
-    this.ttlMs = options.ttlMs ?? defaults.ttlMs;
-    this.maxTickets = options.maxTickets ?? defaults.maxTickets;
-    this.maxFileBytes = options.maxFileBytes ?? defaults.maxFileBytes;
-    this.maxTotalBytes = options.maxTotalBytes ?? defaults.maxTotalBytes;
-    this.now = options.now ?? Date.now;
+    this.enabled = options?.enabled ?? defaults.enabled;
+    this.ttlMs = options?.ttlMs ?? defaults.ttlMs;
+    this.maxTickets = options?.maxTickets ?? defaults.maxTickets;
+    this.maxFileBytes = options?.maxFileBytes ?? defaults.maxFileBytes;
+    this.maxTotalBytes = options?.maxTotalBytes ?? defaults.maxTotalBytes;
+    this.now = options?.now ?? Date.now;
 
     if (this.enabled) {
       this.sweepTimer = setInterval(() => {
@@ -201,16 +204,20 @@ export class ExternalTransferBroker {
     enabled: boolean;
     endpoint: string;
     ticketHeader: string;
+    storage: "bounded_memory";
     ttlMs: number;
     maxFileBytes: number;
+    maxTotalBytes: number;
     maxTickets: number;
   } {
     return {
       enabled: this.enabled,
       endpoint: HTTP_HANDOFF_ENDPOINT,
       ticketHeader: HTTP_HANDOFF_TICKET_HEADER,
+      storage: "bounded_memory",
       ttlMs: this.ttlMs,
       maxFileBytes: this.maxFileBytes,
+      maxTotalBytes: this.maxTotalBytes,
       maxTickets: this.maxTickets,
     };
   }
@@ -219,74 +226,90 @@ export class ExternalTransferBroker {
     handoff: PreparedExternalHandoff,
     authInfo: AuthInfo,
   ): Promise<HttpExternalHandoffDescriptor> {
-    try {
-      return await this.withLock(async () => {
-        this.assertEnabled();
-        await this.pruneExpired();
-        if (!handoff.sha256) {
-          throw new ExternalRootError(
-            "non_verifiable",
-            "HTTP handoff requires a verified SHA-256 digest.",
-          );
-        }
-        if (handoff.size > this.maxFileBytes) {
-          throw new ExternalRootError(
-            "too_large",
-            `The artifact exceeds the ${this.maxFileBytes}-byte HTTP handoff limit.`,
-          );
-        }
-        const totalBytes = [...this.tickets.values()].reduce(
-          (total, entry) => total + entry.size,
-          0,
-        );
-        if (
-          this.tickets.size >= this.maxTickets ||
-          totalBytes + handoff.size > this.maxTotalBytes
-        ) {
-          throw new ExternalRootError(
-            "too_large",
-            "The bounded HTTP handoff capacity is currently exhausted.",
-          );
-        }
-
-        const ticket = randomBytes(32).toString("base64url");
-        const expiresAtMs = this.now() + this.ttlMs;
-        const mediaType = mediaTypeFor(handoff.path);
-        this.tickets.set(ticket, {
-          ticket,
-          tokenFingerprint: tokenFingerprint(authInfo),
-          clientId: authInfo.clientId,
-          subject: authInfo.subject,
-          rootId: handoff.rootId,
-          relativePath: handoff.path,
-          localPath: handoff.localPath,
-          size: handoff.size,
-          modifiedAt: handoff.modifiedAt,
-          sha256: handoff.sha256,
-          mediaType,
-          filename: safeFilename(handoff.path),
-          expiresAtMs,
-        });
-
-        return {
-          delivery: "http_ticket",
-          endpoint: HTTP_HANDOFF_ENDPOINT,
-          method: "GET",
-          ticketHeader: HTTP_HANDOFF_TICKET_HEADER,
-          ticket,
-          rootId: handoff.rootId,
-          path: handoff.path,
-          size: handoff.size,
-          modifiedAt: handoff.modifiedAt,
-          sha256: handoff.sha256,
-          mediaType,
-          expiresAt: new Date(expiresAtMs).toISOString(),
-        };
-      });
-    } catch (error) {
-      await rm(handoff.localPath, { force: true }).catch(() => undefined);
-      throw error;
+    this.assertEnabled();
+    if (!handoff.sha256) {
+      throw new ExternalRootError(
+        "non_verifiable",
+        "HTTP handoff requires a verified SHA-256 digest.",
+      );
     }
+    if (handoff.size > this.maxFileBytes) {
+      throw new ExternalRootError(
+        "too_large",
+        `The artifact exceeds the ${this.maxFileBytes}-byte HTTP handoff limit.`,
+      );
+    }
+
+    // The local handoff copy is owned by ExternalRootsService and may be cached
+    // for a later stdio or HTTP request. Never delete or mutate it here.
+    const fileStat = await stat(handoff.localPath);
+    if (!fileStat.isFile() || fileStat.size !== handoff.size) {
+      throw new ExternalRootError(
+        "non_verifiable",
+        "The verified handoff copy changed before ticket creation.",
+      );
+    }
+    const buffer = await readFile(handoff.localPath);
+    if (
+      buffer.length !== handoff.size ||
+      !constantTimeEqual(sha256(buffer), handoff.sha256)
+    ) {
+      throw new ExternalRootError(
+        "non_verifiable",
+        "The verified handoff copy failed integrity verification.",
+      );
+    }
+
+    return this.withLock(async () => {
+      await this.pruneExpired();
+      const totalBytes = [...this.tickets.values()].reduce(
+        (total, entry) => total + entry.size,
+        0,
+      );
+      if (
+        this.tickets.size >= this.maxTickets ||
+        totalBytes + handoff.size > this.maxTotalBytes
+      ) {
+        throw new ExternalRootError(
+          "too_large",
+          "The bounded HTTP handoff capacity is currently exhausted.",
+        );
+      }
+
+      const ticket = randomBytes(32).toString("base64url");
+      const expiresAtMs = this.now() + this.ttlMs;
+      const mediaType = mediaTypeFor(handoff.path);
+      this.tickets.set(ticket, {
+        ticket,
+        tokenFingerprint: tokenFingerprint(authInfo),
+        clientId: authInfo.clientId,
+        subject: authInfo.subject,
+        rootId: handoff.rootId,
+        relativePath: handoff.path,
+        buffer,
+        size: handoff.size,
+        modifiedAt: handoff.modifiedAt,
+        sha256: handoff.sha256,
+        mediaType,
+        filename: safeFilename(handoff.path),
+        expiresAtMs,
+      });
+
+      return {
+        delivery: "http_ticket",
+        endpoint: HTTP_HANDOFF_ENDPOINT,
+        method: "GET",
+        ticketHeader: HTTP_HANDOFF_TICKET_HEADER,
+        ticket,
+        rootId: handoff.rootId,
+        path: handoff.path,
+        size: handoff.size,
+        modifiedAt: handoff.modifiedAt,
+        sha256: handoff.sha256,
+        mediaType,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+      };
+    });
   }
 
   async consume(
@@ -299,68 +322,42 @@ export class ExternalTransferBroker {
     size: number;
     sha256: string;
   }> {
-    const entry = await this.withLock(async () => {
+    return this.withLock(async () => {
       this.assertEnabled();
       await this.pruneExpired();
-      const candidate = this.tickets.get(ticket);
-      if (!candidate || !this.sameIdentity(candidate, authInfo)) {
-        throw new ExternalRootError(
-          "not_found",
-          "The HTTP handoff ticket is invalid or unavailable.",
-        );
-      }
-      if (candidate.expiresAtMs <= this.now()) {
-        this.tickets.delete(ticket);
-        await rm(candidate.localPath, { force: true }).catch(() => undefined);
+      const entry = this.tickets.get(ticket);
+      if (!entry || !this.sameIdentity(entry, authInfo)) {
         throw new ExternalRootError(
           "not_found",
           "The HTTP handoff ticket is invalid or unavailable.",
         );
       }
 
-      // Claim before reading. A concurrent replay sees no ticket.
+      // Claim before returning bytes. A concurrent replay sees no ticket.
       this.tickets.delete(ticket);
-      return candidate;
-    });
-
-    try {
-      const fileStat = await stat(entry.localPath);
-      if (!fileStat.isFile() || fileStat.size !== entry.size) {
-        throw new ExternalRootError(
-          "non_verifiable",
-          "The staged handoff copy changed before delivery.",
-        );
-      }
-      const buffer = await readFile(entry.localPath);
       if (
-        buffer.length !== entry.size ||
-        !constantTimeEqual(sha256(buffer), entry.sha256)
+        entry.buffer.length !== entry.size ||
+        !constantTimeEqual(sha256(entry.buffer), entry.sha256)
       ) {
         throw new ExternalRootError(
           "non_verifiable",
-          "The staged handoff copy failed integrity verification.",
+          "The staged handoff snapshot failed integrity verification.",
         );
       }
       return {
-        buffer,
+        buffer: entry.buffer,
         filename: entry.filename,
         mediaType: entry.mediaType,
         size: entry.size,
         sha256: entry.sha256,
       };
-    } finally {
-      await rm(entry.localPath, { force: true }).catch(() => undefined);
-    }
+    });
   }
 
   async dispose(): Promise<void> {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     await this.withLock(async () => {
-      const entries = [...this.tickets.values()];
       this.tickets.clear();
-      await Promise.allSettled(
-        entries.map((entry) => rm(entry.localPath, { force: true })),
-      );
     });
   }
 
@@ -383,12 +380,8 @@ export class ExternalTransferBroker {
 
   private async pruneExpired(): Promise<void> {
     const now = this.now();
-    const expired = [...this.tickets.values()].filter(
-      (entry) => entry.expiresAtMs <= now,
-    );
-    for (const entry of expired) {
-      this.tickets.delete(entry.ticket);
-      await rm(entry.localPath, { force: true }).catch(() => undefined);
+    for (const entry of this.tickets.values()) {
+      if (entry.expiresAtMs <= now) this.tickets.delete(entry.ticket);
     }
   }
 
