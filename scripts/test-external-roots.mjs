@@ -39,6 +39,7 @@ try {
   await mkdir(path.join(rootPath, "secret"), { recursive: true });
   await mkdir(outsidePath, { recursive: true });
   await writeFile(path.join(rootPath, "hello.txt"), "Bonjour ÉLYSIA", "utf8");
+  await writeFile(path.join(rootPath, "empty.txt"), "", "utf8");
   await writeFile(path.join(rootPath, "LICENSE"), "private license", "utf8");
   await writeFile(
     path.join(rootPath, "docs", "note.md"),
@@ -128,11 +129,21 @@ try {
     await readdir(path.dirname(handoff.localPath))
   ).filter((name) => name !== ".owner.json");
   assert.equal(retainedCopies.length, 16);
-  await service.pruneHandoffDirectory(path.dirname(handoff.localPath), 0);
+  await service.pruneHandoffDirectory(
+    path.dirname(handoff.localPath),
+    0,
+    false,
+  );
   const retainedAfterSweep = (await readdir(path.dirname(handoff.localPath)))
     .filter((name) => name !== ".owner.json")
     .sort();
   assert.deepEqual(retainedAfterSweep, retainedCopies.sort());
+  const emptyHandoff = await service.handoff("pilot.docs", "empty.txt", false);
+  assert.equal((await readFile(emptyHandoff.localPath)).length, 0);
+  const retainedAfterEmptyHandoff = (
+    await readdir(path.dirname(emptyHandoff.localPath))
+  ).filter((name) => name !== ".owner.json");
+  assert.equal(retainedAfterEmptyHandoff.length, 16);
 
   const abandonedHandoffDirectory = await mkdtemp(
     path.join(os.tmpdir(), "optimike-external-handoff-"),

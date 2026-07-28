@@ -534,7 +534,7 @@ export class ExternalRootsService {
     }
     return this.withHandoffLock(async () => {
       const directory = await this.getHandoffDirectory();
-      await this.pruneHandoffDirectory(directory, buffer.length);
+      await this.pruneHandoffDirectory(directory, buffer.length, true);
       const localPath = path.join(
         directory,
         `${randomUUID()}-${path.basename(relativePath)}`,
@@ -568,7 +568,7 @@ export class ExternalRootsService {
       void this.withHandoffLock(async () => {
         if (this.handoffDirectory) {
           await this.writeHandoffOwner(this.handoffDirectory, "w");
-          await this.pruneHandoffDirectory(this.handoffDirectory, 0);
+          await this.pruneHandoffDirectory(this.handoffDirectory, 0, false);
         }
       }).catch(() => undefined);
     }, HANDOFF_SWEEP_INTERVAL_MS);
@@ -598,6 +598,7 @@ export class ExternalRootsService {
   private async pruneHandoffDirectory(
     directory: string,
     incomingBytes: number,
+    reserveIncomingFile: boolean,
   ): Promise<void> {
     const now = Date.now();
     const files: Array<{
@@ -623,7 +624,7 @@ export class ExternalRootsService {
     files.sort((a, b) => a.modifiedAt - b.modifiedAt);
     let totalBytes = files.reduce((total, file) => total + file.size, 0);
     while (
-      files.length + (incomingBytes > 0 ? 1 : 0) > HANDOFF_MAX_FILES ||
+      files.length + (reserveIncomingFile ? 1 : 0) > HANDOFF_MAX_FILES ||
       totalBytes + incomingBytes > HANDOFF_MAX_TOTAL_BYTES
     ) {
       const oldest = files.shift();
