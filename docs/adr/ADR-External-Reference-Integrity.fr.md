@@ -31,6 +31,13 @@ Ajouter un workflow réservé au stdio local :
 5. `external_move_rollback` restaure les deux surfaces si toutes les
    préconditions tiennent encore.
 
+La réparation des références fait volontairement partie de
+`external_move_plan` et `external_move_apply` ; il n’existe pas d’outils
+séparés `external_links_repair_plan` ou `external_links_repair_apply`. Le move
+du fichier et les réparations exactes de notes constituent une seule transaction
+compensatoire : un client ne peut pas appliquer une surface en laissant
+silencieusement l’autre incohérente.
+
 Le scan et le plan sont en lecture seule. L’apply et le rollback exigent les
 trois autorisations positives :
 
@@ -63,11 +70,24 @@ segments vides, séparateurs encodés, hôtes UNC, fragments et query strings.
 Le token n’autorise pas l’accès filesystem et n’est pas un protocole URI
 personnalisé. La racine configurée reste l’unique frontière d’autorisation.
 
+Le token sérialisé ne contient que l’identité logique stable. Lors du scan et du
+plan, l’enregistrement complet porte aussi le SHA-256 source, la classification
+de l’occurrence et le chemin de la note source. Le hash et le chemin de note
+sont des preuves mutables, pas l’identité durable ; ils ne sont donc pas
+intégrés au token.
+
 Seule une paire exacte token/lien dans un paragraphe Markdown actif est
 réparable automatiquement. Chemins nus, tokens orphelins, paires incohérentes,
 liens candidats multiples, syntaxes non supportées et références sous des
 headings d’historique, archive, exemple, release notes ou changelog exigent une
 revue manuelle. Toute occurrence en revue manuelle bloque l’apply.
+
+Le scanner utilise un AST Markdown. Les blocs de code fenced ne sont pas
+parcourus et le frontmatter YAML est exclu. Un chemin libre, une propriété YAML
+ou un chemin simplement placé sous une rubrique d’artefacts n’est pas promu en
+référence canonique. Les chemins physiques pertinents et les autres formes non
+supportées sont signalés pour revue manuelle et ne sont jamais réécrits par
+supposition.
 
 ## Transaction filesystem
 
@@ -145,5 +165,6 @@ Ces capacités exigent une valeur ÉLYSIA démontrée et une décision séparée
 
 La régression doit couvrir parsing canonique, références exclues ou ambiguës,
 collision cible, source modifiée, note modifiée, move sans écrasement,
-compensation, rollback, journal résilient au redémarrage, refus HTTP et
+échec après une partie des réparations de notes, compensation, rollback, les
+deux états durables entourant la frontière hard-link/unlink, refus HTTP et
 non-divulgation des chemins, sous Windows et Linux lorsque pertinent.
