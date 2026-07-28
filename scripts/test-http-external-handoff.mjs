@@ -68,11 +68,18 @@ async function sendThenDisconnect(url, headers) {
         const requestHeaders = Object.entries(headers)
           .map(([name, value]) => `${name}: ${value}`)
           .join("\r\n");
+        socket.setNoDelay(true);
         socket.write(
           `GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\n${requestHeaders}\r\nConnection: close\r\n\r\n`,
+          (error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            socket.destroy();
+            resolve();
+          },
         );
-        socket.destroy();
-        resolve();
       },
     );
     socket.once("error", reject);
