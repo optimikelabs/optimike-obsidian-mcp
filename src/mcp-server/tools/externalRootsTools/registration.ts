@@ -1,12 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
+import { config } from "../../../config/index.js";
 import {
   ExternalRootError,
   ExternalRootsService,
 } from "../../../services/externalRootsService.js";
 import { externalTransferBroker } from "../../../services/externalTransferBroker.js";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
-import { authContext } from "../../transports/auth/index.js";
 
 export const ExternalRootPathSchema = z
   .object({
@@ -47,10 +48,22 @@ function disabledError(): ExternalRootError {
   );
 }
 
+function secureHttpIdentityConfigured(): boolean {
+  return (
+    config.mcpAuthMode === "oauth" ||
+    (config.mcpAuthMode === "jwt" && Boolean(config.mcpAuthSecretKey))
+  );
+}
+
+function httpHandoffAvailable(): boolean {
+  return externalTransferBroker.enabled && secureHttpIdentityConfigured();
+}
+
 async function deliverExternalHandoff(
   service: ExternalRootsService | undefined,
   localHandoffAllowed: boolean,
   params: z.infer<typeof ExternalHandoffSchema>,
+  authInfo: AuthInfo | undefined,
 ): Promise<unknown> {
   if (!service) throw disabledError();
 
@@ -68,8 +81,12 @@ async function deliverExternalHandoff(
       "HTTP handoff is disabled. The direct HTTP profile can still use status, listing, stat, hashing, and bounded UTF-8 reads.",
     );
   }
-
-  const authInfo = authContext.getStore()?.authInfo;
+  if (!secureHttpIdentityConfigured()) {
+    throw new ExternalRootError(
+      "capability_denied",
+      "HTTP handoff requires JWT with a configured secret or OAuth with a validated issuer and audience.",
+    );
+  }
   if (!authInfo) {
     throw new ExternalRootError(
       "capability_denied",
@@ -145,11 +162,15 @@ export async function registerExternalRootsTools(
       localHandoffAllowed,
       handoffModes: [
         ...(localHandoffAllowed ? (["local_path"] as const) : []),
-        ...(!localHandoffAllowed && externalTransferBroker.enabled
+        ...(!localHandoffAllowed && httpHandoffAvailable()
           ? (["http_ticket"] as const)
           : []),
       ],
-      httpHandoff: externalTransferBroker.publicStatus(),
+      httpHandoff: {
+        ...externalTransferBroker.publicStatus(),
+        available: httpHandoffAvailable(),
+        authenticatedIdentityRequired: true,
+      },
       roots: service ? await service.listRoots() : [],
     })),
   );
@@ -221,9 +242,17 @@ export async function registerExternalRootsTools(
     "Prepares one verified temporary copy of an explicitly allowed file. Stdio returns a local path; an authenticated HTTP profile may return a short-lived opaque download ticket. The source path is never returned over HTTP.",
     ExternalHandoffSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ExternalHandoffSchema>) =>
+    async (
+      params: z.infer<typeof ExternalHandoffSchema>,
+      extra,
+    ) =>
       externalRootsResult(() =>
-        deliverExternalHandoff(service, localHandoffAllowed, params),
+        deliverExternalHandoff(
+          service,
+          localHandoffAllowed,
+          params,
+          extra.authInfo,
+        ),
       )(),
   );
 }
