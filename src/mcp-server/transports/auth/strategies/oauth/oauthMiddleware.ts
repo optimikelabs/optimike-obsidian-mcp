@@ -1,9 +1,9 @@
 /**
  * @fileoverview Hono middleware for OAuth 2.1 Bearer Token validation.
- * This middleware extracts a JWT from the Authorization header, validates it against
- * a remote JWKS (JSON Web Key Set), and checks its issuer and audience claims.
- * On success, it populates an AuthInfo object and stores it in an AsyncLocalStorage
- * context for use in downstream handlers.
+ *
+ * The middleware validates JWT bearer tokens against the configured issuer,
+ * audience and JWKS. It retains only verified claims plus the token required by
+ * downstream ticket binding. Raw tokens are never logged.
  *
  * @module src/mcp-server/transports/auth/strategies/oauth/oauthMiddleware
  */
@@ -18,8 +18,6 @@ import { ErrorHandler } from "../../../../../utils/internal/errorHandler.js";
 import { authContext } from "../../core/authContext.js";
 import type { AuthInfo } from "../../core/authTypes.js";
 
-// --- Startup Validation ---
-// Ensures that necessary OAuth configuration is present when the mode is 'oauth'.
 if (config.mcpAuthMode === "oauth") {
   if (!config.oauthIssuerUrl) {
     throw new Error(
@@ -38,8 +36,6 @@ if (config.mcpAuthMode === "oauth") {
   );
 }
 
-// --- JWKS Client Initialization ---
-// The remote JWK set is fetched and cached to avoid network calls on every request.
 let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 if (config.mcpAuthMode === "oauth" && config.oauthIssuerUrl) {
   try {
@@ -48,8 +44,8 @@ if (config.mcpAuthMode === "oauth" && config.oauthIssuerUrl) {
         `${config.oauthIssuerUrl.replace(/\/$/, "")}/.well-known/jwks.json`,
     );
     jwks = createRemoteJWKSet(jwksUrl, {
-      cooldownDuration: 300000, // 5 minutes
-      timeoutDuration: 5000, // 5 seconds
+      cooldownDuration: 300000,
+      timeoutDuration: 5000,
     });
     logger.info(
       `JWKS client initialized for URL: ${jwksUrl.href}`,
@@ -65,22 +61,14 @@ if (config.mcpAuthMode === "oauth" && config.oauthIssuerUrl) {
         operation: "oauthMiddlewareSetup",
       }),
     );
-    // Prevent server from starting if JWKS setup fails in oauth mode
     process.exit(1);
   }
 }
 
-/**
- * Hono middleware for verifying OAuth 2.1 JWT Bearer tokens.
- * It validates the token and uses AsyncLocalStorage to pass auth info.
- * @param c - The Hono context object.
- * @param next - The function to call to proceed to the next middleware.
- */
 export async function oauthMiddleware(
   c: Context<{ Bindings: HttpBindings }>,
   next: Next,
 ) {
-  // If OAuth is not the configured auth mode, skip this middleware.
   if (config.mcpAuthMode !== "oauth") {
     return await next();
   }
@@ -92,8 +80,6 @@ export async function oauthMiddleware(
   });
 
   if (!jwks) {
-    // This should not happen if startup validation is correct, but it's a safeguard.
-    // This should not happen if startup validation is correct, but it's a safeguard.
     throw new McpError(
       BaseErrorCode.CONFIGURATION_ERROR,
       "OAuth middleware is active, but JWKS client is not initialized.",
@@ -117,9 +103,13 @@ export async function oauthMiddleware(
       audience: config.oauthAudience!,
     });
 
-    // The 'scope' claim is typically a space-delimited string in OAuth 2.1.
     const scopes =
-      typeof payload.scope === "string" ? payload.scope.split(" ") : [];
+      typeof payload.scope === "string"
+        ? payload.scope.split(" ").filter(Boolean)
+        : Array.isArray(payload.scp) &&
+            payload.scp.every((scope) => typeof scope === "string")
+          ? (payload.scp as string[])
+          : [];
 
     if (scopes.length === 0) {
       logger.warning(
@@ -133,7 +123,11 @@ export async function oauthMiddleware(
     }
 
     const clientId =
-      typeof payload.client_id === "string" ? payload.client_id : undefined;
+      typeof payload.client_id === "string"
+        ? payload.client_id
+        : typeof payload.cid === "string"
+          ? payload.cid
+          : undefined;
 
     if (!clientId) {
       logger.warning(
@@ -151,13 +145,22 @@ export async function oauthMiddleware(
       clientId,
       scopes,
       subject: typeof payload.sub === "string" ? payload.sub : undefined,
+      issuer:
+        typeof payload.iss === "string" ? payload.iss : config.oauthIssuerUrl!,
     };
 
-    // Attach to the raw request for potential legacy compatibility and
-    // store in AsyncLocalStorage for modern, safe access in handlers.
     c.env.incoming.auth = authInfo;
+    logger.debug("OAuth token verified successfully.", {
+      ...context,
+      clientId: authInfo.clientId,
+      subjectPresent: Boolean(authInfo.subject),
+      issuer: authInfo.issuer,
+      scopes: authInfo.scopes,
+    });
     await authContext.run({ authInfo }, next);
   } catch (error: unknown) {
+    if (error instanceof McpError) throw error;
+
     if (error instanceof Error && error.name === "JWTExpired") {
       logger.warning("Authentication failed: OAuth token expired.", context);
       throw new McpError(BaseErrorCode.UNAUTHORIZED, "Token expired.");
@@ -166,18 +169,12 @@ export async function oauthMiddleware(
     const handledError = ErrorHandler.handleError(error, {
       operation: "oauthMiddleware",
       context,
-      rethrow: false, // We will throw a new McpError below
+      rethrow: false,
     });
-
-    // Ensure we always throw an McpError for consistency
-    if (handledError instanceof McpError) {
-      throw handledError;
-    } else {
-      throw new McpError(
-        BaseErrorCode.UNAUTHORIZED,
-        `Unauthorized: ${handledError.message || "Invalid token"}`,
-        { originalError: handledError.name },
-      );
-    }
+    logger.warning("Authentication failed: OAuth token verification rejected.", {
+      ...context,
+      errorName: handledError.name,
+    });
+    throw new McpError(BaseErrorCode.UNAUTHORIZED, "Invalid token.");
   }
 }
