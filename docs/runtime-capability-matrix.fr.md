@@ -2,9 +2,9 @@
 
 Version anglaise : [runtime-capability-matrix.md](runtime-capability-matrix.md)
 
-Docs liées : [README](../README.fr.md), [Guide d’exploitation](../OPERATIONS.fr.md), [Profil serveur headless](headless-server-profile.fr.md), [Guide de routage MCP](mcp-routing-guide.fr.md)
+Docs liées : [README](../README.fr.md), [Guide d’exploitation](../OPERATIONS.fr.md), [Profil serveur headless](headless-server-profile.fr.md), [Guide de routage MCP](mcp-routing-guide.fr.md), [Configuration des racines externes](external-roots-setup.fr.md)
 
-Optimike Obsidian MCP a cinq contrats runtime. Les modes headless tournent au-dessus d’un vault Markdown synchronisé. Ils ne lancent pas Obsidian Desktop, ne chargent pas les plugins communautaires, n’exposent pas la command palette et ne donnent pas l’état live de l’UI.
+Optimike Obsidian MCP possède cinq contrats runtime. Les modes headless tournent au-dessus d’un vault Markdown synchronisé. Ils ne lancent pas Obsidian Desktop, ne chargent pas les plugins communautaires, n’exposent pas la palette de commandes et ne donnent pas l’état live de l’interface.
 
 ## Usage recommandé
 
@@ -37,7 +37,7 @@ Optimike Obsidian MCP a cinq contrats runtime. Les modes headless tournent au-de
 | Tags                                   | Outil REST complet             | Outil REST complet                    | Non                       | Non                             | Non                                 | Tags frontmatter, tags inline, index/audit local, rename avec dry-run      |
 | Admin filesystem                       | Via REST selon outil           | Via REST selon outil                  | Non                       | Non                             | Non                                 | Archive, batch move, batch delete en dry-run par défaut                    |
 | Move/delete                            | Outils REST complets           | Outils REST complets                  | Non                       | Non                             | Non                                 | Move/rename + delete, tous deux avec `expectedHash` ou `expectedMtime`     |
-| Active file / UI / commandes           | Via Desktop/plugin             | Via Desktop/plugin                    | Non                       | Non                             | Non                                 | Non                                                                        |
+| Active file / UI / commandes           | Via Desktop/plugin             | Via Desktop/plugin tant que l’API répond | Non                    | Non                             | Non                                 | Non                                                                        |
 | Bases list/schema/query                | Bases Bridge REST              | Bases Bridge REST                     | Non                       | Fallback local en lecture seule | Fallback local en lecture seule     | Fallback local avec filtres simples (`eq`, `contains`, `in`, comparaisons) |
 | Bases create/upsert                    | Bases Bridge REST              | Bases Bridge REST                     | Non                       | Non                             | Non                                 | `.base` YAML create/config + rows -> frontmatter `set`                     |
 | JSON Canvas create/edit                | Via outil filesystem si activé | Via outil filesystem si activé        | Non                       | Non                             | Non                                 | `.canvas` minimal : create, text node, edge, validate                      |
@@ -48,8 +48,19 @@ Optimike Obsidian MCP a cinq contrats runtime. Les modes headless tournent au-de
 Tous les modes enregistrent aussi `external_runtime_status`,
 `external_roots_list`, `external_list`, `external_stat`, `external_read` et
 `external_handoff`. Sans `MCP_EXTERNAL_ROOTS_FILE`, le statut reste désactivé et
-les opérations échouent fermées. Le handoff du chemin physique est limité à
-stdio.
+les opérations échouent fermées.
+
+La livraison du handoff est un contrat de transport, pas une capacité d’écriture
+du mode runtime :
+
+- le stdio expose un `local_path` vérifié, géré par le cycle de vie local du
+  handoff ;
+- le HTTP direct peut exposer un `http_ticket` authentifié uniquement si
+  `MCP_HTTP_HANDOFF_ENABLED=true` ;
+- le ticket HTTP reste en lecture seule, expurgé de tout chemin physique, borné,
+  à usage unique et désactivé par défaut ;
+- aucun mode runtime ne gagne d’upload, create, replace, move, delete ou sync sur
+  une racine externe grâce à ce profil de livraison.
 
 | Mode runtime                     | Tools enregistrées                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -67,11 +78,14 @@ stdio.
 - Les écritures guarded utilisent des chemins relatifs au vault, rejettent les chemins absolus et les traversals, écrivent atomiquement et acceptent des préconditions `expectedHash` ou `expectedMtime`.
 - Le move/delete filesystem headless requiert une précondition `expectedHash` ou `expectedMtime`.
 - Les tags headless modifient le texte Markdown (`tags` frontmatter ou `#tags` inline) et peuvent produire un index local depuis le cache.
-- Le rename global de tags reste une fonction filesystem : dry-run d'abord, puis apply seulement sur copie ou vault serveur dédié.
+- Le rename global de tags reste une fonction filesystem : dry-run d’abord, puis apply seulement sur copie ou vault serveur dédié.
 - `obsidian_admin_filesystem` sert aux opérations admin explicites ; il ne doit pas remplacer les outils de lecture/écriture courants.
-- `obsidian_validate_format` est un validateur local. Il améliore la sûreté des sorties agent, mais ne rend pas Obsidian, ne charge pas les plugins et n'évalue pas la sémantique exacte de l'UI Bases.
+- `obsidian_validate_format` est un validateur local. Il améliore la sûreté des sorties agent, mais ne rend pas Obsidian, ne charge pas les plugins et n’évalue pas la sémantique exacte de l’interface Bases.
 - `obsidian_manage_canvas` reste volontairement minimal et filesystem-only : create, ajout de nœud texte, connexion de nœuds, validation.
 - Le batch frontmatter headless démarre en dry-run et ne supporte que `set` ; les clés protégées restent bloquées par policy.
 - Les écritures Bases headless écrivent des fichiers `.base` et des propriétés frontmatter ; elles n’évaluent pas les vues, formules ou propriétés calculées d’Obsidian.
 - La politique d’exclusion protège les scans Optimike cache/search/tasks/Bases. Elle n’empêche pas Obsidian Sync de télécharger les fichiers.
+- Un service HTTP local doit rester lié au loopback, valider les origines fournies, ignorer les headers de forwarding sans proxy de confiance et employer un port déterministe par défaut.
+- Un profil HTTP distant reste un pilote derrière des contrôles TLS, auth, proxy et réseau revus. L’exposition publique directe n’est pas supportée.
+- Les tickets HTTP d’artefacts exigent une vraie identité authentifiée et n’autorisent jamais une mutation de racine externe.
 - Une validation d’écriture headless doit créer un nouveau brouillon dans un dossier sandbox. Elle ne doit pas modifier des notes existantes d’un vrai vault.
