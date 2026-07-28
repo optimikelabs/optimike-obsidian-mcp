@@ -117,15 +117,33 @@ The ticket is:
 
 - random and unguessable;
 - bound to the bearer-token fingerprint, client ID, and subject;
-- scoped to one staged file;
+- scoped to one verified snapshot;
 - short-lived;
-- claimed atomically before reading;
+- claimed atomically before delivery;
 - single-use;
-- deleted with its staged copy after success, failure, or expiry.
+- removed with its bounded in-memory snapshot after use or expiry.
 
 A cross-client attempt receives the same generic unavailable response as an
 unknown, expired, or replayed ticket. The ticket is not placed in a URL, query,
 redirect, filename, or log field.
+
+## Ownership of the verified copies
+
+`ExternalRootsService` remains the sole owner of the verified local handoff copy
+and its existing bounded cache. The HTTP transfer broker must not delete, rename,
+or mutate that service-owned file.
+
+When a ticket is issued, the broker:
+
+1. reads the already verified local handoff copy;
+2. rechecks its size and SHA-256;
+3. keeps an independent bounded memory snapshot for the ticket lifetime;
+4. leaves the service-owned copy under the existing one-hour, 16-file and
+   512-MiB lifecycle.
+
+This prevents an HTTP ticket from invalidating a later stdio or HTTP handoff of
+the same source. The additional memory snapshot is governed by stricter HTTP
+budgets and a much shorter TTL.
 
 ## Why an auxiliary endpoint
 
@@ -135,8 +153,8 @@ handling. Streaming arbitrary binary bytes through the MCP JSON response would
 also blur transport and business semantics.
 
 The chosen endpoint remains inside the same authenticated process boundary but
-outside the MCP JSON body. The MCP tool authorizes and stages the transfer; the
-auxiliary endpoint consumes the resulting capability ticket.
+outside the MCP JSON body. The MCP tool authorizes and snapshots the transfer;
+the auxiliary endpoint consumes the resulting capability ticket.
 
 This endpoint is not a generic file server. It has no root, path, directory, or
 upload parameter.
@@ -159,9 +177,9 @@ The download response contains the bytes, content length, media type, a safe
 filename, and `X-Artifact-SHA256`. It does not contain root ID, relative path,
 source path, temporary path, user profile, or drive layout.
 
-The delivered object is the verified snapshot prepared at handoff time. A later
-change to the source does not silently change the prepared snapshot; the hash
-identifies exactly what was delivered.
+The delivered object is the verified snapshot prepared at ticket-issuance time.
+A later change to the source does not silently change the prepared snapshot; the
+hash identifies exactly what was delivered.
 
 ## Limits and lifecycle
 
@@ -169,15 +187,15 @@ Defaults for the opt-in HTTP pilot:
 
 - 60-second ticket TTL;
 - 16 active tickets;
-- 25 MiB per file;
-- 128 MiB total staged bytes;
-- one process-local ticket store;
+- 25 MiB per snapshot;
+- 128 MiB total ticket snapshots;
+- one process-local in-memory ticket store;
 - no persistence across restart;
 - no replay after claim.
 
-All budgets are independently bounded below the existing local handoff ceiling.
-Environment overrides are bounded and validated. Restart invalidates every
-outstanding session and ticket, which is a safe failure mode.
+All HTTP budgets are independently bounded below the existing local handoff
+ceiling. Environment overrides are bounded and validated. Restart invalidates
+every outstanding session and ticket, which is a safe failure mode.
 
 ## HTTP lifecycle and supervision
 
@@ -272,14 +290,14 @@ locking semantics.
 | Symlink/junction/reparse escape | Root boundary | Link swapped into path | Component checks, canonical confinement and opened-handle identity checks | Symlink and Windows junction fixtures | `MITIGATE` |
 | Swap after validation | File integrity | Ancestor or file replaced | Re-resolve and compare device/inode around open/read | Simulated identity swap | `MITIGATE` |
 | TOCTOU during read | File integrity | Concurrent writer | Handle stats and final path identity revalidation | Mutate during read | `MITIGATE` |
-| Source changes after staging | Provenance | Legitimate concurrent edit | Deliver immutable staged snapshot with SHA-256 and timestamp | Change source after ticket issue | `ACCEPT` |
+| Source changes after snapshot | Provenance | Legitimate concurrent edit | Deliver immutable in-memory snapshot with SHA-256 and timestamp | Change source after ticket issue | `ACCEPT` |
 | Unauthorized client | Confidentiality | Missing/invalid bearer | JWT/OAuth middleware plus authenticated tool metadata | Missing, invalid and valid auth | `MITIGATE` |
-| Ticket replay | Confidentiality | Same client reuses ticket | Claim and delete before read | Second consume fails | `MITIGATE` |
+| Ticket replay | Confidentiality | Same client reuses ticket | Claim and delete before delivery | Second consume fails | `MITIGATE` |
 | Ticket transferred to another client | Confidentiality | Ticket leakage | Bind to token fingerprint, client ID and subject | Different-token and different-client attempts | `MITIGATE` |
-| Expiry failure | Confidentiality/disk | Stale ticket retained | Bounded TTL sweep and consume-time expiry | Controlled clock expiry | `MITIGATE` |
+| Expiry failure | Confidentiality/memory | Stale ticket retained | Bounded TTL sweep and consume-time expiry | Controlled clock expiry | `MITIGATE` |
 | Partial download | Client result | Network interruption | SHA-256 and content length allow client verification; ticket is consumed | Abort client and verify no replay | `ACCEPT` |
-| Oversized file | Memory/disk | Large allowed source | Root limit plus lower HTTP file and aggregate limits | Boundary and over-limit tests | `MITIGATE` |
-| Disk or memory exhaustion | Availability | Many concurrent tickets | Ticket count, byte budget, serialized claims, expiry | Capacity and concurrency tests | `MITIGATE` |
+| Oversized file | Memory | Large allowed source | Root limit plus lower HTTP file and aggregate-memory limits | Boundary and over-limit tests | `MITIGATE` |
+| Memory exhaustion | Availability | Many concurrent tickets | Ticket count, byte budget, serialized claims, expiry | Capacity and concurrency tests | `MITIGATE` |
 | Malicious archive | Client execution | Crafted ZIP/Office/PDF | Broker never executes, extracts or renders content | Binary pass-through fixture | `ACCEPT` |
 | Active content | Client safety | Macros/scripts in document | Content-Type only; client harness owns sandbox/extraction policy | Document remains opaque bytes | `DEFER` |
 | Concurrent writes | Source integrity | Multiple mutation clients | No mutation surface in this ADR | Assert no mutating external tool | `REJECT` for current scope |
