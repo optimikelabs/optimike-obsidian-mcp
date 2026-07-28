@@ -8,7 +8,6 @@ import {
   readdir,
   rm,
   symlink,
-  utimes,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -127,8 +126,41 @@ try {
     longSourceName,
     false,
   );
-  assert.match(path.basename(longNameHandoff.localPath), /^[0-9a-f-]{36}\.txt$/);
+  assert.match(
+    path.basename(longNameHandoff.localPath),
+    /^[0-9a-f-]{36}\.txt$/,
+  );
   assert.equal(await readFile(longNameHandoff.localPath, "utf8"), "long name");
+  const longExtensionCopy = await service.withHandoffLock(() =>
+    service.createHandoffCopy(
+      `source.${"x".repeat(220)}`,
+      Buffer.from("long extension"),
+    ),
+  );
+  assert.match(path.basename(longExtensionCopy), /^[0-9a-f-]{36}$/);
+  assert.equal(await readFile(longExtensionCopy, "utf8"), "long extension");
+  const originalReadVerifiedBuffer = service.readVerifiedBuffer.bind(service);
+  let activeHandoffReads = 0;
+  let maxConcurrentHandoffReads = 0;
+  service.readVerifiedBuffer = async (...args) => {
+    activeHandoffReads += 1;
+    maxConcurrentHandoffReads = Math.max(
+      maxConcurrentHandoffReads,
+      activeHandoffReads,
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return await originalReadVerifiedBuffer(...args);
+    } finally {
+      activeHandoffReads -= 1;
+    }
+  };
+  await Promise.all([
+    service.handoff("pilot.docs", "hello.txt", false),
+    service.handoff("pilot.docs", "hello.txt", false),
+  ]);
+  service.readVerifiedBuffer = originalReadVerifiedBuffer;
+  assert.equal(maxConcurrentHandoffReads, 1);
 
   for (let index = 0; index < 16; index += 1) {
     await service.handoff("pilot.docs", "hello.txt", false);
@@ -158,9 +190,17 @@ try {
     path.join(os.tmpdir(), "optimike-external-handoff-"),
   );
   const abandonedOwner = path.join(abandonedHandoffDirectory, ".owner.json");
-  await writeFile(abandonedOwner, JSON.stringify({ pid: process.pid }), "utf8");
-  const staleHeartbeat = new Date(Date.now() - 21 * 60 * 1000);
-  await utimes(abandonedOwner, staleHeartbeat, staleHeartbeat);
+  await writeFile(
+    abandonedOwner,
+    JSON.stringify({
+      kind: "optimike-external-handoff",
+      version: 1,
+      pid: process.pid,
+      startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      heartbeatAt: new Date(Date.now() - 21 * 60 * 1000).toISOString(),
+    }),
+    "utf8",
+  );
   await writeFile(
     path.join(abandonedHandoffDirectory, "sensitive.txt"),
     "stale",
@@ -180,6 +220,17 @@ try {
   });
   await scavengingService.listRoots();
   await assert.rejects(() => access(abandonedHandoffDirectory));
+  const unownedDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-external-handoff-"),
+  );
+  await writeFile(path.join(unownedDirectory, "unrelated.txt"), "keep", "utf8");
+  const nonDeletingService = ExternalRootsService.fromConfig({
+    version: 1,
+    roots: [],
+  });
+  await nonDeletingService.listRoots();
+  await access(path.join(unownedDirectory, "unrelated.txt"));
+  await rm(unownedDirectory, { recursive: true, force: true });
 
   const handlers = new Map();
   const annotations = new Map();
