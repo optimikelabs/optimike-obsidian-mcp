@@ -256,7 +256,11 @@ try {
     targetRelativePath: "archive/coordinated.txt",
     idempotencyKey: "coordinator-round-trip",
   });
-  assert.equal(coordinatedPlan.readyToApply, true);
+  assert.equal(
+    coordinatedPlan.readyToApply,
+    true,
+    JSON.stringify(coordinatedPlan),
+  );
   assert.equal(coordinatedPlan.repairs.length, 1);
   assert.equal(coordinatedPlan.manualReview.length, 0);
 

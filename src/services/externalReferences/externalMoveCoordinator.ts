@@ -800,10 +800,11 @@ export class ExternalMoveCoordinator {
             occurrence.token?.rootId !== snapshot.rootId ||
             occurrence.token.relativePath !== snapshot.sourceRelativePath ||
             !occurrence.fileLink ||
-            !samePhysicalPath(
-              occurrence.fileLink.localPath,
-              location.absolutePath,
-            ),
+            (occurrence.fileLink.url !== oldFileUri &&
+              !samePhysicalPath(
+                occurrence.fileLink.localPath,
+                location.absolutePath,
+              )),
         )
       ) {
         manualReview.push({
