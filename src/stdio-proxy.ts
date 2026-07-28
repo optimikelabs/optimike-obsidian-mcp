@@ -14,6 +14,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import {
   ExternalHandoffSchema,
+  ExternalListSchema,
+  ExternalReadSchema,
+  ExternalStatSchema,
   externalRootsResult,
 } from "./mcp-server/tools/externalRootsTools/registration.js";
 import { ensureLocalBackendRunning } from "./runtime/localBackend.js";
@@ -50,6 +53,40 @@ const proxyServer = new Server(
 
 let backend: BackendClient | undefined;
 let externalRootsService: ExternalRootsService | undefined;
+
+function disabledExternalRoots(): Promise<never> {
+  return Promise.reject(
+    new ExternalRootError(
+      "configuration_invalid",
+      "External roots are disabled. Configure MCP_EXTERNAL_ROOTS_FILE to enable them.",
+    ),
+  );
+}
+
+function invalidExternalArguments(
+  toolName: string,
+  message: string,
+): {
+  content: Array<{ type: "text"; text: string }>;
+  isError: true;
+} {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            error: "path_invalid",
+            message: `Invalid ${toolName} arguments: ${message}`,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+    isError: true,
+  };
+}
 
 function isReconnectableBackendError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -162,27 +199,87 @@ async function start() {
       }))();
     }
 
+    if (request.params.name === "external_roots_list") {
+      return externalRootsResult(async () => ({
+        roots: externalRootsService
+          ? await externalRootsService.listRoots()
+          : [],
+      }))();
+    }
+
+    if (request.params.name === "external_list") {
+      const parsed = ExternalListSchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
+      }
+      return externalRootsResult(() =>
+        externalRootsService
+          ? externalRootsService.list(
+              parsed.data.rootId,
+              parsed.data.relativePath,
+              parsed.data.depth,
+              parsed.data.maxEntries,
+            )
+          : disabledExternalRoots(),
+      )();
+    }
+
+    if (request.params.name === "external_stat") {
+      const parsed = ExternalStatSchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
+      }
+      return externalRootsResult(() =>
+        externalRootsService
+          ? externalRootsService.getStat(
+              parsed.data.rootId,
+              parsed.data.relativePath,
+              parsed.data.includeHash,
+            )
+          : disabledExternalRoots(),
+      )();
+    }
+
+    if (request.params.name === "external_read") {
+      const parsed = ExternalReadSchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
+      }
+      return externalRootsResult(() =>
+        externalRootsService
+          ? externalRootsService.readText(
+              parsed.data.rootId,
+              parsed.data.relativePath,
+              parsed.data.maxChars,
+            )
+          : disabledExternalRoots(),
+      )();
+    }
+
     if (request.params.name === "external_handoff") {
       const parsed = ExternalHandoffSchema.safeParse(
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  error: "path_invalid",
-                  message: `Invalid external_handoff arguments: ${parsed.error.message}`,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-          isError: true,
-        };
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
       }
 
       return externalRootsResult(() =>
@@ -192,12 +289,7 @@ async function start() {
               parsed.data.relativePath,
               parsed.data.includeHash,
             )
-          : Promise.reject(
-              new ExternalRootError(
-                "configuration_invalid",
-                "External roots are disabled. Configure MCP_EXTERNAL_ROOTS_FILE to enable them.",
-              ),
-            ),
+          : disabledExternalRoots(),
       )();
     }
 

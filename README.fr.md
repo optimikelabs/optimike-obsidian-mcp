@@ -232,8 +232,14 @@ configuration.
 
 La première version expose des outils bornés et read-only pour l’état, la liste,
 les métadonnées, le SHA-256 et la lecture UTF-8. `external_handoff` peut remettre
-le chemin physique vérifié d’un seul fichier uniquement à un client stdio local,
-et seulement si la racine possède `readable` et `handoff`.
+une copie locale temporaire vérifiée d’un seul fichier uniquement à un client
+stdio local, et seulement si la racine possède `readable` et `handoff`. La copie
+est liée au handle vérifié et son dossier temporaire, détenu par le processus,
+est supprimé à l’arrêt du MCP. Les copies expirent après une heure, sont
+nettoyées toutes les cinq minutes et restent limitées à 16 fichiers et 512 Mio
+par processus ; les dossiers abandonnés par un processus mort sont récupérés au
+prochain démarrage d’un service configuré. Un heartbeat borné évite qu’un PID
+réutilisé soit confondu durablement avec le processus propriétaire.
 
 Le cœur MCP n’embarque aucun moteur PDF, Office ou OCR. Codex, Claude Code,
 Gemini CLI, OpenClaw ou Hermes Agent peuvent utiliser leurs propres outils

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -25,9 +34,14 @@ async function expectCode(operation, expectedCode) {
 
 try {
   await mkdir(path.join(rootPath, "docs"), { recursive: true });
+  await mkdir(path.join(rootPath, "blocking.txt"), { recursive: true });
   await mkdir(path.join(rootPath, "secret"), { recursive: true });
   await mkdir(outsidePath, { recursive: true });
   await writeFile(path.join(rootPath, "hello.txt"), "Bonjour ÉLYSIA", "utf8");
+  await writeFile(path.join(rootPath, "empty.txt"), "", "utf8");
+  const longSourceName = `${"a".repeat(230)}.txt`;
+  await writeFile(path.join(rootPath, longSourceName), "long name", "utf8");
+  await writeFile(path.join(rootPath, "LICENSE"), "private license", "utf8");
   await writeFile(
     path.join(rootPath, "docs", "note.md"),
     "# Note\nContenu",
@@ -103,8 +117,135 @@ try {
   assert.equal("localPath" in metadata, false);
 
   const handoff = await service.handoff("pilot.docs", "hello.txt", true);
-  assert.equal(handoff.localPath, path.join(rootPath, "hello.txt"));
+  assert.equal(path.isAbsolute(handoff.localPath), true);
+  assert.notEqual(handoff.localPath, path.join(rootPath, "hello.txt"));
+  assert.equal(await readFile(handoff.localPath, "utf8"), "Bonjour ÉLYSIA");
   assert.equal(handoff.sha256, read.sha256);
+  const longNameHandoff = await service.handoff(
+    "pilot.docs",
+    longSourceName,
+    false,
+  );
+  assert.match(
+    path.basename(longNameHandoff.localPath),
+    /^[0-9a-f-]{36}\.txt$/,
+  );
+  assert.equal(await readFile(longNameHandoff.localPath, "utf8"), "long name");
+  const longExtensionCopy = await service.withHandoffLock(() =>
+    service.createHandoffCopy(
+      `source.${"x".repeat(220)}`,
+      Buffer.from("long extension"),
+    ),
+  );
+  assert.match(path.basename(longExtensionCopy), /^[0-9a-f-]{36}$/);
+  assert.equal(await readFile(longExtensionCopy, "utf8"), "long extension");
+  const originalReadVerifiedBuffer = service.readVerifiedBuffer.bind(service);
+  let activeHandoffReads = 0;
+  let maxConcurrentHandoffReads = 0;
+  service.readVerifiedBuffer = async (...args) => {
+    activeHandoffReads += 1;
+    maxConcurrentHandoffReads = Math.max(
+      maxConcurrentHandoffReads,
+      activeHandoffReads,
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return await originalReadVerifiedBuffer(...args);
+    } finally {
+      activeHandoffReads -= 1;
+    }
+  };
+  await Promise.all([
+    service.handoff("pilot.docs", "hello.txt", false),
+    service.handoff("pilot.docs", "hello.txt", false),
+  ]);
+  service.readVerifiedBuffer = originalReadVerifiedBuffer;
+  assert.equal(maxConcurrentHandoffReads, 1);
+  const originalReadOpenedFile = service.readOpenedFile.bind(service);
+  service.readOpenedFile = async (...args) => {
+    const buffer = await originalReadOpenedFile(...args);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const changed = Buffer.from(buffer);
+    changed[0] ^= 1;
+    await writeFile(path.join(rootPath, "hello.txt"), changed);
+    return buffer;
+  };
+  await expectCode(
+    () => service.handoff("pilot.docs", "hello.txt", false),
+    "non_verifiable",
+  );
+  service.readOpenedFile = originalReadOpenedFile;
+  await writeFile(path.join(rootPath, "hello.txt"), "Bonjour ÉLYSIA", "utf8");
+
+  for (let index = 0; index < 16; index += 1) {
+    await service.handoff("pilot.docs", "hello.txt", false);
+  }
+  await assert.rejects(() => access(handoff.localPath));
+  const retainedCopies = (
+    await readdir(path.dirname(handoff.localPath))
+  ).filter((name) => name !== ".owner.json");
+  assert.equal(retainedCopies.length, 16);
+  await service.pruneHandoffDirectory(
+    path.dirname(handoff.localPath),
+    0,
+    false,
+  );
+  const retainedAfterSweep = (await readdir(path.dirname(handoff.localPath)))
+    .filter((name) => name !== ".owner.json")
+    .sort();
+  assert.deepEqual(retainedAfterSweep, retainedCopies.sort());
+  const emptyHandoff = await service.handoff("pilot.docs", "empty.txt", false);
+  assert.equal((await readFile(emptyHandoff.localPath)).length, 0);
+  const retainedAfterEmptyHandoff = (
+    await readdir(path.dirname(emptyHandoff.localPath))
+  ).filter((name) => name !== ".owner.json");
+  assert.equal(retainedAfterEmptyHandoff.length, 16);
+
+  const abandonedHandoffDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-external-handoff-"),
+  );
+  const abandonedOwner = path.join(abandonedHandoffDirectory, ".owner.json");
+  await writeFile(
+    abandonedOwner,
+    JSON.stringify({
+      kind: "optimike-external-handoff",
+      version: 1,
+      pid: process.pid,
+      startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      heartbeatAt: new Date(Date.now() - 21 * 60 * 1000).toISOString(),
+    }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(abandonedHandoffDirectory, "sensitive.txt"),
+    "stale",
+    "utf8",
+  );
+  const scavengingService = ExternalRootsService.fromConfig({
+    version: 1,
+    roots: [
+      {
+        id: "scavenger",
+        path: rootPath,
+        capabilities: ["visible", "readable", "handoff"],
+        include: ["**/*.txt"],
+        limits: { maxFileBytes: 1024 },
+      },
+    ],
+  });
+  await scavengingService.listRoots();
+  await assert.rejects(() => access(abandonedHandoffDirectory));
+  const unownedDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-external-handoff-"),
+  );
+  await writeFile(path.join(unownedDirectory, "unrelated.txt"), "keep", "utf8");
+  const nonDeletingService = ExternalRootsService.fromConfig({
+    version: 1,
+    roots: [],
+  });
+  await nonDeletingService.listRoots();
+  await access(path.join(unownedDirectory, "unrelated.txt"));
+  await rm(unownedDirectory, { recursive: true, force: true });
 
   const handlers = new Map();
   const annotations = new Map();
@@ -144,11 +285,41 @@ try {
     () => service.readText("pilot.docs", "secret/hidden.txt"),
     "path_not_allowed",
   );
+  await expectCode(
+    () => service.getStat("pilot.docs", "LICENSE", true),
+    "path_not_allowed",
+  );
+  await expectCode(
+    () => service.handoff("pilot.docs", "LICENSE", true),
+    "path_not_allowed",
+  );
+  await expectCode(
+    () => service.readText("pilot.docs", "blocking.txt"),
+    "not_a_file",
+  );
   if (linkCreated) {
     await expectCode(
       () => service.readText("pilot.docs", "escape-link/outside.txt"),
       "path_link_unsupported",
     );
+  }
+
+  const originalResolvePath = service.resolvePath.bind(service);
+  let resolveCount = 0;
+  service.resolvePath = async (...args) => {
+    resolveCount += 1;
+    if (resolveCount === 2) {
+      return path.join(outsidePath, "outside.txt");
+    }
+    return originalResolvePath(...args);
+  };
+  try {
+    await expectCode(
+      () => service.readText("pilot.docs", "hello.txt"),
+      "non_verifiable",
+    );
+  } finally {
+    service.resolvePath = originalResolvePath;
   }
 
   const limitedService = ExternalRootsService.fromConfig({
@@ -236,8 +407,32 @@ try {
       error.code === "configuration_invalid",
   );
 
+  const redactionHandlers = new Map();
+  await registerExternalRootsTools(
+    {
+      tool(name, _description, _schema, _annotations, handler) {
+        redactionHandlers.set(name, handler);
+      },
+    },
+    {
+      async listRoots() {
+        throw new Error(`native failure at ${rootPath}`);
+      },
+    },
+    false,
+  );
+  const redacted = await redactionHandlers.get("external_roots_list")();
+  const redactedPayload = JSON.parse(redacted.content[0].text);
+  assert.equal(redacted.isError, true);
+  assert.equal(redactedPayload.error, "non_verifiable");
+  assert.equal(
+    redactedPayload.message,
+    "The external path could not be verified.",
+  );
+  assert.equal(JSON.stringify(redacted).includes(rootPath), false);
+
   console.log(
-    `PASS: external roots confinement, capabilities, redaction, limits, hashing and explicit local handoff${linkCreated ? ", including junction rejection" : ""}`,
+    `PASS: external roots confinement, strict allowlists, handle identity, redaction, limits, bounded handoff copies, stale-directory scavenging and explicit local handoff${linkCreated ? ", including junction rejection" : ""}`,
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });

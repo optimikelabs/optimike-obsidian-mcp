@@ -135,8 +135,8 @@ machine-local JSON configuration.
   are visible but never followed.
 - `external_stat`: bounded metadata and optional SHA-256.
 - `external_read`: bounded UTF-8 text read.
-- `external_handoff`: explicit verified physical-path handoff to a local stdio
-  client that has its own PDF or Office tooling.
+- `external_handoff`: explicit handoff of a verified temporary local copy to a
+  local stdio client that has its own PDF or Office tooling.
 
 The core MCP does not parse PDF or Office files. Handoff requires both
 `readable` and `handoff`; it is denied on HTTP. See

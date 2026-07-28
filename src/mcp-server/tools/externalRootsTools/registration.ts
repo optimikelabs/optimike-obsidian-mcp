@@ -6,7 +6,7 @@ import {
 } from "../../../services/externalRootsService.js";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 
-const RootPathSchema = z
+export const ExternalRootPathSchema = z
   .object({
     rootId: z
       .string()
@@ -21,20 +21,20 @@ const RootPathSchema = z
   })
   .strict();
 
-const ListSchema = RootPathSchema.extend({
+export const ExternalListSchema = ExternalRootPathSchema.extend({
   depth: z.number().int().min(0).max(20).default(1),
   maxEntries: z.number().int().positive().max(5000).optional(),
 });
 
-const StatSchema = RootPathSchema.extend({
+export const ExternalStatSchema = ExternalRootPathSchema.extend({
   includeHash: z.boolean().default(false),
 });
 
-const ReadSchema = RootPathSchema.extend({
+export const ExternalReadSchema = ExternalRootPathSchema.extend({
   maxChars: z.number().int().positive().max(2_000_000).optional(),
 });
 
-export const ExternalHandoffSchema = RootPathSchema.extend({
+export const ExternalHandoffSchema = ExternalRootPathSchema.extend({
   includeHash: z.boolean().default(true),
 });
 
@@ -58,12 +58,17 @@ export function externalRootsResult(operation: () => Promise<unknown>) {
         isError: false,
       };
     } catch (error) {
+      if (!(error instanceof ExternalRootError)) {
+        console.error(
+          "[external-roots] Unexpected filesystem error; details redacted.",
+        );
+      }
       const externalError =
         error instanceof ExternalRootError
           ? error
           : new ExternalRootError(
               "non_verifiable",
-              error instanceof Error ? error.message : String(error),
+              "The external path could not be verified.",
             );
       return {
         content: [
@@ -113,9 +118,9 @@ export async function registerExternalRootsTools(
   server.tool(
     "external_list",
     "Lists bounded directory entries inside one configured external root. Paths are root-relative and links are never followed.",
-    ListSchema.shape,
+    ExternalListSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ListSchema>) =>
+    async (params: z.infer<typeof ExternalListSchema>) =>
       externalRootsResult(() =>
         service
           ? service.list(
@@ -131,9 +136,9 @@ export async function registerExternalRootsTools(
   server.tool(
     "external_stat",
     "Returns bounded metadata and optionally a SHA-256 hash for one root-relative external file.",
-    StatSchema.shape,
+    ExternalStatSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof StatSchema>) =>
+    async (params: z.infer<typeof ExternalStatSchema>) =>
       externalRootsResult(() =>
         service
           ? service.getStat(
@@ -148,9 +153,9 @@ export async function registerExternalRootsTools(
   server.tool(
     "external_read",
     "Reads bounded UTF-8 text from one explicitly allowed root-relative file. For binary and Office documents, a local stdio client can explicitly request external_handoff and use its own document tools.",
-    ReadSchema.shape,
+    ExternalReadSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ReadSchema>) =>
+    async (params: z.infer<typeof ExternalReadSchema>) =>
       externalRootsResult(() =>
         service
           ? service.readText(
@@ -164,7 +169,7 @@ export async function registerExternalRootsTools(
 
   server.tool(
     "external_handoff",
-    "Returns a verified local file path for an explicitly allowed stdio client so that its own document tools can process the file. Physical paths are disclosed only by this explicit handoff.",
+    "Returns a verified temporary local copy for an explicitly allowed stdio client so that its own document tools can process the file. A physical path is disclosed only by this explicit handoff.",
     ExternalHandoffSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ExternalHandoffSchema>) =>

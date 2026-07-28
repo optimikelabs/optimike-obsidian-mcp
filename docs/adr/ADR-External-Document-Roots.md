@@ -65,8 +65,8 @@ Initial capability vocabulary:
 
 - `visible`: disclose root metadata and bounded directory entries;
 - `readable`: hash or read an explicitly requested UTF-8 text file;
-- `handoff`: reveal one verified local file path to an explicitly requesting
-  local stdio client so that the client can use its own document tools.
+- `handoff`: create one verified temporary local copy for an explicitly
+  requesting local stdio client so that it can use its own document tools.
 
 `extractable` and `indexable` are reserved for optional future adapters. They
 are not implemented by the core service.
@@ -103,9 +103,17 @@ PPTX, ODF, RTF, OCR, and active rendering remain the responsibility of the
 calling agent harness or an optional future adapter.
 
 `external_handoff` is the only operation that returns a physical local path.
-It requires both `readable` and `handoff`, verifies confinement and size first,
-and is available only over stdio. Lists, status, stat, and text reads remain
-portable and never expose the machine path.
+It requires both `readable` and `handoff`, reads through a handle whose
+filesystem identity is revalidated after open, writes a process-owned temporary
+copy, and is available only over stdio. Returning a verified copy avoids
+re-opening a source path whose ancestors could be swapped after validation. The
+temporary directory is removed when the MCP process exits. Lists, status, stat,
+and text reads remain portable and never expose the machine path. The handoff
+cache expires copies after one hour, sweeps every five minutes, evicts the
+oldest entries above 16 files or 512 MiB, and scavenges directories owned by
+dead processes or stale ownership heartbeats on the next configured service
+startup. The heartbeat prevents PID reuse from preserving abandoned copies
+indefinitely.
 
 This preserves a clean responsibility boundary:
 
@@ -170,7 +178,7 @@ carry read-only MCP annotations.
 2. Traversal, absolute-path, include/exclude, capability, and size-limit tests.
 3. Windows junction escape rejection.
 4. Public status/list/stat/read outputs without physical paths.
-5. Explicit handoff as the only physical-path disclosure.
+5. Explicit handoff copy as the only physical-path disclosure.
 6. Stdio-only handoff policy.
 7. Read-only annotations on every MCP tool.
 8. Disposable-root tests plus a limited AMEX pilot.

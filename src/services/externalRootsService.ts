@@ -1,12 +1,19 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
 import {
+  type FileHandle,
   lstat,
+  mkdtemp,
   open,
   readdir,
   readFile,
   realpath,
+  rename,
+  rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 
@@ -153,6 +160,15 @@ const textExtensions = new Set([
   ".log",
 ]);
 
+const HANDOFF_DIRECTORY_PREFIX = "optimike-external-handoff-";
+const HANDOFF_OWNER_FILE = ".owner.json";
+const HANDOFF_OWNER_KIND = "optimike-external-handoff";
+const HANDOFF_MAX_FILES = 16;
+const HANDOFF_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+const HANDOFF_TTL_MS = 60 * 60 * 1000;
+const HANDOFF_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const HANDOFF_OWNER_HEARTBEAT_GRACE_MS = 20 * 60 * 1000;
+
 function normalizeRelativePath(value: string): string {
   const trimmed = value.trim().replace(/\\/gu, "/").replace(/^\.\//u, "");
   if (!trimmed || trimmed === ".") return "";
@@ -211,10 +227,17 @@ function decodeUtf8(buffer: Buffer): string {
 
 export class ExternalRootsService {
   private readonly roots: Map<string, RootRuntime>;
+  private handoffDirectory?: string;
+  private handoffLock: Promise<void> = Promise.resolve();
+  private handoffSweepTimer?: ReturnType<typeof setInterval>;
+  private readonly startupScavenge: Promise<void>;
 
   private constructor(config: ExternalRootsConfig) {
     this.roots = new Map(
       config.roots.map((root) => [root.id, { config: root }]),
+    );
+    this.startupScavenge = this.scavengeStaleHandoffDirectories().catch(
+      () => undefined,
     );
   }
 
@@ -258,6 +281,7 @@ export class ExternalRootsService {
       limits: ExternalRootConfig["limits"];
     }>
   > {
+    await this.startupScavenge;
     const result = [];
     for (const runtime of this.roots.values()) {
       let available = false;
@@ -461,38 +485,252 @@ export class ExternalRootsService {
     const runtime = this.requireCapability(rootId, "handoff");
     this.assertCapability(runtime, "readable");
     const relativePath = normalizeRelativePath(requestedPath);
-    const localPath = await this.resolvePath(runtime, relativePath);
-    const fileStat = await stat(localPath);
-    if (!fileStat.isFile()) {
-      throw new ExternalRootError(
-        "not_a_file",
-        "Only files can be handed off to a local client.",
+    return this.withHandoffLock(async () => {
+      // Keep the verified read inside the same lock as allocation and copy so
+      // concurrent handoffs cannot accumulate multiple max-sized buffers.
+      const verified = await this.readVerifiedBuffer(runtime, relativePath);
+      const localPath = await this.createHandoffCopy(
+        relativePath,
+        verified.buffer,
       );
+      const response: {
+        rootId: string;
+        path: string;
+        localPath: string;
+        size: number;
+        modifiedAt: string;
+        sha256?: string;
+      } = {
+        rootId,
+        path: relativePath,
+        localPath,
+        size: verified.buffer.length,
+        modifiedAt: verified.modifiedAt,
+      };
+      if (includeHash) {
+        response.sha256 = sha256(verified.buffer);
+      }
+      return response;
+    });
+  }
+
+  private async withHandoffLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.handoffLock;
+    let release: () => void = () => undefined;
+    this.handoffLock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
     }
-    if (fileStat.size > runtime.config.limits.maxFileBytes) {
+  }
+
+  private async createHandoffCopy(
+    relativePath: string,
+    buffer: Buffer,
+  ): Promise<string> {
+    if (buffer.length > HANDOFF_MAX_TOTAL_BYTES) {
       throw new ExternalRootError(
         "too_large",
-        `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
+        "The verified handoff copy exceeds the aggregate handoff budget.",
       );
     }
-    const response: {
-      rootId: string;
-      path: string;
-      localPath: string;
-      size: number;
-      modifiedAt: string;
-      sha256?: string;
-    } = {
-      rootId,
-      path: relativePath,
-      localPath,
-      size: fileStat.size,
-      modifiedAt: fileStat.mtime.toISOString(),
-    };
-    if (includeHash) {
-      response.sha256 = sha256(await this.readBuffer(runtime, relativePath));
+    const directory = await this.getHandoffDirectory();
+    await this.pruneHandoffDirectory(directory, buffer.length, true);
+    const sourceExtension = path.extname(relativePath);
+    const boundedExtension =
+      Buffer.byteLength(sourceExtension, "utf8") <= 32 ? sourceExtension : "";
+    const localPath = path.join(
+      directory,
+      `${randomUUID()}${boundedExtension}`,
+    );
+    await writeFile(localPath, buffer, {
+      flag: "wx",
+      mode: 0o600,
+    });
+    return localPath;
+  }
+
+  private async getHandoffDirectory(): Promise<string> {
+    await this.startupScavenge;
+    if (this.handoffDirectory) {
+      try {
+        if ((await stat(this.handoffDirectory)).isDirectory()) {
+          return this.handoffDirectory;
+        }
+      } catch {
+        this.handoffDirectory = undefined;
+      }
     }
-    return response;
+
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), HANDOFF_DIRECTORY_PREFIX),
+    );
+    await this.writeHandoffOwner(directory);
+    this.handoffDirectory = directory;
+    this.handoffSweepTimer = setInterval(() => {
+      void this.withHandoffLock(async () => {
+        if (this.handoffDirectory) {
+          await this.writeHandoffOwner(this.handoffDirectory);
+          await this.pruneHandoffDirectory(this.handoffDirectory, 0, false);
+        }
+      }).catch(() => undefined);
+    }, HANDOFF_SWEEP_INTERVAL_MS);
+    this.handoffSweepTimer.unref();
+    process.once("exit", () => {
+      if (this.handoffSweepTimer) clearInterval(this.handoffSweepTimer);
+      rmSync(directory, { recursive: true, force: true });
+    });
+    return directory;
+  }
+
+  private async writeHandoffOwner(directory: string): Promise<void> {
+    const ownerPath = path.join(directory, HANDOFF_OWNER_FILE);
+    const temporaryOwnerPath = path.join(
+      directory,
+      `.owner-${randomUUID()}.tmp`,
+    );
+    try {
+      await writeFile(
+        temporaryOwnerPath,
+        JSON.stringify({
+          kind: HANDOFF_OWNER_KIND,
+          version: 1,
+          pid: process.pid,
+          startedAt: new Date(
+            Date.now() - process.uptime() * 1000,
+          ).toISOString(),
+          heartbeatAt: new Date().toISOString(),
+        }),
+        { encoding: "utf8", flag: "wx", mode: 0o600 },
+      );
+      await rename(temporaryOwnerPath, ownerPath);
+    } finally {
+      await rm(temporaryOwnerPath, { force: true }).catch(() => undefined);
+    }
+  }
+
+  private async pruneHandoffDirectory(
+    directory: string,
+    incomingBytes: number,
+    reserveIncomingFile: boolean,
+  ): Promise<void> {
+    const now = Date.now();
+    const files: Array<{
+      path: string;
+      size: number;
+      modifiedAt: number;
+    }> = [];
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (!entry.isFile() || entry.name === HANDOFF_OWNER_FILE) continue;
+      const filePath = path.join(directory, entry.name);
+      const fileStat = await stat(filePath);
+      if (now - fileStat.mtimeMs >= HANDOFF_TTL_MS) {
+        await rm(filePath, { force: true });
+        continue;
+      }
+      files.push({
+        path: filePath,
+        size: fileStat.size,
+        modifiedAt: fileStat.mtimeMs,
+      });
+    }
+
+    files.sort((a, b) => a.modifiedAt - b.modifiedAt);
+    let totalBytes = files.reduce((total, file) => total + file.size, 0);
+    while (
+      files.length + (reserveIncomingFile ? 1 : 0) > HANDOFF_MAX_FILES ||
+      totalBytes + incomingBytes > HANDOFF_MAX_TOTAL_BYTES
+    ) {
+      const oldest = files.shift();
+      if (!oldest) break;
+      await rm(oldest.path, { force: true });
+      totalBytes -= oldest.size;
+    }
+  }
+
+  private async scavengeStaleHandoffDirectories(): Promise<void> {
+    const temporaryRoot = os.tmpdir();
+    const now = Date.now();
+    let entries;
+    try {
+      entries = await readdir(temporaryRoot, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (
+        !entry.isDirectory() ||
+        !entry.name.startsWith(HANDOFF_DIRECTORY_PREFIX)
+      ) {
+        continue;
+      }
+      const directory = path.join(temporaryRoot, entry.name);
+      const owner = await this.readHandoffOwner(directory);
+      if (!owner) {
+        // A matching prefix alone is not proof that this process owns the
+        // directory. Leave unowned or partially written directories untouched.
+        continue;
+      }
+      if (
+        this.isProcessAlive(owner.pid) &&
+        now - Date.parse(owner.heartbeatAt) < HANDOFF_OWNER_HEARTBEAT_GRACE_MS
+      ) {
+        continue;
+      }
+      await rm(directory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    }
+  }
+
+  private async readHandoffOwner(
+    directory: string,
+  ): Promise<{ pid: number; heartbeatAt: string } | undefined> {
+    try {
+      const value = JSON.parse(
+        await readFile(path.join(directory, HANDOFF_OWNER_FILE), "utf8"),
+      ) as {
+        kind?: unknown;
+        version?: unknown;
+        pid?: unknown;
+        startedAt?: unknown;
+        heartbeatAt?: unknown;
+      };
+      if (
+        value.kind !== HANDOFF_OWNER_KIND ||
+        value.version !== 1 ||
+        typeof value.pid !== "number" ||
+        !Number.isInteger(value.pid) ||
+        typeof value.startedAt !== "string" ||
+        !Number.isFinite(Date.parse(value.startedAt)) ||
+        typeof value.heartbeatAt !== "string" ||
+        !Number.isFinite(Date.parse(value.heartbeatAt))
+      ) {
+        return undefined;
+      }
+      return { pid: value.pid, heartbeatAt: value.heartbeatAt };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isProcessAlive(pid: number): boolean {
+    if (pid <= 0) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "EPERM"
+      );
+    }
   }
 
   private getRoot(rootId: string): RootRuntime {
@@ -605,8 +843,7 @@ export class ExternalRootsService {
   private assertAllowed(runtime: RootRuntime, relativePath: string): void {
     if (
       matchesAny(relativePath, runtime.config.exclude) ||
-      (!matchesAny(relativePath, runtime.config.include) &&
-        path.extname(relativePath))
+      !matchesAny(relativePath, runtime.config.include)
     ) {
       throw new ExternalRootError(
         "path_not_allowed",
@@ -619,15 +856,37 @@ export class ExternalRootsService {
     runtime: RootRuntime,
     relativePath: string,
   ): Promise<Buffer> {
-    const absolutePath = await this.resolvePath(runtime, relativePath);
-    const fileStat = await stat(absolutePath);
-    if (!fileStat.isFile()) {
+    return (await this.readVerifiedBuffer(runtime, relativePath)).buffer;
+  }
+
+  private async readOpenedFile(
+    handle: FileHandle,
+    size: number,
+  ): Promise<Buffer> {
+    const buffer = Buffer.alloc(size);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== buffer.length) {
       throw new ExternalRootError(
-        "not_a_file",
-        "The requested external path is not a file.",
+        "non_verifiable",
+        "The file could not be read completely.",
       );
     }
-    if (fileStat.size > runtime.config.limits.maxFileBytes) {
+    return buffer;
+  }
+
+  private async readVerifiedBuffer(
+    runtime: RootRuntime,
+    relativePath: string,
+  ): Promise<{ buffer: Buffer; modifiedAt: string }> {
+    const absolutePath = await this.resolvePath(runtime, relativePath);
+    const preOpenStat = await stat(absolutePath);
+    if (!preOpenStat.isFile()) {
+      throw new ExternalRootError(
+        "not_a_file",
+        "The requested external path is not a regular file.",
+      );
+    }
+    if (preOpenStat.size > runtime.config.limits.maxFileBytes) {
       throw new ExternalRootError(
         "too_large",
         `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
@@ -635,25 +894,64 @@ export class ExternalRootsService {
     }
     const handle = await open(absolutePath, "r");
     try {
-      const openedStat = await handle.stat();
+      const openedStat = await handle.stat({ bigint: true });
+      if (!openedStat.isFile()) {
+        throw new ExternalRootError(
+          "not_a_file",
+          "The requested external path is not a file.",
+        );
+      }
       if (
-        openedStat.size !== fileStat.size ||
-        openedStat.mtimeMs !== fileStat.mtimeMs
+        openedStat.size > BigInt(runtime.config.limits.maxFileBytes) ||
+        openedStat.size > BigInt(Number.MAX_SAFE_INTEGER)
+      ) {
+        throw new ExternalRootError(
+          "too_large",
+          `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
+        );
+      }
+
+      // Re-resolve every path component after opening, then bind the opened
+      // handle to the currently confined object by filesystem identity. If an
+      // ancestor was swapped between validation and open, the identities differ
+      // even if size and timestamps happen to match.
+      const revalidatedPath = await this.resolvePath(runtime, relativePath);
+      const revalidatedStat = await stat(revalidatedPath, { bigint: true });
+      if (
+        !revalidatedStat.isFile() ||
+        openedStat.dev !== revalidatedStat.dev ||
+        openedStat.ino !== revalidatedStat.ino
       ) {
         throw new ExternalRootError(
           "non_verifiable",
-          "The file changed while it was being verified.",
+          "The file identity changed while it was being verified.",
         );
       }
-      const buffer = Buffer.alloc(openedStat.size);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-      if (bytesRead !== buffer.length) {
+
+      const buffer = await this.readOpenedFile(handle, Number(openedStat.size));
+      const postReadStat = await handle.stat({ bigint: true });
+      const finalPath = await this.resolvePath(runtime, relativePath);
+      const finalPathStat = await stat(finalPath, { bigint: true });
+      if (
+        !postReadStat.isFile() ||
+        !finalPathStat.isFile() ||
+        postReadStat.dev !== openedStat.dev ||
+        postReadStat.ino !== openedStat.ino ||
+        postReadStat.size !== openedStat.size ||
+        postReadStat.mtimeNs !== openedStat.mtimeNs ||
+        postReadStat.ctimeNs !== openedStat.ctimeNs ||
+        finalPathStat.dev !== postReadStat.dev ||
+        finalPathStat.ino !== postReadStat.ino
+      ) {
         throw new ExternalRootError(
           "non_verifiable",
-          "The file could not be read completely.",
+          "The file changed while it was being read.",
         );
       }
-      return buffer;
+      return {
+        buffer,
+        modifiedAt: new Date(Number(openedStat.mtimeMs)).toISOString(),
+      };
     } finally {
       await handle.close();
     }

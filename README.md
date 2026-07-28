@@ -227,8 +227,13 @@ machine-local path, adapt the roots and limits, then set the absolute path in
 
 The first release exposes bounded read-only tools for root status, listing,
 metadata, SHA-256, and UTF-8 text reads. `external_handoff` can return one
-verified physical file path only to a local stdio client and only when the root
-has both `readable` and `handoff`.
+verified temporary local copy only to a local stdio client and only when the
+root has both `readable` and `handoff`. The copy is tied to the verified file
+handle and its process-owned temporary directory is removed when the MCP
+process exits. Copies expire after one hour, are swept every five minutes, and
+are capped at 16 files and 512 MiB per process; abandoned directories from dead
+processes or stale ownership heartbeats are scavenged when the next configured
+service starts.
 
 The MCP core does not embed PDF, Office, or OCR engines. Agent clients such as
 Codex, Claude Code, Gemini CLI, OpenClaw, or Hermes Agent can use their own
