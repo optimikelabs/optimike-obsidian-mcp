@@ -188,6 +188,8 @@ export class ExternalTransferBroker {
 
   private readonly now: () => number;
   private readonly tickets = new Map<string, TicketEntry>();
+  private reservedTickets = 0;
+  private reservedBytes = 0;
   private lock: Promise<void> = Promise.resolve();
   private readonly sweepTimer?: ReturnType<typeof setInterval>;
 
@@ -249,76 +251,78 @@ export class ExternalTransferBroker {
       );
     }
 
-    // The local handoff copy is owned by ExternalRootsService and may be cached
-    // for a later stdio or HTTP request. Never delete or mutate it here.
-    const fileStat = await stat(handoff.localPath);
-    if (!fileStat.isFile() || fileStat.size !== handoff.size) {
-      throw new ExternalRootError(
-        "non_verifiable",
-        "The verified handoff copy changed before ticket creation.",
-      );
-    }
-    const buffer = await readFile(handoff.localPath);
-    if (
-      buffer.length !== handoff.size ||
-      !constantTimeEqual(sha256(buffer), verifiedSha256)
-    ) {
-      throw new ExternalRootError(
-        "non_verifiable",
-        "The verified handoff copy failed integrity verification.",
-      );
-    }
-
-    return this.withLock<HttpExternalHandoffDescriptor>(async () => {
-      await this.pruneExpired();
-      const totalBytes = [...this.tickets.values()].reduce(
-        (total, entry) => total + entry.size,
-        0,
-      );
+    await this.reserve(handoff.size);
+    let reservationActive = true;
+    try {
+      // The local handoff copy is owned by ExternalRootsService and may be cached
+      // for a later stdio or HTTP request. Never delete or mutate it here.
+      const fileStat = await stat(handoff.localPath);
+      if (!fileStat.isFile() || fileStat.size !== handoff.size) {
+        throw new ExternalRootError(
+          "non_verifiable",
+          "The verified handoff copy changed before ticket creation.",
+        );
+      }
+      const buffer = await readFile(handoff.localPath);
       if (
-        this.tickets.size >= this.maxTickets ||
-        totalBytes + handoff.size > this.maxTotalBytes
+        buffer.length !== handoff.size ||
+        !constantTimeEqual(sha256(buffer), verifiedSha256)
       ) {
         throw new ExternalRootError(
-          "too_large",
-          "The bounded HTTP handoff capacity is currently exhausted.",
+          "non_verifiable",
+          "The verified handoff copy failed integrity verification.",
         );
       }
 
-      const ticket = randomBytes(32).toString("base64url");
-      const expiresAtMs = this.now() + this.ttlMs;
-      const mediaType = mediaTypeFor(handoff.path);
-      this.tickets.set(ticket, {
-        ticket,
-        tokenFingerprint: tokenFingerprint(authInfo),
-        clientId: authInfo.clientId,
-        subject: authInfo.subject,
-        rootId: handoff.rootId,
-        relativePath: handoff.path,
-        buffer,
-        size: handoff.size,
-        modifiedAt: handoff.modifiedAt,
-        sha256: verifiedSha256,
-        mediaType,
-        filename: safeFilename(handoff.path),
-        expiresAtMs,
-      });
+      const descriptor = await this.withLock<HttpExternalHandoffDescriptor>(
+        async () => {
+          await this.pruneExpired();
+          this.releaseReservation(handoff.size);
+          reservationActive = false;
 
-      return {
-        delivery: "http_ticket",
-        endpoint: HTTP_HANDOFF_ENDPOINT,
-        method: "GET",
-        ticketHeader: HTTP_HANDOFF_TICKET_HEADER,
-        ticket,
-        rootId: handoff.rootId,
-        path: handoff.path,
-        size: handoff.size,
-        modifiedAt: handoff.modifiedAt,
-        sha256: verifiedSha256,
-        mediaType,
-        expiresAt: new Date(expiresAtMs).toISOString(),
-      };
-    });
+          const ticket = randomBytes(32).toString("base64url");
+          const expiresAtMs = this.now() + this.ttlMs;
+          const mediaType = mediaTypeFor(handoff.path);
+          this.tickets.set(ticket, {
+            ticket,
+            tokenFingerprint: tokenFingerprint(authInfo),
+            clientId: authInfo.clientId,
+            subject: authInfo.subject,
+            rootId: handoff.rootId,
+            relativePath: handoff.path,
+            buffer,
+            size: handoff.size,
+            modifiedAt: handoff.modifiedAt,
+            sha256: verifiedSha256,
+            mediaType,
+            filename: safeFilename(handoff.path),
+            expiresAtMs,
+          });
+
+          return {
+            delivery: "http_ticket",
+            endpoint: HTTP_HANDOFF_ENDPOINT,
+            method: "GET",
+            ticketHeader: HTTP_HANDOFF_TICKET_HEADER,
+            ticket,
+            rootId: handoff.rootId,
+            path: handoff.path,
+            size: handoff.size,
+            modifiedAt: handoff.modifiedAt,
+            sha256: verifiedSha256,
+            mediaType,
+            expiresAt: new Date(expiresAtMs).toISOString(),
+          };
+        },
+      );
+      return descriptor;
+    } finally {
+      if (reservationActive) {
+        await this.withLock(async () => {
+          this.releaseReservation(handoff.size);
+        });
+      }
+    }
   }
 
   async consume(
@@ -361,7 +365,35 @@ export class ExternalTransferBroker {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     await this.withLock(async () => {
       this.tickets.clear();
+      this.reservedTickets = 0;
+      this.reservedBytes = 0;
     });
+  }
+
+  private async reserve(size: number): Promise<void> {
+    await this.withLock(async () => {
+      await this.pruneExpired();
+      const ticketBytes = [...this.tickets.values()].reduce(
+        (total, entry) => total + entry.size,
+        0,
+      );
+      if (
+        this.tickets.size + this.reservedTickets >= this.maxTickets ||
+        ticketBytes + this.reservedBytes + size > this.maxTotalBytes
+      ) {
+        throw new ExternalRootError(
+          "too_large",
+          "The bounded HTTP handoff capacity is currently exhausted.",
+        );
+      }
+      this.reservedTickets += 1;
+      this.reservedBytes += size;
+    });
+  }
+
+  private releaseReservation(size: number): void {
+    this.reservedTickets = Math.max(0, this.reservedTickets - 1);
+    this.reservedBytes = Math.max(0, this.reservedBytes - size);
   }
 
   private assertEnabled(): void {
