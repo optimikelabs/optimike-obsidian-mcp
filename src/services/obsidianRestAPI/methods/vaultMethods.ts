@@ -5,12 +5,7 @@
  */
 
 import { RequestContext } from "../../../utils/index.js";
-import {
-  NoteJson,
-  FileListResponse,
-  NoteStat,
-  RequestFunction,
-} from "../types.js";
+import { NoteJson, FileListResponse, NoteStat, RequestFunction } from "../types.js";
 import { encodeVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
 
 /**

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,15 +16,25 @@ import {
 import {
   ExternalHandoffSchema,
   ExternalListSchema,
+  ExternalMoveApplySchema,
+  ExternalMovePlanSchema,
+  ExternalMoveRollbackSchema,
+  ExternalMoveStatusSchema,
   ExternalReadSchema,
+  ExternalReferencesScanSchema,
   ExternalStatSchema,
   externalRootsResult,
 } from "./mcp-server/tools/externalRootsTools/registration.js";
+import { config, profileExternalMoveJournalPath } from "./config/index.js";
 import { ensureLocalBackendRunning } from "./runtime/localBackend.js";
 import {
   ExternalRootError,
   ExternalRootsService,
 } from "./services/externalRootsService.js";
+import { BackendVaultAdapter } from "./services/externalReferences/backendVaultAdapter.js";
+import type { ExternalMoveBindingIdentity } from "./services/externalReferences/backendVaultAdapter.js";
+import { ExternalMoveCoordinator } from "./services/externalReferences/externalMoveCoordinator.js";
+import { ExternalMoveJournal } from "./services/externalReferences/externalMoveJournal.js";
 
 type PackageInfo = { name?: string; version?: string };
 type BackendClient = {
@@ -53,6 +64,30 @@ const proxyServer = new Server(
 
 let backend: BackendClient | undefined;
 let externalRootsService: ExternalRootsService | undefined;
+let externalMoveCoordinator: ExternalMoveCoordinator | undefined;
+let externalMoveBindingIdentity: ExternalMoveBindingIdentity | undefined;
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort((left, right) => left.localeCompare(right))
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function rootConfigFingerprint(filePath: string): string {
+  const parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
+  return createHash("sha256")
+    .update("optimike.external-move.roots.v1\0", "utf8")
+    .update(canonicalJson(parsed), "utf8")
+    .digest("hex");
+}
 
 function disabledExternalRoots(): Promise<never> {
   return Promise.reject(
@@ -182,6 +217,37 @@ async function start() {
     : undefined;
 
   await ensureBackendConnected();
+  if (externalRootsService) {
+    const rootsFingerprint = rootConfigFingerprint(
+      process.env.MCP_EXTERNAL_ROOTS_FILE!,
+    );
+    const vault = new BackendVaultAdapter(
+      (name, args) =>
+        withBackendRetry(
+          `external reference backend adapter: ${name}`,
+          (client) =>
+            client.callTool(
+              { name, arguments: args },
+              CompatibilityCallToolResultSchema,
+            ),
+        ),
+      {
+        backendEndpoint: backendUrl.toString(),
+        rootConfigFingerprint: rootsFingerprint,
+        profileId: config.externalMoveProfileId,
+      },
+    );
+    externalMoveBindingIdentity = await vault.getBindingIdentity();
+    const profiledJournalPath = profileExternalMoveJournalPath(
+      config.externalMoveJournalPath,
+      externalMoveBindingIdentity.bindingFingerprint,
+    );
+    externalMoveCoordinator = new ExternalMoveCoordinator(
+      externalRootsService,
+      vault,
+      new ExternalMoveJournal(profiledJournalPath),
+    );
+  }
 
   proxyServer.setRequestHandler(ListToolsRequestSchema, async (request) =>
     withBackendRetry("listTools", (client) => client.listTools(request.params)),
@@ -191,8 +257,23 @@ async function start() {
     if (request.params.name === "external_runtime_status") {
       return externalRootsResult(async () => ({
         enabled: Boolean(externalRootsService),
-        mode: "read-only",
+        mode:
+          config.externalMoveEnabled && config.mcpWriteMode === "full"
+            ? "read-write-opt-in"
+            : "read-only",
         localHandoffAllowed: true,
+        externalMove: {
+          available:
+            Boolean(externalMoveCoordinator) &&
+            externalMoveBindingIdentity?.verifiable === true &&
+            config.externalMoveEnabled &&
+            config.mcpWriteMode === "full",
+          transport: "stdio-only",
+          requiresRootCapability: "move",
+          identityVerified: externalMoveBindingIdentity?.verifiable ?? false,
+          identitySource: externalMoveBindingIdentity?.vaultIdentitySource,
+          profileFingerprint: externalMoveBindingIdentity?.bindingFingerprint,
+        },
         roots: externalRootsService
           ? await externalRootsService.listRoots()
           : [],
@@ -288,6 +369,100 @@ async function start() {
               parsed.data.rootId,
               parsed.data.relativePath,
               parsed.data.includeHash,
+            )
+          : disabledExternalRoots(),
+      )();
+    }
+
+    if (request.params.name === "external_references_scan") {
+      const parsed = ExternalReferencesScanSchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
+      }
+      return externalRootsResult(() =>
+        externalMoveCoordinator
+          ? externalMoveCoordinator.scan(
+              parsed.data.rootId,
+              parsed.data.relativePath,
+            )
+          : disabledExternalRoots(),
+      )();
+    }
+
+    if (request.params.name === "external_move_plan") {
+      const parsed = ExternalMovePlanSchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
+      }
+      return externalRootsResult(() =>
+        externalMoveCoordinator
+          ? externalMoveCoordinator.plan(parsed.data)
+          : disabledExternalRoots(),
+      )();
+    }
+
+    if (request.params.name === "external_move_status") {
+      const parsed = ExternalMoveStatusSchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
+      }
+      return externalRootsResult(async () =>
+        externalMoveCoordinator
+          ? externalMoveCoordinator.status(parsed.data.planId)
+          : disabledExternalRoots(),
+      )();
+    }
+
+    if (request.params.name === "external_move_apply") {
+      const parsed = ExternalMoveApplySchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
+      }
+      return externalRootsResult(() =>
+        externalMoveCoordinator
+          ? externalMoveCoordinator.apply(
+              parsed.data.planId,
+              parsed.data.idempotencyKey,
+            )
+          : disabledExternalRoots(),
+      )();
+    }
+
+    if (request.params.name === "external_move_rollback") {
+      const parsed = ExternalMoveRollbackSchema.safeParse(
+        request.params.arguments ?? {},
+      );
+      if (!parsed.success) {
+        return invalidExternalArguments(
+          request.params.name,
+          parsed.error.message,
+        );
+      }
+      return externalRootsResult(() =>
+        externalMoveCoordinator
+          ? externalMoveCoordinator.rollback(
+              parsed.data.planId,
+              parsed.data.idempotencyKey,
             )
           : disabledExternalRoots(),
       )();

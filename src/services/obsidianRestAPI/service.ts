@@ -159,6 +159,11 @@ export class ObsidianRestApiService {
                 errorCode = BaseErrorCode.VALIDATION_ERROR; // Method not allowed often implies incorrect usage
                 errorMessage = `Obsidian API Method Not Allowed: ${requestConfig.method} on ${requestConfig.url}`;
                 break;
+              case 412:
+                errorCode = BaseErrorCode.CONFLICT;
+                errorMessage =
+                  "Obsidian API Precondition Failed: the note changed after it was read.";
+                break;
               case 503:
                 errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;
                 errorMessage = "Obsidian API Service Unavailable.";
@@ -430,11 +435,7 @@ export class ObsidianRestApiService {
     payload: BaseCreateRequest,
     context: RequestContext,
   ): Promise<BaseCreateResponse> {
-    return basesMethods.createBase(
-      this._request.bind(this),
-      payload,
-      context,
-    );
+    return basesMethods.createBase(this._request.bind(this), payload, context);
   }
 
   /**

@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
+import os from "node:os";
 import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
@@ -139,6 +140,24 @@ const EnvSchema = z
       .transform((val) => val.toLowerCase() === "true")
       .default("true"),
     MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
+    MCP_EXTERNAL_MOVE_ENABLED: z
+      .string()
+      .transform((val) => val.toLowerCase() === "true")
+      .default("false"),
+    MCP_EXTERNAL_MOVE_JOURNAL_PATH: z
+      .string()
+      .refine(
+        (value) => path.isAbsolute(value),
+        "MCP_EXTERNAL_MOVE_JOURNAL_PATH must be absolute.",
+      )
+      .optional(),
+    MCP_EXTERNAL_MOVE_PROFILE_ID: z
+      .string()
+      .regex(
+        /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u,
+        "MCP_EXTERNAL_MOVE_PROFILE_ID must be a stable lowercase logical identifier.",
+      )
+      .optional(),
     // --- Public runtime safety ---
     MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).optional(),
     MCP_GUARDED_MAX_WRITE_CHARS: z.coerce
@@ -252,9 +271,7 @@ const parsedEnv = EnvSchema.safeParse(process.env);
 
 if (!parsedEnv.success) {
   const errorDetails = parsedEnv.error.flatten().fieldErrors;
-  if (process.stderr.isTTY) {
-    console.error("❌ Invalid environment variables:", errorDetails);
-  }
+  console.error("❌ Invalid environment variables:", errorDetails);
   throw new Error(
     `Invalid environment configuration. Please check your .env file or environment variables. Details: ${JSON.stringify(errorDetails)}`,
   );
@@ -321,11 +338,9 @@ const ensureDirectory = (
 const validatedLogsPath = ensureDirectory(env.LOGS_DIR, projectRoot, "logs");
 
 if (!validatedLogsPath) {
-  if (process.stderr.isTTY) {
-    console.error(
-      "FATAL: Logs directory configuration is invalid or could not be created. Please check permissions and path. Exiting.",
-    );
-  }
+  console.error(
+    "FATAL: Logs directory configuration is invalid or could not be created. Please check permissions and path. Exiting.",
+  );
   process.exit(1);
 }
 
@@ -378,6 +393,17 @@ export const config = {
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
   externalRootsFile: env.MCP_EXTERNAL_ROOTS_FILE,
+  externalMoveEnabled: env.MCP_EXTERNAL_MOVE_ENABLED,
+  externalMoveProfileId: env.MCP_EXTERNAL_MOVE_PROFILE_ID,
+  externalMoveJournalPath:
+    env.MCP_EXTERNAL_MOVE_JOURNAL_PATH ||
+    path.join(
+      process.env.LOCALAPPDATA ||
+        process.env.XDG_STATE_HOME ||
+        path.join(os.homedir(), ".local", "state"),
+      "optimike-obsidian-mcp",
+      "external-moves.sqlite",
+    ),
   mcpWriteMode:
     env.MCP_WRITE_MODE ||
     (env.OBSIDIAN_RUNTIME_MODE === "headless-guarded"
@@ -420,6 +446,27 @@ export const config = {
   semanticSearchPrewarmText: env.SEMANTIC_SEARCH_PREWARM_TEXT,
   obsidianVaultPath: env.OBSIDIAN_VAULT,
 };
+
+/**
+ * Namespaces a durable external-move journal by backend/vault/root binding.
+ * Reusing a base path across local profiles therefore cannot mix their plans.
+ */
+export function profileExternalMoveJournalPath(
+  basePath: string,
+  bindingFingerprint: string,
+): string {
+  if (basePath === ":memory:") return basePath;
+  if (!/^[a-f0-9]{64}$/u.test(bindingFingerprint)) {
+    throw new Error("External move binding fingerprint must be SHA-256.");
+  }
+  const parsed = path.parse(basePath);
+  const extension = parsed.ext || ".sqlite";
+  const stem = parsed.ext ? parsed.name : parsed.base;
+  return path.join(
+    parsed.dir,
+    `${stem}.${bindingFingerprint.slice(0, 24)}${extension}`,
+  );
+}
 
 /**
  * The configured logging level for the application.

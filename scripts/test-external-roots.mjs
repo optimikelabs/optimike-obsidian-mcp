@@ -278,12 +278,16 @@ try {
     },
   };
   await registerExternalRootsTools(fakeServer, service, false);
-  assert.equal(handlers.size, 6);
-  assert.ok(
-    [...annotations.values()].every(
-      (value) => value.readOnlyHint === true && value.destructiveHint === false,
-    ),
-  );
+  assert.equal(handlers.size, 11);
+  for (const [name, value] of annotations) {
+    if (name === "external_move_apply" || name === "external_move_rollback") {
+      assert.equal(value.readOnlyHint, false);
+      assert.equal(value.destructiveHint, true);
+    } else {
+      assert.equal(value.readOnlyHint, true);
+      assert.equal(value.destructiveHint, false);
+    }
+  }
   const deniedHttpHandoff = await handlers.get("external_handoff")({
     rootId: "pilot.docs",
     relativePath: "hello.txt",

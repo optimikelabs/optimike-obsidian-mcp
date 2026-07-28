@@ -7,7 +7,8 @@ de lire des fichiers explicitement autorisés qui restent hors du coffre
 Obsidian : PDF, documents Office, jeux de données, dossiers projet ou
 bibliothèques gérées par une autre application.
 
-Cette fonction est un courtier en lecture seule, pas un second coffre :
+Cette fonction est principalement un courtier en lecture, pas un second coffre
+ni un gestionnaire de fichiers générique :
 
 - le MCP autorise des identifiants logiques et confine chaque requête à une
   racine ;
@@ -15,8 +16,10 @@ Cette fonction est un courtier en lecture seule, pas un second coffre :
   dans des limites explicites ;
 - `external_handoff` peut préparer un snapshot vérifié pour un client qui possède
   les outils PDF, Office, OCR ou binaires adaptés ;
-- il n’indexe, ne synchronise, ne déplace, ne renomme, n’écrit et ne sauvegarde
-  aucun document externe.
+- un workflow stdio local, autorisé séparément, peut déplacer un fichier régulier
+  dans la même racine et réparer ses références ÉLYSIA exactes ;
+- il n’indexe, ne synchronise, n’upload, ne crée, ne remplace, ne supprime et ne
+  sauvegarde aucun document externe.
 
 Le mode de livraison dépend du transport :
 
@@ -27,6 +30,8 @@ Le mode de livraison dépend du transport :
 
 Voir [ADR — Racines documentaires externes](adr/ADR-External-Document-Roots.md)
 et [ADR — Livraison HTTP gouvernée des artefacts externes](adr/ADR-HTTP-External-Artifact-Delivery.md).
+La frontière move/réparation est portée par
+[ADR — Intégrité des références externes](adr/ADR-External-Reference-Integrity.fr.md).
 
 ## 1. Créer une configuration locale à la machine
 
@@ -95,14 +100,14 @@ L’objet racine est strict :
 
 Chaque racine est également stricte :
 
-| Champ          | Contrat                                                                                                                            |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `id`           | Identifiant logique stable en minuscules : lettres, chiffres, `.`, `_` et `-`.                                                     |
-| `path`         | Dossier absolu. Les chemins préfixés UNC sont refusés ; un stockage réseau mappé ou monté n’est pas détecté et reste non supporté. |
-| `capabilities` | Une ou plusieurs valeurs parmi `visible`, `readable`, `handoff`. `handoff` exige `readable`.                                       |
-| `include`      | Allowlist de globs de style Git. Défaut : `["**"]`. Un fichier qui ne correspond à aucun motif est refusé, même sans extension.    |
-| `exclude`      | Denylist de globs. Défaut : `.git` et `node_modules`. `exclude` l’emporte sur `include`.                                           |
-| `limits`       | Limites bornées optionnelles décrites ci-dessous. Les champs inconnus sont refusés.                                                |
+| Champ          | Contrat                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | Identifiant logique stable en minuscules : lettres, chiffres, `.`, `_` et `-`.                                                                           |
+| `path`         | Dossier absolu. Les chemins préfixés UNC sont refusés ; un stockage réseau mappé ou monté n’est pas détecté et reste non supporté.                       |
+| `capabilities` | Une ou plusieurs valeurs parmi `visible`, `readable`, `handoff`, `move`. `handoff` exige `readable` ; `move` est une autorisation positive indépendante. |
+| `include`      | Allowlist de globs de style Git. Défaut : `["**"]`. Un fichier qui ne correspond à aucun motif est refusé, même sans extension.                          |
+| `exclude`      | Denylist de globs. Défaut : `.git` et `node_modules`. `exclude` l’emporte sur `include`.                                                                 |
+| `limits`       | Limites bornées optionnelles décrites ci-dessous. Les champs inconnus sont refusés.                                                                      |
 
 Les capacités sont distinctes :
 
@@ -113,6 +118,9 @@ Les capacités sont distinctes :
 - `readable` autorise le hash et la lecture UTF-8 directe ;
 - `handoff` autorise un snapshot vérifié via un mode de livraison supporté par
   le transport actif.
+- `move` autorise la planification d’un déplacement de fichier régulier dans la
+  même racine. L’apply et le rollback exigent encore les deux gates du processus
+  et le stdio local.
 
 Valeurs par défaut et plafonds du schéma :
 
@@ -356,15 +364,93 @@ sans livraison.
 La provenance portable est l’identifiant logique, le chemin relatif, la taille,
 la date de modification et le SHA-256, pas un chemin local ni un ticket.
 
-## 8. Les mutations restent hors périmètre
+## 8. Move local gouverné et réparation des références
 
-La surface `external_roots` actuelle ne possède aucun upload, create, replace,
-move, delete ou sync.
+L’unique mutation external-root est une transaction stdio locale sur un fichier
+régulier. Elle sert à préserver les références ÉLYSIA, pas à remplacer les
+outils filesystem.
 
-Une future proposition de mutation exige un ADR séparé, des capacités positives
-granulaires, des préconditions de hash attendu, un plan et un apply explicite,
-l’idempotence, un remplacement atomique, un journal, une sauvegarde, une preuve
-après écriture, des tests de crash et un rollback démontré.
+### Ajouter l’identité stable à côté du lien cliquable
+
+```md
+- [Ouvrir le brief](file:///B:/Documents/Projet/brief%20final.docx) — `external-ref:project.documents::brief%20final.docx`
+```
+
+Le lien reste cliquable. Le code inline adjacent porte l’identifiant logique et
+le chemin relatif à la racine, encodé canoniquement en pourcentage. `/` sépare
+les segments encodés. Le token n’expose pas le chemin configuré de la racine et
+n’autorise aucun accès par lui-même.
+
+Seule une paire exacte token/lien dans le même paragraphe Markdown actif peut
+être réparée automatiquement. Chemins physiques nus, tokens incohérents ou
+orphelins, candidats multiples, syntaxe non supportée et sections
+d’historique/exemple/archive/release passent en revue manuelle. Une seule
+occurrence en revue manuelle bloque l’apply.
+
+### Activer explicitement le pilote
+
+Conserver les exemples ordinaires ci-dessus en lecture seule. Pour une racine
+pilote non sensible, ajouter volontairement `move` :
+
+```json
+"capabilities": ["visible", "readable", "handoff", "move"]
+```
+
+Puis configurer le processus stdio local :
+
+```text
+MCP_WRITE_MODE=full
+MCP_EXTERNAL_MOVE_ENABLED=true
+MCP_EXTERNAL_MOVE_PROFILE_ID=<identifiant-stable-du-profil-coffre>
+MCP_EXTERNAL_MOVE_JOURNAL_PATH=<chemin-sqlite-local-absolu-optionnel>
+```
+
+L’identifiant de profil est requis lorsque le backend live ne peut pas prouver
+un chemin de coffre configuré. Il est hashé dans le binding
+backend/coffre/racines et doit changer si le coffre sélectionné change. Le nom
+du journal est automatiquement profilé avec ce binding.
+
+Les trois autorisations write sont nécessaires pour l’apply et le rollback :
+mode write complet, feature flag et capacité `move` de la racine. Scan, plan et
+status ne déplacent pas le fichier, mais restent stdio-only car le proxy possède
+la racine locale et le journal.
+
+### Exécuter la transaction
+
+1. Appeler `external_references_scan` avec `rootId` et `relativePath`. Le scan
+   inventorie tout le coffre gouverné.
+2. Appeler `external_move_plan` avec `sourceRelativePath`,
+   `targetRelativePath` et une `idempotencyKey` unique. Le plan inventorie
+   toujours tout le coffre gouverné ; il ne peut pas être limité à un
+   sous-dossier.
+3. Examiner `external_move_status` ; ne poursuivre que si `readyToApply` vaut
+   true et `manualReview` est vide.
+4. Appeler `external_move_apply` avec le `planId` retourné et la même
+   `idempotencyKey`.
+5. Vérifier cible et notes réparées. Si le résultat vérifié doit être annulé,
+   appeler `external_move_rollback` avec les mêmes identifiants avant de modifier
+   le fichier ou les notes réparées.
+
+Le dossier parent cible doit déjà exister. Source et cible doivent être des
+fichiers réguliers dans la même racine logique et sur le même volume ; la cible
+doit être absente. L’apply revérifie taille, date de modification et SHA-256 de
+la source. Il emploie une séquence hard-link/unlink sans écrasement et échoue
+fermé si le filesystem ne peut pas prouver le move.
+
+Chaque réparation de note est planifiée avec un SHA-256 attendu. L’apply et le
+rollback sont actuellement limités à `headless-filesystem` sur une copie ou un
+coffre dédié, où ce hash est imposé par l’écriture filesystem. Local REST API
+4.1.7 renvoie un ETag mais n’impose pas `If-Match` lors d’un remplacement de
+note complète : l’apply live échoue donc fermé avant de déplacer le fichier
+externe. Le journal SQLite local persiste l’état du plan et les préimages des
+notes pour la compensation. Le traiter comme une donnée locale sensible : ne jamais le
+committer ni le partager.
+
+Le HTTP direct refuse scan, plan, status, apply et rollback. Les tickets HTTP
+restent des handoffs en lecture seule.
+
+Il n’existe toujours aucun upload, create, replace, déplacement de dossier,
+move entre racines/volumes, overwrite, delete, corbeille ou sync external-root.
 
 Les stockages cloud, synchronisés, mappés ou montés n’héritent pas des garanties
 de mutation du filesystem local. SharePoint, Google Drive, OneDrive et services
@@ -394,6 +480,8 @@ Erreurs fréquentes :
 | `capability_denied`      | La racine déclare la capacité exigée ; le mode ticket HTTP est activé et utilise une vraie authentification.    |
 | `path_not_allowed`       | Le chemin relatif correspond à `include` et pas à `exclude`.                                                    |
 | `path_link_unsupported`  | Retirer les symlinks ou jonctions du chemin demandé.                                                            |
+| `target_exists`          | Choisir une cible absente ; l’overwrite n’est jamais autorisé.                                                  |
+| `precondition_failed`    | Refaire scan et plan après modification de source, note ou état de plan.                                        |
 | `too_large`              | Limites de racine et budget agrégé du handoff local ou HTTP.                                                    |
 | `unsupported`            | Employer un texte UTF-8 avec `external_read`, ou un mode de handoff supporté pour le binaire.                   |
 | Ticket HTTP indisponible | Vérifier feature flag, auth, identité bearer, TTL, usage unique et redémarrage du service.                      |
@@ -402,3 +490,6 @@ Erreurs fréquentes :
 
 Le serveur ne déduit jamais une nouvelle racine à partir d’un chemin trouvé dans
 une note Obsidian.
+Désactiver le move sans affecter les lectures en passant
+`MCP_EXTERNAL_MOVE_ENABLED=false` ou en retirant `move` de la racine, puis en
+redémarrant le processus stdio.

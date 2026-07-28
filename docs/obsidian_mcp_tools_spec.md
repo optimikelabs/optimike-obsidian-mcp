@@ -140,6 +140,15 @@ machine-local JSON configuration.
   supported by the active transport:
   - `local_path` for a local stdio client sharing the server filesystem;
   - optional `http_ticket` for an authenticated direct HTTP client.
+- `external_references_scan`: stdio-only inventory of exact, ambiguous and
+  historical ÉLYSIA references to one external file.
+- `external_move_plan`: persist a verified same-root regular-file move plan and
+  exact note repairs.
+- `external_move_status`: return the durable, redacted plan receipt.
+- `external_move_apply`: execute an eligible plan and its conditional note
+  repairs.
+- `external_move_rollback`: restore an applied move and its note repairs while
+  every stored precondition still holds.
 
 The core MCP does not parse PDF or Office files. Handoff requires both
 `readable` and `handoff`. HTTP ticket delivery is disabled by default and must be
@@ -150,13 +159,21 @@ discloses the physical source or temporary path. Issuance requires the
 `external:read` scope.
 
 Every external-root tool invoked through direct HTTP requires
-`external:read`. Local stdio keeps its process-local trust model.
+`external:read`. Local stdio keeps its process-local trust model. Direct HTTP
+explicitly refuses the five reference-integrity operations.
 
-Neither handoff mode authorizes upload, create, replace, move, delete, or sync.
-The client owns binary extraction and must verify the returned size and SHA-256.
+Neither handoff mode authorizes mutation. Local move apply and rollback instead
+require `MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, a root carrying
+`move`, an unambiguous canonical `file:///` plus
+`external-ref:<rootId>::<encoded-relative-path>` pair, and unchanged source and
+note preconditions. There is no upload, create, replace, directory/cross-root
+move, overwrite, delete or sync. The client owns binary extraction and must
+verify the returned size and SHA-256.
 See [External document roots — setup and operations](external-roots-setup.md),
 [ADR — External document roots](adr/ADR-External-Document-Roots.md), and
-[ADR — Governed HTTP delivery](adr/ADR-HTTP-External-Artifact-Delivery.md).
+[ADR — Governed HTTP delivery](adr/ADR-HTTP-External-Artifact-Delivery.md). The
+move contract is defined in
+[ADR — External reference integrity](adr/ADR-External-Reference-Integrity.md).
 
 ## Filesystem Admin
 

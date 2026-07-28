@@ -51,13 +51,17 @@ MCP_HTTP_HANDOFF_ENABLED=true
 Le broker refuse le placeholder d’authentification de développement. Les
 tickets sont liés à l’identité, éphémères, à usage unique et absents des URL.
 Ils n’autorisent aucune création, modification, suppression ou synchronisation.
+Le HTTP direct refuse aussi `external_references_scan` et toutes les opérations
+`external_move_*`.
 
 L’entrée HTTP fournie dans `mcp.json` est volontairement un profil de
 développement Inspector non authentifié, limité au loopback et avec handoff HTTP
 désactivé. Ce n’est pas une configuration de production.
 
 Voir [Configuration des racines](docs/external-roots-setup.fr.md) et
-[ADR HTTP](docs/adr/ADR-HTTP-External-Artifact-Delivery.md).
+[ADR HTTP](docs/adr/ADR-HTTP-External-Artifact-Delivery.md). La frontière du
+move local est définie dans
+[l’ADR Intégrité des références externes](docs/adr/ADR-External-Reference-Integrity.fr.md).
 
 ## Frontière reverse proxy
 
@@ -80,7 +84,23 @@ par défaut.
 - L’apply Operon exige le réglage Bridge et
   `OPERON_MUTATIONS_ENABLED=true`.
 - Utiliser dry-run, révisions/hashes attendus et preuve après écriture.
-- Les racines externes restent read-only dans le contrat actuel.
+- Les racines externes sont read-only par défaut. L’unique mutation est un move
+  stdio local d’un fichier régulier dans la même racine, avec réparation exacte
+  des références ÉLYSIA.
+- Apply et rollback exigent `MCP_WRITE_MODE=full`,
+  `MCP_EXTERNAL_MOVE_ENABLED=true` et une racine portant la capacité `move`.
+- La cible doit être absente sous un dossier parent réel existant. La séquence
+  hard-link/unlink sans écrasement échoue fermée sur un filesystem non supporté
+  ou cross-volume.
+- Toute référence ambiguë, historique, legacy ou non supportée bloque l’apply.
+  Les réparations par hash exact sont limitées à `headless-filesystem` sur une
+  copie ou un coffre dédié. L’apply live échoue fermé, car les remplacements de
+  note complète via Local REST n’imposent pas `If-Match`.
+- `MCP_EXTERNAL_MOVE_JOURNAL_PATH` contient l’état durable des plans et les
+  préimages de notes. Le conserver local à la machine, à accès restreint, hors
+  dépôts, dossiers synchronisés et diagnostics publics.
+- Aucun upload, create, replace, move de dossier/cross-root, overwrite, delete,
+  corbeille ou sync externe n’est activé.
 
 ## Contrôles dépendances et release
 

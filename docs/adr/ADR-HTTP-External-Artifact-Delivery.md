@@ -221,7 +221,10 @@ The stdio proxy keeps its existing auto-start and reconnect behavior.
 
 ## Mutation decision
 
-External mutation is not implemented in this change.
+External mutation is not implemented in this HTTP change. A later
+[reference-integrity ADR](ADR-External-Reference-Integrity.md) adopts one
+same-root regular-file move through local stdio only; direct HTTP still refuses
+its scan, plan, status, apply and rollback operations.
 
 A generic `writable` capability is rejected because it collapses materially
 different risks. A future vocabulary should evaluate at least:
@@ -260,17 +263,17 @@ other payload or target is rejected.
 
 ### Milestone verdicts
 
-| Milestone                        | Verdict         | Reason                                                                                         |
-| -------------------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
-| M1 direct loopback HTTP profile  | `APPLY_READY`   | Transport and health endpoint already exist; deterministic and security hardening are bounded. |
-| M2 transport-independent handoff | `APPLY_READY`   | Preserves stdio and adds one explicit delivery mode.                                           |
-| M3 HTTP read-only handoff        | `APPLY_READY`   | One-file, one-use, authenticated, bounded, path-redacted transfer.                             |
-| M4 upload staging                | `EVAL_FIRST`    | Useful only as part of a mutation contract; must not imply apply.                              |
-| M5 governed replace              | `HOLD`          | Requires independent journal, backup, crash, Windows, and rollback evidence.                   |
-| M6 create                        | `EVAL_FIRST`    | Target non-existence and idempotence semantics need proof.                                     |
-| M6 move                          | `HOLD`          | Reference breakage and cross-filesystem behavior need a separate plan.                         |
-| M6 delete                        | `REJECT` for V1 | Irreversible risk is not justified by the current use case.                                    |
-| `sync`                           | `REJECT`        | It is a reconciliation product, not a file-write operation.                                    |
+| Milestone                        | Verdict             | Reason                                                                                         |
+| -------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------- |
+| M1 direct loopback HTTP profile  | `APPLY_READY`       | Transport and health endpoint already exist; deterministic and security hardening are bounded. |
+| M2 transport-independent handoff | `APPLY_READY`       | Preserves stdio and adds one explicit delivery mode.                                           |
+| M3 HTTP read-only handoff        | `APPLY_READY`       | One-file, one-use, authenticated, bounded, path-redacted transfer.                             |
+| M4 upload staging                | `EVAL_FIRST`        | Useful only as part of a mutation contract; must not imply apply.                              |
+| M5 governed replace              | `HOLD`              | Requires independent journal, backup, crash, Windows, and rollback evidence.                   |
+| M6 create                        | `EVAL_FIRST`        | Target non-existence and idempotence semantics need proof.                                     |
+| M6 move                          | `LOCAL_STDIO_PILOT` | Adopted only by the separate reference-integrity ADR; HTTP move remains denied.                |
+| M6 delete                        | `REJECT` for V1     | Irreversible risk is not justified by the current use case.                                    |
+| `sync`                           | `REJECT`            | It is a reconciliation product, not a file-write operation.                                    |
 
 ## Storage classes
 

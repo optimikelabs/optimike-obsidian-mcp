@@ -15,6 +15,7 @@ This guide helps agents choose the right layer for Obsidian work.
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Read, list, search, tasks, semantic search                                   | Optimike MCP                                                  | Stable tool surface across live, hybrid, and headless modes.            |
 | Read an explicitly configured document outside the vault                     | Optimike MCP external-root tools                              | Default-deny confinement with portable logical paths.                   |
+| Move one external file without silently breaking ÉLYSIA links                | Local stdio on a copied or dedicated vault                    | Inventory, durable plan, exact hash repairs, receipt and rollback.      |
 | Full Obsidian behavior, commands, active file, plugin-backed Bases           | Optimike MCP in `live` or `hybrid` with Obsidian Desktop open | This is the only mode with Desktop/plugin-backed semantics.             |
 | Safe backend server over a synced vault                                      | Optimike MCP in `headless-readonly` first                     | No Desktop required and no write risk.                                  |
 | Bounded Markdown/frontmatter/tag/admin writes on a copied or dedicated vault | Optimike MCP in `headless-filesystem`                         | Path safety, dry-run defaults, and preconditions.                       |
@@ -61,8 +62,30 @@ Agent workflow:
 5. Preserve the logical root ID, relative path, size and SHA-256 as provenance.
    Never persist a temporary path or ticket.
 
+For an ÉLYSIA-managed move:
+
+1. ensure the clickable `file:///` link has an adjacent canonical identity:
+   `external-ref:<rootId>::<percent-encoded-relative-path>`;
+2. use `external_references_scan`, then `external_move_plan`;
+3. stop when `manualReview` is non-empty; never repair a legacy or ambiguous
+   occurrence automatically;
+4. inspect `external_move_status`, then call `external_move_apply` only with
+   explicit local write gates and the same idempotency key;
+5. verify both the target file and repaired notes; use
+   `external_move_rollback` only while its stored preconditions still hold.
+
+This transaction is local stdio only. It supports one regular file, an absent
+target in an existing parent, and a same-root/same-volume no-clobber move.
+Concurrent note edits are protected by an exact SHA-256 precondition in
+`headless-filesystem` on a copied or dedicated vault. Live Local REST apply
+fails closed because whole-note writes do not currently enforce `If-Match`.
+Do not route create, replace, upload, delete, sync, directory, cross-root or
+cross-volume operations through this workflow.
+
 Every direct HTTP external-root operation requires `external:read`. Remote HTTP
 remains pilot-only behind reviewed TLS proxy and network controls.
+Direct HTTP rejects external reference scan, move plan/status, apply and
+rollback; an artifact ticket authorizes download only.
 
 Do not promise extraction merely because handoff succeeds: extraction depends
 on the calling client. Do not silently copy external content into the vault,

@@ -114,6 +114,13 @@ const BaseObsidianSearchReplaceInputSchema = z.object({
     .describe(
       "If true, returns the final content of the file in the response. Defaults to false.",
     ),
+  expectedSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .optional()
+    .describe(
+      "Optional SHA-256 precondition for a filePath target in guarded headless modes. Live Local REST writes reject this precondition.",
+    ),
 });
 
 // ====================================================================================
@@ -513,6 +520,21 @@ export const processObsidianSearchReplace = async (
       BaseErrorCode.INTERNAL_ERROR,
       `${errorMessage}: ${error instanceof Error ? error.message : String(error)}`,
       readContext,
+    );
+  }
+
+  if (params.expectedSha256) {
+    if (targetType !== "filePath" || !effectiveFilePath) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        "expectedSha256 is supported only for an explicit filePath target.",
+        context,
+      );
+    }
+    throw new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      "Atomic expectedSha256 writes are unavailable through the current Obsidian Local REST API. Use a copied or dedicated vault in headless-filesystem mode.",
+      context,
     );
   }
 

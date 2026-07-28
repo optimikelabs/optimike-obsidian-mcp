@@ -30,6 +30,8 @@ Optimike Obsidian MCP possède cinq contrats runtime. Les modes headless tournen
 | Recherche sémantique Smart Connections | Si `.smart-env` existe    | Si `.smart-env` existe                   | Si `.smart-env` existe    | Si `.smart-env` existe          | Si `.smart-env` existe              | Si `.smart-env` existe                                                     |
 | Status/maintenance runtime             | Oui                       | Oui                                      | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
 | Racines documentaires externes         | Config locale optionnelle | Config locale optionnelle                | Config locale optionnelle | Config locale optionnelle       | Config locale optionnelle           | Config locale optionnelle                                                  |
+| Scan/plan des références externes      | Stdio local               | Stdio local                              | Stdio local               | Stdio local                     | Stdio local                         | Stdio local                                                                |
+| Apply/rollback de move externe         | Stdio + trois opt-ins     | Stdio + API + trois opt-ins              | Non                       | Non                             | Stdio + override `full` explicite   | Stdio + override `full` explicite                                          |
 | Validation de format                   | Markdown/Base/Canvas      | Markdown/Base/Canvas                     | Markdown/Base/Canvas      | Markdown/Base/Canvas            | Markdown/Base/Canvas                | Markdown/Base/Canvas                                                       |
 | Update note                            | Outil REST complet        | Outil REST complet                       | Non                       | Non                             | Append/prepend seulement            | Append/prepend seulement                                                   |
 | Search/replace                         | Outil REST complet        | Outil REST complet                       | Non                       | Non                             | Remplacements exacts par `filePath` | Remplacements exacts par `filePath`                                        |
@@ -47,9 +49,17 @@ Optimike Obsidian MCP possède cinq contrats runtime. Les modes headless tournen
 ## Registre des tools par mode
 
 Tous les modes enregistrent aussi `external_runtime_status`,
-`external_roots_list`, `external_list`, `external_stat`, `external_read` et
-`external_handoff`. Sans `MCP_EXTERNAL_ROOTS_FILE`, le statut reste désactivé et
-les opérations échouent fermées.
+`external_roots_list`, `external_list`, `external_stat`, `external_read`,
+`external_handoff`, `external_references_scan`, `external_move_plan`,
+`external_move_status`, `external_move_apply` et `external_move_rollback`. Sans
+`MCP_EXTERNAL_ROOTS_FILE`, le statut reste désactivé et les opérations échouent
+fermées.
+
+Le serveur HTTP direct enregistre les cinq noms d’intégrité uniquement pour
+retourner un refus stdio-only explicite. Le proxy stdio local les implémente.
+Scan, plan et status sont read-only. Apply et rollback exigent en plus
+`MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, la capacité `move` de
+la racine et un backend qui expose `obsidian_search_replace` conditionnel.
 
 Tous les modes enregistrent aussi les 13 outils du contrat Operon :
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
@@ -70,8 +80,11 @@ du mode runtime :
   les racines externes exige `external:read` ;
 - le ticket HTTP reste en lecture seule, expurgé de tout chemin physique, borné,
   à usage unique et désactivé par défaut ;
-- aucun mode runtime ne gagne d’upload, create, replace, move, delete ou sync sur
-  une racine externe grâce à ce profil de livraison.
+- aucun mode runtime ne gagne d’upload, create, replace, delete ou sync sur une
+  racine externe grâce à ce profil de livraison ;
+- le contrat de move stdio local séparé porte un fichier régulier dans la même
+  racine, une cible absente, la réparation exacte des références ÉLYSIA et le
+  rollback.
 
 | Mode runtime                     | Tools enregistrées                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -100,5 +113,14 @@ du mode runtime :
 - Le `/healthz` public est limité à la vie du service et ne divulgue aucun chemin ; l’état détaillé du runtime et de l’intégrité reste derrière l’outil MCP authentifié.
 - Un profil HTTP distant reste un pilote derrière des contrôles TLS, auth, proxy et réseau revus. L’exposition publique directe n’est pas supportée.
 - Les tickets HTTP d’artefacts exigent une vraie identité authentifiée avec
-  `external:read` et n’autorisent jamais une mutation de racine externe.
+  `external:read` et n’autorisent jamais une mutation de racine externe. Le HTTP
+  direct refuse aussi scan de références, plan/status de move, apply et rollback.
+- La réparation automatique exige le token adjacent exact
+  `external-ref:<rootId>::<chemin-relatif-encode-en-pourcentage>`. Toute
+  occurrence ambiguë, historique ou non supportée bloque l’apply.
+- Le move externe emploie une séquence hard-link/unlink sans écrasement sur le
+  même volume et des écritures de notes préconditionnées par hash exact en
+  `headless-filesystem`, sur une copie ou un coffre dédié. L’apply live échoue
+  fermé tant que Local REST ne fournit pas d’écriture atomique conditionnelle
+  de note complète.
 - Une validation d’écriture headless doit créer un nouveau brouillon dans un dossier sandbox. Elle ne doit pas modifier des notes existantes d’un vrai vault.

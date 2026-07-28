@@ -51,7 +51,8 @@ MCP_HTTP_HANDOFF_ENABLED=true
 
 The handoff broker rejects the development authentication placeholder. Tickets
 are identity-bound, short-lived, single-use and absent from URLs. They do not
-authorize upload, create, replace, move, delete or sync.
+authorize upload, create, replace, move, delete or sync. Direct HTTP also
+refuses `external_references_scan` and every `external_move_*` operation.
 
 The bundled `mcp.json` HTTP entry is intentionally an unauthenticated,
 loopback-only Inspector development profile with HTTP handoff disabled. It is
@@ -59,7 +60,8 @@ not a production configuration.
 
 See [External Roots Setup](docs/external-roots-setup.md) for the full
 configuration and [HTTP Delivery ADR](docs/adr/ADR-HTTP-External-Artifact-Delivery.md)
-for the threat model.
+for the transport threat model. The local move boundary is specified by the
+[External Reference Integrity ADR](docs/adr/ADR-External-Reference-Integrity.md).
 
 ## Reverse proxy boundary
 
@@ -81,7 +83,22 @@ by default.
 - Operon apply requires both the Bridge mutation setting and
   `OPERON_MUTATIONS_ENABLED=true`.
 - Use dry-run, expected revisions/hashes and post-write proof where supported.
-- External roots are read-only in the current contract.
+- External roots are read-only by default. The only external mutation is a
+  local-stdio same-root regular-file move with exact ÉLYSIA reference repair.
+- External move apply and rollback require `MCP_WRITE_MODE=full`,
+  `MCP_EXTERNAL_MOVE_ENABLED=true` and a root carrying the `move` capability.
+- The target must be absent under an existing real parent. The no-clobber
+  hard-link/unlink sequence fails closed on unsupported or cross-volume
+  filesystems.
+- Any ambiguous, historical, legacy or unsupported reference blocks apply.
+  Exact-hash repairs are limited to `headless-filesystem` on a copied or
+  dedicated vault. Live apply fails closed because whole-note Local REST writes
+  do not enforce `If-Match`.
+- `MCP_EXTERNAL_MOVE_JOURNAL_PATH` contains durable plan state and note
+  preimages. Keep it machine-local, access-restricted and outside repositories,
+  synchronized folders and public diagnostics.
+- No external upload, create, replace, directory/cross-root move, overwrite,
+  delete, trash or sync capability is enabled.
 
 ## Dependency and release checks
 

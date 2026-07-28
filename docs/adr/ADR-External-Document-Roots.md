@@ -1,7 +1,9 @@
 # ADR — External document roots
 
 - Status: accepted and implemented on `main`; handoff transport amended by
-  [ADR — Governed HTTP delivery](ADR-HTTP-External-Artifact-Delivery.md)
+  [ADR — Governed HTTP delivery](ADR-HTTP-External-Artifact-Delivery.md);
+  one local move/repair workflow amended by
+  [ADR — External reference integrity](ADR-External-Reference-Integrity.md)
 - Date: 2026-07-28
 - External-roots baseline:
   `optimikelabs/optimike-obsidian-mcp@7c2eaad5bf958fa0315d69a067f9972910f6c39d`
@@ -38,7 +40,7 @@ External document access uses an explicit
 - bounded listing, text reading, hashing, and explicit verified handoff;
 - no embedded Office/PDF extraction engine in the first release;
 - no external cache or search namespace in the first release;
-- no automatic copying, moving, renaming, overwriting, or synchronization.
+- no generic copying, moving, renaming, overwriting, or synchronization.
 
 The first implementation is intentionally a secure broker between logical roots
 and agent clients that already have document tools, including Codex, Claude
@@ -77,9 +79,10 @@ Initial capability vocabulary:
 `extractable` and `indexable` are reserved for optional future adapters. They
 are not implemented by the core service.
 
-`writable` is excluded from the first implementation. If it is ever proposed,
-it requires a separate ADR, threat model, mutation journal, optimistic
-preconditions, dry-run contract, explicit apply gate, and rollback evidence.
+`writable` remains excluded as a generic capability. The later reference
+integrity amendment adds only the narrower `move` capability for one same-root
+regular file, with a separate threat model, journal, optimistic preconditions,
+explicit apply gate and rollback evidence.
 
 The absence of a capability denies the corresponding file operation; root
 discovery remains available as described above.
@@ -155,9 +158,9 @@ from vault semantic search.
 - No startup scan of all external roots.
 - Deleting an index entry never deletes the source file.
 
-## Provisional tool surface
+## Tool surface
 
-Current first-release tool surface:
+Read and handoff surface:
 
 - `external_roots_list`
 - `external_list`
@@ -166,8 +169,11 @@ Current first-release tool surface:
 - `external_handoff`
 - `external_runtime_status`
 
-These tools are implemented on `main`. All are read-only and carry read-only
-MCP annotations.
+These tools are implemented on `main` and carry read-only MCP annotations. The
+later local-stdio amendment adds `external_references_scan`,
+`external_move_plan`, `external_move_status`, `external_move_apply` and
+`external_move_rollback`. Its first three operations are read-only; apply and
+rollback are destructive, separately gated, and refused over direct HTTP.
 
 ## Runtime and deployment policy
 
@@ -239,9 +245,18 @@ The promoted implementation provides:
 - stale/hash semantics;
 - no automatic startup crawl.
 
+### Phase 5 — Same-root file move with reference integrity — local pilot
+
+- canonical adjacent logical identity;
+- read-only inventory and durable plan/status;
+- one no-clobber regular-file move through local stdio;
+- exact conditional ÉLYSIA note repair;
+- journal, compensation and rollback;
+- direct HTTP mutation denied.
+
 ### Deferred
 
-- write tools;
+- generic write tools;
 - sync or migration;
 - watcher-driven recursive indexing;
 - network and collaborative-provider connectors;
