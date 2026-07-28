@@ -16,7 +16,15 @@ import { logger, requestContextService } from "../../../../../utils/index.js";
 import { BaseErrorCode, McpError } from "../../../../../types-global/errors.js";
 import { authContext } from "../../core/authContext.js";
 
-if (config.mcpAuthMode === "jwt") {
+const httpUsesJwtBoundary =
+  config.mcpTransportType === "http" && config.mcpAuthMode !== "oauth";
+
+if (httpUsesJwtBoundary) {
+  if (environment === "production" && !config.mcpAuthMode) {
+    throw new Error(
+      "MCP_AUTH_MODE must be set to 'jwt' or 'oauth' for HTTP transport in production.",
+    );
+  }
   if (environment === "production" && !config.mcpAuthSecretKey) {
     logger.fatal(
       "CRITICAL: MCP_AUTH_SECRET_KEY is not set in production environment for JWT auth. Authentication cannot proceed securely.",
@@ -26,7 +34,7 @@ if (config.mcpAuthMode === "jwt") {
     );
   } else if (!config.mcpAuthSecretKey) {
     logger.warning(
-      "MCP_AUTH_SECRET_KEY is not set. JWT auth middleware will use the shared development identity (DEVELOPMENT ONLY).",
+      "MCP_AUTH_SECRET_KEY is not set. HTTP uses one shared development identity (DEVELOPMENT ONLY).",
     );
   }
 }
@@ -50,7 +58,10 @@ export async function mcpAuthMiddleware(
 
   const reqWithAuth = c.env.incoming;
 
-  if (config.mcpAuthMode !== "jwt") {
+  if (config.mcpAuthMode === "oauth") {
+    return await next();
+  }
+  if (!httpUsesJwtBoundary && config.mcpAuthMode !== "jwt") {
     return await next();
   }
 
