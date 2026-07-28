@@ -334,6 +334,10 @@ Codex should point to:
 [mcp_servers.optimike-obsidian-mcp-stdio]
 command = "node"
 args = ["/path/to/optimike-obsidian-mcp/dist/stdio-proxy.js"]
+
+[mcp_servers.optimike-obsidian-mcp-stdio.env]
+# Optional: absolute path to a machine-local external-roots JSON file
+MCP_EXTERNAL_ROOTS_FILE = "/home/you/.config/optimike/external-roots.json"
 ```
 
 Important environment variables:
@@ -345,6 +349,7 @@ Important environment variables:
 - `SMART_ENV_DIR`
 - `OBSIDIAN_BASE_URL`
 - `OBSIDIAN_API_KEY`
+- `MCP_EXTERNAL_ROOTS_FILE`
 
 Recommended startup behavior:
 
@@ -353,6 +358,30 @@ OBSIDIAN_STARTUP_BLOCKING = "false"
 ```
 
 That keeps Codex startup responsive while the backend health check completes in the background.
+
+## External document roots runbook
+
+External roots are an optional, default-deny, read-only boundary for files that
+legitimately remain outside the vault. They are not an external index, a sync
+engine, or a backup system.
+
+1. Copy `docs/external-roots.example.json` to a machine-local path outside the
+   repository.
+2. Configure logical root IDs, capabilities, include/exclude policies, and
+   limits. Never commit the real file.
+3. Set its absolute path in `MCP_EXTERNAL_ROOTS_FILE` on the
+   `dist/stdio-proxy.js` process.
+4. Restart the MCP process. Configuration is not hot-reloaded.
+5. Verify `external_runtime_status`, `external_roots_list`, a bounded listing,
+   one UTF-8 read, and—only when needed—one explicit handoff.
+
+For the complete schema, Windows and Unix examples, client compatibility,
+security lifecycle, rollback, smoke-test levels, and troubleshooting, see
+[External document roots — setup and operations](docs/external-roots-setup.md).
+
+To disable the feature, remove `MCP_EXTERNAL_ROOTS_FILE`, restart, and confirm
+that `external_runtime_status` reports `enabled: false`. This does not mutate
+source documents.
 
 ## Troubleshooting
 

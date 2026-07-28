@@ -336,6 +336,10 @@ Codex doit pointer vers :
 [mcp_servers.optimike-obsidian-mcp-stdio]
 command = "node"
 args = ["/path/to/optimike-obsidian-mcp/dist/stdio-proxy.js"]
+
+[mcp_servers.optimike-obsidian-mcp-stdio.env]
+# Optionnel : chemin absolu vers un JSON external-roots local à la machine
+MCP_EXTERNAL_ROOTS_FILE = "/home/vous/.config/optimike/external-roots.json"
 ```
 
 Variables importantes :
@@ -347,6 +351,7 @@ Variables importantes :
 - `SMART_ENV_DIR`
 - `OBSIDIAN_BASE_URL`
 - `OBSIDIAN_API_KEY`
+- `MCP_EXTERNAL_ROOTS_FILE`
 
 Comportement de démarrage recommandé :
 
@@ -355,6 +360,31 @@ OBSIDIAN_STARTUP_BLOCKING = "false"
 ```
 
 Ça garde le démarrage de Codex réactif pendant que le health check du backend finit en arrière-plan.
+
+## Runbook des racines documentaires externes
+
+Les racines externes forment une frontière optionnelle, default-deny et en
+lecture seule pour des fichiers qui restent légitimement hors du coffre. Elles
+ne sont ni un index externe, ni un moteur de synchronisation, ni une sauvegarde.
+
+1. Copier `docs/external-roots.example.json` vers un chemin local à la machine,
+   hors du dépôt.
+2. Configurer les identifiants logiques, capacités, politiques include/exclude
+   et limites. Ne jamais committer le vrai fichier.
+3. Définir son chemin absolu dans `MCP_EXTERNAL_ROOTS_FILE` sur le processus
+   `dist/stdio-proxy.js`.
+4. Redémarrer le processus MCP. La configuration n’est pas rechargée à chaud.
+5. Vérifier `external_runtime_status`, `external_roots_list`, un listing borné,
+   une lecture UTF-8 et, seulement si nécessaire, un handoff explicite.
+
+Pour le schéma complet, les exemples Windows et Unix, la compatibilité client,
+le cycle de sécurité, le rollback, les niveaux de smoke test et le dépannage,
+voir
+[Racines documentaires externes — configuration et exploitation](docs/external-roots-setup.fr.md).
+
+Pour désactiver la fonction, retirer `MCP_EXTERNAL_ROOTS_FILE`, redémarrer et
+confirmer que `external_runtime_status` indique `enabled: false`. Cette opération
+ne modifie aucun document source.
 
 ## Dépannage
 
