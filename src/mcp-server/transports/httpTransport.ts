@@ -69,11 +69,11 @@ type HttpSession = {
   identityPseudonym: string;
   createdAt: number;
   lastSeenAt: number;
+  activeRequests: number;
 };
 
 type SessionCapacityReservation = {
   release: () => void;
-  isActive: () => boolean;
 };
 
 // The session store is intentionally process-local. Registered sessions plus
@@ -118,13 +118,16 @@ function quotaState(
   };
 }
 
+function jsonRpcIdFromBody(body: unknown): string | number | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const id = (body as { id?: unknown }).id;
+  return typeof id === "string" || typeof id === "number" ? id : null;
+}
+
 async function requestJsonRpcId(c: Context): Promise<string | number | null> {
   if (c.req.method !== "POST") return null;
   try {
-    const body = (await c.req.raw.clone().json()) as { id?: unknown };
-    return typeof body.id === "string" || typeof body.id === "number"
-      ? body.id
-      : null;
+    return jsonRpcIdFromBody(await c.req.raw.clone().json());
   } catch {
     return null;
   }
@@ -243,6 +246,7 @@ function requireIdentity(c: Context): VerifiedHttpIdentity {
 }
 
 function sessionExpired(session: HttpSession, now: number): boolean {
+  if (session.activeRequests > 0) return false;
   return (
     now - session.lastSeenAt >= httpProtectionConfig.sessionIdleTimeoutMs ||
     now - session.createdAt >= httpProtectionConfig.sessionMaxLifetimeMs
@@ -298,7 +302,6 @@ function reserveSessionCapacity(): SessionCapacityReservation | undefined {
         pendingSessionInitializations - 1,
       );
     },
-    isActive: () => active,
   };
 }
 
@@ -330,7 +333,75 @@ function sessionForRequest(
   return session;
 }
 
-function sessionCapacityResponse(c: Context): Response {
+function finishSessionActivity(session: HttpSession): void {
+  session.activeRequests = Math.max(0, session.activeRequests - 1);
+  session.lastSeenAt = Date.now();
+}
+
+function wrapSessionResponse(
+  session: HttpSession,
+  response: Response,
+): Response {
+  if (!response.body) {
+    finishSessionActivity(session);
+    return response;
+  }
+
+  const reader = response.body.getReader();
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    finishSessionActivity(session);
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          finish();
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk.value);
+      } catch (error) {
+        finish();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        finish();
+      }
+    },
+  });
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+async function handleWithSessionActivity(
+  session: HttpSession,
+  operation: () => Promise<Response>,
+  alreadyActive = false,
+): Promise<Response> {
+  if (!alreadyActive) {
+    session.activeRequests += 1;
+    session.lastSeenAt = Date.now();
+  }
+  try {
+    return wrapSessionResponse(session, await operation());
+  } catch (error) {
+    finishSessionActivity(session);
+    throw error;
+  }
+}
+
+function sessionCapacityResponse(c: Context, body: unknown): Response {
   const state = getHttpRequestState(c.req.raw);
   c.header("Retry-After", "1");
   c.header("X-Request-Id", state.requestId);
@@ -342,7 +413,7 @@ function sessionCapacityResponse(c: Context): Response {
         code: BaseErrorCode.SERVICE_UNAVAILABLE,
         message: "HTTP session capacity is temporarily exhausted.",
       },
-      id: null,
+      id: jsonRpcIdFromBody(body),
     },
     503,
   );
@@ -569,6 +640,7 @@ export async function startHttpTransport(
     let initializingTransport:
       | WebStandardStreamableHTTPServerTransport
       | undefined;
+    let initializedSession: HttpSession | undefined;
 
     if (isInitializeRequest(body)) {
       if (transport) {
@@ -582,7 +654,7 @@ export async function startHttpTransport(
 
       initializationReservation = reserveSessionCapacity();
       if (!initializationReservation) {
-        return sessionCapacityResponse(c);
+        return sessionCapacityResponse(c, body);
       }
 
       const newTransport = new WebStandardStreamableHTTPServerTransport({
@@ -590,13 +662,15 @@ export async function startHttpTransport(
         onsessioninitialized: (newId) => {
           const now = Date.now();
           initializationReservation?.release();
-          transports.set(newId, {
+          initializedSession = {
             transport: newTransport,
             identityKey: identity.key,
             identityPseudonym: identity.pseudonym,
             createdAt: now,
             lastSeenAt: now,
-          });
+            activeRequests: 1,
+          };
+          transports.set(newId, initializedSession);
           logger.info("HTTP session created.", {
             ...postContext,
             sessionCount: transports.size,
@@ -630,7 +704,7 @@ export async function startHttpTransport(
         await newTransport.close().catch(() => undefined);
         throw error;
       }
-    } else if (!transport) {
+    } else if (!transport || !session) {
       throw new McpError(
         BaseErrorCode.NOT_FOUND,
         "Invalid or expired session ID.",
@@ -638,13 +712,43 @@ export async function startHttpTransport(
     }
 
     try {
-      return await transport.handleRequest(c.req.raw, {
-        authInfo: c.env.incoming.auth,
-        parsedBody: body,
-      });
+      if (initializedSession) {
+        return await handleWithSessionActivity(
+          initializedSession,
+          () =>
+            transport!.handleRequest(c.req.raw, {
+              authInfo: c.env.incoming.auth,
+              parsedBody: body,
+            }),
+          true,
+        );
+      }
+      if (isInitializeRequest(body)) {
+        const response = await transport.handleRequest(c.req.raw, {
+          authInfo: c.env.incoming.auth,
+          parsedBody: body,
+        });
+        if (!initializedSession) {
+          await initializingTransport?.close().catch(() => undefined);
+          throw new McpError(
+            BaseErrorCode.INTERNAL_ERROR,
+            "HTTP session initialization completed without a registered session.",
+          );
+        }
+        return wrapSessionResponse(initializedSession, response);
+      }
+      return await handleWithSessionActivity(session!, () =>
+        transport!.handleRequest(c.req.raw, {
+          authInfo: c.env.incoming.auth,
+          parsedBody: body,
+        }),
+      );
     } catch (error) {
       if (initializingTransport) {
         await initializingTransport.close().catch(() => undefined);
+      }
+      if (initializedSession && initializedSession.activeRequests > 0) {
+        finishSessionActivity(initializedSession);
       }
       throw error;
     } finally {
@@ -665,9 +769,11 @@ export async function startHttpTransport(
       );
     }
 
-    return await session.transport.handleRequest(c.req.raw, {
-      authInfo: c.env.incoming.auth,
-    });
+    return await handleWithSessionActivity(session, () =>
+      session.transport.handleRequest(c.req.raw, {
+        authInfo: c.env.incoming.auth,
+      }),
+    );
   };
 
   app.get(MCP_ENDPOINT_PATH, handleSessionRequest);
