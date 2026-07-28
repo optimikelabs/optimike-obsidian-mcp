@@ -6,6 +6,9 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SignJWT } from "jose";
 
 const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "60000");
 
@@ -21,7 +24,9 @@ async function findFreePort() {
 }
 
 async function createTempVault() {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "optimike-status-vault-"));
+  const vaultRoot = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-status-vault-"),
+  );
   await mkdir(path.join(vaultRoot, ".obsidian"), { recursive: true });
   await writeFile(
     path.join(vaultRoot, "Status.md"),
@@ -36,7 +41,7 @@ async function waitForHealth(healthUrl) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${healthUrl}?integrity=1`);
+      const response = await fetch(healthUrl);
       if (response.ok) {
         return response.json();
       }
@@ -49,10 +54,22 @@ async function waitForHealth(healthUrl) {
   throw lastError ?? new Error("Timed out waiting for healthz");
 }
 
+function jsonOf(result) {
+  return JSON.parse(
+    result.content?.map((item) => item.text ?? "").join("\n") ?? "{}",
+  );
+}
+
 async function main() {
   const vaultRoot = await createTempVault();
   const port = await findFreePort();
-  const cachePath = path.join(vaultRoot, ".obsidian", "optimike-mcp", "shared-cache.sqlite");
+  const cachePath = path.join(
+    vaultRoot,
+    ".obsidian",
+    "optimike-mcp",
+    "shared-cache.sqlite",
+  );
+  const authSecret = "smoke-status-secret-for-runtime-checks";
   const child = spawn(process.execPath, ["dist/index.js"], {
     cwd: process.cwd(),
     env: {
@@ -67,7 +84,7 @@ async function main() {
       MCP_HTTP_HOST: "127.0.0.1",
       MCP_HTTP_PORT: String(port),
       MCP_AUTH_MODE: "jwt",
-      MCP_AUTH_SECRET_KEY: "smoke-status-secret-for-runtime-checks",
+      MCP_AUTH_SECRET_KEY: authSecret,
       SEMANTIC_SEARCH_PREWARM: "false",
       MCP_LOG_LEVEL: process.env.MCP_LOG_LEVEL ?? "error",
     },
@@ -76,6 +93,7 @@ async function main() {
   });
 
   let stderr = "";
+  let client;
   child.stderr.on("data", (chunk) => {
     stderr += chunk.toString();
   });
@@ -86,16 +104,54 @@ async function main() {
     if (!body.ok) {
       throw new Error(`healthz ok=false: ${JSON.stringify(body)}`);
     }
-    if (body.runtimeMode !== "headless-readonly") {
-      throw new Error(`unexpected runtimeMode: ${body.runtimeMode}`);
+    if (
+      JSON.stringify(body).includes(vaultRoot) ||
+      JSON.stringify(body).includes(cachePath) ||
+      "runtime" in body ||
+      "sharedCache" in body
+    ) {
+      throw new Error(
+        `public healthz disclosed runtime state: ${JSON.stringify(body)}`,
+      );
     }
-    if (!body.sharedCache?.dbExists) {
-      throw new Error(`shared cache DB was not created: ${JSON.stringify(body.sharedCache)}`);
+
+    const token = await new SignJWT({
+      cid: "runtime-status-smoke",
+      scp: ["runtime:read"],
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject("runtime-status-smoke")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(new TextEncoder().encode(authSecret));
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${port}/mcp`),
+      {
+        requestInit: {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      },
+    );
+    client = new Client({
+      name: "optimike-runtime-status-smoke",
+      version: "0",
+    });
+    await client.connect(transport);
+    const runtimeStatus = jsonOf(
+      await client.callTool({
+        name: "obsidian_runtime_status",
+        arguments: {},
+      }),
+    );
+    if (runtimeStatus.runtimeMode !== "headless-readonly") {
+      throw new Error(`unexpected runtimeMode: ${runtimeStatus.runtimeMode}`);
     }
-    if (body.sharedCache?.integrity?.ok !== true) {
-      throw new Error(`integrity check failed: ${JSON.stringify(body.sharedCache?.integrity)}`);
+    if (!runtimeStatus.sharedCache?.dbExists) {
+      throw new Error(
+        `shared cache DB was not created: ${JSON.stringify(runtimeStatus.sharedCache)}`,
+      );
     }
-    if (body.runtime?.dist?.isNewerThanProcess) {
+    if (runtimeStatus.runtime?.dist?.isNewerThanProcess) {
       throw new Error("backend process is older than dist files");
     }
     writeSync(
@@ -106,20 +162,21 @@ async function main() {
           healthUrl,
           vaultRoot,
           cachePath,
-          runtimeMode: body.runtimeMode,
-          pid: body.pid,
+          publicHealth: body,
+          runtimeMode: runtimeStatus.runtimeMode,
+          pid: runtimeStatus.pid,
           sharedCache: {
-            status: body.sharedCache.status,
-            dbFileCount: body.sharedCache.dbFileCount,
-            integrity: body.sharedCache.integrity,
+            status: runtimeStatus.sharedCache.status,
+            dbFileCount: runtimeStatus.sharedCache.dbFileCount,
           },
-          writePolicy: body.writePolicy,
+          writePolicy: runtimeStatus.writePolicy,
         },
         null,
         2,
       )}\n`,
     );
   } finally {
+    await client?.close().catch(() => undefined);
     child.kill();
     if (child.exitCode === null) {
       await Promise.race([
@@ -127,7 +184,9 @@ async function main() {
         new Promise((resolve) => setTimeout(resolve, 1000)),
       ]).catch(() => undefined);
     }
-    await rm(vaultRoot, { recursive: true, force: true }).catch(() => undefined);
+    await rm(vaultRoot, { recursive: true, force: true }).catch(
+      () => undefined,
+    );
     if (child.exitCode && child.exitCode !== 0 && stderr) {
       console.error(stderr);
     }

@@ -474,6 +474,7 @@ export class ExternalRootsService {
     rootId: string,
     requestedPath: string,
     includeHash = true,
+    maxBytesOverride?: number,
   ): Promise<{
     rootId: string;
     path: string;
@@ -488,7 +489,11 @@ export class ExternalRootsService {
     return this.withHandoffLock(async () => {
       // Keep the verified read inside the same lock as allocation and copy so
       // concurrent handoffs cannot accumulate multiple max-sized buffers.
-      const verified = await this.readVerifiedBuffer(runtime, relativePath);
+      const verified = await this.readVerifiedBuffer(
+        runtime,
+        relativePath,
+        maxBytesOverride,
+      );
       const localPath = await this.createHandoffCopy(
         relativePath,
         verified.buffer,
@@ -877,7 +882,12 @@ export class ExternalRootsService {
   private async readVerifiedBuffer(
     runtime: RootRuntime,
     relativePath: string,
+    maxBytesOverride?: number,
   ): Promise<{ buffer: Buffer; modifiedAt: string }> {
+    const maxFileBytes = Math.min(
+      runtime.config.limits.maxFileBytes,
+      maxBytesOverride ?? Number.MAX_SAFE_INTEGER,
+    );
     const absolutePath = await this.resolvePath(runtime, relativePath);
     const preOpenStat = await stat(absolutePath);
     if (!preOpenStat.isFile()) {
@@ -886,10 +896,10 @@ export class ExternalRootsService {
         "The requested external path is not a regular file.",
       );
     }
-    if (preOpenStat.size > runtime.config.limits.maxFileBytes) {
+    if (preOpenStat.size > maxFileBytes) {
       throw new ExternalRootError(
         "too_large",
-        `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
+        `The file exceeds the configured ${maxFileBytes}-byte limit.`,
       );
     }
     const handle = await open(absolutePath, "r");
@@ -902,12 +912,12 @@ export class ExternalRootsService {
         );
       }
       if (
-        openedStat.size > BigInt(runtime.config.limits.maxFileBytes) ||
+        openedStat.size > BigInt(maxFileBytes) ||
         openedStat.size > BigInt(Number.MAX_SAFE_INTEGER)
       ) {
         throw new ExternalRootError(
           "too_large",
-          `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
+          `The file exceeds the configured ${maxFileBytes}-byte limit.`,
         );
       }
 

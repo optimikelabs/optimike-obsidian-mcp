@@ -1,8 +1,4 @@
-import {
-  createHash,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { AuthInfo } from "../mcp-server/transports/auth/core/authTypes.js";
@@ -14,10 +10,13 @@ const DEFAULT_TTL_MS = 60_000;
 const DEFAULT_MAX_TICKETS = 16;
 const DEFAULT_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 128 * 1024 * 1024;
+const DEFAULT_TRANSFER_TIMEOUT_MS = 120_000;
 const MAX_TTL_MS = 5 * 60 * 1000;
 const MAX_TICKETS = 128;
 const MAX_FILE_BYTES = 200 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+const MAX_TRANSFER_TIMEOUT_MS = 10 * 60 * 1000;
+const HANDOFF_STREAM_CHUNK_BYTES = 64 * 1024;
 
 export type PreparedExternalHandoff = {
   rootId: string;
@@ -65,16 +64,92 @@ export type ExternalTransferBrokerOptions = {
   maxTickets?: number;
   maxFileBytes?: number;
   maxTotalBytes?: number;
+  transferTimeoutMs?: number;
   now?: () => number;
 };
 
-type ConsumedExternalHandoff = {
+export type ConsumedExternalHandoff = {
   buffer: Buffer;
   filename: string;
   mediaType: string;
   size: number;
   sha256: string;
+  release: () => Promise<void>;
 };
+
+export function externalHandoffResponse(
+  artifact: ConsumedExternalHandoff,
+  transferTimeoutMs: number,
+): Response {
+  let offset = 0;
+  let finished = false;
+  let transferTimer: ReturnType<typeof setTimeout> | undefined;
+  const releaseLease = async () => {
+    if (finished) return;
+    finished = true;
+    if (transferTimer) clearTimeout(transferTimer);
+    await artifact.release();
+  };
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      transferTimer = setTimeout(() => {
+        if (finished) return;
+        try {
+          controller.error(
+            new Error("The HTTP artifact transfer exceeded its time limit."),
+          );
+        } finally {
+          void releaseLease();
+        }
+      }, transferTimeoutMs);
+      transferTimer.unref();
+    },
+    async pull(controller) {
+      if (finished) return;
+      if (offset >= artifact.buffer.length) {
+        controller.close();
+        await releaseLease();
+        return;
+      }
+      const end = Math.min(
+        offset + HANDOFF_STREAM_CHUNK_BYTES,
+        artifact.buffer.length,
+      );
+      controller.enqueue(
+        new Uint8Array(
+          artifact.buffer.buffer,
+          artifact.buffer.byteOffset + offset,
+          end - offset,
+        ),
+      );
+      offset = end;
+    },
+    async cancel() {
+      await releaseLease();
+    },
+  });
+
+  try {
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+        Pragma: "no-cache",
+        "Content-Type": artifact.mediaType,
+        "Content-Length": String(artifact.size),
+        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(
+          artifact.filename,
+        )}`,
+        "X-Artifact-SHA256": artifact.sha256,
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+      },
+    });
+  } catch (error) {
+    void body.cancel();
+    throw error;
+  }
+}
 
 function parseBoundedInteger(
   name: string,
@@ -116,6 +191,11 @@ function envOptions(): Required<Omit<ExternalTransferBrokerOptions, "now">> {
       "MCP_HTTP_HANDOFF_MAX_TOTAL_BYTES",
       DEFAULT_MAX_TOTAL_BYTES,
       MAX_TOTAL_BYTES,
+    ),
+    transferTimeoutMs: parseBoundedInteger(
+      "MCP_HTTP_HANDOFF_TRANSFER_TIMEOUT_MS",
+      DEFAULT_TRANSFER_TIMEOUT_MS,
+      MAX_TRANSFER_TIMEOUT_MS,
     ),
   };
 }
@@ -185,11 +265,14 @@ export class ExternalTransferBroker {
   readonly maxTickets: number;
   readonly maxFileBytes: number;
   readonly maxTotalBytes: number;
+  readonly transferTimeoutMs: number;
 
   private readonly now: () => number;
   private readonly tickets = new Map<string, TicketEntry>();
   private reservedTickets = 0;
   private reservedBytes = 0;
+  private inFlightTransfers = 0;
+  private inFlightBytes = 0;
   private lock: Promise<void> = Promise.resolve();
   private readonly sweepTimer?: ReturnType<typeof setInterval>;
 
@@ -200,12 +283,17 @@ export class ExternalTransferBroker {
     this.maxTickets = options?.maxTickets ?? defaults.maxTickets;
     this.maxFileBytes = options?.maxFileBytes ?? defaults.maxFileBytes;
     this.maxTotalBytes = options?.maxTotalBytes ?? defaults.maxTotalBytes;
+    this.transferTimeoutMs =
+      options?.transferTimeoutMs ?? defaults.transferTimeoutMs;
     this.now = options?.now ?? Date.now;
 
     if (this.enabled) {
-      this.sweepTimer = setInterval(() => {
-        void this.withLock(() => this.pruneExpired()).catch(() => undefined);
-      }, Math.max(1_000, Math.min(this.ttlMs, 30_000)));
+      this.sweepTimer = setInterval(
+        () => {
+          void this.withLock(() => this.pruneExpired()).catch(() => undefined);
+        },
+        Math.max(1_000, Math.min(this.ttlMs, 30_000)),
+      );
       this.sweepTimer.unref();
     }
   }
@@ -219,6 +307,7 @@ export class ExternalTransferBroker {
     maxFileBytes: number;
     maxTotalBytes: number;
     maxTickets: number;
+    transferTimeoutMs: number;
   } {
     return {
       enabled: this.enabled,
@@ -229,6 +318,7 @@ export class ExternalTransferBroker {
       maxFileBytes: this.maxFileBytes,
       maxTotalBytes: this.maxTotalBytes,
       maxTickets: this.maxTickets,
+      transferTimeoutMs: this.transferTimeoutMs,
     };
   }
 
@@ -351,12 +441,23 @@ export class ExternalTransferBroker {
           "The staged handoff snapshot failed integrity verification.",
         );
       }
+      this.inFlightTransfers += 1;
+      this.inFlightBytes += entry.size;
+      let released = false;
       return {
         buffer: entry.buffer,
         filename: entry.filename,
         mediaType: entry.mediaType,
         size: entry.size,
         sha256: entry.sha256,
+        release: async () => {
+          if (released) return;
+          released = true;
+          await this.withLock(async () => {
+            this.inFlightTransfers = Math.max(0, this.inFlightTransfers - 1);
+            this.inFlightBytes = Math.max(0, this.inFlightBytes - entry.size);
+          });
+        },
       };
     });
   }
@@ -367,6 +468,8 @@ export class ExternalTransferBroker {
       this.tickets.clear();
       this.reservedTickets = 0;
       this.reservedBytes = 0;
+      this.inFlightTransfers = 0;
+      this.inFlightBytes = 0;
     });
   }
 
@@ -378,8 +481,10 @@ export class ExternalTransferBroker {
         0,
       );
       if (
-        this.tickets.size + this.reservedTickets >= this.maxTickets ||
-        ticketBytes + this.reservedBytes + size > this.maxTotalBytes
+        this.tickets.size + this.reservedTickets + this.inFlightTransfers >=
+          this.maxTickets ||
+        ticketBytes + this.reservedBytes + this.inFlightBytes + size >
+          this.maxTotalBytes
       ) {
         throw new ExternalRootError(
           "too_large",

@@ -24,15 +24,15 @@ external-root mutation belongs in the same change.
 
 ## Decision summary
 
-| Axis | Verdict | Decision |
-| --- | --- | --- |
-| Direct HTTP, loopback | `ADOPT_WITH_LIMITS` | Official single-process profile on a deterministic loopback endpoint. |
-| HTTP behind a trusted reverse proxy | `PILOT_ONLY` | TLS termination, explicit origins, trusted proxy configuration, and standards-compliant OAuth deployment evidence are required. |
-| Direct public exposure by the Node server | `REJECT` | The server does not provide TLS termination or a complete internet-facing deployment boundary. |
-| Transport-independent handoff | `ADOPT_WITH_LIMITS` | One semantic operation with `local_path` and `http_ticket` delivery modes. |
-| HTTP transfer mechanism | `ADOPT_WITH_LIMITS` | Authenticated auxiliary GET endpoint with an opaque one-use ticket in a header. |
-| External mutations | `DEFER` | Separate ADR, module, threat model, journal, rollback proof, and local-root pilot are required. |
-| Generic cloud/network mutation | `REJECT` | Provider-specific connectors must own identity, revisions, and conflict semantics. |
+| Axis                                      | Verdict             | Decision                                                                                                                        |
+| ----------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Direct HTTP, loopback                     | `ADOPT_WITH_LIMITS` | Official single-process profile on a deterministic loopback endpoint.                                                           |
+| HTTP behind a trusted reverse proxy       | `PILOT_ONLY`        | TLS termination, explicit origins, trusted proxy configuration, and standards-compliant OAuth deployment evidence are required. |
+| Direct public exposure by the Node server | `REJECT`            | The server does not provide TLS termination or a complete internet-facing deployment boundary.                                  |
+| Transport-independent handoff             | `ADOPT_WITH_LIMITS` | One semantic operation with `local_path` and `http_ticket` delivery modes.                                                      |
+| HTTP transfer mechanism                   | `ADOPT_WITH_LIMITS` | Authenticated auxiliary GET endpoint with an opaque one-use ticket in a header.                                                 |
+| External mutations                        | `DEFER`             | Separate ADR, module, threat model, journal, rollback proof, and local-root pilot are required.                                 |
+| Generic cloud/network mutation            | `REJECT`            | Provider-specific connectors must own identity, revisions, and conflict semantics.                                              |
 
 ## HTTP profiles
 
@@ -54,7 +54,7 @@ Requirements:
 - use a deterministic configured port;
 - fail closed when the port is occupied unless bounded retries are explicitly
   configured;
-- expose `/healthz` for supervision;
+- expose a minimal path-free `/healthz` liveness probe for supervision;
 - validate every supplied `Origin` against an exact allowlist;
 - ignore `X-Forwarded-For` unless `MCP_TRUST_PROXY=true`;
 - use JWT with a real secret or OAuth for HTTP artifact tickets;
@@ -106,7 +106,8 @@ of two delivery modes.
 
 - direct HTTP only;
 - disabled by default with `MCP_HTTP_HANDOFF_ENABLED=false`;
-- requires a non-development authenticated identity;
+- requires a non-development authenticated identity with the
+  `external:read` scope;
 - returns no source path and no temporary path;
 - returns an opaque ticket, fixed endpoint, fixed ticket-header name, logical
   provenance, size, media type, modification time, SHA-256, and expiry;
@@ -121,7 +122,8 @@ The ticket is:
 - short-lived;
 - claimed atomically before delivery;
 - single-use;
-- removed with its bounded in-memory snapshot after use or expiry.
+- removed after claim while its bounded in-memory snapshot remains reserved
+  until the download stream completes or is cancelled.
 
 A cross-client attempt receives the same generic unavailable response as an
 unknown, expired, or replayed ticket. The ticket is not placed in a URL, query,
@@ -137,7 +139,8 @@ When a ticket is issued, the broker:
 
 1. reads the already verified local handoff copy;
 2. rechecks its size and SHA-256;
-3. keeps an independent bounded memory snapshot for the ticket lifetime;
+3. keeps an independent bounded memory snapshot while the ticket is pending and
+   while its download stream is in flight;
 4. leaves the service-owned copy under the existing one-hour, 16-file and
    512-MiB lifecycle.
 
@@ -186,16 +189,18 @@ hash identifies exactly what was delivered.
 Defaults for the opt-in HTTP pilot:
 
 - 60-second ticket TTL;
-- 16 active tickets;
+- 16 pending or in-flight transfers;
 - 25 MiB per snapshot;
-- 128 MiB total ticket snapshots;
+- 128 MiB total pending and in-flight snapshots;
+- 120-second transfer watchdog, bounded to at most 10 minutes;
 - one process-local in-memory ticket store;
 - no persistence across restart;
 - no replay after claim.
 
-All HTTP budgets are independently bounded below the existing local handoff
-ceiling. Environment overrides are bounded and validated. Restart invalidates
-every outstanding session and ticket, which is a safe failure mode.
+Default HTTP budgets are independently bounded below the existing local handoff
+ceiling. Environment overrides are validated against explicit maxima but remain
+an operator capacity decision. Restart invalidates every outstanding session
+and ticket, which is a safe failure mode.
 
 ## HTTP lifecycle and supervision
 
@@ -253,66 +258,67 @@ other payload or target is rejected.
 
 ### Milestone verdicts
 
-| Milestone | Verdict | Reason |
-| --- | --- | --- |
-| M1 direct loopback HTTP profile | `APPLY_READY` | Transport and health endpoint already exist; deterministic and security hardening are bounded. |
-| M2 transport-independent handoff | `APPLY_READY` | Preserves stdio and adds one explicit delivery mode. |
-| M3 HTTP read-only handoff | `APPLY_READY` | One-file, one-use, authenticated, bounded, path-redacted transfer. |
-| M4 upload staging | `EVAL_FIRST` | Useful only as part of a mutation contract; must not imply apply. |
-| M5 governed replace | `HOLD` | Requires independent journal, backup, crash, Windows, and rollback evidence. |
-| M6 create | `EVAL_FIRST` | Target non-existence and idempotence semantics need proof. |
-| M6 move | `HOLD` | Reference breakage and cross-filesystem behavior need a separate plan. |
-| M6 delete | `REJECT` for V1 | Irreversible risk is not justified by the current use case. |
-| `sync` | `REJECT` | It is a reconciliation product, not a file-write operation. |
+| Milestone                        | Verdict         | Reason                                                                                         |
+| -------------------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
+| M1 direct loopback HTTP profile  | `APPLY_READY`   | Transport and health endpoint already exist; deterministic and security hardening are bounded. |
+| M2 transport-independent handoff | `APPLY_READY`   | Preserves stdio and adds one explicit delivery mode.                                           |
+| M3 HTTP read-only handoff        | `APPLY_READY`   | One-file, one-use, authenticated, bounded, path-redacted transfer.                             |
+| M4 upload staging                | `EVAL_FIRST`    | Useful only as part of a mutation contract; must not imply apply.                              |
+| M5 governed replace              | `HOLD`          | Requires independent journal, backup, crash, Windows, and rollback evidence.                   |
+| M6 create                        | `EVAL_FIRST`    | Target non-existence and idempotence semantics need proof.                                     |
+| M6 move                          | `HOLD`          | Reference breakage and cross-filesystem behavior need a separate plan.                         |
+| M6 delete                        | `REJECT` for V1 | Irreversible risk is not justified by the current use case.                                    |
+| `sync`                           | `REJECT`        | It is a reconciliation product, not a file-write operation.                                    |
 
 ## Storage classes
 
-| Storage | Read/handoff | Generic mutation |
-| --- | --- | --- |
-| Ordinary local filesystem | Supported within explicit roots | Future local-only pilot may be possible. |
-| Windows mapped drive | Outside consistency guarantees | Rejected for generic mutation. |
-| Unix network mount | Outside consistency guarantees | Rejected for generic mutation. |
-| OneDrive synchronized folder | Best-effort local read only | Provider connector required for governed mutation. |
-| SharePoint | Provider connector | Provider connector only. |
-| Google Drive | Provider connector | Provider connector only. |
-| Other collaborative storage | Provider connector | Provider connector only. |
+| Storage                      | Read/handoff                    | Generic mutation                                   |
+| ---------------------------- | ------------------------------- | -------------------------------------------------- |
+| Ordinary local filesystem    | Supported within explicit roots | Future local-only pilot may be possible.           |
+| Windows mapped drive         | Outside consistency guarantees  | Rejected for generic mutation.                     |
+| Unix network mount           | Outside consistency guarantees  | Rejected for generic mutation.                     |
+| OneDrive synchronized folder | Best-effort local read only     | Provider connector required for governed mutation. |
+| SharePoint                   | Provider connector              | Provider connector only.                           |
+| Google Drive                 | Provider connector              | Provider connector only.                           |
+| Other collaborative storage  | Provider connector              | Provider connector only.                           |
 
 A local-looking path is not proof that storage has local atomicity, revision, or
 locking semantics.
 
 ## Threat model
 
-| Threat | Protected asset | Plausible attacker/error | Mitigation | Required test | Residual decision |
-| --- | --- | --- | --- | --- | --- |
-| Path traversal | Root boundary | Malicious relative path | Existing normalization rejects `..`, empty segments and absolute paths | Traversal cases on Linux/Windows | `MITIGATE` |
-| Client absolute path | Root boundary | Client submits source path | Tool accepts `rootId` plus relative path only | POSIX and drive-letter absolute paths | `MITIGATE` |
-| Physical-path leak | User privacy | Response, error or log exposes path | HTTP descriptor and response are path-redacted; ticket stays in header | Scan outputs, headers and logs | `MITIGATE` |
-| Symlink/junction/reparse escape | Root boundary | Link swapped into path | Component checks, canonical confinement and opened-handle identity checks | Symlink and Windows junction fixtures | `MITIGATE` |
-| Swap after validation | File integrity | Ancestor or file replaced | Re-resolve and compare device/inode around open/read | Simulated identity swap | `MITIGATE` |
-| TOCTOU during read | File integrity | Concurrent writer | Handle stats and final path identity revalidation | Mutate during read | `MITIGATE` |
-| Source changes after snapshot | Provenance | Legitimate concurrent edit | Deliver immutable in-memory snapshot with SHA-256 and timestamp | Change source after ticket issue | `ACCEPT` |
-| Unauthorized client | Confidentiality | Missing/invalid bearer | JWT/OAuth middleware plus authenticated tool metadata | Missing, invalid and valid auth | `MITIGATE` |
-| Ticket replay | Confidentiality | Same client reuses ticket | Claim and delete before delivery | Second consume fails | `MITIGATE` |
-| Ticket transferred to another client | Confidentiality | Ticket leakage | Bind to token fingerprint, client ID and subject | Different-token and different-client attempts | `MITIGATE` |
-| Expiry failure | Confidentiality/memory | Stale ticket retained | Bounded TTL sweep and consume-time expiry | Controlled clock expiry | `MITIGATE` |
-| Partial download | Client result | Network interruption | SHA-256 and content length allow client verification; ticket is consumed | Abort client and verify no replay | `ACCEPT` |
-| Oversized file | Memory | Large allowed source | Root limit plus lower HTTP file and aggregate-memory limits | Boundary and over-limit tests | `MITIGATE` |
-| Memory exhaustion | Availability | Many concurrent tickets | Ticket count, byte budget, serialized claims, expiry | Capacity and concurrency tests | `MITIGATE` |
-| Malicious archive | Client execution | Crafted ZIP/Office/PDF | Broker never executes, extracts or renders content | Binary pass-through fixture | `ACCEPT` |
-| Active content | Client safety | Macros/scripts in document | Content-Type only; client harness owns sandbox/extraction policy | Document remains opaque bytes | `DEFER` |
-| Concurrent writes | Source integrity | Multiple mutation clients | No mutation surface in this ADR | Assert no mutating external tool | `REJECT` for current scope |
-| Crash during replacement | Source integrity | Process/host crash | Future journal, same-filesystem staging and backup | Crash-injection suite | `DEFER` |
-| Incomplete rollback | Source integrity | Backup or restore failure | Future verified backup and post-rollback hash | Fault-injection suite | `DEFER` |
-| Secret or path in journal | Privacy | Over-detailed logging | Current transfer logs only error code and client ID | Log scan | `MITIGATE` |
-| Untrusted proxy headers | Rate-limit identity | Client spoofs forwarding header | Ignore unless explicit `MCP_TRUST_PROXY=true` | Spoof with flag off/on | `MITIGATE` |
-| Unreliable network | Availability | Disconnect/retry | One-use snapshot; client requests a new ticket after failure | Interrupted download | `ACCEPT` |
-| Cloud/synchronized storage | Consistency | Placeholder or remote conflict | Outside local consistency guarantees | Documentation and config fixture | `DEFER` |
-| Wrong same-named file | Authority | Human selects wrong relative path | Root ID, normalized relative path, size and hash in plan | Two same-name fixtures | `MITIGATE` |
-| Move/delete breaks references | ÉLYSIA graph | Mutation without inventory | No move/delete implementation; future reference inventory gate | Mutation tool absence | `REJECT` for V1 |
-| Idempotency-key abuse | Mutation integrity | Replay with changed payload | Future key binding and immutable result record | Same/different payload replay | `DEFER` |
-| Apply-gate bypass | Source integrity | Staging treated as authorization | No upload or mutation in current change; future distinct plan/apply tools | Assert staging cannot write source | `REJECT` for current scope |
-| Browser DNS rebinding | Local service | Malicious web origin | Exact Origin validation; default loopback bind | Disallowed and allowed Origin tests | `MITIGATE` |
-| Port drift | Availability/authority | Server silently selects another port | Zero retries by default; bounded opt-in retries only | Occupied configured port | `MITIGATE` |
+| Threat                               | Protected asset        | Plausible attacker/error                                          | Mitigation                                                                                                                               | Required test                                                 | Residual decision          |
+| ------------------------------------ | ---------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------- |
+| Path traversal                       | Root boundary          | Malicious relative path                                           | Existing normalization rejects `..`, empty segments and absolute paths                                                                   | Traversal cases on Linux/Windows                              | `MITIGATE`                 |
+| Client absolute path                 | Root boundary          | Client submits source path                                        | Tool accepts `rootId` plus relative path only                                                                                            | POSIX and drive-letter absolute paths                         | `MITIGATE`                 |
+| Physical-path leak                   | User privacy           | Response, error or log exposes path                               | HTTP descriptor and response are path-redacted; ticket stays in header                                                                   | Scan outputs, headers and logs                                | `MITIGATE`                 |
+| Symlink/junction/reparse escape      | Root boundary          | Link swapped into path                                            | Component checks, canonical confinement and opened-handle identity checks                                                                | Symlink and Windows junction fixtures                         | `MITIGATE`                 |
+| Hardlink to an outside file          | Root confidentiality   | Local actor creates a same-volume hardlink inside a root          | Roots are trusted operator-managed boundaries; hardlinks are outside confinement guarantees                                              | Same-volume hardlink review                                   | `ACCEPT` for trusted roots |
+| Swap after validation                | File integrity         | Ancestor or file replaced                                         | Re-resolve and compare device/inode around open/read                                                                                     | Simulated identity swap                                       | `MITIGATE`                 |
+| TOCTOU during read                   | File integrity         | Concurrent writer                                                 | Handle stats and final path identity revalidation                                                                                        | Mutate during read                                            | `MITIGATE`                 |
+| Source changes after snapshot        | Provenance             | Legitimate concurrent edit                                        | Deliver immutable in-memory snapshot with SHA-256 and timestamp                                                                          | Change source after ticket issue                              | `ACCEPT`                   |
+| Unauthorized client                  | Confidentiality        | Missing/invalid bearer or bearer without artifact-read permission | JWT/OAuth middleware plus required `external:read` scope                                                                                 | Missing, invalid, wrong-scope and valid auth                  | `MITIGATE`                 |
+| Ticket replay                        | Confidentiality        | Same client reuses ticket                                         | Claim and delete before delivery                                                                                                         | Second consume fails                                          | `MITIGATE`                 |
+| Ticket transferred to another client | Confidentiality        | Ticket leakage                                                    | Bind to token fingerprint, client ID and subject                                                                                         | Different-token and different-client attempts                 | `MITIGATE`                 |
+| Expiry failure                       | Confidentiality/memory | Stale ticket retained                                             | Bounded TTL sweep and consume-time expiry                                                                                                | Controlled clock expiry                                       | `MITIGATE`                 |
+| Partial or abandoned download        | Client result/memory   | Network interruption or response socket destroyed                 | SHA-256 and content length allow client verification; ticket is consumed; bounded stream watchdog errors the body and releases its lease | Abort before response, verify no replay and capacity recovery | `ACCEPT`                   |
+| Oversized file                       | Memory                 | Large allowed source                                              | Root limit plus lower HTTP file and aggregate-memory limits                                                                              | Boundary and over-limit tests                                 | `MITIGATE`                 |
+| Memory exhaustion                    | Availability           | Many pending tickets or slow concurrent downloads                 | Pending and in-flight count/byte leases, serialized claims, chunked backpressure, expiry                                                 | Capacity, in-flight lease and concurrency tests               | `MITIGATE`                 |
+| Malicious archive                    | Client execution       | Crafted ZIP/Office/PDF                                            | Broker never executes, extracts or renders content                                                                                       | Binary pass-through fixture                                   | `ACCEPT`                   |
+| Active content                       | Client safety          | Macros/scripts in document                                        | Content-Type only; client harness owns sandbox/extraction policy                                                                         | Document remains opaque bytes                                 | `DEFER`                    |
+| Concurrent writes                    | Source integrity       | Multiple mutation clients                                         | No mutation surface in this ADR                                                                                                          | Assert no mutating external tool                              | `REJECT` for current scope |
+| Crash during replacement             | Source integrity       | Process/host crash                                                | Future journal, same-filesystem staging and backup                                                                                       | Crash-injection suite                                         | `DEFER`                    |
+| Incomplete rollback                  | Source integrity       | Backup or restore failure                                         | Future verified backup and post-rollback hash                                                                                            | Fault-injection suite                                         | `DEFER`                    |
+| Secret or path in journal            | Privacy                | Over-detailed logging                                             | Current transfer logs only error code and client ID                                                                                      | Log scan                                                      | `MITIGATE`                 |
+| Untrusted proxy headers              | Rate-limit identity    | Client spoofs forwarding header                                   | Ignore unless explicit `MCP_TRUST_PROXY=true`                                                                                            | Spoof with flag off/on                                        | `MITIGATE`                 |
+| Unreliable network                   | Availability           | Disconnect/retry                                                  | One-use snapshot; client requests a new ticket after failure                                                                             | Interrupted download                                          | `ACCEPT`                   |
+| Cloud/synchronized storage           | Consistency            | Placeholder or remote conflict                                    | Outside local consistency guarantees                                                                                                     | Documentation and config fixture                              | `DEFER`                    |
+| Wrong same-named file                | Authority              | Human selects wrong relative path                                 | Root ID, normalized relative path, size and hash in plan                                                                                 | Two same-name fixtures                                        | `MITIGATE`                 |
+| Move/delete breaks references        | ÉLYSIA graph           | Mutation without inventory                                        | No move/delete implementation; future reference inventory gate                                                                           | Mutation tool absence                                         | `REJECT` for V1            |
+| Idempotency-key abuse                | Mutation integrity     | Replay with changed payload                                       | Future key binding and immutable result record                                                                                           | Same/different payload replay                                 | `DEFER`                    |
+| Apply-gate bypass                    | Source integrity       | Staging treated as authorization                                  | No upload or mutation in current change; future distinct plan/apply tools                                                                | Assert staging cannot write source                            | `REJECT` for current scope |
+| Browser DNS rebinding                | Local service          | Malicious web origin                                              | Exact Origin validation; default loopback bind                                                                                           | Disallowed and allowed Origin tests                           | `MITIGATE`                 |
+| Port drift                           | Availability/authority | Server silently selects another port                              | Zero retries by default; bounded opt-in retries only                                                                                     | Occupied configured port                                      | `MITIGATE`                 |
 
 ## Compatibility
 

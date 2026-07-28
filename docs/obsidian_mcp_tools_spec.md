@@ -145,8 +145,12 @@ The core MCP does not parse PDF or Office files. Handoff requires both
 `readable` and `handoff`. HTTP ticket delivery is disabled by default and must be
 explicitly enabled with `MCP_HTTP_HANDOFF_ENABLED=true` on a non-development
 authenticated profile. The ticket is short-lived, identity-bound, single-use,
-bounded, absent from URLs, and never discloses the physical source or temporary
-path.
+bounded across pending and in-flight delivery, absent from URLs, and never
+discloses the physical source or temporary path. Issuance requires the
+`external:read` scope.
+
+Every external-root tool invoked through direct HTTP requires
+`external:read`. Local stdio keeps its process-local trust model.
 
 Neither handoff mode authorizes upload, create, replace, move, delete, or sync.
 The client owns binary extraction and must verify the returned size and SHA-256.

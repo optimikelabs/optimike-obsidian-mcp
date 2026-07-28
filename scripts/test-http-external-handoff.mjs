@@ -3,20 +3,15 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createServer } from "node:net";
-import {
-  access,
-  mkdir,
-  mkdtemp,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { createConnection, createServer } from "node:net";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SignJWT } from "jose";
 import {
+  externalHandoffResponse,
   ExternalTransferBroker,
 } from "../dist/services/externalTransferBroker.js";
 
@@ -62,8 +57,35 @@ async function waitForHealth(url, child) {
   throw new Error(`Timed out waiting for ${url}`);
 }
 
-async function signToken(secret, clientId, subject = clientId) {
-  return new SignJWT({ cid: clientId, scp: ["external:read"] })
+async function sendThenDisconnect(url, headers) {
+  await new Promise((resolve, reject) => {
+    const socket = createConnection(
+      {
+        host: url.hostname,
+        port: Number(url.port),
+      },
+      () => {
+        const requestHeaders = Object.entries(headers)
+          .map(([name, value]) => `${name}: ${value}`)
+          .join("\r\n");
+        socket.write(
+          `GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\n${requestHeaders}\r\nConnection: close\r\n\r\n`,
+        );
+        socket.destroy();
+        resolve();
+      },
+    );
+    socket.once("error", reject);
+  });
+}
+
+async function signToken(
+  secret,
+  clientId,
+  subject = clientId,
+  scopes = ["external:read"],
+) {
+  return new SignJWT({ cid: clientId, scp: scopes })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(subject)
     .setIssuedAt()
@@ -114,9 +136,26 @@ async function testBrokerLifecycle(sandbox) {
     () => broker.consume(descriptor.ticket, otherAuth),
     /invalid or unavailable/u,
   );
+  await assert.rejects(
+    () =>
+      broker.consume(descriptor.ticket, {
+        ...auth,
+        token: "rotated-token",
+      }),
+    /invalid or unavailable/u,
+  );
+  await assert.rejects(
+    () =>
+      broker.consume(descriptor.ticket, {
+        ...auth,
+        subject: "different-subject",
+      }),
+    /invalid or unavailable/u,
+  );
   const delivered = await broker.consume(descriptor.ticket, auth);
   assert.deepEqual(delivered.buffer, content);
   assert.equal(delivered.sha256, sha256(content));
+  await delivered.release();
   await access(stagedPath);
   await assert.rejects(
     () => broker.consume(descriptor.ticket, auth),
@@ -126,7 +165,22 @@ async function testBrokerLifecycle(sandbox) {
   // The broker must not delete the ExternalRootsService-owned copy. It may be
   // reused by a later handoff until the service's own bounded cache expires.
   const repeated = await broker.issue(prepared, auth);
-  assert.deepEqual((await broker.consume(repeated.ticket, auth)).buffer, content);
+  const competingConsumers = await Promise.allSettled([
+    broker.consume(repeated.ticket, auth),
+    broker.consume(repeated.ticket, auth),
+  ]);
+  const successfulConsumers = competingConsumers.filter(
+    (result) => result.status === "fulfilled",
+  );
+  const rejectedConsumers = competingConsumers.filter(
+    (result) => result.status === "rejected",
+  );
+  assert.equal(successfulConsumers.length, 1);
+  assert.equal(rejectedConsumers.length, 1);
+  assert.match(String(rejectedConsumers[0].reason), /invalid or unavailable/u);
+  const repeatedDelivery = successfulConsumers[0].value;
+  assert.deepEqual(repeatedDelivery.buffer, content);
+  await repeatedDelivery.release();
   await access(stagedPath);
 
   const expiringPath = path.join(sandbox, "service-owned-expiring.bin");
@@ -163,24 +217,57 @@ async function testBrokerLifecycle(sandbox) {
     capacityBroker.issue(prepared, auth),
     capacityBroker.issue(prepared, auth),
   ]);
-  const fulfilled = concurrent.filter((result) => result.status === "fulfilled");
+  const fulfilled = concurrent.filter(
+    (result) => result.status === "fulfilled",
+  );
   const rejected = concurrent.filter((result) => result.status === "rejected");
   assert.equal(fulfilled.length, 1);
   assert.equal(rejected.length, 1);
   assert.match(String(rejected[0].reason), /capacity is currently exhausted/u);
   const capacityTicket = fulfilled[0].value.ticket;
-  assert.deepEqual(
-    (await capacityBroker.consume(capacityTicket, auth)).buffer,
-    content,
-  );
+  const capacityDelivery = await capacityBroker.consume(capacityTicket, auth);
+  assert.deepEqual(capacityDelivery.buffer, content);
 
-  // After the claimed ticket releases its budget, a new request succeeds.
-  const afterRelease = await capacityBroker.issue(prepared, auth);
-  assert.deepEqual(
-    (await capacityBroker.consume(afterRelease.ticket, auth)).buffer,
-    content,
+  // Claiming a ticket must not free its memory budget while the download is
+  // still in flight.
+  await assert.rejects(
+    () => capacityBroker.issue(prepared, auth),
+    /capacity is currently exhausted/u,
   );
+  await capacityDelivery.release();
+  await capacityDelivery.release();
+
+  // After the completed delivery releases its lease, a new request succeeds.
+  const afterRelease = await capacityBroker.issue(prepared, auth);
+  const afterReleaseDelivery = await capacityBroker.consume(
+    afterRelease.ticket,
+    auth,
+  );
+  assert.deepEqual(afterReleaseDelivery.buffer, content);
+  await afterReleaseDelivery.release();
   await capacityBroker.dispose();
+}
+
+async function testTransferWatchdog() {
+  let releases = 0;
+  const content = Buffer.from("unconsumed response");
+  const response = externalHandoffResponse(
+    {
+      buffer: content,
+      filename: "watchdog.bin",
+      mediaType: "application/octet-stream",
+      size: content.length,
+      sha256: sha256(content),
+      release: async () => {
+        releases += 1;
+      },
+    },
+    25,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(releases, 1);
+  await response.body?.cancel().catch(() => undefined);
+  assert.equal(releases, 1);
 }
 
 const sandbox = await mkdtemp(
@@ -197,6 +284,12 @@ const downloadUrl = new URL("/external-handoff", baseUrl);
 const secret = "http-handoff-test-secret-must-be-at-least-32-characters";
 const token = await signToken(secret, "http-client", "operator");
 const otherToken = await signToken(secret, "other-client", "other-operator");
+const wrongScopeToken = await signToken(
+  secret,
+  "wrong-scope-client",
+  "wrong-scope-operator",
+  ["vault:read"],
+);
 const payload = Buffer.from([0, 1, 2, 3, 250, 251, 252, 253, 254, 255]);
 
 await mkdir(path.join(vaultPath, ".obsidian"), { recursive: true });
@@ -243,6 +336,9 @@ const backend = spawn(process.execPath, ["dist/index.js"], {
     MCP_EXTERNAL_ROOTS_FILE: configPath,
     MCP_HTTP_HANDOFF_ENABLED: "true",
     MCP_HTTP_HANDOFF_TTL_MS: "60000",
+    MCP_HTTP_HANDOFF_TRANSFER_TIMEOUT_MS: "500",
+    MCP_HTTP_HANDOFF_MAX_TICKETS: "1",
+    MCP_HTTP_HANDOFF_MAX_TOTAL_BYTES: String(payload.length),
     MCP_AUTH_MODE: "jwt",
     MCP_AUTH_SECRET_KEY: secret,
     MCP_ALLOWED_ORIGINS: "https://allowed.example",
@@ -261,15 +357,49 @@ const client = new Client({
   name: "optimike-http-external-handoff-test",
   version: "0",
 });
+const wrongScopeTransport = new StreamableHTTPClientTransport(mcpUrl, {
+  requestInit: {
+    headers: {
+      Authorization: `Bearer ${wrongScopeToken}`,
+    },
+  },
+});
+const wrongScopeClient = new Client({
+  name: "optimike-http-external-handoff-wrong-scope-test",
+  version: "0",
+});
 
 try {
   await testBrokerLifecycle(sandbox);
+  await testTransferWatchdog();
   await waitForHealth(healthUrl, backend);
 
   const rejectedOrigin = await fetch(healthUrl, {
     headers: { Origin: "https://evil.example" },
   });
   assert.equal(rejectedOrigin.status, 403);
+  const allowedOrigin = await fetch(healthUrl, {
+    headers: { Origin: "https://allowed.example" },
+  });
+  assert.equal(allowedOrigin.status, 200);
+  assert.equal(
+    allowedOrigin.headers.get("access-control-allow-origin"),
+    "https://allowed.example",
+  );
+  const allowedPreflight = await fetch(downloadUrl, {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://allowed.example",
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers":
+        "Authorization,X-External-Handoff-Ticket",
+    },
+  });
+  assert.equal(allowedPreflight.status, 204);
+  assert.equal(
+    allowedPreflight.headers.get("access-control-allow-origin"),
+    "https://allowed.example",
+  );
 
   await client.connect(transport);
   const status = jsonOf(
@@ -302,6 +432,39 @@ try {
   assert.equal(handoff.sha256, sha256(payload));
   assert.equal("localPath" in handoff, false);
   assert.equal(JSON.stringify(handoff).includes(externalPath), false);
+
+  await wrongScopeClient.connect(wrongScopeTransport);
+  const wrongScopeCalls = [
+    { name: "external_runtime_status", arguments: {} },
+    { name: "external_roots_list", arguments: {} },
+    {
+      name: "external_list",
+      arguments: { rootId: "http.pilot", relativePath: "" },
+    },
+    {
+      name: "external_stat",
+      arguments: { rootId: "http.pilot", relativePath: "artifact.bin" },
+    },
+    {
+      name: "external_read",
+      arguments: { rootId: "http.pilot", relativePath: "artifact.bin" },
+    },
+    {
+      name: "external_handoff",
+      arguments: {
+        rootId: "http.pilot",
+        relativePath: "artifact.bin",
+      },
+    },
+  ];
+  for (const call of wrongScopeCalls) {
+    const denied = await wrongScopeClient.callTool(call);
+    assert.equal(denied.isError, true, `${call.name} accepted wrong scope`);
+    assert.match(
+      denied.content?.map((item) => item.text ?? "").join("\n") ?? "",
+      /external:read/u,
+    );
+  }
 
   const crossClient = await fetch(downloadUrl, {
     headers: {
@@ -339,10 +502,51 @@ try {
   });
   assert.equal(missingAuth.status, 401);
 
+  const abandoned = jsonOf(
+    await client.callTool({
+      name: "external_handoff",
+      arguments: {
+        rootId: "http.pilot",
+        relativePath: "artifact.bin",
+      },
+    }),
+  );
+  await sendThenDisconnect(downloadUrl, {
+    Authorization: `Bearer ${token}`,
+    "X-External-Handoff-Ticket": abandoned.ticket,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  const abandonedReplay = await fetch(downloadUrl, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-External-Handoff-Ticket": abandoned.ticket,
+    },
+  });
+  assert.equal(abandonedReplay.status, 404);
+  const afterAbandoned = jsonOf(
+    await client.callTool({
+      name: "external_handoff",
+      arguments: {
+        rootId: "http.pilot",
+        relativePath: "artifact.bin",
+      },
+    }),
+  );
+  const recoveredDownload = await fetch(downloadUrl, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-External-Handoff-Ticket": afterAbandoned.ticket,
+    },
+  });
+  assert.equal(recoveredDownload.status, 200);
+  assert.deepEqual(Buffer.from(await recoveredDownload.arrayBuffer()), payload);
+
   console.log(
-    "PASS: authenticated HTTP handoff returns one-use identity-bound tickets, preserves integrity, bounds concurrent buffering, rejects cross-client use and replay, and discloses no source path",
+    "PASS: authenticated HTTP external-root access requires external:read, handoff returns one-use identity-bound tickets, preserves integrity, bounds pending and in-flight buffering, recovers abandoned transfers, rejects cross-client use and replay, and discloses no source path",
   );
 } finally {
+  await wrongScopeClient.close().catch(() => undefined);
   await client.close().catch(() => undefined);
   backend.kill();
   await new Promise((resolve) => {

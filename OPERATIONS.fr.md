@@ -242,10 +242,10 @@ Si une première lecture ou recherche arrive pendant que le cache filesystem est
 
 ```bash
 curl http://127.0.0.1:3010/healthz
-curl http://127.0.0.1:3010/healthz?integrity=1
 ```
 
-Ce que tu obtiens :
+L’endpoint public ne retourne qu’un signal de vie minimal sans chemin. Utiliser
+les outils MCP authentifiés pour obtenir :
 
 - mode runtime
 - fingerprint runtime : version package, git sha, Node, chemins `dist`, hash de config non sensible
@@ -278,12 +278,13 @@ npm run smoke:runtime
 
 Il contrôle :
 
-- `/healthz?integrity=1`
-- le fingerprint runtime
-- la fraîcheur du process par rapport aux fichiers `dist`
-- l’intégrité SQLite
+- le signal de vie minimal et sans chemin de `/healthz`
 - la découverte des tools via MCP HTTP
 - la découverte des tools via `stdio-proxy`
+
+`npm run smoke:headless-status`, inclus dans `npm run test:runtime`, contrôle le
+statut runtime authentifié, la fraîcheur du process et la disponibilité du cache
+partagé.
 
 Pour vérifier le code avant PR ou merge :
 

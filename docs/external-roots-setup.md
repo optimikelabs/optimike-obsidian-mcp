@@ -84,21 +84,21 @@ path cannot be detected reliably and remains outside the supported guarantees.
 
 The top-level object is strict:
 
-| Field | Contract |
-| --- | --- |
-| `version` | Must be `1`. |
-| `roots` | Zero to 32 root objects. Root IDs must be unique. |
+| Field     | Contract                                          |
+| --------- | ------------------------------------------------- |
+| `version` | Must be `1`.                                      |
+| `roots`   | Zero to 32 root objects. Root IDs must be unique. |
 
 Each root is also strict:
 
-| Field | Contract |
-| --- | --- |
-| `id` | Stable lowercase logical ID: letters, digits, `.`, `_`, and `-`. |
-| `path` | Absolute directory. UNC-prefixed paths are rejected; mapped or mounted network storage is not detected and remains unsupported. |
-| `capabilities` | One or more of `visible`, `readable`, `handoff`. `handoff` requires `readable`. |
-| `include` | Git-style glob allowlist. Default: `["**"]`. A file that matches no include pattern is denied, including extensionless files. |
-| `exclude` | Git-style glob denylist. Default: `.git` and `node_modules`. Exclude wins over include. |
-| `limits` | Optional bounded limits described below. Unknown fields are rejected. |
+| Field          | Contract                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | Stable lowercase logical ID: letters, digits, `.`, `_`, and `-`.                                                                |
+| `path`         | Absolute directory. UNC-prefixed paths are rejected; mapped or mounted network storage is not detected and remains unsupported. |
+| `capabilities` | One or more of `visible`, `readable`, `handoff`. `handoff` requires `readable`.                                                 |
+| `include`      | Git-style glob allowlist. Default: `["**"]`. A file that matches no include pattern is denied, including extensionless files.   |
+| `exclude`      | Git-style glob denylist. Default: `.git` and `node_modules`. Exclude wins over include.                                         |
+| `limits`       | Optional bounded limits described below. Unknown fields are rejected.                                                           |
 
 Capabilities are independent:
 
@@ -111,12 +111,12 @@ Capabilities are independent:
 
 Limit defaults and schema ceilings:
 
-| Limit | Default | Maximum |
-| --- | ---: | ---: |
-| `maxDepth` | 6 | 20 |
-| `maxFileBytes` | 50 MiB | 200 MiB |
-| `maxListEntries` | 500 | 5,000 |
-| `maxTextChars` | 200,000 | 2,000,000 |
+| Limit            | Default |   Maximum |
+| ---------------- | ------: | --------: |
+| `maxDepth`       |       6 |        20 |
+| `maxFileBytes`   |  50 MiB |   200 MiB |
+| `maxListEntries` |     500 |     5,000 |
+| `maxTextChars`   | 200,000 | 2,000,000 |
 
 `external_read` accepts valid UTF-8 files with these extensions: `.txt`, `.md`,
 `.markdown`, `.csv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.htm`, and
@@ -180,6 +180,11 @@ npm run start:daemon
 curl http://127.0.0.1:3010/healthz
 ```
 
+`/healthz` is an unauthenticated liveness probe and intentionally returns only
+minimal, path-free service state. Use the authenticated
+`obsidian_runtime_status` and `obsidian_runtime_maintenance` tools for runtime,
+cache, configuration, or integrity details.
+
 The configured port is deterministic by default. Set
 `MCP_HTTP_PORT_RETRIES` to a bounded value only when controlled fallback ports
 are acceptable.
@@ -201,16 +206,18 @@ are validated.
 
 Optional bounded HTTP ticket settings:
 
-| Variable | Default | Maximum |
-| --- | ---: | ---: |
-| `MCP_HTTP_HANDOFF_TTL_MS` | 60,000 | 300,000 |
-| `MCP_HTTP_HANDOFF_MAX_TICKETS` | 16 | 128 |
-| `MCP_HTTP_HANDOFF_MAX_FILE_BYTES` | 25 MiB | 200 MiB |
-| `MCP_HTTP_HANDOFF_MAX_TOTAL_BYTES` | 128 MiB | 1 GiB |
+| Variable                               | Default | Maximum |
+| -------------------------------------- | ------: | ------: |
+| `MCP_HTTP_HANDOFF_TTL_MS`              |  60,000 | 300,000 |
+| `MCP_HTTP_HANDOFF_MAX_TICKETS`         |      16 |     128 |
+| `MCP_HTTP_HANDOFF_MAX_FILE_BYTES`      |  25 MiB | 200 MiB |
+| `MCP_HTTP_HANDOFF_MAX_TOTAL_BYTES`     | 128 MiB |   1 GiB |
+| `MCP_HTTP_HANDOFF_TRANSFER_TIMEOUT_MS` | 120,000 | 600,000 |
 
-The broker rejects the development authentication placeholder. Setting
-`MCP_HTTP_HANDOFF_ENABLED=true` without a real authenticated identity does not
-open binary handoff.
+The broker rejects the development authentication placeholder and requires the
+authenticated identity to carry the `external:read` scope. Setting
+`MCP_HTTP_HANDOFF_ENABLED=true` without that real scoped identity does not open
+binary handoff.
 
 ### HTTP handoff sequence
 
@@ -226,6 +233,7 @@ The ticket:
 
 - is scoped to one verified in-memory snapshot;
 - is bound to the bearer token fingerprint, client ID, and subject;
+- requires the `external:read` scope when issued;
 - is single-use;
 - expires quickly;
 - never appears in a URL;
@@ -242,22 +250,24 @@ trusted forwarding-header configuration, authentication, process supervision,
 and firewall or private-network controls.
 
 Set `MCP_TRUST_PROXY=true` only when a trusted reverse proxy overwrites forwarding
-headers. The server ignores `X-Forwarded-For` by default.
+headers and network policy blocks direct access to the Node process. The server
+ignores `X-Forwarded-For` by default; the boolean setting does not authenticate
+a proxy by itself.
 
 Do not expose the Node server directly to the public internet merely by binding
 `MCP_HTTP_HOST=0.0.0.0`.
 
 ## 5. Client capability matrix
 
-| Client | Intended integration | What this repository verifies |
-| --- | --- | --- |
-| Codex | Local stdio proxy with process environment | Configured production use and local-path handoff workflow. |
-| Claude Code | Local stdio server configured by the client | Protocol-compatible design; client-specific setup is not tested here. |
-| Gemini CLI | Local stdio server configured by the client | Protocol-compatible design; client-specific setup is not tested here. |
-| OpenClaw | Local MCP process when supported by its deployment | Protocol-compatible design; path access depends on the deployment. |
-| Hermes Agent | Local MCP process when supported by its deployment | Protocol-compatible design; path access depends on the deployment. |
-| Direct loopback HTTP client | Status/list/stat/read and optional ticket handoff | Automated Streamable HTTP, JWT, ticket, replay, identity and binary tests. |
-| Remote HTTP client | Same protocol behind reviewed deployment controls | Architecture and automated server tests; real remote-client interoperability remains pilot evidence. |
+| Client                      | Intended integration                               | What this repository verifies                                                                        |
+| --------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Codex                       | Local stdio proxy with process environment         | Configured production use and local-path handoff workflow.                                           |
+| Claude Code                 | Local stdio server configured by the client        | Protocol-compatible design; client-specific setup is not tested here.                                |
+| Gemini CLI                  | Local stdio server configured by the client        | Protocol-compatible design; client-specific setup is not tested here.                                |
+| OpenClaw                    | Local MCP process when supported by its deployment | Protocol-compatible design; path access depends on the deployment.                                   |
+| Hermes Agent                | Local MCP process when supported by its deployment | Protocol-compatible design; path access depends on the deployment.                                   |
+| Direct loopback HTTP client | Status/list/stat/read and optional ticket handoff  | Automated Streamable HTTP, JWT, ticket, replay, identity and binary tests.                           |
+| Remote HTTP client          | Same protocol behind reviewed deployment controls  | Architecture and automated server tests; real remote-client interoperability remains pilot evidence. |
 
 The MCP core does not install or configure the client's document extraction
 tools. A client without a suitable PDF or Office tool can still list, stat,
@@ -272,14 +282,16 @@ Recommended verification sequence:
 
 1. Call `external_runtime_status` and confirm `enabled: true` plus the expected
    logical root ID.
-2. Inspect `handoffModes`:
+2. Use an identity carrying `external:read` for every external-root status,
+   list, stat, read, hash, or handoff call made through direct HTTP.
+3. Inspect `handoffModes`:
    - stdio should expose `local_path`;
    - an enabled authenticated direct HTTP service should expose `http_ticket`.
-3. Call `external_roots_list`; confirm that the root is `available`.
-4. Call `external_list` with the root ID and a bounded depth.
-5. Call `external_stat`, then `external_read` on a small UTF-8 pilot file.
-6. If needed, call `external_handoff` and consume the returned delivery mode.
-7. Confirm that no public result contains the physical root path.
+4. Call `external_roots_list`; confirm that the root is `available`.
+5. Call `external_list` with the root ID and a bounded depth.
+6. Call `external_stat`, then `external_read` on a small UTF-8 pilot file.
+7. If needed, call `external_handoff` and consume the returned delivery mode.
+8. Confirm that no public result contains the physical root path.
 
 Repository checks:
 
@@ -325,9 +337,11 @@ copy with mode `0600` on platforms that enforce POSIX permissions:
 - a later configured service scavenges directories owned by dead processes or
   stale ownership heartbeats.
 
-The HTTP broker does not own or delete that local cache. It verifies the copy,
-keeps a separate bounded memory snapshot for the short ticket lifetime, then
-removes the snapshot after use or expiry.
+The HTTP broker does not own or delete that local cache. It verifies the copy
+and keeps a separate bounded memory snapshot while the ticket is pending and
+while the chunked download is in flight. The snapshot's capacity lease is
+released only after the stream completes or is cancelled; an expired unused
+ticket is swept without delivery.
 
 Portable provenance is the logical root ID, root-relative path, size,
 modification time, and SHA-256, not a local path or ticket.
@@ -362,17 +376,17 @@ Disable all external roots:
 
 Common failures:
 
-| Error/state | Check |
-| --- | --- |
-| `configuration_invalid` | Absolute config path, valid JSON, version `1`, known fields, root ID rules. |
-| `root_unavailable` | The configured directory exists and the MCP process can access it. |
-| `capability_denied` | The root declares the required capability; HTTP ticket mode is enabled and uses real auth. |
-| `path_not_allowed` | The relative file path matches `include` and does not match `exclude`. |
-| `path_link_unsupported` | Remove symlinks or junctions from the requested path. |
-| `too_large` | Root limits plus the local or HTTP aggregate handoff budget. |
-| `unsupported` | Use UTF-8 text for `external_read`, or a supported handoff mode for binary content. |
-| HTTP ticket unavailable | Check feature flag, auth mode, bearer identity, TTL, one-use semantics, and service restart. |
-| Unexpected port | Keep `MCP_HTTP_PORT_RETRIES=0` or inspect the bounded configured fallback. |
-| Remote client failure | Verify TLS proxy, Origin allowlist, auth metadata, forwarding trust, firewall and client compatibility. |
+| Error/state             | Check                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| `configuration_invalid` | Absolute config path, valid JSON, version `1`, known fields, root ID rules.                             |
+| `root_unavailable`      | The configured directory exists and the MCP process can access it.                                      |
+| `capability_denied`     | The root declares the required capability; HTTP ticket mode is enabled and uses real auth.              |
+| `path_not_allowed`      | The relative file path matches `include` and does not match `exclude`.                                  |
+| `path_link_unsupported` | Remove symlinks or junctions from the requested path.                                                   |
+| `too_large`             | Root limits plus the local or HTTP aggregate handoff budget.                                            |
+| `unsupported`           | Use UTF-8 text for `external_read`, or a supported handoff mode for binary content.                     |
+| HTTP ticket unavailable | Check feature flag, auth mode, bearer identity, TTL, one-use semantics, and service restart.            |
+| Unexpected port         | Keep `MCP_HTTP_PORT_RETRIES=0` or inspect the bounded configured fallback.                              |
+| Remote client failure   | Verify TLS proxy, Origin allowlist, auth metadata, forwarding trust, firewall and client compatibility. |
 
 The server never infers a new root from a path found in an Obsidian note.

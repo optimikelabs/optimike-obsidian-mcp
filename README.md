@@ -322,9 +322,9 @@ Health endpoint when running the backend directly:
 curl http://127.0.0.1:3010/healthz
 ```
 
-Extended health / maintenance:
+Detailed runtime / maintenance:
 
-- `GET /healthz?integrity=1` adds a SQLite integrity check
+- `GET /healthz` is a minimal unauthenticated path-free liveness probe
 - MCP tool `obsidian_runtime_status` returns process, cache, semantic, and degraded-mode status
 - MCP tool `obsidian_runtime_maintenance` supports:
   - `integrity_check`
@@ -353,7 +353,6 @@ Typical checks:
 
 ```bash
 curl http://127.0.0.1:3010/healthz
-curl http://127.0.0.1:3010/healthz?integrity=1
 ```
 
 ## Minimal Codex Config

@@ -88,21 +88,21 @@ locale ne peut pas être détecté de manière fiable et reste hors garanties.
 
 L’objet racine est strict :
 
-| Champ | Contrat |
-| --- | --- |
-| `version` | Doit valoir `1`. |
-| `roots` | De zéro à 32 racines. Chaque identifiant doit être unique. |
+| Champ     | Contrat                                                    |
+| --------- | ---------------------------------------------------------- |
+| `version` | Doit valoir `1`.                                           |
+| `roots`   | De zéro à 32 racines. Chaque identifiant doit être unique. |
 
 Chaque racine est également stricte :
 
-| Champ | Contrat |
-| --- | --- |
-| `id` | Identifiant logique stable en minuscules : lettres, chiffres, `.`, `_` et `-`. |
-| `path` | Dossier absolu. Les chemins préfixés UNC sont refusés ; un stockage réseau mappé ou monté n’est pas détecté et reste non supporté. |
-| `capabilities` | Une ou plusieurs valeurs parmi `visible`, `readable`, `handoff`. `handoff` exige `readable`. |
-| `include` | Allowlist de globs de style Git. Défaut : `["**"]`. Un fichier qui ne correspond à aucun motif est refusé, même sans extension. |
-| `exclude` | Denylist de globs. Défaut : `.git` et `node_modules`. `exclude` l’emporte sur `include`. |
-| `limits` | Limites bornées optionnelles décrites ci-dessous. Les champs inconnus sont refusés. |
+| Champ          | Contrat                                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | Identifiant logique stable en minuscules : lettres, chiffres, `.`, `_` et `-`.                                                     |
+| `path`         | Dossier absolu. Les chemins préfixés UNC sont refusés ; un stockage réseau mappé ou monté n’est pas détecté et reste non supporté. |
+| `capabilities` | Une ou plusieurs valeurs parmi `visible`, `readable`, `handoff`. `handoff` exige `readable`.                                       |
+| `include`      | Allowlist de globs de style Git. Défaut : `["**"]`. Un fichier qui ne correspond à aucun motif est refusé, même sans extension.    |
+| `exclude`      | Denylist de globs. Défaut : `.git` et `node_modules`. `exclude` l’emporte sur `include`.                                           |
+| `limits`       | Limites bornées optionnelles décrites ci-dessous. Les champs inconnus sont refusés.                                                |
 
 Les capacités sont distinctes :
 
@@ -116,12 +116,12 @@ Les capacités sont distinctes :
 
 Valeurs par défaut et plafonds du schéma :
 
-| Limite | Défaut | Maximum |
-| --- | ---: | ---: |
-| `maxDepth` | 6 | 20 |
-| `maxFileBytes` | 50 Mio | 200 Mio |
-| `maxListEntries` | 500 | 5 000 |
-| `maxTextChars` | 200 000 | 2 000 000 |
+| Limite           |  Défaut |   Maximum |
+| ---------------- | ------: | --------: |
+| `maxDepth`       |       6 |        20 |
+| `maxFileBytes`   |  50 Mio |   200 Mio |
+| `maxListEntries` |     500 |     5 000 |
+| `maxTextChars`   | 200 000 | 2 000 000 |
 
 `external_read` accepte les fichiers UTF-8 valides portant les extensions
 `.txt`, `.md`, `.markdown`, `.csv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`,
@@ -186,6 +186,11 @@ npm run start:daemon
 curl http://127.0.0.1:3010/healthz
 ```
 
+`/healthz` est une sonde de vie non authentifiée et ne retourne volontairement
+qu’un état minimal sans chemin. Utiliser les outils authentifiés
+`obsidian_runtime_status` et `obsidian_runtime_maintenance` pour les détails de
+runtime, cache, configuration ou intégrité.
+
 Le port configuré est déterministe par défaut. Définir
 `MCP_HTTP_PORT_RETRIES` à une valeur bornée uniquement si des ports de repli
 contrôlés sont acceptables.
@@ -207,16 +212,18 @@ l’interopérabilité client ne sont pas validées.
 
 Réglages bornés optionnels des tickets HTTP :
 
-| Variable | Défaut | Maximum |
-| --- | ---: | ---: |
-| `MCP_HTTP_HANDOFF_TTL_MS` | 60 000 | 300 000 |
-| `MCP_HTTP_HANDOFF_MAX_TICKETS` | 16 | 128 |
-| `MCP_HTTP_HANDOFF_MAX_FILE_BYTES` | 25 Mio | 200 Mio |
-| `MCP_HTTP_HANDOFF_MAX_TOTAL_BYTES` | 128 Mio | 1 Gio |
+| Variable                               |  Défaut | Maximum |
+| -------------------------------------- | ------: | ------: |
+| `MCP_HTTP_HANDOFF_TTL_MS`              |  60 000 | 300 000 |
+| `MCP_HTTP_HANDOFF_MAX_TICKETS`         |      16 |     128 |
+| `MCP_HTTP_HANDOFF_MAX_FILE_BYTES`      |  25 Mio | 200 Mio |
+| `MCP_HTTP_HANDOFF_MAX_TOTAL_BYTES`     | 128 Mio |   1 Gio |
+| `MCP_HTTP_HANDOFF_TRANSFER_TIMEOUT_MS` | 120 000 | 600 000 |
 
-Le broker refuse le placeholder d’authentification de développement. Définir
-`MCP_HTTP_HANDOFF_ENABLED=true` sans identité réellement authentifiée n’ouvre
-pas le handoff binaire.
+Le broker refuse le placeholder d’authentification de développement et exige le
+scope `external:read` sur l’identité authentifiée. Définir
+`MCP_HTTP_HANDOFF_ENABLED=true` sans cette identité réelle et correctement
+scopée n’ouvre pas le handoff binaire.
 
 ### Séquence du handoff HTTP
 
@@ -232,6 +239,7 @@ Le ticket :
 
 - porte un seul snapshot mémoire vérifié ;
 - est lié à l’empreinte du token bearer, au client ID et au sujet ;
+- exige le scope `external:read` lors de son émission ;
 - est à usage unique ;
 - expire rapidement ;
 - n’apparaît jamais dans une URL ;
@@ -249,23 +257,24 @@ des headers transmis, une authentification, une supervision du processus et des
 contrôles réseau ou firewall.
 
 Définir `MCP_TRUST_PROXY=true` uniquement si un reverse proxy de confiance
-réécrit les headers de forwarding. Le serveur ignore `X-Forwarded-For` par
-défaut.
+réécrit les headers de forwarding et si la politique réseau bloque l’accès
+direct au processus Node. Le serveur ignore `X-Forwarded-For` par défaut ; le
+booléen ne suffit pas à authentifier un proxy.
 
 Ne pas exposer directement le serveur Node sur Internet en se contentant de
 lier `MCP_HTTP_HOST=0.0.0.0`.
 
 ## 5. Matrice des clients
 
-| Client | Intégration visée | Ce que ce dépôt vérifie |
-| --- | --- | --- |
-| Codex | Proxy stdio local avec environnement du processus | Usage de production configuré et workflow de handoff par chemin local. |
-| Claude Code | Serveur stdio local configuré par le client | Conception compatible avec le protocole ; setup propre au client non testé ici. |
-| Gemini CLI | Serveur stdio local configuré par le client | Conception compatible avec le protocole ; setup propre au client non testé ici. |
-| OpenClaw | Processus MCP local si son déploiement le supporte | Conception compatible ; accès au chemin dépendant du déploiement. |
-| Hermes Agent | Processus MCP local si son déploiement le supporte | Conception compatible ; accès au chemin dépendant du déploiement. |
-| Client HTTP direct sur localhost | Status/list/stat/read et handoff optionnel par ticket | Tests automatisés Streamable HTTP, JWT, ticket, replay, identité et binaire. |
-| Client HTTP distant | Même protocole derrière des contrôles de déploiement revus | Architecture et tests serveur automatisés ; interopérabilité avec de vrais clients distants encore en pilote. |
+| Client                           | Intégration visée                                          | Ce que ce dépôt vérifie                                                                                       |
+| -------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Codex                            | Proxy stdio local avec environnement du processus          | Usage de production configuré et workflow de handoff par chemin local.                                        |
+| Claude Code                      | Serveur stdio local configuré par le client                | Conception compatible avec le protocole ; setup propre au client non testé ici.                               |
+| Gemini CLI                       | Serveur stdio local configuré par le client                | Conception compatible avec le protocole ; setup propre au client non testé ici.                               |
+| OpenClaw                         | Processus MCP local si son déploiement le supporte         | Conception compatible ; accès au chemin dépendant du déploiement.                                             |
+| Hermes Agent                     | Processus MCP local si son déploiement le supporte         | Conception compatible ; accès au chemin dépendant du déploiement.                                             |
+| Client HTTP direct sur localhost | Status/list/stat/read et handoff optionnel par ticket      | Tests automatisés Streamable HTTP, JWT, ticket, replay, identité et binaire.                                  |
+| Client HTTP distant              | Même protocole derrière des contrôles de déploiement revus | Architecture et tests serveur automatisés ; interopérabilité avec de vrais clients distants encore en pilote. |
 
 Le cœur MCP n’installe ni ne configure les extracteurs du client. Sans outil PDF
 ou Office adapté, un client peut toujours lister, lire les métadonnées, hasher et
@@ -281,14 +290,16 @@ Séquence de vérification recommandée :
 
 1. Appeler `external_runtime_status` et confirmer `enabled: true` ainsi que
    l’identifiant logique attendu.
-2. Examiner `handoffModes` :
+2. Utiliser une identité portant `external:read` pour tout appel HTTP direct de
+   status, list, stat, read, hash ou handoff sur les racines externes.
+3. Examiner `handoffModes` :
    - le stdio doit exposer `local_path` ;
    - un service HTTP direct authentifié et activé doit exposer `http_ticket`.
-3. Appeler `external_roots_list` et confirmer que la racine est `available`.
-4. Appeler `external_list` avec l’identifiant et une profondeur bornée.
-5. Appeler `external_stat`, puis `external_read` sur un petit fichier UTF-8.
-6. Si nécessaire, appeler `external_handoff` et consommer le mode retourné.
-7. Confirmer qu’aucun résultat public ne contient le chemin physique de la
+4. Appeler `external_roots_list` et confirmer que la racine est `available`.
+5. Appeler `external_list` avec l’identifiant et une profondeur bornée.
+6. Appeler `external_stat`, puis `external_read` sur un petit fichier UTF-8.
+7. Si nécessaire, appeler `external_handoff` et consommer le mode retourné.
+8. Confirmer qu’aucun résultat public ne contient le chemin physique de la
    racine.
 
 Vérifications du dépôt :
@@ -336,9 +347,11 @@ en mode `0600` sur les plateformes qui appliquent les permissions POSIX :
 - un service configuré ultérieur récupère les dossiers détenus par des processus
   morts ou des heartbeats périmés.
 
-Le broker HTTP ne possède ni ne supprime ce cache local. Il vérifie la copie,
-conserve un snapshot mémoire borné pendant la courte durée du ticket, puis retire
-ce snapshot après usage ou expiration.
+Le broker HTTP ne possède ni ne supprime ce cache local. Il vérifie la copie et
+conserve un snapshot mémoire borné tant que le ticket est en attente et pendant
+le téléchargement par flux découpé. La réservation de capacité n’est libérée
+qu’à la fin ou à l’annulation du flux ; un ticket inutilisé expiré est nettoyé
+sans livraison.
 
 La provenance portable est l’identifiant logique, le chemin relatif, la taille,
 la date de modification et le SHA-256, pas un chemin local ni un ticket.
@@ -374,18 +387,18 @@ Désactiver toutes les racines externes :
 
 Erreurs fréquentes :
 
-| Erreur/état | Vérification |
-| --- | --- |
-| `configuration_invalid` | Chemin de config absolu, JSON valide, version `1`, champs connus et règles d’identifiant. |
-| `root_unavailable` | Le dossier existe et le processus MCP peut y accéder. |
-| `capability_denied` | La racine déclare la capacité exigée ; le mode ticket HTTP est activé et utilise une vraie authentification. |
-| `path_not_allowed` | Le chemin relatif correspond à `include` et pas à `exclude`. |
-| `path_link_unsupported` | Retirer les symlinks ou jonctions du chemin demandé. |
-| `too_large` | Limites de racine et budget agrégé du handoff local ou HTTP. |
-| `unsupported` | Employer un texte UTF-8 avec `external_read`, ou un mode de handoff supporté pour le binaire. |
-| Ticket HTTP indisponible | Vérifier feature flag, auth, identité bearer, TTL, usage unique et redémarrage du service. |
-| Port inattendu | Garder `MCP_HTTP_PORT_RETRIES=0` ou examiner le repli borné configuré. |
-| Échec client distant | Vérifier proxy TLS, allowlist Origin, métadonnées auth, confiance forwarding, firewall et compatibilité client. |
+| Erreur/état              | Vérification                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `configuration_invalid`  | Chemin de config absolu, JSON valide, version `1`, champs connus et règles d’identifiant.                       |
+| `root_unavailable`       | Le dossier existe et le processus MCP peut y accéder.                                                           |
+| `capability_denied`      | La racine déclare la capacité exigée ; le mode ticket HTTP est activé et utilise une vraie authentification.    |
+| `path_not_allowed`       | Le chemin relatif correspond à `include` et pas à `exclude`.                                                    |
+| `path_link_unsupported`  | Retirer les symlinks ou jonctions du chemin demandé.                                                            |
+| `too_large`              | Limites de racine et budget agrégé du handoff local ou HTTP.                                                    |
+| `unsupported`            | Employer un texte UTF-8 avec `external_read`, ou un mode de handoff supporté pour le binaire.                   |
+| Ticket HTTP indisponible | Vérifier feature flag, auth, identité bearer, TTL, usage unique et redémarrage du service.                      |
+| Port inattendu           | Garder `MCP_HTTP_PORT_RETRIES=0` ou examiner le repli borné configuré.                                          |
+| Échec client distant     | Vérifier proxy TLS, allowlist Origin, métadonnées auth, confiance forwarding, firewall et compatibilité client. |
 
 Le serveur ne déduit jamais une nouvelle racine à partir d’un chemin trouvé dans
 une note Obsidian.

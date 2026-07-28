@@ -20,11 +20,11 @@ import { randomUUID } from "node:crypto";
 import { config } from "../../config/index.js";
 import { ExternalRootError } from "../../services/externalRootsService.js";
 import {
+  externalHandoffResponse,
   externalHandoffEndpoint,
   externalHandoffTicketHeader,
   externalTransferBroker,
 } from "../../services/externalTransferBroker.js";
-import { collectRuntimeStatus } from "../../services/runtimeState.js";
 import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import {
@@ -55,7 +55,9 @@ function parsePortRetries(): number {
   const raw = process.env.MCP_HTTP_PORT_RETRIES ?? "0";
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0 || value > 15) {
-    throw new Error("MCP_HTTP_PORT_RETRIES must be an integer between 0 and 15.");
+    throw new Error(
+      "MCP_HTTP_PORT_RETRIES must be an integer between 0 and 15.",
+    );
   }
   return value;
 }
@@ -181,7 +183,7 @@ function startHttpServerWithRetry(
 export async function startHttpTransport(
   createServerInstanceFn: () => Promise<McpServer>,
   parentContext: RequestContext,
-  vaultCacheService?: VaultCacheService,
+  _vaultCacheService?: VaultCacheService,
 ): Promise<ServerType> {
   const app = new Hono<{ Bindings: HttpBindings }>();
   const transportContext = requestContextService.createRequestContext({
@@ -229,18 +231,12 @@ export async function startHttpTransport(
     await next();
   });
 
-  app.get("/healthz", async (c: Context) => {
-    const includeIntegrity = c.req.query("integrity") === "1";
-    const runtimeStatus = await collectRuntimeStatus(vaultCacheService, {
-      includeIntegrity,
-    });
+  app.get("/healthz", (c: Context) => {
     return c.json({
-      ...runtimeStatus,
+      ok: true,
+      status: "healthy",
       transport: "streamable-http",
       endpoint: MCP_ENDPOINT_PATH,
-      externalHttpHandoff: externalTransferBroker.publicStatus(),
-      trustedProxyHeaders: TRUST_PROXY,
-      portRetries: MAX_PORT_RETRIES,
     });
   });
 
@@ -266,30 +262,24 @@ export async function startHttpTransport(
 
     try {
       const artifact = await externalTransferBroker.consume(ticket, authInfo);
-      return new Response(new Uint8Array(artifact.buffer), {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-          Pragma: "no-cache",
-          "Content-Type": artifact.mediaType,
-          "Content-Length": String(artifact.size),
-          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(
-            artifact.filename,
-          )}`,
-          "X-Artifact-SHA256": artifact.sha256,
-          "X-Content-Type-Options": "nosniff",
-          "Referrer-Policy": "no-referrer",
-        },
-      });
+      if (c.env.incoming.destroyed) {
+        await artifact.release();
+        throw new ExternalRootError(
+          "not_found",
+          "The HTTP client disconnected before artifact delivery.",
+        );
+      }
+      return externalHandoffResponse(
+        artifact,
+        externalTransferBroker.transferTimeoutMs,
+      );
     } catch (error) {
       logger.warning("HTTP artifact transfer denied or unavailable.", {
         ...transportContext,
         operation: "consumeExternalHandoffTicket",
         clientId: authInfo.clientId,
         errorCode:
-          error instanceof ExternalRootError
-            ? error.code
-            : "non_verifiable",
+          error instanceof ExternalRootError ? error.code : "non_verifiable",
       });
       return c.json(
         {
@@ -308,9 +298,8 @@ export async function startHttpTransport(
     });
     const body = await c.req.raw.clone().json();
     const sessionId = c.req.header("mcp-session-id");
-    let transport: WebStandardStreamableHTTPServerTransport | undefined = sessionId
-      ? transports[sessionId]
-      : undefined;
+    let transport: WebStandardStreamableHTTPServerTransport | undefined =
+      sessionId ? transports[sessionId] : undefined;
 
     if (isInitializeRequest(body)) {
       if (transport) {

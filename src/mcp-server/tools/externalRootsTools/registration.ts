@@ -47,12 +47,26 @@ function disabledError(): ExternalRootError {
   );
 }
 
-function secureHttpIdentity(authInfo: AuthInfo | undefined): authInfo is AuthInfo {
+function secureHttpIdentity(
+  authInfo: AuthInfo | undefined,
+): authInfo is AuthInfo {
   return Boolean(
     authInfo &&
       authInfo.token !== "dev-mode-placeholder-token" &&
       authInfo.clientId !== "dev-client-id" &&
-      !authInfo.scopes.includes("dev-scope"),
+      !authInfo.scopes.includes("dev-scope") &&
+      authInfo.scopes.includes("external:read"),
+  );
+}
+
+function assertExternalReadAccess(
+  localHandoffAllowed: boolean,
+  authInfo: AuthInfo | undefined,
+): void {
+  if (localHandoffAllowed || secureHttpIdentity(authInfo)) return;
+  throw new ExternalRootError(
+    "capability_denied",
+    "Direct HTTP external-root operations require a non-development authenticated client identity with the external:read scope.",
   );
 }
 
@@ -81,7 +95,7 @@ async function deliverExternalHandoff(
   if (!secureHttpIdentity(authInfo)) {
     throw new ExternalRootError(
       "capability_denied",
-      "HTTP handoff requires a non-development authenticated client identity.",
+      "HTTP handoff requires a non-development authenticated client identity with the external:read scope.",
     );
   }
 
@@ -91,6 +105,7 @@ async function deliverExternalHandoff(
     params.rootId,
     params.relativePath,
     true,
+    externalTransferBroker.maxFileBytes,
   );
   return externalTransferBroker.issue(prepared, authInfo);
 }
@@ -147,24 +162,29 @@ export async function registerExternalRootsTools(
     "Reports whether explicitly configured external document roots are enabled and available. Physical root paths are never returned.",
     {},
     READ_ONLY_TOOL_ANNOTATIONS,
-    externalRootsResult(async () => ({
-      enabled: Boolean(service),
-      mode: "read-only",
-      localHandoffAllowed,
-      handoffModes: [
-        ...(localHandoffAllowed ? (["local_path"] as const) : []),
-        ...(!localHandoffAllowed && externalTransferBroker.enabled
-          ? (["http_ticket"] as const)
-          : []),
-      ],
-      httpHandoff: {
-        ...externalTransferBroker.publicStatus(),
-        available: externalTransferBroker.enabled,
-        authenticatedIdentityRequired: true,
-        developmentBypassAccepted: false,
-      },
-      roots: service ? await service.listRoots() : [],
-    })),
+    async (_params, extra) =>
+      externalRootsResult(async () => {
+        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        return {
+          enabled: Boolean(service),
+          mode: "read-only",
+          localHandoffAllowed,
+          handoffModes: [
+            ...(localHandoffAllowed ? (["local_path"] as const) : []),
+            ...(!localHandoffAllowed && externalTransferBroker.enabled
+              ? (["http_ticket"] as const)
+              : []),
+          ],
+          httpHandoff: {
+            ...externalTransferBroker.publicStatus(),
+            available: externalTransferBroker.enabled,
+            authenticatedIdentityRequired: true,
+            requiredScope: "external:read",
+            developmentBypassAccepted: false,
+          },
+          roots: service ? await service.listRoots() : [],
+        };
+      })(),
   );
 
   server.tool(
@@ -172,9 +192,13 @@ export async function registerExternalRootsTools(
     "Lists configured external document root IDs, capabilities, limits, and availability without disclosing physical paths.",
     {},
     READ_ONLY_TOOL_ANNOTATIONS,
-    externalRootsResult(async () => ({
-      roots: service ? await service.listRoots() : [],
-    })),
+    async (_params, extra) =>
+      externalRootsResult(async () => {
+        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        return {
+          roots: service ? await service.listRoots() : [],
+        };
+      })(),
   );
 
   server.tool(
@@ -182,17 +206,18 @@ export async function registerExternalRootsTools(
     "Lists bounded directory entries inside one configured external root. Paths are root-relative and links are never followed.",
     ExternalListSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ExternalListSchema>) =>
-      externalRootsResult(() =>
-        service
+    async (params: z.infer<typeof ExternalListSchema>, extra) =>
+      externalRootsResult(() => {
+        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        return service
           ? service.list(
               params.rootId,
               params.relativePath,
               params.depth,
               params.maxEntries,
             )
-          : Promise.reject(disabledError()),
-      )(),
+          : Promise.reject(disabledError());
+      })(),
   );
 
   server.tool(
@@ -200,16 +225,17 @@ export async function registerExternalRootsTools(
     "Returns bounded metadata and optionally a SHA-256 hash for one root-relative external file.",
     ExternalStatSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ExternalStatSchema>) =>
-      externalRootsResult(() =>
-        service
+    async (params: z.infer<typeof ExternalStatSchema>, extra) =>
+      externalRootsResult(() => {
+        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        return service
           ? service.getStat(
               params.rootId,
               params.relativePath,
               params.includeHash,
             )
-          : Promise.reject(disabledError()),
-      )(),
+          : Promise.reject(disabledError());
+      })(),
   );
 
   server.tool(
@@ -217,16 +243,17 @@ export async function registerExternalRootsTools(
     "Reads bounded UTF-8 text from one explicitly allowed root-relative file. Binary and Office documents require an explicit handoff mode supported by the active transport.",
     ExternalReadSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ExternalReadSchema>) =>
-      externalRootsResult(() =>
-        service
+    async (params: z.infer<typeof ExternalReadSchema>, extra) =>
+      externalRootsResult(() => {
+        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        return service
           ? service.readText(
               params.rootId,
               params.relativePath,
               params.maxChars,
             )
-          : Promise.reject(disabledError()),
-      )(),
+          : Promise.reject(disabledError());
+      })(),
   );
 
   server.tool(
