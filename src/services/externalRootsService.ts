@@ -806,6 +806,19 @@ export class ExternalRootsService {
     relativePath: string,
   ): Promise<{ buffer: Buffer; modifiedAt: string }> {
     const absolutePath = await this.resolvePath(runtime, relativePath);
+    const preOpenStat = await stat(absolutePath);
+    if (!preOpenStat.isFile()) {
+      throw new ExternalRootError(
+        "not_a_file",
+        "The requested external path is not a regular file.",
+      );
+    }
+    if (preOpenStat.size > runtime.config.limits.maxFileBytes) {
+      throw new ExternalRootError(
+        "too_large",
+        `The file exceeds the configured ${runtime.config.limits.maxFileBytes}-byte limit.`,
+      );
+    }
     const handle = await open(absolutePath, "r");
     try {
       const openedStat = await handle.stat({ bigint: true });

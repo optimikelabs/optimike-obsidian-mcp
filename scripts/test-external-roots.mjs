@@ -34,6 +34,7 @@ async function expectCode(operation, expectedCode) {
 
 try {
   await mkdir(path.join(rootPath, "docs"), { recursive: true });
+  await mkdir(path.join(rootPath, "blocking.txt"), { recursive: true });
   await mkdir(path.join(rootPath, "secret"), { recursive: true });
   await mkdir(outsidePath, { recursive: true });
   await writeFile(path.join(rootPath, "hello.txt"), "Bonjour ÉLYSIA", "utf8");
@@ -200,6 +201,10 @@ try {
   await expectCode(
     () => service.handoff("pilot.docs", "LICENSE", true),
     "path_not_allowed",
+  );
+  await expectCode(
+    () => service.readText("pilot.docs", "blocking.txt"),
+    "not_a_file",
   );
   if (linkCreated) {
     await expectCode(
