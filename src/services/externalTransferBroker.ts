@@ -68,6 +68,14 @@ export type ExternalTransferBrokerOptions = {
   now?: () => number;
 };
 
+type ConsumedExternalHandoff = {
+  buffer: Buffer;
+  filename: string;
+  mediaType: string;
+  size: number;
+  sha256: string;
+};
+
 function parseBoundedInteger(
   name: string,
   fallback: number,
@@ -260,7 +268,7 @@ export class ExternalTransferBroker {
       );
     }
 
-    return this.withLock(async () => {
+    return this.withLock<HttpExternalHandoffDescriptor>(async () => {
       await this.pruneExpired();
       const totalBytes = [...this.tickets.values()].reduce(
         (total, entry) => total + entry.size,
@@ -315,14 +323,8 @@ export class ExternalTransferBroker {
   async consume(
     ticket: string,
     authInfo: AuthInfo,
-  ): Promise<{
-    buffer: Buffer;
-    filename: string;
-    mediaType: string;
-    size: number;
-    sha256: string;
-  }> {
-    return this.withLock(async () => {
+  ): Promise<ConsumedExternalHandoff> {
+    return this.withLock<ConsumedExternalHandoff>(async () => {
       this.assertEnabled();
       await this.pruneExpired();
       const entry = this.tickets.get(ticket);
