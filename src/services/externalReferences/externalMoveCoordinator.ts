@@ -497,8 +497,12 @@ export class ExternalMoveCoordinator {
     }
     await this.vault.assertConditionalWritesSupported();
     try {
-      const placement = await this.inspectFilePlacement(plan.snapshot);
-      if (placement === "both" || placement === "missing_or_changed") {
+      let placement = await this.inspectFilePlacement(plan.snapshot);
+      if (placement === "both") {
+        await this.roots.recoverMoveToSource(plan.snapshot);
+        placement = await this.inspectFilePlacement(plan.snapshot);
+      }
+      if (placement === "missing_or_changed" || placement === "both") {
         throw new ExternalRootError(
           "non_verifiable",
           `External file placement is ${placement}; automatic rollback is unsafe.`,

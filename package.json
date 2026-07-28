@@ -102,7 +102,7 @@
     "smoke:operon-rich-mutations": "node scripts/smoke-operon-rich-mutations.mjs",
     "test:profiles": "node scripts/test-elysia-task-profile.mjs",
     "test:tool-annotations": "node scripts/test-tool-annotations.mjs",
-    "test:external-roots": "npm run build && node scripts/test-external-reference-parser.mjs && node scripts/test-external-move-integrity.mjs && node scripts/test-obsidian-cas.mjs && node scripts/test-obsidian-search-replace-cas.mjs && node scripts/test-external-roots.mjs && node scripts/test-stdio-proxy-external-roots.mjs && node scripts/test-http-external-handoff.mjs",
+    "test:external-roots": "npm run build && node scripts/test-external-reference-parser.mjs && node scripts/test-external-move-integrity.mjs && node scripts/test-backend-vault-adapter-cas.mjs && node scripts/test-obsidian-cas.mjs && node scripts/test-obsidian-search-replace-cas.mjs && node scripts/test-external-roots.mjs && node scripts/test-stdio-proxy-external-roots.mjs && node scripts/test-http-external-handoff.mjs",
     "test:external-roots:proxy": "npm run build && node scripts/test-stdio-proxy-external-roots.mjs",
     "test:http-external-handoff": "npm run build && node scripts/test-http-external-handoff.mjs",
     "smoke:external-roots": "npm run build && node scripts/smoke-external-roots.mjs",

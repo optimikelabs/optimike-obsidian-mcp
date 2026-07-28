@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   access,
+  link,
   mkdir,
   mkdtemp,
   readFile,
@@ -534,6 +535,55 @@ try {
   assert.equal(await readFile(recoverySource, "utf8"), "recovery");
   assert.equal(await exists(recoveryTarget), false);
   assert.equal(recoveryVault.notes.get(recoveryNotePath), recoveryNote);
+
+  // A crash after the no-clobber hard link but before source unlink leaves
+  // both paths on the same inode. Rollback must recover that verified window.
+  const linkedRecoverySource = path.join(rootPath, "linked-recovery.txt");
+  const linkedRecoveryTarget = path.join(
+    archivePath,
+    "linked-recovery.txt",
+  );
+  await writeFile(linkedRecoverySource, "linked recovery", "utf8");
+  const linkedRecoveryUri = pathToFileURL(linkedRecoverySource).href;
+  const linkedRecoveryNotePath = "Efforts/Projets/Linked recovery.md";
+  const linkedRecoveryNote =
+    `[Linked recovery](${linkedRecoveryUri}) ` +
+    "`external-ref:pilot.move::linked-recovery.txt`\n";
+  const linkedRecoveryVault = new FakeVault({
+    [linkedRecoveryNotePath]: linkedRecoveryNote,
+  });
+  const linkedRecoveryJournal = new ExternalMoveJournal(":memory:");
+  const linkedRecoveryCoordinator = new ExternalMoveCoordinator(
+    service,
+    linkedRecoveryVault,
+    linkedRecoveryJournal,
+  );
+  const linkedRecoveryPlan = await linkedRecoveryCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "linked-recovery.txt",
+    targetRelativePath: "archive/linked-recovery.txt",
+    idempotencyKey: "coordinator-linked-recovery",
+  });
+  await link(linkedRecoverySource, linkedRecoveryTarget);
+  linkedRecoveryJournal.transition(
+    linkedRecoveryPlan.planId,
+    ["planned"],
+    "applying_file",
+  );
+  const linkedRecovered = await linkedRecoveryCoordinator.rollback(
+    linkedRecoveryPlan.planId,
+    "coordinator-linked-recovery",
+  );
+  assert.equal(linkedRecovered.status, "rolled_back");
+  assert.equal(
+    await readFile(linkedRecoverySource, "utf8"),
+    "linked recovery",
+  );
+  assert.equal(await exists(linkedRecoveryTarget), false);
+  assert.equal(
+    linkedRecoveryVault.notes.get(linkedRecoveryNotePath),
+    linkedRecoveryNote,
+  );
 
   // Legacy physical paths are inventoried case-insensitively and block apply.
   const legacyCaseSource = path.join(rootPath, "legacy-case.txt");
