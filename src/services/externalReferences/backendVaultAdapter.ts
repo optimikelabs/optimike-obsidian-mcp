@@ -325,10 +325,14 @@ export class BackendVaultAdapter {
         flexibleWhitespace: false,
         wholeWord: false,
         returnContent: false,
-        expectedSha256,
+        expectedHash: expectedSha256,
       }),
     );
-    if (parsed.success !== true) {
+    if (
+      parsed.success !== true ||
+      parsed.replacementsApplied !== 1 ||
+      nestedRecord(parsed, "stats")?.hash !== sha256Text(after)
+    ) {
       throw new Error("The conditional vault repair did not succeed.");
     }
   }
