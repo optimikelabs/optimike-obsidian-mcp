@@ -1,18 +1,11 @@
 /**
  * @fileoverview Configures and starts the Streamable HTTP MCP transport using Hono.
- * This module integrates the `@modelcontextprotocol/sdk`'s `StreamableHTTPServerTransport`
- * into a Hono web server. Its responsibilities include:
- * - Creating a Hono server instance.
- * - Applying and configuring middleware for CORS, rate limiting, and authentication (JWT/OAuth).
- * - Defining the routes (`/mcp` endpoint for POST, GET, DELETE) to handle the MCP lifecycle.
- * - Orchestrating session management by mapping session IDs to SDK transport instances.
- * - Implementing port-binding logic with automatic retry on conflicts.
  *
- * The underlying implementation of the MCP Streamable HTTP specification, including
- * Server-Sent Events (SSE) for streaming, is handled by the SDK's transport class.
+ * The transport owns the MCP lifecycle endpoint and the optional authenticated
+ * download endpoint used by transportable external-artifact handoff. The latter
+ * accepts only an opaque ticket in a dedicated header; source paths and tickets
+ * never appear in URLs.
  *
- * Specification Reference:
- * https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2025-03-26/basic/transports.mdx#streamable-http
  * @module src/mcp-server/transports/httpTransport
  */
 
@@ -25,6 +18,12 @@ import { cors } from "hono/cors";
 import http from "http";
 import { randomUUID } from "node:crypto";
 import { config } from "../../config/index.js";
+import { ExternalRootError } from "../../services/externalRootsService.js";
+import {
+  externalHandoffEndpoint,
+  externalHandoffTicketHeader,
+  externalTransferBroker,
+} from "../../services/externalTransferBroker.js";
 import { collectRuntimeStatus } from "../../services/runtimeState.js";
 import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
@@ -44,21 +43,64 @@ import { httpErrorHandler } from "./httpErrorHandler.js";
 const HTTP_PORT = config.mcpHttpPort;
 const HTTP_HOST = config.mcpHttpHost;
 const MCP_ENDPOINT_PATH = "/mcp";
-const MAX_PORT_RETRIES = 15;
+const MAX_PORT_RETRIES = parsePortRetries();
+const TRUST_PROXY =
+  (process.env.MCP_TRUST_PROXY ?? "false").toLowerCase() === "true";
 
-// The transports map will store active sessions, keyed by session ID.
-// NOTE: This is an in-memory session store, which is a known limitation for scalability.
-// It will not work in a multi-process (clustered) or serverless environment.
-// For a scalable deployment, this would need to be replaced with a distributed
-// store like Redis or Memcached.
+// Active sessions are intentionally in-memory. This profile is a single-process
+// service and is not a serverless or clustered deployment contract.
 const transports: Record<string, WebStandardStreamableHTTPServerTransport> = {};
+
+function parsePortRetries(): number {
+  const raw = process.env.MCP_HTTP_PORT_RETRIES ?? "0";
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 15) {
+    throw new Error("MCP_HTTP_PORT_RETRIES must be an integer between 0 and 15.");
+  }
+  return value;
+}
+
+function originAllowed(origin: string): boolean {
+  return (config.mcpAllowedOrigins ?? []).includes(origin);
+}
+
+function clientIp(c: Context<{ Bindings: HttpBindings }>): string {
+  if (TRUST_PROXY) {
+    const forwarded = c.req.header("x-forwarded-for")?.split(",")[0].trim();
+    if (forwarded) return forwarded;
+  }
+  return c.env.incoming.socket.remoteAddress ?? "unknown_ip";
+}
+
+async function authMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void | Response> {
+  return config.mcpAuthMode === "oauth"
+    ? oauthMiddleware(c, next)
+    : jwtAuthMiddleware(c, next);
+}
+
+async function rateLimitMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void> {
+  const ipAddress = clientIp(c);
+  const context = requestContextService.createRequestContext({
+    operation: "httpRateLimitCheck",
+    ipAddress,
+    trustedProxyHeaders: TRUST_PROXY,
+  });
+  rateLimiter.check(ipAddress, context);
+  await next();
+}
 
 async function isPortInUse(
   port: number,
   host: string,
   parentContext: RequestContext,
 ): Promise<boolean> {
-  const checkContext = requestContextService.createRequestContext({
+  requestContextService.createRequestContext({
     ...parentContext,
     operation: "isPortInUse",
     port,
@@ -99,10 +141,7 @@ function startHttpServerWithRetry(
       };
 
       if (await isPortInUse(currentPort, host, attemptContext)) {
-        logger.warning(
-          `Port ${currentPort} is in use, retrying...`,
-          attemptContext,
-        );
+        logger.warning(`Port ${currentPort} is in use.`, attemptContext);
         continue;
       }
 
@@ -129,7 +168,13 @@ function startHttpServerWithRetry(
         }
       }
     }
-    reject(new Error("Failed to bind to any port after multiple retries."));
+    reject(
+      new Error(
+        `Failed to bind HTTP transport at ${host}:${initialPort}${
+          maxRetries > 0 ? ` through ${initialPort + maxRetries}` : ""
+        }.`,
+      ),
+    );
   });
 }
 
@@ -144,16 +189,17 @@ export async function startHttpTransport(
     component: "HttpTransportSetup",
   });
 
-  app.get("/healthz", async (c: Context) => {
-    const includeIntegrity = c.req.query("integrity") === "1";
-    const runtimeStatus = await collectRuntimeStatus(vaultCacheService, {
-      includeIntegrity,
-    });
-    return c.json({
-      ...runtimeStatus,
-      transport: "streamable-http",
-      endpoint: MCP_ENDPOINT_PATH,
-    });
+  // MCP requires Origin validation to mitigate browser-based DNS rebinding.
+  // Requests without Origin remain valid for non-browser MCP clients.
+  app.use("*", async (c: Context, next: Next) => {
+    const origin = c.req.header("origin");
+    if (origin && !originAllowed(origin)) {
+      return c.json(
+        { error: "origin_not_allowed", message: "Origin is not allowed." },
+        403,
+      );
+    }
+    await next();
   });
 
   app.use(
@@ -166,6 +212,12 @@ export async function startHttpTransport(
         "Mcp-Session-Id",
         "Last-Event-ID",
         "Authorization",
+        externalHandoffTicketHeader,
+      ],
+      exposeHeaders: [
+        "Content-Disposition",
+        "Content-Length",
+        "X-Artifact-SHA256",
       ],
       credentials: true,
     }),
@@ -173,32 +225,81 @@ export async function startHttpTransport(
 
   app.use("*", async (c: Context, next: Next) => {
     c.res.headers.set("X-Content-Type-Options", "nosniff");
+    c.res.headers.set("Referrer-Policy", "no-referrer");
     await next();
   });
 
-  app.use(MCP_ENDPOINT_PATH, async (c: Context, next: Next) => {
-    // NOTE (Security): The 'x-forwarded-for' header is used for rate limiting.
-    // This is only secure if the server is run behind a trusted proxy that
-    // correctly sets or validates this header.
-    const clientIp =
-      c.req.header("x-forwarded-for")?.split(",")[0].trim() || "unknown_ip";
-    const context = requestContextService.createRequestContext({
-      operation: "httpRateLimitCheck",
-      ipAddress: clientIp,
+  app.get("/healthz", async (c: Context) => {
+    const includeIntegrity = c.req.query("integrity") === "1";
+    const runtimeStatus = await collectRuntimeStatus(vaultCacheService, {
+      includeIntegrity,
     });
-    // Let the centralized error handler catch rate limit errors
-    rateLimiter.check(clientIp, context);
-    await next();
+    return c.json({
+      ...runtimeStatus,
+      transport: "streamable-http",
+      endpoint: MCP_ENDPOINT_PATH,
+      externalHttpHandoff: externalTransferBroker.publicStatus(),
+      trustedProxyHeaders: TRUST_PROXY,
+      portRetries: MAX_PORT_RETRIES,
+    });
   });
 
-  if (config.mcpAuthMode === "oauth") {
-    app.use(MCP_ENDPOINT_PATH, oauthMiddleware);
-  } else {
-    app.use(MCP_ENDPOINT_PATH, jwtAuthMiddleware);
-  }
+  app.use(MCP_ENDPOINT_PATH, rateLimitMiddleware);
+  app.use(externalHandoffEndpoint, rateLimitMiddleware);
+  app.use(MCP_ENDPOINT_PATH, authMiddleware);
+  app.use(externalHandoffEndpoint, authMiddleware);
 
-  // Centralized Error Handling
   app.onError(httpErrorHandler);
+
+  app.get(externalHandoffEndpoint, async (c: Context) => {
+    const ticket = c.req.header(externalHandoffTicketHeader);
+    const authInfo = c.env.incoming.auth as AuthInfo | undefined;
+    if (!ticket || !authInfo) {
+      return c.json(
+        {
+          error: "not_found",
+          message: "Artifact transfer is invalid or unavailable.",
+        },
+        404,
+      );
+    }
+
+    try {
+      const artifact = await externalTransferBroker.consume(ticket, authInfo);
+      return new Response(new Uint8Array(artifact.buffer), {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+          Pragma: "no-cache",
+          "Content-Type": artifact.mediaType,
+          "Content-Length": String(artifact.size),
+          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(
+            artifact.filename,
+          )}`,
+          "X-Artifact-SHA256": artifact.sha256,
+          "X-Content-Type-Options": "nosniff",
+          "Referrer-Policy": "no-referrer",
+        },
+      });
+    } catch (error) {
+      logger.warning("HTTP artifact transfer denied or unavailable.", {
+        ...transportContext,
+        operation: "consumeExternalHandoffTicket",
+        clientId: authInfo.clientId,
+        errorCode:
+          error instanceof ExternalRootError
+            ? error.code
+            : "non_verifiable",
+      });
+      return c.json(
+        {
+          error: "not_found",
+          message: "Artifact transfer is invalid or unavailable.",
+        },
+        404,
+      );
+    }
+  });
 
   app.post(MCP_ENDPOINT_PATH, async (c: Context) => {
     const postContext = requestContextService.createRequestContext({
@@ -212,16 +313,14 @@ export async function startHttpTransport(
       : undefined;
 
     if (isInitializeRequest(body)) {
-      // If a transport already exists for a session, it's a re-initialization.
       if (transport) {
         logger.warning("Re-initializing existing session.", {
           ...postContext,
           sessionId,
         });
-        await transport.close(); // This will trigger the onclose handler.
+        await transport.close();
       }
 
-      // Create a new transport for a new session.
       const newTransport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (newId) => {
@@ -233,7 +332,6 @@ export async function startHttpTransport(
         },
       });
 
-      // Set up cleanup logic for when the transport is closed.
       newTransport.onclose = () => {
         const closedSessionId = newTransport.sessionId;
         if (closedSessionId && transports[closedSessionId]) {
@@ -245,26 +343,22 @@ export async function startHttpTransport(
         }
       };
 
-      // Connect the new transport to a new server instance.
       const server = await createServerInstanceFn();
       await server.connect(newTransport);
       transport = newTransport;
     } else if (!transport) {
-      // If it's not an initialization request and no transport was found, it's an error.
       throw new McpError(
         BaseErrorCode.NOT_FOUND,
         "Invalid or expired session ID.",
       );
     }
 
-    // Pass the request to the transport to handle.
     return await transport.handleRequest(c.req.raw, {
       authInfo: c.env.incoming.auth,
       parsedBody: body,
     });
   });
 
-  // A reusable handler for GET and DELETE requests which operate on existing sessions.
   const handleSessionRequest = async (
     c: Context<{ Bindings: HttpBindings }>,
   ) => {
@@ -278,7 +372,6 @@ export async function startHttpTransport(
       );
     }
 
-    // Let the transport handle the streaming (GET) or termination (DELETE) request.
     return await transport.handleRequest(c.req.raw, {
       authInfo: c.env.incoming.auth,
     });
