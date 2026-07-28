@@ -159,6 +159,7 @@ export async function registerExternalRootsTools(
       ],
       httpHandoff: {
         ...externalTransferBroker.publicStatus(),
+        available: externalTransferBroker.enabled,
         authenticatedIdentityRequired: true,
         developmentBypassAccepted: false,
       },
