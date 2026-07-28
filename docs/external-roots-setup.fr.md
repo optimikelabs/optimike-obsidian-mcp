@@ -370,6 +370,14 @@ L’unique mutation external-root est une transaction stdio locale sur un fichie
 régulier. Elle sert à préserver les références ÉLYSIA, pas à remplacer les
 outils filesystem.
 
+Le modèle durable de référence est assemblé au scan/plan avec `rootId`, chemin
+relatif à la racine, SHA-256 source, classification de l’occurrence et chemin de
+la note source. Le token Markdown sérialise uniquement le `rootId` et le chemin
+relatif stables. La planification et l’apply des réparations sont intégrés à
+`external_move_plan` et `external_move_apply` ; l’absence volontaire d’outils
+séparés `external_links_repair_*` maintient le fichier et les notes dans une
+seule transaction compensatoire.
+
 ### Ajouter l’identité stable à côté du lien cliquable
 
 ```md
@@ -386,6 +394,12 @@ Seule une paire exacte token/lien dans le même paragraphe Markdown actif peut
 orphelins, candidats multiples, syntaxe non supportée et sections
 d’historique/exemple/archive/release passent en revue manuelle. Une seule
 occurrence en revue manuelle bloque l’apply.
+
+Le parser Markdown ne parcourt pas les blocs de code fenced et exclut le
+frontmatter YAML. Un chemin libre, une propriété YAML ou un chemin sous une
+rubrique d’artefacts sans paire canonique n’est jamais réparé automatiquement.
+S’il désigne physiquement le fichier déplacé, il reste en revue manuelle et
+bloque l’apply.
 
 ### Activer explicitement le pilote
 
@@ -445,6 +459,11 @@ note complète : l’apply live échoue donc fermé avant de déplacer le fichie
 externe. Le journal SQLite local persiste l’état du plan et les préimages des
 notes pour la compensation. Le traiter comme une donnée locale sensible : ne jamais le
 committer ni le partager.
+
+Si l’apply échoue après une ou plusieurs réparations, le coordinateur restaure
+les notes déjà modifiées puis replace le fichier vérifié à sa source. Après une
+interruption de processus, le rollback récupère aussi l’état durable post-move
+et la fenêtre vérifiée où source et cible sont deux hard-links du même objet.
 
 Le HTTP direct refuse scan, plan, status, apply et rollback. Les tickets HTTP
 restent des handoffs en lecture seule.

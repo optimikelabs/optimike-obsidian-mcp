@@ -150,6 +150,19 @@ machine-local JSON configuration.
 - `external_move_rollback`: restore an applied move and its note repairs while
   every stored precondition still holds.
 
+The reference record assembled by scan and plan contains the logical `rootId`,
+root-relative path, source SHA-256, occurrence classification and source note
+path. Only `rootId` plus relative path are serialized in the stable
+`external-ref:` token. Exact repairs are intentionally embedded in
+`external_move_plan` and `external_move_apply`; no standalone link-repair apply
+surface exists.
+
+Automatic repair accepts one exact Markdown `file:///` link paired with one
+adjacent inline `external-ref:` token. YAML frontmatter, fenced code, historical
+or example sections, free-form paths and unsupported declarations are never
+auto-repaired. Relevant unsupported or ambiguous physical-path occurrences are
+returned for manual review and block apply.
+
 The core MCP does not parse PDF or Office files. Handoff requires both
 `readable` and `handoff`. HTTP ticket delivery is disabled by default and must be
 explicitly enabled with `MCP_HTTP_HANDOFF_ENABLED=true` on a non-development

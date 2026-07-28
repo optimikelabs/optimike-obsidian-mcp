@@ -359,6 +359,14 @@ The only external-root mutation is a local stdio transaction for one regular
 file. It is designed to preserve ÉLYSIA references, not to replace filesystem
 tools.
 
+The durable reference model is assembled at scan/plan time from `rootId`,
+root-relative path, source SHA-256, occurrence classification and source note
+path. The Markdown token serializes only the stable `rootId` plus relative path.
+Repair planning and apply are embedded in `external_move_plan` and
+`external_move_apply`; separate `external_links_repair_*` tools are
+intentionally absent so the file and note surfaces remain one compensating
+transaction.
+
 ### Add the stable identity next to the clickable link
 
 ```md
@@ -375,6 +383,11 @@ repaired automatically. Bare physical paths, mismatched or orphan tokens,
 multiple candidates, unsupported syntax and historical/example/archive/release
 sections are classified for manual review. One manual-review occurrence blocks
 apply.
+
+The Markdown parser does not traverse fenced code and excludes YAML frontmatter.
+A free-form path, a YAML property or a path under an artifacts heading without
+the canonical pair is never auto-repaired. If it physically refers to the moved
+file, it remains manual review and blocks apply.
 
 ### Enable the pilot explicitly
 
@@ -432,6 +445,11 @@ returns an ETag but does not enforce `If-Match` on whole-note writes, so live
 apply fails closed before moving the external file. The machine-local SQLite
 journal persists plan state and note preimages for compensation. Treat that
 journal as sensitive local data and never commit or share it.
+
+If apply fails after one or more note repairs, the coordinator restores the
+already-modified notes and moves the verified file back to its source. After a
+process interruption, rollback also recovers the durable post-move state and the
+verified window where source and target are hard links to the same object.
 
 Direct HTTP refuses scan, plan, status, apply and rollback. HTTP tickets remain
 read-only handoffs.

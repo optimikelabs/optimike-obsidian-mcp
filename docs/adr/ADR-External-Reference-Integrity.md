@@ -28,6 +28,12 @@ Add a local-stdio-only workflow:
 5. `external_move_rollback` restores both surfaces when every precondition still
    holds.
 
+Reference repair is deliberately part of `external_move_plan` and
+`external_move_apply`; there are no separate `external_links_repair_plan` or
+`external_links_repair_apply` tools. The file move and its exact note repairs
+form one compensating transaction, so a client cannot apply one surface while
+silently leaving the other behind.
+
 Planning and scanning are read-only. Apply and rollback require all three
 positive gates:
 
@@ -60,11 +66,22 @@ fragments and query strings are rejected.
 The token does not authorize filesystem access and is not a custom URI scheme.
 The configured root remains the sole authorization boundary.
 
+The serialized token contains only the stable logical identity. At scan and plan
+time, the complete reference record also carries the source SHA-256, occurrence
+classification and source note path. Hashes and note paths are mutable evidence,
+not durable identity, so they are not embedded in the token.
+
 Only an exact token/link pair in an active Markdown paragraph is automatically
 repairable. Bare paths, unmatched tokens, mismatched pairs, multiple candidate
 links, unsupported syntax, and references under history, archive, example,
 release-note or changelog headings require manual review. Any manual-review
 occurrence blocks apply.
+
+The scanner uses a Markdown AST. Fenced code is not traversed and YAML
+frontmatter is excluded. A free-form path, a YAML property, or a path merely
+placed under an artifacts heading is not promoted to a canonical reference.
+Relevant physical-path occurrences and other unsupported forms are reported for
+manual review and are never rewritten by guessing.
 
 ## Filesystem transaction
 
@@ -139,5 +156,6 @@ These capabilities require demonstrated ÉLYSIA value and a separate decision.
 
 The regression suite must cover canonical parsing, excluded/ambiguous
 references, target collision, changed sources, changed notes, no-clobber move,
-compensation, rollback, restart-safe journal state, HTTP denial and path
+failure after a subset of note repairs, compensation, rollback, both durable
+restart states around the hard-link/unlink boundary, HTTP denial and path
 redaction on Windows and Linux where applicable.

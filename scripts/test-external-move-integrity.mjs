@@ -86,6 +86,8 @@ class FakeVault {
     this.notes = new Map(Object.entries(entries));
     this.bindingFingerprint = "test-binding";
     this.conditionalWritesSupported = true;
+    this.conditionalReplaceCalls = 0;
+    this.failConditionalReplaceAt = undefined;
   }
 
   async getBindingIdentity() {
@@ -130,6 +132,10 @@ class FakeVault {
   }
 
   async conditionalReplace(filePath, before, after, expectedSha256) {
+    this.conditionalReplaceCalls += 1;
+    if (this.conditionalReplaceCalls === this.failConditionalReplaceAt) {
+      throw new Error(`Injected conditional repair failure for ${filePath}.`);
+    }
     const current = await this.read(filePath);
     if (current.sha256 !== expectedSha256 || current.content !== before) {
       throw new ExternalRootError(
@@ -386,12 +392,55 @@ try {
   assert.equal(await readFile(casSource, "utf8"), "CAS");
   assert.equal(await exists(casTarget), false);
 
+  // If one of several note repairs fails after an earlier repair succeeded,
+  // apply compensates the repaired note and restores the external file.
+  const compensationSource = path.join(rootPath, "compensation.txt");
+  const compensationTarget = path.join(archivePath, "compensation.txt");
+  await writeFile(compensationSource, "compensation", "utf8");
+  const compensationUri = pathToFileURL(compensationSource).href;
+  const compensationReference =
+    `[Compensation](${compensationUri}) ` +
+    "`external-ref:pilot.move::compensation.txt`\n";
+  const compensationNotes = {
+    "Efforts/Projets/Compensation A.md": compensationReference,
+    "Efforts/Projets/Compensation B.md": compensationReference,
+  };
+  const compensationVault = new FakeVault(compensationNotes);
+  const compensationCoordinator = new ExternalMoveCoordinator(
+    service,
+    compensationVault,
+    new ExternalMoveJournal(":memory:"),
+  );
+  const compensationPlan = await compensationCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "compensation.txt",
+    targetRelativePath: "archive/compensation.txt",
+    idempotencyKey: "coordinator-compensation",
+  });
+  assert.equal(compensationPlan.repairs.length, 2);
+  compensationVault.failConditionalReplaceAt = 2;
+  await assert.rejects(
+    () =>
+      compensationCoordinator.apply(
+        compensationPlan.planId,
+        "coordinator-compensation",
+      ),
+    /All partial effects were compensated and journaled/u,
+  );
+  assert.equal(
+    compensationCoordinator.status(compensationPlan.planId).status,
+    "failed_compensated",
+  );
+  assert.equal(await readFile(compensationSource, "utf8"), "compensation");
+  assert.equal(await exists(compensationTarget), false);
+  assert.deepEqual(
+    Object.fromEntries(compensationVault.notes),
+    compensationNotes,
+  );
+
   // An unsupported vault writer is rejected before the external file moves.
   const unsupportedSource = path.join(rootPath, "unsupported-writer.txt");
-  const unsupportedTarget = path.join(
-    archivePath,
-    "unsupported-writer.txt",
-  );
+  const unsupportedTarget = path.join(archivePath, "unsupported-writer.txt");
   await writeFile(unsupportedSource, "unsupported writer", "utf8");
   const unsupportedUri = pathToFileURL(unsupportedSource).href;
   const unsupportedVault = new FakeVault({
@@ -419,10 +468,7 @@ try {
       ),
     /Conditional note writes are unavailable/u,
   );
-  assert.equal(
-    await readFile(unsupportedSource, "utf8"),
-    "unsupported writer",
-  );
+  assert.equal(await readFile(unsupportedSource, "utf8"), "unsupported writer");
   assert.equal(await exists(unsupportedTarget), false);
 
   // Apply rescans the complete vault. A new canonical reference created after
@@ -539,10 +585,7 @@ try {
   // A crash after the no-clobber hard link but before source unlink leaves
   // both paths on the same inode. Rollback must recover that verified window.
   const linkedRecoverySource = path.join(rootPath, "linked-recovery.txt");
-  const linkedRecoveryTarget = path.join(
-    archivePath,
-    "linked-recovery.txt",
-  );
+  const linkedRecoveryTarget = path.join(archivePath, "linked-recovery.txt");
   await writeFile(linkedRecoverySource, "linked recovery", "utf8");
   const linkedRecoveryUri = pathToFileURL(linkedRecoverySource).href;
   const linkedRecoveryNotePath = "Efforts/Projets/Linked recovery.md";
@@ -575,10 +618,7 @@ try {
     "coordinator-linked-recovery",
   );
   assert.equal(linkedRecovered.status, "rolled_back");
-  assert.equal(
-    await readFile(linkedRecoverySource, "utf8"),
-    "linked recovery",
-  );
+  assert.equal(await readFile(linkedRecoverySource, "utf8"), "linked recovery");
   assert.equal(await exists(linkedRecoveryTarget), false);
   assert.equal(
     linkedRecoveryVault.notes.get(linkedRecoveryNotePath),
@@ -589,8 +629,7 @@ try {
   const legacyCaseSource = path.join(rootPath, "legacy-case.txt");
   await writeFile(legacyCaseSource, "legacy case", "utf8");
   const legacyCaseVault = new FakeVault({
-    "Efforts/Projets/Legacy case.md":
-      `Legacy location: ${legacyCaseSource.toUpperCase()}\n`,
+    "Efforts/Projets/Legacy case.md": `Legacy location: ${legacyCaseSource.toUpperCase()}\n`,
   });
   const legacyCaseCoordinator = new ExternalMoveCoordinator(
     service,
