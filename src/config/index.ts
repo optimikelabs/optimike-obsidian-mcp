@@ -138,6 +138,7 @@ const EnvSchema = z
       .string()
       .transform((val) => val.toLowerCase() === "true")
       .default("true"),
+    MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
     // --- Public runtime safety ---
     MCP_WRITE_MODE: z.enum(["readonly", "guarded", "full"]).optional(),
     MCP_GUARDED_MAX_WRITE_CHARS: z.coerce
@@ -376,6 +377,7 @@ export const config = {
   obsidianStartupMaxRetries: env.OBSIDIAN_STARTUP_MAX_RETRIES,
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
+  externalRootsFile: env.MCP_EXTERNAL_ROOTS_FILE,
   mcpWriteMode:
     env.MCP_WRITE_MODE ||
     (env.OBSIDIAN_RUNTIME_MODE === "headless-guarded"

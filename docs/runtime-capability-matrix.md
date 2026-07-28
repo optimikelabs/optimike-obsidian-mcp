@@ -29,6 +29,7 @@ Optimike Obsidian MCP has five runtime contracts. Headless modes run over a sync
 | Tasks list/query                 | Cache/filesystem               | Cache/filesystem                    | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                         |
 | Smart semantic search            | If `.smart-env` exists         | If `.smart-env` exists              | If `.smart-env` exists   | If `.smart-env` exists  | If `.smart-env` exists           | If `.smart-env` exists                                                   |
 | Runtime status/maintenance       | Yes                            | Yes                                 | Yes                      | Yes                     | Yes                              | Yes                                                                      |
+| External document roots          | Optional local config          | Optional local config               | Optional local config    | Optional local config   | Optional local config            | Optional local config                                                    |
 | Format validation                | Markdown/Base/Canvas           | Markdown/Base/Canvas                | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                     |
 | Update note                      | REST full tool                 | REST full tool                      | No                       | No                      | Append/prepend only              | Append/prepend only                                                      |
 | Search/replace                   | REST full tool                 | REST full tool                      | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                         |
@@ -43,6 +44,11 @@ Optimike Obsidian MCP has five runtime contracts. Headless modes run over a sync
 | Obsidian plugin parity           | Desktop plugins                | Desktop plugins while API available | No                       | No                      | No                               | No                                                                       |
 
 ## Tool Registry By Mode
+
+Every mode also registers `external_runtime_status`, `external_roots_list`,
+`external_list`, `external_stat`, `external_read`, and `external_handoff`.
+Without `MCP_EXTERNAL_ROOTS_FILE`, status remains disabled and operations fail
+closed. Physical-path handoff is available only over stdio.
 
 | Runtime mode                    | Tools registered                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

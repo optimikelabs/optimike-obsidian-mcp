@@ -36,6 +36,7 @@ import {
   type VaultTagLocation,
 } from "../services/vaultFileService.js";
 import { assertWriteAllowed } from "../services/writePolicy.js";
+import { ExternalRootsService } from "../services/externalRootsService.js";
 import {
   validateJsonCanvas,
   validateObsidianFormat,
@@ -60,6 +61,7 @@ import { registerBasesUpsertConfigTool } from "./tools/basesUpsertConfigTool/ind
 import { registerListAllTasksTool } from "./tools/listAllTasksTool/index.js";
 import { registerQueryTasksTool } from "./tools/queryTasksTool/index.js";
 import { registerRuntimeTools } from "./tools/runtimeTools/index.js";
+import { registerExternalRootsTools } from "./tools/externalRootsTools/index.js";
 import {
   DESTRUCTIVE_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
@@ -1694,6 +1696,14 @@ async function createMcpServerInstance(
     await registerListAllTasksTool(server, vaultCacheService);
     await registerQueryTasksTool(server, vaultCacheService);
     await registerRuntimeTools(server, vaultCacheService);
+    const externalRootsService = config.externalRootsFile
+      ? await ExternalRootsService.fromConfigFile(config.externalRootsFile)
+      : undefined;
+    await registerExternalRootsTools(
+      server,
+      externalRootsService,
+      config.mcpTransportType === "stdio",
+    );
     registerFormatValidationTool(server);
 
     if (isHeadlessGuarded || isHeadlessFilesystem) {

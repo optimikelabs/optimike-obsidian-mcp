@@ -1,0 +1,244 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {
+  ExternalRootError,
+  ExternalRootsService,
+} from "../dist/services/externalRootsService.js";
+import { registerExternalRootsTools } from "../dist/mcp-server/tools/externalRootsTools/index.js";
+
+const sandbox = await mkdtemp(
+  path.join(os.tmpdir(), "optimike-external-roots-"),
+);
+const rootPath = path.join(sandbox, "root");
+const outsidePath = path.join(sandbox, "outside");
+
+async function expectCode(operation, expectedCode) {
+  await assert.rejects(operation, (error) => {
+    assert.ok(error instanceof ExternalRootError);
+    assert.equal(error.code, expectedCode);
+    return true;
+  });
+}
+
+try {
+  await mkdir(path.join(rootPath, "docs"), { recursive: true });
+  await mkdir(path.join(rootPath, "secret"), { recursive: true });
+  await mkdir(outsidePath, { recursive: true });
+  await writeFile(path.join(rootPath, "hello.txt"), "Bonjour ÉLYSIA", "utf8");
+  await writeFile(
+    path.join(rootPath, "docs", "note.md"),
+    "# Note\nContenu",
+    "utf8",
+  );
+  await writeFile(
+    path.join(rootPath, "secret", "hidden.txt"),
+    "secret",
+    "utf8",
+  );
+  await writeFile(path.join(outsidePath, "outside.txt"), "outside", "utf8");
+
+  let linkCreated = false;
+  try {
+    await symlink(outsidePath, path.join(rootPath, "escape-link"), "junction");
+    linkCreated = true;
+  } catch (error) {
+    if (!["EPERM", "EACCES"].includes(error?.code)) throw error;
+  }
+
+  const service = ExternalRootsService.fromConfig({
+    version: 1,
+    roots: [
+      {
+        id: "pilot.docs",
+        path: rootPath,
+        capabilities: ["visible", "readable", "handoff"],
+        include: ["**/*.txt", "**/*.md"],
+        exclude: ["secret/**"],
+        limits: {
+          maxDepth: 3,
+          maxFileBytes: 1024,
+          maxListEntries: 20,
+          maxTextChars: 100,
+        },
+      },
+    ],
+  });
+
+  const roots = await service.listRoots();
+  assert.equal(roots.length, 1);
+  assert.equal(roots[0].id, "pilot.docs");
+  assert.equal(roots[0].available, true);
+  assert.equal(JSON.stringify(roots).includes(rootPath), false);
+
+  const listing = await service.list("pilot.docs", "", 2);
+  assert.equal(listing.truncated, false);
+  assert.ok(listing.entries.some((entry) => entry.path === "hello.txt"));
+  assert.ok(listing.entries.some((entry) => entry.path === "docs/note.md"));
+  assert.equal(
+    listing.entries.some((entry) => entry.path.includes("hidden.txt")),
+    false,
+  );
+  if (linkCreated) {
+    assert.ok(
+      listing.entries.some(
+        (entry) => entry.path === "escape-link" && entry.type === "link",
+      ),
+    );
+  }
+
+  const read = await service.readText("pilot.docs", "hello.txt");
+  assert.equal(read.text, "Bonjour ÉLYSIA");
+  assert.equal(
+    read.sha256,
+    createHash("sha256").update(Buffer.from("Bonjour ÉLYSIA")).digest("hex"),
+  );
+  assert.equal("localPath" in read, false);
+
+  const metadata = await service.getStat("pilot.docs", "hello.txt", true);
+  assert.equal(metadata.type, "file");
+  assert.equal(metadata.sha256, read.sha256);
+  assert.equal("localPath" in metadata, false);
+
+  const handoff = await service.handoff("pilot.docs", "hello.txt", true);
+  assert.equal(handoff.localPath, path.join(rootPath, "hello.txt"));
+  assert.equal(handoff.sha256, read.sha256);
+
+  const handlers = new Map();
+  const annotations = new Map();
+  const fakeServer = {
+    tool(name, _description, _schema, toolAnnotations, handler) {
+      annotations.set(name, toolAnnotations);
+      handlers.set(name, handler);
+    },
+  };
+  await registerExternalRootsTools(fakeServer, service, false);
+  assert.equal(handlers.size, 6);
+  assert.ok(
+    [...annotations.values()].every(
+      (value) => value.readOnlyHint === true && value.destructiveHint === false,
+    ),
+  );
+  const deniedHttpHandoff = await handlers.get("external_handoff")({
+    rootId: "pilot.docs",
+    relativePath: "hello.txt",
+    includeHash: true,
+  });
+  assert.equal(deniedHttpHandoff.isError, true);
+  assert.equal(
+    JSON.parse(deniedHttpHandoff.content[0].text).error,
+    "capability_denied",
+  );
+
+  await expectCode(
+    () => service.readText("pilot.docs", "../outside/outside.txt"),
+    "path_invalid",
+  );
+  await expectCode(
+    () => service.readText("pilot.docs", path.join(rootPath, "hello.txt")),
+    "path_invalid",
+  );
+  await expectCode(
+    () => service.readText("pilot.docs", "secret/hidden.txt"),
+    "path_not_allowed",
+  );
+  if (linkCreated) {
+    await expectCode(
+      () => service.readText("pilot.docs", "escape-link/outside.txt"),
+      "path_link_unsupported",
+    );
+  }
+
+  const limitedService = ExternalRootsService.fromConfig({
+    version: 1,
+    roots: [
+      {
+        id: "limited",
+        path: rootPath,
+        capabilities: ["visible"],
+        include: ["**"],
+        limits: { maxFileBytes: 4 },
+      },
+    ],
+  });
+  await expectCode(
+    () => limitedService.readText("limited", "hello.txt"),
+    "capability_denied",
+  );
+  await expectCode(
+    () => limitedService.handoff("limited", "hello.txt"),
+    "capability_denied",
+  );
+
+  const sizeLimitedService = ExternalRootsService.fromConfig({
+    version: 1,
+    roots: [
+      {
+        id: "size-limited",
+        path: rootPath,
+        capabilities: ["visible", "readable"],
+        include: ["**"],
+        limits: { maxFileBytes: 4 },
+      },
+    ],
+  });
+  await expectCode(
+    () => sizeLimitedService.readText("size-limited", "hello.txt"),
+    "too_large",
+  );
+
+  assert.throws(
+    () =>
+      ExternalRootsService.fromConfig({
+        version: 1,
+        roots: [
+          { id: "duplicate", path: rootPath, capabilities: ["visible"] },
+          { id: "duplicate", path: rootPath, capabilities: ["visible"] },
+        ],
+      }),
+    (error) =>
+      error instanceof ExternalRootError &&
+      error.code === "configuration_invalid",
+  );
+  assert.throws(
+    () =>
+      ExternalRootsService.fromConfig({
+        version: 1,
+        roots: [
+          {
+            id: "unsafe-handoff",
+            path: rootPath,
+            capabilities: ["visible", "handoff"],
+          },
+        ],
+      }),
+    (error) =>
+      error instanceof ExternalRootError &&
+      error.code === "configuration_invalid",
+  );
+  assert.throws(
+    () =>
+      ExternalRootsService.fromConfig({
+        version: 1,
+        roots: [
+          {
+            id: "typo",
+            path: rootPath,
+            capabilities: ["visible"],
+            maxFileBytes: 100,
+          },
+        ],
+      }),
+    (error) =>
+      error instanceof ExternalRootError &&
+      error.code === "configuration_invalid",
+  );
+
+  console.log(
+    `PASS: external roots confinement, capabilities, redaction, limits, hashing and explicit local handoff${linkCreated ? ", including junction rejection" : ""}`,
+  );
+} finally {
+  await rm(sandbox, { recursive: true, force: true });
+}

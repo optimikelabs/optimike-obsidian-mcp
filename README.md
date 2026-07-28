@@ -204,6 +204,7 @@ Useful env overrides:
 - `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` to add comma- or newline-separated gitignore-style exclusions on top of the built-in vault safety policy
 - `MCP_WRITE_MODE=readonly|guarded|full` to enforce server-side write safety (`full` is the default; set `guarded` or `readonly` explicitly to harden a host)
 - `MCP_GUARDED_MAX_WRITE_CHARS` and `MCP_GUARDED_MAX_BATCH_OPERATIONS` to tune guarded-mode limits
+- `MCP_EXTERNAL_ROOTS_FILE` to opt into machine-local, bounded external document roots
 
 For production-like tests on a real vault, set `OBSIDIAN_SHARED_CACHE_DB_PATH` outside the vault so validation databases do not pollute the synced note tree.
 
@@ -216,6 +217,31 @@ Vault exclusion policy:
 
 This runtime exposes the Tasks surface directly from the main MCP, so Codex no longer needs a second dedicated `optimike-obsidian-tasks-mcp` entry when using this server.
 Warm semantic refreshes now load from SQLite first instead of re-reading the whole `.smart-env` path every time.
+
+## External document roots
+
+External roots are disabled by default. To enable them, copy
+[`docs/external-roots.example.json`](docs/external-roots.example.json) to a
+machine-local path, adapt the roots and limits, then set the absolute path in
+`MCP_EXTERNAL_ROOTS_FILE`. Never commit the real configuration.
+
+The first release exposes bounded read-only tools for root status, listing,
+metadata, SHA-256, and UTF-8 text reads. `external_handoff` can return one
+verified physical file path only to a local stdio client and only when the root
+has both `readable` and `handoff`.
+
+The MCP core does not embed PDF, Office, or OCR engines. Agent clients such as
+Codex, Claude Code, Gemini CLI, OpenClaw, or Hermes Agent can use their own
+document tools after explicit handoff. HTTP handoff is denied.
+
+Validation:
+
+```bash
+npm run test:external-roots
+MCP_EXTERNAL_ROOTS_FILE=/absolute/path/external-roots.json npm run smoke:external-roots
+```
+
+See [ADR — External document roots](docs/adr/ADR-External-Document-Roots.md).
 
 ## Runtime modes
 
@@ -522,6 +548,7 @@ Keep auto mode and let each user override via env vars.
 - Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
 - Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
 - Current tool surface: [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
+- Proposed external document roots boundary: [docs/adr/ADR-External-Document-Roots.md](docs/adr/ADR-External-Document-Roots.md)
 - Public ÉLYSIA task-management profile and portable agent skill (French): [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
 - French README: [README.fr.md](README.fr.md)
 
