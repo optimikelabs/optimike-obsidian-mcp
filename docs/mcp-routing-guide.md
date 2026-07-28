@@ -53,10 +53,16 @@ Agent workflow:
 2. Use `external_list` and `external_stat` with a root ID and root-relative
    path.
 3. Use `external_read` only for bounded UTF-8 text.
-4. For PDF or Office content, request `external_handoff` explicitly, then pass
-   the returned temporary copy to a suitable local client tool.
-5. Preserve the logical root ID, relative path, and SHA-256 as provenance.
-   Never persist the temporary path.
+4. For PDF or Office content, request `external_handoff` explicitly:
+   - local stdio returns a verified temporary `local_path`;
+   - authenticated direct HTTP may return an opt-in `http_ticket`, which the
+     client claims once from `GET /external-handoff` with the same bearer
+     identity and `X-External-Handoff-Ticket` header.
+5. Preserve the logical root ID, relative path, size and SHA-256 as provenance.
+   Never persist a temporary path or ticket.
+
+Every direct HTTP external-root operation requires `external:read`. Remote HTTP
+remains pilot-only behind reviewed TLS proxy and network controls.
 
 Do not promise extraction merely because handoff succeeds: extraction depends
 on the calling client. Do not silently copy external content into the vault,

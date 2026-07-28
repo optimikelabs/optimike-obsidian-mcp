@@ -1,7 +1,9 @@
 # ADR — Governed HTTP delivery for external artifacts
 
-- Status: proposed and implemented as an opt-in pilot on
-  `feat/http-external-artifacts-broker`
+- Status: accepted and implemented on `main` at
+  `5c74643a7840b9a1b68714c362a0fe7e1a9bea4f`
+- Promotion boundary: authenticated direct loopback is supported with limits;
+  remote HTTP remains pilot-only
 - Date: 2026-07-28
 - Depends on: [ADR — External document roots](ADR-External-Document-Roots.md)
 - Product contract: ÉLYSIA OS external spaces and artifacts boundary

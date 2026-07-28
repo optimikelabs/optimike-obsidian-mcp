@@ -313,10 +313,11 @@ npm audit signatures
 
 Current expected result for the locked dependency tree: 0 known npm
 vulnerabilities, verified npm registry signatures, and a successful TypeScript
-build. Treat any HTTP deployment on `0.0.0.0` or a LAN address as production-like:
-set `MCP_AUTH_MODE=jwt` or `MCP_AUTH_MODE=oauth`, provide a strong
-`MCP_AUTH_SECRET_KEY` or OAuth provider config, and restrict
-`MCP_ALLOWED_ORIGINS`.
+build. Direct loopback HTTP is supported with limits. Any LAN or remote profile
+remains pilot-only behind a reviewed TLS reverse proxy, real JWT/OAuth identity,
+explicit origins, process supervision and network controls. Direct public
+exposure of the Node process is unsupported; binding `0.0.0.0` is not a
+deployment boundary.
 
 Then restart the backend if the build changed `dist`, and run:
 
@@ -433,8 +434,11 @@ That is the final intended shape of the product.
 
 ## More Documentation
 
+- Documentation hub: [docs/README.md](docs/README.md)
 - Product overview and install: [README.md](README.md)
+- Security and deployment boundary: [SECURITY.md](SECURITY.md)
 - Mode-by-mode capability matrix: [docs/runtime-capability-matrix.md](docs/runtime-capability-matrix.md)
 - Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
 - Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
+- External roots and handoff: [docs/external-roots-setup.md](docs/external-roots-setup.md)
 - French operations guide: [OPERATIONS.fr.md](OPERATIONS.fr.md)

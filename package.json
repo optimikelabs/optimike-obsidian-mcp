@@ -10,6 +10,10 @@
     "README_EMBEDDERS.md",
     "OPERATIONS.md",
     "OPERATIONS.fr.md",
+    "SECURITY.md",
+    "SECURITY.fr.md",
+    "docs/README.md",
+    "docs/README.fr.md",
     "docs/obsidian_mcp_tools_spec.md",
     "docs/runtime-capability-matrix.md",
     "docs/runtime-capability-matrix.fr.md",
@@ -23,6 +27,7 @@
     "docs/adr/ADR-External-Document-Roots.md",
     "docs/adr/ADR-HTTP-External-Artifact-Delivery.md",
     "docs/adr/ADR-Operon-Bridge.md",
+    "docs/adr/README.md",
     "docs/operon-decision-report.md",
     "docs/operon-local-validation.md",
     "docs/operon-mcp-contract.md",
@@ -43,7 +48,8 @@
     "CHANGELOG.md"
   ],
   "bin": {
-    "optimike-obsidian-mcp": "dist/index.js"
+    "optimike-obsidian-mcp": "dist/index.js",
+    "optimike-obsidian-mcp-proxy": "dist/stdio-proxy.js"
   },
   "type": "module",
   "repository": {
@@ -58,10 +64,10 @@
     "build": "tsc && node scripts/make-executable.mjs dist/index.js dist/stdio-proxy.js",
     "start:stdio": "node dist/index.js",
     "start:proxy": "node dist/stdio-proxy.js",
-    "inspect": "DANGEROUSLY_OMIT_AUTH=true npx @modelcontextprotocol/inspector --open",
+    "inspect": "node scripts/run-inspector.mjs",
     "start": "node dist/index.js",
-    "start:http": "MCP_LOG_LEVEL=debug MCP_TRANSPORT_TYPE=http node dist/index.js",
-    "start:daemon": "MCP_LOG_LEVEL=debug MCP_TRANSPORT_TYPE=http node dist/index.js",
+    "start:http": "node scripts/run-http.mjs",
+    "start:daemon": "node scripts/run-http.mjs",
     "smoke:runtime": "node scripts/smoke-runtime.mjs",
     "smoke:headless-readonly": "node scripts/smoke-headless-readonly.mjs",
     "smoke:hybrid-unavailable": "node scripts/smoke-headless-readonly.mjs --mode=hybrid",
@@ -100,7 +106,9 @@
     "smoke:external-roots": "npm run build && node scripts/smoke-external-roots.mjs",
     "smoke:external-roots:mcp": "npm run build && node scripts/smoke-external-roots-mcp.mjs",
     "test:migrations:windows": "pwsh -NoProfile -File scripts/test-task-engine-migrations.ps1",
-    "test:package": "node scripts/test-package-contents.mjs"
+    "test:package": "node scripts/test-package-contents.mjs",
+    "test:docs": "node scripts/test-doc-contract.mjs",
+    "test:launchers": "npm run build && node scripts/test-launchers.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",

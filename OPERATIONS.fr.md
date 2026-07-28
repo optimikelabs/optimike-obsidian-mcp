@@ -316,10 +316,11 @@ npm audit signatures
 
 Résultat attendu sur l’arbre de dépendances verrouillé : 0 vulnérabilité npm
 connue, signatures registry vérifiées et build TypeScript réussi. Traite tout
-déploiement HTTP sur `0.0.0.0` ou sur une adresse LAN comme un profil proche
-production : active `MCP_AUTH_MODE=jwt` ou `MCP_AUTH_MODE=oauth`, configure un
-`MCP_AUTH_SECRET_KEY` robuste ou un provider OAuth, et limite
-`MCP_ALLOWED_ORIGINS`.
+HTTP loopback direct est supporté avec limites. Tout profil LAN ou distant reste
+pilote derrière un reverse proxy TLS revu, une identité JWT/OAuth réelle, des
+origins explicites, une supervision et des contrôles réseau. L’exposition
+publique directe du processus Node n’est pas supportée ; `0.0.0.0` ne constitue
+pas une frontière de déploiement.
 
 Ensuite, redémarre le backend si le build vient de modifier `dist`, puis lance :
 
@@ -437,8 +438,11 @@ C’est la forme visée du produit.
 
 ## Documentation complémentaire
 
+- Hub documentaire : [docs/README.fr.md](docs/README.fr.md)
 - Vue produit et installation : [README.fr.md](README.fr.md)
+- Sécurité et frontière de déploiement : [SECURITY.fr.md](SECURITY.fr.md)
 - Matrice des capacités par mode : [docs/runtime-capability-matrix.fr.md](docs/runtime-capability-matrix.fr.md)
 - Profil serveur headless dédié : [docs/headless-server-profile.fr.md](docs/headless-server-profile.fr.md)
 - Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
+- Racines externes et handoff : [docs/external-roots-setup.fr.md](docs/external-roots-setup.fr.md)
 - Guide d’exploitation anglais : [OPERATIONS.md](OPERATIONS.md)

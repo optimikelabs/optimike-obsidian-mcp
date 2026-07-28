@@ -25,6 +25,8 @@ jobs:
       - run: npm run test:external-roots
       - run: npm run test:profiles
       - run: npm run test:tool-annotations
+      - run: npm run test:docs
+      - run: npm run test:launchers
       - if: runner.os == 'Windows'
         run: npm run test:migrations:windows
 

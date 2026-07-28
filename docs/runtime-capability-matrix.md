@@ -19,29 +19,30 @@ Optimike Obsidian MCP has five runtime contracts. Headless modes run over a sync
 
 ## Capability Table
 
-| Capability                       | `live`                         | `hybrid` API available                  | `hybrid` API unavailable | `headless-readonly`     | `headless-guarded`               | `headless-filesystem`                                                    |
-| -------------------------------- | ------------------------------ | --------------------------------------- | ------------------------ | ----------------------- | -------------------------------- | ------------------------------------------------------------------------ |
-| Start without `OBSIDIAN_API_KEY` | No                             | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| Start without Obsidian Desktop   | No                             | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| Filesystem cache                 | Optional                       | Yes                                     | Yes                      | Required                | Required                         | Required                                                                 |
-| Vault exclusion policy           | Yes for cache scans            | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| List/read/search                 | REST/cache                     | REST/cache                              | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                         |
-| Tasks list/query                 | Cache/filesystem               | Cache/filesystem                        | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                         |
-| Smart semantic search            | If `.smart-env` exists         | If `.smart-env` exists                  | If `.smart-env` exists   | If `.smart-env` exists  | If `.smart-env` exists           | If `.smart-env` exists                                                   |
-| Runtime status/maintenance       | Yes                            | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| External document roots          | Optional local config          | Optional local config                   | Optional local config    | Optional local config   | Optional local config            | Optional local config                                                    |
-| Format validation                | Markdown/Base/Canvas           | Markdown/Base/Canvas                    | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                     |
-| Update note                      | REST full tool                 | REST full tool                          | No                       | No                      | Append/prepend only              | Append/prepend only                                                      |
-| Search/replace                   | REST full tool                 | REST full tool                          | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                         |
-| Frontmatter                      | REST full tool                 | REST full tool                          | No                       | No                      | Single-key `set` only            | `set`, batch frontmatter dry-run/apply, and Bases rows                   |
-| Tags                             | REST full tool                 | REST full tool                          | No                       | No                      | No                               | Frontmatter tags, inline tags, local index/audit, dry-run rename         |
-| Admin filesystem                 | Via REST when relevant         | Via REST when relevant                  | No                       | No                      | No                               | Archive, batch move, batch delete; dry-run by default                    |
-| Move/delete                      | REST full tools                | REST full tools                         | No                       | No                      | No                               | Move/rename + delete, both requiring `expectedHash` or `expectedMtime`   |
-| Active file / UI / commands      | Via Desktop/plugin             | Via Desktop/plugins while API available | No                       | No                      | No                               | No                                                                       |
-| Bases list/schema/query          | Bases Bridge REST              | Bases Bridge REST                       | No                       | Local readonly fallback | Local readonly fallback          | Local fallback with simple filters (`eq`, `contains`, `in`, comparisons) |
-| Bases create/upsert              | Bases Bridge REST              | Bases Bridge REST                       | No                       | No                      | No                               | `.base` YAML create/config + rows -> frontmatter `set`                   |
-| JSON Canvas create/edit          | Via filesystem tool if enabled | Via filesystem tool if enabled          | No                       | No                      | No                               | Minimal `.canvas` create, text node, edge, validate                      |
-| Obsidian plugin parity           | Desktop plugins                | Desktop plugins while API available     | No                       | No                      | No                               | No                                                                       |
+| Capability                       | `live`                 | `hybrid` API available                  | `hybrid` API unavailable | `headless-readonly`     | `headless-guarded`               | `headless-filesystem`                                                    |
+| -------------------------------- | ---------------------- | --------------------------------------- | ------------------------ | ----------------------- | -------------------------------- | ------------------------------------------------------------------------ |
+| Start without `OBSIDIAN_API_KEY` | No                     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
+| Start without Obsidian Desktop   | No                     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
+| Filesystem cache                 | Optional               | Yes                                     | Yes                      | Required                | Required                         | Required                                                                 |
+| Vault exclusion policy           | Yes for cache scans    | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
+| List/read/search                 | REST/cache             | REST/cache                              | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                         |
+| Tasks list/query                 | Cache/filesystem       | Cache/filesystem                        | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                         |
+| Smart semantic search            | If `.smart-env` exists | If `.smart-env` exists                  | If `.smart-env` exists   | If `.smart-env` exists  | If `.smart-env` exists           | If `.smart-env` exists                                                   |
+| Runtime status/maintenance       | Yes                    | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
+| External document roots          | Optional local config  | Optional local config                   | Optional local config    | Optional local config   | Optional local config            | Optional local config                                                    |
+| Format validation                | Markdown/Base/Canvas   | Markdown/Base/Canvas                    | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                     |
+| Update note                      | REST full tool         | REST full tool                          | No                       | No                      | Append/prepend only              | Append/prepend only                                                      |
+| Search/replace                   | REST full tool         | REST full tool                          | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                         |
+| Frontmatter                      | REST full tool         | REST full tool                          | No                       | No                      | Single-key `set` only            | `set`, batch frontmatter dry-run/apply, and Bases rows                   |
+| Tags                             | REST full tool         | REST full tool                          | No                       | No                      | No                               | Frontmatter tags, inline tags, local index/audit, dry-run rename         |
+| Admin filesystem                 | No                     | No                                      | No                       | No                      | No                               | Archive, batch move, batch delete; dry-run by default                    |
+| Delete note                      | REST delete            | REST delete                             | No                       | No                      | No                               | Filesystem delete requiring `expectedHash` or `expectedMtime`            |
+| Move/rename                      | No                     | No                                      | No                       | No                      | No                               | Filesystem move requiring `expectedHash` or `expectedMtime`              |
+| Active file / UI / commands      | Via Desktop/plugin     | Via Desktop/plugins while API available | No                       | No                      | No                               | No                                                                       |
+| Bases list/schema/query          | Bases Bridge REST      | Bases Bridge REST                       | No                       | Local readonly fallback | Local readonly fallback          | Local fallback with simple filters (`eq`, `contains`, `in`, comparisons) |
+| Bases create/upsert              | Bases Bridge REST      | Bases Bridge REST                       | No                       | No                      | No                               | `.base` YAML create/config + rows -> frontmatter `set`                   |
+| JSON Canvas create/edit          | No                     | No                                      | No                       | No                      | No                               | Minimal `.canvas` create, text node, edge, validate                      |
+| Obsidian plugin parity           | Desktop plugins        | Desktop plugins while API available     | No                       | No                      | No                               | No                                                                       |
 
 ## Tool Registry By Mode
 
@@ -49,6 +50,14 @@ Every mode also registers `external_runtime_status`, `external_roots_list`,
 `external_list`, `external_stat`, `external_read`, and `external_handoff`.
 Without `MCP_EXTERNAL_ROOTS_FILE`, status remains disabled and operations fail
 closed.
+
+Every mode also registers the 13 Operon contract tools:
+`operon_status`, `operon_get_configuration`, `operon_list_tasks`,
+`operon_get_task`, `operon_query_tasks`, `operon_query_saved_filter`,
+`operon_validate`, `operon_adopt_task`, `operon_create_task`,
+`operon_update_task`, `operon_transition_task`, `operon_convert_task`, and
+`operon_relocate_task`. In non-live modes they remain limited to validated
+read-only snapshots; mutation calls fail closed.
 
 Handoff delivery is a transport contract, not a runtime-mode write capability:
 

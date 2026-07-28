@@ -1,9 +1,12 @@
 # ADR — External document roots
 
-- Status: accepted and implemented on `main`
+- Status: accepted and implemented on `main`; handoff transport amended by
+  [ADR — Governed HTTP delivery](ADR-HTTP-External-Artifact-Delivery.md)
 - Date: 2026-07-28
-- MCP implementation baseline:
+- External-roots baseline:
   `optimikelabs/optimike-obsidian-mcp@7c2eaad5bf958fa0315d69a067f9972910f6c39d`
+- Transport amendment baseline:
+  `optimikelabs/optimike-obsidian-mcp@5c74643a7840b9a1b68714c362a0fe7e1a9bea4f`
 - Related product contract: ÉLYSIA OS external spaces and artifacts boundary
 
 ## Problem
@@ -32,7 +35,7 @@ External document access uses an explicit
 - read-only first release;
 - capability declaration per root;
 - canonical-path confinement for every request;
-- bounded listing, text reading, hashing, and explicit local handoff;
+- bounded listing, text reading, hashing, and explicit verified handoff;
 - no embedded Office/PDF extraction engine in the first release;
 - no external cache or search namespace in the first release;
 - no automatic copying, moving, renaming, overwriting, or synchronization.
@@ -188,7 +191,8 @@ The promoted implementation provides:
 3. Windows junction escape rejection;
 4. public status/list/stat/read outputs without physical paths;
 5. a verified temporary copy as the only physical-path disclosure;
-6. stdio-only handoff policy;
+6. local stdio `local_path` handoff plus the separately governed, opt-in
+   authenticated loopback HTTP `http_ticket` amendment;
 7. read-only annotations on every MCP tool;
 8. disposable-root tests plus a limited AMEX pilot;
 9. packaging checks proving that no machine-local root configuration is
@@ -216,7 +220,8 @@ The promoted implementation provides:
 
 - explicit single-file read;
 - SHA-256 and bounded metadata;
-- explicit stdio-only local handoff;
+- explicit local stdio handoff and optional authenticated loopback HTTP ticket
+  delivery under the transport amendment;
 - extraction delegated to the client harness;
 - no index.
 

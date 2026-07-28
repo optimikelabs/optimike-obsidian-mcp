@@ -2,7 +2,7 @@
   "mcpServers": {
     "optimike-obsidian-mcp-stdio": {
       "command": "npx",
-      "args": ["optimike-obsidian-mcp"],
+      "args": ["optimike-obsidian-mcp-proxy"],
       "env": {
         "OBSIDIAN_RUNTIME_MODE": "live",
         "OBSIDIAN_API_KEY": "YOUR_OBSIDIAN_API_KEY_HERE",
@@ -13,7 +13,7 @@
     },
     "optimike-obsidian-mcp-headless-readonly-stdio": {
       "command": "npx",
-      "args": ["optimike-obsidian-mcp"],
+      "args": ["optimike-obsidian-mcp-proxy"],
       "env": {
         "OBSIDIAN_RUNTIME_MODE": "headless-readonly",
         "OBSIDIAN_VAULT": "/path/to/vault",
@@ -34,7 +34,8 @@
         "MCP_HTTP_PORT": "3010",
         "MCP_HTTP_HOST": "127.0.0.1",
         "MCP_LOG_LEVEL": "debug",
-        "MCP_AUTH_SECRET_KEY": "YOUR_MIN_32_CHAR_SECRET_KEY_HERE_IF_USING_HTTP_AUTH"
+        "DANGEROUSLY_OMIT_AUTH": "true",
+        "MCP_HTTP_HANDOFF_ENABLED": "false"
       }
     }
   }
