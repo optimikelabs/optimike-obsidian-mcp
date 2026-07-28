@@ -241,6 +241,7 @@ export class ExternalTransferBroker {
         "HTTP handoff requires a verified SHA-256 digest.",
       );
     }
+    const verifiedSha256 = handoff.sha256;
     if (handoff.size > this.maxFileBytes) {
       throw new ExternalRootError(
         "too_large",
@@ -260,7 +261,7 @@ export class ExternalTransferBroker {
     const buffer = await readFile(handoff.localPath);
     if (
       buffer.length !== handoff.size ||
-      !constantTimeEqual(sha256(buffer), handoff.sha256)
+      !constantTimeEqual(sha256(buffer), verifiedSha256)
     ) {
       throw new ExternalRootError(
         "non_verifiable",
@@ -297,7 +298,7 @@ export class ExternalTransferBroker {
         buffer,
         size: handoff.size,
         modifiedAt: handoff.modifiedAt,
-        sha256: handoff.sha256,
+        sha256: verifiedSha256,
         mediaType,
         filename: safeFilename(handoff.path),
         expiresAtMs,
@@ -313,7 +314,7 @@ export class ExternalTransferBroker {
         path: handoff.path,
         size: handoff.size,
         modifiedAt: handoff.modifiedAt,
-        sha256: handoff.sha256,
+        sha256: verifiedSha256,
         mediaType,
         expiresAt: new Date(expiresAtMs).toISOString(),
       };
