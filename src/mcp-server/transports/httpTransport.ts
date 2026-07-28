@@ -49,7 +49,6 @@ import {
   deriveVerifiedHttpIdentity,
   httpProtectionConfig,
   isLoopbackAddress,
-  loopbackPreAuthSourceLimiter,
   preAuthSourceLimiter,
   pseudonymizeClientAddress,
   type RateLimitDecision,
@@ -71,11 +70,19 @@ type HttpSession = {
   transport: WebStandardStreamableHTTPServerTransport;
   identityKey: string;
   identityPseudonym: string;
+  createdAt: number;
+  lastSeenAt: number;
 };
 
-// The session store is intentionally process-local. It is bounded so a single
-// process cannot grow without limit under initialization churn.
+type SessionCapacityReservation = {
+  release: () => void;
+  isActive: () => boolean;
+};
+
+// The session store is intentionally process-local. Registered sessions plus
+// initialization reservations are both bounded by MCP_HTTP_MAX_SESSIONS.
 const transports = new Map<string, HttpSession>();
+let pendingSessionInitializations = 0;
 
 function parsePortRetries(): number {
   const raw = process.env.MCP_HTTP_PORT_RETRIES ?? "0";
@@ -188,10 +195,14 @@ async function preAuthRateLimitMiddleware(
   const scope: HttpQuotaState["scope"] = loopback
     ? "loopback-source-ip"
     : "source-ip";
-  const limiter = loopback
-    ? loopbackPreAuthSourceLimiter
-    : preAuthSourceLimiter;
-  const decision = limiter.check(pseudonymizeClientAddress(address.address));
+  const maxRequests =
+    loopback && httpProtectionConfig.loopbackPolicy === "elevated"
+      ? httpProtectionConfig.loopbackPreAuthMaxRequests
+      : httpProtectionConfig.preAuthMaxRequests;
+  const decision = preAuthSourceLimiter.check(
+    pseudonymizeClientAddress(address.address),
+    maxRequests,
+  );
   requestState.quotas.push(quotaState(scope, decision));
   if (!decision.allowed) {
     return rateLimitResponse(c, scope, decision);
@@ -234,11 +245,73 @@ function requireIdentity(c: Context): VerifiedHttpIdentity {
   return identity;
 }
 
+function sessionExpired(session: HttpSession, now: number): boolean {
+  return (
+    now - session.lastSeenAt >= httpProtectionConfig.sessionIdleTimeoutMs ||
+    now - session.createdAt >= httpProtectionConfig.sessionMaxLifetimeMs
+  );
+}
+
+function expireStaleSessions(now = Date.now()): number {
+  let expired = 0;
+  for (const [sessionId, session] of transports) {
+    if (!sessionExpired(session, now)) continue;
+    transports.delete(sessionId);
+    expired += 1;
+    void session.transport.close().catch((error) => {
+      logger.warning(
+        "Expired HTTP session failed to close cleanly.",
+        requestContextService.createRequestContext({
+          operation: "expireHttpSession",
+          clientIdentity: session.identityPseudonym,
+          errorName: error instanceof Error ? error.name : "unknown",
+        }),
+      );
+    });
+  }
+  if (expired > 0) {
+    logger.info(
+      "Expired abandoned HTTP sessions.",
+      requestContextService.createRequestContext({
+        operation: "expireHttpSessions",
+        expiredSessionCount: expired,
+        sessionCount: transports.size,
+      }),
+    );
+  }
+  return expired;
+}
+
+function reserveSessionCapacity(): SessionCapacityReservation | undefined {
+  expireStaleSessions();
+  if (
+    transports.size + pendingSessionInitializations >=
+    httpProtectionConfig.maxSessions
+  ) {
+    return undefined;
+  }
+  pendingSessionInitializations += 1;
+  let active = true;
+  return {
+    release: () => {
+      if (!active) return;
+      active = false;
+      pendingSessionInitializations = Math.max(
+        0,
+        pendingSessionInitializations - 1,
+      );
+    },
+    isActive: () => active,
+  };
+}
+
 function sessionForRequest(
   c: Context,
   sessionId: string | undefined,
 ): HttpSession | undefined {
   if (!sessionId) return undefined;
+  const now = Date.now();
+  expireStaleSessions(now);
   const session = transports.get(sessionId);
   if (!session) return undefined;
   const identity = requireIdentity(c);
@@ -256,6 +329,7 @@ function sessionForRequest(
       "Invalid or expired session ID.",
     );
   }
+  session.lastSeenAt = now;
   return session;
 }
 
@@ -263,6 +337,7 @@ function sessionCapacityResponse(c: Context): Response {
   const state = getHttpRequestState(c.req.raw);
   c.header("Retry-After", "1");
   c.header("X-Request-Id", state.requestId);
+  c.header("Cache-Control", "no-store");
   return c.json(
     {
       jsonrpc: "2.0",
@@ -498,6 +573,10 @@ export async function startHttpTransport(
     const sessionId = c.req.header("mcp-session-id");
     const session = sessionForRequest(c, sessionId);
     let transport = session?.transport;
+    let initializationReservation: SessionCapacityReservation | undefined;
+    let initializingTransport:
+      | WebStandardStreamableHTTPServerTransport
+      | undefined;
 
     if (isInitializeRequest(body)) {
       if (transport) {
@@ -506,26 +585,37 @@ export async function startHttpTransport(
           sessionPresent: true,
         });
         await transport.close();
-      } else if (transports.size >= httpProtectionConfig.maxSessions) {
+        transport = undefined;
+      }
+
+      initializationReservation = reserveSessionCapacity();
+      if (!initializationReservation) {
         return sessionCapacityResponse(c);
       }
 
       const newTransport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (newId) => {
+          const now = Date.now();
+          initializationReservation?.release();
           transports.set(newId, {
             transport: newTransport,
             identityKey: identity.key,
             identityPseudonym: identity.pseudonym,
+            createdAt: now,
+            lastSeenAt: now,
           });
           logger.info("HTTP session created.", {
             ...postContext,
             sessionCount: transports.size,
+            pendingSessionInitializations,
           });
         },
       });
+      initializingTransport = newTransport;
 
       newTransport.onclose = () => {
+        initializationReservation?.release();
         const closedSessionId = newTransport.sessionId;
         const current = closedSessionId
           ? transports.get(closedSessionId)
@@ -539,9 +629,15 @@ export async function startHttpTransport(
         }
       };
 
-      const server = await createServerInstanceFn();
-      await server.connect(newTransport);
-      transport = newTransport;
+      try {
+        const server = await createServerInstanceFn();
+        await server.connect(newTransport);
+        transport = newTransport;
+      } catch (error) {
+        initializationReservation.release();
+        await newTransport.close().catch(() => undefined);
+        throw error;
+      }
     } else if (!transport) {
       throw new McpError(
         BaseErrorCode.NOT_FOUND,
@@ -549,10 +645,19 @@ export async function startHttpTransport(
       );
     }
 
-    return await transport.handleRequest(c.req.raw, {
-      authInfo: c.env.incoming.auth,
-      parsedBody: body,
-    });
+    try {
+      return await transport.handleRequest(c.req.raw, {
+        authInfo: c.env.incoming.auth,
+        parsedBody: body,
+      });
+    } catch (error) {
+      if (initializingTransport) {
+        await initializingTransport.close().catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      initializationReservation?.release();
+    }
   });
 
   const handleSessionRequest = async (
@@ -576,11 +681,18 @@ export async function startHttpTransport(
   app.get(MCP_ENDPOINT_PATH, handleSessionRequest);
   app.delete(MCP_ENDPOINT_PATH, handleSessionRequest);
 
-  return startHttpServerWithRetry(
+  const server = await startHttpServerWithRetry(
     app,
     HTTP_PORT,
     HTTP_HOST,
     MAX_PORT_RETRIES,
     transportContext,
   );
+  const sessionCleanupTimer = setInterval(
+    () => expireStaleSessions(),
+    httpProtectionConfig.sessionCleanupIntervalMs,
+  );
+  sessionCleanupTimer.unref?.();
+  server.once("close", () => clearInterval(sessionCleanupTimer));
+  return server;
 }
