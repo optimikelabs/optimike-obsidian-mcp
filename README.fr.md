@@ -1,358 +1,72 @@
 # Optimike Obsidian MCP
 
-Version anglaise : [README.md](README.md)
-Guide d’exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
-Guide d’exploitation anglais : [OPERATIONS.md](OPERATIONS.md)
+English version: [README.md](README.md)
+Hub documentaire : [docs/README.fr.md](docs/README.fr.md)
+Exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
+Sécurité : [SECURITY.fr.md](SECURITY.fr.md)
 
-![Hero Optimike Obsidian MCP](docs/assets/hero-optimike-obsidian-mcp.png)
+![Optimike Obsidian MCP hero](docs/assets/hero-optimike-obsidian-mcp.png)
 
-Serveur MCP (Model Context Protocol) pour Obsidian avec cache local partagé,
-outils Operon sécurisés, compatibilité Tasks historique, Bases, recherche
-sémantique Smart Connections et accès explicite en lecture seule à des racines
-documentaires configurées hors du coffre.
+Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle
+gouvernée au-dessus d’un coffre Obsidian. Il réunit opérations Desktop,
+fonctionnement headless résilient, Tasks et Operon, Bases, recherche
+sémantique, observabilité runtime et accès explicite en lecture seule à des
+documents autorisés hors du coffre.
 
-## TL;DR
+## Carte des capacités
 
-```bash
-npm install
-npm run build
-node dist/stdio-proxy.js
-```
+| Domaine                 | Ce que fournit le MCP                                                | Dépendance principale                                  |
+| ----------------------- | -------------------------------------------------------------------- | ------------------------------------------------------ |
+| Notes                   | Lecture, liste, recherche, mise à jour, frontmatter et tags          | Coffre ; Local REST API pour la surface live complète  |
+| Bases et Canvas         | Requêtes/écritures Bases, validation et helpers Canvas bornés        | Bases Bridge pour Bases en live                        |
+| Tâches                  | Lecture/requête Tasks + 13 outils Operon gouvernés                   | Tasks ; Kairélys/Operon Bridge pour les mutations live |
+| Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable        | `.smart-env` + embedding Ollama ou OpenAI              |
+| Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions | Filesystem local                                       |
+| Documents externes      | Racines logiques, liste/stat/hash/lecture et handoff vérifié         | Allowlist locale à la machine                          |
+| Administration headless | Opérations bornées sur notes, métadonnées et fichiers                | Coffre copié ou dédié recommandé                       |
 
-Recommandation Codex : pointer la config MCP vers `dist/stdio-proxy.js`, pas directement vers `dist/index.js`.
+Le registre actuel des outils vit dans
+[Surface des outils](docs/obsidian_mcp_tools_spec.md). Leur disponibilité dépend
+du mode runtime ; consulter la
+[Matrice des capacités](docs/runtime-capability-matrix.fr.md) avant d’activer
+des écritures.
 
-## Prérequis
+## Choisir un profil
 
-- Node.js >= 22.7.5
-- Obsidian Desktop pour le mode `live`. Les modes headless demandent seulement un chemin de vault local.
-- Plugins :
-  - Local REST API (obligatoire pour les outils REST live) : https://github.com/coddingtonbear/obsidian-local-rest-api
-  - Smart Connections (obligatoire pour la recherche sémantique) : https://github.com/brianpetro/obsidian-smart-connections
-  - Bases Bridge (REST) (obligatoire pour les outils `.base` live/plugin-backed, inclus dans ce repo)
-  - Kairélys `2.6.3`, ou une release Operon compatible avec Public API v1, et Optimike Operon Bridge (requis pour les mutations live ; Bridge inclus dans ce repo)
-  - plugin Obsidian Tasks (obligatoire pour un comportement Tasks canonique)
-- Pour la recherche sémantique, assure-toi que ton vault contient un dossier `.smart-env`
+| Besoin                                   | Profil recommandé                              | Posture                     |
+| ---------------------------------------- | ---------------------------------------------- | --------------------------- |
+| Codex ou autre client local              | `dist/stdio-proxy.js`                          | Profil local par défaut     |
+| Automatisation Obsidian Desktop          | `live` ou `hybrid` via le proxy stdio          | Desktop de confiance        |
+| CI, serveur ou copie synchronisée        | `headless-readonly`                            | Profil headless le plus sûr |
+| Écritures bornées sur coffre copié/dédié | `headless-guarded`, puis `headless-filesystem` | Opt-in explicite            |
+| HTTP direct sur la même machine          | HTTP loopback authentifié                      | Supporté avec limites       |
+| HTTP distant                             | Reverse proxy TLS revu + réseau privé          | Pilote seulement            |
 
-## Installation
+Le serveur Node ne doit jamais être exposé directement à Internet. Voir
+[Sécurité](SECURITY.fr.md) et
+[l’ADR de livraison HTTP](docs/adr/ADR-HTTP-External-Artifact-Delivery.md).
 
-Depuis le repo :
+## Démarrage rapide depuis les sources
+
+Pré-requis :
+
+- Node.js `>=22.7.5` ;
+- Obsidian Desktop seulement pour les fonctions Desktop live ;
+- plugins propres aux capacités réellement utilisées.
 
 ```bash
 git clone https://github.com/optimikelabs/optimike-obsidian-mcp.git
 cd optimike-obsidian-mcp
 npm install
 npm run build
-```
-
-Lancer l’entrypoint MCP recommandé :
-
-```bash
 node dist/stdio-proxy.js
 ```
 
-## Pourquoi
-
-- Connecter Obsidian à des agents MCP (Codex, IDE, etc.)
-- Exposer les outils REST Obsidian (lecture/écriture, frontmatter, tags, recherche)
-- Offrir une recherche vectorielle locale via Smart Connections (`.smart-env`)
-- Garder un backend local durable au lieu de respawner tout l’état lourd à chaque run stdio
-- Donner aux agents locaux un accès borné et default-deny à des documents
-  explicitement configurés hors du coffre sans les transformer en notes Obsidian
-
-## Ce qu'il sait faire
-
-Optimike Obsidian MCP donne aux agents une façon structurée de travailler avec un coffre Obsidian :
-
-- lire, lister, modifier et rechercher des notes
-- gérer le frontmatter et les tags
-- interroger et mettre à jour les Bases Obsidian via le Bases Bridge inclus
-- gérer les tâches Operon avec 13 outils index-aware sans écriture Markdown brute
-- inspecter et requêter les tâches Obsidian Tasks
-- lancer une recherche sémantique sur un index Smart Connections
-- vérifier la santé du serveur, l'état du cache, le mode dégradé et la politique d'écriture
-- lister, hasher, lire ou remettre explicitement des documents autorisés hors du coffre
-
-En clair : il ne fait pas seulement de la lecture de notes. Il expose le coffre comme une vraie surface MCP opérationnelle, avec outils de lecture/écriture, opérations structurées sur les métadonnées, Tasks, Bases, recherche sémantique et observabilité de l'état du serveur.
-
-## Usage backend partagé
-
-Le backend durable est utile en local, mais il prend encore plus d'intérêt dans une configuration avec backend partagé ou déporté.
-
-Au lieu de synchroniser et indexer le coffre séparément pour chaque client agentique, les clients peuvent parler à un seul backend MCP qui porte le cache, les métadonnées sémantiques, le cache Tasks et les opérations Obsidian. Le backend doit toujours avoir accès au coffre lui-même, à un chemin de coffre monté, ou à l'API REST Obsidian, mais les clients agents n'ont pas chacun besoin d'une synchronisation complète du vault ni de leur propre couche d'indexation.
-
-Le MCP devient donc une frontière pratique entre les agents et Obsidian : les agents appellent des tools, le backend gère le coffre.
-
-## Points forts
-
-- Outils MCP complets (notes, frontmatter, tags, recherche globale, etc.)
-- Treize outils Operon avec identités de workflow stables, filtres natifs, mutations sécurisées et fallback stale en lecture seule
-- Outils Tasks intégrés : `list_all_tasks` et `query_tasks`
-- Recherche sémantique locale `smart_semantic_search`
-- Outils de santé/état du serveur : `obsidian_runtime_status` et `obsidian_runtime_maintenance`
-- Outils documentaires externes en lecture seule avec identifiants logiques et
-  handoff temporaire réservé au stdio
-- Mode dégradé lecture seule pour `obsidian_read_note` et `obsidian_list_notes` si Obsidian REST tombe
-- Store SQLite partagé pour le contenu du vault, le cache Tasks et le manifest sémantique
-- Embedder-agnostic : aligne automatiquement la requête sur le modèle du vault
-- Support Ollama / OpenAI (surcharge par variables d’environnement) ; Xenova / Transformers est désactivé tant que sa chaîne ONNX/protobuf vulnérable ne peut pas être réintroduite proprement
-
-## Architecture (vue d'ensemble)
-
-1. **Obsidian** + plugins (Local REST API, Bases Bridge, Smart Connections)
-2. Racines documentaires externes locales optionnelles
-3. **Optimike Obsidian MCP** (ce serveur)
-4. **Agents MCP** (Codex, IDE, etc.)
-
-Le serveur agit comme un **pont** entre les agents et Obsidian, et comme un
-courtier en lecture séparé et default-deny pour les racines externes configurées.
-Il ajoute une couche « Base » pour les fichiers `.base` et persiste l’état
-runtime local pour garder Codex rapide et stable au fil des sessions.
-
-## Bases Bridge (REST) — pourquoi et comment
-
-Obsidian ne fournit pas d’API native pour interroger les Bases (`.base`).  
-Le plugin **Bases Bridge (REST)** comble ce manque en ajoutant des endpoints REST dédiés.
-
-### Endpoints exposés par Bases Bridge
-
-Préfixe officiel (recommandé) :
-
-- `GET /extensions/obsidian-bases-bridge/bases`  
-  Liste toutes les bases disponibles.
-- `GET /extensions/obsidian-bases-bridge/bases/:id/schema`  
-  Retourne le schéma (propriétés, formules, vues).
-- `POST /extensions/obsidian-bases-bridge/bases/:id/query`  
-  Interroge une base (filtres, tri, pagination, evaluate).
-- `POST /extensions/obsidian-bases-bridge/bases/:id/upsert`  
-  Met à jour le frontmatter de notes en masse.
-- `POST /extensions/obsidian-bases-bridge/bases`  
-  Crée/valide une base `.base`.
-- `GET /extensions/obsidian-bases-bridge/bases/:id/config`  
-  Lit le YAML d’une base.
-- `PUT /extensions/obsidian-bases-bridge/bases/:id/config`  
-  Met à jour le YAML d’une base.
-
-Alias legacy (compat MCP) :
-
-- `GET /bases`
-- `GET /bases/:id/schema`
-- `POST /bases/:id/query`
-- `POST /bases/:id/upsert`
-- `POST /bases`
-- `GET /bases/:id/config`
-- `PUT /bases/:id/config`
-
-### Engine / Evaluate
-
-Quand `evaluate: true`, le bridge renvoie :
-
-- `source: "engine"` : cache auto + évaluation des formules (sans vue Bridge)
-- `source: "fallback"` : calcul partiel sur disque si l’engine est OFF
-
-## Outils MCP liés aux Bases
-
-Le serveur expose des tools MCP “Base” via Obsidian MCP :
-
-- `bases_list` : liste toutes les bases
-- `bases_get_schema` : récupère le schéma d’une base
-- `bases_query` : requête paginée avec filtres/tri
-- `bases_upsert_rows` : mise à jour de frontmatter en masse
-- `bases_upsert_config` : valider ou mettre à jour la configuration YAML/JSON d’une base
-- `bases_create` : créer/valider une base `.base`
-
-`bases_upsert_rows` est conçu pour les écritures Obsidian live en lot : préflight Local REST/Bases Bridge, `dryRun`, `chunkSize`, `delayMs`, `maxRetries`, `retryBackoffMs`, `requestTimeoutMs`, puis `summary` structuré avec `changed_count`, `failed_count`, `failed_operations` et métadonnées de retry. Pour un lot sensible, commencer par `dryRun: true`, puis écrire avec `chunkSize: 1`, `continueOnError: true` et `maxRetries: 2`.
-
-Les clés protégées ou virtuelles (`file.*`, `formula.*`, `création`/`creation`, `modification`) sont refusées avant écriture. Les timeouts `processFrontMatter` du Bridge remontent en `write_timeout` retryable : les traiter d’abord comme signal “Obsidian occupé/indexing/locked”, pas comme une donnée forcément invalide.
-
-## Moteur de tâches Kairélys / Operon
-
-Kairélys ou une release Operon compatible reste le moteur métier des tâches et l’interface humaine. L’Optimike Operon Bridge inclus projette son index live et sa Public API versionnée via Local REST API ; le MCP ajoute validation, snapshots stale, politique d’écriture, révisions optimistes, idempotence durable et journal d’audit.
-
-Les 13 outils sont :
-
-```text
-operon_status, operon_get_configuration, operon_list_tasks,
-operon_get_task, operon_query_tasks, operon_query_saved_filter,
-operon_validate, operon_adopt_task, operon_create_task,
-operon_update_task, operon_transition_task, operon_convert_task,
-operon_relocate_task
-```
-
-L’application des mutations est désactivée par défaut. Après validation live, l’activer aux deux endroits :
-
-```text
-Réglages Optimike Operon Bridge → Autoriser les mutations de tâches
-OPERON_MUTATIONS_ENABLED=true
-```
-
-## Modèle runtime final
-
-Le repo supporte maintenant deux modes locaux :
-
-- `stdio proxy` : recommandé pour Codex, un petit wrapper `stdio` qui démarre au besoin un backend HTTP local
-- `http backend` : le backend persistant qui porte le cache partagé et les warmups
-
-Le backend persiste désormais :
-
-- le contenu du vault dans un cache SQLite partagé
-- un cache RAM borné
-- un manifest sémantique (`semantic_manifest`, `semantic_vectors`) dans la même base
-
-La même base stocke donc :
-
-- `file_cache` pour le contenu des notes
-- `task_file_cache` pour les données Tasks déjà parsées
-- `semantic_manifest` et `semantic_vectors` pour le chemin sémantique
-
-Chemin par défaut :
-
-```text
-<vault>/.obsidian/optimike-mcp/shared-cache.sqlite
-```
-
-Variables utiles :
-
-- `OBSIDIAN_RUNTIME_MODE=live|hybrid|headless-readonly|headless-guarded|headless-filesystem` pour choisir le contrat runtime
-- `OBSIDIAN_SHARED_CACHE_DB_PATH`
-- `OBSIDIAN_CONTENT_HOT_CACHE_LIMIT`
-- `OBSIDIAN_CACHE_SOURCE=auto|filesystem|rest` pour choisir la source de refresh du cache (`auto` privilégie le vault local quand il existe)
-- `OBSIDIAN_CACHE_CONCURRENCY` pour borner le travail filesystem local
-- `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` pour ajouter des exclusions façon gitignore, séparées par virgules ou retours ligne, au-dessus de la politique de sécurité intégrée
-- `MCP_WRITE_MODE=readonly|guarded|full` pour imposer la sécurité d’écriture côté serveur (`full` est le défaut ; définir explicitement `guarded` ou `readonly` pour durcir un hôte)
-- `MCP_GUARDED_MAX_WRITE_CHARS` et `MCP_GUARDED_MAX_BATCH_OPERATIONS` pour régler les limites du mode guarded
-- `MCP_EXTERNAL_ROOTS_FILE` pour activer des racines documentaires externes locales et bornées
-
-Pour tester sur un vrai coffre, définir `OBSIDIAN_SHARED_CACHE_DB_PATH` hors du coffre afin que les bases SQLite de validation ne polluent pas l’arbre synchronisé.
-
-Politique d’exclusion du vault :
-
-- Les exclusions intégrées couvrent `.obsidian`, `.trash`, `.git`, `.tmp`, `tmp`, `node_modules`, les dossiers de screenshots, les dossiers build/cache, les fichiers SQLite/DB et les logs.
-- `OBSIDIAN_VAULT_EXCLUDE_PATTERNS` permet d’ajouter les exclusions propres au coffre, par exemple `tmp/**,**/tmp/**,Efforts/Archives/**`.
-- Les exclusions s’appliquent aux refreshs filesystem du cache et aux scans du fallback local Bases. Elles ne promettent pas la parité Desktop et n’empêchent pas Obsidian Sync de télécharger les fichiers ; pour cela, il faut un profil serveur ou un vault propre côté Sync.
-- `npm run check:vault-exclusions -- --vault=/chemin/vers/vault` affiche l’effet de la politique avant une validation headless longue.
-
-Le MCP principal absorbe aussi la surface `Tasks`, donc Codex n’a plus besoin d’un deuxième `optimike-obsidian-tasks-mcp`.
-Les refreshs sémantiques à chaud relisent SQLite d’abord, puis seulement `.smart-env` si nécessaire.
-
-## Racines documentaires externes
-
-Les racines externes sont désactivées par défaut. Pour les activer, copier
-[`docs/external-roots.example.json`](docs/external-roots.example.json) vers un
-emplacement propre à la machine, adapter les racines et limites, puis renseigner
-son chemin absolu dans `MCP_EXTERNAL_ROOTS_FILE`. Ne jamais committer la vraie
-configuration.
-
-La première version expose des outils bornés et read-only pour l’état, la liste,
-les métadonnées, le SHA-256 et la lecture UTF-8. `external_handoff` peut remettre
-une copie locale temporaire vérifiée d’un seul fichier uniquement à un client
-stdio local, et seulement si la racine possède `readable` et `handoff`. La copie
-est liée au handle vérifié et son dossier temporaire, détenu par le processus,
-est supprimé à l’arrêt du MCP. Les copies expirent après une heure, sont
-nettoyées toutes les cinq minutes et restent limitées à 16 fichiers et 512 Mio
-par processus ; les dossiers abandonnés par un processus mort sont récupérés au
-prochain démarrage d’un service configuré. Un heartbeat borné évite qu’un PID
-réutilisé soit confondu durablement avec le processus propriétaire.
-
-Le cœur MCP n’embarque aucun moteur PDF, Office ou OCR. Codex, Claude Code,
-Gemini CLI, OpenClaw ou Hermes Agent peuvent utiliser leurs propres outils
-documentaires après un handoff explicite. Le handoff est refusé en HTTP.
-
-Validation :
-
-```bash
-npm run test:external-roots
-MCP_EXTERNAL_ROOTS_FILE=/chemin/absolu/external-roots.json npm run smoke:external-roots
-```
-
-Voir [ADR — External document roots](docs/adr/ADR-External-Document-Roots.md).
-Pour le schéma complet, les exemples Windows et Unix, la validation, le rollback
-et le dépannage, voir
-[Racines documentaires externes — configuration et exploitation](docs/external-roots-setup.fr.md).
-
-Scripts utiles :
-
-```bash
-npm run build
-npm run start:proxy
-npm run start:http
-npm run test:runtime
-npm run smoke:headless-readonly
-npm run smoke:hybrid-unavailable
-npm run smoke:hybrid-api-available
-npm run smoke:headless-guarded
-npm run smoke:headless-filesystem
-npm run smoke:headless-status
-npm run check:vault-exclusions -- --vault=/chemin/vers/vault
-npm run test:headless-long-run
-npm run snapshot:vault
-npm pack --dry-run
-```
-
-## Modes runtime
-
-- `live` (défaut) : Obsidian Desktop + Local REST API. Surface complète REST, écritures et Bases Bridge.
-- `hybrid` : démarre depuis le vault/cache local et utilise Local REST API quand `OBSIDIAN_API_KEY` est configurée. Le check API au démarrage n’est pas bloquant. Si aucune clé API n’est configurée, `OBSIDIAN_VAULT` est requis.
-- `headless-readonly` : sans Obsidian Desktop, sans Local REST API, sans `OBSIDIAN_API_KEY`. Requiert `OBSIDIAN_VAULT` ; définir `OBSIDIAN_CACHE_SOURCE=filesystem` rend le profil serveur explicite. Expose lecture, liste, recherche, Tasks, sémantique, runtime, plus `bases_list`, `bases_get_schema` et `bases_query` en fallback local en lecture seule.
-- `headless-guarded` : sans Obsidian Desktop ; expose la surface de lecture headless + écritures filesystem bornées pour `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter`. Les updates de note sont limitées à append/prepend ; overwrite reste bloqué par la politique guarded. Le fallback local Bases en lecture seule est aussi disponible.
-- `headless-filesystem` : sans Obsidian Desktop ; expose `headless-guarded` plus les fonctions filesystem bornées : tags frontmatter/inline, index/audit local des tags et rename en dry-run, opérations admin move/archive/delete avec `expectedHash` ou `expectedMtime`, batch frontmatter avec dry-run, création/config YAML `.base`, rows Bases comme opérations `set` de frontmatter Markdown, et helpers JSON Canvas minimaux.
-
-Headless signifie : Optimike MCP tourne au-dessus d’un vault Markdown synchronisé. Cela ne signifie pas que Desktop, les plugins communautaires, la command palette, l’active file ou Bases Bridge sont disponibles sans Obsidian Desktop.
-
-`npm run test:runtime` lance le build, les smokes runtime principaux et le smoke HTTP health/status. Il utilise des vaults temporaires et ne dépend ni d’un vrai coffre Obsidian, ni d’une clé API réelle. Les smokes headless vérifient aussi qu’un contenu exclu sous `tmp/**` n’est pas indexé.
-
-Pour le comparatif mode par mode, voir [Matrice des capacités runtime](docs/runtime-capability-matrix.fr.md).
-Pour le chemin serveur dédié, voir [Profil serveur headless](docs/headless-server-profile.fr.md).
-Pour le routage agent entre MCP, Desktop/API, filesystem, CLI et skills de format, voir [Guide de routage MCP](docs/mcp-routing-guide.fr.md).
-
-Validation de format :
-
-- `obsidian_validate_format` est disponible dans tous les modes runtime.
-- Il valide Markdown Obsidian, YAML `.base` et structure JSON Canvas avant les écritures.
-- Il attrape les erreurs locales de format, mais ne rend pas Obsidian, ne charge pas les plugins et n'évalue pas la sémantique exacte de l'UI Bases.
-
-Fallback local Bases :
-
-- `bases_list`, `bases_get_schema` et `bases_query` sont disponibles en modes headless avec `source: "local-fallback"`.
-- Le fallback lit les YAML `.base` depuis `OBSIDIAN_VAULT` et le frontmatter Markdown depuis le cache partagé.
-- Il supporte l’égalité directe, les arrays, `contains`, `in`, les comparaisons, le tri simple, la pagination et l’inspection de schéma.
-- Il n’évalue pas les formules Obsidian, les filtres spécifiques à des plugins, les propriétés calculées, ni la sémantique exacte des vues UI.
-
-Health et maintenance :
-
-```bash
-curl http://127.0.0.1:3010/healthz
-```
-
-Cette URL publique retourne uniquement un signal de vie minimal sans chemin.
-Les détails passent par MCP authentifié :
-
-- `obsidian_runtime_status`
-- `obsidian_runtime_maintenance`
-
-Sécurité d’écriture runtime :
-
-- `readonly` bloque tous les outils d’écriture hors opérations de validation pure
-- `guarded` autorise les écritures explicites et bornées, mais bloque suppression, overwrite, unset frontmatter, regex replace-all large et gros batchs
-- `full` est le défaut et conserve le comportement d’écriture complet pour un environnement local de confiance
-
-Les écritures filesystem guarded acceptent `expectedHash` et `expectedMtime`. Préférer `expectedHash` sur un coffre synchronisé ou multi-agent : une note modifiée entre lecture et écriture produit alors un conflit explicite au lieu d’un écrasement silencieux.
-
-Contrôle du contexte agent :
-
-- `obsidian_list_notes` supporte `responseMode="compact"`, `limit` et `cursor`
-- `obsidian_global_search` supporte `responseMode="compact"` en gardant la pagination `page/pageSize`
-- `list_all_tasks` et `query_tasks` supportent `responseMode="compact"|"detailed"`, `responseLimit` et `cursor`
-- la lecture d’une note identifiée reste complète via `obsidian_read_note`
-
-Checks typiques :
-
-```bash
-curl http://127.0.0.1:3010/healthz
-```
-
-## Configuration Codex minimale
-
-Dans `~/.codex/config.toml` :
+Avec le package, le binaire proxy explicite est
+`optimike-obsidian-mcp-proxy`. Le binaire historique
+`optimike-obsidian-mcp` démarre toujours directement le backend.
+
+Configuration Codex minimale :
 
 ```toml
 [mcp_servers.optimike-obsidian-mcp-stdio]
@@ -360,195 +74,97 @@ command = "node"
 args = ["/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js"]
 
 [mcp_servers.optimike-obsidian-mcp-stdio.env]
-MCP_HTTP_HOST = "127.0.0.1"
-MCP_HTTP_PORT = "3010"
-MCP_PROXY_START_TIMEOUT_MS = "20000"
-OBSIDIAN_VAULT = "/chemin/vers/<vault>"
-
-# Racines documentaires optionnelles en lecture seule hors du coffre
-# MCP_EXTERNAL_ROOTS_FILE = "/chemin/absolu/vers/external-roots.json"
-
-# Smart Connections
-SMART_ENV_DIR = "/chemin/vers/<vault>/.smart-env"
-ENABLE_QUERY_EMBEDDING = "true"
-
-# Recommandé : auto (ne rien setter)
-# QUERY_EMBEDDER = "auto"
-
-# Obsidian REST (si plugin Local REST API actif)
+OBSIDIAN_VAULT = "/chemin/vers/coffre"
+OBSIDIAN_RUNTIME_MODE = "live"
 OBSIDIAN_BASE_URL = "http://127.0.0.1:27123"
-OBSIDIAN_API_KEY  = "<token>"
-
-# Comportement au démarrage (optionnel, recommandé pour un boot plus rapide)
-# OBSIDIAN_STARTUP_BLOCKING=false démarre le MCP immédiatement et lance le health check en arrière-plan.
-OBSIDIAN_STARTUP_MAX_RETRIES = "2"
-OBSIDIAN_STARTUP_RETRY_DELAY_MS = "1200"
-OBSIDIAN_STARTUP_BLOCKING = "false"
-
-# Cache partagé (optionnel)
-# OBSIDIAN_SHARED_CACHE_DB_PATH = "/chemin/vers/<vault>/.obsidian/optimike-mcp/shared-cache.sqlite"
-# OBSIDIAN_CONTENT_HOT_CACHE_LIMIT = "64"
+OBSIDIAN_API_KEY = "<cle-local-rest-api>"
 ```
 
-Notes :
+Conserver chemins réels, clés API et configuration des racines externes hors du
+dépôt et hors des contenus distribuables du coffre.
 
-- Garde cette config en local dans `~/.codex/config.toml` (ne pas commit des chemins machine personnels).
-- Dans la doc, utilise des chemins logiques (`/chemin/vers/...`) et garde les chemins réels uniquement en local.
-- `dist/index.js` reste l’entrypoint backend, mais Codex doit pointer vers `dist/stdio-proxy.js`.
-- La configuration external-roots est chargée au démarrage du processus.
-  Redémarre le client/serveur MCP après toute modification de
-  `MCP_EXTERNAL_ROOTS_FILE` ou de son JSON.
+## Intégrations Obsidian optionnelles
 
-## Réglage Local REST API (Obsidian)
+Activer seulement les surfaces utilisées :
 
-Repo du plugin Local REST API :
-https://github.com/coddingtonbear/obsidian-local-rest-api
+- [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) :
+  notes, métadonnées et tags en live ;
+- **Bases Bridge (REST)** inclus : opérations `.base` en live ;
+- **Smart Connections** : index sémantique `.smart-env` ;
+- **Kairélys 2.6.3+ / Operon compatible** et
+  **Optimike Operon Bridge** inclus : tâches live gouvernées ;
+- **Obsidian Tasks** : parsing et configuration Tasks canoniques.
 
-Dans Obsidian :
+L’apply Operon exige deux opt-ins :
 
-1. installe et active **Local REST API**
-2. active le serveur HTTP
-3. copie la clé API
-4. renseigne `OBSIDIAN_BASE_URL` et `OBSIDIAN_API_KEY` dans les variables d’env du MCP
+```text
+Réglage Optimike Operon Bridge : Allow task mutations
+OPERON_MUTATIONS_ENABLED=true
+```
 
-Exemple :
+Les snapshots Operon obsolètes restent toujours en lecture seule.
+
+## Racines documentaires externes
+
+Les racines externes sont désactivées par défaut. Elles forment un courtier
+d’autorisation en lecture seule, pas un index externe, un moteur de
+synchronisation ou une sauvegarde.
+
+Le même outil `external_handoff` choisit une livraison adaptée au transport :
+
+- le stdio local retourne un `local_path` vérifié et temporaire ;
+- le HTTP direct authentifié peut retourner un `http_ticket` opt-in, lié à
+  l’identité et à usage unique ;
+- aucun mode ne divulgue le chemin source ni n’autorise de mutation externe.
+
+Le cœur MCP n’embarque pas de moteur PDF, Office ou OCR. Le client appelant
+assure l’extraction binaire et vérifie taille et SHA-256.
+
+Commencer par
+[Racines externes — configuration et exploitation](docs/external-roots-setup.fr.md).
+
+## Recherche sémantique
+
+`smart_semantic_search` interroge un index Smart Connections local. L’embedding
+de requête peut rester local via Ollama ou passer par OpenAI selon la
+configuration. Avec OpenAI, l’outil devient donc open-world même si l’index du
+coffre reste local.
+
+Voir [Exploitation](OPERATIONS.fr.md) pour les providers et le cache.
+
+## Validation
 
 ```bash
-export OBSIDIAN_BASE_URL=http://127.0.0.1:27123
-export OBSIDIAN_API_KEY=<ta_cle_api>
+npm run build
+npm run test:runtime
+npm run check:operon
+npm run test:external-roots
+npm run test:docs
+npm run test:package
+npm run audit:production
 ```
 
-## Sécurité
+Les suites runtime utilisent des coffres jetables et sont couvertes en CI
+Linux/Windows. Pour un test proche de la production, placer la base de cache
+partagée hors du vrai coffre synchronisé.
 
-- Garde `OBSIDIAN_API_KEY` privée et locale.
-- N’expose pas l’API REST d’Obsidian sur Internet.
-- Garde `OBSIDIAN_API_KEY` et `OPENAI_API_KEY` dans les variables d’env, pas dans des fichiers de config commités.
-- État actuel des dépendances : `npm audit` remonte 0 vulnérabilité connue, et
-  `npm audit signatures` vérifie les signatures registry de l’arbre npm
-  installé.
-- Si tu exposes le MCP en HTTP au-delà de localhost, active
-  `MCP_AUTH_MODE=jwt` ou `MCP_AUTH_MODE=oauth`, utilise un secret/provider
-  robuste et garde `MCP_ALLOWED_ORIGINS` strict. Le profil local le plus sûr
-  reste `stdio` ou HTTP sur `127.0.0.1`.
+## Documentation
 
-## Dépannage legacy WSL2 : Obsidian sous Windows
-
-La plupart des setups locaux doivent utiliser l’entrypoint `stdio` natif et
-`127.0.0.1`. Cette section sert seulement aux anciens setups, ou aux setups
-WSL2 explicites, où Obsidian tourne sous Windows et Codex dans WSL2 :
-
-- `127.0.0.1` côté WSL pointe vers WSL, pas vers Windows
-- utilise l’IP du host Windows (gateway WSL) pour `OBSIDIAN_BASE_URL`
-
-Exemple :
-
-```bash
-GW=$(ip route | awk '/default/ {print $3; exit}')
-export OBSIDIAN_BASE_URL=http://$GW:27123
-```
-
-Si tu utilises un portproxy Windows, adapte simplement le port.
-
-## Surface MCP principale
-
-Le MCP principal inclut maintenant :
-
-- outils notes : lecture, listing, update, search-replace, tags, frontmatter
-- outils Bases : list, schema, query, create, upsert config, upsert rows
-- outils Tasks : `list_all_tasks`, `query_tasks`
-- outils sémantiques : `smart_semantic_search`, `smart_search`, `smart-search`
-- outils santé/état du serveur : `obsidian_runtime_status`, `obsidian_runtime_maintenance`
-- outils documentaires externes : `external_runtime_status`,
-  `external_roots_list`, `external_list`, `external_stat`, `external_read`,
-  `external_handoff`
-
-## Plugins Obsidian requis ou utiles
-
-Plugins requis selon les surfaces utilisées :
-
-- **Local REST API** : API Obsidian requise par le MCP.
-- **Bases Bridge (REST)** : support `.base` via REST.
-- **Smart Connections** : index vectoriel et `.smart-env` pour la recherche sémantique.
-
-## Recherche sémantique (Smart Connections)
-
-Tool : `smart_semantic_search` (alias : `smart_search`, `smart-search`).
-
-Exemple :
-
-```json
-{ "query": "publication X threads", "top_k": 10, "with_snippets": false }
-```
-
-Le serveur :
-
-- lit `.smart-env/multi/*.ajson`
-- choisit la dimension dominante
-- encode la requête avec le même modèle que le vault
-- persiste un manifest sémantique dans SQLite pour accélérer les refreshs à chaud
-- préchauffe la recherche sémantique au démarrage en chargeant le snapshot et en réveillant l’embedder de requête
-- renvoie `timings_ms`, `vector_count` et `filtered_count` pour diagnostiquer le coût réel
-
-Important :
-
-- l’exécution d’une requête sémantique exige toujours un provider de requête joignable
-- si le vault repose sur Ollama et qu’Ollama est down, l’erreur remonte clairement au lieu de bloquer silencieusement
-- `SEMANTIC_SEARCH_PREWARM=false` désactive le préchauffage au démarrage
-
-Autrement dit :
-
-- le chemin des métadonnées sémantiques est maintenant durable et observable
-- la requête finale dépend toujours d’un provider d’embedding vivant au moment de l’appel
-
-## Providers (surcharge optionnelle)
-
-**Ollama (local)**
-
-```bash
-export QUERY_EMBEDDER=ollama
-export QUERY_EMBEDDER_MODEL=snowflake-arctic-embed2
-export OLLAMA_BASE_URL=http://127.0.0.1:11434
-```
-
-**Xenova / Transformers**
-
-Le provider local Xenova est désactivé pour l’instant, car sa chaîne de dépendances ONNX/protobuf remontait des vulnérabilités `npm audit`. Utiliser Ollama en local, ou OpenAI en mode cloud.
-
-**OpenAI (cloud)**
-
-```bash
-export QUERY_EMBEDDER=openai
-export QUERY_EMBEDDER_MODEL=text-embedding-3-small
-export OPENAI_API_KEY=...
-# export OPENAI_EMBEDDING_DIMENSIONS=1024
-```
-
-## MCP partage : portabilité
-
-Pour un MCP partagé, ne pas figer un `OLLAMA_BASE_URL` global dans le vault.
-Garder le mode auto et laisser chaque utilisateur surcharger par variables d’environnement.
-
-## Repo Tasks legacy
-
-`optimike-obsidian-tasks-mcp` peut encore exister comme repo standalone legacy, mais Codex n’en a plus besoin quand ce serveur principal est utilisé. Le MCP canonique est maintenant celui-ci.
-
-## Documentation complémentaire
-
-- Vue produit et installation : ce README
-- Guide d’exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
-- Matrice des capacités par mode : [docs/runtime-capability-matrix.fr.md](docs/runtime-capability-matrix.fr.md)
-- Profil serveur headless dédié : [docs/headless-server-profile.fr.md](docs/headless-server-profile.fr.md)
-- Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
-- Surface actuelle des tools : [docs/obsidian_mcp_tools_spec.md](docs/obsidian_mcp_tools_spec.md)
-- Configuration et exploitation des racines documentaires externes : [docs/external-roots-setup.fr.md](docs/external-roots-setup.fr.md)
-- Architecture des racines documentaires externes : [docs/adr/ADR-External-Document-Roots.md](docs/adr/ADR-External-Document-Roots.md)
-- Profil public de gestion des tâches ÉLYSIA et skill agentique portable : [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
-- README anglais : [README.md](README.md)
+- Entrée par audience et besoin : [Hub documentaire](docs/README.fr.md)
+- Runtime et maintenance : [OPERATIONS.fr.md](OPERATIONS.fr.md)
+- Sécurité et frontière de déploiement : [SECURITY.fr.md](SECURITY.fr.md)
+- Outils actuels : [Surface des outils](docs/obsidian_mcp_tools_spec.md)
+- Modes runtime : [Matrice des capacités](docs/runtime-capability-matrix.fr.md)
+- Routage agentique : [Guide de routage](docs/mcp-routing-guide.fr.md)
+- Déploiement headless : [Profil serveur headless](docs/headless-server-profile.fr.md)
+- Documents externes : [Configuration des racines](docs/external-roots-setup.fr.md)
+- Décisions d’architecture : [Index des ADR](docs/adr/README.md)
+- Profil public Tasks ÉLYSIA : [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
 
 ## Crédits
 
-- Créé par **Optimike** (Mickaël Ahouansou)
+Créé par **Optimike — Mickaël Ahouansou**.
 
 ## Licence
 
-Voir `LICENSE`.
+Voir [LICENSE](LICENSE).

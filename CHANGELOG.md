@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Documentation entrypoints now distinguish local stdio, authenticated loopback
+  HTTP and pilot-only remote HTTP without contradictory stdio-only claims.
+- Runtime matrices now describe Operon as a common tool family and restrict
+  Canvas, move and admin tools to the modes that actually register them.
+- The bundled Inspector HTTP example is now explicitly development-only instead
+  of presenting an unused JWT secret as authentication.
+- HTTP and Inspector launch scripts now use cross-platform Node wrappers.
 - Direct HTTP now validates supplied origins, ignores forwarding headers unless a
   trusted proxy is explicit, and uses a deterministic configured port by default.
 - Semantic-search tools now declare `openWorldHint: true` because OpenAI can be selected as the query embedder.
@@ -39,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Added bilingual security and documentation hubs with one authoritative route
+  for tools, runtime modes, external roots, deployment posture and ADR status.
 - External-root access uses canonical-path confinement, strict include/exclude
   policies, link/junction rejection, handle identity revalidation, and
   path-redacted responses.

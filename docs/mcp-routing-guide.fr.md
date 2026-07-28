@@ -55,10 +55,16 @@ Workflow agent :
    relatif à la racine.
 3. Employer `external_read` uniquement pour du texte UTF-8 borné.
 4. Pour un PDF ou un document Office, demander explicitement
-   `external_handoff`, puis transmettre la copie temporaire retournée à un outil
-   local adapté du client.
-5. Conserver comme provenance l’identifiant logique, le chemin relatif et le
-   SHA-256. Ne jamais persister le chemin temporaire.
+   `external_handoff` :
+   - le stdio local retourne un `local_path` temporaire vérifié ;
+   - le HTTP direct authentifié peut retourner un `http_ticket` opt-in, réclamé
+     une seule fois via `GET /external-handoff` avec la même identité bearer et
+     le header `X-External-Handoff-Ticket`.
+5. Conserver comme provenance l’identifiant logique, le chemin relatif, la
+   taille et le SHA-256. Ne jamais persister le chemin temporaire ni le ticket.
+
+Toute opération external-root en HTTP direct exige `external:read`. Le HTTP
+distant reste pilote derrière un proxy TLS et des contrôles réseau revus.
 
 Ne pas promettre l’extraction au seul motif que le handoff fonctionne :
 l’extraction dépend du client appelant. Ne pas copier silencieusement le contenu
