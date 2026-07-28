@@ -18,6 +18,23 @@ export type HttpQuotaState = {
   outcome: "allowed" | "limited" | "capacity";
 };
 
+export type HttpOperationClass = "standard" | "expensive" | "mutation";
+
+export type HttpAdmissionState = {
+  operationClass: HttpOperationClass;
+  operationName: string;
+  queued: boolean;
+  waitMs: number;
+  outcome:
+    | "admitted"
+    | "queue-full"
+    | "identity-queue-full"
+    | "timeout"
+    | "cancelled";
+  admittedAt?: number;
+  releasedAt?: number;
+};
+
 export type HttpRequestState = {
   requestId: string;
   startedAt: number;
@@ -31,6 +48,7 @@ export type HttpRequestState = {
   authInfo?: AuthInfo;
   identity?: VerifiedHttpIdentity;
   quotas: HttpQuotaState[];
+  admission?: HttpAdmissionState;
 };
 
 const requestStates = new WeakMap<Request, HttpRequestState>();
