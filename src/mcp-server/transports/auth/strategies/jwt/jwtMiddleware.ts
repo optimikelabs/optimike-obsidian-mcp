@@ -1,19 +1,10 @@
 /**
  * @fileoverview MCP Authentication Middleware for Bearer Token Validation (JWT) for Hono.
  *
- * This middleware validates JSON Web Tokens (JWT) passed via the 'Authorization' header
- * using the 'Bearer' scheme (e.g., "Authorization: Bearer <your_token>").
- * It verifies the token's signature and expiration using the secret key defined
- * in the configuration (`config.mcpAuthSecretKey`).
+ * This middleware validates JSON Web Tokens (JWT) passed via the Authorization header.
+ * Verified claims are attached to the incoming request for SDK compatibility and to the
+ * AsyncLocalStorage authentication context. Raw bearer tokens are never logged.
  *
- * If the token is valid, an object conforming to the MCP SDK's `AuthInfo` type
- * is attached to `c.env.incoming.auth`. This direct attachment to the raw Node.js
- * request object is for compatibility with the underlying SDK transport, which is
- * not Hono-context-aware.
- * If the token is missing, invalid, or expired, it throws an `McpError`, which is
- * then handled by the centralized `httpErrorHandler`.
- *
- * @see {@link https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2025-03-26/basic/authorization.mdx | MCP Authorization Specification}
  * @module src/mcp-server/transports/auth/strategies/jwt/jwtMiddleware
  */
 
@@ -25,7 +16,6 @@ import { logger, requestContextService } from "../../../../../utils/index.js";
 import { BaseErrorCode, McpError } from "../../../../../types-global/errors.js";
 import { authContext } from "../../core/authContext.js";
 
-// Startup Validation: Validate secret key presence on module load.
 if (config.mcpAuthMode === "jwt") {
   if (environment === "production" && !config.mcpAuthSecretKey) {
     logger.fatal(
@@ -36,14 +26,13 @@ if (config.mcpAuthMode === "jwt") {
     );
   } else if (!config.mcpAuthSecretKey) {
     logger.warning(
-      "MCP_AUTH_SECRET_KEY is not set. JWT auth middleware will bypass checks (DEVELOPMENT ONLY). This is insecure for production.",
+      "MCP_AUTH_SECRET_KEY is not set. JWT auth middleware will use the shared development identity (DEVELOPMENT ONLY).",
     );
   }
 }
 
 /**
- * Hono middleware for verifying JWT Bearer token authentication.
- * It attaches authentication info to `c.env.incoming.auth` for SDK compatibility with the node server.
+ * Hono middleware for verifying JWT Bearer authentication.
  */
 export async function mcpAuthMiddleware(
   c: Context<{ Bindings: HttpBindings }>,
@@ -61,39 +50,40 @@ export async function mcpAuthMiddleware(
 
   const reqWithAuth = c.env.incoming;
 
-  // If JWT auth is not enabled, skip the middleware.
   if (config.mcpAuthMode !== "jwt") {
     return await next();
   }
 
-  // Development Mode Bypass
   if (!config.mcpAuthSecretKey) {
     if (environment !== "production") {
       logger.warning(
-        "Bypassing JWT authentication: MCP_AUTH_SECRET_KEY is not set (DEVELOPMENT ONLY).",
+        "Bypassing JWT verification with the shared development identity because MCP_AUTH_SECRET_KEY is not set (DEVELOPMENT ONLY).",
         context,
       );
       reqWithAuth.auth = {
         token: "dev-mode-placeholder-token",
         clientId: "dev-client-id",
         scopes: ["dev-scope"],
+        issuer: "optimike-development",
       };
       const authInfo = reqWithAuth.auth;
-      logger.debug("Dev mode auth object created.", {
+      logger.debug("Development authentication identity created.", {
         ...context,
-        authDetails: authInfo,
+        clientId: authInfo.clientId,
+        scopes: authInfo.scopes,
+        issuer: authInfo.issuer,
       });
       return await authContext.run({ authInfo }, next);
-    } else {
-      logger.error(
-        "FATAL: MCP_AUTH_SECRET_KEY is missing in production. Cannot bypass auth.",
-        context,
-      );
-      throw new McpError(
-        BaseErrorCode.INTERNAL_ERROR,
-        "Server configuration error: Authentication key missing.",
-      );
     }
+
+    logger.error(
+      "FATAL: MCP_AUTH_SECRET_KEY is missing in production. Cannot bypass auth.",
+      context,
+    );
+    throw new McpError(
+      BaseErrorCode.INTERNAL_ERROR,
+      "Server configuration error: Authentication key missing.",
+    );
   }
 
   const secretKey = new TextEncoder().encode(config.mcpAuthSecretKey);
@@ -142,14 +132,14 @@ export async function mcpAuthMiddleware(
     let scopesFromToken: string[] = [];
     if (
       Array.isArray(decoded.scp) &&
-      decoded.scp.every((s) => typeof s === "string")
+      decoded.scp.every((scope) => typeof scope === "string")
     ) {
       scopesFromToken = decoded.scp as string[];
     } else if (
       typeof decoded.scope === "string" &&
       decoded.scope.trim() !== ""
     ) {
-      scopesFromToken = decoded.scope.split(" ").filter((s) => s);
+      scopesFromToken = decoded.scope.split(" ").filter(Boolean);
       if (scopesFromToken.length === 0 && decoded.scope.trim() !== "") {
         scopesFromToken = [decoded.scope.trim()];
       }
@@ -167,45 +157,40 @@ export async function mcpAuthMiddleware(
     }
 
     const subject = typeof decoded.sub === "string" ? decoded.sub : undefined;
+    const issuer =
+      typeof decoded.iss === "string" ? decoded.iss : "optimike-local-jwt";
     reqWithAuth.auth = {
       token: rawToken,
       clientId: clientIdFromToken,
       scopes: scopesFromToken,
       subject,
+      issuer,
     };
 
     const authInfo = reqWithAuth.auth;
     logger.debug("JWT verified successfully. AuthInfo attached to request.", {
       ...context,
-      mcpSessionIdContext: subject,
+      subjectPresent: Boolean(subject),
       clientId: authInfo.clientId,
       scopes: authInfo.scopes,
+      issuer: authInfo.issuer,
     });
     await authContext.run({ authInfo }, next);
   } catch (error: unknown) {
-    let errorMessage = "Invalid token.";
-    let errorCode = BaseErrorCode.UNAUTHORIZED;
+    if (error instanceof McpError) throw error;
 
     if (error instanceof Error && error.name === "JWTExpired") {
-      errorMessage = "Token expired.";
       logger.warning("Authentication failed: Token expired.", {
         ...context,
         errorName: error.name,
       });
-    } else if (error instanceof Error) {
-      errorMessage = `Invalid token: ${error.message}`;
-      logger.warning(`Authentication failed: ${errorMessage}`, {
-        ...context,
-        errorName: error.name,
-      });
-    } else {
-      errorMessage = "Unknown verification error.";
-      errorCode = BaseErrorCode.INTERNAL_ERROR;
-      logger.error(
-        "Authentication failed: Unexpected non-error exception during token verification.",
-        { ...context, error },
-      );
+      throw new McpError(BaseErrorCode.UNAUTHORIZED, "Token expired.");
     }
-    throw new McpError(errorCode, errorMessage);
+
+    logger.warning("Authentication failed: Token verification rejected.", {
+      ...context,
+      errorName: error instanceof Error ? error.name : "unknown",
+    });
+    throw new McpError(BaseErrorCode.UNAUTHORIZED, "Invalid token.");
   }
 }
