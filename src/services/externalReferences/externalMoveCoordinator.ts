@@ -747,13 +747,17 @@ export class ExternalMoveCoordinator {
       snapshot.sourceRelativePath,
     );
     const candidatePaths = new Set<string>();
-    for (const query of [
-      sourceToken,
-      oldFileUri,
-      location.absolutePath,
-      path.basename(location.absolutePath),
+    for (const candidate of [
+      { query: sourceToken, caseSensitive: true },
+      { query: oldFileUri, caseSensitive: false },
+      { query: location.absolutePath, caseSensitive: false },
+      { query: path.basename(location.absolutePath), caseSensitive: false },
     ]) {
-      for (const filePath of await this.vault.searchPaths(query)) {
+      for (const filePath of await this.vault.searchPaths(
+        candidate.query,
+        "",
+        candidate.caseSensitive,
+      )) {
         candidatePaths.add(filePath);
       }
     }

@@ -237,7 +237,11 @@ export class BackendVaultAdapter {
     }
   }
 
-  async searchPaths(query: string, searchInPath = ""): Promise<string[]> {
+  async searchPaths(
+    query: string,
+    searchInPath = "",
+    caseSensitive = true,
+  ): Promise<string[]> {
     const paths = new Set<string>();
     let page = 1;
     let totalPages = 1;
@@ -247,7 +251,7 @@ export class BackendVaultAdapter {
           query,
           searchInPath: searchInPath || undefined,
           useRegex: false,
-          caseSensitive: true,
+          caseSensitive,
           page,
           pageSize: 100,
           maxMatchesPerFile: 1,

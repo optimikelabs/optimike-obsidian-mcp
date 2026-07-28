@@ -107,12 +107,15 @@ class FakeVault {
     }
   }
 
-  async searchPaths(query, searchInPath = "") {
+  async searchPaths(query, searchInPath = "", caseSensitive = true) {
+    const normalizedQuery = caseSensitive ? query : query.toLowerCase();
     return [...this.notes.entries()]
       .filter(
         ([filePath, content]) =>
           (!searchInPath || filePath.startsWith(searchInPath)) &&
-          content.includes(query),
+          (caseSensitive ? content : content.toLowerCase()).includes(
+            normalizedQuery,
+          ),
       )
       .map(([filePath]) => filePath)
       .sort((left, right) => left.localeCompare(right));
@@ -527,6 +530,29 @@ try {
   assert.equal(await readFile(recoverySource, "utf8"), "recovery");
   assert.equal(await exists(recoveryTarget), false);
   assert.equal(recoveryVault.notes.get(recoveryNotePath), recoveryNote);
+
+  // Legacy physical paths are inventoried case-insensitively and block apply.
+  const legacyCaseSource = path.join(rootPath, "legacy-case.txt");
+  await writeFile(legacyCaseSource, "legacy case", "utf8");
+  const legacyCaseVault = new FakeVault({
+    "Efforts/Projets/Legacy case.md":
+      `Legacy location: ${legacyCaseSource.toUpperCase()}\n`,
+  });
+  const legacyCaseCoordinator = new ExternalMoveCoordinator(
+    service,
+    legacyCaseVault,
+    new ExternalMoveJournal(":memory:"),
+  );
+  const legacyCasePlan = await legacyCaseCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "legacy-case.txt",
+    targetRelativePath: "archive/legacy-case.txt",
+    idempotencyKey: "coordinator-legacy-case",
+  });
+  assert.equal(legacyCasePlan.readyToApply, false);
+  assert.equal(legacyCasePlan.repairs.length, 0);
+  assert.equal(legacyCasePlan.manualReview.length, 1);
+  assert.equal(await readFile(legacyCaseSource, "utf8"), "legacy case");
 
   // Historical and legacy references are inventoried, never auto-repaired.
   const manualSource = path.join(rootPath, "manual.txt");
