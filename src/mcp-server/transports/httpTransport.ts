@@ -1,10 +1,11 @@
 /**
  * @fileoverview Configures and starts the Streamable HTTP MCP transport using Hono.
  *
- * The HTTP boundary applies two independent protections:
+ * The HTTP boundary applies independent source, identity and concurrency controls:
  *
  * 1. a bounded pre-authentication source-address limiter;
- * 2. a bounded functional limiter keyed by verified authentication claims.
+ * 2. a bounded functional limiter keyed by verified authentication claims;
+ * 3. global, per-identity, expensive-operation and mutation admission limits.
  *
  * Proxy headers are ignored unless the immediate peer belongs to the explicit
  * `MCP_TRUSTED_PROXIES` allowlist. MCP sessions are bound to the verified identity
@@ -41,6 +42,7 @@ import {
   oauthMiddleware,
   type AuthInfo,
 } from "./auth/index.js";
+import { createHttpBackpressureMiddleware } from "./httpBackpressure.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import {
   authenticatedIdentityLimiter,
@@ -63,6 +65,7 @@ const HTTP_PORT = config.mcpHttpPort;
 const HTTP_HOST = config.mcpHttpHost;
 const MCP_ENDPOINT_PATH = "/mcp";
 const MAX_PORT_RETRIES = parsePortRetries();
+const httpBackpressureMiddleware = createHttpBackpressureMiddleware();
 
 type HttpSession = {
   transport: WebStandardStreamableHTTPServerTransport;
@@ -399,6 +402,9 @@ export async function startHttpTransport(
         "RateLimit-Remaining",
         "RateLimit-Reset",
         "X-Optimike-Rate-Limit-Scope",
+        "X-Optimike-Backpressure",
+        "X-Optimike-Operation-Class",
+        "X-Optimike-Queue-Wait-Ms",
         "X-Request-Id",
       ],
       credentials: true,
@@ -428,6 +434,8 @@ export async function startHttpTransport(
   app.use(externalHandoffEndpoint, authMiddleware);
   app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);
   app.use(externalHandoffEndpoint, authenticatedIdentityRateLimitMiddleware);
+  app.use(MCP_ENDPOINT_PATH, httpBackpressureMiddleware);
+  app.use(externalHandoffEndpoint, httpBackpressureMiddleware);
 
   app.onError(httpErrorHandler);
 
