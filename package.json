@@ -99,8 +99,8 @@
     "test:package": "node scripts/test-package-contents.mjs"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.14",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@hono/node-server": "^2.0.12",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/sanitize-html": "^2.16.0",
     "@types/validator": "^13.15.10",
     "axios": "^1.16.0",
