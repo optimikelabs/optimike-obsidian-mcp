@@ -81,9 +81,11 @@ Pour un move gouverné par ÉLYSIA :
 Cette transaction est réservée au stdio local. Elle accepte un fichier régulier,
 une cible absente dans un dossier parent existant, et un move sans écrasement
 dans la même racine et sur le même volume. Les éditions concurrentes de notes
-sont protégées par SHA-256 et, en mode live, par `If-Match` de la Local REST API.
-Ne pas router create, replace, upload, delete, sync, dossier, cross-root ou
-cross-volume dans ce workflow.
+sont protégées par une précondition SHA-256 exacte en `headless-filesystem` sur
+une copie ou un coffre dédié. L’apply live via Local REST échoue fermé, car les
+remplacements de note complète n’imposent pas encore `If-Match`. Ne pas router
+create, replace, upload, delete, sync, dossier, cross-root ou cross-volume dans
+ce workflow.
 
 Toute opération external-root en HTTP direct exige `external:read`. Le HTTP
 distant reste pilote derrière un proxy TLS et des contrôles réseau revus.

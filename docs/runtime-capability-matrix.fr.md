@@ -119,6 +119,8 @@ du mode runtime :
   `external-ref:<rootId>::<chemin-relatif-encode-en-pourcentage>`. Toute
   occurrence ambiguë, historique ou non supportée bloque l’apply.
 - Le move externe emploie une séquence hard-link/unlink sans écrasement sur le
-  même volume et des écritures conditionnelles de notes. Le live utilise
-  `If-Match` de la Local REST API.
+  même volume et des écritures de notes préconditionnées par hash exact en
+  `headless-filesystem`, sur une copie ou un coffre dédié. L’apply live échoue
+  fermé tant que Local REST ne fournit pas d’écriture atomique conditionnelle
+  de note complète.
 - Une validation d’écriture headless doit créer un nouveau brouillon dans un dossier sandbox. Elle ne doit pas modifier des notes existantes d’un vrai vault.

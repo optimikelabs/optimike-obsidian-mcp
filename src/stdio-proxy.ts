@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,13 +25,14 @@ import {
   ExternalStatSchema,
   externalRootsResult,
 } from "./mcp-server/tools/externalRootsTools/registration.js";
-import { config } from "./config/index.js";
+import { config, profileExternalMoveJournalPath } from "./config/index.js";
 import { ensureLocalBackendRunning } from "./runtime/localBackend.js";
 import {
   ExternalRootError,
   ExternalRootsService,
 } from "./services/externalRootsService.js";
 import { BackendVaultAdapter } from "./services/externalReferences/backendVaultAdapter.js";
+import type { ExternalMoveBindingIdentity } from "./services/externalReferences/backendVaultAdapter.js";
 import { ExternalMoveCoordinator } from "./services/externalReferences/externalMoveCoordinator.js";
 import { ExternalMoveJournal } from "./services/externalReferences/externalMoveJournal.js";
 
@@ -63,6 +65,29 @@ const proxyServer = new Server(
 let backend: BackendClient | undefined;
 let externalRootsService: ExternalRootsService | undefined;
 let externalMoveCoordinator: ExternalMoveCoordinator | undefined;
+let externalMoveBindingIdentity: ExternalMoveBindingIdentity | undefined;
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort((left, right) => left.localeCompare(right))
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function rootConfigFingerprint(filePath: string): string {
+  const parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
+  return createHash("sha256")
+    .update("optimike.external-move.roots.v1\0", "utf8")
+    .update(canonicalJson(parsed), "utf8")
+    .digest("hex");
+}
 
 function disabledExternalRoots(): Promise<never> {
   return Promise.reject(
@@ -193,20 +218,34 @@ async function start() {
 
   await ensureBackendConnected();
   if (externalRootsService) {
-    const vault = new BackendVaultAdapter((name, args) =>
-      withBackendRetry(
-        `external reference backend adapter: ${name}`,
-        (client) =>
-          client.callTool(
-            { name, arguments: args },
-            CompatibilityCallToolResultSchema,
-          ),
-      ),
+    const rootsFingerprint = rootConfigFingerprint(
+      process.env.MCP_EXTERNAL_ROOTS_FILE!,
+    );
+    const vault = new BackendVaultAdapter(
+      (name, args) =>
+        withBackendRetry(
+          `external reference backend adapter: ${name}`,
+          (client) =>
+            client.callTool(
+              { name, arguments: args },
+              CompatibilityCallToolResultSchema,
+            ),
+        ),
+      {
+        backendEndpoint: backendUrl.toString(),
+        rootConfigFingerprint: rootsFingerprint,
+        profileId: config.externalMoveProfileId,
+      },
+    );
+    externalMoveBindingIdentity = await vault.getBindingIdentity();
+    const profiledJournalPath = profileExternalMoveJournalPath(
+      config.externalMoveJournalPath,
+      externalMoveBindingIdentity.bindingFingerprint,
     );
     externalMoveCoordinator = new ExternalMoveCoordinator(
       externalRootsService,
       vault,
-      new ExternalMoveJournal(config.externalMoveJournalPath),
+      new ExternalMoveJournal(profiledJournalPath),
     );
   }
 
@@ -226,10 +265,14 @@ async function start() {
         externalMove: {
           available:
             Boolean(externalMoveCoordinator) &&
+            externalMoveBindingIdentity?.verifiable === true &&
             config.externalMoveEnabled &&
             config.mcpWriteMode === "full",
           transport: "stdio-only",
           requiresRootCapability: "move",
+          identityVerified: externalMoveBindingIdentity?.verifiable ?? false,
+          identitySource: externalMoveBindingIdentity?.vaultIdentitySource,
+          profileFingerprint: externalMoveBindingIdentity?.bindingFingerprint,
         },
         roots: externalRootsService
           ? await externalRootsService.listRoots()
@@ -346,7 +389,6 @@ async function start() {
           ? externalMoveCoordinator.scan(
               parsed.data.rootId,
               parsed.data.relativePath,
-              parsed.data.searchInPath,
             )
           : disabledExternalRoots(),
       )();

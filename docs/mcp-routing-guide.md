@@ -15,7 +15,7 @@ This guide helps agents choose the right layer for Obsidian work.
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Read, list, search, tasks, semantic search                                   | Optimike MCP                                                  | Stable tool surface across live, hybrid, and headless modes.            |
 | Read an explicitly configured document outside the vault                     | Optimike MCP external-root tools                              | Default-deny confinement with portable logical paths.                   |
-| Move one external file without silently breaking ÉLYSIA links                | Local stdio external move workflow                            | Inventory, durable plan, exact CAS repairs, receipt and rollback.       |
+| Move one external file without silently breaking ÉLYSIA links                | Local stdio on a copied or dedicated vault                    | Inventory, durable plan, exact hash repairs, receipt and rollback.      |
 | Full Obsidian behavior, commands, active file, plugin-backed Bases           | Optimike MCP in `live` or `hybrid` with Obsidian Desktop open | This is the only mode with Desktop/plugin-backed semantics.             |
 | Safe backend server over a synced vault                                      | Optimike MCP in `headless-readonly` first                     | No Desktop required and no write risk.                                  |
 | Bounded Markdown/frontmatter/tag/admin writes on a copied or dedicated vault | Optimike MCP in `headless-filesystem`                         | Path safety, dry-run defaults, and preconditions.                       |
@@ -76,9 +76,11 @@ For an ÉLYSIA-managed move:
 
 This transaction is local stdio only. It supports one regular file, an absent
 target in an existing parent, and a same-root/same-volume no-clobber move.
-Concurrent note edits are protected by SHA-256 and, in live mode, Local REST
-API `If-Match`. Do not route create, replace, upload, delete, sync, directory,
-cross-root or cross-volume operations through this workflow.
+Concurrent note edits are protected by an exact SHA-256 precondition in
+`headless-filesystem` on a copied or dedicated vault. Live Local REST apply
+fails closed because whole-note writes do not currently enforce `If-Match`.
+Do not route create, replace, upload, delete, sync, directory, cross-root or
+cross-volume operations through this workflow.
 
 Every direct HTTP external-root operation requires `external:read`. Remote HTTP
 remains pilot-only behind reviewed TLS proxy and network controls.

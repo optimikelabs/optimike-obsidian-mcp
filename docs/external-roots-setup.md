@@ -390,20 +390,27 @@ Then configure the local stdio process:
 ```text
 MCP_WRITE_MODE=full
 MCP_EXTERNAL_MOVE_ENABLED=true
+MCP_EXTERNAL_MOVE_PROFILE_ID=<stable-lowercase-vault-profile-id>
 MCP_EXTERNAL_MOVE_JOURNAL_PATH=<optional-absolute-local-sqlite-path>
 ```
 
-All three grants are required for apply and rollback: full write mode, the
-feature flag and the root `move` capability. Scan, plan and status do not move
-the file, but remain stdio-only because the proxy owns the local root and
+The profile ID is required when the live backend cannot prove a configured
+vault path. It is hashed into the backend/vault/root binding and must change
+when the selected vault changes. The journal filename is automatically
+namespaced by that binding.
+
+All three write grants are required for apply and rollback: full write mode,
+the feature flag and the root `move` capability. Scan, plan and status do not
+move the file, but remain stdio-only because the proxy owns the local root and
 journal.
 
 ### Use the transaction
 
-1. Call `external_references_scan` with `rootId`, `relativePath` and an optional
-   vault-relative `searchInPath`.
+1. Call `external_references_scan` with `rootId` and `relativePath`. The scan
+   inventories the whole governed vault.
 2. Call `external_move_plan` with `sourceRelativePath`,
-   `targetRelativePath`, `searchInPath` and a unique `idempotencyKey`.
+   `targetRelativePath` and a unique `idempotencyKey`. Planning always
+   inventories the whole governed vault; it cannot be narrowed to a subfolder.
 3. Inspect `external_move_status`; proceed only when `readyToApply` is true and
    `manualReview` is empty.
 4. Call `external_move_apply` with the returned `planId` and the same
@@ -418,11 +425,13 @@ absent. Apply revalidates the source size, modification time and SHA-256. It
 uses a no-clobber hard-link/unlink sequence and fails closed when the filesystem
 cannot prove the move.
 
-Each note repair is planned with an expected SHA-256. Live Obsidian writes use
-the Local REST API document version and Markdown Patch 2.x `If-Match`; a
-concurrent edit produces a conflict rather than an overwrite. The machine-local
-SQLite journal persists plan state and note preimages for compensation. Treat
-that journal as sensitive local data and never commit or share it.
+Each note repair is planned with an expected SHA-256. Apply and rollback are
+currently restricted to `headless-filesystem` on a copied or dedicated vault,
+where that hash is enforced by the filesystem writer. Local REST API 4.1.7
+returns an ETag but does not enforce `If-Match` on whole-note writes, so live
+apply fails closed before moving the external file. The machine-local SQLite
+journal persists plan state and note preimages for compensation. Treat that
+journal as sensitive local data and never commit or share it.
 
 Direct HTTP refuses scan, plan, status, apply and rollback. HTTP tickets remain
 read-only handoffs.

@@ -84,9 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The move verifies source size, mtime and SHA-256, requires an absent target
   under an existing real parent, and uses a no-clobber same-volume
   hard-link/unlink sequence.
-- Exact note repairs use SHA-256 preconditions and Local REST API Markdown Patch
-  2.x `If-Match` in live mode. Direct HTTP refuses scan, plan/status, apply and
-  rollback.
+- Exact note repairs use SHA-256 preconditions in `headless-filesystem` on a
+  copied or dedicated vault. Live apply fails closed because Local REST API
+  4.1.7 does not enforce `If-Match` on whole-note writes. Direct HTTP refuses
+  scan, plan/status, apply and rollback.
 - Marked every legacy MCP tool as read-only, mutating, maintenance, or destructive for approval-aware clients.
 - Moved MCP Inspector to development dependencies and updated `fast-uri` to a patched release, removing the high-severity production audit finding.
 

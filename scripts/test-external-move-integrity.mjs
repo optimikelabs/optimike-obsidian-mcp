@@ -83,6 +83,28 @@ function createRootService(
 class FakeVault {
   constructor(entries = {}) {
     this.notes = new Map(Object.entries(entries));
+    this.bindingFingerprint = "test-binding";
+    this.conditionalWritesSupported = true;
+  }
+
+  async getBindingIdentity() {
+    return {
+      schemaVersion: 1,
+      backendFingerprint: "test-backend",
+      vaultFingerprint: "test-vault",
+      rootConfigFingerprint: "test-roots",
+      bindingFingerprint: this.bindingFingerprint,
+      vaultIdentitySource: "explicit_profile",
+      verifiable: true,
+    };
+  }
+
+  async refreshInventory() {}
+
+  async assertConditionalWritesSupported() {
+    if (!this.conditionalWritesSupported) {
+      throw new Error("Conditional note writes are unavailable.");
+    }
   }
 
   async searchPaths(query, searchInPath = "") {
@@ -355,6 +377,156 @@ try {
   );
   assert.equal(await readFile(casSource, "utf8"), "CAS");
   assert.equal(await exists(casTarget), false);
+
+  // An unsupported vault writer is rejected before the external file moves.
+  const unsupportedSource = path.join(rootPath, "unsupported-writer.txt");
+  const unsupportedTarget = path.join(
+    archivePath,
+    "unsupported-writer.txt",
+  );
+  await writeFile(unsupportedSource, "unsupported writer", "utf8");
+  const unsupportedUri = pathToFileURL(unsupportedSource).href;
+  const unsupportedVault = new FakeVault({
+    "Efforts/Projets/Unsupported writer.md":
+      `[Unsupported](${unsupportedUri}) ` +
+      "`external-ref:pilot.move::unsupported-writer.txt`\n",
+  });
+  const unsupportedCoordinator = new ExternalMoveCoordinator(
+    service,
+    unsupportedVault,
+    new ExternalMoveJournal(":memory:"),
+  );
+  const unsupportedPlan = await unsupportedCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "unsupported-writer.txt",
+    targetRelativePath: "archive/unsupported-writer.txt",
+    idempotencyKey: "coordinator-unsupported-writer",
+  });
+  unsupportedVault.conditionalWritesSupported = false;
+  await assert.rejects(
+    () =>
+      unsupportedCoordinator.apply(
+        unsupportedPlan.planId,
+        "coordinator-unsupported-writer",
+      ),
+    /Conditional note writes are unavailable/u,
+  );
+  assert.equal(
+    await readFile(unsupportedSource, "utf8"),
+    "unsupported writer",
+  );
+  assert.equal(await exists(unsupportedTarget), false);
+
+  // Apply rescans the complete vault. A new canonical reference created after
+  // planning invalidates the inventory before the external file is moved.
+  const inventorySource = path.join(rootPath, "inventory-change.txt");
+  const inventoryTarget = path.join(archivePath, "inventory-change.txt");
+  await writeFile(inventorySource, "inventory", "utf8");
+  const inventoryUri = pathToFileURL(inventorySource).href;
+  const inventoryVault = new FakeVault({
+    "Efforts/Projets/Inventory one.md":
+      `[Inventory](${inventoryUri}) ` +
+      "`external-ref:pilot.move::inventory-change.txt`\n",
+  });
+  const inventoryCoordinator = new ExternalMoveCoordinator(
+    service,
+    inventoryVault,
+    new ExternalMoveJournal(":memory:"),
+  );
+  const inventoryPlan = await inventoryCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "inventory-change.txt",
+    targetRelativePath: "archive/inventory-change.txt",
+    idempotencyKey: "coordinator-inventory-change",
+  });
+  inventoryVault.notes.set(
+    "Efforts/Projets/Inventory two.md",
+    `[Inventory 2](${inventoryUri}) ` +
+      "`external-ref:pilot.move::inventory-change.txt`\n",
+  );
+  await expectExternalCode(
+    () =>
+      inventoryCoordinator.apply(
+        inventoryPlan.planId,
+        "coordinator-inventory-change",
+      ),
+    "precondition_failed",
+  );
+  assert.equal(await readFile(inventorySource, "utf8"), "inventory");
+  assert.equal(await exists(inventoryTarget), false);
+
+  // A plan is bound to one backend/vault/root profile and cannot be replayed
+  // after that binding changes.
+  const bindingSource = path.join(rootPath, "binding-change.txt");
+  const bindingTarget = path.join(archivePath, "binding-change.txt");
+  await writeFile(bindingSource, "binding", "utf8");
+  const bindingUri = pathToFileURL(bindingSource).href;
+  const bindingVault = new FakeVault({
+    "Efforts/Projets/Binding.md":
+      `[Binding](${bindingUri}) ` +
+      "`external-ref:pilot.move::binding-change.txt`\n",
+  });
+  const bindingCoordinator = new ExternalMoveCoordinator(
+    service,
+    bindingVault,
+    new ExternalMoveJournal(":memory:"),
+  );
+  const bindingPlan = await bindingCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "binding-change.txt",
+    targetRelativePath: "archive/binding-change.txt",
+    idempotencyKey: "coordinator-binding-change",
+  });
+  bindingVault.bindingFingerprint = "different-binding";
+  await expectExternalCode(
+    () =>
+      bindingCoordinator.apply(
+        bindingPlan.planId,
+        "coordinator-binding-change",
+      ),
+    "precondition_failed",
+  );
+  assert.equal(await readFile(bindingSource, "utf8"), "binding");
+  assert.equal(await exists(bindingTarget), false);
+
+  // A process crash after the file move is recoverable from the durable
+  // intermediate journal state through the ordinary rollback tool.
+  const recoverySource = path.join(rootPath, "recovery.txt");
+  const recoveryTarget = path.join(archivePath, "recovery.txt");
+  await writeFile(recoverySource, "recovery", "utf8");
+  const recoveryUri = pathToFileURL(recoverySource).href;
+  const recoveryNotePath = "Efforts/Projets/Recovery.md";
+  const recoveryNote =
+    `[Recovery](${recoveryUri}) ` + "`external-ref:pilot.move::recovery.txt`\n";
+  const recoveryVault = new FakeVault({ [recoveryNotePath]: recoveryNote });
+  const recoveryJournal = new ExternalMoveJournal(":memory:");
+  const recoveryCoordinator = new ExternalMoveCoordinator(
+    service,
+    recoveryVault,
+    recoveryJournal,
+  );
+  const recoveryPlan = await recoveryCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "recovery.txt",
+    targetRelativePath: "archive/recovery.txt",
+    idempotencyKey: "coordinator-recovery",
+  });
+  const recoveryStored = recoveryJournal.get(recoveryPlan.planId);
+  await service.applyMove(recoveryStored.snapshot);
+  recoveryJournal.transition(recoveryPlan.planId, ["planned"], "applying_file");
+  recoveryJournal.transition(
+    recoveryPlan.planId,
+    ["applying_file"],
+    "file_moved",
+  );
+  const recovered = await recoveryCoordinator.rollback(
+    recoveryPlan.planId,
+    "coordinator-recovery",
+  );
+  assert.equal(recovered.status, "rolled_back");
+  assert.equal(await readFile(recoverySource, "utf8"), "recovery");
+  assert.equal(await exists(recoveryTarget), false);
+  assert.equal(recoveryVault.notes.get(recoveryNotePath), recoveryNote);
 
   // Historical and legacy references are inventoried, never auto-repaired.
   const manualSource = path.join(rootPath, "manual.txt");

@@ -91,8 +91,9 @@ by default.
   hard-link/unlink sequence fails closed on unsupported or cross-volume
   filesystems.
 - Any ambiguous, historical, legacy or unsupported reference blocks apply.
-  Live note repairs use Local REST API `If-Match`; headless repairs use exact
-  hash preconditions.
+  Exact-hash repairs are limited to `headless-filesystem` on a copied or
+  dedicated vault. Live apply fails closed because whole-note Local REST writes
+  do not enforce `If-Match`.
 - `MCP_EXTERNAL_MOVE_JOURNAL_PATH` contains durable plan state and note
   preimages. Keep it machine-local, access-restricted and outside repositories,
   synchronized folders and public diagnostics.

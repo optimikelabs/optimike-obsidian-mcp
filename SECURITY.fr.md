@@ -93,8 +93,9 @@ par défaut.
   hard-link/unlink sans écrasement échoue fermée sur un filesystem non supporté
   ou cross-volume.
 - Toute référence ambiguë, historique, legacy ou non supportée bloque l’apply.
-  Les réparations live emploient `If-Match` de la Local REST API ; les
-  réparations headless emploient une précondition de hash exacte.
+  Les réparations par hash exact sont limitées à `headless-filesystem` sur une
+  copie ou un coffre dédié. L’apply live échoue fermé, car les remplacements de
+  note complète via Local REST n’imposent pas `If-Match`.
 - `MCP_EXTERNAL_MOVE_JOURNAL_PATH` contient l’état durable des plans et les
   préimages de notes. Le conserver local à la machine, à accès restreint, hors
   dépôts, dossiers synchronisés et diagnostics publics.

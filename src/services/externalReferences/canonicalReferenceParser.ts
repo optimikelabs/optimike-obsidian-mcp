@@ -18,7 +18,7 @@ const TOKEN_PREFIX = "external-ref:";
 const ENCODED_SEPARATOR_PATTERN = /%(?:2f|5c)/iu;
 const PERCENT_ESCAPE_PATTERN = /%(?![0-9a-f]{2})/iu;
 const EXCLUDED_HEADING_PATTERN =
-  /^(?:historique|history|exemples?|examples?|changelog|journal des modifications|release notes?)\b/iu;
+  /^(?:historique|history|archives?|exemples?|examples?|changelog|journal des modifications|release notes?)\b/iu;
 
 export type ExternalReferenceClassification =
   | "reparable"

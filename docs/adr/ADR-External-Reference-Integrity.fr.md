@@ -89,9 +89,11 @@ retire la source. Un filesystem incapable de fournir ces garanties échoue ferm�
 
 Chaque réparation planifiée conserve le contenu exact avant/après et le SHA-256
 attendu de la note. L’apply relit toutes les notes avant de déplacer le fichier.
-En mode Obsidian live, il récupère la version Local REST API et utilise Markdown
-Patch 2.x avec `If-Match` ; une édition concurrente produit un conflit au lieu
-d’être écrasée. En headless, l’écriture utilise la précondition de hash exacte.
+L’apply et le rollback sont limités à `headless-filesystem` sur une copie ou un
+coffre dédié, où la précondition de hash exacte est imposée. Local REST API
+4.1.7 expose un ETag mais n’impose pas `If-Match` lors d’un remplacement de note
+complète ; l’apply live échoue donc fermé avant le déplacement du fichier
+externe.
 
 Si une réparation échoue après le move, le coordinateur compense les notes déjà
 modifiées et replace le fichier quand son état vérifié le permet encore.

@@ -112,7 +112,7 @@ const excluded = await readFile(
 const excludedResult = scanCanonicalExternalReferences(excluded);
 assert.equal(excludedResult.reparable.length, 1);
 assert.equal(excludedResult.manualReview.length, 0);
-assert.equal(excludedResult.ignored.length, 4);
+assert.equal(excludedResult.ignored.length, 5);
 assert.equal(
   excludedResult.occurrences.some((occurrence) =>
     excluded

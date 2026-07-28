@@ -43,21 +43,13 @@ export const ExternalHandoffSchema = ExternalRootPathSchema.extend({
   includeHash: z.boolean().default(true),
 });
 
-export const ExternalReferencesScanSchema = ExternalRootPathSchema.extend({
-  searchInPath: z
-    .string()
-    .default("")
-    .describe(
-      "Optional vault-relative directory in which to inventory references.",
-    ),
-});
+export const ExternalReferencesScanSchema = ExternalRootPathSchema;
 
 export const ExternalMovePlanSchema = z
   .object({
     rootId: z.string().min(1),
     sourceRelativePath: z.string().min(1),
     targetRelativePath: z.string().min(1),
-    searchInPath: z.string().default(""),
     idempotencyKey: z.string().min(8).max(200),
   })
   .strict();

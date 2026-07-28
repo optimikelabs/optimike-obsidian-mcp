@@ -85,10 +85,11 @@ the source. Filesystems that cannot provide these guarantees fail closed.
 ## Vault repair and concurrency
 
 Each planned note repair stores its exact before/after content and expected
-SHA-256. Apply re-reads every note before moving the file. Live Obsidian writes
-obtain the Local REST API document version and use Markdown Patch 2.x with
-`If-Match`; a concurrent edit returns a conflict instead of being overwritten.
-Headless writes use the existing exact-hash precondition.
+SHA-256. Apply re-reads every note before moving the file. Apply and rollback
+are restricted to `headless-filesystem` on a copied or dedicated vault, where
+the existing exact-hash precondition is enforced. Local REST API 4.1.7 exposes
+an ETag but does not enforce `If-Match` on whole-note writes; live apply
+therefore fails closed before the external file is moved.
 
 If a repair fails after the file move, the coordinator compensates completed
 note repairs and rolls the file back when the verified state still permits it.

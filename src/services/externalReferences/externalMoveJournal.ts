@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ExternalMoveSnapshot } from "../externalRootsService.js";
+import type { ExternalMoveBindingIdentity } from "./backendVaultAdapter.js";
 
 export type ExternalNoteRepair = {
   filePath: string;
@@ -13,10 +14,19 @@ export type ExternalNoteRepair = {
 
 export type ExternalMovePlanStatus =
   | "planned"
-  | "applying"
+  | "applying_file"
+  | "file_moved"
+  | "applying_repairs"
   | "applied"
-  | "rolling_back"
+  | "rolling_back_repairs"
+  | "rolling_back_file"
   | "rolled_back"
+  | "failed_compensated"
+  | "recovery_required"
+  // Legacy states are retained so an existing private journal can be
+  // recovered instead of becoming unreadable after an upgrade.
+  | "applying"
+  | "rolling_back"
   | "failed";
 
 export type ExternalMovePlan = {
@@ -26,14 +36,26 @@ export type ExternalMovePlan = {
   updatedAt: string;
   status: ExternalMovePlanStatus;
   snapshot: ExternalMoveSnapshot;
+  bindingIdentity: ExternalMoveBindingIdentity;
   sourceToken: string;
   targetToken: string;
   oldFileUri: string;
   newFileUri: string;
   repairs: ExternalNoteRepair[];
   manualReview: Array<{ filePath: string; reason: string }>;
+  inventoryDigest: string;
+  appliedRepairPaths: string[];
+  restoredRepairPaths: string[];
+  recoveryErrors: string[];
   failure?: string;
 };
+
+type ExternalMovePlanPatch = Partial<
+  Pick<
+    ExternalMovePlan,
+    "failure" | "appliedRepairPaths" | "restoredRepairPaths" | "recoveryErrors"
+  >
+>;
 
 export class ExternalMoveJournal {
   private readonly db: DatabaseSync;
@@ -79,6 +101,9 @@ export class ExternalMoveJournal {
     const now = new Date().toISOString();
     const plan: ExternalMovePlan = {
       ...input,
+      appliedRepairPaths: [...input.appliedRepairPaths],
+      restoredRepairPaths: [...input.restoredRepairPaths],
+      recoveryErrors: [...input.recoveryErrors],
       planId: randomUUID(),
       createdAt: now,
       updatedAt: now,
@@ -121,39 +146,72 @@ export class ExternalMoveJournal {
     planId: string,
     status: ExternalMovePlanStatus,
     failure?: string,
+    patch: ExternalMovePlanPatch = {},
   ): ExternalMovePlan {
     const current = this.get(planId);
     if (!current) throw new Error("Unknown external move plan.");
-    const updated: ExternalMovePlan = {
-      ...current,
-      status,
-      updatedAt: new Date().toISOString(),
+    return this.persist(current, [current.status], status, {
+      ...patch,
       failure,
-    };
-    this.db
-      .prepare(
-        `UPDATE external_move_plans
-         SET status = ?, payload_json = ?, updated_at = ?
-         WHERE plan_id = ?`,
-      )
-      .run(status, JSON.stringify(updated), updated.updatedAt, planId);
-    return updated;
+    });
   }
 
   transition(
     planId: string,
     expectedStatuses: ExternalMovePlanStatus[],
     nextStatus: ExternalMovePlanStatus,
+    patch: ExternalMovePlanPatch = {},
   ): ExternalMovePlan {
     const current = this.get(planId);
     if (!current || !expectedStatuses.includes(current.status)) {
       throw new Error("External move plan state changed concurrently.");
     }
+    return this.persist(current, expectedStatuses, nextStatus, {
+      recoveryErrors: [],
+      failure: undefined,
+      ...patch,
+    });
+  }
+
+  recordAppliedRepair(planId: string, filePath: string): ExternalMovePlan {
+    const current = this.get(planId);
+    if (!current) throw new Error("Unknown external move plan.");
+    const appliedRepairPaths = [
+      ...new Set([...(current.appliedRepairPaths ?? []), filePath]),
+    ].sort((left, right) => left.localeCompare(right));
+    return this.persist(current, ["applying_repairs"], "applying_repairs", {
+      appliedRepairPaths,
+    });
+  }
+
+  recordRestoredRepair(planId: string, filePath: string): ExternalMovePlan {
+    const current = this.get(planId);
+    if (!current) throw new Error("Unknown external move plan.");
+    const restoredRepairPaths = [
+      ...new Set([...(current.restoredRepairPaths ?? []), filePath]),
+    ].sort((left, right) => left.localeCompare(right));
+    return this.persist(
+      current,
+      ["rolling_back_repairs"],
+      "rolling_back_repairs",
+      { restoredRepairPaths },
+    );
+  }
+
+  private persist(
+    current: ExternalMovePlan,
+    expectedStatuses: ExternalMovePlanStatus[],
+    nextStatus: ExternalMovePlanStatus,
+    patch: ExternalMovePlanPatch,
+  ): ExternalMovePlan {
     const updated: ExternalMovePlan = {
       ...current,
+      appliedRepairPaths: current.appliedRepairPaths ?? [],
+      restoredRepairPaths: current.restoredRepairPaths ?? [],
+      recoveryErrors: current.recoveryErrors ?? [],
+      ...patch,
       status: nextStatus,
       updatedAt: new Date().toISOString(),
-      failure: undefined,
     };
     const placeholders = expectedStatuses.map(() => "?").join(", ");
     const result = this.db
@@ -166,7 +224,7 @@ export class ExternalMoveJournal {
         nextStatus,
         JSON.stringify(updated),
         updated.updatedAt,
-        planId,
+        current.planId,
         ...expectedStatuses,
       );
     if (Number(result.changes) !== 1) {

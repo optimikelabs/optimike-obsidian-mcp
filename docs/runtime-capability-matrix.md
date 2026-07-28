@@ -117,5 +117,7 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
   `external-ref:<rootId>::<percent-encoded-relative-path>` token. Any ambiguous,
   historical or unsupported occurrence blocks apply.
 - External move uses a no-clobber same-volume hard-link/unlink sequence and
-  conditional note writes. Live writes use Local REST API `If-Match`.
+  exact-hash note writes in `headless-filesystem` on a copied or dedicated
+  vault. Live apply fails closed until Local REST provides atomic conditional
+  whole-note writes.
 - Headless write validation should create a new draft file in a sandbox folder. It should not edit existing notes in a real vault.

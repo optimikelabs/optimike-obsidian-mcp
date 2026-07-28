@@ -401,20 +401,28 @@ Puis configurer le processus stdio local :
 ```text
 MCP_WRITE_MODE=full
 MCP_EXTERNAL_MOVE_ENABLED=true
+MCP_EXTERNAL_MOVE_PROFILE_ID=<identifiant-stable-du-profil-coffre>
 MCP_EXTERNAL_MOVE_JOURNAL_PATH=<chemin-sqlite-local-absolu-optionnel>
 ```
 
-Les trois autorisations sont nécessaires pour l’apply et le rollback : mode
-write complet, feature flag et capacité `move` de la racine. Scan, plan et
+L’identifiant de profil est requis lorsque le backend live ne peut pas prouver
+un chemin de coffre configuré. Il est hashé dans le binding
+backend/coffre/racines et doit changer si le coffre sélectionné change. Le nom
+du journal est automatiquement profilé avec ce binding.
+
+Les trois autorisations write sont nécessaires pour l’apply et le rollback :
+mode write complet, feature flag et capacité `move` de la racine. Scan, plan et
 status ne déplacent pas le fichier, mais restent stdio-only car le proxy possède
 la racine locale et le journal.
 
 ### Exécuter la transaction
 
-1. Appeler `external_references_scan` avec `rootId`, `relativePath` et un
-   `searchInPath` relatif au coffre, optionnel.
+1. Appeler `external_references_scan` avec `rootId` et `relativePath`. Le scan
+   inventorie tout le coffre gouverné.
 2. Appeler `external_move_plan` avec `sourceRelativePath`,
-   `targetRelativePath`, `searchInPath` et une `idempotencyKey` unique.
+   `targetRelativePath` et une `idempotencyKey` unique. Le plan inventorie
+   toujours tout le coffre gouverné ; il ne peut pas être limité à un
+   sous-dossier.
 3. Examiner `external_move_status` ; ne poursuivre que si `readyToApply` vaut
    true et `manualReview` est vide.
 4. Appeler `external_move_apply` avec le `planId` retourné et la même
@@ -429,11 +437,13 @@ doit être absente. L’apply revérifie taille, date de modification et SHA-256
 la source. Il emploie une séquence hard-link/unlink sans écrasement et échoue
 fermé si le filesystem ne peut pas prouver le move.
 
-Chaque réparation de note est planifiée avec un SHA-256 attendu. En Obsidian
-live, l’écriture utilise la version Local REST API et `If-Match` de Markdown
-Patch 2.x ; une édition concurrente provoque un conflit, jamais un écrasement.
-Le journal SQLite local persiste l’état du plan et les préimages des notes pour
-la compensation. Le traiter comme une donnée locale sensible : ne jamais le
+Chaque réparation de note est planifiée avec un SHA-256 attendu. L’apply et le
+rollback sont actuellement limités à `headless-filesystem` sur une copie ou un
+coffre dédié, où ce hash est imposé par l’écriture filesystem. Local REST API
+4.1.7 renvoie un ETag mais n’impose pas `If-Match` lors d’un remplacement de
+note complète : l’apply live échoue donc fermé avant de déplacer le fichier
+externe. Le journal SQLite local persiste l’état du plan et les préimages des
+notes pour la compensation. Le traiter comme une donnée locale sensible : ne jamais le
 committer ni le partager.
 
 Le HTTP direct refuse scan, plan, status, apply et rollback. Les tickets HTTP

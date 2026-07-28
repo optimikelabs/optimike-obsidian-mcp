@@ -24,7 +24,6 @@ const context = {
   timestamp: new Date(0).toISOString(),
   operation: "testSearchReplaceCas",
 };
-
 const filePath = "Projet/Pilote.md";
 const originalContent = "# Pilote\n\nLien ancien\n";
 const modifiedContent = "# Pilote\n\nLien nouveau\n";
@@ -42,26 +41,9 @@ function params(overrides = {}) {
   });
 }
 
-function createService({
-  documentVersions = ["version-1", "version-1"],
-  markdownContent = originalContent,
-} = {}) {
+function createService() {
   const calls = [];
-  let mapIndex = 0;
-
   const service = {
-    async getFileDocumentMap(requestedPath) {
-      calls.push({ method: "getFileDocumentMap", path: requestedPath });
-      const version =
-        documentVersions[Math.min(mapIndex, documentVersions.length - 1)];
-      mapIndex += 1;
-      return {
-        headings: {},
-        blocks: [],
-        frontmatterFields: [],
-        version,
-      };
-    },
     async getFileContent(requestedPath, format) {
       calls.push({ method: "getFileContent", path: requestedPath, format });
       if (format === "json") {
@@ -73,15 +55,7 @@ function createService({
           tags: [],
         };
       }
-      return markdownContent;
-    },
-    async replaceFileContentIfMatch(requestedPath, content, expectedVersion) {
-      calls.push({
-        method: "replaceFileContentIfMatch",
-        path: requestedPath,
-        content,
-        expectedVersion,
-      });
+      return originalContent;
     },
     async updateFileContent(requestedPath, content) {
       calls.push({
@@ -92,89 +66,26 @@ function createService({
     },
     async getActiveFile(format) {
       calls.push({ method: "getActiveFile", format });
-      return markdownContent;
+      return originalContent;
     },
   };
-
   return { service, calls };
-}
-
-function writeCalls(calls) {
-  return calls.filter((call) =>
-    ["replaceFileContentIfMatch", "updateFileContent"].includes(call.method),
-  );
 }
 
 try {
   {
     const { service, calls } = createService();
-    const result = await processObsidianSearchReplace(
-      params(),
-      context,
-      service,
-      undefined,
-    );
-
-    assert.equal(result.success, true);
-    assert.equal(result.totalReplacementsMade, 1);
-    assert.deepEqual(
-      calls.slice(0, 4).map((call) => call.method),
-      [
-        "getFileDocumentMap",
-        "getFileContent",
-        "getFileDocumentMap",
-        "replaceFileContentIfMatch",
-      ],
-    );
-    assert.deepEqual(writeCalls(calls), [
-      {
-        method: "replaceFileContentIfMatch",
-        path: filePath,
-        content: modifiedContent,
-        expectedVersion: "version-1",
-      },
-    ]);
-  }
-
-  {
-    const { service, calls } = createService();
-    await assert.rejects(
-      () =>
-        processObsidianSearchReplace(
-          params({ expectedSha256: "0".repeat(64) }),
-          context,
-          service,
-          undefined,
-        ),
-      (error) =>
-        error instanceof McpError &&
-        error.code === BaseErrorCode.CONFLICT &&
-        error.message === "The note content does not match expectedSha256.",
-    );
-    assert.deepEqual(
-      calls.map((call) => call.method),
-      ["getFileDocumentMap", "getFileContent"],
-    );
-    assert.deepEqual(writeCalls(calls), []);
-  }
-
-  {
-    const { service, calls } = createService({
-      documentVersions: ["version-1", "version-2"],
-    });
     await assert.rejects(
       () => processObsidianSearchReplace(params(), context, service, undefined),
       (error) =>
         error instanceof McpError &&
-        error.code === BaseErrorCode.CONFLICT &&
-        error.message ===
-          "The note changed while the conditional replacement was being prepared.",
+        error.code === BaseErrorCode.SERVICE_UNAVAILABLE &&
+        error.message.includes("Atomic expectedSha256 writes are unavailable"),
     );
     assert.deepEqual(
       calls.map((call) => call.method),
-      ["getFileDocumentMap", "getFileContent", "getFileDocumentMap"],
+      ["getFileContent"],
     );
-    assert.deepEqual(writeCalls(calls), []);
   }
 
   {
@@ -200,7 +111,6 @@ try {
       calls.map((call) => call.method),
       ["getActiveFile"],
     );
-    assert.deepEqual(writeCalls(calls), []);
   }
 
   {
@@ -214,20 +124,21 @@ try {
 
     assert.equal(result.success, true);
     assert.equal(result.totalReplacementsMade, 1);
-    assert.equal(
-      calls.some((call) => call.method === "getFileDocumentMap"),
-      false,
+    assert.deepEqual(
+      calls.filter((call) => call.method === "updateFileContent"),
+      [
+        {
+          method: "updateFileContent",
+          path: filePath,
+          content: modifiedContent,
+        },
+      ],
     );
-    assert.deepEqual(writeCalls(calls), [
-      {
-        method: "updateFileContent",
-        path: filePath,
-        content: modifiedContent,
-      },
-    ]);
   }
 
-  console.log("Obsidian search/replace expectedSha256 tests passed.");
+  console.log(
+    "Obsidian search/replace live CAS refusal and normal write tests passed.",
+  );
 } finally {
   await rm(logsDir, { recursive: true, force: true });
 }
