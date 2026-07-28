@@ -49,16 +49,21 @@ function initializeBody(id, name) {
   };
 }
 
-async function initialize(baseUrl, token, id) {
+async function mcpPost(baseUrl, token, body, sessionId) {
   return fetch(new URL("/mcp", baseUrl), {
     method: "POST",
     headers: {
       Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
+      ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
     },
-    body: JSON.stringify(initializeBody(id, `session-test-${id}`)),
+    body: JSON.stringify(body),
   });
+}
+
+async function initialize(baseUrl, token, id) {
+  return mcpPost(baseUrl, token, initializeBody(id, `session-test-${id}`));
 }
 
 async function waitForHealth(baseUrl, child) {
@@ -83,7 +88,11 @@ async function waitForHealth(baseUrl, child) {
 async function startBackend(sandbox, name, overrides) {
   const port = await unusedPort();
   const vaultPath = path.join(sandbox, `${name}-vault`);
-  const logDir = path.join(process.cwd(), ".tmp", `http-session-${name}-${port}`);
+  const logDir = path.join(
+    process.cwd(),
+    ".tmp",
+    `http-session-${name}-${port}`,
+  );
   await mkdir(path.join(vaultPath, ".obsidian"), { recursive: true });
   await mkdir(logDir, { recursive: true });
   await writeFile(path.join(vaultPath, "Smoke.md"), "# Smoke\n", "utf8");
@@ -164,9 +173,16 @@ async function testConcurrentReservations(sandbox) {
       10,
       `expected every excess initialization to receive 503, got ${statuses.join(",")}`,
     );
-    for (const response of responses.filter((candidate) => candidate.status === 503)) {
+    for (const [index, response] of responses.entries()) {
+      if (response.status !== 503) continue;
       assert.equal(response.headers.get("retry-after"), "1");
       assert.equal(response.headers.get("cache-control"), "no-store");
+      const payload = await response.json();
+      assert.equal(
+        payload.id,
+        index + 1,
+        "capacity errors must preserve the initialize request id",
+      );
     }
   } finally {
     await stopBackend(instance);
@@ -230,6 +246,56 @@ async function testAbsoluteExpiry(sandbox) {
   }
 }
 
+async function testActiveStreamSurvivesIdleCleanup(sandbox) {
+  const instance = await startBackend(sandbox, "active-stream", {
+    MCP_HTTP_MAX_SESSIONS: "1",
+    MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "80",
+    MCP_HTTP_SESSION_MAX_LIFETIME_MS: "5000",
+  });
+  const token = await signToken("stream-owner");
+  const streamAbort = new AbortController();
+  let streamResponse;
+  try {
+    const initialized = await initialize(instance.baseUrl, token, 40);
+    assert.equal(initialized.status, 200);
+    const sessionId = initialized.headers.get("mcp-session-id");
+    assert.ok(sessionId);
+
+    streamResponse = await Promise.race([
+      fetch(new URL("/mcp", instance.baseUrl), {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${token}`,
+          "Mcp-Session-Id": sessionId,
+        },
+        signal: streamAbort.signal,
+      }),
+      sleep(3000).then(() => {
+        throw new Error("timed out opening the MCP event stream");
+      }),
+    ]);
+    assert.equal(streamResponse.status, 200);
+
+    await sleep(180);
+    const ping = await mcpPost(
+      instance.baseUrl,
+      token,
+      { jsonrpc: "2.0", id: 41, method: "ping" },
+      sessionId,
+    );
+    assert.equal(
+      ping.status,
+      200,
+      "idle cleanup must not close a session with an active stream",
+    );
+  } finally {
+    streamAbort.abort();
+    await streamResponse?.body?.cancel().catch(() => undefined);
+    await stopBackend(instance);
+  }
+}
+
 const sandbox = await mkdtemp(
   path.join(os.tmpdir(), "optimike-http-session-bounds-"),
 );
@@ -237,8 +303,9 @@ try {
   await testConcurrentReservations(sandbox);
   await testIdleExpiry(sandbox);
   await testAbsoluteExpiry(sandbox);
+  await testActiveStreamSurvivesIdleCleanup(sandbox);
   console.log(
-    "PASS: concurrent initialization reservations preserve the configured session maximum, excess requests receive deterministic 503 responses, and abandoned sessions expire by idle and absolute lifetime without a backend restart",
+    "PASS: concurrent initialization reservations preserve the session maximum, capacity errors preserve JSON-RPC ids, abandoned sessions expire by idle and absolute lifetime, and active streaming sessions survive idle cleanup",
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });
