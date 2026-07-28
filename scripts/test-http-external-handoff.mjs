@@ -8,7 +8,6 @@ import {
   access,
   mkdir,
   mkdtemp,
-  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -95,19 +94,17 @@ async function testBrokerLifecycle(sandbox) {
     subject: "subject-b",
   };
   const content = Buffer.from("verified broker payload");
-  const stagedPath = path.join(sandbox, "broker-staged.bin");
+  const stagedPath = path.join(sandbox, "service-owned-staged.bin");
   await writeFile(stagedPath, content);
-  const descriptor = await broker.issue(
-    {
-      rootId: "pilot.docs",
-      path: "docs/payload.bin",
-      localPath: stagedPath,
-      size: content.length,
-      modifiedAt: new Date(now).toISOString(),
-      sha256: sha256(content),
-    },
-    auth,
-  );
+  const prepared = {
+    rootId: "pilot.docs",
+    path: "docs/payload.bin",
+    localPath: stagedPath,
+    size: content.length,
+    modifiedAt: new Date(now).toISOString(),
+    sha256: sha256(content),
+  };
+  const descriptor = await broker.issue(prepared, auth);
   assert.equal(descriptor.delivery, "http_ticket");
   assert.equal(descriptor.endpoint, "/external-handoff");
   assert.equal(descriptor.ticketHeader, "X-External-Handoff-Ticket");
@@ -120,13 +117,19 @@ async function testBrokerLifecycle(sandbox) {
   const delivered = await broker.consume(descriptor.ticket, auth);
   assert.deepEqual(delivered.buffer, content);
   assert.equal(delivered.sha256, sha256(content));
-  await assert.rejects(() => access(stagedPath));
+  await access(stagedPath);
   await assert.rejects(
     () => broker.consume(descriptor.ticket, auth),
     /invalid or unavailable/u,
   );
 
-  const expiringPath = path.join(sandbox, "broker-expiring.bin");
+  // The broker must not delete the ExternalRootsService-owned copy. It may be
+  // reused by a later handoff until the service's own bounded cache expires.
+  const repeated = await broker.issue(prepared, auth);
+  assert.deepEqual((await broker.consume(repeated.ticket, auth)).buffer, content);
+  await access(stagedPath);
+
+  const expiringPath = path.join(sandbox, "service-owned-expiring.bin");
   await writeFile(expiringPath, content);
   const expiring = await broker.issue(
     {
@@ -144,7 +147,7 @@ async function testBrokerLifecycle(sandbox) {
     () => broker.consume(expiring.ticket, auth),
     /invalid or unavailable/u,
   );
-  await assert.rejects(() => access(expiringPath));
+  await access(expiringPath);
   await broker.dispose();
 }
 
@@ -247,6 +250,7 @@ try {
   assert.equal(status.localHandoffAllowed, false);
   assert.deepEqual(status.handoffModes, ["http_ticket"]);
   assert.equal(status.httpHandoff.available, true);
+  assert.equal(status.httpHandoff.storage, "bounded_memory");
   assert.equal(JSON.stringify(status).includes(externalPath), false);
 
   const handoff = jsonOf(
@@ -284,7 +288,10 @@ try {
   assert.equal(downloaded.status, 200);
   assert.equal(downloaded.headers.get("cache-control"), "no-store, max-age=0");
   assert.equal(downloaded.headers.get("x-artifact-sha256"), sha256(payload));
-  assert.equal(JSON.stringify([...downloaded.headers]).includes(externalPath), false);
+  assert.equal(
+    JSON.stringify([...downloaded.headers]).includes(externalPath),
+    false,
+  );
   assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), payload);
 
   const replay = await fetch(downloadUrl, {
