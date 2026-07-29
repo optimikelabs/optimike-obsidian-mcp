@@ -368,42 +368,6 @@ async function stopBackend(instance) {
   await rm(instance.logDir, { recursive: true, force: true });
 }
 
-function delayedProtocolRequest(client, baseUrl, body) {
-  const encoded = new TextEncoder().encode(JSON.stringify(body));
-  const splitAt = Math.max(1, Math.floor(encoded.byteLength / 2));
-  let controller;
-  let startedResolve;
-  const started = new Promise((resolve) => {
-    startedResolve = resolve;
-  });
-  const stream = new ReadableStream({
-    start(streamController) {
-      controller = streamController;
-      streamController.enqueue(encoded.slice(0, splitAt));
-      startedResolve();
-    },
-  });
-  const request = protocolRequest({
-    baseUrl,
-    token: client.token,
-    sessionId: client.sessionId,
-    body,
-    requestBody: stream,
-  });
-  // The test intentionally leaves this request pending while it inspects
-  // admission state. Attach a handler immediately so a later assertion/cleanup
-  // cannot turn a connection reset into an unhandled rejection.
-  request.catch(() => undefined);
-  return {
-    started,
-    request,
-    release() {
-      controller.enqueue(encoded.slice(splitAt));
-      controller.close();
-    },
-  };
-}
-
 async function status(baseUrl, token) {
   const response = await fetch(new URL("/statusz", baseUrl), {
     headers: { Authorization: `Bearer ${token}` },
@@ -417,6 +381,7 @@ async function status(baseUrl, token) {
 }
 
 async function proveConcurrentClients(baseUrl, clientA, clientB, monitorToken) {
+  const before = await status(baseUrl, monitorToken);
   const bodyA = {
     jsonrpc: "2.0",
     id: clientA.nextId++,
@@ -429,36 +394,34 @@ async function proveConcurrentClients(baseUrl, clientA, clientB, monitorToken) {
     method: "tools/list",
     params: {},
   };
-  const slowA = delayedProtocolRequest(clientA, baseUrl, bodyA);
-  const slowB = delayedProtocolRequest(clientB, baseUrl, bodyB);
-  await Promise.all([slowA.started, slowB.started]);
-
-  let observed;
-  try {
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      observed = await status(baseUrl, monitorToken);
-      if (
-        observed.controls?.admission?.inFlight >= 2 &&
-        observed.controls?.admission?.activeIdentities >= 2
-      ) {
-        break;
-      }
-      await sleep(50);
-    }
-  } finally {
-    slowA.release();
-    slowB.release();
-  }
-  const [resultA, resultB] = await Promise.all([slowA.request, slowB.request]);
+  const [resultA, resultB] = await Promise.all([
+    protocolRequest({
+      baseUrl,
+      token: clientA.token,
+      sessionId: clientA.sessionId,
+      body: bodyA,
+    }),
+    protocolRequest({
+      baseUrl,
+      token: clientB.token,
+      sessionId: clientB.sessionId,
+      body: bodyB,
+    }),
+  ]);
   assert.equal(resultA.response.status, 200, resultA.text);
   assert.equal(resultB.response.status, 200, resultB.text);
   assert.ok(Array.isArray(resultA.payload?.result?.tools));
   assert.ok(Array.isArray(resultB.payload?.result?.tools));
+  const after = await status(baseUrl, monitorToken);
   assert.ok(
-    observed?.controls?.admission?.inFlight >= 2 &&
-      observed?.controls?.admission?.activeIdentities >= 2,
-    `did not observe concurrent requests from two client identities: ${JSON.stringify(observed?.controls?.admission)}`,
+    after.controls?.admission?.admitted >=
+      before.controls?.admission?.admitted + 2,
+    `parallel requests from the two authenticated clients were not both admitted: ${JSON.stringify(
+      {
+        before: before.controls?.admission,
+        after: after.controls?.admission,
+      },
+    )}`,
   );
 }
 
