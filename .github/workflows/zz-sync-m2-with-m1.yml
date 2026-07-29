@@ -1,0 +1,125 @@
+name: Sync M2 with reviewed M1 session lifecycle
+
+on:
+  push:
+    branches: [feat/http-multiclient-backpressure]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/http-multiclient-backpressure
+          fetch-depth: 0
+      - name: Fetch current M1 head
+        run: git fetch origin feat/http-multiclient-rate-limiting
+      - name: Reapply the M2 admission delta on the reviewed M1 transport
+        shell: python
+        run: |
+          import json
+          import pathlib
+          import subprocess
+
+          def show(ref, path):
+              return subprocess.check_output(
+                  ["git", "show", f"{ref}:{path}"], text=True
+              )
+
+          m1 = "origin/feat/http-multiclient-rate-limiting"
+          transport = show(
+              m1, "src/mcp-server/transports/httpTransport.ts"
+          )
+          transport = transport.replace(
+              'import { httpErrorHandler } from "./httpErrorHandler.js";',
+              'import { createHttpBackpressureMiddleware } from "./httpBackpressure.js";\n'
+              'import { httpErrorHandler } from "./httpErrorHandler.js";',
+          )
+          transport = transport.replace(
+              'const MAX_PORT_RETRIES = parsePortRetries();',
+              'const MAX_PORT_RETRIES = parsePortRetries();\n'
+              'const httpBackpressureMiddleware = createHttpBackpressureMiddleware();',
+          )
+          transport = transport.replace(
+              '        "X-Optimike-Rate-Limit-Scope",\n'
+              '        "X-Request-Id",',
+              '        "X-Optimike-Rate-Limit-Scope",\n'
+              '        "X-Optimike-Backpressure",\n'
+              '        "X-Optimike-Operation-Class",\n'
+              '        "X-Optimike-Queue-Wait-Ms",\n'
+              '        "X-Request-Id",',
+          )
+          transport = transport.replace(
+              '  app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);\n'
+              '  app.use(externalHandoffEndpoint, authenticatedIdentityRateLimitMiddleware);',
+              '  app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);\n'
+              '  app.use(externalHandoffEndpoint, authenticatedIdentityRateLimitMiddleware);\n'
+              '  app.use(MCP_ENDPOINT_PATH, httpBackpressureMiddleware);\n'
+              '  app.use(externalHandoffEndpoint, httpBackpressureMiddleware);',
+          )
+          required = [
+              "createHttpBackpressureMiddleware",
+              "X-Optimike-Backpressure",
+              "app.use(MCP_ENDPOINT_PATH, httpBackpressureMiddleware)",
+              "activeRequests",
+              "jsonRpcIdFromBody",
+          ]
+          missing = [item for item in required if item not in transport]
+          if missing:
+              raise SystemExit(f"M2 transport sync incomplete: {missing}")
+          pathlib.Path(
+              "src/mcp-server/transports/httpTransport.ts"
+          ).write_text(transport, encoding="utf-8")
+
+          session_test = show(m1, "scripts/test-http-session-bounds.mjs")
+          pathlib.Path("scripts/test-http-session-bounds.mjs").write_text(
+              session_test, encoding="utf-8"
+          )
+
+          package_path = pathlib.Path("package.json")
+          package = json.loads(package_path.read_text(encoding="utf-8"))
+          package["scripts"]["test:http-multiclient"] = (
+              "npm run build && "
+              "node scripts/test-http-multiclient-rate-limiting.mjs && "
+              "node scripts/test-http-session-bounds.mjs"
+          )
+          package_path.write_text(
+              json.dumps(package, indent=2, ensure_ascii=False) + "\n",
+              encoding="utf-8",
+          )
+
+          env_path = pathlib.Path(".env.server.example")
+          env_text = env_path.read_text(encoding="utf-8")
+          marker = "# MCP_HTTP_MAX_SESSIONS=500\n"
+          addition = (
+              marker
+              + "# MCP_HTTP_SESSION_IDLE_TIMEOUT_MS=1800000\n"
+              + "# MCP_HTTP_SESSION_MAX_LIFETIME_MS=86400000\n"
+              + "# MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS=60000\n"
+          )
+          if "MCP_HTTP_SESSION_IDLE_TIMEOUT_MS" not in env_text:
+              if marker not in env_text:
+                  raise SystemExit("session configuration marker is missing")
+              env_path.write_text(
+                  env_text.replace(marker, addition), encoding="utf-8"
+              )
+
+          pathlib.Path(
+              ".github/workflows/zz-sync-m2-with-m1.yml"
+          ).unlink()
+      - name: Commit the reviewed session delta
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: preserve active session lifecycle under backpressure"
+      - name: Align stacked ancestry without rewriting M2
+        run: |
+          git merge -s ours --no-edit origin/feat/http-multiclient-rate-limiting \
+            -m "chore: align M2 stack with latest M1 head"
+      - name: Push M2 head
+        run: git push origin HEAD:feat/http-multiclient-backpressure
