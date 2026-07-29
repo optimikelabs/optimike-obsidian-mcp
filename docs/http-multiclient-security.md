@@ -22,6 +22,12 @@ Raw bearer tokens are retained only where an existing downstream contract needs 
 
 Every `/mcp` and `/external-handoff` request first consumes a bounded source-address allowance. This protects authentication and parsing work from missing, malformed or invalid credentials.
 
+The verified-identity functional quota applies when the MCP tool issues the
+handoff ticket. Redeeming that one-use, identity-bound ticket remains protected
+by the source-address limit and authentication but does not consume a second
+identity allowance. A ticket issued on the final allowance of a window must
+remain usable.
+
 Default:
 
 ```text
@@ -94,21 +100,21 @@ The process-local session registry is bounded by `MCP_HTTP_MAX_SESSIONS`, defaul
 
 ## Configuration
 
-| Variable | Default | Meaning |
-| --- | ---: | --- |
-| `MCP_HTTP_PREAUTH_RATE_LIMIT_WINDOW_MS` | `900000` | Source defence window |
-| `MCP_HTTP_PREAUTH_RATE_LIMIT_MAX` | `600` | Non-loopback requests per source/window |
-| `MCP_HTTP_LOOPBACK_POLICY` | `elevated` | `shared` or `elevated` |
-| `MCP_HTTP_LOOPBACK_PREAUTH_RATE_LIMIT_MAX` | `3000` | Loopback requests/window under `elevated` |
-| `MCP_HTTP_IDENTITY_RATE_LIMIT_WINDOW_MS` | `900000` | Functional quota window |
-| `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX` | `100` | Requests per verified identity/window |
-| `MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS` | `5000` | Bound on source counters |
-| `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS` | `10000` | Bound on identity counters |
-| `MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS` | `300000` | Counter cleanup interval |
-| `MCP_HTTP_MAX_SESSIONS` | `500` | Process-local session bound |
-| `MCP_TRUSTED_PROXIES` | empty | Trusted proxy IP/CIDR allowlist |
-| `MCP_HTTP_IDENTITY_HASH_KEY` | JWT secret or random process key | Optional dedicated HMAC key, minimum 32 characters |
-| `MCP_BACKEND_BEARER_TOKEN` | empty | Stdio proxy credential for a secured backend |
+| Variable                                   |                          Default | Meaning                                            |
+| ------------------------------------------ | -------------------------------: | -------------------------------------------------- |
+| `MCP_HTTP_PREAUTH_RATE_LIMIT_WINDOW_MS`    |                         `900000` | Source defence window                              |
+| `MCP_HTTP_PREAUTH_RATE_LIMIT_MAX`          |                            `600` | Non-loopback requests per source/window            |
+| `MCP_HTTP_LOOPBACK_POLICY`                 |                       `elevated` | `shared` or `elevated`                             |
+| `MCP_HTTP_LOOPBACK_PREAUTH_RATE_LIMIT_MAX` |                           `3000` | Loopback requests/window under `elevated`          |
+| `MCP_HTTP_IDENTITY_RATE_LIMIT_WINDOW_MS`   |                         `900000` | Functional quota window                            |
+| `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX`         |                            `100` | Requests per verified identity/window              |
+| `MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS`     |                           `5000` | Bound on source counters                           |
+| `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS`    |                          `10000` | Bound on identity counters                         |
+| `MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS`  |                         `300000` | Counter cleanup interval                           |
+| `MCP_HTTP_MAX_SESSIONS`                    |                            `500` | Process-local session bound                        |
+| `MCP_TRUSTED_PROXIES`                      |                            empty | Trusted proxy IP/CIDR allowlist                    |
+| `MCP_HTTP_IDENTITY_HASH_KEY`               | JWT secret or random process key | Optional dedicated HMAC key, minimum 32 characters |
+| `MCP_BACKEND_BEARER_TOKEN`                 |                            empty | Stdio proxy credential for a secured backend       |
 
 All numeric values are validated at startup. Invalid or unsafe values stop the process before the HTTP listener is opened.
 

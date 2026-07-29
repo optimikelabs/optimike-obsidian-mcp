@@ -22,6 +22,12 @@ Les tokens Bearer bruts ne sont conservés que lorsqu’un contrat existant en d
 
 Chaque requête vers `/mcp` et `/external-handoff` consomme d’abord une capacité bornée associée à l’adresse source. Cette protection couvre le coût de validation des credentials absents, malformés ou invalides.
 
+Le quota fonctionnel par identité vérifiée s’applique lorsque l’outil MCP émet
+le ticket de handoff. La consommation de ce ticket mono-usage et lié à
+l’identité reste protégée par la limite d’adresse source et par
+l’authentification, mais ne consomme pas une seconde unité d’identité. Un ticket
+émis avec la dernière unité disponible de la fenêtre doit rester utilisable.
+
 Valeurs par défaut :
 
 ```text
@@ -94,21 +100,21 @@ Le registre des sessions, local au processus, est borné par `MCP_HTTP_MAX_SESSI
 
 ## Configuration
 
-| Variable | Défaut | Fonction |
-| --- | ---: | --- |
-| `MCP_HTTP_PREAUTH_RATE_LIMIT_WINDOW_MS` | `900000` | Fenêtre de protection par source |
-| `MCP_HTTP_PREAUTH_RATE_LIMIT_MAX` | `600` | Requêtes par source hors loopback et par fenêtre |
-| `MCP_HTTP_LOOPBACK_POLICY` | `elevated` | `shared` ou `elevated` |
-| `MCP_HTTP_LOOPBACK_PREAUTH_RATE_LIMIT_MAX` | `3000` | Requêtes loopback par fenêtre avec `elevated` |
-| `MCP_HTTP_IDENTITY_RATE_LIMIT_WINDOW_MS` | `900000` | Fenêtre du quota fonctionnel |
-| `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX` | `100` | Requêtes par identité et par fenêtre |
-| `MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS` | `5000` | Borne des compteurs par source |
-| `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS` | `10000` | Borne des compteurs d’identité |
-| `MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS` | `300000` | Intervalle de nettoyage |
-| `MCP_HTTP_MAX_SESSIONS` | `500` | Borne des sessions locales au processus |
-| `MCP_TRUSTED_PROXIES` | vide | Allowlist d’IP ou CIDR de proxies |
-| `MCP_HTTP_IDENTITY_HASH_KEY` | secret JWT ou clé aléatoire du processus | Clé HMAC dédiée facultative, 32 caractères minimum |
-| `MCP_BACKEND_BEARER_TOKEN` | vide | Credential du proxy stdio vers un backend sécurisé |
+| Variable                                   |                                   Défaut | Fonction                                           |
+| ------------------------------------------ | ---------------------------------------: | -------------------------------------------------- |
+| `MCP_HTTP_PREAUTH_RATE_LIMIT_WINDOW_MS`    |                                 `900000` | Fenêtre de protection par source                   |
+| `MCP_HTTP_PREAUTH_RATE_LIMIT_MAX`          |                                    `600` | Requêtes par source hors loopback et par fenêtre   |
+| `MCP_HTTP_LOOPBACK_POLICY`                 |                               `elevated` | `shared` ou `elevated`                             |
+| `MCP_HTTP_LOOPBACK_PREAUTH_RATE_LIMIT_MAX` |                                   `3000` | Requêtes loopback par fenêtre avec `elevated`      |
+| `MCP_HTTP_IDENTITY_RATE_LIMIT_WINDOW_MS`   |                                 `900000` | Fenêtre du quota fonctionnel                       |
+| `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX`         |                                    `100` | Requêtes par identité et par fenêtre               |
+| `MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS`     |                                   `5000` | Borne des compteurs par source                     |
+| `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS`    |                                  `10000` | Borne des compteurs d’identité                     |
+| `MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS`  |                                 `300000` | Intervalle de nettoyage                            |
+| `MCP_HTTP_MAX_SESSIONS`                    |                                    `500` | Borne des sessions locales au processus            |
+| `MCP_TRUSTED_PROXIES`                      |                                     vide | Allowlist d’IP ou CIDR de proxies                  |
+| `MCP_HTTP_IDENTITY_HASH_KEY`               | secret JWT ou clé aléatoire du processus | Clé HMAC dédiée facultative, 32 caractères minimum |
+| `MCP_BACKEND_BEARER_TOKEN`                 |                                     vide | Credential du proxy stdio vers un backend sécurisé |
 
 Toutes les valeurs numériques sont validées au démarrage. Une valeur invalide ou dangereuse arrête le processus avant l’ouverture du listener HTTP.
 
