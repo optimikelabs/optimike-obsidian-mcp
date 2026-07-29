@@ -43,7 +43,8 @@ export type HttpRequestState = {
     | "socket"
     | "trusted-forwarded"
     | "trusted-x-forwarded-for"
-    | "socket-invalid-forward-chain";
+    | "socket-invalid-forward-chain"
+    | "socket-conflicting-forward-headers";
   trustedProxyHeaders: boolean;
   authInfo?: AuthInfo;
   identity?: VerifiedHttpIdentity;

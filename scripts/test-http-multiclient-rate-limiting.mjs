@@ -386,12 +386,18 @@ async function testUntrustedProxyHeaders(sandbox) {
   try {
     const first = await mcpPost(instance.baseUrl, {
       body: initializeBody(20, "missing-auth-a"),
-      headers: { "X-Forwarded-For": "198.51.100.1" },
+      headers: {
+        Forwarded: "for=198.51.100.1",
+        "X-Forwarded-For": "203.0.113.1",
+      },
     });
     assert.equal(first.status, 401);
     const second = await mcpPost(instance.baseUrl, {
       body: initializeBody(21, "missing-auth-b"),
-      headers: { "X-Forwarded-For": "198.51.100.2" },
+      headers: {
+        Forwarded: "for=198.51.100.2",
+        "X-Forwarded-For": "203.0.113.2",
+      },
     });
     assert.equal(second.status, 429);
     assert.equal(
@@ -466,6 +472,44 @@ async function testTrustedProxyHeaders(sandbox) {
   }
 }
 
+async function testTrustedProxyRejectsConflictingHeaderFamilies(sandbox) {
+  const instance = await startBackend(sandbox, "trusted-proxy-conflict", {
+    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX: "1",
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "100",
+    MCP_TRUSTED_PROXIES: "127.0.0.1/32",
+  });
+  try {
+    const first = await mcpPost(instance.baseUrl, {
+      body: initializeBody(40, "trusted-conflict-a"),
+      headers: {
+        Forwarded: "for=198.51.100.1",
+        "X-Forwarded-For": "203.0.113.1",
+      },
+    });
+    assert.equal(first.status, 401);
+
+    const second = await mcpPost(instance.baseUrl, {
+      body: initializeBody(41, "trusted-conflict-b"),
+      headers: {
+        Forwarded: "for=198.51.100.2",
+        "X-Forwarded-For": "203.0.113.2",
+      },
+    });
+    assert.equal(
+      second.status,
+      429,
+      "conflicting forwarding header families must share the trusted proxy socket quota",
+    );
+    assert.equal(
+      second.headers.get("x-optimike-rate-limit-scope"),
+      "loopback-source-ip",
+    );
+  } finally {
+    await stopBackend(instance);
+    await rm(instance.logDir, { recursive: true, force: true });
+  }
+}
+
 async function testInvalidConfigurationRefused(sandbox) {
   const port = await unusedPort();
   const vaultPath = path.join(sandbox, "invalid-vault");
@@ -513,9 +557,10 @@ try {
   await testUntrustedProxyHeaders(sandbox);
   await testPreAuthLimitPrecedesBodyBuffering(sandbox);
   await testTrustedProxyHeaders(sandbox);
+  await testTrustedProxyRejectsConflictingHeaderFamilies(sandbox);
   await testInvalidConfigurationRefused(sandbox);
   console.log(
-    "PASS: verified HTTP identities isolate functional quotas, shared identities share limits, pre-auth source protection rejects unfinished near-limit uploads before buffering, untrusted forwarding headers are ignored, trusted proxy CIDRs are explicit, sessions are identity-bound, configuration fails closed, and secrets stay out of logs",
+    "PASS: verified HTTP identities isolate functional quotas, shared identities share limits, pre-auth rejection does not read bodies and rejects concurrent unfinished near-limit uploads before buffering, untrusted forwarding headers are ignored, conflicting trusted proxy header families fail closed, trusted proxy CIDRs are explicit, sessions are identity-bound, configuration fails closed, and secrets stay out of logs",
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });

@@ -300,7 +300,8 @@ async function testActiveStreamStopsAtAbsoluteExpiry(sandbox) {
   const instance = await startBackend(sandbox, "active-stream-max-lifetime", {
     MCP_HTTP_MAX_SESSIONS: "1",
     MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "5000",
-    MCP_HTTP_SESSION_MAX_LIFETIME_MS: "120",
+    MCP_HTTP_SESSION_MAX_LIFETIME_MS: "1000",
+    MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS: "86400000",
   });
   const token = await signToken("absolute-stream-owner");
   const streamAbort = new AbortController();
@@ -339,10 +340,10 @@ async function testActiveStreamStopsAtAbsoluteExpiry(sandbox) {
     assert.equal(
       await Promise.race([
         streamClosed,
-        sleep(3000).then(() => false),
+        sleep(5000).then(() => false),
       ]),
       true,
-      "absolute session lifetime must close an active event stream",
+      "absolute session lifetime must close an active event stream independently of cleanup cadence",
     );
 
     const expiredPing = await mcpPost(

@@ -293,7 +293,8 @@ export type ClientAddressResolution = {
     | "socket"
     | "trusted-forwarded"
     | "trusted-x-forwarded-for"
-    | "socket-invalid-forward-chain";
+    | "socket-invalid-forward-chain"
+    | "socket-conflicting-forward-headers";
   trustedProxyHeaders: boolean;
 };
 
@@ -314,6 +315,13 @@ export function resolveClientAddress(input: {
 
   const hasForwarded = Boolean(input.forwarded?.trim());
   const hasXForwardedFor = Boolean(input.xForwardedFor?.trim());
+  if (hasForwarded && hasXForwardedFor) {
+    return {
+      address: socketAddress,
+      source: "socket-conflicting-forward-headers",
+      trustedProxyHeaders: false,
+    };
+  }
   const parsedChain = hasForwarded
     ? parseForwardedHeader(input.forwarded!)
     : hasXForwardedFor
