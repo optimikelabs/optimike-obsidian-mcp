@@ -40,6 +40,11 @@ copie bornée de la requête. Un corps déclaré ou streamé au-delà de la limi
 refusé en HTTP `413` ; il n’est jamais intégralement mis en mémoire avant
 l’admission.
 
+Le profil HTTP accepte exactement une enveloppe JSON-RPC par `POST`. Un tableau
+JSON à la racine est refusé par défaut en HTTP `400` avant d’atteindre le
+handler MCP : compter un batch comme une seule opération contournerait le
+contrat de concurrence. Le client doit envoyer chaque membre séparément.
+
 ## Classes d’opérations explicites
 
 La liste coûteuse par défaut contient les alias de recherche sémantique, la maintenance runtime, la recherche globale, les requêtes Bases, les scans et requêtes Tasks, certaines opérations de reconstruction ou validation Operon, les lectures externes et le handoff externe.
@@ -58,6 +63,12 @@ Modifier ces listes change la politique de capacité. Il faut utiliser les noms 
 La file est partitionnée par identité vérifiée et distribuée en round-robin. Les opérations restent FIFO à l’intérieur d’une même identité. Un client qui accumule des appels ne peut donc pas affamer les autres identités.
 
 L’état de file respecte les bornes globales et par identité. Les entrées d’identité actives ou en attente sont supprimées lorsque leur compteur revient à zéro. Aucun token Bearer, chemin documentaire ou contenu de requête n’est conservé dans l’état d’admission.
+
+Une requête conserve un seul deadline pendant la lecture bornée de son corps et
+la requalification de son slot standard en capacité coûteuse ou mutation. Le
+parsing et les deux admissions ne reçoivent pas chacun un nouveau timeout.
+`X-Optimike-Queue-Wait-Ms` rapporte l’attente cumulée depuis la première
+tentative d’admission lorsqu’une requalification a lieu.
 
 ## Sémantique de refus
 

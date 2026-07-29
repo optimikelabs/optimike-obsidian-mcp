@@ -507,6 +507,140 @@ async function testRequestBodyParsingIsBoundedAndAdmitted() {
   assert.equal(admission.getSnapshot().inFlight, 0);
 }
 
+async function testJsonRpcBatchesAreRejectedFailClosed() {
+  const admission = controller({
+    maxInFlight: 1,
+    maxInFlightPerIdentity: 1,
+    maxQueued: 0,
+    maxQueuedPerIdentity: 0,
+  });
+  const app = new Hono();
+  let handlerCalls = 0;
+  app.use("*", async (c, next) => {
+    attachTestIdentity(c, "batch-client");
+    await next();
+  });
+  app.use("/mcp", createHttpBackpressureMiddleware(admission));
+  app.post("/mcp", (c) => {
+    handlerCalls += 1;
+    return c.json({ ok: true });
+  });
+
+  const response = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify([
+      { jsonrpc: "2.0", id: 10, method: "ping" },
+      {
+        jsonrpc: "2.0",
+        id: 11,
+        method: "tools/call",
+        params: { name: "obsidian_update_note", arguments: {} },
+      },
+    ]),
+  });
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error.data.batchSupported, false);
+  assert.equal(body.error.data.maxEnvelopesPerRequest, 1);
+  assert.match(body.error.message, /one envelope per POST/u);
+  assert.equal(handlerCalls, 0);
+  assert.equal(admission.getSnapshot().inFlight, 0);
+}
+
+function slowJsonRequest(body, delayMs) {
+  let emitted = false;
+  return new Request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: new ReadableStream({
+      async pull(streamController) {
+        if (emitted) return;
+        emitted = true;
+        await sleep(delayMs);
+        streamController.enqueue(
+          new TextEncoder().encode(JSON.stringify(body)),
+        );
+        streamController.close();
+      },
+    }),
+    duplex: "half",
+  });
+}
+
+async function testReclassificationPreservesDeadlineAndCumulativeWait() {
+  const mutationBody = {
+    jsonrpc: "2.0",
+    id: 12,
+    method: "tools/call",
+    params: { name: "obsidian_update_note", arguments: {} },
+  };
+
+  const cumulativeAdmission = controller({
+    maxInFlight: 1,
+    maxInFlightPerIdentity: 1,
+    queueWaitTimeoutMs: 150,
+  });
+  const cumulativeApp = new Hono();
+  cumulativeApp.use("*", async (c, next) => {
+    attachTestIdentity(c, "cumulative-client");
+    await next();
+  });
+  cumulativeApp.use(
+    "/mcp",
+    createHttpBackpressureMiddleware(cumulativeAdmission),
+  );
+  cumulativeApp.post("/mcp", (c) => c.json({ ok: true }));
+
+  const admitted = await cumulativeApp.request(
+    slowJsonRequest(mutationBody, 35),
+  );
+  assert.equal(admitted.status, 200);
+  const cumulativeWaitMs = Number(
+    admitted.headers.get("x-optimike-queue-wait-ms"),
+  );
+  assert.ok(
+    cumulativeWaitMs >= 20,
+    `reclassified admission lost parsing wait: ${cumulativeWaitMs}ms`,
+  );
+  await admitted.arrayBuffer();
+  assert.equal(cumulativeAdmission.getSnapshot().inFlight, 0);
+
+  const deadlineAdmission = controller({
+    maxInFlight: 2,
+    maxInFlightPerIdentity: 1,
+    expensiveMaxInFlight: 1,
+    expensiveMaxInFlightPerIdentity: 1,
+    mutationMaxInFlight: 1,
+    mutationMaxInFlightPerIdentity: 1,
+    queueWaitTimeoutMs: 80,
+  });
+  const held = await deadlineAdmission.acquire({
+    identityKey: "holder",
+    operationClass: "expensive",
+  });
+  const deadlineApp = new Hono();
+  let handlerCalls = 0;
+  deadlineApp.use("*", async (c, next) => {
+    attachTestIdentity(c, "deadline-client");
+    await next();
+  });
+  deadlineApp.use("/mcp", createHttpBackpressureMiddleware(deadlineAdmission));
+  deadlineApp.post("/mcp", (c) => {
+    handlerCalls += 1;
+    return c.json({ ok: true });
+  });
+
+  const releaseHolder = sleep(110).then(() => held.release());
+  const timedOut = await deadlineApp.request(slowJsonRequest(mutationBody, 50));
+  assert.equal(timedOut.status, 503);
+  assert.equal(timedOut.headers.get("x-optimike-backpressure"), "timeout");
+  assert.equal(handlerCalls, 0);
+  await timedOut.arrayBuffer();
+  await releaseHolder;
+  assert.equal(deadlineAdmission.getSnapshot().inFlight, 0);
+}
+
 async function testStreamingResponseRetainsLease() {
   const admission = controller({
     maxInFlight: 1,
@@ -563,8 +697,10 @@ await testDeterministicLoad();
 await testRealMiddlewareResponses();
 await testDownstreamAdmissionErrorIsNotReclassified();
 await testRequestBodyParsingIsBoundedAndAdmitted();
+await testJsonRpcBatchesAreRejectedFailClosed();
+await testReclassificationPreservesDeadlineAndCumulativeWait();
 await testStreamingResponseRetainsLease();
 
 console.log(
-  "PASS: HTTP admission is globally bounded, isolates verified identities, separately protects expensive operations and mutations, bounds request-body parsing, retains leases through response streaming, uses a bounded fair queue, redispatches after timeout and cancellation, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
+  "PASS: HTTP admission is globally bounded, isolates verified identities, rejects JSON-RPC batches fail-closed, preserves one deadline and cumulative wait through request classification, separately protects expensive operations and mutations, bounds request-body parsing, retains leases through response streaming, uses a bounded fair queue, redispatches after timeout and cancellation, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
 );
