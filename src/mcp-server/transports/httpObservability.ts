@@ -91,7 +91,11 @@ const ObservabilityEnvSchema = z.object({
       value === undefined || value === null || value === ""
         ? 15 * 60 * 1000
         : value,
-    z.coerce.number().int().min(1000).max(30 * 24 * 60 * 60 * 1000),
+    z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .max(30 * 24 * 60 * 60 * 1000),
   ),
 });
 
@@ -103,6 +107,7 @@ if (!parsedObservabilityEnv.success) {
     )}`,
   );
 }
+const observabilityEnv = parsedObservabilityEnv.data;
 
 const PROCESS_STARTED_AT = new Date().toISOString();
 const SAFE_EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -126,9 +131,10 @@ function parseTimestamp(value: unknown): number | undefined {
   return undefined;
 }
 
-function readCacheStats(
-  service: VaultCacheService | undefined,
-): { stats?: CacheStatsLike; error?: string } {
+function readCacheStats(service: VaultCacheService | undefined): {
+  stats?: CacheStatsLike;
+  error?: string;
+} {
   if (!service || typeof service.getStats !== "function") return {};
   try {
     const value = service.getStats() as unknown;
@@ -196,19 +202,21 @@ export function buildHealthSnapshot(
     "readonly"
   ).toLowerCase();
   const staleAfterMs =
-    options.staleAfterMs ??
-    parsedObservabilityEnv.data.MCP_OBSERVABILITY_STALE_AFTER_MS;
+    options.staleAfterMs ?? observabilityEnv.MCP_OBSERVABILITY_STALE_AFTER_MS;
   const cacheResult = readCacheStats(options.vaultCacheService);
   const stats = cacheResult.stats;
   const observedAtMs = parseTimestamp(stats?.lastRefreshAt);
-  const freshnessMs = observedAtMs === undefined ? null : Math.max(0, now - observedAtMs);
+  const freshnessMs =
+    observedAtMs === undefined ? null : Math.max(0, now - observedAtMs);
   const stale = freshnessMs !== null && freshnessMs > staleAfterMs;
   const origin = normalizeCacheOrigin(
     nonEmptyString(stats?.refreshSource),
     cacheSource,
   );
   const vaultAvailable = Boolean(vaultPath && existsSync(vaultPath));
-  const cacheHasData = Boolean(stats && (positiveFileCount(stats) || observedAtMs));
+  const cacheHasData = Boolean(
+    stats && (positiveFileCount(stats) || observedAtMs),
+  );
   const cacheAvailable = Boolean(stats && !statusFailed(stats));
   const liveObserved = origin === "obsidian_api" && cacheAvailable && !stale;
   const filesystemObserved =
@@ -216,7 +224,9 @@ export function buildHealthSnapshot(
     runtimeMode.startsWith("headless") ||
     cacheSource.toLowerCase().includes("filesystem");
   const usableFallback =
-    cacheHasData || (filesystemObserved && vaultAvailable) || origin === "snapshot";
+    cacheHasData ||
+    (filesystemObserved && vaultAvailable) ||
+    origin === "snapshot";
 
   let provenance: ResponseProvenance = "unknown";
   if (liveObserved) provenance = "live-obsidian";
@@ -237,9 +247,7 @@ export function buildHealthSnapshot(
     } else if (stale || statusFailed(stats) || cacheResult.error) {
       state = "degraded";
       reasons.push(
-        stale
-          ? "fallback_data_stale"
-          : cacheResult.error ?? "cache_degraded",
+        stale ? "fallback_data_stale" : (cacheResult.error ?? "cache_degraded"),
       );
     } else {
       state = "ready";
@@ -267,7 +275,9 @@ export function buildHealthSnapshot(
 
   const liveRequired = !headless;
   const mutationCapable =
-    writeMode !== "readonly" && liveObserved && !runtimeMode.includes("readonly");
+    writeMode !== "readonly" &&
+    liveObserved &&
+    !runtimeMode.includes("readonly");
   const unavailable: string[] = [];
   if (!liveObserved) unavailable.push("live-obsidian-reads");
   if (!vaultAvailable) unavailable.push("filesystem-reads");
@@ -287,7 +297,9 @@ export function buildHealthSnapshot(
       source: provenance,
       origin,
       observedAt:
-        observedAtMs === undefined ? null : new Date(observedAtMs).toISOString(),
+        observedAtMs === undefined
+          ? null
+          : new Date(observedAtMs).toISOString(),
       freshnessMs,
       stale,
       freshnessKnown: freshnessMs !== null,
@@ -313,7 +325,7 @@ export function buildHealthSnapshot(
         reason:
           cacheAvailable || cacheHasData
             ? undefined
-            : cacheResult.error ?? "cache_not_initialized",
+            : (cacheResult.error ?? "cache_not_initialized"),
       },
     },
     capabilities: {

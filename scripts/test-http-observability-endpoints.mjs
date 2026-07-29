@@ -17,6 +17,7 @@ import { SignJWT } from "jose";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const secret = "observability-test-secret-at-least-32-characters-long";
+const localRestSecret = "observability-local-rest-test-key";
 const documentSecret = "DOCUMENT-CONTENT-MUST-NOT-ENTER-REQUEST-LOGS";
 
 async function unusedPort() {
@@ -58,7 +59,11 @@ async function readAllLogs(directory) {
 async function startBackend(sandbox, name, runtimeMode) {
   const port = await unusedPort();
   const vaultPath = path.join(sandbox, `${name}-vault`);
-  const logDir = path.join(sandbox, `${name}-logs`);
+  const logDir = path.join(
+    process.cwd(),
+    ".tmp",
+    `http-observability-${name}-${port}`,
+  );
   await mkdir(path.join(vaultPath, ".obsidian"), { recursive: true });
   await mkdir(logDir, { recursive: true });
   await writeFile(
@@ -74,7 +79,10 @@ async function startBackend(sandbox, name, runtimeMode) {
       NODE_ENV: "test",
       OBSIDIAN_RUNTIME_MODE: runtimeMode,
       OBSIDIAN_VAULT: vaultPath,
-      OBSIDIAN_CACHE_SOURCE: "filesystem",
+      OBSIDIAN_BASE_URL: "http://127.0.0.1:1",
+      OBSIDIAN_API_KEY: localRestSecret,
+      OBSIDIAN_STARTUP_BLOCKING: "false",
+      OBSIDIAN_CACHE_SOURCE: runtimeMode === "live" ? "rest" : "filesystem",
       OBSIDIAN_ENABLE_CACHE: "false",
       MCP_WRITE_MODE: "readonly",
       SEMANTIC_SEARCH_PREWARM: "false",
@@ -95,8 +103,11 @@ async function startBackend(sandbox, name, runtimeMode) {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  let stdout = "";
   let stderr = "";
-  child.stdout?.on("data", () => undefined);
+  child.stdout?.on("data", (chunk) => {
+    stdout += String(chunk);
+  });
   child.stderr?.on("data", (chunk) => {
     stderr += String(chunk);
   });
@@ -105,7 +116,9 @@ async function startBackend(sandbox, name, runtimeMode) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`backend exited with ${child.exitCode}: ${stderr}`);
+      throw new Error(
+        `backend exited with ${child.exitCode}: stdout=${stdout} stderr=${stderr}`,
+      );
     }
     try {
       const response = await fetch(new URL("/healthz", baseUrl));
@@ -128,17 +141,14 @@ async function stopBackend(instance) {
     }),
     sleep(3000),
   ]);
+  await rm(instance.logDir, { recursive: true, force: true });
 }
 
 const sandbox = await mkdtemp(
   path.join(os.tmpdir(), "optimike-http-observability-"),
 );
 try {
-  const headless = await startBackend(
-    sandbox,
-    "headless",
-    "headless-readonly",
-  );
+  const headless = await startBackend(sandbox, "headless", "headless-readonly");
   try {
     const liveness = await fetch(new URL("/healthz", headless.baseUrl));
     assert.equal(liveness.status, 200);
@@ -183,6 +193,7 @@ try {
     assert.ok(logs.includes("incident-42:retry.1"));
     assert.equal(logs.includes(token), false);
     assert.equal(logs.includes(secret), false);
+    assert.equal(logs.includes(localRestSecret), false);
     assert.equal(logs.includes(documentSecret), false);
     assert.equal(logs.includes(headless.vaultPath), false);
     assert.equal(logs.includes("invalid incident with spaces"), false);
