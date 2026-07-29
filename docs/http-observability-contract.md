@@ -1,0 +1,157 @@
+# Streamable HTTP observability contract
+
+Optimike MCP exposes signals for an external monitor or an OSS gateway. It does not implement an incident platform, a dashboard or a monitoring backend.
+
+## Three endpoints, three meanings
+
+### `GET /healthz`
+
+Unauthenticated liveness only. HTTP `200` means the process and HTTP listener can answer. It does not claim that Obsidian Desktop, the filesystem vault, the shared cache, a bridge or a semantic provider is available.
+
+The existing compatibility fields remain present:
+
+```json
+{
+  "ok": true,
+  "status": "healthy",
+  "state": "live",
+  "transport": "streamable-http",
+  "endpoint": "/mcp"
+}
+```
+
+### `GET /readyz`
+
+Unauthenticated, sanitized readiness for the configured runtime profile. It returns:
+
+- HTTP `200` for `ready` and `degraded`;
+- HTTP `503` for `critical`.
+
+A degraded service is still capable of serving a documented subset. A critical service cannot serve the expected profile safely.
+
+### `GET /statusz`
+
+Authenticated detailed status. It uses the same pre-authentication source protection, authentication and verified-identity quota as `/mcp`. It adds aggregate controls for sessions, admission and rate-limit map occupancy. It never returns bearer tokens, raw client identities, document content, document paths or personal vault paths.
+
+## Readiness states
+
+| State | Meaning | HTTP on `/readyz` |
+| --- | --- | ---: |
+| `ready` | The expected profile is available from a verified source | `200` |
+| `degraded` | A bounded fallback is usable, or a non-critical dependency is degraded | `200` |
+| `critical` | No verified source can serve the expected profile safely | `503` |
+
+The state includes machine-readable reasons such as `live_obsidian_unavailable_using_stale_fallback`, `cache_status_failed` or `headless_vault_and_cache_unavailable`.
+
+## Provenance and freshness
+
+The status contract uses these response-source classes:
+
+- `live-obsidian`;
+- `filesystem`;
+- `cache`;
+- `snapshot`;
+- `unknown`.
+
+It also exposes the internal origin (`obsidian_api`, `filesystem`, `cache`, `snapshot` or `unknown`), observation timestamp, age in milliseconds, whether freshness is known and whether the result is stale.
+
+A source is never called `live-obsidian` solely because the service runs in `live` mode. A cache observation must explicitly identify `obsidian_api`, be available and remain inside the freshness threshold. When that observation ages past the threshold, provenance becomes `snapshot` and the service is degraded. A stale fallback is never presented as live.
+
+Default freshness threshold:
+
+```dotenv
+MCP_OBSERVABILITY_STALE_AFTER_MS=900000
+```
+
+## Dependencies and temporary capability loss
+
+Status distinguishes:
+
+- whether Obsidian Desktop is required and verified;
+- whether the configured filesystem vault exists;
+- whether shared cache data is available;
+- whether live reads, filesystem reads, cache reads and mutations are currently available.
+
+`temporarilyUnavailable` contains stable capability identifiers, not exception text. Headless read-only operation can therefore be `ready` while `live-obsidian-reads` and `mutations` are unavailable by design.
+
+## Structured request logs
+
+Every HTTP request emits one completion event with:
+
+- `requestId`;
+- pseudonymous verified client identity when authentication succeeded;
+- transport;
+- HTTP method and route;
+- MCP method or tool name when safely classified;
+- duration;
+- result and HTTP status;
+- quota outcomes;
+- admission/backpressure outcome;
+- operation class and queue wait;
+- current provenance and stale flag;
+- optional sanitized `correlationId` and `incidentId`.
+
+Clients may send:
+
+```http
+X-Correlation-Id: incident-42:retry.1
+X-Incident-Id: inc_2026-07-29_001
+```
+
+Only 1 to 128 characters from `[A-Za-z0-9._:-]` are accepted. Invalid values are ignored rather than logged. These headers are correlation hints, never authentication or authorization evidence.
+
+Logs do not include by default:
+
+- `Authorization` or any bearer token;
+- authentication secrets;
+- raw issuer, subject or client ID;
+- request or response bodies;
+- MCP tool arguments;
+- note content;
+- physical vault or external-root paths;
+- external handoff tickets.
+
+## Example sanitized readiness
+
+```json
+{
+  "schemaVersion": "1",
+  "state": "degraded",
+  "ready": true,
+  "degraded": true,
+  "critical": false,
+  "runtimeMode": "hybrid",
+  "provenance": {
+    "source": "snapshot",
+    "origin": "obsidian_api",
+    "observedAt": "2026-07-29T11:45:00.000Z",
+    "freshnessMs": 1200000,
+    "stale": true,
+    "freshnessKnown": true
+  },
+  "capabilities": {
+    "liveObsidianReads": false,
+    "filesystemReads": true,
+    "cacheReads": true,
+    "mutations": false,
+    "temporarilyUnavailable": ["live-obsidian-reads", "mutations"]
+  },
+  "reasons": ["live_obsidian_unavailable_using_stale_fallback"]
+}
+```
+
+## Compatibility and limits
+
+- `/healthz` remains unauthenticated and preserves the prior `ok`, `status`, `transport` and `endpoint` fields.
+- `/readyz` contains no secret or path and is suitable for a load balancer readiness probe.
+- `/statusz` is authenticated and rate-limited, but it is still an operational surface and should not be exposed publicly without TLS and network policy.
+- Health is process-local. It does not claim clustered high availability or distributed session state.
+- The server exposes signals only. Alerting, retention, dashboards and incident response remain external concerns.
+
+## Tests
+
+```bash
+npm run test:http-observability
+```
+
+The suite runs on Ubuntu and Windows and proves fresh live, filesystem, cache, stale snapshot, degraded and critical states, endpoint status codes, authentication of `/statusz`, sanitized aggregate controls and absence of tokens, secrets, document content and personal paths from the observability surfaces.
