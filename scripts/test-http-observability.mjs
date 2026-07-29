@@ -5,9 +5,8 @@ import path from "node:path";
 
 process.env.OBSIDIAN_RUNTIME_MODE ??= "headless-readonly";
 process.env.OBSIDIAN_VAULT ??= process.cwd();
-const { buildHealthSnapshot, sanitizeExternalCorrelationId } = await import(
-  "../dist/mcp-server/transports/httpObservability.js"
-);
+const { buildHealthSnapshot, sanitizeExternalCorrelationId } =
+  await import("../dist/mcp-server/transports/httpObservability.js");
 
 const now = Date.parse("2026-07-29T12:00:00.000Z");
 const vaultPath = process.cwd();
@@ -30,12 +29,14 @@ const live = buildHealthSnapshot({
   vaultCacheService: cache({
     status: "ready",
     lastRefreshAt: new Date(now - 5000).toISOString(),
-    refreshSource: "obsidian_api",
-    totalFiles: 10,
+    refreshSource: "rest",
+    configuredRefreshSource: "rest",
+    cachedFileCount: 10,
   }),
 });
 assert.equal(live.state, "ready");
 assert.equal(live.provenance.source, "live-obsidian");
+assert.equal(live.provenance.origin, "obsidian_api");
 assert.equal(live.provenance.stale, false);
 assert.equal(live.capabilities.liveObsidianReads, true);
 assert.equal(live.capabilities.mutations, true);
@@ -49,8 +50,9 @@ const stale = buildHealthSnapshot({
   vaultCacheService: cache({
     status: "ready",
     lastRefreshAt: new Date(now - 5 * 60_000).toISOString(),
-    refreshSource: "obsidian_api",
-    totalFiles: 10,
+    refreshSource: "rest",
+    configuredRefreshSource: "rest",
+    cachedFileCount: 10,
   }),
 });
 assert.equal(stale.state, "degraded");
@@ -72,7 +74,8 @@ const headless = buildHealthSnapshot({
   vaultCacheService: cache({
     status: "ready",
     refreshSource: "filesystem",
-    totalFiles: 3,
+    configuredRefreshSource: "filesystem",
+    cachedFileCount: 3,
   }),
 });
 assert.equal(headless.state, "ready");
@@ -87,16 +90,47 @@ const degradedCache = buildHealthSnapshot({
   cacheSource: "filesystem",
   staleAfterMs: 60_000,
   vaultCacheService: cache({
-    status: "error",
-    lastRefreshAt: new Date(now - 30_000).toISOString(),
+    status: "ready",
+    lastRefreshAt: new Date(now - 5 * 60_000).toISOString(),
     refreshSource: "filesystem",
-    totalFiles: 2,
-    lastError: "synthetic",
+    configuredRefreshSource: "filesystem",
+    cachedFileCount: 2,
   }),
 });
 assert.equal(degradedCache.state, "degraded");
 assert.equal(degradedCache.critical, false);
-assert.ok(degradedCache.reasons.includes("cache_status_failed"));
+assert.ok(degradedCache.reasons.includes("fallback_data_stale"));
+
+const headlessWithoutCache = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "headless-readonly",
+  vaultPath,
+  cacheSource: "filesystem",
+  vaultCacheService: undefined,
+});
+assert.equal(headlessWithoutCache.state, "critical");
+assert.equal(headlessWithoutCache.ready, false);
+assert.equal(headlessWithoutCache.capabilities.filesystemReads, false);
+assert.equal(headlessWithoutCache.capabilities.cacheReads, false);
+assert.ok(headlessWithoutCache.reasons.includes("headless_cache_unavailable"));
+
+const headlessBuildingCache = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "headless-readonly",
+  vaultPath,
+  cacheSource: "filesystem",
+  vaultCacheService: cache({
+    status: "building",
+    building: true,
+    configuredRefreshSource: "filesystem",
+    cachedFileCount: 0,
+  }),
+});
+assert.equal(headlessBuildingCache.state, "critical");
+assert.equal(
+  headlessBuildingCache.dependencies.sharedCache.reason,
+  "cache_building",
+);
 
 const critical = buildHealthSnapshot({
   now: () => now,
@@ -127,12 +161,19 @@ assert.equal(sanitizeExternalCorrelationId(" contains spaces "), undefined);
 assert.equal(sanitizeExternalCorrelationId("Bearer secret"), undefined);
 assert.equal(sanitizeExternalCorrelationId("x".repeat(129)), undefined);
 
-for (const snapshot of [live, stale, headless, degradedCache, critical]) {
+for (const snapshot of [
+  live,
+  stale,
+  headless,
+  degradedCache,
+  headlessWithoutCache,
+  headlessBuildingCache,
+  critical,
+]) {
   const serialized = JSON.stringify(snapshot);
   assert.equal(serialized.includes(vaultPath), false);
-  assert.equal(serialized.includes("synthetic"), false);
 }
 
 console.log(
-  "PASS: liveness-independent readiness distinguishes ready, degraded and critical profiles; provenance and freshness are explicit; stale data is never labeled live; dependency and capability states are sanitized; external correlation identifiers are strictly bounded",
+  "PASS: readiness requires a usable cache-backed read path, the real REST cache vocabulary maps to live Obsidian, stale data is never labeled live, dependency and capability states are sanitized, and external correlation identifiers are strictly bounded",
 );

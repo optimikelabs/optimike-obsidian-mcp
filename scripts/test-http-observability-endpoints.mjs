@@ -56,7 +56,12 @@ async function readAllLogs(directory) {
   return chunks.join("\n");
 }
 
-async function startBackend(sandbox, name, runtimeMode) {
+async function startBackend(
+  sandbox,
+  name,
+  runtimeMode,
+  { enableCache = runtimeMode.startsWith("headless") } = {},
+) {
   const port = await unusedPort();
   const vaultPath = path.join(sandbox, `${name}-vault`);
   const logDir = path.join(
@@ -83,7 +88,7 @@ async function startBackend(sandbox, name, runtimeMode) {
       OBSIDIAN_API_KEY: localRestSecret,
       OBSIDIAN_STARTUP_BLOCKING: "false",
       OBSIDIAN_CACHE_SOURCE: runtimeMode === "live" ? "rest" : "filesystem",
-      OBSIDIAN_ENABLE_CACHE: "false",
+      OBSIDIAN_ENABLE_CACHE: String(enableCache),
       MCP_WRITE_MODE: "readonly",
       SEMANTIC_SEARCH_PREWARM: "false",
       MCP_TRANSPORT_TYPE: "http",
@@ -132,6 +137,18 @@ async function startBackend(sandbox, name, runtimeMode) {
   throw new Error(`timed out waiting for ${baseUrl}`);
 }
 
+async function waitForReadiness(baseUrl, expectedStatus) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const response = await fetch(new URL("/readyz", baseUrl));
+    if (response.status === expectedStatus) return response;
+    await sleep(50);
+  }
+  throw new Error(
+    `timed out waiting for /readyz to return ${expectedStatus} at ${baseUrl}`,
+  );
+}
+
 async function stopBackend(instance) {
   instance.child.kill();
   await Promise.race([
@@ -157,7 +174,7 @@ try {
     assert.equal(livenessBody.status, "healthy");
     assert.equal(livenessBody.state, "live");
 
-    const readiness = await fetch(new URL("/readyz", headless.baseUrl));
+    const readiness = await waitForReadiness(headless.baseUrl, 200);
     assert.equal(readiness.status, 200);
     const readinessBody = await readiness.json();
     assert.equal(readinessBody.ready, true);
@@ -188,9 +205,21 @@ try {
     assert.equal(serializedStatus.includes(headless.vaultPath), false);
     assert.equal(serializedStatus.includes(documentSecret), false);
 
+    const rejectedOrigin = await fetch(new URL("/healthz", headless.baseUrl), {
+      headers: {
+        Origin: "https://blocked-origin.example",
+        "X-Correlation-Id": "rejected-origin-403",
+      },
+    });
+    assert.equal(rejectedOrigin.status, 403);
+
     await sleep(150);
     const logs = await readAllLogs(headless.logDir);
     assert.ok(logs.includes("incident-42:retry.1"));
+    assert.ok(
+      logs.includes("rejected-origin-403"),
+      "origin rejection must still emit its completion event",
+    );
     assert.equal(logs.includes(token), false);
     assert.equal(logs.includes(secret), false);
     assert.equal(logs.includes(localRestSecret), false);
@@ -201,7 +230,26 @@ try {
     await stopBackend(headless);
   }
 
-  const liveWithoutProof = await startBackend(sandbox, "live", "live");
+  const headlessWithoutCache = await startBackend(
+    sandbox,
+    "headless-without-cache",
+    "headless-readonly",
+    { enableCache: false },
+  );
+  try {
+    const readiness = await waitForReadiness(headlessWithoutCache.baseUrl, 503);
+    const body = await readiness.json();
+    assert.equal(body.state, "critical");
+    assert.equal(body.ready, false);
+    assert.equal(body.capabilities.filesystemReads, false);
+    assert.ok(body.reasons.includes("headless_cache_unavailable"));
+  } finally {
+    await stopBackend(headlessWithoutCache);
+  }
+
+  const liveWithoutProof = await startBackend(sandbox, "live", "live", {
+    enableCache: false,
+  });
   try {
     const liveness = await fetch(new URL("/healthz", liveWithoutProof.baseUrl));
     assert.equal(liveness.status, 200);
@@ -216,7 +264,7 @@ try {
   }
 
   console.log(
-    "PASS: healthz remains backward-compatible liveness, readyz distinguishes ready and critical profiles, statusz requires authentication and exposes sanitized aggregate controls, structured logs carry bounded correlation without bearer tokens, vault paths or document content",
+    "PASS: healthz remains backward-compatible liveness, readyz requires a usable headless cache backend, statusz requires authentication and exposes sanitized aggregate controls, and structured completion logs include rejected origins without bearer tokens, vault paths or document content",
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });

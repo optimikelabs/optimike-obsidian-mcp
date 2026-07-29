@@ -35,13 +35,13 @@ Statut détaillé authentifié. Il utilise la même protection pré-authentifica
 
 ## États de readiness
 
-| État | Signification | HTTP sur `/readyz` |
-| --- | --- | ---: |
-| `ready` | Le profil attendu est disponible depuis une source vérifiée | `200` |
-| `degraded` | Un fallback borné reste utilisable, ou une dépendance non critique est dégradée | `200` |
-| `critical` | Aucune source vérifiée ne peut servir le profil attendu en sécurité | `503` |
+| État       | Signification                                                                   | HTTP sur `/readyz` |
+| ---------- | ------------------------------------------------------------------------------- | -----------------: |
+| `ready`    | Le profil attendu est disponible depuis une source vérifiée                     |              `200` |
+| `degraded` | Un fallback borné reste utilisable, ou une dépendance non critique est dégradée |              `200` |
+| `critical` | Aucune source vérifiée ne peut servir le profil attendu en sécurité             |              `503` |
 
-L’état contient des raisons stables et exploitables, par exemple `live_obsidian_unavailable_using_stale_fallback`, `cache_status_failed` ou `headless_vault_and_cache_unavailable`.
+L’état contient des raisons stables et exploitables, par exemple `live_obsidian_unavailable_using_stale_fallback`, `headless_cache_unavailable` ou `headless_vault_and_cache_unavailable`.
 
 ## Provenance et fraîcheur
 
@@ -55,7 +55,7 @@ Le contrat distingue les sources suivantes :
 
 Il expose aussi l’origine interne (`obsidian_api`, `filesystem`, `cache`, `snapshot` ou `unknown`), le timestamp d’observation, l’âge en millisecondes, la connaissance ou non de la fraîcheur et le statut stale.
 
-Une source n’est jamais qualifiée de `live-obsidian` uniquement parce que le service tourne en mode `live`. Une observation du cache doit identifier explicitement `obsidian_api`, être disponible et rester dans le seuil de fraîcheur. Au-delà, la provenance devient `snapshot` et le service passe en dégradé. Un fallback stale n’est jamais présenté comme live.
+Une source n’est jamais qualifiée de `live-obsidian` uniquement parce que le service tourne en mode `live`. Une observation issue d’un cache prêt dont la vraie source de rafraîchissement est `rest` est normalisée vers l’origine publique `obsidian_api` et doit rester dans le seuil de fraîcheur. Au-delà, la provenance devient `snapshot` et le service passe en dégradé. Un fallback stale n’est jamais présenté comme live.
 
 Seuil de fraîcheur par défaut :
 
@@ -69,10 +69,10 @@ Le statut distingue :
 
 - si Obsidian Desktop est requis et vérifié ;
 - si le coffre filesystem configuré existe ;
-- si des données du cache partagé sont disponibles ;
+- si le backend de lecture du cache partagé est prêt ;
 - si les lectures live, filesystem, cache et les mutations sont actuellement possibles.
 
-`temporarilyUnavailable` contient des identifiants de capacités stables, jamais du texte d’exception. Un profil headless read-only peut donc être `ready` tout en indiquant que `live-obsidian-reads` et `mutations` sont indisponibles par conception.
+`temporarilyUnavailable` contient des identifiants de capacités stables, jamais du texte d’exception. Un profil headless read-only peut donc être `ready` tout en indiquant que `live-obsidian-reads` et `mutations` sont indisponibles par conception. L’existence du chemin du coffre ne suffit pas : la readiness headless reste `critical` tant que le cache partagé n’a pas terminé un build exploitable depuis le filesystem.
 
 ## Logs structurés de requêtes
 
@@ -154,4 +154,4 @@ Les logs n’incluent pas par défaut :
 npm run test:http-observability
 ```
 
-La suite tourne sur Ubuntu et Windows. Elle prouve les états live frais, filesystem, cache, snapshot stale, degraded et critical, les codes HTTP des endpoints, l’authentification de `/statusz`, les agrégats nettoyés et l’absence de tokens, secrets, contenu documentaire et chemins personnels dans les surfaces d’observabilité.
+La suite tourne sur Ubuntu et Windows. Elle prouve le vocabulaire réel `rest` du cache, les états live frais, cache filesystem exploitable, snapshot stale, degraded et critical, la journalisation des rejets Origin, les codes HTTP des endpoints, l’authentification de `/statusz`, les agrégats nettoyés et l’absence de tokens, secrets, contenu documentaire et chemins personnels dans les surfaces d’observabilité.

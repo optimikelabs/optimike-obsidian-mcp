@@ -35,13 +35,13 @@ Authenticated detailed status. It uses the same pre-authentication source protec
 
 ## Readiness states
 
-| State | Meaning | HTTP on `/readyz` |
-| --- | --- | ---: |
-| `ready` | The expected profile is available from a verified source | `200` |
-| `degraded` | A bounded fallback is usable, or a non-critical dependency is degraded | `200` |
-| `critical` | No verified source can serve the expected profile safely | `503` |
+| State      | Meaning                                                                | HTTP on `/readyz` |
+| ---------- | ---------------------------------------------------------------------- | ----------------: |
+| `ready`    | The expected profile is available from a verified source               |             `200` |
+| `degraded` | A bounded fallback is usable, or a non-critical dependency is degraded |             `200` |
+| `critical` | No verified source can serve the expected profile safely               |             `503` |
 
-The state includes machine-readable reasons such as `live_obsidian_unavailable_using_stale_fallback`, `cache_status_failed` or `headless_vault_and_cache_unavailable`.
+The state includes machine-readable reasons such as `live_obsidian_unavailable_using_stale_fallback`, `headless_cache_unavailable` or `headless_vault_and_cache_unavailable`.
 
 ## Provenance and freshness
 
@@ -55,7 +55,7 @@ The status contract uses these response-source classes:
 
 It also exposes the internal origin (`obsidian_api`, `filesystem`, `cache`, `snapshot` or `unknown`), observation timestamp, age in milliseconds, whether freshness is known and whether the result is stale.
 
-A source is never called `live-obsidian` solely because the service runs in `live` mode. A cache observation must explicitly identify `obsidian_api`, be available and remain inside the freshness threshold. When that observation ages past the threshold, provenance becomes `snapshot` and the service is degraded. A stale fallback is never presented as live.
+A source is never called `live-obsidian` solely because the service runs in `live` mode. A ready cache observation whose real refresh source is `rest` is normalized to the public `obsidian_api` origin and must remain inside the freshness threshold. When that observation ages past the threshold, provenance becomes `snapshot` and the service is degraded. A stale fallback is never presented as live.
 
 Default freshness threshold:
 
@@ -69,10 +69,10 @@ Status distinguishes:
 
 - whether Obsidian Desktop is required and verified;
 - whether the configured filesystem vault exists;
-- whether shared cache data is available;
+- whether the shared cache read backend is ready;
 - whether live reads, filesystem reads, cache reads and mutations are currently available.
 
-`temporarilyUnavailable` contains stable capability identifiers, not exception text. Headless read-only operation can therefore be `ready` while `live-obsidian-reads` and `mutations` are unavailable by design.
+`temporarilyUnavailable` contains stable capability identifiers, not exception text. Headless read-only operation can therefore be `ready` while `live-obsidian-reads` and `mutations` are unavailable by design. The configured vault path existing is not enough: headless readiness stays `critical` until the shared cache has completed a usable filesystem-backed build.
 
 ## Structured request logs
 
@@ -154,4 +154,4 @@ Logs do not include by default:
 npm run test:http-observability
 ```
 
-The suite runs on Ubuntu and Windows and proves fresh live, filesystem, cache, stale snapshot, degraded and critical states, endpoint status codes, authentication of `/statusz`, sanitized aggregate controls and absence of tokens, secrets, document content and personal paths from the observability surfaces.
+The suite runs on Ubuntu and Windows and proves the real `rest` cache vocabulary, fresh live, usable filesystem-backed cache, stale snapshot, degraded and critical states, origin-rejection completion logging, endpoint status codes, authentication of `/statusz`, sanitized aggregate controls and absence of tokens, secrets, document content and personal paths from the observability surfaces.

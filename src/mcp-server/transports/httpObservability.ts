@@ -66,10 +66,15 @@ export type HttpSessionStats = {
 
 type CacheStatsLike = {
   status?: unknown;
+  ready?: unknown;
+  building?: unknown;
   lastRefreshAt?: unknown;
   refreshSource?: unknown;
+  configuredRefreshSource?: unknown;
   totalFiles?: unknown;
   files?: unknown;
+  cachedFileCount?: unknown;
+  inMemoryFileCount?: unknown;
   error?: unknown;
   lastError?: unknown;
 };
@@ -154,7 +159,11 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 function positiveFileCount(stats: CacheStatsLike | undefined): boolean {
-  const candidate = stats?.totalFiles ?? stats?.files;
+  const candidate =
+    stats?.cachedFileCount ??
+    stats?.inMemoryFileCount ??
+    stats?.totalFiles ??
+    stats?.files;
   if (typeof candidate === "number") return candidate > 0;
   if (Array.isArray(candidate)) return candidate.length > 0;
   return false;
@@ -168,12 +177,19 @@ function normalizeCacheOrigin(
   refreshSource: string | undefined,
   configuredSource: string | undefined,
 ): HealthSnapshot["provenance"]["origin"] {
-  const source = `${refreshSource ?? configuredSource ?? ""}`.toLowerCase();
-  if (source.includes("obsidian")) return "obsidian_api";
+  const source = `${refreshSource ?? configuredSource ?? ""}`
+    .trim()
+    .toLowerCase();
+  if (source === "rest" || source.includes("obsidian")) return "obsidian_api";
   if (source.includes("filesystem")) return "filesystem";
   if (source.includes("snapshot")) return "snapshot";
   if (source.includes("cache") || source.includes("sqlite")) return "cache";
   return "unknown";
+}
+
+function cacheIsReady(stats: CacheStatsLike | undefined): boolean {
+  const status = nonEmptyString(stats?.status)?.toLowerCase();
+  return stats?.ready === true || status === "ready";
 }
 
 function statusFailed(stats: CacheStatsLike | undefined): boolean {
@@ -211,29 +227,33 @@ export function buildHealthSnapshot(
   const stale = freshnessMs !== null && freshnessMs > staleAfterMs;
   const origin = normalizeCacheOrigin(
     nonEmptyString(stats?.refreshSource),
-    cacheSource,
+    nonEmptyString(stats?.configuredRefreshSource) ?? cacheSource,
   );
   const vaultAvailable = Boolean(vaultPath && existsSync(vaultPath));
   const cacheHasData = Boolean(
     stats && (positiveFileCount(stats) || observedAtMs),
   );
-  const cacheAvailable = Boolean(stats && !statusFailed(stats));
-  const liveObserved = origin === "obsidian_api" && cacheAvailable && !stale;
+  const cacheReady = cacheIsReady(stats);
+  const liveObserved =
+    origin === "obsidian_api" && cacheReady && freshnessMs !== null && !stale;
   const filesystemObserved =
     origin === "filesystem" ||
     runtimeMode.startsWith("headless") ||
     cacheSource.toLowerCase().includes("filesystem");
+  const filesystemReads = filesystemObserved && vaultAvailable && cacheReady;
   const usableFallback =
-    cacheHasData ||
-    (filesystemObserved && vaultAvailable) ||
-    origin === "snapshot";
+    cacheReady &&
+    (cacheHasData ||
+      (filesystemObserved && vaultAvailable) ||
+      origin === "snapshot");
 
   let provenance: ResponseProvenance = "unknown";
   if (liveObserved) provenance = "live-obsidian";
-  else if (stale && cacheHasData) provenance = "snapshot";
-  else if (origin === "filesystem" && vaultAvailable) provenance = "filesystem";
-  else if (cacheHasData) provenance = "cache";
-  else if (origin === "snapshot") provenance = "snapshot";
+  else if (cacheReady && stale && cacheHasData) provenance = "snapshot";
+  else if (cacheReady && origin === "filesystem" && vaultAvailable) {
+    provenance = "filesystem";
+  } else if (cacheReady && cacheHasData) provenance = "cache";
+  else if (cacheReady && origin === "snapshot") provenance = "snapshot";
 
   const headless = runtimeMode.startsWith("headless");
   const hybrid = runtimeMode === "hybrid";
@@ -241,9 +261,12 @@ export function buildHealthSnapshot(
   let state: ReadinessState;
 
   if (headless) {
-    if (!vaultAvailable && !cacheHasData) {
+    if (!vaultAvailable) {
       state = "critical";
       reasons.push("headless_vault_and_cache_unavailable");
+    } else if (!cacheReady) {
+      state = "critical";
+      reasons.push("headless_cache_unavailable");
     } else if (stale || statusFailed(stats) || cacheResult.error) {
       state = "degraded";
       reasons.push(
@@ -280,8 +303,8 @@ export function buildHealthSnapshot(
     !runtimeMode.includes("readonly");
   const unavailable: string[] = [];
   if (!liveObserved) unavailable.push("live-obsidian-reads");
-  if (!vaultAvailable) unavailable.push("filesystem-reads");
-  if (!cacheAvailable && !cacheHasData) unavailable.push("cache-reads");
+  if (!filesystemReads) unavailable.push("filesystem-reads");
+  if (!cacheReady) unavailable.push("cache-reads");
   if (!mutationCapable) unavailable.push("mutations");
 
   return {
@@ -321,17 +344,19 @@ export function buildHealthSnapshot(
       },
       sharedCache: {
         required: headless || hybrid,
-        available: cacheAvailable || cacheHasData,
-        reason:
-          cacheAvailable || cacheHasData
-            ? undefined
-            : (cacheResult.error ?? "cache_not_initialized"),
+        available: cacheReady,
+        reason: cacheReady
+          ? undefined
+          : (cacheResult.error ??
+            (stats?.building === true
+              ? "cache_building"
+              : "cache_not_initialized")),
       },
     },
     capabilities: {
       liveObsidianReads: liveObserved,
-      filesystemReads: vaultAvailable,
-      cacheReads: cacheAvailable || cacheHasData,
+      filesystemReads,
+      cacheReads: cacheReady,
       mutations: mutationCapable,
       temporarilyUnavailable: unavailable,
     },

@@ -528,6 +528,8 @@ export async function startHttpTransport(
     }),
   });
 
+  app.use("*", observability.requestLoggingMiddleware);
+
   app.use("*", async (c: Context, next: Next) => {
     const origin = c.req.header("origin");
     if (origin && !originAllowed(origin)) {
@@ -577,8 +579,6 @@ export async function startHttpTransport(
     c.res.headers.set("X-Request-Id", getHttpRequestState(c.req.raw).requestId);
     await next();
   });
-
-  app.use("*", observability.requestLoggingMiddleware);
 
   app.get("/healthz", observability.livenessHandler);
   app.get("/readyz", observability.readinessHandler);
@@ -659,8 +659,7 @@ export async function startHttpTransport(
     let transport = session?.transport;
     let initializationReservation: SessionCapacityReservation | undefined;
     let initializingTransport:
-      | WebStandardStreamableHTTPServerTransport
-      | undefined;
+      WebStandardStreamableHTTPServerTransport | undefined;
     let initializedSession: HttpSession | undefined;
 
     if (isInitializeRequest(body)) {
