@@ -58,7 +58,7 @@ Consequences:
 - absent or invalid authentication is still covered by the pre-authentication limit;
 - all stores are bounded and expired counters are cleaned periodically.
 
-A rejected request returns HTTP `429`, a JSON error, `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` and `X-Optimike-Rate-Limit-Scope`.
+A rejected request returns HTTP `429`, a JSON error with a null JSON-RPC ID, `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` and `X-Optimike-Rate-Limit-Scope`. Rejection happens before request-body admission: the server does not clone or parse the body merely to recover its JSON-RPC ID.
 
 ## Loopback policy
 
@@ -75,6 +75,8 @@ MCP_TRUSTED_PROXIES=10.20.0.10/32,2001:db8:42::10/128
 ```
 
 When the socket peer is trusted, the forwarding chain is evaluated from the trusted edge toward the first untrusted hop. Invalid chains fail closed to the socket address.
+
+One request must use only one forwarding-header family. If both `Forwarded` and `X-Forwarded-For` are present, Optimike MCP does not choose one silently: it ignores both and uses the immediate socket address for the source quota. Configure the trusted proxy to emit exactly one canonical family.
 
 `MCP_TRUST_PROXY=true` is no longer sufficient. If the legacy flag is true without an explicit allowlist, startup fails.
 
@@ -96,7 +98,7 @@ The personal development profile can run without configured authentication outsi
 
 An HTTP MCP session is bound to the verified identity that initialized it. A different authenticated identity cannot reuse the session ID. The response is intentionally indistinguishable from an absent or expired session.
 
-The process-local session registry is bounded by `MCP_HTTP_MAX_SESSIONS`, default 500. Capacity exhaustion returns `503` and `Retry-After`. An inactive session expires after `MCP_HTTP_SESSION_IDLE_TIMEOUT_MS`. Active requests suspend only this idle timeout: `MCP_HTTP_SESSION_MAX_LIFETIME_MS` is an absolute lifetime and closes the transport, including an active event stream, when reached. This is a single-process contract, not a clustered session store.
+The process-local session registry is bounded by `MCP_HTTP_MAX_SESSIONS`, default 500. Capacity exhaustion returns `503` and `Retry-After`. An inactive session expires after `MCP_HTTP_SESSION_IDLE_TIMEOUT_MS`. Active requests suspend only this idle timeout: `MCP_HTTP_SESSION_MAX_LIFETIME_MS` is enforced by a per-session deadline and closes the transport, including an active event stream, when reached. It does not depend on the periodic cleanup interval. This is a single-process contract, not a clustered session store.
 
 ## Configuration
 

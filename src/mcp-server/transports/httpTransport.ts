@@ -42,7 +42,10 @@ import {
   oauthMiddleware,
   type AuthInfo,
 } from "./auth/index.js";
-import { createHttpBackpressureMiddleware } from "./httpBackpressure.js";
+import {
+  createHttpBackpressureMiddleware,
+  createHttpRequestBodyGuardMiddleware,
+} from "./httpBackpressure.js";
 import {
   createHttpObservability,
   type LiveApiObservation,
@@ -68,6 +71,7 @@ const HTTP_PORT = config.mcpHttpPort;
 const HTTP_HOST = config.mcpHttpHost;
 const MCP_ENDPOINT_PATH = "/mcp";
 const MAX_PORT_RETRIES = parsePortRetries();
+const httpRequestBodyGuardMiddleware = createHttpRequestBodyGuardMiddleware();
 const httpBackpressureMiddleware = createHttpBackpressureMiddleware();
 const LIVE_API_PROBE_INTERVAL_MS = 30_000;
 
@@ -78,6 +82,7 @@ type HttpSession = {
   createdAt: number;
   lastSeenAt: number;
   activeRequests: number;
+  absoluteExpiryTimer?: ReturnType<typeof setTimeout>;
 };
 
 type SessionCapacityReservation = {
@@ -176,21 +181,20 @@ function jsonRpcIdFromBody(body: unknown): string | number | null {
   return typeof id === "string" || typeof id === "number" ? id : null;
 }
 
-async function requestJsonRpcId(c: Context): Promise<string | number | null> {
-  if (c.req.method !== "POST") return null;
-  try {
-    return jsonRpcIdFromBody(await c.req.raw.clone().json());
-  } catch {
-    return null;
-  }
-}
-
 async function rateLimitResponse(
   c: Context,
   scope: HttpQuotaState["scope"],
   decision: RateLimitDecision,
 ): Promise<Response> {
   const requestState = getHttpRequestState(c.req.raw);
+  const preAuthRejection = scope !== "client-identity";
+  if (preAuthRejection && c.req.method === "POST") {
+    // Source limiting runs before the request-body guard. Never clone or parse
+    // an untrusted body on this rejection path; cancel it instead.
+    void c.req.raw.body
+      ?.cancel("pre-authentication source rate limit")
+      .catch(() => undefined);
+  }
   c.header("Retry-After", String(decision.retryAfterSeconds));
   c.header("RateLimit-Limit", String(decision.limit));
   c.header("RateLimit-Remaining", String(decision.remaining));
@@ -223,7 +227,9 @@ async function rateLimitResponse(
             ? "Rate-limit state capacity is temporarily exhausted."
             : "Rate limit exceeded.",
       },
-      id: await requestJsonRpcId(c),
+      // Quota rejection happens before request-body admission. Do not clone or
+      // parse an attacker-controlled body merely to recover its JSON-RPC id.
+      id: null,
     },
     429,
   );
@@ -324,22 +330,31 @@ function sessionExpired(session: HttpSession, now: number): boolean {
   );
 }
 
+function closeExpiredSession(sessionId: string, session: HttpSession): boolean {
+  if (transports.get(sessionId) !== session) return false;
+  transports.delete(sessionId);
+  if (session.absoluteExpiryTimer) {
+    clearTimeout(session.absoluteExpiryTimer);
+    session.absoluteExpiryTimer = undefined;
+  }
+  void session.transport.close().catch((error) => {
+    logger.warning(
+      "Expired HTTP session failed to close cleanly.",
+      requestContextService.createRequestContext({
+        operation: "expireHttpSession",
+        clientIdentity: session.identityPseudonym,
+        errorName: error instanceof Error ? error.name : "unknown",
+      }),
+    );
+  });
+  return true;
+}
+
 function expireStaleSessions(now = Date.now()): number {
   let expired = 0;
   for (const [sessionId, session] of transports) {
     if (!sessionExpired(session, now)) continue;
-    transports.delete(sessionId);
-    expired += 1;
-    void session.transport.close().catch((error) => {
-      logger.warning(
-        "Expired HTTP session failed to close cleanly.",
-        requestContextService.createRequestContext({
-          operation: "expireHttpSession",
-          clientIdentity: session.identityPseudonym,
-          errorName: error instanceof Error ? error.name : "unknown",
-        }),
-      );
-    });
+    if (closeExpiredSession(sessionId, session)) expired += 1;
   }
   if (expired > 0) {
     logger.info(
@@ -661,6 +676,9 @@ export async function startHttpTransport(
 
   app.use(MCP_ENDPOINT_PATH, preAuthRateLimitMiddleware);
   app.use(externalHandoffEndpoint, preAuthRateLimitMiddleware);
+  // Source limiting must happen before buffering. Its 429 path never reads the
+  // body; this guard then protects authentication and identity-quota errors.
+  app.use(MCP_ENDPOINT_PATH, httpRequestBodyGuardMiddleware);
   app.use(MCP_ENDPOINT_PATH, authMiddleware);
   app.use(externalHandoffEndpoint, authMiddleware);
   app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);
@@ -754,7 +772,7 @@ export async function startHttpTransport(
         onsessioninitialized: (newId) => {
           const now = Date.now();
           initializationReservation?.release();
-          initializedSession = {
+          const registeredSession: HttpSession = {
             transport: newTransport,
             identityKey: identity.key,
             identityPseudonym: identity.pseudonym,
@@ -762,7 +780,21 @@ export async function startHttpTransport(
             lastSeenAt: now,
             activeRequests: 1,
           };
-          transports.set(newId, initializedSession);
+          initializedSession = registeredSession;
+          transports.set(newId, registeredSession);
+          registeredSession.absoluteExpiryTimer = setTimeout(() => {
+            if (closeExpiredSession(newId, registeredSession)) {
+              logger.info(
+                "HTTP session reached its absolute lifetime.",
+                requestContextService.createRequestContext({
+                  operation: "expireHttpSessionMaxLifetime",
+                  clientIdentity: identity.pseudonym,
+                  sessionCount: transports.size,
+                }),
+              );
+            }
+          }, httpProtectionConfig.sessionMaxLifetimeMs);
+          registeredSession.absoluteExpiryTimer.unref?.();
           logger.info("HTTP session created.", {
             ...postContext,
             sessionCount: transports.size,
@@ -778,6 +810,10 @@ export async function startHttpTransport(
         const current = closedSessionId
           ? transports.get(closedSessionId)
           : undefined;
+        if (initializedSession?.absoluteExpiryTimer) {
+          clearTimeout(initializedSession.absoluteExpiryTimer);
+          initializedSession.absoluteExpiryTimer = undefined;
+        }
         if (closedSessionId && current?.transport === newTransport) {
           transports.delete(closedSessionId);
           logger.info("HTTP session closed.", {
