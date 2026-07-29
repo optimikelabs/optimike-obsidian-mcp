@@ -192,6 +192,11 @@ export type AdmissionLease = {
   release: () => void;
 };
 
+export type AdmissionWaitBudget = {
+  waitStartedAt: number;
+  deadlineAt: number;
+};
+
 export type AdmissionSnapshot = {
   inFlight: number;
   expensiveInFlight: number;
@@ -268,6 +273,14 @@ export class FairAdmissionController {
 
   private now(): number {
     return this.limits.now?.() ?? Date.now();
+  }
+
+  public createWaitBudget(): AdmissionWaitBudget {
+    const waitStartedAt = this.now();
+    return {
+      waitStartedAt,
+      deadlineAt: waitStartedAt + this.limits.queueWaitTimeoutMs,
+    };
   }
 
   private canGrant(
@@ -354,6 +367,8 @@ export class FairAdmissionController {
     identityKey: string;
     operationClass: HttpOperationClass;
     signal?: AbortSignal;
+    waitStartedAt?: number;
+    deadlineAt?: number;
   }): Promise<AdmissionLease> {
     if (input.signal?.aborted) {
       this.cancelled += 1;
@@ -362,12 +377,28 @@ export class FairAdmissionController {
       );
     }
 
+    const now = this.now();
+    const waitStartedAt = input.waitStartedAt ?? now;
+    const deadlineAt =
+      input.deadlineAt ?? waitStartedAt + this.limits.queueWaitTimeoutMs;
+    if (deadlineAt <= now) {
+      this.timedOut += 1;
+      return Promise.reject(
+        new AdmissionRejectedError("timeout", this.limits.retryAfterSeconds),
+      );
+    }
+
     if (
       this.queued === 0 &&
       this.canGrant(input.identityKey, input.operationClass)
     ) {
       return Promise.resolve(
-        this.grant(input.identityKey, input.operationClass, false, 0),
+        this.grant(
+          input.identityKey,
+          input.operationClass,
+          false,
+          Math.max(0, now - waitStartedAt),
+        ),
       );
     }
 
@@ -393,7 +424,7 @@ export class FairAdmissionController {
         id: this.nextQueueId++,
         identityKey: input.identityKey,
         operationClass: input.operationClass,
-        enqueuedAt: this.now(),
+        enqueuedAt: waitStartedAt,
         resolve,
         reject,
         signal: input.signal,
@@ -408,6 +439,16 @@ export class FairAdmissionController {
       this.queued += 1;
       this.maxObservedQueued = Math.max(this.maxObservedQueued, this.queued);
 
+      const remainingWaitMs = deadlineAt - this.now();
+      if (remainingWaitMs <= 0) {
+        this.removeQueuedItem(item);
+        this.timedOut += 1;
+        item.reject(
+          new AdmissionRejectedError("timeout", this.limits.retryAfterSeconds),
+        );
+        this.dispatch();
+        return;
+      }
       item.timeout = setTimeout(() => {
         if (!this.removeQueuedItem(item)) return;
         this.timedOut += 1;
@@ -415,7 +456,7 @@ export class FairAdmissionController {
           new AdmissionRejectedError("timeout", this.limits.retryAfterSeconds),
         );
         this.dispatch();
-      }, this.limits.queueWaitTimeoutMs);
+      }, remainingWaitMs);
       item.timeout.unref?.();
 
       if (input.signal) {
@@ -550,6 +591,10 @@ class RequestBodyTooLargeError extends Error {
   public readonly name = "RequestBodyTooLargeError";
 }
 
+class JsonRpcBatchUnsupportedError extends Error {
+  public readonly name = "JsonRpcBatchUnsupportedError";
+}
+
 function cancelRequestBody(request: Request, reason: string): void {
   void request.body?.cancel(reason).catch(() => undefined);
 }
@@ -653,19 +698,17 @@ export async function classifyHttpOperation(
       c.req.raw,
       httpBackpressureConfig.maxRequestBodyBytes,
     )) as JsonRpcEnvelope | JsonRpcEnvelope[];
-    const envelopes = Array.isArray(payload) ? payload : [payload];
-    const classified = envelopes.map(classifyEnvelope);
-    return (
-      classified.find((item) => item.operationClass === "mutation") ??
-      classified.find((item) => item.operationClass === "expensive") ??
-      classified[0] ?? {
-        operationClass: "standard",
-        operationName: "empty-batch",
-        rpcId: null,
-      }
-    );
+    if (Array.isArray(payload)) {
+      throw new JsonRpcBatchUnsupportedError();
+    }
+    return classifyEnvelope(payload);
   } catch (error) {
-    if (error instanceof RequestBodyTooLargeError) throw error;
+    if (
+      error instanceof RequestBodyTooLargeError ||
+      error instanceof JsonRpcBatchUnsupportedError
+    ) {
+      throw error;
+    }
     return {
       operationClass: "standard",
       operationName: "invalid-json",
@@ -693,6 +736,30 @@ function requestBodyTooLargeResponse(
       id: null,
     },
     413,
+  );
+}
+
+function batchUnsupportedResponse(
+  c: Context<{ Bindings: HttpBindings }>,
+): Response {
+  const state = getHttpRequestState(c.req.raw);
+  c.header("X-Request-Id", state.requestId);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      error: {
+        code: BaseErrorCode.VALIDATION_ERROR,
+        message:
+          "JSON-RPC batches are not supported by this HTTP transport. Send one envelope per POST request.",
+        data: {
+          batchSupported: false,
+          maxEnvelopesPerRequest: 1,
+        },
+      },
+      id: null,
+    },
+    400,
   );
 }
 
@@ -823,6 +890,7 @@ export function createHttpBackpressureMiddleware(
     };
     const signal =
       c.req.path === "/external-handoff" ? undefined : c.req.raw.signal;
+    const waitBudget = controller.createWaitBudget();
     let descriptor: HttpOperationDescriptor;
     let lease: AdmissionLease | undefined;
 
@@ -832,6 +900,7 @@ export function createHttpBackpressureMiddleware(
           identityKey: identity.key,
           operationClass: "standard",
           signal,
+          ...waitBudget,
         });
       } catch (error) {
         if (!(error instanceof AdmissionRejectedError)) throw error;
@@ -843,6 +912,9 @@ export function createHttpBackpressureMiddleware(
         lease.release();
         if (error instanceof RequestBodyTooLargeError) {
           return requestBodyTooLargeResponse(c);
+        }
+        if (error instanceof JsonRpcBatchUnsupportedError) {
+          return batchUnsupportedResponse(c);
         }
         throw error;
       }
@@ -864,6 +936,7 @@ export function createHttpBackpressureMiddleware(
           // The bounded queue timeout still prevents orphaned work from waiting
           // indefinitely. Other operations remain abort-aware before admission.
           signal,
+          ...waitBudget,
         });
       } catch (error) {
         if (!(error instanceof AdmissionRejectedError)) throw error;

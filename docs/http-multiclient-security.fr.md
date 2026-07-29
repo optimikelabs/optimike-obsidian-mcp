@@ -96,7 +96,7 @@ Le profil personnel de développement peut fonctionner sans authentification con
 
 Une session MCP HTTP est liée à l’identité vérifiée qui l’a initialisée. Une autre identité authentifiée ne peut pas réutiliser son identifiant. La réponse ne permet pas de distinguer ce cas d’une session absente ou expirée.
 
-Le registre des sessions, local au processus, est borné par `MCP_HTTP_MAX_SESSIONS`, avec une valeur par défaut de 500. Une saturation renvoie `503` et `Retry-After`. Ce contrat ne constitue pas un stockage de sessions distribué.
+Le registre des sessions, local au processus, est borné par `MCP_HTTP_MAX_SESSIONS`, avec une valeur par défaut de 500. Une saturation renvoie `503` et `Retry-After`. Une session inactive expire après `MCP_HTTP_SESSION_IDLE_TIMEOUT_MS`. Les requêtes actives suspendent uniquement ce timeout d’inactivité : `MCP_HTTP_SESSION_MAX_LIFETIME_MS` reste une durée de vie absolue et ferme le transport, y compris un flux d’événements actif, lorsqu’elle est atteinte. Ce contrat ne constitue pas un stockage de sessions distribué.
 
 ## Configuration
 
@@ -112,6 +112,9 @@ Le registre des sessions, local au processus, est borné par `MCP_HTTP_MAX_SESSI
 | `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS`    |                                  `10000` | Borne des compteurs d’identité                     |
 | `MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS`  |                                 `300000` | Intervalle de nettoyage                            |
 | `MCP_HTTP_MAX_SESSIONS`                    |                                    `500` | Borne des sessions locales au processus            |
+| `MCP_HTTP_SESSION_IDLE_TIMEOUT_MS`         |                                `1800000` | Durée inactive, suspendue pendant les requêtes      |
+| `MCP_HTTP_SESSION_MAX_LIFETIME_MS`         |                               `86400000` | Durée absolue, flux actifs compris                  |
+| `MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS`     |                                  `60000` | Intervalle de nettoyage des sessions                |
 | `MCP_TRUSTED_PROXIES`                      |                                     vide | Allowlist d’IP ou CIDR de proxies                  |
 | `MCP_HTTP_IDENTITY_HASH_KEY`               | secret JWT ou clé aléatoire du processus | Clé HMAC dédiée facultative, 32 caractères minimum |
 | `MCP_BACKEND_BEARER_TOKEN`                 |                                     vide | Credential du proxy stdio vers un backend sécurisé |

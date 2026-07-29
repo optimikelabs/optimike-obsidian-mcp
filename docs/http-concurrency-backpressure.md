@@ -39,6 +39,11 @@ A zero queue is allowed only when both queue limits are zero. This produces imme
 bounded clone of the request. Declared and streamed bodies above the limit are
 rejected with HTTP `413`; they are never fully buffered before admission.
 
+The HTTP profile accepts exactly one JSON-RPC envelope per `POST`. A top-level
+JSON array is rejected fail-closed with HTTP `400` before the MCP handler runs,
+because treating a batch as one admitted operation would bypass the concurrency
+contract. Clients must send batch members as separate requests.
+
 ## Explicit operation classes
 
 The default expensive set contains semantic search aliases, runtime maintenance, global search, Bases queries, Tasks scans and queries, selected Operon rebuild/validation operations, external reads and external handoff.
@@ -57,6 +62,12 @@ Changing these lists is a capacity-policy change. Use exact registered tool name
 The queue is partitioned by verified identity and dispatched in round-robin order. Operations preserve FIFO order inside one identity. This prevents one client with many queued calls from starving other identities.
 
 Queue state is bounded by the global and per-identity limits. Active and queued identity maps are removed when their counts return to zero. No bearer token, document path or request content is retained in admission state.
+
+A request keeps one wait deadline while its bounded body is parsed and its
+standard parsing slot is reclassified as expensive or mutation capacity. Body
+parsing and both admission steps cannot each receive a fresh timeout.
+`X-Optimike-Queue-Wait-Ms` reports the cumulative wait from the first admission
+attempt when reclassification occurs.
 
 ## Rejection semantics
 
