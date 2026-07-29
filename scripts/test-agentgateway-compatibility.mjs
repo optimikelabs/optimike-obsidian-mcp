@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import {
   cp,
@@ -26,6 +27,7 @@ const jwtSecret = "gateway-e2e-secret-must-be-at-least-thirty-two-characters";
 const fixtureRootId = "gateway-fixture";
 const fixtureRelativePath = "artifact.txt";
 const fixtureContent = "Optimike gateway handoff fixture\n";
+const vaultFixtureContent = "# Gateway\n\nRead retry fixture.\n";
 const physicalPathSentinel = "PHYSICAL-GATEWAY-FIXTURE-PATH";
 
 async function readAllLogs(directory) {
@@ -150,6 +152,21 @@ function containsExactString(value, expected) {
   );
 }
 
+function containsStringFragment(value, expectedFragments) {
+  if (typeof value === "string") {
+    return expectedFragments.some((fragment) => value.includes(fragment));
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) =>
+      containsStringFragment(item, expectedFragments),
+    );
+  }
+  if (!value || typeof value !== "object") return false;
+  return Object.values(value).some((item) =>
+    containsStringFragment(item, expectedFragments),
+  );
+}
+
 async function createExternalRootConfig(sandbox, externalRoot) {
   const examplePath = path.join(
     projectRoot,
@@ -217,6 +234,25 @@ async function waitForUrl(url, child, timeoutMs = 30_000) {
   throw new Error(`timed out waiting for ${url}`);
 }
 
+async function waitForStatus(url, child, expectedStatus, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child?.exitCode !== null && child?.exitCode !== undefined) {
+      throw new Error(
+        `process exited with ${child.exitCode}: ${child.stderrText ?? ""}`,
+      );
+    }
+    try {
+      const response = await fetch(url);
+      if (response.status === expectedStatus) return response;
+    } catch {
+      // Still starting.
+    }
+    await sleep(75);
+  }
+  throw new Error(`timed out waiting for ${url} to return ${expectedStatus}`);
+}
+
 async function stopChild(child) {
   if (!child || child.exitCode !== null) return;
   child.kill("SIGTERM");
@@ -227,94 +263,94 @@ async function stopChild(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-function gatewayCandidates(gatewayPort, backendPort) {
-  const socket = `127.0.0.1:${backendPort}`;
-  const host = `http://127.0.0.1:${backendPort}`;
-  return [
-    {
-      name: "v1.4-transparent-http",
-      yaml: `# yaml-language-server: $schema=https://agentgateway.dev/schema/config\ngateways:\n  optimike:\n    port: ${gatewayPort}\n    protocol: HTTP\nroutes:\n- name: optimike-all\n  gateways: [optimike]\n  matches:\n  - path:\n      pathPrefix: /\n  backends:\n  - host: ${socket}\n`,
-    },
-    {
-      name: "minimal-host",
-      yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - routes:\n    - backends:\n      - host: ${host}\n`,
-    },
-    {
-      name: "path-prefix-host",
-      yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - routes:\n    - matches:\n      - path:\n          pathPrefix: /\n      backends:\n      - host: ${host}\n`,
-    },
-    {
-      name: "http-protocol-host",
-      yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - protocol: HTTP\n    routes:\n    - backends:\n      - host: ${host}\n`,
-    },
-    {
-      name: "named-route-host",
-      yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - name: optimike-http\n    routes:\n    - name: optimike-all\n      backends:\n      - host: ${host}\n`,
-    },
-  ];
+function replaceExactOnce(source, expected, replacement, label) {
+  const first = source.indexOf(expected);
+  assert.notEqual(first, -1, `${label} placeholder is missing`);
+  assert.equal(
+    source.indexOf(expected, first + expected.length),
+    -1,
+    `${label} placeholder is ambiguous`,
+  );
+  return (
+    source.slice(0, first) + replacement + source.slice(first + expected.length)
+  );
 }
 
-function gatewayArgumentCandidates(binary, configPath) {
-  return [
-    [binary, "-f", configPath],
-    [binary, "--file", configPath],
-    [binary, "--config", configPath],
-    [binary, "--config-file", configPath],
-    [binary, configPath],
-  ];
+async function materializePublishedGatewayConfig(
+  sandbox,
+  gatewayPort,
+  backendPort,
+) {
+  const publishedConfigPath = path.join(
+    projectRoot,
+    "docs",
+    "agentgateway.transparent.example.yaml",
+  );
+  let yaml = await readFile(publishedConfigPath, "utf8");
+  yaml = replaceExactOnce(
+    yaml,
+    "port: 3100",
+    `port: ${gatewayPort}`,
+    "gateway port",
+  );
+  yaml = replaceExactOnce(
+    yaml,
+    "host: 127.0.0.1:3101",
+    `host: 127.0.0.1:${backendPort}`,
+    "backend endpoint",
+  );
+  const configPath = path.join(
+    sandbox,
+    "agentgateway.transparent.example.resolved.yaml",
+  );
+  await writeFile(configPath, yaml, "utf8");
+  return configPath;
 }
 
 async function startGateway(binary, sandbox, gatewayPort, backendPort) {
-  const attempts = [];
-  for (const candidate of gatewayCandidates(gatewayPort, backendPort)) {
-    const configPath = path.join(
-      sandbox,
-      `agentgateway-${candidate.name}.yaml`,
-    );
-    await writeFile(configPath, candidate.yaml, "utf8");
-    for (const [command, ...args] of gatewayArgumentCandidates(
-      binary,
-      configPath,
-    )) {
-      const child = spawn(command, args, {
-        cwd: sandbox,
-        env: { ...process.env, RUST_LOG: "info" },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      child.stderrText = "";
-      child.stdoutText = "";
-      child.stdout?.on("data", (chunk) => {
-        child.stdoutText += String(chunk);
-      });
-      child.stderr?.on("data", (chunk) => {
-        child.stderrText += String(chunk);
-      });
-      let accepted = false;
-      try {
-        const probe = await waitForUrl(
-          new URL(`http://127.0.0.1:${gatewayPort}/healthz`),
-          child,
-          6000,
-        );
-        if (probe.status < 500) {
-          accepted = true;
-          return { child, configPath, candidate: candidate.name, args };
-        }
-      } catch (error) {
-        attempts.push({
-          candidate: candidate.name,
-          args,
-          error: error instanceof Error ? error.message : String(error),
-          stderr: child.stderrText.slice(-3000),
-        });
-      } finally {
-        if (!accepted && child.exitCode === null) await stopChild(child);
-      }
-    }
-  }
-  throw new Error(
-    `agentgateway did not accept a transparent HTTP configuration: ${JSON.stringify(attempts)}`,
+  const configPath = await materializePublishedGatewayConfig(
+    sandbox,
+    gatewayPort,
+    backendPort,
   );
+  const args = ["-f", configPath];
+  const child = spawn(binary, args, {
+    cwd: sandbox,
+    env: { ...process.env, RUST_LOG: "info" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stderrText = "";
+  child.stdoutText = "";
+  child.stdout?.on("data", (chunk) => {
+    child.stdoutText += String(chunk);
+  });
+  child.stderr?.on("data", (chunk) => {
+    child.stderrText += String(chunk);
+  });
+  try {
+    const probe = await waitForUrl(
+      new URL(`http://127.0.0.1:${gatewayPort}/healthz`),
+      child,
+      6000,
+    );
+    assert.ok(
+      probe.status < 500,
+      `published agentgateway config returned ${probe.status}`,
+    );
+    return {
+      child,
+      configPath,
+      candidate: "docs/agentgateway.transparent.example.yaml",
+      args,
+    };
+  } catch (error) {
+    await stopChild(child);
+    throw new Error(
+      `agentgateway rejected the published transparent HTTP configuration: ${
+        error instanceof Error ? error.message : String(error)
+      }\n${child.stderrText.slice(-3000)}`,
+    );
+  }
 }
 
 function parseProtocolPayload(text, contentType, expectedId) {
@@ -520,6 +556,26 @@ function normalizeToolResult(payload) {
   return result;
 }
 
+function assertSuccessfulToolResultContaining(result, expectedContent, label) {
+  assert.equal(result.response.status, 200, result.text);
+  assert.equal(
+    result.payload?.error,
+    undefined,
+    `${label} returned a JSON-RPC error: ${result.text}`,
+  );
+  const normalized = normalizeToolResult(result.payload);
+  assert.notEqual(
+    normalized?.isError,
+    true,
+    `${label} returned an MCP tool error: ${result.text}`,
+  );
+  assert.ok(
+    containsStringFragment(normalized, [expectedContent]),
+    `${label} did not return the fixture content: ${result.text}`,
+  );
+  return normalized;
+}
+
 async function callTool(client, baseUrl, name, argumentsValue) {
   return call(client, baseUrl, "tools/call", {
     name,
@@ -539,11 +595,19 @@ async function readRetryProof(client, baseUrl, tools) {
   });
   const first = await callTool(client, baseUrl, tool.name, args);
   const second = await callTool(client, baseUrl, tool.name, args);
-  assert.equal(first.response.status, 200, first.text);
-  assert.equal(second.response.status, 200, second.text);
+  const normalizedFirst = assertSuccessfulToolResultContaining(
+    first,
+    vaultFixtureContent,
+    "first fixture read",
+  );
+  const normalizedSecond = assertSuccessfulToolResultContaining(
+    second,
+    vaultFixtureContent,
+    "retried fixture read",
+  );
   assert.deepEqual(
-    normalizeToolResult(first.payload),
-    normalizeToolResult(second.payload),
+    normalizedFirst,
+    normalizedSecond,
     "a retried read changed its result",
   );
   return { tool: tool.name, args };
@@ -873,9 +937,34 @@ async function mutationReplayHarnessStatus(client, baseUrl, tools) {
   };
 }
 
+async function verifyGatewayBinary(binary, expectedSha256) {
+  assert.match(
+    expectedSha256,
+    /^[a-f0-9]{64}$/iu,
+    "AGENTGATEWAY_SHA256 must be an explicit 64-character SHA-256 digest",
+  );
+  const bytes = await readFile(binary);
+  const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+  assert.equal(
+    actualSha256,
+    expectedSha256.toLowerCase(),
+    `agentgateway binary checksum mismatch: expected ${expectedSha256.toLowerCase()}, received ${actualSha256}`,
+  );
+  return actualSha256;
+}
+
 async function main() {
   const gatewayBinary = process.env.AGENTGATEWAY_BIN;
   assert.ok(gatewayBinary, "AGENTGATEWAY_BIN is required");
+  const expectedGatewaySha256 = process.env.AGENTGATEWAY_SHA256;
+  assert.ok(
+    expectedGatewaySha256,
+    "AGENTGATEWAY_SHA256 is required and must match AGENTGATEWAY_BIN",
+  );
+  const gatewaySha256 = await verifyGatewayBinary(
+    gatewayBinary,
+    expectedGatewaySha256,
+  );
   const sandbox = await mkdtemp(
     path.join(os.tmpdir(), "optimike-agentgateway-"),
   );
@@ -892,7 +981,7 @@ async function main() {
   await mkdir(logDir, { recursive: true });
   await writeFile(
     path.join(vaultPath, "Gateway.md"),
-    "# Gateway\n\nRead retry fixture.\n",
+    vaultFixtureContent,
     "utf8",
   );
   await writeFile(
@@ -914,7 +1003,8 @@ async function main() {
     OBSIDIAN_RUNTIME_MODE: "headless-readonly",
     OBSIDIAN_VAULT: vaultPath,
     OBSIDIAN_CACHE_SOURCE: "filesystem",
-    OBSIDIAN_ENABLE_CACHE: "false",
+    OBSIDIAN_SHARED_CACHE_DB_PATH: path.join(runArtifactsDir, "cache.sqlite"),
+    OBSIDIAN_ENABLE_CACHE: "true",
     MCP_WRITE_MODE: "readonly",
     SEMANTIC_SEARCH_PREWARM: "false",
     MCP_TRANSPORT_TYPE: "http",
@@ -968,6 +1058,11 @@ async function main() {
       new URL(`http://127.0.0.1:${backendPort}/healthz`),
       backend,
     );
+    await waitForStatus(
+      new URL(`http://127.0.0.1:${backendPort}/readyz`),
+      backend,
+      200,
+    );
     gateway = await startGateway(
       gatewayBinary,
       sandbox,
@@ -1008,8 +1103,20 @@ async function main() {
     });
     assert.equal(status.status, 200);
     const statusText = await status.text();
-    assert.equal(statusText.includes(jwtSecret), false);
-    assert.equal(statusText.includes(externalRoot), false);
+    const statusPayload = JSON.parse(statusText);
+    assert.equal(
+      containsStringFragment(statusPayload, [jwtSecret]),
+      false,
+      "authenticated status disclosed the JWT secret",
+    );
+    assert.equal(
+      containsStringFragment(statusPayload, [
+        externalRoot,
+        physicalPathSentinel,
+      ]),
+      false,
+      "authenticated status disclosed the physical external-root path",
+    );
     await waitForCompletionLog(
       logDir,
       "gateway-e2e:status.1",
@@ -1025,6 +1132,7 @@ async function main() {
       schemaVersion: 1,
       gateway: "agentgateway",
       upstreamCommit: process.env.AGENTGATEWAY_COMMIT ?? "unknown",
+      binarySha256: gatewaySha256,
       selectedConfig: gateway.candidate,
       invocationArgs: gateway.args,
       directBackendPort: backendPort,
