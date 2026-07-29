@@ -213,10 +213,9 @@ async function preAuthRateLimitMiddleware(
   await next();
 }
 
-async function authenticatedIdentityRateLimitMiddleware(
+function attachVerifiedIdentity(
   c: Context<{ Bindings: HttpBindings }>,
-  next: Next,
-): Promise<void | Response> {
+): VerifiedHttpIdentity {
   const authInfo = c.env.incoming.auth as AuthInfo | undefined;
   if (!authInfo) {
     throw new McpError(
@@ -226,9 +225,27 @@ async function authenticatedIdentityRateLimitMiddleware(
   }
 
   const requestState = getHttpRequestState(c.req.raw);
-  const identity = deriveVerifiedHttpIdentity(authInfo);
+  const identity =
+    requestState.identity ?? deriveVerifiedHttpIdentity(authInfo);
   requestState.authInfo = authInfo;
   requestState.identity = identity;
+  return identity;
+}
+
+async function verifiedIdentityMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void> {
+  attachVerifiedIdentity(c);
+  await next();
+}
+
+async function authenticatedIdentityRateLimitMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void | Response> {
+  const requestState = getHttpRequestState(c.req.raw);
+  const identity = attachVerifiedIdentity(c);
   const decision = authenticatedIdentityLimiter.check(identity.key);
   requestState.quotas.push(quotaState("client-identity", decision));
   if (!decision.allowed) {
@@ -592,7 +609,7 @@ export async function startHttpTransport(
   app.use(MCP_ENDPOINT_PATH, authMiddleware);
   app.use(externalHandoffEndpoint, authMiddleware);
   app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);
-  app.use(externalHandoffEndpoint, authenticatedIdentityRateLimitMiddleware);
+  app.use(externalHandoffEndpoint, verifiedIdentityMiddleware);
   app.use(MCP_ENDPOINT_PATH, httpBackpressureMiddleware);
   app.use(externalHandoffEndpoint, httpBackpressureMiddleware);
 

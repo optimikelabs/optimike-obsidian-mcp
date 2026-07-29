@@ -3,13 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
@@ -97,7 +91,11 @@ async function mcpPost(baseUrl, { token, body, sessionId, headers = {} }) {
 async function startBackend(sandbox, name, overrides = {}) {
   const port = await unusedPort();
   const vaultPath = path.join(sandbox, `${name}-vault`);
-  const logDir = path.join(process.cwd(), ".tmp", `http-multiclient-${name}-${port}`);
+  const logDir = path.join(
+    process.cwd(),
+    ".tmp",
+    `http-multiclient-${name}-${port}`,
+  );
   await mkdir(path.join(vaultPath, ".obsidian"), { recursive: true });
   await mkdir(logDir, { recursive: true });
   await writeFile(path.join(vaultPath, "Smoke.md"), "# Smoke\n", "utf8");
@@ -188,6 +186,15 @@ async function testPureProtectionPrimitives() {
   assert.equal(subjectIdentityA.key, subjectIdentityB.key);
   assert.equal(subjectIdentityA.key.includes("secret-token-a"), false);
   assert.equal(subjectIdentityA.pseudonym.includes("client-a"), false);
+
+  const whitespaceDistinctIdentity = deriveVerifiedHttpIdentity({
+    token: "secret-token-a",
+    clientId: " client-a",
+    subject: "operator",
+    issuer: "issuer",
+    scopes: ["vault:read"],
+  });
+  assert.notEqual(subjectIdentityA.key, whitespaceDistinctIdentity.key);
 
   const fallbackIdentityA = deriveVerifiedHttpIdentity({
     token: "secret-token-a",
@@ -334,7 +341,10 @@ async function testUntrustedProxyHeaders(sandbox) {
       headers: { "X-Forwarded-For": "198.51.100.2" },
     });
     assert.equal(second.status, 429);
-    assert.equal(second.headers.get("x-optimike-rate-limit-scope"), "loopback-source-ip");
+    assert.equal(
+      second.headers.get("x-optimike-rate-limit-scope"),
+      "loopback-source-ip",
+    );
   } finally {
     await stopBackend(instance);
     await rm(instance.logDir, { recursive: true, force: true });
@@ -363,7 +373,10 @@ async function testTrustedProxyHeaders(sandbox) {
       headers: { "X-Forwarded-For": "198.51.100.1" },
     });
     assert.equal(repeatedFirst.status, 429);
-    assert.equal(repeatedFirst.headers.get("x-optimike-rate-limit-scope"), "source-ip");
+    assert.equal(
+      repeatedFirst.headers.get("x-optimike-rate-limit-scope"),
+      "source-ip",
+    );
   } finally {
     await stopBackend(instance);
     await rm(instance.logDir, { recursive: true, force: true });

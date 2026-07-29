@@ -7,6 +7,7 @@ import {
   AdmissionRejectedError,
   FairAdmissionController,
   createHttpBackpressureMiddleware,
+  httpBackpressureConfig,
 } from "../dist/mcp-server/transports/httpBackpressure.js";
 import { getHttpRequestState } from "../dist/mcp-server/transports/httpRequestState.js";
 
@@ -372,13 +373,16 @@ async function testRealMiddlewareResponses() {
   );
   const rejectedBody = await rejected.json();
   assert.equal(rejectedBody.error.data.retryable, true);
-  assert.equal((await first).status, 200);
+  const admittedFirst = await first;
+  assert.equal(admittedFirst.status, 200);
+  await admittedFirst.arrayBuffer();
   const admittedSecond = await second;
   assert.equal(admittedSecond.status, 200);
   assert.equal(
     admittedSecond.headers.get("x-optimike-operation-class"),
     "mutation",
   );
+  await admittedSecond.arrayBuffer();
 }
 
 async function testDownstreamAdmissionErrorIsNotReclassified() {
@@ -405,6 +409,150 @@ async function testDownstreamAdmissionErrorIsNotReclassified() {
   );
 }
 
+async function testRequestBodyParsingIsBoundedAndAdmitted() {
+  const admission = controller({
+    maxInFlight: 1,
+    maxInFlightPerIdentity: 1,
+    maxQueued: 0,
+    maxQueuedPerIdentity: 0,
+  });
+  const app = new Hono();
+  let handlerCalls = 0;
+  app.use("*", async (c, next) => {
+    attachTestIdentity(c, "bounded-body");
+    await next();
+  });
+  app.use("/mcp", createHttpBackpressureMiddleware(admission));
+  app.post("/mcp", (c) => {
+    handlerCalls += 1;
+    return c.json({ ok: true });
+  });
+
+  const oversized = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "x".repeat(httpBackpressureConfig.maxRequestBodyBytes + 1),
+  });
+  assert.equal(oversized.status, 413);
+  assert.equal(handlerCalls, 0);
+  assert.equal(admission.getSnapshot().inFlight, 0);
+
+  let oversizedStreamCancelled;
+  const oversizedStreamWasCancelled = new Promise((resolve) => {
+    oversizedStreamCancelled = resolve;
+  });
+  let oversizedChunkSent = false;
+  const oversizedChunkedRequest = new Request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: new ReadableStream({
+      pull(streamController) {
+        if (oversizedChunkSent) return;
+        oversizedChunkSent = true;
+        streamController.enqueue(
+          new Uint8Array(httpBackpressureConfig.maxRequestBodyBytes + 1),
+        );
+      },
+      cancel() {
+        oversizedStreamCancelled();
+      },
+    }),
+    duplex: "half",
+  });
+  const oversizedChunkedResponse = await app.request(oversizedChunkedRequest);
+  assert.equal(oversizedChunkedResponse.status, 413);
+  await oversizedStreamWasCancelled;
+  assert.equal(handlerCalls, 0);
+  assert.equal(admission.getSnapshot().inFlight, 0);
+
+  let bodyStarted;
+  const started = new Promise((resolve) => {
+    bodyStarted = resolve;
+  });
+  let continueBody;
+  const bodyGate = new Promise((resolve) => {
+    continueBody = resolve;
+  });
+  let emitted = false;
+  const request = new Request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: new ReadableStream({
+      async pull(streamController) {
+        if (emitted) return;
+        emitted = true;
+        bodyStarted();
+        await bodyGate;
+        streamController.enqueue(
+          new TextEncoder().encode(
+            JSON.stringify({ jsonrpc: "2.0", id: 3, method: "ping" }),
+          ),
+        );
+        streamController.close();
+      },
+    }),
+    duplex: "half",
+  });
+  const responsePromise = app.request(request);
+  await started;
+  assert.equal(
+    admission.getSnapshot().inFlight,
+    1,
+    "request-body parsing was not covered by admission",
+  );
+  continueBody();
+  const response = await responsePromise;
+  assert.equal(response.status, 200);
+  await response.arrayBuffer();
+  assert.equal(admission.getSnapshot().inFlight, 0);
+}
+
+async function testStreamingResponseRetainsLease() {
+  const admission = controller({
+    maxInFlight: 1,
+    maxInFlightPerIdentity: 1,
+    maxQueued: 0,
+    maxQueuedPerIdentity: 0,
+  });
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    attachTestIdentity(c, "stream-owner");
+    await next();
+  });
+  app.use("/mcp", createHttpBackpressureMiddleware(admission));
+  app.post(
+    "/mcp",
+    () =>
+      new Response(
+        new ReadableStream({
+          start(streamController) {
+            streamController.enqueue(new TextEncoder().encode("open"));
+          },
+        }),
+      ),
+  );
+
+  const request = () =>
+    app.request("http://test/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "ping" }),
+    });
+
+  const first = await request();
+  assert.equal(first.status, 200);
+  assert.equal(admission.getSnapshot().inFlight, 1);
+  const rejected = await request();
+  assert.equal(rejected.status, 503);
+  await first.body.cancel();
+  assert.equal(admission.getSnapshot().inFlight, 0);
+
+  const recovered = await request();
+  assert.equal(recovered.status, 200);
+  await recovered.body.cancel();
+  assert.equal(admission.getSnapshot().inFlight, 0);
+}
+
 await testGlobalAndPerIdentityLimits();
 await testExpensiveAndMutationLimits();
 await testQueueBoundsTimeoutAndCancellation();
@@ -414,7 +562,9 @@ await testReleaseAfterError();
 await testDeterministicLoad();
 await testRealMiddlewareResponses();
 await testDownstreamAdmissionErrorIsNotReclassified();
+await testRequestBodyParsingIsBoundedAndAdmitted();
+await testStreamingResponseRetainsLease();
 
 console.log(
-  "PASS: HTTP admission is globally bounded, isolated per verified identity, separately protects expensive operations and mutations, uses a bounded fair queue, redispatches after timeout and cancellation, always releases slots, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
+  "PASS: HTTP admission is globally bounded, isolates verified identities, separately protects expensive operations and mutations, bounds request-body parsing, retains leases through response streaming, uses a bounded fair queue, redispatches after timeout and cancellation, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
 );
