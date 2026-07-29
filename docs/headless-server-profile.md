@@ -2,7 +2,7 @@
 
 French version: [headless-server-profile.fr.md](headless-server-profile.fr.md)
 
-Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Runtime Capability Matrix](runtime-capability-matrix.md), [MCP Routing Guide](mcp-routing-guide.md)
+Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Runtime Capability Matrix](runtime-capability-matrix.md), [MCP Routing Guide](mcp-routing-guide.md), [Linux Headless Multi-client Pilot](headless-multiclient-pilot.md)
 
 This profile is for a dedicated server or copied Sync vault. It keeps the stable release posture: read-only first, guarded writes only after the read-only profile is proven.
 
@@ -35,6 +35,7 @@ SEMANTIC_SEARCH_PREWARM=false
 ```bash
 npm run build
 npm run test:runtime
+npm run test:http-headless-multiclient
 HEADLESS_SERVER_VAULT=/path/to/dedicated-or-copied-vault \
 HEADLESS_SERVER_CACHE_DIR=.tmp/headless-server-profile-cache \
 npm run smoke:headless-server-profile

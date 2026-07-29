@@ -127,6 +127,11 @@ npm pack --dry-run
 
 `npm run test:runtime` is the durable local gate for this runtime family. It runs `npm run build`, all mode smokes, and the HTTP health/status smoke on temporary vaults. The headless smokes also check that excluded `tmp/**` content is not indexed.
 
+`npm run test:http-headless-multiclient` is the multi-client HTTP gate on a
+disposable read-only vault. The field runbook and exact Desktop/plugin boundary
+are documented in
+[Linux Headless Multi-client Pilot](docs/headless-multiclient-pilot.md).
+
 The detailed mode comparison lives in [Runtime Capability Matrix](docs/runtime-capability-matrix.md).
 The dedicated server runbook lives in [Headless Server Profile](docs/headless-server-profile.md).
 Agent routing guidance lives in [MCP Routing Guide](docs/mcp-routing-guide.md).

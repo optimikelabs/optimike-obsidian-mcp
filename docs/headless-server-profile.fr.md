@@ -2,6 +2,8 @@
 
 Version anglaise : [headless-server-profile.md](headless-server-profile.md)
 
+Documentation liée : [Pilote Linux headless multi-client](headless-multiclient-pilot.fr.md)
+
 Docs liées : [README](../README.fr.md), [Guide d’exploitation](../OPERATIONS.fr.md), [Matrice des capacités runtime](runtime-capability-matrix.fr.md), [Guide de routage MCP](mcp-routing-guide.fr.md)
 
 Ce profil sert à valider un serveur dédié ou une copie Sync. Il garde une posture stable : lecture seule d’abord, écritures guarded seulement après preuve du profil en lecture seule.
@@ -35,6 +37,7 @@ SEMANTIC_SEARCH_PREWARM=false
 ```bash
 npm run build
 npm run test:runtime
+npm run test:http-headless-multiclient
 HEADLESS_SERVER_VAULT=/chemin/vers/vault-dedie-ou-copie \
 HEADLESS_SERVER_CACHE_DIR=.tmp/headless-server-profile-cache \
 npm run smoke:headless-server-profile
