@@ -58,7 +58,7 @@ Conséquences :
 - une authentification absente ou invalide reste soumise à la protection pré-authentification ;
 - tous les états sont bornés et les compteurs expirés sont nettoyés périodiquement.
 
-Une requête refusée renvoie HTTP `429`, une erreur JSON, `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` et `X-Optimike-Rate-Limit-Scope`.
+Une requête refusée renvoie HTTP `429`, une erreur JSON avec un identifiant JSON-RPC nul, `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` et `X-Optimike-Rate-Limit-Scope`. Le refus intervient avant l’admission du corps : le serveur ne clone ni ne parse le body uniquement pour récupérer son identifiant JSON-RPC.
 
 ## Politique loopback
 
@@ -98,7 +98,7 @@ Le profil personnel de développement peut fonctionner sans authentification con
 
 Une session MCP HTTP est liée à l’identité vérifiée qui l’a initialisée. Une autre identité authentifiée ne peut pas réutiliser son identifiant. La réponse ne permet pas de distinguer ce cas d’une session absente ou expirée.
 
-Le registre des sessions, local au processus, est borné par `MCP_HTTP_MAX_SESSIONS`, avec une valeur par défaut de 500. Une saturation renvoie `503` et `Retry-After`. Une session inactive expire après `MCP_HTTP_SESSION_IDLE_TIMEOUT_MS`. Les requêtes actives suspendent uniquement ce timeout d’inactivité : `MCP_HTTP_SESSION_MAX_LIFETIME_MS` reste une durée de vie absolue et ferme le transport, y compris un flux d’événements actif, lorsqu’elle est atteinte. Ce contrat ne constitue pas un stockage de sessions distribué.
+Le registre des sessions, local au processus, est borné par `MCP_HTTP_MAX_SESSIONS`, avec une valeur par défaut de 500. Une saturation renvoie `503` et `Retry-After`. Une session inactive expire après `MCP_HTTP_SESSION_IDLE_TIMEOUT_MS`. Les requêtes actives suspendent uniquement ce timeout d’inactivité : `MCP_HTTP_SESSION_MAX_LIFETIME_MS` est appliqué par une échéance propre à chaque session et ferme le transport, y compris un flux d’événements actif, lorsqu’elle est atteinte. Cette échéance ne dépend pas de l’intervalle du nettoyage périodique. Ce contrat ne constitue pas un stockage de sessions distribué.
 
 ## Configuration
 
