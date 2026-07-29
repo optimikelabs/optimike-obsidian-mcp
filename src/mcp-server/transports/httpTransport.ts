@@ -29,6 +29,7 @@ import {
   externalHandoffTicketHeader,
   externalTransferBroker,
 } from "../../services/externalTransferBroker.js";
+import type { ObsidianRestApiService } from "../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import {
@@ -42,7 +43,10 @@ import {
   type AuthInfo,
 } from "./auth/index.js";
 import { createHttpBackpressureMiddleware } from "./httpBackpressure.js";
-import { createHttpObservability } from "./httpObservability.js";
+import {
+  createHttpObservability,
+  type LiveApiObservation,
+} from "./httpObservability.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import {
   authenticatedIdentityLimiter,
@@ -65,6 +69,7 @@ const HTTP_HOST = config.mcpHttpHost;
 const MCP_ENDPOINT_PATH = "/mcp";
 const MAX_PORT_RETRIES = parsePortRetries();
 const httpBackpressureMiddleware = createHttpBackpressureMiddleware();
+const LIVE_API_PROBE_INTERVAL_MS = 30_000;
 
 type HttpSession = {
   transport: WebStandardStreamableHTTPServerTransport;
@@ -78,6 +83,50 @@ type HttpSession = {
 type SessionCapacityReservation = {
   release: () => void;
 };
+
+function createLiveApiProbe(
+  obsidianService: ObsidianRestApiService | undefined,
+  parentContext: RequestContext,
+) {
+  let observation: LiveApiObservation = {
+    available: obsidianService ? null : false,
+  };
+  let probing = false;
+
+  const probe = async () => {
+    if (!obsidianService || probing) return;
+    probing = true;
+    try {
+      const status = await obsidianService.checkStatus({
+        ...parentContext,
+        operation: "httpObservabilityLiveApiProbe",
+      });
+      observation = {
+        available:
+          status?.service === "Obsidian Local REST API" &&
+          status.authenticated === true,
+        observedAt: Date.now(),
+      };
+    } catch {
+      observation = { available: false, observedAt: Date.now() };
+    } finally {
+      probing = false;
+    }
+  };
+
+  const timer = obsidianService
+    ? setInterval(() => void probe(), LIVE_API_PROBE_INTERVAL_MS)
+    : undefined;
+  timer?.unref?.();
+  if (obsidianService) void probe();
+
+  return {
+    getObservation: () => observation,
+    stop: () => {
+      if (timer) clearInterval(timer);
+    },
+  };
+}
 
 // The session store is intentionally process-local. Registered sessions plus
 // initialization reservations are both bounded by MCP_HTTP_MAX_SESSIONS.
@@ -527,6 +576,7 @@ function startHttpServerWithRetry(
 export async function startHttpTransport(
   createServerInstanceFn: () => Promise<McpServer>,
   parentContext: RequestContext,
+  _obsidianService?: ObsidianRestApiService,
   _vaultCacheService?: VaultCacheService,
 ): Promise<ServerType> {
   const app = new Hono<{ Bindings: HttpBindings }>();
@@ -534,8 +584,11 @@ export async function startHttpTransport(
     ...parentContext,
     component: "HttpTransportSetup",
   });
+  const liveApiProbe = createLiveApiProbe(_obsidianService, transportContext);
   const observability = createHttpObservability({
     vaultCacheService: _vaultCacheService,
+    getLiveApiObservation: liveApiProbe.getObservation,
+    writeMode: config.mcpWriteMode,
     getSessionStats: () => ({
       active: transports.size,
       pendingInitializations: pendingSessionInitializations,
@@ -831,5 +884,6 @@ export async function startHttpTransport(
   );
   sessionCleanupTimer.unref?.();
   server.once("close", () => clearInterval(sessionCleanupTimer));
+  server.once("close", liveApiProbe.stop);
   return server;
 }

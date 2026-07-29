@@ -2,6 +2,7 @@ import { HttpBindings } from "@hono/node-server";
 import { Context, Next } from "hono";
 import { existsSync } from "node:fs";
 import { z } from "zod";
+import { config } from "../../config/index.js";
 import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { logger, requestContextService } from "../../utils/index.js";
 import { httpAdmissionController } from "./httpBackpressure.js";
@@ -69,6 +70,7 @@ type CacheStatsLike = {
   ready?: unknown;
   building?: unknown;
   lastRefreshAt?: unknown;
+  lastRefreshError?: unknown;
   refreshSource?: unknown;
   configuredRefreshSource?: unknown;
   totalFiles?: unknown;
@@ -79,8 +81,14 @@ type CacheStatsLike = {
   lastError?: unknown;
 };
 
+export type LiveApiObservation = {
+  available: boolean | null;
+  observedAt?: number | string | Date;
+};
+
 type HealthOptions = {
   vaultCacheService?: VaultCacheService;
+  getLiveApiObservation?: () => LiveApiObservation;
   getSessionStats?: () => HttpSessionStats;
   now?: () => number;
   runtimeMode?: string;
@@ -116,12 +124,39 @@ const observabilityEnv = parsedObservabilityEnv.data;
 
 const PROCESS_STARTED_AT = new Date().toISOString();
 const SAFE_EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const SAFE_OPERATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u;
+const KNOWN_HTTP_ROUTES = new Set([
+  "/external-handoff",
+  "/healthz",
+  "/mcp",
+  "/readyz",
+  "/statusz",
+]);
+const KNOWN_HTTP_METHODS = new Set(["DELETE", "GET", "OPTIONS", "POST"]);
 
 export function sanitizeExternalCorrelationId(
   value: string | undefined,
 ): string | undefined {
   const candidate = value?.trim();
   return candidate && SAFE_EXTERNAL_ID.test(candidate) ? candidate : undefined;
+}
+
+export function sanitizeLoggedOperationName(
+  value: string | undefined,
+): string | undefined {
+  const candidate = value?.trim();
+  return candidate && SAFE_OPERATION_NAME.test(candidate)
+    ? candidate
+    : undefined;
+}
+
+function safeHttpRoute(path: string): string {
+  return KNOWN_HTTP_ROUTES.has(path) ? path : "unmatched-route";
+}
+
+function safeHttpMethod(method: string): string {
+  const normalized = method.toUpperCase();
+  return KNOWN_HTTP_METHODS.has(normalized) ? normalized : "HTTP";
 }
 
 function parseTimestamp(value: unknown): number | undefined {
@@ -212,30 +247,55 @@ export function buildHealthSnapshot(
   const vaultPath = options.vaultPath ?? process.env.OBSIDIAN_VAULT;
   const cacheSource =
     options.cacheSource ?? process.env.OBSIDIAN_CACHE_SOURCE ?? "";
-  const writeMode = (
-    options.writeMode ??
-    process.env.MCP_WRITE_MODE ??
-    "readonly"
-  ).toLowerCase();
+  const writeMode = (options.writeMode ?? config.mcpWriteMode).toLowerCase();
   const staleAfterMs =
     options.staleAfterMs ?? observabilityEnv.MCP_OBSERVABILITY_STALE_AFTER_MS;
   const cacheResult = readCacheStats(options.vaultCacheService);
   const stats = cacheResult.stats;
-  const observedAtMs = parseTimestamp(stats?.lastRefreshAt);
-  const freshnessMs =
-    observedAtMs === undefined ? null : Math.max(0, now - observedAtMs);
-  const stale = freshnessMs !== null && freshnessMs > staleAfterMs;
+  const cacheObservedAtMs = parseTimestamp(stats?.lastRefreshAt);
+  const cacheFreshnessMs =
+    cacheObservedAtMs === undefined
+      ? null
+      : Math.max(0, now - cacheObservedAtMs);
+  const cacheStale =
+    cacheFreshnessMs !== null && cacheFreshnessMs > staleAfterMs;
+  let liveApiObservation: LiveApiObservation = { available: null };
+  try {
+    liveApiObservation =
+      options.getLiveApiObservation?.() ?? liveApiObservation;
+  } catch {
+    liveApiObservation = { available: null };
+  }
+  const liveApiObservedAtMs = parseTimestamp(liveApiObservation.observedAt);
+  const liveApiFreshnessMs =
+    liveApiObservedAtMs === undefined
+      ? null
+      : Math.max(0, now - liveApiObservedAtMs);
+  const liveApiStale =
+    liveApiFreshnessMs !== null && liveApiFreshnessMs > staleAfterMs;
   const origin = normalizeCacheOrigin(
     nonEmptyString(stats?.refreshSource),
     nonEmptyString(stats?.configuredRefreshSource) ?? cacheSource,
   );
   const vaultAvailable = Boolean(vaultPath && existsSync(vaultPath));
   const cacheHasData = Boolean(
-    stats && (positiveFileCount(stats) || observedAtMs),
+    stats && (positiveFileCount(stats) || cacheObservedAtMs),
   );
   const cacheReady = cacheIsReady(stats);
-  const liveObserved =
-    origin === "obsidian_api" && cacheReady && freshnessMs !== null && !stale;
+  const cacheRefreshFailed = Boolean(
+    nonEmptyString(stats?.lastRefreshError) ?? nonEmptyString(stats?.lastError),
+  );
+  const cacheLiveObserved =
+    origin === "obsidian_api" &&
+    cacheReady &&
+    cacheFreshnessMs !== null &&
+    !cacheStale &&
+    !cacheRefreshFailed;
+  const directLiveObserved =
+    liveApiObservation.available === true &&
+    liveApiFreshnessMs !== null &&
+    !liveApiStale;
+  const liveObserved = directLiveObserved || cacheLiveObserved;
   const filesystemObserved =
     origin === "filesystem" ||
     runtimeMode.startsWith("headless") ||
@@ -249,14 +309,13 @@ export function buildHealthSnapshot(
 
   let provenance: ResponseProvenance = "unknown";
   if (liveObserved) provenance = "live-obsidian";
-  else if (cacheReady && stale && cacheHasData) provenance = "snapshot";
+  else if (cacheReady && cacheStale && cacheHasData) provenance = "snapshot";
   else if (cacheReady && origin === "filesystem" && vaultAvailable) {
     provenance = "filesystem";
   } else if (cacheReady && cacheHasData) provenance = "cache";
   else if (cacheReady && origin === "snapshot") provenance = "snapshot";
 
   const headless = runtimeMode.startsWith("headless");
-  const hybrid = runtimeMode === "hybrid";
   const reasons: string[] = [];
   let state: ReadinessState;
 
@@ -267,20 +326,29 @@ export function buildHealthSnapshot(
     } else if (!cacheReady) {
       state = "critical";
       reasons.push("headless_cache_unavailable");
-    } else if (stale || statusFailed(stats) || cacheResult.error) {
+    } else if (
+      cacheStale ||
+      cacheRefreshFailed ||
+      statusFailed(stats) ||
+      cacheResult.error
+    ) {
       state = "degraded";
       reasons.push(
-        stale ? "fallback_data_stale" : (cacheResult.error ?? "cache_degraded"),
+        cacheStale
+          ? "fallback_data_stale"
+          : cacheRefreshFailed
+            ? "cache_refresh_failed"
+            : (cacheResult.error ?? "cache_degraded"),
       );
     } else {
       state = "ready";
     }
   } else if (liveObserved) {
     state = "ready";
-  } else if (usableFallback || hybrid) {
+  } else if (usableFallback) {
     state = "degraded";
     reasons.push(
-      stale
+      cacheStale
         ? "live_obsidian_unavailable_using_stale_fallback"
         : "live_obsidian_unverified_using_fallback",
     );
@@ -295,6 +363,10 @@ export function buildHealthSnapshot(
   if (statusFailed(stats) && !reasons.includes("cache_status_failed")) {
     reasons.push("cache_status_failed");
   }
+  if (cacheRefreshFailed && !reasons.includes("cache_refresh_failed")) {
+    reasons.push("cache_refresh_failed");
+    if (state === "ready") state = "degraded";
+  }
 
   const liveRequired = !headless;
   const mutationCapable =
@@ -306,6 +378,13 @@ export function buildHealthSnapshot(
   if (!filesystemReads) unavailable.push("filesystem-reads");
   if (!cacheReady) unavailable.push("cache-reads");
   if (!mutationCapable) unavailable.push("mutations");
+  const selectedObservedAtMs = directLiveObserved
+    ? liveApiObservedAtMs
+    : cacheObservedAtMs;
+  const selectedFreshnessMs = directLiveObserved
+    ? liveApiFreshnessMs
+    : cacheFreshnessMs;
+  const selectedStale = directLiveObserved ? liveApiStale : cacheStale;
 
   return {
     schemaVersion: "1",
@@ -318,23 +397,29 @@ export function buildHealthSnapshot(
     runtimeMode,
     provenance: {
       source: provenance,
-      origin,
+      origin: directLiveObserved ? "obsidian_api" : origin,
       observedAt:
-        observedAtMs === undefined
+        selectedObservedAtMs === undefined
           ? null
-          : new Date(observedAtMs).toISOString(),
-      freshnessMs,
-      stale,
-      freshnessKnown: freshnessMs !== null,
+          : new Date(selectedObservedAtMs).toISOString(),
+      freshnessMs: selectedFreshnessMs,
+      stale: selectedStale,
+      freshnessKnown: selectedFreshnessMs !== null,
     },
     dependencies: {
       obsidianDesktop: {
         required: liveRequired,
-        available: liveObserved ? true : liveRequired ? null : false,
+        available: liveObserved
+          ? true
+          : liveRequired
+            ? liveApiObservation.available
+            : false,
         reason: liveObserved
           ? undefined
           : liveRequired
-            ? "live_dependency_not_verified"
+            ? liveApiObservation.available === false
+              ? "live_dependency_unavailable"
+              : "live_dependency_not_verified"
             : "not_required_by_headless_profile",
       },
       filesystemVault: {
@@ -343,7 +428,7 @@ export function buildHealthSnapshot(
         reason: vaultAvailable ? undefined : "configured_vault_unavailable",
       },
       sharedCache: {
-        required: headless || hybrid,
+        required: headless,
         available: cacheReady,
         reason: cacheReady
           ? undefined
@@ -371,6 +456,56 @@ function summarizeResult(status: number): string {
   return "success";
 }
 
+type ResponseCompletion = "response" | "cancelled" | "exception";
+
+export function wrapResponseForCompletion(
+  response: Response,
+  onComplete: (completion: ResponseCompletion) => void,
+): Response {
+  let completed = false;
+  const complete = (completion: ResponseCompletion) => {
+    if (completed) return;
+    completed = true;
+    onComplete(completion);
+  };
+
+  if (!response.body) {
+    complete("response");
+    return response;
+  }
+
+  const reader = response.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          complete("response");
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk.value);
+      } catch (error) {
+        complete("exception");
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        complete("cancelled");
+      }
+    },
+  });
+
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 export function createHttpObservability(options: HealthOptions = {}) {
   const healthSnapshot = () => buildHealthSnapshot(options);
 
@@ -385,28 +520,27 @@ export function createHttpObservability(options: HealthOptions = {}) {
     state.incidentId = sanitizeExternalCorrelationId(
       c.req.header("x-incident-id"),
     );
-    let thrown: unknown;
-    try {
-      await next();
-    } catch (error) {
-      thrown = error;
-      throw error;
-    } finally {
+    const logCompletion = (completion: ResponseCompletion, status: number) => {
       const snapshot = healthSnapshot();
       const durationMs = Math.max(0, Date.now() - state.startedAt);
+      const httpMethod = safeHttpMethod(c.req.method);
+      const httpRoute = safeHttpRoute(c.req.path);
+      const operation =
+        sanitizeLoggedOperationName(state.admission?.operationName) ??
+        `${httpMethod} ${httpRoute}`;
       logger.info(
         "HTTP request completed.",
         requestContextService.createRequestContext({
           requestId: state.requestId,
-          operation:
-            state.admission?.operationName ?? `${c.req.method} ${c.req.path}`,
+          operation,
           clientIdentity: state.identity?.pseudonym,
           transport: "streamable-http",
-          httpMethod: c.req.method,
-          httpRoute: c.req.path,
+          httpMethod,
+          httpRoute,
           durationMs,
-          result: thrown ? "exception" : summarizeResult(c.res.status),
-          httpStatus: thrown ? 500 : c.res.status,
+          result:
+            completion === "response" ? summarizeResult(status) : completion,
+          httpStatus: completion === "exception" ? 500 : status,
           quotaStatus: state.quotas.map((quota) => ({
             scope: quota.scope,
             outcome: quota.outcome,
@@ -421,6 +555,17 @@ export function createHttpObservability(options: HealthOptions = {}) {
           incidentId: state.incidentId,
         }),
       );
+    };
+
+    try {
+      await next();
+      const response = c.res;
+      c.res = wrapResponseForCompletion(response, (completion) =>
+        logCompletion(completion, response.status),
+      );
+    } catch (error) {
+      logCompletion("exception", 500);
+      throw error;
     }
   };
 
