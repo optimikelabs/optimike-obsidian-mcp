@@ -96,6 +96,17 @@ const HttpBackpressureEnvSchema = z
         });
       }
     }
+    if (
+      value.MCP_HTTP_MAX_QUEUED > 0 &&
+      value.MCP_HTTP_MAX_QUEUED_PER_IDENTITY === 0
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_HTTP_MAX_QUEUED_PER_IDENTITY"],
+        message:
+          "MCP_HTTP_MAX_QUEUED_PER_IDENTITY must be positive when MCP_HTTP_MAX_QUEUED is positive.",
+      });
+    }
     if (value.MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT > value.MCP_HTTP_MAX_IN_FLIGHT) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -578,6 +589,19 @@ export const httpAdmissionController = new FairAdmissionController({
   retryAfterSeconds: httpBackpressureConfig.retryAfterSeconds,
 });
 
+export const httpRequestBodyAdmissionController = new FairAdmissionController({
+  maxInFlight: httpBackpressureConfig.maxInFlight,
+  maxInFlightPerIdentity: httpBackpressureConfig.maxInFlight,
+  expensiveMaxInFlight: httpBackpressureConfig.maxInFlight,
+  expensiveMaxInFlightPerIdentity: httpBackpressureConfig.maxInFlight,
+  mutationMaxInFlight: httpBackpressureConfig.maxInFlight,
+  mutationMaxInFlightPerIdentity: httpBackpressureConfig.maxInFlight,
+  maxQueued: httpBackpressureConfig.maxQueued,
+  maxQueuedPerIdentity: httpBackpressureConfig.maxQueued,
+  queueWaitTimeoutMs: httpBackpressureConfig.queueWaitTimeoutMs,
+  retryAfterSeconds: httpBackpressureConfig.retryAfterSeconds,
+});
+
 export type HttpOperationDescriptor = {
   operationClass: HttpOperationClass;
   operationName: string;
@@ -946,6 +970,7 @@ function admissionRejectionResponse(
 
 export function createHttpRequestBodyGuardMiddleware(
   bodyLimits: RequestBodyLimits = defaultRequestBodyLimits(),
+  controller: FairAdmissionController = httpRequestBodyAdmissionController,
 ) {
   return async function httpRequestBodyGuardMiddleware(
     c: Context<{ Bindings: HttpBindings }>,
@@ -956,9 +981,30 @@ export function createHttpRequestBodyGuardMiddleware(
       return;
     }
 
+    const descriptor: HttpOperationDescriptor = {
+      operationClass: "standard",
+      operationName: "request-body-guard",
+      rpcId: null,
+    };
+    let lease: AdmissionLease;
+    try {
+      lease = await controller.acquire({
+        // Authentication has not run yet. All raw body reads intentionally
+        // share one bounded anonymous pool rather than trusting caller input.
+        identityKey: "preauth-request-body",
+        operationClass: "standard",
+        signal: c.req.raw.signal,
+      });
+    } catch (error) {
+      if (!(error instanceof AdmissionRejectedError)) throw error;
+      cancelRequestBody(c.req.raw, "request body guard admission rejected");
+      return admissionRejectionResponse(c, descriptor, error);
+    }
+
     try {
       await readBoundedBody(c.req.raw, bodyLimits);
     } catch (error) {
+      lease.release();
       if (error instanceof RequestBodyTooLargeError) {
         return requestBodyTooLargeResponse(c, bodyLimits.maxBytes);
       }
@@ -967,6 +1013,7 @@ export function createHttpRequestBodyGuardMiddleware(
       }
       throw error;
     }
+    lease.release();
     await next();
   };
 }

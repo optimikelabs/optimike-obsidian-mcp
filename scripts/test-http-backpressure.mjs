@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Hono } from "hono";
 import {
@@ -508,6 +509,71 @@ async function testRequestBodyParsingIsBoundedAndAdmitted() {
   assert.equal(admission.getSnapshot().inFlight, 0);
 }
 
+async function testBodyGuardHasBoundedGlobalAdmission() {
+  const guardAdmission = controller({
+    maxInFlight: 1,
+    maxInFlightPerIdentity: 1,
+    maxQueued: 0,
+    maxQueuedPerIdentity: 0,
+  });
+  const app = new Hono();
+  app.use(
+    "/mcp",
+    createHttpRequestBodyGuardMiddleware(
+      { maxBytes: 1024, readTimeoutMs: 500 },
+      guardAdmission,
+    ),
+  );
+  app.post("/mcp", (c) => c.json({ error: "synthetic_auth_rejection" }, 401));
+
+  const firstPromise = app.request(
+    slowJsonRequest({ jsonrpc: "2.0", id: 18, method: "ping" }, 80),
+  );
+  await sleep(10);
+  assert.equal(guardAdmission.getSnapshot().inFlight, 1);
+
+  const rejected = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 19, method: "ping" }),
+  });
+  assert.equal(rejected.status, 503);
+  assert.equal(rejected.headers.get("x-optimike-backpressure"), "queue-full");
+
+  const first = await firstPromise;
+  assert.equal(first.status, 401);
+  await first.arrayBuffer();
+  assert.equal(guardAdmission.getSnapshot().inFlight, 0);
+}
+
+function testOneSidedZeroQueueConfigurationIsRejected() {
+  const moduleUrl = new URL(
+    "../dist/mcp-server/transports/httpBackpressure.js",
+    import.meta.url,
+  ).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `await import(${JSON.stringify(moduleUrl)})`,
+    ],
+    {
+      env: {
+        ...process.env,
+        MCP_HTTP_MAX_QUEUED: "1",
+        MCP_HTTP_MAX_QUEUED_PER_IDENTITY: "0",
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /MCP_HTTP_MAX_QUEUED_PER_IDENTITY must be positive/u,
+  );
+}
+
 function stalledJsonRequest(prefix = '{"jsonrpc":"2.0"') {
   let emitted = false;
   return new Request("http://test/mcp", {
@@ -806,6 +872,8 @@ await testDeterministicLoad();
 await testRealMiddlewareResponses();
 await testDownstreamAdmissionErrorIsNotReclassified();
 await testRequestBodyParsingIsBoundedAndAdmitted();
+await testBodyGuardHasBoundedGlobalAdmission();
+testOneSidedZeroQueueConfigurationIsRejected();
 await testStalledRequestBodyTimesOutAndReleasesLease();
 await testBodyGuardRunsBeforeBodyReadingRejections();
 await testJsonRpcBatchesAreRejectedFailClosed();
@@ -813,5 +881,5 @@ await testReclassificationPreservesDeadlineAndCumulativeWait();
 await testStreamingResponseRetainsLease();
 
 console.log(
-  "PASS: HTTP admission is globally bounded, isolates verified identities, guards request bodies before body-reading rejection paths, times out stalled uploads and releases their leases, rejects JSON-RPC batches fail-closed, preserves one deadline and cumulative wait through request classification, separately protects expensive operations and mutations, bounds request-body parsing, retains leases through response streaming, uses a bounded fair queue, redispatches after timeout and cancellation, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
+  "PASS: HTTP admission is globally bounded, isolates verified identities, bounds raw body reads before authentication, rejects one-sided zero queue configuration, guards request bodies before body-reading rejection paths, times out stalled uploads and releases their leases, rejects JSON-RPC batches fail-closed, preserves one deadline and cumulative wait through request classification, separately protects expensive operations and mutations, bounds request-body parsing, retains leases through response streaming, uses a bounded fair queue, redispatches after timeout and cancellation, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
 );

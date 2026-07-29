@@ -45,6 +45,12 @@ déclaré ou streamé au-delà de la limite est refusé en HTTP `413`. Un corps
 chunked qui ne se termine pas avant le deadline serveur est annulé et refusé en
 HTTP `408`.
 
+Les gardes de corps bruts partagent un pool global anonyme distinct, borné par
+les mêmes grandeurs globales de concurrence, file et timeout. Une rafale venant
+de nombreuses adresses sources encore autorisées ne peut donc pas ouvrir un
+nombre illimité de buffers proches de la taille maximale avant
+l’authentification. Un refus de la garde annule le corps non lu.
+
 Après vérification de l’identité, l’inspection du corps `POST` conserve toujours
 un slot standard. La même limite en octets et le même délai serveur bornent
 cette lecture admise ; un timeout ou un dépassement libère le slot exactement

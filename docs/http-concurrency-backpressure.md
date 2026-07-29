@@ -44,6 +44,12 @@ identity quota can inspect a JSON-RPC id. Declared and streamed bodies above the
 limit are rejected with HTTP `413`. A chunked body that does not complete
 before the server deadline is cancelled and rejected with HTTP `408`.
 
+Raw body guards share a separate anonymous global admission pool using the
+configured global in-flight, queue and timeout magnitudes. A burst across many
+allowed source addresses therefore cannot start an unbounded number of
+near-limit buffers before authentication. Guard rejection cancels the unread
+body.
+
 After identity verification, `POST` body inspection still holds a standard
 admission slot. The same byte limit and server deadline apply to that admitted
 read; timeout or size rejection releases the slot exactly once.
