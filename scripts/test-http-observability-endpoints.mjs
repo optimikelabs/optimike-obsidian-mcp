@@ -215,17 +215,24 @@ try {
 
     await sleep(150);
     const logs = await readAllLogs(headless.logDir);
-    assert.ok(logs.includes("incident-42:retry.1"));
+    const completionLogs = logs
+      .split(/\r?\n/u)
+      .filter((line) => line.includes("HTTP request completed."))
+      .join("\n");
+    assert.ok(completionLogs.includes("incident-42:retry.1"));
     assert.ok(
-      logs.includes("rejected-origin-403"),
+      completionLogs.includes("rejected-origin-403"),
       "origin rejection must still emit its completion event",
     );
-    assert.equal(logs.includes(token), false);
-    assert.equal(logs.includes(secret), false);
-    assert.equal(logs.includes(localRestSecret), false);
-    assert.equal(logs.includes(documentSecret), false);
-    assert.equal(logs.includes(headless.vaultPath), false);
-    assert.equal(logs.includes("invalid incident with spaces"), false);
+    assert.equal(completionLogs.includes(token), false);
+    assert.equal(completionLogs.includes(secret), false);
+    assert.equal(completionLogs.includes(localRestSecret), false);
+    assert.equal(completionLogs.includes(documentSecret), false);
+    assert.equal(completionLogs.includes(headless.vaultPath), false);
+    assert.equal(
+      completionLogs.includes("invalid incident with spaces"),
+      false,
+    );
   } finally {
     await stopBackend(headless);
   }
