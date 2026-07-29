@@ -76,6 +76,8 @@ MCP_TRUSTED_PROXIES=10.20.0.10/32,2001:db8:42::10/128
 
 Lorsque le pair réseau immédiat est approuvé, la chaîne est parcourue depuis le bord de confiance vers le premier saut non approuvé. Une chaîne invalide échoue de manière fermée et l’adresse du socket fait foi.
 
+Une requête doit utiliser une seule famille de headers de transfert. Si `Forwarded` et `X-Forwarded-For` sont présents simultanément, Optimike MCP ne choisit pas silencieusement l’un des deux : il les ignore tous les deux et utilise l’adresse du socket immédiat pour le quota par source. Le proxy approuvé doit être configuré pour émettre une seule famille canonique.
+
 `MCP_TRUST_PROXY=true` ne suffit plus. Si cet ancien flag est activé sans allowlist explicite, le démarrage est refusé.
 
 Un réseau privé ne remplace ni TLS, ni l’authentification Bearer, ni la politique de confiance des proxies.

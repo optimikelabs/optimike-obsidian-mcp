@@ -76,6 +76,8 @@ MCP_TRUSTED_PROXIES=10.20.0.10/32,2001:db8:42::10/128
 
 When the socket peer is trusted, the forwarding chain is evaluated from the trusted edge toward the first untrusted hop. Invalid chains fail closed to the socket address.
 
+One request must use only one forwarding-header family. If both `Forwarded` and `X-Forwarded-For` are present, Optimike MCP does not choose one silently: it ignores both and uses the immediate socket address for the source quota. Configure the trusted proxy to emit exactly one canonical family.
+
 `MCP_TRUST_PROXY=true` is no longer sufficient. If the legacy flag is true without an explicit allowlist, startup fails.
 
 A private network does not replace TLS, bearer verification or a proxy trust policy.
