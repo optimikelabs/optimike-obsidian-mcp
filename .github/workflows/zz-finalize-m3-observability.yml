@@ -1,0 +1,213 @@
+name: Finalize M3 observability contract
+
+on:
+  push:
+    branches: [feat/http-observability-contract]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/http-observability-contract
+          fetch-depth: 0
+      - name: Fetch current M2 head
+        run: git fetch origin feat/http-multiclient-backpressure
+      - name: Inherit reviewed M2 transport and wire M3
+        shell: python
+        run: |
+          import json
+          import pathlib
+          import re
+          import subprocess
+
+          root = pathlib.Path('.')
+          m2 = 'origin/feat/http-multiclient-backpressure'
+          inherited = [
+              'src/mcp-server/transports/httpTransport.ts',
+              'src/mcp-server/transports/httpProtection.ts',
+              'src/mcp-server/transports/httpBackpressure.ts',
+              'src/mcp-server/transports/httpRequestState.ts',
+              'scripts/test-http-session-bounds.mjs',
+              'scripts/test-http-backpressure.mjs',
+              'package.json',
+              '.github/workflows/runtime.yml',
+              '.env.server.example',
+              'docs/http-concurrency-backpressure.md',
+              'docs/http-concurrency-backpressure.fr.md',
+              'docs/http-backpressure.env.example',
+              'docs/adr/M2-HTTP-Backpressure-Validation.md',
+          ]
+          subprocess.run(['git', 'checkout', m2, '--', *inherited], check=True)
+
+          state_path = root / 'src/mcp-server/transports/httpRequestState.ts'
+          state = state_path.read_text(encoding='utf-8')
+          anchor = '  quotas: HttpQuotaState[];\n  admission?: HttpAdmissionState;'
+          replacement = (
+              '  quotas: HttpQuotaState[];\n'
+              '  correlationId?: string;\n'
+              '  incidentId?: string;\n'
+              '  admission?: HttpAdmissionState;'
+          )
+          if 'correlationId?: string;' not in state:
+              if anchor not in state:
+                  raise SystemExit('http request state anchor missing')
+              state = state.replace(anchor, replacement, 1)
+          state_path.write_text(state, encoding='utf-8')
+
+          transport_path = root / 'src/mcp-server/transports/httpTransport.ts'
+          transport = transport_path.read_text(encoding='utf-8')
+          import_anchor = 'import { createHttpBackpressureMiddleware } from "./httpBackpressure.js";'
+          if 'createHttpObservability' not in transport:
+              if import_anchor not in transport:
+                  raise SystemExit('backpressure import anchor missing')
+              transport = transport.replace(
+                  import_anchor,
+                  import_anchor + '\nimport { createHttpObservability } from "./httpObservability.js";',
+                  1,
+              )
+
+          setup_anchor = (
+              '  const transportContext = requestContextService.createRequestContext({\n'
+              '    ...parentContext,\n'
+              '    component: "HttpTransportSetup",\n'
+              '  });'
+          )
+          setup_replacement = setup_anchor + (
+              '\n  const observability = createHttpObservability({\n'
+              '    vaultCacheService: _vaultCacheService,\n'
+              '    getSessionStats: () => ({\n'
+              '      active: transports.size,\n'
+              '      pendingInitializations: pendingSessionInitializations,\n'
+              '      activeRequests: Array.from(transports.values()).reduce(\n'
+              '        (total, session) => total + session.activeRequests,\n'
+              '        0,\n'
+              '      ),\n'
+              '      maxSessions: httpProtectionConfig.maxSessions,\n'
+              '    }),\n'
+              '  });'
+          )
+          if 'const observability = createHttpObservability' not in transport:
+              if setup_anchor not in transport:
+                  raise SystemExit('transport setup anchor missing')
+              transport = transport.replace(setup_anchor, setup_replacement, 1)
+
+          allow_anchor = '        "Authorization",\n        externalHandoffTicketHeader,'
+          allow_replacement = (
+              '        "Authorization",\n'
+              '        "X-Correlation-Id",\n'
+              '        "X-Incident-Id",\n'
+              '        externalHandoffTicketHeader,'
+          )
+          if '"X-Correlation-Id"' not in transport:
+              if allow_anchor not in transport:
+                  raise SystemExit('CORS allow header anchor missing')
+              transport = transport.replace(allow_anchor, allow_replacement, 1)
+
+          health_pattern = re.compile(
+              r'\n  // Backward-compatible liveness only\. M3 adds readiness and detailed state\.\n'
+              r'  app\.get\("/healthz", \(c: Context\) => \{\n'
+              r'    return c\.json\(\{.*?\n  \}\);\n',
+              re.S,
+          )
+          health_replacement = (
+              '\n  app.use("*", observability.requestLoggingMiddleware);\n\n'
+              '  app.get("/healthz", observability.livenessHandler);\n'
+              '  app.get("/readyz", observability.readinessHandler);\n'
+              '  app.use("/statusz", preAuthRateLimitMiddleware);\n'
+              '  app.use("/statusz", authMiddleware);\n'
+              '  app.use("/statusz", authenticatedIdentityRateLimitMiddleware);\n'
+              '  app.get("/statusz", observability.statusHandler);\n'
+          )
+          if 'observability.livenessHandler' not in transport:
+              transport, count = health_pattern.subn(health_replacement, transport, count=1)
+              if count != 1:
+                  raise SystemExit(f'health route replacement count={count}')
+
+          required = [
+              'createHttpObservability',
+              'observability.requestLoggingMiddleware',
+              'observability.readinessHandler',
+              'app.use("/statusz", authMiddleware)',
+              'httpBackpressureMiddleware',
+              'activeRequests',
+          ]
+          missing = [item for item in required if item not in transport]
+          if missing:
+              raise SystemExit(f'M3 transport integration incomplete: {missing}')
+          transport_path.write_text(transport, encoding='utf-8')
+
+          package_path = root / 'package.json'
+          package = json.loads(package_path.read_text(encoding='utf-8'))
+          package['scripts']['test:http-observability'] = (
+              'npm run build && '
+              'node scripts/test-http-observability.mjs && '
+              'node scripts/test-http-observability-endpoints.mjs'
+          )
+          package_path.write_text(
+              json.dumps(package, indent=2, ensure_ascii=False) + '\n',
+              encoding='utf-8',
+          )
+
+          workflow_path = root / '.github/workflows/runtime.yml'
+          workflow = workflow_path.read_text(encoding='utf-8')
+          if '  http-observability:' not in workflow:
+              marker = '  packaging:\n'
+              job = '''  http-observability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --silent
+      - run: npm run test:http-observability
+
+'''
+              if marker not in workflow:
+                  raise SystemExit('packaging job marker missing')
+              workflow = workflow.replace(marker, job + marker, 1)
+          workflow_path.write_text(workflow, encoding='utf-8')
+
+          env_path = root / '.env.server.example'
+          env_text = env_path.read_text(encoding='utf-8')
+          if 'MCP_OBSERVABILITY_STALE_AFTER_MS' not in env_text:
+              marker = '# MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS=1\n'
+              addition = marker + '# MCP_OBSERVABILITY_STALE_AFTER_MS=900000\n'
+              if marker not in env_text:
+                  raise SystemExit('observability env marker missing')
+              env_text = env_text.replace(marker, addition, 1)
+              env_path.write_text(env_text, encoding='utf-8')
+
+          (root / '.github/workflows/zz-finalize-m3-observability.yml').unlink()
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Validate M3 and inherited milestones
+        run: |
+          npm run test:http-observability
+          npm run test:http-multiclient
+          npm run test:http-backpressure
+          npm run test:http-external-handoff
+      - name: Commit M3 integration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat: expose explicit HTTP readiness and provenance"
+      - name: Align stacked ancestry without rewriting M3
+        run: |
+          git merge -s ours --no-edit origin/feat/http-multiclient-backpressure \
+            -m "chore: align M3 stack with latest M2 head"
+      - name: Push M3 head
+        run: git push origin HEAD:feat/http-observability-contract
