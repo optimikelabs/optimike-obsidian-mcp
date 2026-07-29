@@ -28,27 +28,15 @@ const HttpProtectionEnvSchema = z
     MCP_HTTP_LOOPBACK_POLICY: z
       .enum(["shared", "elevated"])
       .default("elevated"),
-    MCP_HTTP_LOOPBACK_PREAUTH_RATE_LIMIT_MAX: envInteger(
-      3000,
-      1,
-      1_000_000,
-    ),
+    MCP_HTTP_LOOPBACK_PREAUTH_RATE_LIMIT_MAX: envInteger(3000, 1, 1_000_000),
     MCP_HTTP_IDENTITY_RATE_LIMIT_WINDOW_MS: envInteger(
       15 * 60 * 1000,
       1000,
       DAY_MS,
     ),
     MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: envInteger(100, 1, 1_000_000),
-    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS: envInteger(
-      5000,
-      1,
-      1_000_000,
-    ),
-    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS: envInteger(
-      10_000,
-      1,
-      1_000_000,
-    ),
+    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS: envInteger(5000, 1, 1_000_000),
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS: envInteger(10_000, 1, 1_000_000),
     MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS: envInteger(
       5 * 60 * 1000,
       1000,
@@ -60,16 +48,8 @@ const HttpProtectionEnvSchema = z
       10,
       THIRTY_DAYS_MS,
     ),
-    MCP_HTTP_SESSION_MAX_LIFETIME_MS: envInteger(
-      DAY_MS,
-      10,
-      THIRTY_DAYS_MS,
-    ),
-    MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS: envInteger(
-      60 * 1000,
-      10,
-      DAY_MS,
-    ),
+    MCP_HTTP_SESSION_MAX_LIFETIME_MS: envInteger(DAY_MS, 10, THIRTY_DAYS_MS),
+    MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS: envInteger(60 * 1000, 10, DAY_MS),
     MCP_TRUSTED_PROXIES: z.string().default(""),
     MCP_TRUST_PROXY: z.string().optional(),
     MCP_HTTP_IDENTITY_HASH_KEY: z.string().min(32).optional(),
@@ -130,8 +110,7 @@ export const httpProtectionConfig = {
   maxSessions: protectionEnv.MCP_HTTP_MAX_SESSIONS,
   sessionIdleTimeoutMs: protectionEnv.MCP_HTTP_SESSION_IDLE_TIMEOUT_MS,
   sessionMaxLifetimeMs: protectionEnv.MCP_HTTP_SESSION_MAX_LIFETIME_MS,
-  sessionCleanupIntervalMs:
-    protectionEnv.MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS,
+  sessionCleanupIntervalMs: protectionEnv.MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS,
   trustedProxyRanges: splitCsv(protectionEnv.MCP_TRUSTED_PROXIES).map(
     parseIpRange,
   ),
@@ -266,10 +245,7 @@ export function parseIpRange(source: string): ParsedIpRange {
   };
 }
 
-export function ipMatchesRange(
-  address: string,
-  range: ParsedIpRange,
-): boolean {
+export function ipMatchesRange(address: string, range: ParsedIpRange): boolean {
   try {
     const parsed = ipToBigInt(address);
     if (parsed.version !== range.version) return false;
@@ -306,9 +282,7 @@ function parseForwardedHeader(value: string): string[] | undefined {
 }
 
 function parseXForwardedFor(value: string): string[] | undefined {
-  const addresses = value
-    .split(",")
-    .map((part) => normalizeIpLiteral(part));
+  const addresses = value.split(",").map((part) => normalizeIpLiteral(part));
   if (addresses.some((address) => !address)) return undefined;
   return addresses as string[];
 }
@@ -345,9 +319,7 @@ export function resolveClientAddress(input: {
     : hasXForwardedFor
       ? parseXForwardedFor(input.xForwardedFor!)
       : [];
-  const source = hasForwarded
-    ? "trusted-forwarded"
-    : "trusted-x-forwarded-for";
+  const source = hasForwarded ? "trusted-forwarded" : "trusted-x-forwarded-for";
 
   if (parsedChain === undefined) {
     return {
@@ -398,12 +370,18 @@ export function pseudonymizeClientAddress(address: string): string {
 export function deriveVerifiedHttpIdentity(
   authInfo: AuthInfo,
 ): VerifiedHttpIdentity {
-  const issuer = authInfo.issuer?.trim() || "optimike-local";
-  const clientId = authInfo.clientId?.trim();
-  if (!clientId) {
+  const issuer =
+    typeof authInfo.issuer === "string" && authInfo.issuer.length > 0
+      ? authInfo.issuer
+      : "optimike-local";
+  const clientId = authInfo.clientId;
+  if (typeof clientId !== "string" || clientId.length === 0) {
     throw new Error("Authenticated request has no verified clientId.");
   }
-  const subject = authInfo.subject?.trim() || undefined;
+  const subject =
+    typeof authInfo.subject === "string" && authInfo.subject.length > 0
+      ? authInfo.subject
+      : undefined;
   const tokenFingerprint = subject
     ? undefined
     : digest("http-token-fallback-v1", authInfo.token);
@@ -481,7 +459,9 @@ export class BoundedFixedWindowRateLimiter {
     maxRequests = this.options.maxRequests,
   ): RateLimitDecision {
     if (!Number.isInteger(maxRequests) || maxRequests <= 0) {
-      throw new Error("Rate-limit request allowance must be a positive integer.");
+      throw new Error(
+        "Rate-limit request allowance must be a positive integer.",
+      );
     }
 
     const now = this.now();
@@ -537,10 +517,7 @@ export class BoundedFixedWindowRateLimiter {
         limit: maxRequests,
         remaining: 0,
         resetAt: entry.resetAt,
-        retryAfterSeconds: Math.max(
-          1,
-          Math.ceil((entry.resetAt - now) / 1000),
-        ),
+        retryAfterSeconds: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)),
       };
     }
 

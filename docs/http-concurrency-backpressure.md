@@ -17,22 +17,27 @@ The long-lived `GET /mcp` event stream does not hold an operation slot for its w
 
 ## Defaults
 
-| Variable | Default | Meaning |
-| --- | ---: | --- |
-| `MCP_HTTP_MAX_IN_FLIGHT` | `32` | All admitted HTTP operations |
-| `MCP_HTTP_MAX_IN_FLIGHT_PER_IDENTITY` | `8` | Operations for one verified identity |
-| `MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT` | `4` | Expensive operations globally |
-| `MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT_PER_IDENTITY` | `2` | Expensive operations for one identity |
-| `MCP_HTTP_MUTATION_MAX_IN_FLIGHT` | `4` | Mutations globally |
-| `MCP_HTTP_MUTATION_MAX_IN_FLIGHT_PER_IDENTITY` | `1` | Mutations for one identity |
-| `MCP_HTTP_MAX_QUEUED` | `64` | Total queued operations |
-| `MCP_HTTP_MAX_QUEUED_PER_IDENTITY` | `8` | Queued operations for one identity |
-| `MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS` | `5000` | Maximum queue wait |
-| `MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS` | `1` | Conservative retry hint |
+| Variable                                        |   Default | Meaning                                         |
+| ----------------------------------------------- | --------: | ----------------------------------------------- |
+| `MCP_HTTP_MAX_IN_FLIGHT`                        |      `32` | All admitted HTTP operations                    |
+| `MCP_HTTP_MAX_IN_FLIGHT_PER_IDENTITY`           |       `8` | Operations for one verified identity            |
+| `MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT`              |       `4` | Expensive operations globally                   |
+| `MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT_PER_IDENTITY` |       `2` | Expensive operations for one identity           |
+| `MCP_HTTP_MUTATION_MAX_IN_FLIGHT`               |       `4` | Mutations globally                              |
+| `MCP_HTTP_MUTATION_MAX_IN_FLIGHT_PER_IDENTITY`  |       `1` | Mutations for one identity                      |
+| `MCP_HTTP_MAX_QUEUED`                           |      `64` | Total queued operations                         |
+| `MCP_HTTP_MAX_QUEUED_PER_IDENTITY`              |       `8` | Queued operations for one identity              |
+| `MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS`                |    `5000` | Maximum queue wait                              |
+| `MCP_HTTP_MAX_REQUEST_BODY_BYTES`               | `1048576` | Maximum JSON-RPC request body before HTTP `413` |
+| `MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS`     |       `1` | Conservative retry hint                         |
 
 All values are validated before the HTTP listener starts. Per-identity limits cannot exceed their global limits. Mutation capacity cannot exceed expensive-operation capacity, and expensive capacity cannot exceed global capacity.
 
 A zero queue is allowed only when both queue limits are zero. This produces immediate deterministic rejection whenever capacity is unavailable.
+
+`POST` body inspection itself first holds a standard admission slot and reads a
+bounded clone of the request. Declared and streamed bodies above the limit are
+rejected with HTTP `413`; they are never fully buffered before admission.
 
 ## Explicit operation classes
 
@@ -69,7 +74,11 @@ An admitted response exposes `X-Optimike-Operation-Class` and `X-Optimike-Queue-
 
 ## Slot release guarantees
 
-A granted slot is released exactly once after success or downstream error. A queued request removed by timeout or cancellation never consumes an in-flight slot. Abort listeners and timers are removed when a queue item settles.
+A granted slot is released exactly once after downstream error, response-body
+completion or response-body cancellation. Creating a streaming `Response` does
+not release the slot while bytes are still being delivered. A queued request
+removed by timeout or cancellation never consumes an in-flight slot. Abort
+listeners and timers are removed when a queue item settles.
 
 The controller exports aggregate snapshots only: active counts, queue counts, admitted totals, rejection totals and observed maxima. It does not label metrics by raw identity, token, path or tool arguments.
 

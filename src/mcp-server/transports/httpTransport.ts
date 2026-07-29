@@ -213,10 +213,9 @@ async function preAuthRateLimitMiddleware(
   await next();
 }
 
-async function authenticatedIdentityRateLimitMiddleware(
+function attachVerifiedIdentity(
   c: Context<{ Bindings: HttpBindings }>,
-  next: Next,
-): Promise<void | Response> {
+): VerifiedHttpIdentity {
   const authInfo = c.env.incoming.auth as AuthInfo | undefined;
   if (!authInfo) {
     throw new McpError(
@@ -226,9 +225,27 @@ async function authenticatedIdentityRateLimitMiddleware(
   }
 
   const requestState = getHttpRequestState(c.req.raw);
-  const identity = deriveVerifiedHttpIdentity(authInfo);
+  const identity =
+    requestState.identity ?? deriveVerifiedHttpIdentity(authInfo);
   requestState.authInfo = authInfo;
   requestState.identity = identity;
+  return identity;
+}
+
+async function verifiedIdentityMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void> {
+  attachVerifiedIdentity(c);
+  await next();
+}
+
+async function authenticatedIdentityRateLimitMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void | Response> {
+  const requestState = getHttpRequestState(c.req.raw);
+  const identity = attachVerifiedIdentity(c);
   const decision = authenticatedIdentityLimiter.check(identity.key);
   requestState.quotas.push(quotaState("client-identity", decision));
   if (!decision.allowed) {
@@ -528,6 +545,8 @@ export async function startHttpTransport(
     }),
   });
 
+  app.use("*", observability.requestLoggingMiddleware);
+
   app.use("*", async (c: Context, next: Next) => {
     const origin = c.req.header("origin");
     if (origin && !originAllowed(origin)) {
@@ -578,8 +597,6 @@ export async function startHttpTransport(
     await next();
   });
 
-  app.use("*", observability.requestLoggingMiddleware);
-
   app.get("/healthz", observability.livenessHandler);
   app.get("/readyz", observability.readinessHandler);
   app.use("/statusz", preAuthRateLimitMiddleware);
@@ -592,7 +609,7 @@ export async function startHttpTransport(
   app.use(MCP_ENDPOINT_PATH, authMiddleware);
   app.use(externalHandoffEndpoint, authMiddleware);
   app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);
-  app.use(externalHandoffEndpoint, authenticatedIdentityRateLimitMiddleware);
+  app.use(externalHandoffEndpoint, verifiedIdentityMiddleware);
   app.use(MCP_ENDPOINT_PATH, httpBackpressureMiddleware);
   app.use(externalHandoffEndpoint, httpBackpressureMiddleware);
 
@@ -659,8 +676,7 @@ export async function startHttpTransport(
     let transport = session?.transport;
     let initializationReservation: SessionCapacityReservation | undefined;
     let initializingTransport:
-      | WebStandardStreamableHTTPServerTransport
-      | undefined;
+      WebStandardStreamableHTTPServerTransport | undefined;
     let initializedSession: HttpSession | undefined;
 
     if (isInitializeRequest(body)) {
