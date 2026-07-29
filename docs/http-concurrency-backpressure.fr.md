@@ -17,22 +17,28 @@ Le flux longue durée `GET /mcp` ne conserve pas un slot d’opération pendant 
 
 ## Valeurs par défaut
 
-| Variable | Défaut | Fonction |
-| --- | ---: | --- |
-| `MCP_HTTP_MAX_IN_FLIGHT` | `32` | Toutes les opérations HTTP admises |
-| `MCP_HTTP_MAX_IN_FLIGHT_PER_IDENTITY` | `8` | Opérations d’une identité vérifiée |
-| `MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT` | `4` | Opérations coûteuses globales |
-| `MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT_PER_IDENTITY` | `2` | Opérations coûteuses d’une identité |
-| `MCP_HTTP_MUTATION_MAX_IN_FLIGHT` | `4` | Mutations globales |
-| `MCP_HTTP_MUTATION_MAX_IN_FLIGHT_PER_IDENTITY` | `1` | Mutations d’une identité |
-| `MCP_HTTP_MAX_QUEUED` | `64` | Opérations en file au total |
-| `MCP_HTTP_MAX_QUEUED_PER_IDENTITY` | `8` | Opérations en file pour une identité |
-| `MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS` | `5000` | Attente maximale en file |
-| `MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS` | `1` | Indication prudente de retry |
+| Variable                                        |    Défaut | Fonction                                           |
+| ----------------------------------------------- | --------: | -------------------------------------------------- |
+| `MCP_HTTP_MAX_IN_FLIGHT`                        |      `32` | Toutes les opérations HTTP admises                 |
+| `MCP_HTTP_MAX_IN_FLIGHT_PER_IDENTITY`           |       `8` | Opérations d’une identité vérifiée                 |
+| `MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT`              |       `4` | Opérations coûteuses globales                      |
+| `MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT_PER_IDENTITY` |       `2` | Opérations coûteuses d’une identité                |
+| `MCP_HTTP_MUTATION_MAX_IN_FLIGHT`               |       `4` | Mutations globales                                 |
+| `MCP_HTTP_MUTATION_MAX_IN_FLIGHT_PER_IDENTITY`  |       `1` | Mutations d’une identité                           |
+| `MCP_HTTP_MAX_QUEUED`                           |      `64` | Opérations en file au total                        |
+| `MCP_HTTP_MAX_QUEUED_PER_IDENTITY`              |       `8` | Opérations en file pour une identité               |
+| `MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS`                |    `5000` | Attente maximale en file                           |
+| `MCP_HTTP_MAX_REQUEST_BODY_BYTES`               | `1048576` | Taille maximale du corps JSON-RPC avant HTTP `413` |
+| `MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS`     |       `1` | Indication prudente de retry                       |
 
 Toutes les valeurs sont validées avant l’ouverture du listener HTTP. Une limite par identité ne peut pas dépasser sa limite globale. La capacité de mutation ne peut pas dépasser la capacité coûteuse, qui ne peut pas dépasser la capacité globale.
 
 Une file de taille zéro est possible uniquement lorsque les deux limites de file sont à zéro. Toute saturation produit alors un refus déterministe immédiat.
+
+L’inspection d’un corps `POST` conserve d’abord un slot standard puis lit une
+copie bornée de la requête. Un corps déclaré ou streamé au-delà de la limite est
+refusé en HTTP `413` ; il n’est jamais intégralement mis en mémoire avant
+l’admission.
 
 ## Classes d’opérations explicites
 
@@ -69,7 +75,12 @@ Une réponse admise expose `X-Optimike-Operation-Class` et `X-Optimike-Queue-Wai
 
 ## Libération des slots
 
-Un slot accordé est libéré exactement une fois après un succès ou une erreur aval. Une requête retirée de la file par timeout ou annulation n’a jamais consommé de slot en vol. Les listeners d’abort et les timers sont supprimés quand l’item quitte la file.
+Un slot accordé est libéré exactement une fois après une erreur aval, la fin du
+corps de réponse ou son annulation. La simple création d’une `Response` en
+streaming ne libère pas le slot tant que les octets sont encore transmis. Une
+requête retirée de la file par timeout ou annulation n’a jamais consommé de slot
+en vol. Les listeners d’abort et les timers sont supprimés quand l’item quitte
+la file.
 
 Le contrôleur expose uniquement des instantanés agrégés : compteurs actifs, compteurs de file, admissions, refus et maxima observés. Il n’étiquette aucune métrique avec une identité brute, un token, un chemin ou les arguments d’un outil.
 

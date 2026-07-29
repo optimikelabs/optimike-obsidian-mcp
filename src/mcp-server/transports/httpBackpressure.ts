@@ -64,6 +64,11 @@ const HttpBackpressureEnvSchema = z
     MCP_HTTP_MAX_QUEUED: envInteger(64, 0, 100_000),
     MCP_HTTP_MAX_QUEUED_PER_IDENTITY: envInteger(8, 0, 100_000),
     MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS: envInteger(5000, 1, 60 * 60 * 1000),
+    MCP_HTTP_MAX_REQUEST_BODY_BYTES: envInteger(
+      1024 * 1024,
+      1024,
+      16 * 1024 * 1024,
+    ),
     MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS: envInteger(1, 1, 3600),
     MCP_HTTP_EXPENSIVE_TOOLS: z.string().default(DEFAULT_EXPENSIVE_TOOLS),
     MCP_HTTP_MUTATION_TOOLS: z.string().default(DEFAULT_MUTATION_TOOLS),
@@ -90,10 +95,7 @@ const HttpBackpressureEnvSchema = z
         });
       }
     }
-    if (
-      value.MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT >
-      value.MCP_HTTP_MAX_IN_FLIGHT
-    ) {
+    if (value.MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT > value.MCP_HTTP_MAX_IN_FLIGHT) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT"],
@@ -107,7 +109,8 @@ const HttpBackpressureEnvSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["MCP_HTTP_MUTATION_MAX_IN_FLIGHT"],
-        message: "Mutation capacity cannot exceed expensive-operation capacity.",
+        message:
+          "Mutation capacity cannot exceed expensive-operation capacity.",
       });
     }
   });
@@ -121,7 +124,10 @@ if (!parsedBackpressureEnv.success) {
   );
 }
 
-function parseToolSet(value: string, variableName: string): ReadonlySet<string> {
+function parseToolSet(
+  value: string,
+  variableName: string,
+): ReadonlySet<string> {
   const tools = value
     .split(/[\s,]+/u)
     .map((tool) => tool.trim())
@@ -141,8 +147,7 @@ const backpressureEnv = parsedBackpressureEnv.data;
 
 export const httpBackpressureConfig = {
   maxInFlight: backpressureEnv.MCP_HTTP_MAX_IN_FLIGHT,
-  maxInFlightPerIdentity:
-    backpressureEnv.MCP_HTTP_MAX_IN_FLIGHT_PER_IDENTITY,
+  maxInFlightPerIdentity: backpressureEnv.MCP_HTTP_MAX_IN_FLIGHT_PER_IDENTITY,
   expensiveMaxInFlight: backpressureEnv.MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT,
   expensiveMaxInFlightPerIdentity:
     backpressureEnv.MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT_PER_IDENTITY,
@@ -152,8 +157,8 @@ export const httpBackpressureConfig = {
   maxQueued: backpressureEnv.MCP_HTTP_MAX_QUEUED,
   maxQueuedPerIdentity: backpressureEnv.MCP_HTTP_MAX_QUEUED_PER_IDENTITY,
   queueWaitTimeoutMs: backpressureEnv.MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS,
-  retryAfterSeconds:
-    backpressureEnv.MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS,
+  maxRequestBodyBytes: backpressureEnv.MCP_HTTP_MAX_REQUEST_BODY_BYTES,
+  retryAfterSeconds: backpressureEnv.MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS,
   expensiveTools: parseToolSet(
     backpressureEnv.MCP_HTTP_EXPENSIVE_TOOLS,
     "MCP_HTTP_EXPENSIVE_TOOLS",
@@ -353,10 +358,7 @@ export class FairAdmissionController {
     if (input.signal?.aborted) {
       this.cancelled += 1;
       return Promise.reject(
-        new AdmissionRejectedError(
-          "cancelled",
-          this.limits.retryAfterSeconds,
-        ),
+        new AdmissionRejectedError("cancelled", this.limits.retryAfterSeconds),
       );
     }
 
@@ -372,10 +374,7 @@ export class FairAdmissionController {
     if (this.queued >= this.limits.maxQueued) {
       this.rejectedQueueFull += 1;
       return Promise.reject(
-        new AdmissionRejectedError(
-          "queue-full",
-          this.limits.retryAfterSeconds,
-        ),
+        new AdmissionRejectedError("queue-full", this.limits.retryAfterSeconds),
       );
     }
     const identityQueue = this.queueByIdentity.get(input.identityKey) ?? [];
@@ -413,10 +412,7 @@ export class FairAdmissionController {
         if (!this.removeQueuedItem(item)) return;
         this.timedOut += 1;
         item.reject(
-          new AdmissionRejectedError(
-            "timeout",
-            this.limits.retryAfterSeconds,
-          ),
+          new AdmissionRejectedError("timeout", this.limits.retryAfterSeconds),
         );
         this.dispatch();
       }, this.limits.queueWaitTimeoutMs);
@@ -499,9 +495,7 @@ export class FairAdmissionController {
       else this.queueByIdentity.delete(identityKey);
 
       const waitMs = Math.max(0, this.now() - item.enqueuedAt);
-      item.resolve(
-        this.grant(identityKey, item.operationClass, true, waitMs),
-      );
+      item.resolve(this.grant(identityKey, item.operationClass, true, waitMs));
       attemptsWithoutProgress = this.identityOrder.length;
     }
   }
@@ -527,8 +521,7 @@ export class FairAdmissionController {
 
 export const httpAdmissionController = new FairAdmissionController({
   maxInFlight: httpBackpressureConfig.maxInFlight,
-  maxInFlightPerIdentity:
-    httpBackpressureConfig.maxInFlightPerIdentity,
+  maxInFlightPerIdentity: httpBackpressureConfig.maxInFlightPerIdentity,
   expensiveMaxInFlight: httpBackpressureConfig.expensiveMaxInFlight,
   expensiveMaxInFlightPerIdentity:
     httpBackpressureConfig.expensiveMaxInFlightPerIdentity,
@@ -553,6 +546,60 @@ type JsonRpcEnvelope = {
   params?: unknown;
 };
 
+class RequestBodyTooLargeError extends Error {
+  public readonly name = "RequestBodyTooLargeError";
+}
+
+function cancelRequestBody(request: Request, reason: string): void {
+  void request.body?.cancel(reason).catch(() => undefined);
+}
+
+async function readBoundedJsonBody(
+  request: Request,
+  maxBytes: number,
+): Promise<unknown> {
+  const declaredLength = request.headers.get("content-length");
+  if (
+    declaredLength &&
+    /^\d+$/u.test(declaredLength) &&
+    Number(declaredLength) > maxBytes
+  ) {
+    cancelRequestBody(request, "declared request body limit exceeded");
+    throw new RequestBodyTooLargeError();
+  }
+
+  const clone = request.clone();
+  if (!clone.body) return undefined;
+  const reader = clone.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      total += chunk.value.byteLength;
+      if (total > maxBytes) {
+        void reader
+          .cancel("request body limit exceeded")
+          .catch(() => undefined);
+        cancelRequestBody(request, "request body limit exceeded");
+        throw new RequestBodyTooLargeError();
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+}
+
 function classifyEnvelope(envelope: JsonRpcEnvelope): HttpOperationDescriptor {
   const rpcId =
     typeof envelope.id === "string" || typeof envelope.id === "number"
@@ -572,7 +619,8 @@ function classifyEnvelope(envelope: JsonRpcEnvelope): HttpOperationDescriptor {
     envelope.params && typeof envelope.params === "object"
       ? (envelope.params as Record<string, unknown>)
       : undefined;
-  const toolName = typeof params?.name === "string" ? params.name : "tools/call";
+  const toolName =
+    typeof params?.name === "string" ? params.name : "tools/call";
   if (httpBackpressureConfig.mutationTools.has(toolName)) {
     return { operationClass: "mutation", operationName: toolName, rpcId };
   }
@@ -601,9 +649,10 @@ export async function classifyHttpOperation(
   }
 
   try {
-    const payload = (await c.req.raw.clone().json()) as
-      | JsonRpcEnvelope
-      | JsonRpcEnvelope[];
+    const payload = (await readBoundedJsonBody(
+      c.req.raw,
+      httpBackpressureConfig.maxRequestBodyBytes,
+    )) as JsonRpcEnvelope | JsonRpcEnvelope[];
     const envelopes = Array.isArray(payload) ? payload : [payload];
     const classified = envelopes.map(classifyEnvelope);
     return (
@@ -615,13 +664,85 @@ export async function classifyHttpOperation(
         rpcId: null,
       }
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) throw error;
     return {
       operationClass: "standard",
       operationName: "invalid-json",
       rpcId: null,
     };
   }
+}
+
+function requestBodyTooLargeResponse(
+  c: Context<{ Bindings: HttpBindings }>,
+): Response {
+  const state = getHttpRequestState(c.req.raw);
+  c.header("X-Request-Id", state.requestId);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      error: {
+        code: BaseErrorCode.VALIDATION_ERROR,
+        message: "The HTTP request body exceeds the configured limit.",
+        data: {
+          maxBytes: httpBackpressureConfig.maxRequestBodyBytes,
+        },
+      },
+      id: null,
+    },
+    413,
+  );
+}
+
+function wrapAdmissionResponse(
+  c: Context<{ Bindings: HttpBindings }>,
+  lease: AdmissionLease,
+): void {
+  const state = getHttpRequestState(c.req.raw);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    lease.release();
+    if (state.admission) state.admission.releasedAt = Date.now();
+  };
+  const response = c.res;
+  if (!response.body) {
+    release();
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          release();
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk.value);
+      } catch (error) {
+        release();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        release();
+      }
+    },
+  });
+  c.res = new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
 }
 
 function rejectionMessage(reason: AdmissionRejectReason): string {
@@ -695,23 +816,59 @@ export function createHttpBackpressureMiddleware(
         "Verified client identity is unavailable for admission control.",
       );
     }
-    const descriptor = await classifyHttpOperation(c);
+    const parsingDescriptor: HttpOperationDescriptor = {
+      operationClass: "standard",
+      operationName: "request-body",
+      rpcId: null,
+    };
+    const signal =
+      c.req.path === "/external-handoff" ? undefined : c.req.raw.signal;
+    let descriptor: HttpOperationDescriptor;
+    let lease: AdmissionLease | undefined;
 
-    let lease: AdmissionLease;
-    try {
-      lease = await controller.acquire({
-        identityKey: identity.key,
-        operationClass: descriptor.operationClass,
-        // Once a valid external handoff request reaches the server, its one-use
-        // ticket must be consumed even if the socket disappears immediately.
-        // The bounded queue timeout still prevents orphaned work from waiting
-        // indefinitely. Other operations remain abort-aware before admission.
-        signal:
-          c.req.path === "/external-handoff" ? undefined : c.req.raw.signal,
-      });
-    } catch (error) {
-      if (!(error instanceof AdmissionRejectedError)) throw error;
-      return admissionRejectionResponse(c, descriptor, error);
+    if (c.req.method === "POST") {
+      try {
+        lease = await controller.acquire({
+          identityKey: identity.key,
+          operationClass: "standard",
+          signal,
+        });
+      } catch (error) {
+        if (!(error instanceof AdmissionRejectedError)) throw error;
+        return admissionRejectionResponse(c, parsingDescriptor, error);
+      }
+      try {
+        descriptor = await classifyHttpOperation(c);
+      } catch (error) {
+        lease.release();
+        if (error instanceof RequestBodyTooLargeError) {
+          return requestBodyTooLargeResponse(c);
+        }
+        throw error;
+      }
+      if (descriptor.operationClass !== "standard") {
+        lease.release();
+        lease = undefined;
+      }
+    } else {
+      descriptor = await classifyHttpOperation(c);
+    }
+
+    if (!lease) {
+      try {
+        lease = await controller.acquire({
+          identityKey: identity.key,
+          operationClass: descriptor.operationClass,
+          // Once a valid external handoff request reaches the server, its one-use
+          // ticket must be consumed even if the socket disappears immediately.
+          // The bounded queue timeout still prevents orphaned work from waiting
+          // indefinitely. Other operations remain abort-aware before admission.
+          signal,
+        });
+      } catch (error) {
+        if (!(error instanceof AdmissionRejectedError)) throw error;
+        return admissionRejectionResponse(c, descriptor, error);
+      }
     }
 
     state.admission = {
@@ -726,9 +883,11 @@ export function createHttpBackpressureMiddleware(
     c.header("X-Optimike-Queue-Wait-Ms", String(lease.waitMs));
     try {
       await next();
-    } finally {
+      wrapAdmissionResponse(c, lease);
+    } catch (error) {
       lease.release();
       if (state.admission) state.admission.releasedAt = Date.now();
+      throw error;
     }
   };
 }
