@@ -41,7 +41,10 @@ import {
   oauthMiddleware,
   type AuthInfo,
 } from "./auth/index.js";
-import { createHttpBackpressureMiddleware } from "./httpBackpressure.js";
+import {
+  createHttpBackpressureMiddleware,
+  createHttpRequestBodyGuardMiddleware,
+} from "./httpBackpressure.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import {
   authenticatedIdentityLimiter,
@@ -63,6 +66,7 @@ const HTTP_PORT = config.mcpHttpPort;
 const HTTP_HOST = config.mcpHttpHost;
 const MCP_ENDPOINT_PATH = "/mcp";
 const MAX_PORT_RETRIES = parsePortRetries();
+const httpRequestBodyGuardMiddleware = createHttpRequestBodyGuardMiddleware();
 const httpBackpressureMiddleware = createHttpBackpressureMiddleware();
 
 type HttpSession = {
@@ -592,6 +596,9 @@ export async function startHttpTransport(
     });
   });
 
+  // The raw POST body is bounded before any rejection path that may inspect
+  // its JSON-RPC id (rate limit or authentication error handling).
+  app.use(MCP_ENDPOINT_PATH, httpRequestBodyGuardMiddleware);
   app.use(MCP_ENDPOINT_PATH, preAuthRateLimitMiddleware);
   app.use(externalHandoffEndpoint, preAuthRateLimitMiddleware);
   app.use(MCP_ENDPOINT_PATH, authMiddleware);

@@ -69,6 +69,7 @@ const HttpBackpressureEnvSchema = z
       1024,
       16 * 1024 * 1024,
     ),
+    MCP_HTTP_REQUEST_BODY_READ_TIMEOUT_MS: envInteger(5000, 100, 5 * 60 * 1000),
     MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS: envInteger(1, 1, 3600),
     MCP_HTTP_EXPENSIVE_TOOLS: z.string().default(DEFAULT_EXPENSIVE_TOOLS),
     MCP_HTTP_MUTATION_TOOLS: z.string().default(DEFAULT_MUTATION_TOOLS),
@@ -158,6 +159,8 @@ export const httpBackpressureConfig = {
   maxQueuedPerIdentity: backpressureEnv.MCP_HTTP_MAX_QUEUED_PER_IDENTITY,
   queueWaitTimeoutMs: backpressureEnv.MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS,
   maxRequestBodyBytes: backpressureEnv.MCP_HTTP_MAX_REQUEST_BODY_BYTES,
+  requestBodyReadTimeoutMs:
+    backpressureEnv.MCP_HTTP_REQUEST_BODY_READ_TIMEOUT_MS,
   retryAfterSeconds: backpressureEnv.MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS,
   expensiveTools: parseToolSet(
     backpressureEnv.MCP_HTTP_EXPENSIVE_TOOLS,
@@ -591,39 +594,79 @@ class RequestBodyTooLargeError extends Error {
   public readonly name = "RequestBodyTooLargeError";
 }
 
+class RequestBodyReadTimeoutError extends Error {
+  public readonly name = "RequestBodyReadTimeoutError";
+}
+
 class JsonRpcBatchUnsupportedError extends Error {
   public readonly name = "JsonRpcBatchUnsupportedError";
+}
+
+export type RequestBodyLimits = {
+  maxBytes: number;
+  readTimeoutMs: number;
+};
+
+function defaultRequestBodyLimits(): RequestBodyLimits {
+  return {
+    maxBytes: httpBackpressureConfig.maxRequestBodyBytes,
+    readTimeoutMs: httpBackpressureConfig.requestBodyReadTimeoutMs,
+  };
 }
 
 function cancelRequestBody(request: Request, reason: string): void {
   void request.body?.cancel(reason).catch(() => undefined);
 }
 
-async function readBoundedJsonBody(
+async function readChunkWithDeadline(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  deadlineAt: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) throw new RequestBodyReadTimeoutError();
+
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new RequestBodyReadTimeoutError()),
+          remainingMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function readBoundedBody(
   request: Request,
-  maxBytes: number,
-): Promise<unknown> {
+  limits: RequestBodyLimits,
+): Promise<Uint8Array> {
   const declaredLength = request.headers.get("content-length");
   if (
     declaredLength &&
     /^\d+$/u.test(declaredLength) &&
-    Number(declaredLength) > maxBytes
+    Number(declaredLength) > limits.maxBytes
   ) {
     cancelRequestBody(request, "declared request body limit exceeded");
     throw new RequestBodyTooLargeError();
   }
 
   const clone = request.clone();
-  if (!clone.body) return undefined;
+  if (!clone.body) return new Uint8Array();
   const reader = clone.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  const deadlineAt = Date.now() + limits.readTimeoutMs;
   try {
     while (true) {
-      const chunk = await reader.read();
+      const chunk = await readChunkWithDeadline(reader, deadlineAt);
       if (chunk.done) break;
       total += chunk.value.byteLength;
-      if (total > maxBytes) {
+      if (total > limits.maxBytes) {
         void reader
           .cancel("request body limit exceeded")
           .catch(() => undefined);
@@ -632,6 +675,12 @@ async function readBoundedJsonBody(
       }
       chunks.push(chunk.value);
     }
+  } catch (error) {
+    if (error instanceof RequestBodyReadTimeoutError) {
+      void reader.cancel("request body read timeout").catch(() => undefined);
+      cancelRequestBody(request, "request body read timeout");
+    }
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -642,6 +691,14 @@ async function readBoundedJsonBody(
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  return body;
+}
+
+async function readBoundedJsonBody(
+  request: Request,
+  limits: RequestBodyLimits,
+): Promise<unknown> {
+  const body = await readBoundedBody(request, limits);
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
 }
 
@@ -677,6 +734,7 @@ function classifyEnvelope(envelope: JsonRpcEnvelope): HttpOperationDescriptor {
 
 export async function classifyHttpOperation(
   c: Context<{ Bindings: HttpBindings }>,
+  bodyLimits: RequestBodyLimits = defaultRequestBodyLimits(),
 ): Promise<HttpOperationDescriptor> {
   if (c.req.path === "/external-handoff") {
     return {
@@ -694,10 +752,9 @@ export async function classifyHttpOperation(
   }
 
   try {
-    const payload = (await readBoundedJsonBody(
-      c.req.raw,
-      httpBackpressureConfig.maxRequestBodyBytes,
-    )) as JsonRpcEnvelope | JsonRpcEnvelope[];
+    const payload = (await readBoundedJsonBody(c.req.raw, bodyLimits)) as
+      | JsonRpcEnvelope
+      | JsonRpcEnvelope[];
     if (Array.isArray(payload)) {
       throw new JsonRpcBatchUnsupportedError();
     }
@@ -705,6 +762,7 @@ export async function classifyHttpOperation(
   } catch (error) {
     if (
       error instanceof RequestBodyTooLargeError ||
+      error instanceof RequestBodyReadTimeoutError ||
       error instanceof JsonRpcBatchUnsupportedError
     ) {
       throw error;
@@ -719,6 +777,7 @@ export async function classifyHttpOperation(
 
 function requestBodyTooLargeResponse(
   c: Context<{ Bindings: HttpBindings }>,
+  maxBytes: number,
 ): Response {
   const state = getHttpRequestState(c.req.raw);
   c.header("X-Request-Id", state.requestId);
@@ -730,12 +789,37 @@ function requestBodyTooLargeResponse(
         code: BaseErrorCode.VALIDATION_ERROR,
         message: "The HTTP request body exceeds the configured limit.",
         data: {
-          maxBytes: httpBackpressureConfig.maxRequestBodyBytes,
+          maxBytes,
         },
       },
       id: null,
     },
     413,
+  );
+}
+
+function requestBodyReadTimeoutResponse(
+  c: Context<{ Bindings: HttpBindings }>,
+  readTimeoutMs: number,
+): Response {
+  const state = getHttpRequestState(c.req.raw);
+  c.header("X-Request-Id", state.requestId);
+  c.header("Cache-Control", "no-store");
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      error: {
+        code: BaseErrorCode.SERVICE_UNAVAILABLE,
+        message:
+          "The HTTP request body was not completed before the server deadline.",
+        data: {
+          retryable: true,
+          readTimeoutMs,
+        },
+      },
+      id: null,
+    },
+    408,
   );
 }
 
@@ -860,8 +944,36 @@ function admissionRejectionResponse(
   );
 }
 
+export function createHttpRequestBodyGuardMiddleware(
+  bodyLimits: RequestBodyLimits = defaultRequestBodyLimits(),
+) {
+  return async function httpRequestBodyGuardMiddleware(
+    c: Context<{ Bindings: HttpBindings }>,
+    next: Next,
+  ): Promise<void | Response> {
+    if (c.req.method !== "POST") {
+      await next();
+      return;
+    }
+
+    try {
+      await readBoundedBody(c.req.raw, bodyLimits);
+    } catch (error) {
+      if (error instanceof RequestBodyTooLargeError) {
+        return requestBodyTooLargeResponse(c, bodyLimits.maxBytes);
+      }
+      if (error instanceof RequestBodyReadTimeoutError) {
+        return requestBodyReadTimeoutResponse(c, bodyLimits.readTimeoutMs);
+      }
+      throw error;
+    }
+    await next();
+  };
+}
+
 export function createHttpBackpressureMiddleware(
   controller: FairAdmissionController = httpAdmissionController,
+  bodyLimits: RequestBodyLimits = defaultRequestBodyLimits(),
 ) {
   return async function httpBackpressureMiddleware(
     c: Context<{ Bindings: HttpBindings }>,
@@ -907,11 +1019,14 @@ export function createHttpBackpressureMiddleware(
         return admissionRejectionResponse(c, parsingDescriptor, error);
       }
       try {
-        descriptor = await classifyHttpOperation(c);
+        descriptor = await classifyHttpOperation(c, bodyLimits);
       } catch (error) {
         lease.release();
         if (error instanceof RequestBodyTooLargeError) {
-          return requestBodyTooLargeResponse(c);
+          return requestBodyTooLargeResponse(c, bodyLimits.maxBytes);
+        }
+        if (error instanceof RequestBodyReadTimeoutError) {
+          return requestBodyReadTimeoutResponse(c, bodyLimits.readTimeoutMs);
         }
         if (error instanceof JsonRpcBatchUnsupportedError) {
           return batchUnsupportedResponse(c);
@@ -923,7 +1038,7 @@ export function createHttpBackpressureMiddleware(
         lease = undefined;
       }
     } else {
-      descriptor = await classifyHttpOperation(c);
+      descriptor = await classifyHttpOperation(c, bodyLimits);
     }
 
     if (!lease) {

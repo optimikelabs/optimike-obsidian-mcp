@@ -29,15 +29,22 @@ The long-lived `GET /mcp` event stream does not hold an operation slot for its w
 | `MCP_HTTP_MAX_QUEUED_PER_IDENTITY`              |       `8` | Queued operations for one identity              |
 | `MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS`                |    `5000` | Maximum queue wait                              |
 | `MCP_HTTP_MAX_REQUEST_BODY_BYTES`               | `1048576` | Maximum JSON-RPC request body before HTTP `413` |
+| `MCP_HTTP_REQUEST_BODY_READ_TIMEOUT_MS`         |    `5000` | Server deadline for a complete request body     |
 | `MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS`     |       `1` | Conservative retry hint                         |
 
 All values are validated before the HTTP listener starts. Per-identity limits cannot exceed their global limits. Mutation capacity cannot exceed expensive-operation capacity, and expensive capacity cannot exceed global capacity.
 
 A zero queue is allowed only when both queue limits are zero. This produces immediate deterministic rejection whenever capacity is unavailable.
 
-`POST` body inspection itself first holds a standard admission slot and reads a
-bounded clone of the request. Declared and streamed bodies above the limit are
-rejected with HTTP `413`; they are never fully buffered before admission.
+Before authentication or either rate-limit layer can inspect a JSON-RPC id, a
+transport guard reads at most the configured body limit. Declared and streamed
+bodies above the limit are rejected with HTTP `413`. A chunked body that does
+not complete before the server deadline is cancelled and rejected with HTTP
+`408`.
+
+After identity verification, `POST` body inspection still holds a standard
+admission slot. The same byte limit and server deadline apply to that admitted
+read; timeout or size rejection releases the slot exactly once.
 
 The HTTP profile accepts exactly one JSON-RPC envelope per `POST`. A top-level
 JSON array is rejected fail-closed with HTTP `400` before the MCP handler runs,
