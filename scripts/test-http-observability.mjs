@@ -2,10 +2,12 @@
 
 import assert from "node:assert/strict";
 import path from "node:path";
-import {
-  buildHealthSnapshot,
-  sanitizeExternalCorrelationId,
-} from "../dist/mcp-server/transports/httpObservability.js";
+
+process.env.OBSIDIAN_RUNTIME_MODE ??= "headless-readonly";
+process.env.OBSIDIAN_VAULT ??= process.cwd();
+const { buildHealthSnapshot, sanitizeExternalCorrelationId } = await import(
+  "../dist/mcp-server/transports/httpObservability.js"
+);
 
 const now = Date.parse("2026-07-29T12:00:00.000Z");
 const vaultPath = process.cwd();

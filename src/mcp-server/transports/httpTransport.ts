@@ -42,6 +42,7 @@ import {
   type AuthInfo,
 } from "./auth/index.js";
 import { createHttpBackpressureMiddleware } from "./httpBackpressure.js";
+import { createHttpObservability } from "./httpObservability.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import {
   authenticatedIdentityLimiter,
@@ -514,6 +515,18 @@ export async function startHttpTransport(
     ...parentContext,
     component: "HttpTransportSetup",
   });
+  const observability = createHttpObservability({
+    vaultCacheService: _vaultCacheService,
+    getSessionStats: () => ({
+      active: transports.size,
+      pendingInitializations: pendingSessionInitializations,
+      activeRequests: Array.from(transports.values()).reduce(
+        (total, session) => total + session.activeRequests,
+        0,
+      ),
+      maxSessions: httpProtectionConfig.maxSessions,
+    }),
+  });
 
   app.use("*", async (c: Context, next: Next) => {
     const origin = c.req.header("origin");
@@ -536,6 +549,8 @@ export async function startHttpTransport(
         "Mcp-Session-Id",
         "Last-Event-ID",
         "Authorization",
+        "X-Correlation-Id",
+        "X-Incident-Id",
         externalHandoffTicketHeader,
       ],
       exposeHeaders: [
@@ -563,15 +578,14 @@ export async function startHttpTransport(
     await next();
   });
 
-  // Backward-compatible liveness only. M3 adds readiness and detailed state.
-  app.get("/healthz", (c: Context) => {
-    return c.json({
-      ok: true,
-      status: "healthy",
-      transport: "streamable-http",
-      endpoint: MCP_ENDPOINT_PATH,
-    });
-  });
+  app.use("*", observability.requestLoggingMiddleware);
+
+  app.get("/healthz", observability.livenessHandler);
+  app.get("/readyz", observability.readinessHandler);
+  app.use("/statusz", preAuthRateLimitMiddleware);
+  app.use("/statusz", authMiddleware);
+  app.use("/statusz", authenticatedIdentityRateLimitMiddleware);
+  app.get("/statusz", observability.statusHandler);
 
   app.use(MCP_ENDPOINT_PATH, preAuthRateLimitMiddleware);
   app.use(externalHandoffEndpoint, preAuthRateLimitMiddleware);
