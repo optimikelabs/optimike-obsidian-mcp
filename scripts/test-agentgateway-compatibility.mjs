@@ -219,9 +219,9 @@ async function discoverHandoffTtlEnv() {
 async function waitForUrl(url, child, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (child?.exitCode !== null && child?.exitCode !== undefined) {
+    if (child && hasChildExited(child)) {
       throw new Error(
-        `process exited with ${child.exitCode}: ${child.stderrText ?? ""}`,
+        `process exited with ${child.exitCode ?? child.signalCode}: ${child.stderrText ?? ""}`,
       );
     }
     try {
@@ -238,9 +238,9 @@ async function waitForUrl(url, child, timeoutMs = 30_000) {
 async function waitForStatus(url, child, expectedStatus, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (child?.exitCode !== null && child?.exitCode !== undefined) {
+    if (child && hasChildExited(child)) {
       throw new Error(
-        `process exited with ${child.exitCode}: ${child.stderrText ?? ""}`,
+        `process exited with ${child.exitCode ?? child.signalCode}: ${child.stderrText ?? ""}`,
       );
     }
     try {
@@ -254,8 +254,12 @@ async function waitForStatus(url, child, expectedStatus, timeoutMs = 30_000) {
   throw new Error(`timed out waiting for ${url} to return ${expectedStatus}`);
 }
 
+function hasChildExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
 async function stopChild(child) {
-  if (!child || child.exitCode !== null) return;
+  if (!child || hasChildExited(child)) return;
   child.kill("SIGTERM");
   if (await waitForChildExit(child, 3000)) return;
   child.kill("SIGKILL");
@@ -265,7 +269,7 @@ async function stopChild(child) {
 }
 
 async function waitForChildExit(child, timeoutMs) {
-  if (child.exitCode !== null) return true;
+  if (hasChildExited(child)) return true;
   return new Promise((resolve) => {
     const onExit = () => {
       clearTimeout(timer);
@@ -273,7 +277,7 @@ async function waitForChildExit(child, timeoutMs) {
     };
     const timer = setTimeout(() => {
       child.off("exit", onExit);
-      resolve(child.exitCode !== null);
+      resolve(hasChildExited(child));
     }, timeoutMs);
     timer.unref?.();
     child.once("exit", onExit);
@@ -983,24 +987,41 @@ async function mutationReplayHarnessStatus(client, baseUrl, tools) {
     (candidate) => candidate.name === "obsidian_update_note",
   );
   if (!tool) return { status: "tool-unavailable" };
-  const args = generatedArguments(tool.inputSchema, {
-    notePath: "Gateway.md",
-    content: "# Gateway\n\nmutation replay fixture\n",
-    idempotencyKey: "gateway-fixed-mutation-key",
-  });
+  const args = {
+    targetType: "filePath",
+    targetIdentifier: "Gateway.md",
+    modificationType: "wholeFile",
+    wholeFileMode: "append",
+    content: "\nmutation replay fixture\n",
+    createIfNeeded: false,
+    overwriteIfExists: false,
+    returnContent: false,
+  };
   const result = await callTool(client, baseUrl, tool.name, args);
-  const normalized = JSON.stringify(normalizeToolResult(result.payload));
-  if (
-    result.response.status !== 200 ||
-    /read.?only|live obsidian|required|mutation.*disabled|forbidden/i.test(
+  assert.equal(result.response.status, 200, result.text);
+  assert.equal(
+    result.payload?.error,
+    undefined,
+    `mutation probe returned a JSON-RPC error: ${result.text}`,
+  );
+  const normalizedResult = normalizeToolResult(result.payload);
+  const normalized = JSON.stringify(normalizedResult);
+  const readonlyPolicyDenied =
+    normalizedResult?.isError === true &&
+    /read.?only|write.?policy|writes?.*disabled|mutation.*disabled|forbidden.*write/i.test(
       normalized,
-    )
-  ) {
+    );
+  if (readonlyPolicyDenied) {
     return {
       status: "blocked-by-readonly-headless-profile",
       tool: tool.name,
       reusableArguments: args,
     };
+  }
+  if (normalizedResult?.isError === true) {
+    throw new Error(
+      `mutation probe failed before reaching an explicit readonly policy: ${result.text}`,
+    );
   }
   const replay = await callTool(client, baseUrl, tool.name, args);
   return {
