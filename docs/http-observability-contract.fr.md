@@ -41,7 +41,7 @@ Statut détaillé authentifié. Il utilise la même protection pré-authentifica
 | `degraded` | Un fallback borné reste utilisable, ou une dépendance non critique est dégradée |              `200` |
 | `critical` | Aucune source vérifiée ne peut servir le profil attendu en sécurité             |              `503` |
 
-L’état contient des raisons stables et exploitables, par exemple `live_obsidian_unavailable_using_stale_fallback`, `headless_cache_unavailable` ou `headless_vault_and_cache_unavailable`.
+L’état contient des raisons stables et exploitables, par exemple `live_obsidian_unavailable_using_stale_fallback`, `cache_refresh_failed`, `headless_cache_unavailable` ou `headless_vault_and_cache_unavailable`. Le texte d’exception d’un rafraîchissement échoué n’est jamais renvoyé.
 
 ## Provenance et fraîcheur
 
@@ -55,7 +55,20 @@ Le contrat distingue les sources suivantes :
 
 Il expose aussi l’origine interne (`obsidian_api`, `filesystem`, `cache`, `snapshot` ou `unknown`), le timestamp d’observation, l’âge en millisecondes, la connaissance ou non de la fraîcheur et le statut stale.
 
-Une source n’est jamais qualifiée de `live-obsidian` uniquement parce que le service tourne en mode `live`. Une observation issue d’un cache prêt dont la vraie source de rafraîchissement est `rest` est normalisée vers l’origine publique `obsidian_api` et doit rester dans le seuil de fraîcheur. Au-delà, la provenance devient `snapshot` et le service passe en dégradé. Un fallback stale n’est jamais présenté comme live.
+Une source n’est jamais qualifiée de `live-obsidian` uniquement parce que le service tourne en mode `live`. Le transport sonde le service REST Obsidian configuré indépendamment du cache facultatif. Un probe authentifié, récent et réussi rend donc un profil live prêt même si le cache est désactivé. Une observation issue d’un cache prêt dont la vraie source de rafraîchissement est `rest` est aussi normalisée vers l’origine publique `obsidian_api` et doit rester dans le seuil de fraîcheur. Au-delà, la provenance devient `snapshot` et le service passe en dégradé. Un échec connu de rafraîchissement du cache est signalé sous forme de dégradation expurgée. Un fallback stale n’est jamais présenté comme live.
+
+La cadence du probe live est la plus petite valeur entre 30 secondes et la
+moitié du seuil de fraîcheur configuré. Abaisser ce seuil ne peut donc pas
+laisser un profil live sain sans cache devenir stale entre deux probes fixes de
+30 secondes.
+Un probe direct récent prime sur une preuve plus ancienne issue du cache :
+s’il déclare l’API REST indisponible, les lectures live et les mutations sont
+retirées immédiatement, même si un snapshot précédemment rafraîchi par REST
+reste exploitable comme fallback.
+Un timestamp d’observation situé plus de cinq secondes dans le futur constitue
+une preuve invalide. Il n’autorise jamais la readiness live ni les mutations ;
+un payload de cache exploitable peut uniquement rester disponible comme
+fallback stale avec une raison de diagnostic stable.
 
 Seuil de fraîcheur par défaut :
 
@@ -74,9 +87,11 @@ Le statut distingue :
 
 `temporarilyUnavailable` contient des identifiants de capacités stables, jamais du texte d’exception. Un profil headless read-only peut donc être `ready` tout en indiquant que `live-obsidian-reads` et `mutations` sont indisponibles par conception. L’existence du chemin du coffre ne suffit pas : la readiness headless reste `critical` tant que le cache partagé n’a pas terminé un build exploitable depuis le filesystem.
 
+Le mode hybride suit la même règle de preuve : sans observation vérifiée de l’API live ni fallback borné prêt, il est `critical`, et non simplement `degraded`. La capacité de mutation utilise le mode d’écriture validé centralement par le runtime ; l’observabilité ne réinterprète pas l’environnement brut.
+
 ## Logs structurés de requêtes
 
-Chaque requête HTTP émet un événement de fin contenant :
+Chaque requête HTTP émet un événement de fin lorsque le corps de sa réponse est terminé, annulé par le client ou en erreur. La simple création d’une `Response` streamée n’est pas considérée comme une fin. L’événement contient :
 
 - `requestId` ;
 - l’identité client vérifiée pseudonymisée lorsque l’authentification a réussi ;
@@ -90,6 +105,14 @@ Chaque requête HTTP émet un événement de fin contenant :
 - la classe d’opération et le temps d’attente ;
 - la provenance courante et le statut stale ;
 - un `correlationId` ou `incidentId` facultatif et nettoyé.
+
+Les erreurs applicatives mappées utilisent le statut de la vraie réponse
+d’erreur et ne sont journalisées qu’après la fin de son corps. Si le corps
+échoue après la production des headers, l’événement conserve le statut placé
+sur le réseau et indique `result: exception` au lieu d’inventer ensuite un
+HTTP `500`.
+
+Les méthodes JSON-RPC et noms d’outils contrôlés par l’appelant ne sont journalisés que s’ils respectent une grammaire stricte d’identifiant de 128 caractères. Les autres valeurs sont remplacées par le libellé HTTP contrôlé, ce qui empêche caractères de contrôle, contenu documentaire et valeurs démesurées d’entrer dans le champ d’opération.
 
 Les clients peuvent envoyer :
 
@@ -154,4 +177,4 @@ Les logs n’incluent pas par défaut :
 npm run test:http-observability
 ```
 
-La suite tourne sur Ubuntu et Windows. Elle prouve le vocabulaire réel `rest` du cache, les états live frais, cache filesystem exploitable, snapshot stale, degraded et critical, la journalisation des rejets Origin, les codes HTTP des endpoints, l’authentification de `/statusz`, les agrégats nettoyés et l’absence de tokens, secrets, contenu documentaire et chemins personnels dans les surfaces d’observabilité.
+La suite tourne sur Ubuntu et Windows. Elle prouve le vocabulaire réel `rest` du cache, la readiness directe de l’API live sans cache, la readiness stricte du mode hybride, le cache filesystem exploitable, l’échec de rafraîchissement expurgé, le snapshot stale, les états degraded et critical, la fin et l’annulation des corps streamés, les noms d’opérations bornés, la journalisation des rejets Origin, les codes HTTP des endpoints, l’authentification de `/statusz`, les agrégats nettoyés et l’absence de tokens, secrets, contenu documentaire et chemins personnels dans les surfaces d’observabilité.

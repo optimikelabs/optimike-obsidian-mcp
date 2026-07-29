@@ -1833,6 +1833,7 @@ async function startTransport(
     const httpServerInstance = await startHttpTransport(
       mcpServerFactory,
       context,
+      obsidianService,
       vaultCacheService,
     );
     return httpServerInstance; // Return the http.Server instance.

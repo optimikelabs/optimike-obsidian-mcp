@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Hono } from "hono";
 import {
   AdmissionRejectedError,
   FairAdmissionController,
   createHttpBackpressureMiddleware,
+  createHttpRequestBodyGuardMiddleware,
   httpBackpressureConfig,
 } from "../dist/mcp-server/transports/httpBackpressure.js";
 import { getHttpRequestState } from "../dist/mcp-server/transports/httpRequestState.js";
@@ -507,6 +509,179 @@ async function testRequestBodyParsingIsBoundedAndAdmitted() {
   assert.equal(admission.getSnapshot().inFlight, 0);
 }
 
+async function testBodyGuardHasBoundedGlobalAdmission() {
+  const guardAdmission = controller({
+    maxInFlight: 1,
+    maxInFlightPerIdentity: 1,
+    maxQueued: 0,
+    maxQueuedPerIdentity: 0,
+  });
+  const app = new Hono();
+  app.use(
+    "/mcp",
+    createHttpRequestBodyGuardMiddleware(
+      { maxBytes: 1024, readTimeoutMs: 500 },
+      guardAdmission,
+    ),
+  );
+  app.post("/mcp", (c) => c.json({ error: "synthetic_auth_rejection" }, 401));
+
+  const firstPromise = app.request(
+    slowJsonRequest({ jsonrpc: "2.0", id: 18, method: "ping" }, 80),
+  );
+  await sleep(10);
+  assert.equal(guardAdmission.getSnapshot().inFlight, 1);
+
+  const rejected = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 19, method: "ping" }),
+  });
+  assert.equal(rejected.status, 503);
+  assert.equal(rejected.headers.get("x-optimike-backpressure"), "queue-full");
+
+  const first = await firstPromise;
+  assert.equal(first.status, 401);
+  await first.arrayBuffer();
+  assert.equal(guardAdmission.getSnapshot().inFlight, 0);
+}
+
+function testOneSidedZeroQueueConfigurationIsRejected() {
+  const moduleUrl = new URL(
+    "../dist/mcp-server/transports/httpBackpressure.js",
+    import.meta.url,
+  ).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `await import(${JSON.stringify(moduleUrl)})`,
+    ],
+    {
+      env: {
+        ...process.env,
+        MCP_HTTP_MAX_QUEUED: "1",
+        MCP_HTTP_MAX_QUEUED_PER_IDENTITY: "0",
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /MCP_HTTP_MAX_QUEUED_PER_IDENTITY must be positive/u,
+  );
+}
+
+function stalledJsonRequest(prefix = '{"jsonrpc":"2.0"') {
+  let emitted = false;
+  return new Request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: new ReadableStream({
+      pull(streamController) {
+        if (!emitted) {
+          emitted = true;
+          streamController.enqueue(new TextEncoder().encode(prefix));
+          return;
+        }
+        return new Promise(() => {});
+      },
+    }),
+    duplex: "half",
+  });
+}
+
+async function testStalledRequestBodyTimesOutAndReleasesLease() {
+  const admission = controller({
+    maxInFlight: 1,
+    maxInFlightPerIdentity: 1,
+    maxQueued: 0,
+    maxQueuedPerIdentity: 0,
+  });
+  const app = new Hono();
+  let handlerCalls = 0;
+  app.use("*", async (c, next) => {
+    attachTestIdentity(c, "stalled-body");
+    await next();
+  });
+  app.use(
+    "/mcp",
+    createHttpBackpressureMiddleware(admission, {
+      maxBytes: 1024,
+      readTimeoutMs: 40,
+    }),
+  );
+  app.post("/mcp", (c) => {
+    handlerCalls += 1;
+    return c.json({ ok: true });
+  });
+
+  const response = await app.request(stalledJsonRequest());
+  assert.equal(response.status, 408);
+  const body = await response.json();
+  assert.equal(body.error.data.readTimeoutMs, 40);
+  assert.equal(body.error.data.retryable, true);
+  assert.equal(handlerCalls, 0);
+  assert.equal(
+    admission.getSnapshot().inFlight,
+    0,
+    "stalled body retained its parsing lease after server timeout",
+  );
+
+  const recovered = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 20, method: "ping" }),
+  });
+  assert.equal(recovered.status, 200);
+  await recovered.arrayBuffer();
+  assert.equal(admission.getSnapshot().inFlight, 0);
+}
+
+async function testBodyGuardRunsBeforeBodyReadingRejections() {
+  const app = new Hono();
+  let rejectionMiddlewareCalls = 0;
+  app.use(
+    "/mcp",
+    createHttpRequestBodyGuardMiddleware({
+      maxBytes: 128,
+      readTimeoutMs: 40,
+    }),
+  );
+  app.use("/mcp", async (c) => {
+    rejectionMiddlewareCalls += 1;
+    await c.req.raw.clone().json();
+    return c.json({ error: "synthetic_auth_rejection" }, 401);
+  });
+
+  const oversized = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 21,
+      method: "ping",
+      padding: "x".repeat(256),
+    }),
+  });
+  assert.equal(oversized.status, 413);
+  assert.equal(rejectionMiddlewareCalls, 0);
+
+  const stalled = await app.request(stalledJsonRequest());
+  assert.equal(stalled.status, 408);
+  assert.equal(rejectionMiddlewareCalls, 0);
+
+  const bounded = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 22, method: "ping" }),
+  });
+  assert.equal(bounded.status, 401);
+  assert.equal(rejectionMiddlewareCalls, 1);
+}
+
 async function testJsonRpcBatchesAreRejectedFailClosed() {
   const admission = controller({
     maxInFlight: 1,
@@ -697,10 +872,14 @@ await testDeterministicLoad();
 await testRealMiddlewareResponses();
 await testDownstreamAdmissionErrorIsNotReclassified();
 await testRequestBodyParsingIsBoundedAndAdmitted();
+await testBodyGuardHasBoundedGlobalAdmission();
+testOneSidedZeroQueueConfigurationIsRejected();
+await testStalledRequestBodyTimesOutAndReleasesLease();
+await testBodyGuardRunsBeforeBodyReadingRejections();
 await testJsonRpcBatchesAreRejectedFailClosed();
 await testReclassificationPreservesDeadlineAndCumulativeWait();
 await testStreamingResponseRetainsLease();
 
 console.log(
-  "PASS: HTTP admission is globally bounded, isolates verified identities, rejects JSON-RPC batches fail-closed, preserves one deadline and cumulative wait through request classification, separately protects expensive operations and mutations, bounds request-body parsing, retains leases through response streaming, uses a bounded fair queue, redispatches after timeout and cancellation, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
+  "PASS: HTTP admission is globally bounded, isolates verified identities, bounds raw body reads before authentication, rejects one-sided zero queue configuration, guards request bodies before body-reading rejection paths, times out stalled uploads and releases their leases, rejects JSON-RPC batches fail-closed, preserves one deadline and cumulative wait through request classification, separately protects expensive operations and mutations, bounds request-body parsing, retains leases through response streaming, uses a bounded fair queue, redispatches after timeout and cancellation, preserves downstream errors, returns deterministic retry semantics, and remains bounded under deterministic load",
 );

@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import {
   mkdir,
@@ -19,6 +20,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const secret = "observability-test-secret-at-least-32-characters-long";
 const localRestSecret = "observability-local-rest-test-key";
 const documentSecret = "DOCUMENT-CONTENT-MUST-NOT-ENTER-REQUEST-LOGS";
+const operationSecret = "OPERATION-SECRET-MUST-NOT-ENTER-LOGS";
 
 async function unusedPort() {
   const server = createServer();
@@ -45,6 +47,37 @@ async function signToken(clientId) {
     .sign(new TextEncoder().encode(secret));
 }
 
+async function startFakeObsidianRest() {
+  const server = createHttpServer((request, response) => {
+    if (request.url === "/") {
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          service: "Obsidian Local REST API",
+          authenticated: true,
+          versions: { obsidian: "observability", self: "observability" },
+        }),
+      );
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: () =>
+      new Promise((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  };
+}
+
 async function readAllLogs(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const chunks = [];
@@ -60,7 +93,12 @@ async function startBackend(
   sandbox,
   name,
   runtimeMode,
-  { enableCache = runtimeMode.startsWith("headless") } = {},
+  {
+    enableCache = runtimeMode.startsWith("headless"),
+    obsidianBaseUrl = "http://127.0.0.1:1",
+    writeMode = "readonly",
+    observabilityStaleAfterMs = 60_000,
+  } = {},
 ) {
   const port = await unusedPort();
   const vaultPath = path.join(sandbox, `${name}-vault`);
@@ -77,35 +115,38 @@ async function startBackend(
     "utf8",
   );
 
+  const childEnv = {
+    ...process.env,
+    NODE_ENV: "test",
+    OBSIDIAN_RUNTIME_MODE: runtimeMode,
+    OBSIDIAN_VAULT: vaultPath,
+    OBSIDIAN_BASE_URL: obsidianBaseUrl,
+    OBSIDIAN_API_KEY: localRestSecret,
+    OBSIDIAN_STARTUP_BLOCKING: "false",
+    OBSIDIAN_CACHE_SOURCE: runtimeMode === "live" ? "rest" : "filesystem",
+    OBSIDIAN_ENABLE_CACHE: String(enableCache),
+    SEMANTIC_SEARCH_PREWARM: "false",
+    MCP_TRANSPORT_TYPE: "http",
+    MCP_HTTP_HOST: "127.0.0.1",
+    MCP_HTTP_PORT: String(port),
+    MCP_HTTP_PORT_RETRIES: "0",
+    MCP_LOG_LEVEL: "info",
+    LOGS_DIR: logDir,
+    MCP_AUTH_MODE: "jwt",
+    MCP_AUTH_SECRET_KEY: secret,
+    MCP_ALLOWED_ORIGINS: "",
+    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX: "1000",
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "1000",
+    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS: "1000",
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS: "1000",
+    MCP_OBSERVABILITY_STALE_AFTER_MS: String(observabilityStaleAfterMs),
+  };
+  if (writeMode === null) delete childEnv.MCP_WRITE_MODE;
+  else childEnv.MCP_WRITE_MODE = writeMode;
+
   const child = spawn(process.execPath, ["dist/index.js"], {
     cwd: process.cwd(),
-    env: {
-      ...process.env,
-      NODE_ENV: "test",
-      OBSIDIAN_RUNTIME_MODE: runtimeMode,
-      OBSIDIAN_VAULT: vaultPath,
-      OBSIDIAN_BASE_URL: "http://127.0.0.1:1",
-      OBSIDIAN_API_KEY: localRestSecret,
-      OBSIDIAN_STARTUP_BLOCKING: "false",
-      OBSIDIAN_CACHE_SOURCE: runtimeMode === "live" ? "rest" : "filesystem",
-      OBSIDIAN_ENABLE_CACHE: String(enableCache),
-      MCP_WRITE_MODE: "readonly",
-      SEMANTIC_SEARCH_PREWARM: "false",
-      MCP_TRANSPORT_TYPE: "http",
-      MCP_HTTP_HOST: "127.0.0.1",
-      MCP_HTTP_PORT: String(port),
-      MCP_HTTP_PORT_RETRIES: "0",
-      MCP_LOG_LEVEL: "info",
-      LOGS_DIR: logDir,
-      MCP_AUTH_MODE: "jwt",
-      MCP_AUTH_SECRET_KEY: secret,
-      MCP_ALLOWED_ORIGINS: "",
-      MCP_HTTP_PREAUTH_RATE_LIMIT_MAX: "1000",
-      MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "1000",
-      MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS: "1000",
-      MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS: "1000",
-      MCP_OBSERVABILITY_STALE_AFTER_MS: "60000",
-    },
+    env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -205,6 +246,39 @@ try {
     assert.equal(serializedStatus.includes(headless.vaultPath), false);
     assert.equal(serializedStatus.includes(documentSecret), false);
 
+    const maliciousOperation = await fetch(new URL("/mcp", headless.baseUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: { name: `${operationSecret}\ncontrol` },
+      }),
+    });
+    await maliciousOperation.text();
+
+    const mappedError = await fetch(new URL("/mcp", headless.baseUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "expired-observability-test-session",
+        "X-Correlation-Id": "mapped-error-404",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 8,
+        method: "tools/list",
+      }),
+    });
+    assert.equal(mappedError.status, 404);
+    const mappedErrorBody = await mappedError.json();
+    assert.equal(mappedErrorBody.id, 8);
+
     const rejectedOrigin = await fetch(new URL("/healthz", headless.baseUrl), {
       headers: {
         Origin: "https://blocked-origin.example",
@@ -228,11 +302,25 @@ try {
     assert.equal(completionLogs.includes(secret), false);
     assert.equal(completionLogs.includes(localRestSecret), false);
     assert.equal(completionLogs.includes(documentSecret), false);
+    assert.equal(completionLogs.includes(operationSecret), false);
     assert.equal(completionLogs.includes(headless.vaultPath), false);
     assert.equal(
       completionLogs.includes("invalid incident with spaces"),
       false,
     );
+    const mappedErrorLog = completionLogs
+      .split(/\r?\n/u)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+      })
+      .find((entry) => entry?.correlationId === "mapped-error-404");
+    assert.ok(mappedErrorLog, "mapped error must emit a completion event");
+    assert.equal(mappedErrorLog.httpStatus, 404);
+    assert.equal(mappedErrorLog.result, "client_error");
   } finally {
     await stopBackend(headless);
   }
@@ -254,6 +342,21 @@ try {
     await stopBackend(headlessWithoutCache);
   }
 
+  const hybridWithoutSource = await startBackend(
+    sandbox,
+    "hybrid-without-source",
+    "hybrid",
+    { enableCache: false },
+  );
+  try {
+    const readiness = await waitForReadiness(hybridWithoutSource.baseUrl, 503);
+    const body = await readiness.json();
+    assert.equal(body.state, "critical");
+    assert.equal(body.ready, false);
+  } finally {
+    await stopBackend(hybridWithoutSource);
+  }
+
   const liveWithoutProof = await startBackend(sandbox, "live", "live", {
     enableCache: false,
   });
@@ -270,8 +373,46 @@ try {
     await stopBackend(liveWithoutProof);
   }
 
+  const fakeRest = await startFakeObsidianRest();
+  const liveWithoutCache = await startBackend(
+    sandbox,
+    "live-without-cache",
+    "live",
+    {
+      enableCache: false,
+      obsidianBaseUrl: fakeRest.baseUrl,
+      writeMode: null,
+      observabilityStaleAfterMs: 1000,
+    },
+  );
+  try {
+    const readiness = await waitForReadiness(liveWithoutCache.baseUrl, 200);
+    const body = await readiness.json();
+    assert.equal(body.state, "ready");
+    assert.equal(body.provenance.source, "live-obsidian");
+    assert.equal(body.capabilities.liveObsidianReads, true);
+    assert.equal(
+      body.capabilities.mutations,
+      true,
+      "validated live default write mode is full",
+    );
+    assert.equal(body.capabilities.cacheReads, false);
+    await sleep(1600);
+    const stillReady = await fetch(
+      new URL("/readyz", liveWithoutCache.baseUrl),
+    );
+    assert.equal(
+      stillReady.status,
+      200,
+      "probe cadence must keep a healthy live API inside its freshness window",
+    );
+  } finally {
+    await stopBackend(liveWithoutCache);
+    await fakeRest.close();
+  }
+
   console.log(
-    "PASS: healthz remains backward-compatible liveness, readyz requires a usable headless cache backend, statusz requires authentication and exposes sanitized aggregate controls, and structured completion logs include rejected origins without bearer tokens, vault paths or document content",
+    "PASS: readyz requires a usable source for headless and hybrid profiles, a verified live API works without optional cache using the validated write mode, and streamed completion logs sanitize caller-controlled operations and rejected origins",
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });

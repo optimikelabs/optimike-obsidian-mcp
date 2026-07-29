@@ -29,16 +29,32 @@ Le flux longue durée `GET /mcp` ne conserve pas un slot d’opération pendant 
 | `MCP_HTTP_MAX_QUEUED_PER_IDENTITY`              |       `8` | Opérations en file pour une identité               |
 | `MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS`                |    `5000` | Attente maximale en file                           |
 | `MCP_HTTP_MAX_REQUEST_BODY_BYTES`               | `1048576` | Taille maximale du corps JSON-RPC avant HTTP `413` |
+| `MCP_HTTP_REQUEST_BODY_READ_TIMEOUT_MS`         |    `5000` | Deadline serveur pour recevoir un corps complet    |
 | `MCP_HTTP_BACKPRESSURE_RETRY_AFTER_SECONDS`     |       `1` | Indication prudente de retry                       |
 
 Toutes les valeurs sont validées avant l’ouverture du listener HTTP. Une limite par identité ne peut pas dépasser sa limite globale. La capacité de mutation ne peut pas dépasser la capacité coûteuse, qui ne peut pas dépasser la capacité globale.
 
 Une file de taille zéro est possible uniquement lorsque les deux limites de file sont à zéro. Toute saturation produit alors un refus déterministe immédiat.
 
-L’inspection d’un corps `POST` conserve d’abord un slot standard puis lit une
-copie bornée de la requête. Un corps déclaré ou streamé au-delà de la limite est
-refusé en HTTP `413` ; il n’est jamais intégralement mis en mémoire avant
-l’admission.
+Le quota par IP source s’applique avant toute mise en mémoire du corps. Son
+refus pré-authentification en `429` utilise l’id JSON-RPC `null`, ne clone ni ne
+parse le corps non fiable et annule le flux entrant. Après ce contrôle source,
+une garde transport ne lit jamais plus que la taille configurée avant que
+l’authentification ou le quota d’identité puisse lire l’id JSON-RPC. Un corps
+déclaré ou streamé au-delà de la limite est refusé en HTTP `413`. Un corps
+chunked qui ne se termine pas avant le deadline serveur est annulé et refusé en
+HTTP `408`.
+
+Les gardes de corps bruts partagent un pool global anonyme distinct, borné par
+les mêmes grandeurs globales de concurrence, file et timeout. Une rafale venant
+de nombreuses adresses sources encore autorisées ne peut donc pas ouvrir un
+nombre illimité de buffers proches de la taille maximale avant
+l’authentification. Un refus de la garde annule le corps non lu.
+
+Après vérification de l’identité, l’inspection du corps `POST` conserve toujours
+un slot standard. La même limite en octets et le même délai serveur bornent
+cette lecture admise ; un timeout ou un dépassement libère le slot exactement
+une fois.
 
 Le profil HTTP accepte exactement une enveloppe JSON-RPC par `POST`. Un tableau
 JSON à la racine est refusé par défaut en HTTP `400` avant d’atteindre le

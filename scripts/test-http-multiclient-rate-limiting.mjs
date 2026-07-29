@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -85,6 +85,59 @@ async function mcpPost(baseUrl, { token, body, sessionId, headers = {} }) {
       ...headers,
     },
     body: JSON.stringify(body),
+  });
+}
+
+async function headerOnlyPostStatus(baseUrl, contentLength, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({
+      host: baseUrl.hostname,
+      port: Number(baseUrl.port),
+    });
+    let response = "";
+    let settled = false;
+    const finish = (error, status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      if (error) reject(error);
+      else resolve(status);
+    };
+    const timeout = setTimeout(
+      () =>
+        finish(
+          new Error(
+            "pre-auth rejection waited for an unfinished near-limit body",
+          ),
+        ),
+      timeoutMs,
+    );
+    socket.on("connect", () => {
+      socket.write(
+        [
+          "POST /mcp HTTP/1.1",
+          `Host: ${baseUrl.host}`,
+          "Accept: application/json",
+          "Content-Type: application/json",
+          `Content-Length: ${contentLength}`,
+          "Connection: close",
+          "",
+          "",
+        ].join("\r\n"),
+      );
+    });
+    socket.on("data", (chunk) => {
+      response += String(chunk);
+      const match = /^HTTP\/1\.[01] (\d{3})/u.exec(response);
+      if (match) finish(undefined, Number(match[1]));
+    });
+    socket.on("error", (error) => finish(error));
+    socket.on("close", () => {
+      if (!settled) {
+        finish(new Error(`connection closed without a response: ${response}`));
+      }
+    });
   });
 }
 
@@ -333,17 +386,53 @@ async function testUntrustedProxyHeaders(sandbox) {
   try {
     const first = await mcpPost(instance.baseUrl, {
       body: initializeBody(20, "missing-auth-a"),
-      headers: { "X-Forwarded-For": "198.51.100.1" },
+      headers: {
+        Forwarded: "for=198.51.100.1",
+        "X-Forwarded-For": "203.0.113.1",
+      },
     });
     assert.equal(first.status, 401);
     const second = await mcpPost(instance.baseUrl, {
       body: initializeBody(21, "missing-auth-b"),
-      headers: { "X-Forwarded-For": "198.51.100.2" },
+      headers: {
+        Forwarded: "for=198.51.100.2",
+        "X-Forwarded-For": "203.0.113.2",
+      },
     });
     assert.equal(second.status, 429);
     assert.equal(
       second.headers.get("x-optimike-rate-limit-scope"),
       "loopback-source-ip",
+    );
+    assert.equal((await second.json()).id, null);
+  } finally {
+    await stopBackend(instance);
+    await rm(instance.logDir, { recursive: true, force: true });
+  }
+}
+
+async function testPreAuthLimitPrecedesBodyBuffering(sandbox) {
+  const instance = await startBackend(sandbox, "preauth-before-body", {
+    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX: "1",
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "100",
+    MCP_HTTP_REQUEST_BODY_READ_TIMEOUT_MS: "5000",
+  });
+  try {
+    const allowance = await mcpPost(instance.baseUrl, {
+      body: initializeBody(25, "consume-source-allowance"),
+    });
+    assert.equal(allowance.status, 401);
+
+    const startedAt = Date.now();
+    const statuses = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        headerOnlyPostStatus(instance.baseUrl, 1024 * 1024 - 1),
+      ),
+    );
+    assert.deepEqual(statuses, [429, 429, 429, 429]);
+    assert.ok(
+      Date.now() - startedAt < 3000,
+      "source-limited uploads waited for their unfinished bodies",
     );
   } finally {
     await stopBackend(instance);
@@ -376,6 +465,44 @@ async function testTrustedProxyHeaders(sandbox) {
     assert.equal(
       repeatedFirst.headers.get("x-optimike-rate-limit-scope"),
       "source-ip",
+    );
+  } finally {
+    await stopBackend(instance);
+    await rm(instance.logDir, { recursive: true, force: true });
+  }
+}
+
+async function testTrustedProxyRejectsConflictingHeaderFamilies(sandbox) {
+  const instance = await startBackend(sandbox, "trusted-proxy-conflict", {
+    MCP_HTTP_PREAUTH_RATE_LIMIT_MAX: "1",
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "100",
+    MCP_TRUSTED_PROXIES: "127.0.0.1/32",
+  });
+  try {
+    const first = await mcpPost(instance.baseUrl, {
+      body: initializeBody(40, "trusted-conflict-a"),
+      headers: {
+        Forwarded: "for=198.51.100.1",
+        "X-Forwarded-For": "203.0.113.1",
+      },
+    });
+    assert.equal(first.status, 401);
+
+    const second = await mcpPost(instance.baseUrl, {
+      body: initializeBody(41, "trusted-conflict-b"),
+      headers: {
+        Forwarded: "for=198.51.100.2",
+        "X-Forwarded-For": "203.0.113.2",
+      },
+    });
+    assert.equal(
+      second.status,
+      429,
+      "conflicting forwarding header families must share the trusted proxy socket quota",
+    );
+    assert.equal(
+      second.headers.get("x-optimike-rate-limit-scope"),
+      "loopback-source-ip",
     );
   } finally {
     await stopBackend(instance);
@@ -428,10 +555,12 @@ try {
   await testIdentityIsolation(sandbox);
   await testSessionIdentityBinding(sandbox);
   await testUntrustedProxyHeaders(sandbox);
+  await testPreAuthLimitPrecedesBodyBuffering(sandbox);
   await testTrustedProxyHeaders(sandbox);
+  await testTrustedProxyRejectsConflictingHeaderFamilies(sandbox);
   await testInvalidConfigurationRefused(sandbox);
   console.log(
-    "PASS: verified HTTP identities isolate functional quotas, shared identities share limits, pre-auth source protection is bounded, untrusted forwarding headers are ignored, trusted proxy CIDRs are explicit, sessions are identity-bound, configuration fails closed, and secrets stay out of logs",
+    "PASS: verified HTTP identities isolate functional quotas, shared identities share limits, pre-auth rejection does not read bodies and rejects concurrent unfinished near-limit uploads before buffering, untrusted forwarding headers are ignored, conflicting trusted proxy header families fail closed, trusted proxy CIDRs are explicit, sessions are identity-bound, configuration fails closed, and secrets stay out of logs",
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });

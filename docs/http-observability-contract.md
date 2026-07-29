@@ -41,7 +41,7 @@ Authenticated detailed status. It uses the same pre-authentication source protec
 | `degraded` | A bounded fallback is usable, or a non-critical dependency is degraded |             `200` |
 | `critical` | No verified source can serve the expected profile safely               |             `503` |
 
-The state includes machine-readable reasons such as `live_obsidian_unavailable_using_stale_fallback`, `headless_cache_unavailable` or `headless_vault_and_cache_unavailable`.
+The state includes machine-readable reasons such as `live_obsidian_unavailable_using_stale_fallback`, `cache_refresh_failed`, `headless_cache_unavailable` or `headless_vault_and_cache_unavailable`. Exception text from a failed refresh is never returned.
 
 ## Provenance and freshness
 
@@ -55,7 +55,17 @@ The status contract uses these response-source classes:
 
 It also exposes the internal origin (`obsidian_api`, `filesystem`, `cache`, `snapshot` or `unknown`), observation timestamp, age in milliseconds, whether freshness is known and whether the result is stale.
 
-A source is never called `live-obsidian` solely because the service runs in `live` mode. A ready cache observation whose real refresh source is `rest` is normalized to the public `obsidian_api` origin and must remain inside the freshness threshold. When that observation ages past the threshold, provenance becomes `snapshot` and the service is degraded. A stale fallback is never presented as live.
+A source is never called `live-obsidian` solely because the service runs in `live` mode. The transport probes the configured Obsidian REST service independently of the optional cache. A successful, recent authenticated probe therefore makes a live profile ready even when caching is disabled. A ready cache observation whose real refresh source is `rest` is also normalized to the public `obsidian_api` origin and must remain inside the freshness threshold. When that observation ages past the threshold, provenance becomes `snapshot` and the service is degraded. A known cache refresh failure is reported as sanitized degradation. A stale fallback is never presented as live.
+
+The live probe cadence is the lower of 30 seconds and half the configured
+freshness threshold. Lowering the threshold therefore cannot leave a healthy
+cache-disabled live profile stale between fixed 30-second probes.
+A recent direct probe takes precedence over older cache evidence: when it
+reports the REST API unavailable, live reads and mutations are withdrawn
+immediately even if a previous REST-backed cache snapshot remains usable.
+Observation timestamps more than five seconds in the future are invalid
+evidence. They never grant live readiness or mutations; a usable cached payload
+may remain only as a stale fallback with a stable diagnostic reason.
 
 Default freshness threshold:
 
@@ -74,9 +84,11 @@ Status distinguishes:
 
 `temporarilyUnavailable` contains stable capability identifiers, not exception text. Headless read-only operation can therefore be `ready` while `live-obsidian-reads` and `mutations` are unavailable by design. The configured vault path existing is not enough: headless readiness stays `critical` until the shared cache has completed a usable filesystem-backed build.
 
+Hybrid operation follows the same evidence rule: without a verified live API observation or a ready bounded fallback, it is `critical`, not merely `degraded`. Mutation capability uses the centrally validated runtime write mode; observability does not reinterpret the raw environment.
+
 ## Structured request logs
 
-Every HTTP request emits one completion event with:
+Every HTTP request emits one completion event when its response body finishes, is cancelled by the client, or fails. Creating a streamed `Response` is not treated as completion. The event contains:
 
 - `requestId`;
 - pseudonymous verified client identity when authentication succeeded;
@@ -90,6 +102,13 @@ Every HTTP request emits one completion event with:
 - operation class and queue wait;
 - current provenance and stale flag;
 - optional sanitized `correlationId` and `incidentId`.
+
+Mapped application errors use the status of the actual error response and are
+logged only after that body completes. If a response body fails after headers
+were produced, the event preserves the status placed on the wire and reports
+`result: exception` instead of inventing a later HTTP `500`.
+
+Caller-controlled JSON-RPC methods and tool names are logged only when they match a strict 128-character identifier grammar. Other values are replaced by the controlled HTTP route label, preventing control characters, document content and oversized values from entering the operation field.
 
 Clients may send:
 
@@ -154,4 +173,4 @@ Logs do not include by default:
 npm run test:http-observability
 ```
 
-The suite runs on Ubuntu and Windows and proves the real `rest` cache vocabulary, fresh live, usable filesystem-backed cache, stale snapshot, degraded and critical states, origin-rejection completion logging, endpoint status codes, authentication of `/statusz`, sanitized aggregate controls and absence of tokens, secrets, document content and personal paths from the observability surfaces.
+The suite runs on Ubuntu and Windows and proves the real `rest` cache vocabulary, direct live API readiness without cache, strict hybrid readiness, usable filesystem-backed cache, sanitized refresh failure, stale snapshot, degraded and critical states, body-stream completion and cancellation, bounded operation names, origin-rejection completion logging, endpoint status codes, authentication of `/statusz`, sanitized aggregate controls and absence of tokens, secrets, document content and personal paths from the observability surfaces.

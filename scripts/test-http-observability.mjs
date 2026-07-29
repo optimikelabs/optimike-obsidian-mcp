@@ -5,8 +5,14 @@ import path from "node:path";
 
 process.env.OBSIDIAN_RUNTIME_MODE ??= "headless-readonly";
 process.env.OBSIDIAN_VAULT ??= process.cwd();
-const { buildHealthSnapshot, sanitizeExternalCorrelationId } =
-  await import("../dist/mcp-server/transports/httpObservability.js");
+const {
+  buildHealthSnapshot,
+  sanitizeExternalCorrelationId,
+  sanitizeLoggedOperationName,
+  wrapResponseForCompletion,
+} = await import("../dist/mcp-server/transports/httpObservability.js");
+const { liveApiProbeIntervalMs } =
+  await import("../dist/mcp-server/transports/httpTransport.js");
 
 const now = Date.parse("2026-07-29T12:00:00.000Z");
 const vaultPath = process.cwd();
@@ -40,6 +46,106 @@ assert.equal(live.provenance.origin, "obsidian_api");
 assert.equal(live.provenance.stale, false);
 assert.equal(live.capabilities.liveObsidianReads, true);
 assert.equal(live.capabilities.mutations, true);
+
+const directLiveWithoutCache = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "live",
+  vaultPath: missingVault,
+  writeMode: "full",
+  staleAfterMs: 60_000,
+  getLiveApiObservation: () => ({
+    available: true,
+    observedAt: now - 1000,
+  }),
+});
+assert.equal(directLiveWithoutCache.state, "ready");
+assert.equal(directLiveWithoutCache.provenance.source, "live-obsidian");
+assert.equal(directLiveWithoutCache.capabilities.liveObsidianReads, true);
+assert.equal(directLiveWithoutCache.capabilities.mutations, true);
+assert.equal(directLiveWithoutCache.capabilities.cacheReads, false);
+
+const failedProbeOverridesRestCache = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "live",
+  vaultPath,
+  writeMode: "full",
+  staleAfterMs: 60_000,
+  getLiveApiObservation: () => ({
+    available: false,
+    observedAt: now - 1000,
+  }),
+  vaultCacheService: cache({
+    status: "ready",
+    ready: true,
+    lastRefreshAt: new Date(now - 5000).toISOString(),
+    refreshSource: "rest",
+    configuredRefreshSource: "rest",
+    cachedFileCount: 10,
+  }),
+});
+assert.equal(failedProbeOverridesRestCache.state, "degraded");
+assert.equal(failedProbeOverridesRestCache.provenance.source, "cache");
+assert.equal(
+  failedProbeOverridesRestCache.dependencies.obsidianDesktop.available,
+  false,
+);
+assert.equal(
+  failedProbeOverridesRestCache.capabilities.liveObsidianReads,
+  false,
+);
+assert.equal(failedProbeOverridesRestCache.capabilities.mutations, false);
+
+const futureCacheObservation = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "live",
+  vaultPath,
+  writeMode: "full",
+  staleAfterMs: 60_000,
+  vaultCacheService: cache({
+    status: "ready",
+    ready: true,
+    lastRefreshAt: new Date(now + 60_000).toISOString(),
+    refreshSource: "rest",
+    configuredRefreshSource: "rest",
+    cachedFileCount: 10,
+  }),
+});
+assert.equal(futureCacheObservation.state, "degraded");
+assert.equal(futureCacheObservation.provenance.source, "snapshot");
+assert.equal(futureCacheObservation.provenance.stale, true);
+assert.equal(futureCacheObservation.capabilities.liveObsidianReads, false);
+assert.equal(futureCacheObservation.capabilities.mutations, false);
+assert.ok(
+  futureCacheObservation.reasons.includes(
+    "cache_observation_timestamp_invalid",
+  ),
+);
+
+const futureDirectObservation = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "live",
+  vaultPath: missingVault,
+  writeMode: "full",
+  staleAfterMs: 60_000,
+  getLiveApiObservation: () => ({
+    available: true,
+    observedAt: now + 60_000,
+  }),
+});
+assert.equal(futureDirectObservation.state, "critical");
+assert.equal(futureDirectObservation.provenance.source, "unknown");
+assert.equal(futureDirectObservation.provenance.stale, true);
+assert.equal(futureDirectObservation.capabilities.liveObsidianReads, false);
+assert.equal(futureDirectObservation.capabilities.mutations, false);
+assert.equal(
+  futureDirectObservation.dependencies.obsidianDesktop.available,
+  null,
+);
+assert.ok(
+  futureDirectObservation.reasons.includes(
+    "live_observation_timestamp_invalid",
+  ),
+);
 
 const stale = buildHealthSnapshot({
   now: () => now,
@@ -101,6 +207,29 @@ assert.equal(degradedCache.state, "degraded");
 assert.equal(degradedCache.critical, false);
 assert.ok(degradedCache.reasons.includes("fallback_data_stale"));
 
+const refreshFailed = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "headless-readonly",
+  vaultPath,
+  cacheSource: "filesystem",
+  staleAfterMs: 60_000,
+  vaultCacheService: cache({
+    status: "ready",
+    ready: true,
+    lastRefreshAt: new Date(now - 5000).toISOString(),
+    lastRefreshError: "SECRET INTERNAL CACHE FAILURE",
+    refreshSource: "filesystem",
+    configuredRefreshSource: "filesystem",
+    cachedFileCount: 2,
+  }),
+});
+assert.equal(refreshFailed.state, "degraded");
+assert.ok(refreshFailed.reasons.includes("cache_refresh_failed"));
+assert.equal(
+  JSON.stringify(refreshFailed).includes("SECRET INTERNAL CACHE FAILURE"),
+  false,
+);
+
 const headlessWithoutCache = buildHealthSnapshot({
   now: () => now,
   runtimeMode: "headless-readonly",
@@ -153,6 +282,18 @@ const liveWithoutProof = buildHealthSnapshot({
 assert.equal(liveWithoutProof.state, "critical");
 assert.equal(liveWithoutProof.capabilities.liveObsidianReads, false);
 
+const hybridWithoutSource = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "hybrid",
+  vaultPath,
+  writeMode: "full",
+});
+assert.equal(hybridWithoutSource.state, "critical");
+assert.equal(hybridWithoutSource.ready, false);
+assert.ok(
+  hybridWithoutSource.reasons.includes("no_verified_live_or_fallback_source"),
+);
+
 assert.equal(
   sanitizeExternalCorrelationId("incident-42:retry.1"),
   "incident-42:retry.1",
@@ -160,20 +301,90 @@ assert.equal(
 assert.equal(sanitizeExternalCorrelationId(" contains spaces "), undefined);
 assert.equal(sanitizeExternalCorrelationId("Bearer secret"), undefined);
 assert.equal(sanitizeExternalCorrelationId("x".repeat(129)), undefined);
+assert.equal(sanitizeLoggedOperationName("tools/call"), "tools/call");
+assert.equal(
+  sanitizeLoggedOperationName("obsidian_read_note"),
+  "obsidian_read_note",
+);
+assert.equal(
+  sanitizeLoggedOperationName("SECRET\nDOCUMENT CONTENT"),
+  undefined,
+);
+assert.equal(sanitizeLoggedOperationName("x".repeat(129)), undefined);
+assert.equal(liveApiProbeIntervalMs(1000), 500);
+assert.equal(liveApiProbeIntervalMs(60_000), 30_000);
+assert.equal(liveApiProbeIntervalMs(15 * 60_000), 30_000);
+
+let streamController;
+const completionEvents = [];
+const wrappedStreamResponse = wrapResponseForCompletion(
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        streamController = controller;
+      },
+    }),
+  ),
+  (completion) => completionEvents.push(completion),
+);
+const pendingBody = wrappedStreamResponse.text();
+await new Promise((resolve) => setTimeout(resolve, 10));
+assert.deepEqual(
+  completionEvents,
+  [],
+  "a response object is not a completed body stream",
+);
+streamController.enqueue(new TextEncoder().encode("done"));
+streamController.close();
+assert.equal(await pendingBody, "done");
+assert.deepEqual(completionEvents, ["response"]);
+
+const cancellationEvents = [];
+const cancellableResponse = wrapResponseForCompletion(
+  new Response(new ReadableStream({ pull() {} })),
+  (completion) => cancellationEvents.push(completion),
+);
+await cancellableResponse.body.cancel("test cancellation");
+assert.deepEqual(cancellationEvents, ["cancelled"]);
+
+let failingController;
+const failureEvents = [];
+const failingResponse = wrapResponseForCompletion(
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        failingController = controller;
+      },
+    }),
+    { status: 206 },
+  ),
+  (completion) => failureEvents.push(completion),
+);
+assert.equal(failingResponse.status, 206);
+const failingBody = failingResponse.text();
+failingController.error(new Error("synthetic stream failure"));
+await assert.rejects(failingBody, /synthetic stream failure/u);
+assert.deepEqual(failureEvents, ["exception"]);
 
 for (const snapshot of [
   live,
   stale,
   headless,
   degradedCache,
+  refreshFailed,
   headlessWithoutCache,
   headlessBuildingCache,
   critical,
+  directLiveWithoutCache,
+  failedProbeOverridesRestCache,
+  futureCacheObservation,
+  futureDirectObservation,
+  hybridWithoutSource,
 ]) {
   const serialized = JSON.stringify(snapshot);
   assert.equal(serialized.includes(vaultPath), false);
 }
 
 console.log(
-  "PASS: readiness requires a usable cache-backed read path, the real REST cache vocabulary maps to live Obsidian, stale data is never labeled live, dependency and capability states are sanitized, and external correlation identifiers are strictly bounded",
+  "PASS: readiness distinguishes direct live API health from optional cache health, hybrid requires a usable source, refresh failures degrade without leaking details, operation names are bounded, and completion waits for streamed response finish or cancellation",
 );
