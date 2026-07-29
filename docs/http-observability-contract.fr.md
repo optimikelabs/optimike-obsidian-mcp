@@ -61,6 +61,14 @@ La cadence du probe live est la plus petite valeur entre 30 secondes et la
 moitié du seuil de fraîcheur configuré. Abaisser ce seuil ne peut donc pas
 laisser un profil live sain sans cache devenir stale entre deux probes fixes de
 30 secondes.
+Un probe direct récent prime sur une preuve plus ancienne issue du cache :
+s’il déclare l’API REST indisponible, les lectures live et les mutations sont
+retirées immédiatement, même si un snapshot précédemment rafraîchi par REST
+reste exploitable comme fallback.
+Un timestamp d’observation situé plus de cinq secondes dans le futur constitue
+une preuve invalide. Il n’autorise jamais la readiness live ni les mutations ;
+un payload de cache exploitable peut uniquement rester disponible comme
+fallback stale avec une raison de diagnostic stable.
 
 Seuil de fraîcheur par défaut :
 

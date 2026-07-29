@@ -126,6 +126,7 @@ export const HTTP_OBSERVABILITY_STALE_AFTER_MS =
   observabilityEnv.MCP_OBSERVABILITY_STALE_AFTER_MS;
 
 const PROCESS_STARTED_AT = new Date().toISOString();
+const MAX_OBSERVATION_FUTURE_SKEW_MS = 5000;
 const SAFE_EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SAFE_OPERATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u;
 const KNOWN_HTTP_ROUTES = new Set([
@@ -255,13 +256,20 @@ export function buildHealthSnapshot(
     options.staleAfterMs ?? HTTP_OBSERVABILITY_STALE_AFTER_MS;
   const cacheResult = readCacheStats(options.vaultCacheService);
   const stats = cacheResult.stats;
-  const cacheObservedAtMs = parseTimestamp(stats?.lastRefreshAt);
+  const rawCacheObservedAtMs = parseTimestamp(stats?.lastRefreshAt);
+  const cacheTimestampInvalid =
+    rawCacheObservedAtMs !== undefined &&
+    rawCacheObservedAtMs - now > MAX_OBSERVATION_FUTURE_SKEW_MS;
+  const cacheObservedAtMs = cacheTimestampInvalid
+    ? undefined
+    : rawCacheObservedAtMs;
   const cacheFreshnessMs =
     cacheObservedAtMs === undefined
       ? null
       : Math.max(0, now - cacheObservedAtMs);
   const cacheStale =
-    cacheFreshnessMs !== null && cacheFreshnessMs > staleAfterMs;
+    cacheTimestampInvalid ||
+    (cacheFreshnessMs !== null && cacheFreshnessMs > staleAfterMs);
   let liveApiObservation: LiveApiObservation = { available: null };
   try {
     liveApiObservation =
@@ -269,13 +277,22 @@ export function buildHealthSnapshot(
   } catch {
     liveApiObservation = { available: null };
   }
-  const liveApiObservedAtMs = parseTimestamp(liveApiObservation.observedAt);
+  const rawLiveApiObservedAtMs = parseTimestamp(
+    liveApiObservation.observedAt,
+  );
+  const liveApiTimestampInvalid =
+    rawLiveApiObservedAtMs !== undefined &&
+    rawLiveApiObservedAtMs - now > MAX_OBSERVATION_FUTURE_SKEW_MS;
+  const liveApiObservedAtMs = liveApiTimestampInvalid
+    ? undefined
+    : rawLiveApiObservedAtMs;
   const liveApiFreshnessMs =
     liveApiObservedAtMs === undefined
       ? null
       : Math.max(0, now - liveApiObservedAtMs);
   const liveApiStale =
-    liveApiFreshnessMs !== null && liveApiFreshnessMs > staleAfterMs;
+    liveApiTimestampInvalid ||
+    (liveApiFreshnessMs !== null && liveApiFreshnessMs > staleAfterMs);
   const origin = normalizeCacheOrigin(
     nonEmptyString(stats?.refreshSource),
     nonEmptyString(stats?.configuredRefreshSource) ?? cacheSource,
@@ -298,7 +315,16 @@ export function buildHealthSnapshot(
     liveApiObservation.available === true &&
     liveApiFreshnessMs !== null &&
     !liveApiStale;
-  const liveObserved = directLiveObserved || cacheLiveObserved;
+  const directLiveKnown =
+    liveApiObservation.available !== null &&
+    liveApiFreshnessMs !== null &&
+    !liveApiStale;
+  // A recent direct probe is stronger evidence than a cache whose last
+  // successful refresh came from REST. In particular, a fresh failed probe
+  // must immediately withdraw live-read and mutation capability.
+  const liveObserved = directLiveKnown
+    ? directLiveObserved
+    : cacheLiveObserved;
   const filesystemObserved =
     origin === "filesystem" ||
     runtimeMode.startsWith("headless") ||
@@ -370,6 +396,20 @@ export function buildHealthSnapshot(
     reasons.push("cache_refresh_failed");
     if (state === "ready") state = "degraded";
   }
+  if (
+    cacheTimestampInvalid &&
+    !reasons.includes("cache_observation_timestamp_invalid")
+  ) {
+    reasons.push("cache_observation_timestamp_invalid");
+    if (state === "ready") state = "degraded";
+  }
+  if (
+    liveApiTimestampInvalid &&
+    !reasons.includes("live_observation_timestamp_invalid")
+  ) {
+    reasons.push("live_observation_timestamp_invalid");
+    if (state === "ready") state = "degraded";
+  }
 
   const liveRequired = !headless;
   const mutationCapable =
@@ -381,13 +421,15 @@ export function buildHealthSnapshot(
   if (!filesystemReads) unavailable.push("filesystem-reads");
   if (!cacheReady) unavailable.push("cache-reads");
   if (!mutationCapable) unavailable.push("mutations");
-  const selectedObservedAtMs = directLiveObserved
+  const selectDirectProvenance =
+    directLiveObserved || (liveApiTimestampInvalid && !cacheHasData);
+  const selectedObservedAtMs = selectDirectProvenance
     ? liveApiObservedAtMs
     : cacheObservedAtMs;
-  const selectedFreshnessMs = directLiveObserved
+  const selectedFreshnessMs = selectDirectProvenance
     ? liveApiFreshnessMs
     : cacheFreshnessMs;
-  const selectedStale = directLiveObserved ? liveApiStale : cacheStale;
+  const selectedStale = selectDirectProvenance ? liveApiStale : cacheStale;
 
   return {
     schemaVersion: "1",
@@ -400,7 +442,7 @@ export function buildHealthSnapshot(
     runtimeMode,
     provenance: {
       source: provenance,
-      origin: directLiveObserved ? "obsidian_api" : origin,
+      origin: selectDirectProvenance ? "obsidian_api" : origin,
       observedAt:
         selectedObservedAtMs === undefined
           ? null
@@ -415,14 +457,18 @@ export function buildHealthSnapshot(
         available: liveObserved
           ? true
           : liveRequired
-            ? liveApiObservation.available
+            ? liveApiTimestampInvalid
+              ? null
+              : liveApiObservation.available
             : false,
         reason: liveObserved
           ? undefined
           : liveRequired
-            ? liveApiObservation.available === false
-              ? "live_dependency_unavailable"
-              : "live_dependency_not_verified"
+            ? liveApiTimestampInvalid
+              ? "live_dependency_observation_invalid"
+              : liveApiObservation.available === false
+                ? "live_dependency_unavailable"
+                : "live_dependency_not_verified"
             : "not_required_by_headless_profile",
       },
       filesystemVault: {

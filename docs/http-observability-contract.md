@@ -60,6 +60,12 @@ A source is never called `live-obsidian` solely because the service runs in `liv
 The live probe cadence is the lower of 30 seconds and half the configured
 freshness threshold. Lowering the threshold therefore cannot leave a healthy
 cache-disabled live profile stale between fixed 30-second probes.
+A recent direct probe takes precedence over older cache evidence: when it
+reports the REST API unavailable, live reads and mutations are withdrawn
+immediately even if a previous REST-backed cache snapshot remains usable.
+Observation timestamps more than five seconds in the future are invalid
+evidence. They never grant live readiness or mutations; a usable cached payload
+may remain only as a stale fallback with a stable diagnostic reason.
 
 Default freshness threshold:
 

@@ -64,6 +64,89 @@ assert.equal(directLiveWithoutCache.capabilities.liveObsidianReads, true);
 assert.equal(directLiveWithoutCache.capabilities.mutations, true);
 assert.equal(directLiveWithoutCache.capabilities.cacheReads, false);
 
+const failedProbeOverridesRestCache = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "live",
+  vaultPath,
+  writeMode: "full",
+  staleAfterMs: 60_000,
+  getLiveApiObservation: () => ({
+    available: false,
+    observedAt: now - 1000,
+  }),
+  vaultCacheService: cache({
+    status: "ready",
+    ready: true,
+    lastRefreshAt: new Date(now - 5000).toISOString(),
+    refreshSource: "rest",
+    configuredRefreshSource: "rest",
+    cachedFileCount: 10,
+  }),
+});
+assert.equal(failedProbeOverridesRestCache.state, "degraded");
+assert.equal(failedProbeOverridesRestCache.provenance.source, "cache");
+assert.equal(
+  failedProbeOverridesRestCache.dependencies.obsidianDesktop.available,
+  false,
+);
+assert.equal(
+  failedProbeOverridesRestCache.capabilities.liveObsidianReads,
+  false,
+);
+assert.equal(failedProbeOverridesRestCache.capabilities.mutations, false);
+
+const futureCacheObservation = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "live",
+  vaultPath,
+  writeMode: "full",
+  staleAfterMs: 60_000,
+  vaultCacheService: cache({
+    status: "ready",
+    ready: true,
+    lastRefreshAt: new Date(now + 60_000).toISOString(),
+    refreshSource: "rest",
+    configuredRefreshSource: "rest",
+    cachedFileCount: 10,
+  }),
+});
+assert.equal(futureCacheObservation.state, "degraded");
+assert.equal(futureCacheObservation.provenance.source, "snapshot");
+assert.equal(futureCacheObservation.provenance.stale, true);
+assert.equal(futureCacheObservation.capabilities.liveObsidianReads, false);
+assert.equal(futureCacheObservation.capabilities.mutations, false);
+assert.ok(
+  futureCacheObservation.reasons.includes(
+    "cache_observation_timestamp_invalid",
+  ),
+);
+
+const futureDirectObservation = buildHealthSnapshot({
+  now: () => now,
+  runtimeMode: "live",
+  vaultPath: missingVault,
+  writeMode: "full",
+  staleAfterMs: 60_000,
+  getLiveApiObservation: () => ({
+    available: true,
+    observedAt: now + 60_000,
+  }),
+});
+assert.equal(futureDirectObservation.state, "critical");
+assert.equal(futureDirectObservation.provenance.source, "unknown");
+assert.equal(futureDirectObservation.provenance.stale, true);
+assert.equal(futureDirectObservation.capabilities.liveObsidianReads, false);
+assert.equal(futureDirectObservation.capabilities.mutations, false);
+assert.equal(
+  futureDirectObservation.dependencies.obsidianDesktop.available,
+  null,
+);
+assert.ok(
+  futureDirectObservation.reasons.includes(
+    "live_observation_timestamp_invalid",
+  ),
+);
+
 const stale = buildHealthSnapshot({
   now: () => now,
   runtimeMode: "hybrid",
@@ -293,6 +376,9 @@ for (const snapshot of [
   headlessBuildingCache,
   critical,
   directLiveWithoutCache,
+  failedProbeOverridesRestCache,
+  futureCacheObservation,
+  futureDirectObservation,
   hybridWithoutSource,
 ]) {
   const serialized = JSON.stringify(snapshot);
