@@ -12,6 +12,7 @@ French operator guides are linked alongside their English equivalents.
 | A new local user                | [Product overview](../README.md)                      | [Operations](../OPERATIONS.md)                                                                                               |
 | A Codex or local-agent operator | [Operations](../OPERATIONS.md)                        | [Agent routing](mcp-routing-guide.md)                                                                                        |
 | A headless/server operator      | [Headless Server Profile](headless-server-profile.md) | [Runtime Matrix](runtime-capability-matrix.md), [Security](../SECURITY.md)                                                   |
+| A gateway integrator            | [OSS Gateway Compatibility](gateway-compatibility.md) | [HTTP Security](http-multiclient-security.md), [Backpressure](http-concurrency-backpressure.md)                              |
 | An MCP client integrator        | [Tool Surface](obsidian_mcp_tools_spec.md)            | [Runtime Matrix](runtime-capability-matrix.md)                                                                               |
 | An external-document operator   | [External Roots Setup](external-roots-setup.md)       | [External Roots ADR](adr/ADR-External-Document-Roots.md), [Reference Integrity ADR](adr/ADR-External-Reference-Integrity.md) |
 | A Tasks/Operon operator         | [Operon MCP Contract](operon-mcp-contract.md)         | [Local Validation](operon-local-validation.md), [public ÉLYSIA profile](../profiles/elysia-tasks/README.fr.md)               |
@@ -28,6 +29,7 @@ French operator guides are linked alongside their English equivalents.
 | How do I run without Obsidian Desktop?                     | [Headless Server Profile](headless-server-profile.md)                                 |
 | How do external reads, handoff, move and link repair work? | [External Roots Setup](external-roots-setup.md)                                       |
 | What is the supported HTTP security boundary?              | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
+| Which OSS gateway profile has been proven end to end?      | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
 | How are Operon reads and mutations governed?               | [Operon MCP Contract](operon-mcp-contract.md)                                         |
 | Why was an architecture decision made?                     | [ADR Index](adr/README.md)                                                            |
 | What changed?                                              | [Changelog](../CHANGELOG.md)                                                          |

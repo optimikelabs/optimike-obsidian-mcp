@@ -157,6 +157,7 @@ partagée hors du vrai coffre synchronisé.
 - Modes runtime : [Matrice des capacités](docs/runtime-capability-matrix.fr.md)
 - Routage agentique : [Guide de routage](docs/mcp-routing-guide.fr.md)
 - Déploiement headless : [Profil serveur headless](docs/headless-server-profile.fr.md)
+- Intégration gateway OSS : [Compatibilité gateways](docs/gateway-compatibility.fr.md)
 - Documents externes : [Configuration des racines](docs/external-roots-setup.fr.md)
 - Décisions d’architecture : [Index des ADR](docs/adr/README.md)
 - Profil public Tasks ÉLYSIA : [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)

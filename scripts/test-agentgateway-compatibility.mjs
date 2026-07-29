@@ -18,7 +18,10 @@ import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 const jwtSecret = "gateway-e2e-secret-must-be-at-least-thirty-two-characters";
 const fixtureRootId = "gateway-fixture";
 const fixtureRelativePath = "artifact.txt";
@@ -100,13 +103,34 @@ function recursivelyRewriteRoot(value, rootPath) {
   return copy;
 }
 
+function containsExactString(value, expected) {
+  if (value === expected) return true;
+  if (Array.isArray(value)) {
+    return value.some((item) => containsExactString(item, expected));
+  }
+  if (!value || typeof value !== "object") return false;
+  return Object.values(value).some((item) =>
+    containsExactString(item, expected),
+  );
+}
+
 async function createExternalRootConfig(sandbox, externalRoot) {
-  const examplePath = path.join(projectRoot, "docs", "external-roots.example.json");
+  const examplePath = path.join(
+    projectRoot,
+    "docs",
+    "external-roots.example.json",
+  );
   const parsed = JSON.parse(await readFile(examplePath, "utf8"));
   const rewritten = recursivelyRewriteRoot(parsed, externalRoot);
   const serialized = JSON.stringify(rewritten, null, 2);
-  assert.ok(serialized.includes(externalRoot), "example root path was not rewritten");
-  assert.ok(serialized.includes(fixtureRootId), "example root id was not rewritten");
+  assert.ok(
+    containsExactString(rewritten, externalRoot),
+    "example root path was not rewritten",
+  );
+  assert.ok(
+    containsExactString(rewritten, fixtureRootId),
+    "example root id was not rewritten",
+  );
   const configPath = path.join(sandbox, "external-roots.json");
   await writeFile(configPath, serialized + "\n", "utf8");
   return configPath;
@@ -121,10 +145,14 @@ async function discoverHandoffTtlEnv() {
       if (entry.isDirectory()) await walk(candidate);
       else if (/\.(?:ts|js)$/u.test(entry.name)) {
         const text = await readFile(candidate, "utf8");
-        for (const match of text.matchAll(/MCP_[A-Z0-9_]*HANDOFF[A-Z0-9_]*TTL[A-Z0-9_]*/gu)) {
+        for (const match of text.matchAll(
+          /MCP_[A-Z0-9_]*HANDOFF[A-Z0-9_]*TTL[A-Z0-9_]*/gu,
+        )) {
           matches.add(match[0]);
         }
-        for (const match of text.matchAll(/MCP_[A-Z0-9_]*TICKET[A-Z0-9_]*TTL[A-Z0-9_]*/gu)) {
+        for (const match of text.matchAll(
+          /MCP_[A-Z0-9_]*TICKET[A-Z0-9_]*TTL[A-Z0-9_]*/gu,
+        )) {
           matches.add(match[0]);
         }
       }
@@ -164,8 +192,13 @@ async function stopChild(child) {
 }
 
 function gatewayCandidates(gatewayPort, backendPort) {
+  const socket = `127.0.0.1:${backendPort}`;
   const host = `http://127.0.0.1:${backendPort}`;
   return [
+    {
+      name: "v1.4-transparent-http",
+      yaml: `# yaml-language-server: $schema=https://agentgateway.dev/schema/config\ngateways:\n  optimike:\n    port: ${gatewayPort}\n    protocol: HTTP\nroutes:\n- name: optimike-all\n  gateways: [optimike]\n  matches:\n  - path:\n      pathPrefix: /\n  backends:\n  - host: ${socket}\n`,
+    },
     {
       name: "minimal-host",
       yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - routes:\n    - backends:\n      - host: ${host}\n`,
@@ -198,9 +231,15 @@ function gatewayArgumentCandidates(binary, configPath) {
 async function startGateway(binary, sandbox, gatewayPort, backendPort) {
   const attempts = [];
   for (const candidate of gatewayCandidates(gatewayPort, backendPort)) {
-    const configPath = path.join(sandbox, `agentgateway-${candidate.name}.yaml`);
+    const configPath = path.join(
+      sandbox,
+      `agentgateway-${candidate.name}.yaml`,
+    );
     await writeFile(configPath, candidate.yaml, "utf8");
-    for (const [command, ...args] of gatewayArgumentCandidates(binary, configPath)) {
+    for (const [command, ...args] of gatewayArgumentCandidates(
+      binary,
+      configPath,
+    )) {
       const child = spawn(command, args, {
         cwd: sandbox,
         env: { ...process.env, RUST_LOG: "info" },
@@ -214,6 +253,7 @@ async function startGateway(binary, sandbox, gatewayPort, backendPort) {
       child.stderr?.on("data", (chunk) => {
         child.stderrText += String(chunk);
       });
+      let accepted = false;
       try {
         const probe = await waitForUrl(
           new URL(`http://127.0.0.1:${gatewayPort}/healthz`),
@@ -221,6 +261,7 @@ async function startGateway(binary, sandbox, gatewayPort, backendPort) {
           6000,
         );
         if (probe.status < 500) {
+          accepted = true;
           return { child, configPath, candidate: candidate.name, args };
         }
       } catch (error) {
@@ -231,11 +272,13 @@ async function startGateway(binary, sandbox, gatewayPort, backendPort) {
           stderr: child.stderrText.slice(-3000),
         });
       } finally {
-        if (child.exitCode === null) await stopChild(child);
+        if (!accepted && child.exitCode === null) await stopChild(child);
       }
     }
   }
-  throw new Error(`agentgateway did not accept a transparent HTTP configuration: ${JSON.stringify(attempts)}`);
+  throw new Error(
+    `agentgateway did not accept a transparent HTTP configuration: ${JSON.stringify(attempts)}`,
+  );
 }
 
 function parseProtocolPayload(text, contentType, expectedId) {
@@ -348,16 +391,10 @@ function generatedArguments(schema, context, propertyName = "") {
   if (normalized.includes("root") && normalized.includes("id")) {
     return fixtureRootId;
   }
-  if (
-    normalized === "root" &&
-    (schema.type === "string" || !schema.type)
-  ) {
+  if (normalized === "root" && (schema.type === "string" || !schema.type)) {
     return fixtureRootId;
   }
-  if (
-    normalized.includes("relative") &&
-    normalized.includes("path")
-  ) {
+  if (normalized.includes("relative") && normalized.includes("path")) {
     return fixtureRelativePath;
   }
   if (
@@ -379,7 +416,8 @@ function generatedArguments(schema, context, propertyName = "") {
     return chooseEnum(schema, "overwrite");
   }
   if (schema.default !== undefined) return schema.default;
-  if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
+  if (Array.isArray(schema.enum) && schema.enum.length > 0)
+    return schema.enum[0];
   if (schema.type === "object" || schema.properties) {
     const result = {};
     const required = new Set(schema.required ?? []);
@@ -518,9 +556,15 @@ async function externalHandoffProof({
         assert.equal(result.text.includes(physicalPathSentinel), false);
         return { ticket, args, raw: result };
       }
-      errors.push({ args, status: result.response.status, text: result.text.slice(0, 1000) });
+      errors.push({
+        args,
+        status: result.response.status,
+        text: result.text.slice(0, 1000),
+      });
     }
-    throw new Error(`could not issue external handoff ticket: ${JSON.stringify(errors)}`);
+    throw new Error(
+      `could not issue external handoff ticket: ${JSON.stringify(errors)}`,
+    );
   }
 
   async function download(token, ticket) {
@@ -580,7 +624,7 @@ async function quotaIsolationProof(baseUrl) {
   const a = await initializeClient(baseUrl, tokenA, "quota-a", 700);
   const b = await initializeClient(baseUrl, tokenB, "quota-b", 800);
   let limited;
-  for (let index = 0; index < 20; index += 1) {
+  for (let index = 0; index < 80; index += 1) {
     const result = await call(a, baseUrl, "ping");
     if (result.response.status === 429) {
       limited = result;
@@ -626,7 +670,9 @@ async function concurrentProof(a, b, baseUrl) {
 }
 
 async function mutationReplayHarnessStatus(client, baseUrl, tools) {
-  const tool = tools.find((candidate) => candidate.name === "obsidian_update_note");
+  const tool = tools.find(
+    (candidate) => candidate.name === "obsidian_update_note",
+  );
   if (!tool) return { status: "tool-unavailable" };
   const args = generatedArguments(tool.inputSchema, {
     notePath: "Gateway.md",
@@ -637,7 +683,9 @@ async function mutationReplayHarnessStatus(client, baseUrl, tools) {
   const normalized = JSON.stringify(normalizeToolResult(result.payload));
   if (
     result.response.status !== 200 ||
-    /read.?only|live obsidian|required|mutation.*disabled|forbidden/i.test(normalized)
+    /read.?only|live obsidian|required|mutation.*disabled|forbidden/i.test(
+      normalized,
+    )
   ) {
     return {
       status: "blocked-by-readonly-headless-profile",
@@ -660,10 +708,17 @@ async function mutationReplayHarnessStatus(client, baseUrl, tools) {
 async function main() {
   const gatewayBinary = process.env.AGENTGATEWAY_BIN;
   assert.ok(gatewayBinary, "AGENTGATEWAY_BIN is required");
-  const sandbox = await mkdtemp(path.join(os.tmpdir(), "optimike-agentgateway-"));
+  const sandbox = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-agentgateway-"),
+  );
   const vaultPath = path.join(sandbox, "vault");
   const externalRoot = path.join(sandbox, physicalPathSentinel);
-  const logDir = path.join(sandbox, "logs");
+  const runArtifactsDir = path.join(
+    projectRoot,
+    ".tmp",
+    path.basename(sandbox),
+  );
+  const logDir = path.join(runArtifactsDir, "logs");
   await mkdir(path.join(vaultPath, ".obsidian"), { recursive: true });
   await mkdir(externalRoot, { recursive: true });
   await mkdir(logDir, { recursive: true });
@@ -677,7 +732,10 @@ async function main() {
     fixtureContent,
     "utf8",
   );
-  const externalRootsFile = await createExternalRootConfig(sandbox, externalRoot);
+  const externalRootsFile = await createExternalRootConfig(
+    sandbox,
+    externalRoot,
+  );
   const ttlVariables = await discoverHandoffTtlEnv();
   const backendPort = await unusedPort();
   const gatewayPort = await unusedPort();
@@ -701,23 +759,32 @@ async function main() {
     MCP_AUTH_SECRET_KEY: jwtSecret,
     MCP_ALLOWED_ORIGINS: "",
     MCP_EXTERNAL_ROOTS_FILE: externalRootsFile,
+    MCP_HTTP_HANDOFF_ENABLED: "true",
     MCP_HTTP_PREAUTH_RATE_LIMIT_MAX: "1000",
-    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "12",
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "40",
     MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS: "1000",
     MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS: "1000",
     MCP_HTTP_MAX_IN_FLIGHT: "2",
     MCP_HTTP_MAX_IN_FLIGHT_PER_IDENTITY: "1",
+    MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT: "1",
+    MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT_PER_IDENTITY: "1",
+    MCP_HTTP_MUTATION_MAX_IN_FLIGHT: "1",
+    MCP_HTTP_MUTATION_MAX_IN_FLIGHT_PER_IDENTITY: "1",
     MCP_HTTP_MAX_QUEUED: "8",
     MCP_HTTP_MAX_QUEUED_PER_IDENTITY: "4",
     MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS: "1000",
   };
   for (const variable of ttlVariables) backendEnv[variable] = String(ttlMs);
 
-  const backend = spawn(process.execPath, [path.join(projectRoot, "dist", "index.js")], {
-    cwd: projectRoot,
-    env: backendEnv,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const backend = spawn(
+    process.execPath,
+    [path.join(projectRoot, "dist", "index.js")],
+    {
+      cwd: projectRoot,
+      env: backendEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   backend.stderrText = "";
   backend.stdoutText = "";
   backend.stdout?.on("data", (chunk) => {
@@ -729,7 +796,10 @@ async function main() {
 
   let gateway;
   try {
-    await waitForUrl(new URL(`http://127.0.0.1:${backendPort}/healthz`), backend);
+    await waitForUrl(
+      new URL(`http://127.0.0.1:${backendPort}/healthz`),
+      backend,
+    );
     gateway = await startGateway(
       gatewayBinary,
       sandbox,
@@ -758,11 +828,7 @@ async function main() {
       externalRoot,
       ttlWaitMs: ttlVariables.length > 0 ? ttlMs + 350 : 65_000,
     });
-    const mutation = await mutationReplayHarnessStatus(
-      clientA,
-      baseUrl,
-      tools,
-    );
+    const mutation = await mutationReplayHarnessStatus(clientA, baseUrl, tools);
     const quota = await quotaIsolationProof(baseUrl);
 
     const status = await fetch(new URL("/statusz", baseUrl), {
@@ -815,13 +881,18 @@ async function main() {
     const reportOut = process.env.AGENTGATEWAY_REPORT_OUT;
     if (reportOut) {
       await mkdir(path.dirname(reportOut), { recursive: true });
-      await writeFile(reportOut, JSON.stringify(report, null, 2) + "\n", "utf8");
+      await writeFile(
+        reportOut,
+        JSON.stringify(report, null, 2) + "\n",
+        "utf8",
+      );
     }
     console.log(JSON.stringify(report, null, 2));
   } finally {
     await stopChild(gateway?.child);
     await stopChild(backend);
     await rm(sandbox, { recursive: true, force: true });
+    await rm(runArtifactsDir, { recursive: true, force: true });
   }
 }
 

@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI coverage and installable package artifacts for both the Bases and Operon Bridges.
 - MCP safety annotations for all tool registrations, with regression coverage.
 - A production dependency audit gate that fails on high or critical findings.
+- Reproducible agentgateway v1.4 transparent-routing harness covering
+  Streamable HTTP sessions, identity isolation, bounded overload,
+  cancellation, authenticated status and the auxiliary external-handoff
+  ticket flow.
+- Bilingual OSS gateway audit selecting agentgateway for the first pilot while
+  keeping authorization, scopes, CAS, idempotency and rollback in Optimike MCP.
 
 ### Fixed
 
