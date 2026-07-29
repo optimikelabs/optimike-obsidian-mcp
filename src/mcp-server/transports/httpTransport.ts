@@ -578,7 +578,6 @@ export async function startHttpTransport(
   app.use(MCP_ENDPOINT_PATH, authMiddleware);
   app.use(externalHandoffEndpoint, authMiddleware);
   app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);
-  app.use(externalHandoffEndpoint, authenticatedIdentityRateLimitMiddleware);
   app.use(MCP_ENDPOINT_PATH, httpBackpressureMiddleware);
   app.use(externalHandoffEndpoint, httpBackpressureMiddleware);
 
