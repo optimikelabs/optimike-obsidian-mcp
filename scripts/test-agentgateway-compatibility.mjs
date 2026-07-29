@@ -10,6 +10,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -256,11 +257,27 @@ async function waitForStatus(url, child, expectedStatus, timeoutMs = 30_000) {
 async function stopChild(child) {
   if (!child || child.exitCode !== null) return;
   child.kill("SIGTERM");
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    sleep(3000),
-  ]);
-  if (child.exitCode === null) child.kill("SIGKILL");
+  if (await waitForChildExit(child, 3000)) return;
+  child.kill("SIGKILL");
+  if (!(await waitForChildExit(child, 3000))) {
+    throw new Error(`process ${child.pid ?? "unknown"} did not terminate`);
+  }
+}
+
+async function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null) return true;
+  return new Promise((resolve) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(child.exitCode !== null);
+    }, timeoutMs);
+    timer.unref?.();
+    child.once("exit", onExit);
+  });
 }
 
 function replaceExactOnce(source, expected, replacement, label) {
@@ -1013,9 +1030,14 @@ async function verifyGatewayBinary(binary, expectedSha256) {
   return actualSha256;
 }
 
+async function resolveGatewayBinary(binary) {
+  return realpath(path.resolve(binary));
+}
+
 async function main() {
-  const gatewayBinary = process.env.AGENTGATEWAY_BIN;
-  assert.ok(gatewayBinary, "AGENTGATEWAY_BIN is required");
+  const configuredGatewayBinary = process.env.AGENTGATEWAY_BIN;
+  assert.ok(configuredGatewayBinary, "AGENTGATEWAY_BIN is required");
+  const gatewayBinary = await resolveGatewayBinary(configuredGatewayBinary);
   const expectedGatewaySha256 = process.env.AGENTGATEWAY_SHA256;
   assert.ok(
     expectedGatewaySha256,
@@ -1114,6 +1136,7 @@ async function main() {
   });
 
   let gateway;
+  let primaryError;
   try {
     await waitForUrl(
       new URL(`http://127.0.0.1:${backendPort}/healthz`),
@@ -1242,11 +1265,41 @@ async function main() {
       );
     }
     console.log(JSON.stringify(report, null, 2));
-  } finally {
-    await stopChild(gateway?.child);
-    await stopChild(backend);
-    await rm(sandbox, { recursive: true, force: true });
-    await rm(runArtifactsDir, { recursive: true, force: true });
+  } catch (error) {
+    primaryError = error;
+  }
+
+  const teardownErrors = [];
+  for (const [label, action] of [
+    ["gateway process", () => stopChild(gateway?.child)],
+    ["backend process", () => stopChild(backend)],
+    ["gateway sandbox", () => rm(sandbox, { recursive: true, force: true })],
+    [
+      "gateway run artifacts",
+      () => rm(runArtifactsDir, { recursive: true, force: true }),
+    ],
+  ]) {
+    try {
+      await action();
+    } catch (error) {
+      teardownErrors.push(
+        new Error(`failed to clean ${label}`, { cause: error }),
+      );
+    }
+  }
+
+  if (primaryError && teardownErrors.length > 0) {
+    throw new AggregateError(
+      [primaryError, ...teardownErrors],
+      "gateway compatibility proof failed and teardown also reported errors",
+    );
+  }
+  if (primaryError) throw primaryError;
+  if (teardownErrors.length > 0) {
+    throw new AggregateError(
+      teardownErrors,
+      "gateway compatibility teardown failed",
+    );
   }
 }
 
