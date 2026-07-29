@@ -49,6 +49,8 @@ export type HttpRequestState = {
   authInfo?: AuthInfo;
   identity?: VerifiedHttpIdentity;
   quotas: HttpQuotaState[];
+  correlationId?: string;
+  incidentId?: string;
   admission?: HttpAdmissionState;
 };
 

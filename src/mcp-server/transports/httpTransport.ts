@@ -29,6 +29,7 @@ import {
   externalHandoffTicketHeader,
   externalTransferBroker,
 } from "../../services/externalTransferBroker.js";
+import type { ObsidianRestApiService } from "../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import {
@@ -45,6 +46,11 @@ import {
   createHttpBackpressureMiddleware,
   createHttpRequestBodyGuardMiddleware,
 } from "./httpBackpressure.js";
+import {
+  createHttpObservability,
+  HTTP_OBSERVABILITY_STALE_AFTER_MS,
+  type LiveApiObservation,
+} from "./httpObservability.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import {
   authenticatedIdentityLimiter,
@@ -68,6 +74,8 @@ const MCP_ENDPOINT_PATH = "/mcp";
 const MAX_PORT_RETRIES = parsePortRetries();
 const httpRequestBodyGuardMiddleware = createHttpRequestBodyGuardMiddleware();
 const httpBackpressureMiddleware = createHttpBackpressureMiddleware();
+const LIVE_API_PROBE_MAX_INTERVAL_MS = 30_000;
+const LIVE_API_PROBE_MIN_INTERVAL_MS = 250;
 
 type HttpSession = {
   transport: WebStandardStreamableHTTPServerTransport;
@@ -82,6 +90,59 @@ type HttpSession = {
 type SessionCapacityReservation = {
   release: () => void;
 };
+
+export function liveApiProbeIntervalMs(
+  staleAfterMs = HTTP_OBSERVABILITY_STALE_AFTER_MS,
+): number {
+  return Math.max(
+    LIVE_API_PROBE_MIN_INTERVAL_MS,
+    Math.min(LIVE_API_PROBE_MAX_INTERVAL_MS, Math.floor(staleAfterMs / 2)),
+  );
+}
+
+function createLiveApiProbe(
+  obsidianService: ObsidianRestApiService | undefined,
+  parentContext: RequestContext,
+) {
+  let observation: LiveApiObservation = {
+    available: obsidianService ? null : false,
+  };
+  let probing = false;
+
+  const probe = async () => {
+    if (!obsidianService || probing) return;
+    probing = true;
+    try {
+      const status = await obsidianService.checkStatus({
+        ...parentContext,
+        operation: "httpObservabilityLiveApiProbe",
+      });
+      observation = {
+        available:
+          status?.service === "Obsidian Local REST API" &&
+          status.authenticated === true,
+        observedAt: Date.now(),
+      };
+    } catch {
+      observation = { available: false, observedAt: Date.now() };
+    } finally {
+      probing = false;
+    }
+  };
+
+  const timer = obsidianService
+    ? setInterval(() => void probe(), liveApiProbeIntervalMs())
+    : undefined;
+  timer?.unref?.();
+  if (obsidianService) void probe();
+
+  return {
+    getObservation: () => observation,
+    stop: () => {
+      if (timer) clearInterval(timer);
+    },
+  };
+}
 
 // The session store is intentionally process-local. Registered sessions plus
 // initialization reservations are both bounded by MCP_HTTP_MAX_SESSIONS.
@@ -541,6 +602,7 @@ function startHttpServerWithRetry(
 export async function startHttpTransport(
   createServerInstanceFn: () => Promise<McpServer>,
   parentContext: RequestContext,
+  _obsidianService?: ObsidianRestApiService,
   _vaultCacheService?: VaultCacheService,
 ): Promise<ServerType> {
   const app = new Hono<{ Bindings: HttpBindings }>();
@@ -548,6 +610,23 @@ export async function startHttpTransport(
     ...parentContext,
     component: "HttpTransportSetup",
   });
+  const liveApiProbe = createLiveApiProbe(_obsidianService, transportContext);
+  const observability = createHttpObservability({
+    vaultCacheService: _vaultCacheService,
+    getLiveApiObservation: liveApiProbe.getObservation,
+    writeMode: config.mcpWriteMode,
+    getSessionStats: () => ({
+      active: transports.size,
+      pendingInitializations: pendingSessionInitializations,
+      activeRequests: Array.from(transports.values()).reduce(
+        (total, session) => total + session.activeRequests,
+        0,
+      ),
+      maxSessions: httpProtectionConfig.maxSessions,
+    }),
+  });
+
+  app.use("*", observability.requestLoggingMiddleware);
 
   app.use("*", async (c: Context, next: Next) => {
     const origin = c.req.header("origin");
@@ -570,6 +649,8 @@ export async function startHttpTransport(
         "Mcp-Session-Id",
         "Last-Event-ID",
         "Authorization",
+        "X-Correlation-Id",
+        "X-Incident-Id",
         externalHandoffTicketHeader,
       ],
       exposeHeaders: [
@@ -597,15 +678,12 @@ export async function startHttpTransport(
     await next();
   });
 
-  // Backward-compatible liveness only. M3 adds readiness and detailed state.
-  app.get("/healthz", (c: Context) => {
-    return c.json({
-      ok: true,
-      status: "healthy",
-      transport: "streamable-http",
-      endpoint: MCP_ENDPOINT_PATH,
-    });
-  });
+  app.get("/healthz", observability.livenessHandler);
+  app.get("/readyz", observability.readinessHandler);
+  app.use("/statusz", preAuthRateLimitMiddleware);
+  app.use("/statusz", authMiddleware);
+  app.use("/statusz", authenticatedIdentityRateLimitMiddleware);
+  app.get("/statusz", observability.statusHandler);
 
   app.use(MCP_ENDPOINT_PATH, preAuthRateLimitMiddleware);
   app.use(externalHandoffEndpoint, preAuthRateLimitMiddleware);
@@ -682,8 +760,7 @@ export async function startHttpTransport(
     let transport = session?.transport;
     let initializationReservation: SessionCapacityReservation | undefined;
     let initializingTransport:
-      | WebStandardStreamableHTTPServerTransport
-      | undefined;
+      WebStandardStreamableHTTPServerTransport | undefined;
     let initializedSession: HttpSession | undefined;
 
     if (isInitializeRequest(body)) {
@@ -854,5 +931,6 @@ export async function startHttpTransport(
   );
   sessionCleanupTimer.unref?.();
   server.once("close", () => clearInterval(sessionCleanupTimer));
+  server.once("close", liveApiProbe.stop);
   return server;
 }
