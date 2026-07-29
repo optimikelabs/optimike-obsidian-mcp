@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Access is explicit, mutation is narrower</title>
+  <desc id="description">Identity shapes the access plane. Tool policy controls effect.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B87333"/>
+    </marker>
+  </defs>
+  <style>
+    .eyebrow,.meta,.pill{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;font-weight:700;letter-spacing:1.2px}
+    .title{font-family:Newsreader,Georgia,serif;font-size:45px;font-weight:700;fill:#1A1A1A}
+    .sectionTitle{font-family:Newsreader,Georgia,serif;font-size:34px;font-weight:700;fill:#F7F5F0}
+    .subtitle{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:19px;fill:#2E5A7C}
+    .eyebrow{font-size:14px;fill:#B87333}
+    .meta{font-size:13px;fill:#2E5A7C}
+    .label{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:18px;font-weight:700;fill:#1A1A1A}
+    .body{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:17px;fill:#1A1A1A}
+    .small{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:15px;fill:#2E5A7C}
+    .pill{font-size:12px}
+    .inverse{fill:#F7F5F0}
+    .accent{fill:#B87333}
+    .positive{fill:#4A7C59}
+  </style>
+  <rect width="1200" height="630" fill="#F7F5F0"/>
+  <rect x="0" y="0" width="16" height="630" fill="#B87333"/>
+  <text x="54" y="40" class="eyebrow" text-anchor="start">OPTIMIKE · OBSIDIAN MCP</text>
+  <text x="1148" y="40" class="eyebrow" text-anchor="end">04</text>
+  <text x="54" y="92" class="title" text-anchor="start">Access is explicit, mutation is narrower</text>
+  <text x="54" y="122" class="subtitle" text-anchor="start">Identity shapes the access plane. Tool policy controls effect.</text>
+
+  <rect x="54" y="162" width="250" height="104" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="78" y="194" class="meta" text-anchor="start">LOCAL STDIO</text>
+  <text x="78" y="232" class="label" text-anchor="start">Trusted machine</text>
+  <rect x="54" y="292" width="250" height="104" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="78" y="324" class="meta" text-anchor="start">REMOTE HTTP</text>
+  <text x="78" y="362" class="label" text-anchor="start">Pilot only</text>
+  <text x="78" y="388" class="small" text-anchor="start">optional gateway</text>
+  <line x1="304" y1="214" x2="390" y2="260" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="304" y1="344" x2="390" y2="298" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect x="390" y="194" width="292" height="184" rx="24" fill="#131316" stroke="#131316" stroke-width="2"/>
+  <text x="420" y="228" class="eyebrow" text-anchor="start">CONTROL PLANE</text>
+  <text x="420" y="274" class="sectionTitle" text-anchor="start">MCP policy</text>
+  <text x="420" y="318" class="inverse" text-anchor="start">identity · scopes · limits</text>
+  <line x1="682" y1="286" x2="764" y2="220" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="682" y1="286" x2="764" y2="354" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect x="764" y="162" width="384" height="116" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="790" y="194" class="meta" text-anchor="start">READ-ONLY HANDOFF</text>
+  <text x="790" y="233" class="label" text-anchor="start">local_path / http_ticket</text>
+  <rect x="764" y="304" width="384" height="116" rx="18" fill="#EFEDE8" stroke="#B87333" stroke-width="2"/>
+  <text x="790" y="336" class="meta" text-anchor="start">EXTERNAL MOVE</text>
+  <text x="790" y="373" class="label" text-anchor="start">stdio + headless-filesystem</text>
+  <text x="790" y="399" class="small" text-anchor="start">gates · CAS · journal · rollback</text>
+  <rect x="390" y="458" width="758" height="64" rx="18" fill="#F7F5F0" stroke="#B87333" stroke-width="2"/>
+  <circle cx="424" cy="490" r="11" fill="#B87333"/>
+  <text x="450" y="497" class="label" text-anchor="start">Remote HTTP cannot move external files</text>
+  <line x1="54" y1="590" x2="1148" y2="590" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="54" y="614" class="meta" text-anchor="start">optimike-obsidian-mcp</text>
+  <text x="1148" y="614" class="meta" text-anchor="end">EN</text>
+</svg>

@@ -100,7 +100,8 @@ Il valide :
 
 Le probe de replay d’une mutation est volontairement indisponible dans le
 profil `headless-readonly`. La sûreté des mutations reste couverte par les
-tests CAS/idempotence dédiés et par le pilote M5 sur un coffre copié ou dédié.
+suites dédiées de CAS, idempotence, journal et rollback. Le pilote multi-client
+M5 reste en lecture seule et ne prouve pas le comportement des mutations.
 
 ## Frontière de déploiement
 

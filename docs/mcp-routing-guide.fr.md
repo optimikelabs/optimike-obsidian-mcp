@@ -8,6 +8,8 @@ Docs liées : [README](../README.fr.md),
 [Profil serveur headless](headless-server-profile.fr.md) et
 [Racines documentaires externes](external-roots-setup.fr.md)
 
+![Parcours de décision pour router le travail agentique dans Optimike Obsidian MCP](assets/readme/routing-guide.fr.svg)
+
 Ce guide aide les agents à choisir la bonne couche pour travailler avec Obsidian.
 
 ## Décision par défaut

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Un runtime, deux accès</title>
+  <desc id="description">La vitesse locale par stdio. La portée contrôlée par HTTP.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B87333"/>
+    </marker>
+  </defs>
+  <style>
+    .eyebrow,.meta,.pill{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;font-weight:700;letter-spacing:1.2px}
+    .title{font-family:Newsreader,Georgia,serif;font-size:45px;font-weight:700;fill:#1A1A1A}
+    .sectionTitle{font-family:Newsreader,Georgia,serif;font-size:34px;font-weight:700;fill:#F7F5F0}
+    .subtitle{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:19px;fill:#2E5A7C}
+    .eyebrow{font-size:14px;fill:#B87333}
+    .meta{font-size:13px;fill:#2E5A7C}
+    .label{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:18px;font-weight:700;fill:#1A1A1A}
+    .body{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:17px;fill:#1A1A1A}
+    .small{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:15px;fill:#2E5A7C}
+    .pill{font-size:12px}
+    .inverse{fill:#F7F5F0}
+    .accent{fill:#B87333}
+    .positive{fill:#4A7C59}
+  </style>
+  <rect width="1200" height="630" fill="#F7F5F0"/>
+  <rect x="0" y="0" width="16" height="630" fill="#B87333"/>
+  <text x="54" y="40" class="eyebrow" text-anchor="start">OPTIMIKE · OBSIDIAN MCP</text>
+  <text x="1148" y="40" class="eyebrow" text-anchor="end">01</text>
+  <text x="54" y="92" class="title" text-anchor="start">Un runtime, deux accès</text>
+  <text x="54" y="122" class="subtitle" text-anchor="start">La vitesse locale par stdio. La portée contrôlée par HTTP.</text>
+
+  <rect x="54" y="160" width="230" height="112" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="76" y="188" class="meta" text-anchor="start">CLIENT LOCAL</text>
+  <text x="76" y="226" class="label" text-anchor="start">proxy stdio</text>
+  <rect x="76" y="238" width="112" height="34" rx="17" fill="#2E5A7C" stroke="#2E5A7C" stroke-width="0"/>
+  <text x="132" y="260" class="pill" fill="#F7F5F0" text-anchor="middle">local_path</text>
+  <rect x="54" y="318" width="230" height="112" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="76" y="346" class="meta" text-anchor="start">CLIENT DISTANT</text>
+  <text x="76" y="384" class="label" text-anchor="start">HTTP · pilote</text>
+  <rect x="76" y="396" width="118" height="34" rx="17" fill="#2E5A7C" stroke="#2E5A7C" stroke-width="0"/>
+  <text x="135" y="418" class="pill" fill="#F7F5F0" text-anchor="middle">http_ticket</text>
+  <line x1="284" y1="216" x2="386" y2="266" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="284" y1="374" x2="386" y2="318" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect x="386" y="192" width="344" height="246" rx="24" fill="#131316" stroke="#131316" stroke-width="2"/>
+  <text x="414" y="228" class="eyebrow" text-anchor="start">Plan d’accès gouverné</text>
+  <text x="414" y="282" class="sectionTitle" text-anchor="start">Runtime MCP</text>
+<text x="414" y="320" class="sectionTitle" text-anchor="start">persistant</text>
+  <circle cx="434" cy="356" r="10" fill="#4A7C59"/>
+  <text x="458" y="362" class="inverse" text-anchor="start">Handoff en lecture seule</text>
+  <circle cx="434" cy="392" r="10" fill="#B87333"/>
+  <text x="458" y="398" class="inverse" text-anchor="start">Move local · gates</text>
+  <line x1="730" y1="315" x2="824" y2="247" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="730" y1="315" x2="824" y2="383" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect x="824" y="186" width="324" height="118" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="850" y="218" class="eyebrow" text-anchor="start">01</text>
+  <text x="850" y="257" class="label" text-anchor="start">Obsidian + bridges</text>
+  <rect x="824" y="326" width="324" height="118" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="850" y="358" class="eyebrow" text-anchor="start">02</text>
+  <text x="850" y="397" class="label" text-anchor="start">Racines externes</text>
+  <text x="850" y="423" class="small" text-anchor="start">local_path · http_ticket</text>
+  <line x1="54" y1="590" x2="1148" y2="590" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="54" y="614" class="meta" text-anchor="start">optimike-obsidian-mcp</text>
+  <text x="1148" y="614" class="meta" text-anchor="end">FR</text>
+</svg>

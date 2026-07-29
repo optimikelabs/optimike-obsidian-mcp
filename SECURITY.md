@@ -2,6 +2,8 @@
 
 French version: [SECURITY.fr.md](SECURITY.fr.md)
 
+![Optimike Obsidian MCP security boundaries and explicitly gated operations](docs/assets/readme/security.en.svg)
+
 Optimike Obsidian MCP can read and, in explicitly enabled profiles, mutate
 valuable local knowledge. Treat the process, its environment and every connected
 client as part of one security boundary.

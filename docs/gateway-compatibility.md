@@ -97,7 +97,8 @@ It passed:
 
 The mutation replay probe was intentionally unavailable in the
 `headless-readonly` profile. Mutation safety remains owned by the dedicated
-CAS/idempotency tests and the M5 pilot on a copied or dedicated vault.
+CAS, idempotency, journal and rollback test suites. The M5 multi-client pilot
+remains read-only and does not prove mutation behavior.
 
 ## Deployment boundary
 

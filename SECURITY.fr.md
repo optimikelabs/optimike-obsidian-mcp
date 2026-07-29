@@ -2,6 +2,8 @@
 
 English version: [SECURITY.md](SECURITY.md)
 
+![Frontières de sécurité et opérations explicitement gouvernées d’Optimike Obsidian MCP](docs/assets/readme/security.fr.svg)
+
 Optimike Obsidian MCP peut lire et, dans des profils explicitement activés,
 modifier une connaissance locale importante. Le processus, son environnement et
 chaque client connecté appartiennent à une même frontière de sécurité.

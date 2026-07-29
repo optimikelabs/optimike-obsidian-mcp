@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Choose the source before the profile</title>
+  <desc id="description">Profiles define provenance, availability and write policy.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B87333"/>
+    </marker>
+  </defs>
+  <style>
+    .eyebrow,.meta,.pill{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;font-weight:700;letter-spacing:1.2px}
+    .title{font-family:Newsreader,Georgia,serif;font-size:45px;font-weight:700;fill:#1A1A1A}
+    .sectionTitle{font-family:Newsreader,Georgia,serif;font-size:34px;font-weight:700;fill:#F7F5F0}
+    .subtitle{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:19px;fill:#2E5A7C}
+    .eyebrow{font-size:14px;fill:#B87333}
+    .meta{font-size:13px;fill:#2E5A7C}
+    .label{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:18px;font-weight:700;fill:#1A1A1A}
+    .body{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:17px;fill:#1A1A1A}
+    .small{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:15px;fill:#2E5A7C}
+    .pill{font-size:12px}
+    .inverse{fill:#F7F5F0}
+    .accent{fill:#B87333}
+    .positive{fill:#4A7C59}
+  </style>
+  <rect width="1200" height="630" fill="#F7F5F0"/>
+  <rect x="0" y="0" width="16" height="630" fill="#B87333"/>
+  <text x="54" y="40" class="eyebrow" text-anchor="start">OPTIMIKE · OBSIDIAN MCP</text>
+  <text x="1148" y="40" class="eyebrow" text-anchor="end">05</text>
+  <text x="54" y="92" class="title" text-anchor="start">Choose the source before the profile</text>
+  <text x="54" y="122" class="subtitle" text-anchor="start">Profiles define provenance, availability and write policy.</text>
+
+
+    <rect x="54" y="166" width="282" height="256" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+    <rect x="54" y="166" width="282" height="10" rx="5" fill="#B87333"/>
+    <text x="78" y="214" class="meta" text-anchor="start">LIVE</text>
+    <text x="78" y="266" class="label" text-anchor="start">Obsidian Desktop</text>
+    <text x="78" y="304" class="small" text-anchor="start">Local REST API required</text>
+    <rect x="78" y="356" width="62" height="34" rx="17" fill="#B87333" stroke="#B87333" stroke-width="0"/>
+  <text x="109" y="378" class="pill" fill="#F7F5F0" text-anchor="middle">API</text>
+
+
+    <rect x="360" y="166" width="282" height="256" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+    <rect x="360" y="166" width="282" height="10" rx="5" fill="#2E5A7C"/>
+    <text x="384" y="214" class="meta" text-anchor="start">HYBRID</text>
+    <text x="384" y="266" class="label" text-anchor="start">API or filesystem</text>
+    <text x="384" y="304" class="small" text-anchor="start">Fallback stays available</text>
+    <rect x="384" y="356" width="94" height="34" rx="17" fill="#2E5A7C" stroke="#2E5A7C" stroke-width="0"/>
+  <text x="431" y="378" class="pill" fill="#F7F5F0" text-anchor="middle">API + FS</text>
+
+
+    <rect x="666" y="166" width="282" height="256" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+    <rect x="666" y="166" width="282" height="10" rx="5" fill="#4A7C59"/>
+    <text x="690" y="214" class="meta" text-anchor="start">HEADLESS</text>
+    <text x="690" y="266" class="label" text-anchor="start">Synchronized vault</text>
+    <text x="690" y="304" class="small" text-anchor="start">Readonly → guarded → filesystem</text>
+    <rect x="690" y="356" width="62" height="34" rx="17" fill="#4A7C59" stroke="#4A7C59" stroke-width="0"/>
+  <text x="721" y="378" class="pill" fill="#F7F5F0" text-anchor="middle">FS</text>
+
+  <rect x="972" y="166" width="176" height="256" rx="18" fill="#131316" stroke="#131316" stroke-width="2"/>
+  <text x="996" y="214" class="eyebrow" text-anchor="start">BRIDGES</text>
+  <text x="996" y="266" class="inverse" text-anchor="start">Desktop-only</text>
+<text x="996" y="291" class="inverse" text-anchor="start">semantics</text>
+  <rect x="360" y="466" width="588" height="64" rx="18" fill="#F7F5F0" stroke="#4A7C59" stroke-width="2"/>
+  <circle cx="394" cy="498" r="11" fill="#4A7C59"/>
+  <text x="420" y="505" class="label" text-anchor="start">Server default: begin readonly</text>
+  <line x1="54" y1="590" x2="1148" y2="590" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="54" y="614" class="meta" text-anchor="start">optimike-obsidian-mcp</text>
+  <text x="1148" y="614" class="meta" text-anchor="end">EN</text>
+</svg>

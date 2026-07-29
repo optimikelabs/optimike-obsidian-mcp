@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "scripts/generate-readme-visuals.mjs",
+  "sourceOfTruth": "README visual brief: Optimike editorial system",
+  "palette": {
+    "paper": "#F7F5F0",
+    "ink": "#1A1A1A",
+    "surface": "#EFEDE8",
+    "border": "#E0DCD4",
+    "copper": "#B87333",
+    "blue": "#2E5A7C",
+    "green": "#4A7C59",
+    "bench": "#131316"
+  },
+  "fonts": {
+    "display": [
+      "Newsreader",
+      "Georgia",
+      "serif"
+    ],
+    "sans": [
+      "DM Sans",
+      "Inter",
+      "Arial",
+      "sans-serif"
+    ],
+    "mono": [
+      "JetBrains Mono",
+      "SFMono-Regular",
+      "Consolas",
+      "monospace"
+    ]
+  },
+  "constraints": {
+    "dimensions": "1200x630",
+    "editableText": true,
+    "externalDependencies": false,
+    "rasterContent": false
+  },
+  "files": [
+    {
+      "filename": "overview.en.svg",
+      "slug": "overview",
+      "language": "en",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "overview.fr.svg",
+      "slug": "overview",
+      "language": "fr",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "documentation-hub.en.svg",
+      "slug": "documentation-hub",
+      "language": "en",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "documentation-hub.fr.svg",
+      "slug": "documentation-hub",
+      "language": "fr",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "operations.en.svg",
+      "slug": "operations",
+      "language": "en",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "operations.fr.svg",
+      "slug": "operations",
+      "language": "fr",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "security.en.svg",
+      "slug": "security",
+      "language": "en",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "security.fr.svg",
+      "slug": "security",
+      "language": "fr",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "runtime-profiles.en.svg",
+      "slug": "runtime-profiles",
+      "language": "en",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "runtime-profiles.fr.svg",
+      "slug": "runtime-profiles",
+      "language": "fr",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "routing-guide.en.svg",
+      "slug": "routing-guide",
+      "language": "en",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    },
+    {
+      "filename": "routing-guide.fr.svg",
+      "slug": "routing-guide",
+      "language": "fr",
+      "width": 1200,
+      "height": 630,
+      "format": "svg"
+    }
+  ]
+}

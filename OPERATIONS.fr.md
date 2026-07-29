@@ -2,7 +2,7 @@
 
 Version anglaise : [OPERATIONS.md](OPERATIONS.md)
 
-![Architecture runtime Optimike Obsidian MCP](docs/assets/runtime-architecture-optimike-obsidian-mcp.png)
+![Modèle d’exploitation Optimike Obsidian MCP avec proxy client léger et backend partagé](docs/assets/readme/operations.fr.svg)
 
 Ce guide explique comment le serveur tourne réellement, de quoi il dépend, comment Tasks et la recherche sémantique fonctionnent, et ce qui permet de garder une faible empreinte mémoire.
 

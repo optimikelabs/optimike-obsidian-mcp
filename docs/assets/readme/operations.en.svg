@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Operate the persistent core</title>
+  <desc id="description">Keep client processes light. Observe one long-lived runtime.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B87333"/>
+    </marker>
+  </defs>
+  <style>
+    .eyebrow,.meta,.pill{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;font-weight:700;letter-spacing:1.2px}
+    .title{font-family:Newsreader,Georgia,serif;font-size:45px;font-weight:700;fill:#1A1A1A}
+    .sectionTitle{font-family:Newsreader,Georgia,serif;font-size:34px;font-weight:700;fill:#F7F5F0}
+    .subtitle{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:19px;fill:#2E5A7C}
+    .eyebrow{font-size:14px;fill:#B87333}
+    .meta{font-size:13px;fill:#2E5A7C}
+    .label{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:18px;font-weight:700;fill:#1A1A1A}
+    .body{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:17px;fill:#1A1A1A}
+    .small{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:15px;fill:#2E5A7C}
+    .pill{font-size:12px}
+    .inverse{fill:#F7F5F0}
+    .accent{fill:#B87333}
+    .positive{fill:#4A7C59}
+  </style>
+  <rect width="1200" height="630" fill="#F7F5F0"/>
+  <rect x="0" y="0" width="16" height="630" fill="#B87333"/>
+  <text x="54" y="40" class="eyebrow" text-anchor="start">OPTIMIKE · OBSIDIAN MCP</text>
+  <text x="1148" y="40" class="eyebrow" text-anchor="end">03</text>
+  <text x="54" y="92" class="title" text-anchor="start">Operate the persistent core</text>
+  <text x="54" y="122" class="subtitle" text-anchor="start">Keep client processes light. Observe one long-lived runtime.</text>
+
+  <text x="54" y="172" class="meta" text-anchor="start">CLIENT</text>
+  <text x="411" y="172" class="meta" text-anchor="start">PERSISTENT CORE</text>
+  <text x="830" y="172" class="meta" text-anchor="start">SOURCE</text>
+  <rect x="54" y="190" width="284" height="106" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="78" y="232" class="label" text-anchor="start">Short-lived stdio proxy</text>
+  <rect x="78" y="248" width="76" height="34" rx="17" fill="#2E5A7C" stroke="#2E5A7C" stroke-width="0"/>
+  <text x="116" y="270" class="pill" fill="#F7F5F0" text-anchor="middle">stdio</text>
+  <line x1="338" y1="243" x2="411" y2="243" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect x="411" y="180" width="346" height="126" rx="22" fill="#131316" stroke="#131316" stroke-width="2"/>
+  <text x="441" y="220" class="label inverse" text-anchor="start">HTTP MCP runtime</text>
+  <rect x="441" y="246" width="72" height="34" rx="17" fill="#B87333" stroke="#B87333" stroke-width="0"/>
+  <text x="477" y="268" class="pill" fill="#F7F5F0" text-anchor="middle">HTTP</text>
+  <line x1="757" y1="243" x2="830" y2="243" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <rect x="830" y="190" width="318" height="106" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="854" y="232" class="label" text-anchor="start">Obsidian / synchronized vault</text>
+  <rect x="854" y="248" width="118" height="34" rx="17" fill="#4A7C59" stroke="#4A7C59" stroke-width="0"/>
+  <text x="913" y="270" class="pill" fill="#F7F5F0" text-anchor="middle">API / FILES</text>
+  <rect x="54" y="340" width="1094" height="190" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="82" y="374" class="meta" text-anchor="start">OPERATIONS LOOP</text>
+  <rect x="82" y="404" width="42" height="34" rx="17" fill="#B87333" stroke="#B87333" stroke-width="0"/>
+  <text x="103" y="426" class="pill" fill="#F7F5F0" text-anchor="middle">01</text>
+    <text x="82" y="468" class="label" text-anchor="start">Start</text>
+    <line x1="236" y1="422" x2="312" y2="422" stroke="#B87333" stroke-width="3" stroke-dasharray="7 7" marker-end="url(#arrow)"/>
+<rect x="334" y="404" width="42" height="34" rx="17" fill="#2E5A7C" stroke="#2E5A7C" stroke-width="0"/>
+  <text x="355" y="426" class="pill" fill="#F7F5F0" text-anchor="middle">02</text>
+    <text x="334" y="468" class="label" text-anchor="start">Check readiness</text>
+    <line x1="488" y1="422" x2="564" y2="422" stroke="#B87333" stroke-width="3" stroke-dasharray="7 7" marker-end="url(#arrow)"/>
+<rect x="586" y="404" width="42" height="34" rx="17" fill="#2E5A7C" stroke="#2E5A7C" stroke-width="0"/>
+  <text x="607" y="426" class="pill" fill="#F7F5F0" text-anchor="middle">03</text>
+    <text x="586" y="468" class="label" text-anchor="start">Watch provenance</text>
+    <line x1="740" y1="422" x2="816" y2="422" stroke="#B87333" stroke-width="3" stroke-dasharray="7 7" marker-end="url(#arrow)"/>
+<rect x="838" y="404" width="42" height="34" rx="17" fill="#2E5A7C" stroke="#2E5A7C" stroke-width="0"/>
+  <text x="859" y="426" class="pill" fill="#F7F5F0" text-anchor="middle">04</text>
+    <text x="838" y="468" class="label" text-anchor="start">Bound sessions</text>
+
+  <text x="1120" y="510" class="small" text-anchor="end">Heavy state is built once</text>
+  <line x1="54" y1="590" x2="1148" y2="590" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="54" y="614" class="meta" text-anchor="start">optimike-obsidian-mcp</text>
+  <text x="1148" y="614" class="meta" text-anchor="end">EN</text>
+</svg>
