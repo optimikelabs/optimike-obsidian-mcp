@@ -6,11 +6,13 @@
 import type { AuthInfo as SdkAuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 /**
- * Defines the structure for authentication information derived from a token.
- * It extends the base SDK type to include common optional claims.
+ * Defines the structure for authentication information derived from a verified token.
+ * It extends the base SDK type with claims used to derive a stable, non-reversible
+ * client identity for quotas and admission control.
  */
 export type AuthInfo = SdkAuthInfo & {
   subject?: string;
+  issuer?: string;
 };
 
 // Extend the Node.js IncomingMessage type to include an optional 'auth' property.

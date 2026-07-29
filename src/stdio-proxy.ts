@@ -56,6 +56,7 @@ const host = process.env.MCP_HTTP_HOST || "127.0.0.1";
 const port = Number(process.env.MCP_HTTP_PORT || "3010");
 const backendUrl = new URL(`http://${host}:${port}/mcp`);
 const healthUrl = new URL(`http://${host}:${port}/healthz`);
+const backendBearerToken = process.env.MCP_BACKEND_BEARER_TOKEN?.trim();
 
 const proxyServer = new Server(
   { name: `${packageName}-stdio-proxy`, version: packageVersion },
@@ -162,7 +163,24 @@ async function ensureBackendConnected(forceReconnect = false): Promise<Client> {
     startupTimeoutMs: Number(process.env.MCP_PROXY_START_TIMEOUT_MS || "20000"),
   });
 
-  const transport = new StreamableHTTPClientTransport(backendUrl);
+  if (process.env.MCP_AUTH_MODE && !backendBearerToken) {
+    throw new Error(
+      "MCP_BACKEND_BEARER_TOKEN is required by the stdio proxy when the shared HTTP backend uses JWT or OAuth authentication. Provision one verified credential per agent for isolated quotas.",
+    );
+  }
+
+  const transport = new StreamableHTTPClientTransport(
+    backendUrl,
+    backendBearerToken
+      ? {
+          requestInit: {
+            headers: {
+              Authorization: `Bearer ${backendBearerToken}`,
+            },
+          },
+        }
+      : undefined,
+  );
   const client = new Client(
     { name: `${packageName}-stdio-proxy`, version: packageVersion },
     { capabilities: {} },

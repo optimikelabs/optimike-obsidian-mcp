@@ -15,6 +15,8 @@ import {
   ExternalTransferBroker,
 } from "../dist/services/externalTransferBroker.js";
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function jsonOf(result) {
   return JSON.parse(
     result.content?.map((item) => item.text ?? "").join("\n") ?? "{}",
@@ -349,6 +351,8 @@ const backend = spawn(process.execPath, ["dist/index.js"], {
     MCP_AUTH_MODE: "jwt",
     MCP_AUTH_SECRET_KEY: secret,
     MCP_ALLOWED_ORIGINS: "https://allowed.example",
+    MCP_HTTP_IDENTITY_RATE_LIMIT_WINDOW_MS: "1000",
+    MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "20",
   },
   stdio: "ignore",
 });
@@ -421,6 +425,36 @@ try {
   assert.equal(status.httpHandoff.available, true);
   assert.equal(status.httpHandoff.storage, "bounded_memory");
   assert.equal(JSON.stringify(status).includes(externalPath), false);
+
+  await sleep(1100);
+  for (let index = 0; index < 19; index += 1) {
+    await client.listTools();
+  }
+  const lastAllowanceHandoff = jsonOf(
+    await client.callTool({
+      name: "external_handoff",
+      arguments: {
+        rootId: "http.pilot",
+        relativePath: "artifact.bin",
+      },
+    }),
+  );
+  const lastAllowanceDownload = await fetch(downloadUrl, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-External-Handoff-Ticket": lastAllowanceHandoff.ticket,
+    },
+  });
+  assert.equal(
+    lastAllowanceDownload.status,
+    200,
+    "ticket redemption consumed a second identity-quota allowance",
+  );
+  assert.deepEqual(
+    Buffer.from(await lastAllowanceDownload.arrayBuffer()),
+    payload,
+  );
+  await sleep(1100);
 
   const handoff = jsonOf(
     await client.callTool({
