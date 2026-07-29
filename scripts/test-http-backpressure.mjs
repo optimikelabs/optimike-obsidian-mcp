@@ -123,16 +123,19 @@ async function testQueueBoundsTimeoutAndCancellation() {
     identityKey: "a",
     operationClass: "standard",
   });
-  const queued = bounded.acquire({
-    identityKey: "a",
-    operationClass: "standard",
-  });
+  const queuedTimeout = expectReason(
+    bounded.acquire({
+      identityKey: "a",
+      operationClass: "standard",
+    }),
+    "timeout",
+  );
   await expectReason(
     bounded.acquire({ identityKey: "b", operationClass: "standard" }),
     "queue-full",
   );
   await sleep(40);
-  await expectReason(queued, "timeout");
+  await queuedTimeout;
   assert.equal(bounded.getSnapshot().timedOut, 1);
 
   const abortController = new AbortController();
@@ -170,7 +173,9 @@ async function testRemovalRedispatchesSameIdentityQueue() {
     operationClass: "standard",
   });
 
-  await expectReason(blockedExpensiveB, "timeout");
+  const blockedTimeout = expectReason(blockedExpensiveB, "timeout");
+  await sleep(40);
+  await blockedTimeout;
   const standardB = await Promise.race([
     standardBehindIt,
     sleep(200).then(() => {
@@ -287,10 +292,7 @@ async function testDeterministicLoad() {
       assert.ok(mutationActive <= 1);
       await sleep((index % 3) + 1);
       active -= 1;
-      activeByIdentity.set(
-        identityKey,
-        activeByIdentity.get(identityKey) - 1,
-      );
+      activeByIdentity.set(identityKey, activeByIdentity.get(identityKey) - 1);
       if (operationClass !== "standard") expensiveActive -= 1;
       if (operationClass === "mutation") mutationActive -= 1;
       lease.release();
@@ -325,7 +327,7 @@ async function testRealMiddlewareResponses() {
     expensiveMaxInFlightPerIdentity: 1,
     mutationMaxInFlight: 1,
     mutationMaxInFlightPerIdentity: 1,
-    maxQueued: 1,
+    maxQueued: 2,
     maxQueuedPerIdentity: 1,
     queueWaitTimeoutMs: 250,
   });
@@ -386,9 +388,7 @@ async function testDownstreamAdmissionErrorIsNotReclassified() {
     await next();
   });
   app.use("/mcp", createHttpBackpressureMiddleware(controller()));
-  app.onError((error, c) =>
-    c.json({ downstreamErrorName: error.name }, 599),
-  );
+  app.onError((error, c) => c.json({ downstreamErrorName: error.name }, 599));
   app.post("/mcp", () => {
     throw new AdmissionRejectedError("queue-full", 1);
   });
