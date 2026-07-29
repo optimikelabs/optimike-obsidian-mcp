@@ -57,6 +57,10 @@ It also exposes the internal origin (`obsidian_api`, `filesystem`, `cache`, `sna
 
 A source is never called `live-obsidian` solely because the service runs in `live` mode. The transport probes the configured Obsidian REST service independently of the optional cache. A successful, recent authenticated probe therefore makes a live profile ready even when caching is disabled. A ready cache observation whose real refresh source is `rest` is also normalized to the public `obsidian_api` origin and must remain inside the freshness threshold. When that observation ages past the threshold, provenance becomes `snapshot` and the service is degraded. A known cache refresh failure is reported as sanitized degradation. A stale fallback is never presented as live.
 
+The live probe cadence is the lower of 30 seconds and half the configured
+freshness threshold. Lowering the threshold therefore cannot leave a healthy
+cache-disabled live profile stale between fixed 30-second probes.
+
 Default freshness threshold:
 
 ```dotenv
@@ -92,6 +96,11 @@ Every HTTP request emits one completion event when its response body finishes, i
 - operation class and queue wait;
 - current provenance and stale flag;
 - optional sanitized `correlationId` and `incidentId`.
+
+Mapped application errors use the status of the actual error response and are
+logged only after that body completes. If a response body fails after headers
+were produced, the event preserves the status placed on the wire and reports
+`result: exception` instead of inventing a later HTTP `500`.
 
 Caller-controlled JSON-RPC methods and tool names are logged only when they match a strict 128-character identifier grammar. Other values are replaced by the controlled HTTP route label, preventing control characters, document content and oversized values from entering the operation field.
 

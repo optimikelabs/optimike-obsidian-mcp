@@ -48,6 +48,7 @@ import {
 } from "./httpBackpressure.js";
 import {
   createHttpObservability,
+  HTTP_OBSERVABILITY_STALE_AFTER_MS,
   type LiveApiObservation,
 } from "./httpObservability.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
@@ -73,7 +74,8 @@ const MCP_ENDPOINT_PATH = "/mcp";
 const MAX_PORT_RETRIES = parsePortRetries();
 const httpRequestBodyGuardMiddleware = createHttpRequestBodyGuardMiddleware();
 const httpBackpressureMiddleware = createHttpBackpressureMiddleware();
-const LIVE_API_PROBE_INTERVAL_MS = 30_000;
+const LIVE_API_PROBE_MAX_INTERVAL_MS = 30_000;
+const LIVE_API_PROBE_MIN_INTERVAL_MS = 250;
 
 type HttpSession = {
   transport: WebStandardStreamableHTTPServerTransport;
@@ -88,6 +90,15 @@ type HttpSession = {
 type SessionCapacityReservation = {
   release: () => void;
 };
+
+export function liveApiProbeIntervalMs(
+  staleAfterMs = HTTP_OBSERVABILITY_STALE_AFTER_MS,
+): number {
+  return Math.max(
+    LIVE_API_PROBE_MIN_INTERVAL_MS,
+    Math.min(LIVE_API_PROBE_MAX_INTERVAL_MS, Math.floor(staleAfterMs / 2)),
+  );
+}
 
 function createLiveApiProbe(
   obsidianService: ObsidianRestApiService | undefined,
@@ -120,7 +131,7 @@ function createLiveApiProbe(
   };
 
   const timer = obsidianService
-    ? setInterval(() => void probe(), LIVE_API_PROBE_INTERVAL_MS)
+    ? setInterval(() => void probe(), liveApiProbeIntervalMs())
     : undefined;
   timer?.unref?.();
   if (obsidianService) void probe();

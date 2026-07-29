@@ -11,6 +11,8 @@ const {
   sanitizeLoggedOperationName,
   wrapResponseForCompletion,
 } = await import("../dist/mcp-server/transports/httpObservability.js");
+const { liveApiProbeIntervalMs } =
+  await import("../dist/mcp-server/transports/httpTransport.js");
 
 const now = Date.parse("2026-07-29T12:00:00.000Z");
 const vaultPath = process.cwd();
@@ -226,6 +228,9 @@ assert.equal(
   undefined,
 );
 assert.equal(sanitizeLoggedOperationName("x".repeat(129)), undefined);
+assert.equal(liveApiProbeIntervalMs(1000), 500);
+assert.equal(liveApiProbeIntervalMs(60_000), 30_000);
+assert.equal(liveApiProbeIntervalMs(15 * 60_000), 30_000);
 
 let streamController;
 const completionEvents = [];
@@ -268,9 +273,11 @@ const failingResponse = wrapResponseForCompletion(
         failingController = controller;
       },
     }),
+    { status: 206 },
   ),
   (completion) => failureEvents.push(completion),
 );
+assert.equal(failingResponse.status, 206);
 const failingBody = failingResponse.text();
 failingController.error(new Error("synthetic stream failure"));
 await assert.rejects(failingBody, /synthetic stream failure/u);

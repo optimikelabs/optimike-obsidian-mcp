@@ -57,6 +57,11 @@ Il expose aussi l’origine interne (`obsidian_api`, `filesystem`, `cache`, `sna
 
 Une source n’est jamais qualifiée de `live-obsidian` uniquement parce que le service tourne en mode `live`. Le transport sonde le service REST Obsidian configuré indépendamment du cache facultatif. Un probe authentifié, récent et réussi rend donc un profil live prêt même si le cache est désactivé. Une observation issue d’un cache prêt dont la vraie source de rafraîchissement est `rest` est aussi normalisée vers l’origine publique `obsidian_api` et doit rester dans le seuil de fraîcheur. Au-delà, la provenance devient `snapshot` et le service passe en dégradé. Un échec connu de rafraîchissement du cache est signalé sous forme de dégradation expurgée. Un fallback stale n’est jamais présenté comme live.
 
+La cadence du probe live est la plus petite valeur entre 30 secondes et la
+moitié du seuil de fraîcheur configuré. Abaisser ce seuil ne peut donc pas
+laisser un profil live sain sans cache devenir stale entre deux probes fixes de
+30 secondes.
+
 Seuil de fraîcheur par défaut :
 
 ```dotenv
@@ -92,6 +97,12 @@ Chaque requête HTTP émet un événement de fin lorsque le corps de sa réponse
 - la classe d’opération et le temps d’attente ;
 - la provenance courante et le statut stale ;
 - un `correlationId` ou `incidentId` facultatif et nettoyé.
+
+Les erreurs applicatives mappées utilisent le statut de la vraie réponse
+d’erreur et ne sont journalisées qu’après la fin de son corps. Si le corps
+échoue après la production des headers, l’événement conserve le statut placé
+sur le réseau et indique `result: exception` au lieu d’inventer ensuite un
+HTTP `500`.
 
 Les méthodes JSON-RPC et noms d’outils contrôlés par l’appelant ne sont journalisés que s’ils respectent une grammaire stricte d’identifiant de 128 caractères. Les autres valeurs sont remplacées par le libellé HTTP contrôlé, ce qui empêche caractères de contrôle, contenu documentaire et valeurs démesurées d’entrer dans le champ d’opération.
 

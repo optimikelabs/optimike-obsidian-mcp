@@ -10,6 +10,7 @@ import {
   authenticatedIdentityLimiter,
   preAuthSourceLimiter,
 } from "./httpProtection.js";
+import { httpErrorHandler } from "./httpErrorHandler.js";
 import { getHttpRequestState } from "./httpRequestState.js";
 
 export type ReadinessState = "ready" | "degraded" | "critical";
@@ -121,6 +122,8 @@ if (!parsedObservabilityEnv.success) {
   );
 }
 const observabilityEnv = parsedObservabilityEnv.data;
+export const HTTP_OBSERVABILITY_STALE_AFTER_MS =
+  observabilityEnv.MCP_OBSERVABILITY_STALE_AFTER_MS;
 
 const PROCESS_STARTED_AT = new Date().toISOString();
 const SAFE_EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -249,7 +252,7 @@ export function buildHealthSnapshot(
     options.cacheSource ?? process.env.OBSIDIAN_CACHE_SOURCE ?? "";
   const writeMode = (options.writeMode ?? config.mcpWriteMode).toLowerCase();
   const staleAfterMs =
-    options.staleAfterMs ?? observabilityEnv.MCP_OBSERVABILITY_STALE_AFTER_MS;
+    options.staleAfterMs ?? HTTP_OBSERVABILITY_STALE_AFTER_MS;
   const cacheResult = readCacheStats(options.vaultCacheService);
   const stats = cacheResult.stats;
   const cacheObservedAtMs = parseTimestamp(stats?.lastRefreshAt);
@@ -512,7 +515,7 @@ export function createHttpObservability(options: HealthOptions = {}) {
   const requestLoggingMiddleware = async (
     c: Context<{ Bindings: HttpBindings }>,
     next: Next,
-  ): Promise<void> => {
+  ): Promise<void | Response> => {
     const state = getHttpRequestState(c.req.raw);
     state.correlationId = sanitizeExternalCorrelationId(
       c.req.header("x-correlation-id"),
@@ -540,7 +543,10 @@ export function createHttpObservability(options: HealthOptions = {}) {
           durationMs,
           result:
             completion === "response" ? summarizeResult(status) : completion,
-          httpStatus: completion === "exception" ? 500 : status,
+          // A body-stream failure happens after the response status may already
+          // be on the wire. Preserve that status and use result=exception to
+          // represent the later stream failure.
+          httpStatus: status,
           quotaStatus: state.quotas.map((quota) => ({
             scope: quota.scope,
             outcome: quota.outcome,
@@ -564,8 +570,20 @@ export function createHttpObservability(options: HealthOptions = {}) {
         logCompletion(completion, response.status),
       );
     } catch (error) {
-      logCompletion("exception", 500);
-      throw error;
+      // Hono's top-level onError hook runs after middleware unwinds. Map the
+      // error here so its actual wire response follows the same body-completion
+      // lifecycle and reports the mapped status instead of a premature 500.
+      const response = await httpErrorHandler(
+        error instanceof Error
+          ? error
+          : new Error("Unknown HTTP transport error."),
+        c,
+      );
+      const wrapped = wrapResponseForCompletion(response, (completion) =>
+        logCompletion(completion, response.status),
+      );
+      c.res = wrapped;
+      return wrapped;
     }
   };
 

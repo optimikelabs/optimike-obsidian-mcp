@@ -97,6 +97,7 @@ async function startBackend(
     enableCache = runtimeMode.startsWith("headless"),
     obsidianBaseUrl = "http://127.0.0.1:1",
     writeMode = "readonly",
+    observabilityStaleAfterMs = 60_000,
   } = {},
 ) {
   const port = await unusedPort();
@@ -138,7 +139,7 @@ async function startBackend(
     MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "1000",
     MCP_HTTP_PREAUTH_RATE_LIMIT_MAX_KEYS: "1000",
     MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS: "1000",
-    MCP_OBSERVABILITY_STALE_AFTER_MS: "60000",
+    MCP_OBSERVABILITY_STALE_AFTER_MS: String(observabilityStaleAfterMs),
   };
   if (writeMode === null) delete childEnv.MCP_WRITE_MODE;
   else childEnv.MCP_WRITE_MODE = writeMode;
@@ -260,6 +261,24 @@ try {
     });
     await maliciousOperation.text();
 
+    const mappedError = await fetch(new URL("/mcp", headless.baseUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "expired-observability-test-session",
+        "X-Correlation-Id": "mapped-error-404",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 8,
+        method: "tools/list",
+      }),
+    });
+    assert.equal(mappedError.status, 404);
+    const mappedErrorBody = await mappedError.json();
+    assert.equal(mappedErrorBody.id, 8);
+
     const rejectedOrigin = await fetch(new URL("/healthz", headless.baseUrl), {
       headers: {
         Origin: "https://blocked-origin.example",
@@ -289,6 +308,19 @@ try {
       completionLogs.includes("invalid incident with spaces"),
       false,
     );
+    const mappedErrorLog = completionLogs
+      .split(/\r?\n/u)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+      })
+      .find((entry) => entry?.correlationId === "mapped-error-404");
+    assert.ok(mappedErrorLog, "mapped error must emit a completion event");
+    assert.equal(mappedErrorLog.httpStatus, 404);
+    assert.equal(mappedErrorLog.result, "client_error");
   } finally {
     await stopBackend(headless);
   }
@@ -350,6 +382,7 @@ try {
       enableCache: false,
       obsidianBaseUrl: fakeRest.baseUrl,
       writeMode: null,
+      observabilityStaleAfterMs: 1000,
     },
   );
   try {
@@ -364,6 +397,15 @@ try {
       "validated live default write mode is full",
     );
     assert.equal(body.capabilities.cacheReads, false);
+    await sleep(1600);
+    const stillReady = await fetch(
+      new URL("/readyz", liveWithoutCache.baseUrl),
+    );
+    assert.equal(
+      stillReady.status,
+      200,
+      "probe cadence must keep a healthy live API inside its freshness window",
+    );
   } finally {
     await stopBackend(liveWithoutCache);
     await fakeRest.close();
