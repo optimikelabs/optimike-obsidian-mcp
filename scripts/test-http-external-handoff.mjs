@@ -445,10 +445,14 @@ try {
       "X-External-Handoff-Ticket": lastAllowanceHandoff.ticket,
     },
   });
+  const lastAllowanceFailure =
+    lastAllowanceDownload.status === 200
+      ? ""
+      : await lastAllowanceDownload.clone().text();
   assert.equal(
     lastAllowanceDownload.status,
     200,
-    "ticket redemption consumed a second identity-quota allowance",
+    `ticket redemption failed after issuance on the final identity allowance: ${lastAllowanceFailure}`,
   );
   assert.deepEqual(
     Buffer.from(await lastAllowanceDownload.arrayBuffer()),

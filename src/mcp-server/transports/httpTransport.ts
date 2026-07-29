@@ -41,6 +41,10 @@ import {
   oauthMiddleware,
   type AuthInfo,
 } from "./auth/index.js";
+import {
+  createHttpBackpressureMiddleware,
+  createHttpRequestBodyGuardMiddleware,
+} from "./httpBackpressure.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import {
   authenticatedIdentityLimiter,
@@ -62,6 +66,8 @@ const HTTP_PORT = config.mcpHttpPort;
 const HTTP_HOST = config.mcpHttpHost;
 const MCP_ENDPOINT_PATH = "/mcp";
 const MAX_PORT_RETRIES = parsePortRetries();
+const httpRequestBodyGuardMiddleware = createHttpRequestBodyGuardMiddleware();
+const httpBackpressureMiddleware = createHttpBackpressureMiddleware();
 
 type HttpSession = {
   transport: WebStandardStreamableHTTPServerTransport;
@@ -131,6 +137,14 @@ async function rateLimitResponse(
   decision: RateLimitDecision,
 ): Promise<Response> {
   const requestState = getHttpRequestState(c.req.raw);
+  const preAuthRejection = scope !== "client-identity";
+  if (preAuthRejection && c.req.method === "POST") {
+    // Source limiting runs before the request-body guard. Never clone or parse
+    // an untrusted body on this rejection path; cancel it instead.
+    void c.req.raw.body
+      ?.cancel("pre-authentication source rate limit")
+      .catch(() => undefined);
+  }
   c.header("Retry-After", String(decision.retryAfterSeconds));
   c.header("RateLimit-Limit", String(decision.limit));
   c.header("RateLimit-Remaining", String(decision.remaining));
@@ -204,10 +218,9 @@ async function preAuthRateLimitMiddleware(
   await next();
 }
 
-async function authenticatedIdentityRateLimitMiddleware(
+function attachVerifiedIdentity(
   c: Context<{ Bindings: HttpBindings }>,
-  next: Next,
-): Promise<void | Response> {
+): VerifiedHttpIdentity {
   const authInfo = c.env.incoming.auth as AuthInfo | undefined;
   if (!authInfo) {
     throw new McpError(
@@ -217,9 +230,27 @@ async function authenticatedIdentityRateLimitMiddleware(
   }
 
   const requestState = getHttpRequestState(c.req.raw);
-  const identity = deriveVerifiedHttpIdentity(authInfo);
+  const identity =
+    requestState.identity ?? deriveVerifiedHttpIdentity(authInfo);
   requestState.authInfo = authInfo;
   requestState.identity = identity;
+  return identity;
+}
+
+async function verifiedIdentityMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void> {
+  attachVerifiedIdentity(c);
+  await next();
+}
+
+async function authenticatedIdentityRateLimitMiddleware(
+  c: Context<{ Bindings: HttpBindings }>,
+  next: Next,
+): Promise<void | Response> {
+  const requestState = getHttpRequestState(c.req.raw);
+  const identity = attachVerifiedIdentity(c);
   const decision = authenticatedIdentityLimiter.check(identity.key);
   requestState.quotas.push(quotaState("client-identity", decision));
   if (!decision.allowed) {
@@ -249,10 +280,7 @@ function sessionExpired(session: HttpSession, now: number): boolean {
   );
 }
 
-function closeExpiredSession(
-  sessionId: string,
-  session: HttpSession,
-): boolean {
+function closeExpiredSession(sessionId: string, session: HttpSession): boolean {
   if (transports.get(sessionId) !== session) return false;
   transports.delete(sessionId);
   if (session.absoluteExpiryTimer) {
@@ -553,6 +581,9 @@ export async function startHttpTransport(
         "RateLimit-Remaining",
         "RateLimit-Reset",
         "X-Optimike-Rate-Limit-Scope",
+        "X-Optimike-Backpressure",
+        "X-Optimike-Operation-Class",
+        "X-Optimike-Queue-Wait-Ms",
         "X-Request-Id",
       ],
       credentials: true,
@@ -578,9 +609,15 @@ export async function startHttpTransport(
 
   app.use(MCP_ENDPOINT_PATH, preAuthRateLimitMiddleware);
   app.use(externalHandoffEndpoint, preAuthRateLimitMiddleware);
+  // Source limiting must happen before buffering. Its 429 path never reads the
+  // body; this guard then protects authentication and identity-quota errors.
+  app.use(MCP_ENDPOINT_PATH, httpRequestBodyGuardMiddleware);
   app.use(MCP_ENDPOINT_PATH, authMiddleware);
   app.use(externalHandoffEndpoint, authMiddleware);
   app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);
+  app.use(externalHandoffEndpoint, verifiedIdentityMiddleware);
+  app.use(MCP_ENDPOINT_PATH, httpBackpressureMiddleware);
+  app.use(externalHandoffEndpoint, httpBackpressureMiddleware);
 
   app.onError(httpErrorHandler);
 
