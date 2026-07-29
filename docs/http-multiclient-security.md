@@ -96,7 +96,7 @@ The personal development profile can run without configured authentication outsi
 
 An HTTP MCP session is bound to the verified identity that initialized it. A different authenticated identity cannot reuse the session ID. The response is intentionally indistinguishable from an absent or expired session.
 
-The process-local session registry is bounded by `MCP_HTTP_MAX_SESSIONS`, default 500. Capacity exhaustion returns `503` and `Retry-After`. This is a single-process contract, not a clustered session store.
+The process-local session registry is bounded by `MCP_HTTP_MAX_SESSIONS`, default 500. Capacity exhaustion returns `503` and `Retry-After`. An inactive session expires after `MCP_HTTP_SESSION_IDLE_TIMEOUT_MS`. Active requests suspend only this idle timeout: `MCP_HTTP_SESSION_MAX_LIFETIME_MS` is an absolute lifetime and closes the transport, including an active event stream, when reached. This is a single-process contract, not a clustered session store.
 
 ## Configuration
 
@@ -112,6 +112,9 @@ The process-local session registry is bounded by `MCP_HTTP_MAX_SESSIONS`, defaul
 | `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX_KEYS`    |                          `10000` | Bound on identity counters                         |
 | `MCP_HTTP_RATE_LIMIT_CLEANUP_INTERVAL_MS`  |                         `300000` | Counter cleanup interval                           |
 | `MCP_HTTP_MAX_SESSIONS`                    |                            `500` | Process-local session bound                        |
+| `MCP_HTTP_SESSION_IDLE_TIMEOUT_MS`         |                        `1800000` | Idle lifetime; suspended while requests are active |
+| `MCP_HTTP_SESSION_MAX_LIFETIME_MS`         |                       `86400000` | Absolute lifetime, including active streams        |
+| `MCP_HTTP_SESSION_CLEANUP_INTERVAL_MS`     |                          `60000` | Session cleanup interval                           |
 | `MCP_TRUSTED_PROXIES`                      |                            empty | Trusted proxy IP/CIDR allowlist                    |
 | `MCP_HTTP_IDENTITY_HASH_KEY`               | JWT secret or random process key | Optional dedicated HMAC key, minimum 32 characters |
 | `MCP_BACKEND_BEARER_TOKEN`                 |                            empty | Stdio proxy credential for a secured backend       |

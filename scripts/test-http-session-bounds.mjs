@@ -296,6 +296,85 @@ async function testActiveStreamSurvivesIdleCleanup(sandbox) {
   }
 }
 
+async function testActiveStreamStopsAtAbsoluteExpiry(sandbox) {
+  const instance = await startBackend(sandbox, "active-stream-max-lifetime", {
+    MCP_HTTP_MAX_SESSIONS: "1",
+    MCP_HTTP_SESSION_IDLE_TIMEOUT_MS: "5000",
+    MCP_HTTP_SESSION_MAX_LIFETIME_MS: "120",
+  });
+  const token = await signToken("absolute-stream-owner");
+  const streamAbort = new AbortController();
+  let streamResponse;
+  let streamReader;
+  try {
+    const initialized = await initialize(instance.baseUrl, token, 50);
+    assert.equal(initialized.status, 200);
+    const sessionId = initialized.headers.get("mcp-session-id");
+    assert.ok(sessionId);
+
+    streamResponse = await Promise.race([
+      fetch(new URL("/mcp", instance.baseUrl), {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${token}`,
+          "Mcp-Session-Id": sessionId,
+        },
+        signal: streamAbort.signal,
+      }),
+      sleep(3000).then(() => {
+        throw new Error("timed out opening the max-lifetime MCP event stream");
+      }),
+    ]);
+    assert.equal(streamResponse.status, 200);
+    assert.ok(streamResponse.body);
+    streamReader = streamResponse.body.getReader();
+
+    const streamClosed = (async () => {
+      while (true) {
+        const chunk = await streamReader.read();
+        if (chunk.done) return true;
+      }
+    })();
+    assert.equal(
+      await Promise.race([
+        streamClosed,
+        sleep(3000).then(() => false),
+      ]),
+      true,
+      "absolute session lifetime must close an active event stream",
+    );
+
+    const expiredPing = await mcpPost(
+      instance.baseUrl,
+      token,
+      { jsonrpc: "2.0", id: 51, method: "ping" },
+      sessionId,
+    );
+    assert.equal(
+      expiredPing.status,
+      404,
+      "requests using an absolutely expired session must be rejected",
+    );
+
+    const successor = await initialize(
+      instance.baseUrl,
+      await signToken("absolute-stream-successor"),
+      52,
+    );
+    assert.equal(
+      successor.status,
+      200,
+      "absolute expiry must release session capacity after closing the stream",
+    );
+  } finally {
+    streamAbort.abort();
+    await streamReader?.cancel().catch(() => undefined);
+    streamReader?.releaseLock();
+    await stopBackend(instance);
+  }
+}
+
 const sandbox = await mkdtemp(
   path.join(os.tmpdir(), "optimike-http-session-bounds-"),
 );
@@ -304,8 +383,9 @@ try {
   await testIdleExpiry(sandbox);
   await testAbsoluteExpiry(sandbox);
   await testActiveStreamSurvivesIdleCleanup(sandbox);
+  await testActiveStreamStopsAtAbsoluteExpiry(sandbox);
   console.log(
-    "PASS: concurrent initialization reservations preserve the session maximum, capacity errors preserve JSON-RPC ids, abandoned sessions expire by idle and absolute lifetime, and active streaming sessions survive idle cleanup",
+    "PASS: concurrent initialization reservations preserve the session maximum, capacity errors preserve JSON-RPC ids, idle cleanup preserves active streams, and absolute lifetime closes active streams deterministically",
   );
 } finally {
   await rm(sandbox, { recursive: true, force: true });

@@ -246,10 +246,12 @@ function requireIdentity(c: Context): VerifiedHttpIdentity {
 }
 
 function sessionExpired(session: HttpSession, now: number): boolean {
-  if (session.activeRequests > 0) return false;
+  const maxLifetimeExpired =
+    now - session.createdAt >= httpProtectionConfig.sessionMaxLifetimeMs;
+  if (maxLifetimeExpired) return true;
   return (
-    now - session.lastSeenAt >= httpProtectionConfig.sessionIdleTimeoutMs ||
-    now - session.createdAt >= httpProtectionConfig.sessionMaxLifetimeMs
+    session.activeRequests === 0 &&
+    now - session.lastSeenAt >= httpProtectionConfig.sessionIdleTimeoutMs
   );
 }
 
