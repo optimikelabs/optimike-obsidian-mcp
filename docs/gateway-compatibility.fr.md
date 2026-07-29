@@ -64,9 +64,17 @@ Il exige un binaire agentgateway fourni explicitement et vérifié par checksum 
 
 ```powershell
 $env:AGENTGATEWAY_BIN = "C:\chemin\vers\agentgateway-windows-amd64.exe"
+$env:AGENTGATEWAY_SHA256 = "<SHA-256 attendu>"
 $env:AGENTGATEWAY_COMMIT = "<commit upstream>"
 npm run test:gateway:agentgateway
 ```
+
+Le harness refuse un binaire dont le SHA-256 calculé diffère de
+`AGENTGATEWAY_SHA256`. Il charge le fichier distribué
+[`agentgateway.transparent.example.yaml`](agentgateway.transparent.example.yaml),
+ne remplace que ses placeholders uniques de port gateway et d’endpoint
+backend, puis échoue si ce schéma publié n’est pas accepté. Il ne bascule pas
+silencieusement vers une autre configuration de gateway.
 
 Le run vérifié du 29 juillet 2026 utilise agentgateway `v1.4.0`, commit upstream
 `83c952731ee79b4372e3a031382c4ff419ddfee1`, avec le SHA-256 de l’asset Windows :

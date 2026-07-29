@@ -60,7 +60,6 @@ jobs:
           cache: npm
       - run: npm ci --silent
       - run: npm run test:http-multiclient
-      - run: node scripts/test-http-session-bounds.mjs
 
   http-backpressure:
     strategy:

@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import {
   cp,
@@ -9,6 +10,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -26,6 +28,7 @@ const jwtSecret = "gateway-e2e-secret-must-be-at-least-thirty-two-characters";
 const fixtureRootId = "gateway-fixture";
 const fixtureRelativePath = "artifact.txt";
 const fixtureContent = "Optimike gateway handoff fixture\n";
+const vaultFixtureContent = "# Gateway\n\nRead retry fixture.\n";
 const physicalPathSentinel = "PHYSICAL-GATEWAY-FIXTURE-PATH";
 
 async function readAllLogs(directory) {
@@ -150,6 +153,21 @@ function containsExactString(value, expected) {
   );
 }
 
+function containsStringFragment(value, expectedFragments) {
+  if (typeof value === "string") {
+    return expectedFragments.some((fragment) => value.includes(fragment));
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) =>
+      containsStringFragment(item, expectedFragments),
+    );
+  }
+  if (!value || typeof value !== "object") return false;
+  return Object.values(value).some((item) =>
+    containsStringFragment(item, expectedFragments),
+  );
+}
+
 async function createExternalRootConfig(sandbox, externalRoot) {
   const examplePath = path.join(
     projectRoot,
@@ -201,9 +219,9 @@ async function discoverHandoffTtlEnv() {
 async function waitForUrl(url, child, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (child?.exitCode !== null && child?.exitCode !== undefined) {
+    if (child && hasChildExited(child)) {
       throw new Error(
-        `process exited with ${child.exitCode}: ${child.stderrText ?? ""}`,
+        `process exited with ${child.exitCode ?? child.signalCode}: ${child.stderrText ?? ""}`,
       );
     }
     try {
@@ -217,104 +235,143 @@ async function waitForUrl(url, child, timeoutMs = 30_000) {
   throw new Error(`timed out waiting for ${url}`);
 }
 
+async function waitForStatus(url, child, expectedStatus, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child && hasChildExited(child)) {
+      throw new Error(
+        `process exited with ${child.exitCode ?? child.signalCode}: ${child.stderrText ?? ""}`,
+      );
+    }
+    try {
+      const response = await fetch(url);
+      if (response.status === expectedStatus) return response;
+    } catch {
+      // Still starting.
+    }
+    await sleep(75);
+  }
+  throw new Error(`timed out waiting for ${url} to return ${expectedStatus}`);
+}
+
+function hasChildExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
 async function stopChild(child) {
-  if (!child || child.exitCode !== null) return;
+  if (!child || hasChildExited(child)) return;
   child.kill("SIGTERM");
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    sleep(3000),
-  ]);
-  if (child.exitCode === null) child.kill("SIGKILL");
+  if (await waitForChildExit(child, 3000)) return;
+  child.kill("SIGKILL");
+  if (!(await waitForChildExit(child, 3000))) {
+    throw new Error(`process ${child.pid ?? "unknown"} did not terminate`);
+  }
 }
 
-function gatewayCandidates(gatewayPort, backendPort) {
-  const socket = `127.0.0.1:${backendPort}`;
-  const host = `http://127.0.0.1:${backendPort}`;
-  return [
-    {
-      name: "v1.4-transparent-http",
-      yaml: `# yaml-language-server: $schema=https://agentgateway.dev/schema/config\ngateways:\n  optimike:\n    port: ${gatewayPort}\n    protocol: HTTP\nroutes:\n- name: optimike-all\n  gateways: [optimike]\n  matches:\n  - path:\n      pathPrefix: /\n  backends:\n  - host: ${socket}\n`,
-    },
-    {
-      name: "minimal-host",
-      yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - routes:\n    - backends:\n      - host: ${host}\n`,
-    },
-    {
-      name: "path-prefix-host",
-      yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - routes:\n    - matches:\n      - path:\n          pathPrefix: /\n      backends:\n      - host: ${host}\n`,
-    },
-    {
-      name: "http-protocol-host",
-      yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - protocol: HTTP\n    routes:\n    - backends:\n      - host: ${host}\n`,
-    },
-    {
-      name: "named-route-host",
-      yaml: `binds:\n- port: ${gatewayPort}\n  listeners:\n  - name: optimike-http\n    routes:\n    - name: optimike-all\n      backends:\n      - host: ${host}\n`,
-    },
-  ];
+async function waitForChildExit(child, timeoutMs) {
+  if (hasChildExited(child)) return true;
+  return new Promise((resolve) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(hasChildExited(child));
+    }, timeoutMs);
+    timer.unref?.();
+    child.once("exit", onExit);
+  });
 }
 
-function gatewayArgumentCandidates(binary, configPath) {
-  return [
-    [binary, "-f", configPath],
-    [binary, "--file", configPath],
-    [binary, "--config", configPath],
-    [binary, "--config-file", configPath],
-    [binary, configPath],
-  ];
+function replaceExactOnce(source, expected, replacement, label) {
+  const first = source.indexOf(expected);
+  assert.notEqual(first, -1, `${label} placeholder is missing`);
+  assert.equal(
+    source.indexOf(expected, first + expected.length),
+    -1,
+    `${label} placeholder is ambiguous`,
+  );
+  return (
+    source.slice(0, first) + replacement + source.slice(first + expected.length)
+  );
+}
+
+async function materializePublishedGatewayConfig(
+  sandbox,
+  gatewayPort,
+  backendPort,
+) {
+  const publishedConfigPath = path.join(
+    projectRoot,
+    "docs",
+    "agentgateway.transparent.example.yaml",
+  );
+  let yaml = await readFile(publishedConfigPath, "utf8");
+  yaml = replaceExactOnce(
+    yaml,
+    "port: 3100",
+    `port: ${gatewayPort}`,
+    "gateway port",
+  );
+  yaml = replaceExactOnce(
+    yaml,
+    "host: 127.0.0.1:3101",
+    `host: 127.0.0.1:${backendPort}`,
+    "backend endpoint",
+  );
+  const configPath = path.join(
+    sandbox,
+    "agentgateway.transparent.example.resolved.yaml",
+  );
+  await writeFile(configPath, yaml, "utf8");
+  return configPath;
 }
 
 async function startGateway(binary, sandbox, gatewayPort, backendPort) {
-  const attempts = [];
-  for (const candidate of gatewayCandidates(gatewayPort, backendPort)) {
-    const configPath = path.join(
-      sandbox,
-      `agentgateway-${candidate.name}.yaml`,
-    );
-    await writeFile(configPath, candidate.yaml, "utf8");
-    for (const [command, ...args] of gatewayArgumentCandidates(
-      binary,
-      configPath,
-    )) {
-      const child = spawn(command, args, {
-        cwd: sandbox,
-        env: { ...process.env, RUST_LOG: "info" },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      child.stderrText = "";
-      child.stdoutText = "";
-      child.stdout?.on("data", (chunk) => {
-        child.stdoutText += String(chunk);
-      });
-      child.stderr?.on("data", (chunk) => {
-        child.stderrText += String(chunk);
-      });
-      let accepted = false;
-      try {
-        const probe = await waitForUrl(
-          new URL(`http://127.0.0.1:${gatewayPort}/healthz`),
-          child,
-          6000,
-        );
-        if (probe.status < 500) {
-          accepted = true;
-          return { child, configPath, candidate: candidate.name, args };
-        }
-      } catch (error) {
-        attempts.push({
-          candidate: candidate.name,
-          args,
-          error: error instanceof Error ? error.message : String(error),
-          stderr: child.stderrText.slice(-3000),
-        });
-      } finally {
-        if (!accepted && child.exitCode === null) await stopChild(child);
-      }
-    }
-  }
-  throw new Error(
-    `agentgateway did not accept a transparent HTTP configuration: ${JSON.stringify(attempts)}`,
+  const configPath = await materializePublishedGatewayConfig(
+    sandbox,
+    gatewayPort,
+    backendPort,
   );
+  const args = ["-f", configPath];
+  const child = spawn(binary, args, {
+    cwd: sandbox,
+    env: { ...process.env, RUST_LOG: "info" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stderrText = "";
+  child.stdoutText = "";
+  child.stdout?.on("data", (chunk) => {
+    child.stdoutText += String(chunk);
+  });
+  child.stderr?.on("data", (chunk) => {
+    child.stderrText += String(chunk);
+  });
+  try {
+    const probe = await waitForUrl(
+      new URL(`http://127.0.0.1:${gatewayPort}/healthz`),
+      child,
+      6000,
+    );
+    assert.ok(
+      probe.status < 500,
+      `published agentgateway config returned ${probe.status}`,
+    );
+    return {
+      child,
+      configPath,
+      candidate: "docs/agentgateway.transparent.example.yaml",
+      args,
+    };
+  } catch (error) {
+    await stopChild(child);
+    throw new Error(
+      `agentgateway rejected the published transparent HTTP configuration: ${
+        error instanceof Error ? error.message : String(error)
+      }\n${child.stderrText.slice(-3000)}`,
+    );
+  }
 }
 
 function parseProtocolPayload(text, contentType, expectedId) {
@@ -520,6 +577,26 @@ function normalizeToolResult(payload) {
   return result;
 }
 
+function assertSuccessfulToolResultContaining(result, expectedContent, label) {
+  assert.equal(result.response.status, 200, result.text);
+  assert.equal(
+    result.payload?.error,
+    undefined,
+    `${label} returned a JSON-RPC error: ${result.text}`,
+  );
+  const normalized = normalizeToolResult(result.payload);
+  assert.notEqual(
+    normalized?.isError,
+    true,
+    `${label} returned an MCP tool error: ${result.text}`,
+  );
+  assert.ok(
+    containsStringFragment(normalized, [expectedContent]),
+    `${label} did not return the fixture content: ${result.text}`,
+  );
+  return normalized;
+}
+
 async function callTool(client, baseUrl, name, argumentsValue) {
   return call(client, baseUrl, "tools/call", {
     name,
@@ -539,11 +616,19 @@ async function readRetryProof(client, baseUrl, tools) {
   });
   const first = await callTool(client, baseUrl, tool.name, args);
   const second = await callTool(client, baseUrl, tool.name, args);
-  assert.equal(first.response.status, 200, first.text);
-  assert.equal(second.response.status, 200, second.text);
+  const normalizedFirst = assertSuccessfulToolResultContaining(
+    first,
+    vaultFixtureContent,
+    "first fixture read",
+  );
+  const normalizedSecond = assertSuccessfulToolResultContaining(
+    second,
+    vaultFixtureContent,
+    "retried fixture read",
+  );
   assert.deepEqual(
-    normalizeToolResult(first.payload),
-    normalizeToolResult(second.payload),
+    normalizedFirst,
+    normalizedSecond,
     "a retried read changed its result",
   );
   return { tool: tool.name, args };
@@ -659,17 +744,6 @@ async function waitForActiveRequests(baseUrl, token, predicate, label) {
   throw new Error(`timed out waiting for upstream active requests: ${label}`);
 }
 
-async function waitForAdmission(baseUrl, token, predicate, label) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    const status = await statusSnapshot(baseUrl, token);
-    const admission = status.controls?.admission;
-    if (admission && predicate(admission)) return admission;
-    await sleep(50);
-  }
-  throw new Error(`timed out waiting for upstream admission state: ${label}`);
-}
-
 async function openEventStream(client, baseUrl, correlationId, incidentId) {
   const controller = new AbortController();
   const response = await Promise.race([
@@ -697,8 +771,8 @@ async function closeEventStream(stream) {
   await stream.response.body?.cancel().catch(() => undefined);
 }
 
-async function streamCancellationProof(client, baseUrl, logDir) {
-  const baseline = await statusSnapshot(baseUrl, client.token);
+async function streamCancellationProof(client, baseUrl, logDir, observerToken) {
+  const baseline = await statusSnapshot(baseUrl, observerToken);
   const baselineActive = baseline.controls.sessions.activeRequests;
   const correlationId = "gateway-e2e:cancel.1";
   const incidentId = "gateway-e2e-cancel-001";
@@ -710,14 +784,14 @@ async function streamCancellationProof(client, baseUrl, logDir) {
   );
   await waitForActiveRequests(
     baseUrl,
-    client.token,
+    observerToken,
     (active) => active >= baselineActive + 1,
     "gateway stream reached Optimike",
   );
   await closeEventStream(stream);
   await waitForActiveRequests(
     baseUrl,
-    client.token,
+    observerToken,
     (active) => active <= baselineActive,
     "gateway cancellation reached Optimike",
   );
@@ -763,6 +837,7 @@ async function sameSessionIdentityProof(owner, intruder, baseUrl) {
 
 function startBlockedProtocolRequest(client, baseUrl, id) {
   const encoder = new TextEncoder();
+  const abortController = new AbortController();
   let bodyController;
   const body = new ReadableStream({
     start(controller) {
@@ -782,59 +857,129 @@ function startBlockedProtocolRequest(client, baseUrl, id) {
     },
     body,
     duplex: "half",
+    signal: abortController.signal,
   });
+  void responsePromise.catch(() => undefined);
+  let released = false;
   return {
     responsePromise,
     release() {
-      bodyController.enqueue(encoder.encode("}"));
-      bodyController.close();
+      if (released) return;
+      released = true;
+      try {
+        bodyController.enqueue(encoder.encode("}"));
+        bodyController.close();
+      } catch {
+        // A rejected request may already have cancelled its upload stream.
+      }
+    },
+    abort() {
+      abortController.abort();
     },
   };
 }
 
 async function concurrentProof(a, b, baseUrl) {
-  const blockedA = startBlockedProtocolRequest(a, baseUrl, 1200);
-  const blockedB = startBlockedProtocolRequest(b, baseUrl, 1201);
-  await waitForAdmission(
-    baseUrl,
-    a.token,
-    (admission) => admission.inFlight >= 2,
-    "both slow request bodies reached Optimike",
+  const blocked = Array.from({ length: 6 }, (_, index) =>
+    startBlockedProtocolRequest(index % 2 === 0 ? a : b, baseUrl, 1200 + index),
   );
-  const rejected = await call(a, baseUrl, "ping");
-  assert.equal(
-    rejected.response.status,
-    503,
-    `synchronized overload was not rejected: ${rejected.text}`,
-  );
-  assert.ok(rejected.response.headers.get("retry-after"));
-  assert.ok(rejected.response.headers.get("x-optimike-backpressure"));
-  blockedA.release();
-  blockedB.release();
-  const completed = await Promise.all([
-    blockedA.responsePromise,
-    blockedB.responsePromise,
-  ]);
-  for (const response of completed) {
-    if (response.status !== 200) {
-      throw new Error(
-        `blocked request failed after release: ${response.status} ${await response.text()}`,
-      );
-    }
-    await response.arrayBuffer();
+  let proofResult;
+  let proofError;
+  try {
+    const rejected = await Promise.race([
+      new Promise((resolve, reject) => {
+        let completedWithoutOverload = 0;
+        for (const request of blocked) {
+          void request.responsePromise.then(
+            (response) => {
+              if (response.status === 503) {
+                resolve(response);
+                return;
+              }
+              completedWithoutOverload += 1;
+              if (completedWithoutOverload === blocked.length) {
+                reject(
+                  new Error(
+                    "all synchronized partial-body requests completed without overload",
+                  ),
+                );
+              }
+            },
+            () => {
+              completedWithoutOverload += 1;
+              if (completedWithoutOverload === blocked.length) {
+                reject(
+                  new Error(
+                    "all synchronized partial-body requests failed without an observable 503",
+                  ),
+                );
+              }
+            },
+          );
+        }
+      }),
+      sleep(5000).then(() => {
+        throw new Error("timed out waiting for synchronized HTTP overload");
+      }),
+    ]);
+    const rejectedText = await rejected.clone().text();
+    assert.equal(
+      rejected.status,
+      503,
+      `synchronized overload was not rejected: ${rejectedText}`,
+    );
+    assert.ok(
+      rejected.headers.get("retry-after"),
+      `overload lacked Retry-After: ${rejectedText}`,
+    );
+    assert.ok(
+      rejected.headers.get("x-optimike-backpressure"),
+      `overload lacked Optimike backpressure evidence: ${rejectedText}`,
+    );
+    proofResult = {
+      rejectedStatus: rejected.status,
+      retryAfter: rejected.headers.get("retry-after"),
+      reason: rejected.headers.get("x-optimike-backpressure"),
+    };
+  } catch (error) {
+    proofError = error;
   }
-  await waitForAdmission(
-    baseUrl,
-    a.token,
-    (admission) => admission.inFlight === 0,
-    "slow request bodies completed upstream",
-  );
+
+  let cleanupError;
+  try {
+    for (const request of blocked) request.release();
+    const results = await Promise.race([
+      Promise.allSettled(blocked.map((request) => request.responsePromise)),
+      sleep(5000).then(() => {
+        throw new Error("timed out cleaning synchronized HTTP requests");
+      }),
+    ]);
+    await Promise.all(
+      results
+        .filter((result) => result.status === "fulfilled")
+        .map((result) => result.value.body?.cancel().catch(() => undefined)),
+    );
+  } catch (error) {
+    cleanupError = error;
+  } finally {
+    for (const request of blocked) request.abort();
+  }
+
+  if (proofError && cleanupError) {
+    throw new AggregateError(
+      [proofError, cleanupError],
+      "gateway concurrency proof and cleanup both failed",
+    );
+  }
+  if (proofError) throw proofError;
+  if (cleanupError) throw cleanupError;
+  assert.ok(proofResult, "gateway concurrency proof produced no result");
+  return proofResult;
+}
+
+async function concurrencyRecoveryProof(a, baseUrl) {
   const recovered = await call(a, baseUrl, "ping");
   assert.equal(recovered.response.status, 200, recovered.text);
-  return {
-    rejectedStatus: rejected.response.status,
-    retryAfter: rejected.response.headers.get("retry-after"),
-  };
 }
 
 async function mutationReplayHarnessStatus(client, baseUrl, tools) {
@@ -842,24 +987,41 @@ async function mutationReplayHarnessStatus(client, baseUrl, tools) {
     (candidate) => candidate.name === "obsidian_update_note",
   );
   if (!tool) return { status: "tool-unavailable" };
-  const args = generatedArguments(tool.inputSchema, {
-    notePath: "Gateway.md",
-    content: "# Gateway\n\nmutation replay fixture\n",
-    idempotencyKey: "gateway-fixed-mutation-key",
-  });
+  const args = {
+    targetType: "filePath",
+    targetIdentifier: "Gateway.md",
+    modificationType: "wholeFile",
+    wholeFileMode: "append",
+    content: "\nmutation replay fixture\n",
+    createIfNeeded: false,
+    overwriteIfExists: false,
+    returnContent: false,
+  };
   const result = await callTool(client, baseUrl, tool.name, args);
-  const normalized = JSON.stringify(normalizeToolResult(result.payload));
-  if (
-    result.response.status !== 200 ||
-    /read.?only|live obsidian|required|mutation.*disabled|forbidden/i.test(
+  assert.equal(result.response.status, 200, result.text);
+  assert.equal(
+    result.payload?.error,
+    undefined,
+    `mutation probe returned a JSON-RPC error: ${result.text}`,
+  );
+  const normalizedResult = normalizeToolResult(result.payload);
+  const normalized = JSON.stringify(normalizedResult);
+  const readonlyPolicyDenied =
+    normalizedResult?.isError === true &&
+    /read.?only|write.?policy|writes?.*disabled|mutation.*disabled|forbidden.*write/i.test(
       normalized,
-    )
-  ) {
+    );
+  if (readonlyPolicyDenied) {
     return {
       status: "blocked-by-readonly-headless-profile",
       tool: tool.name,
       reusableArguments: args,
     };
+  }
+  if (normalizedResult?.isError === true) {
+    throw new Error(
+      `mutation probe failed before reaching an explicit readonly policy: ${result.text}`,
+    );
   }
   const replay = await callTool(client, baseUrl, tool.name, args);
   return {
@@ -873,9 +1035,39 @@ async function mutationReplayHarnessStatus(client, baseUrl, tools) {
   };
 }
 
+async function verifyGatewayBinary(binary, expectedSha256) {
+  assert.match(
+    expectedSha256,
+    /^[a-f0-9]{64}$/iu,
+    "AGENTGATEWAY_SHA256 must be an explicit 64-character SHA-256 digest",
+  );
+  const bytes = await readFile(binary);
+  const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+  assert.equal(
+    actualSha256,
+    expectedSha256.toLowerCase(),
+    `agentgateway binary checksum mismatch: expected ${expectedSha256.toLowerCase()}, received ${actualSha256}`,
+  );
+  return actualSha256;
+}
+
+async function resolveGatewayBinary(binary) {
+  return realpath(path.resolve(binary));
+}
+
 async function main() {
-  const gatewayBinary = process.env.AGENTGATEWAY_BIN;
-  assert.ok(gatewayBinary, "AGENTGATEWAY_BIN is required");
+  const configuredGatewayBinary = process.env.AGENTGATEWAY_BIN;
+  assert.ok(configuredGatewayBinary, "AGENTGATEWAY_BIN is required");
+  const gatewayBinary = await resolveGatewayBinary(configuredGatewayBinary);
+  const expectedGatewaySha256 = process.env.AGENTGATEWAY_SHA256;
+  assert.ok(
+    expectedGatewaySha256,
+    "AGENTGATEWAY_SHA256 is required and must match AGENTGATEWAY_BIN",
+  );
+  const gatewaySha256 = await verifyGatewayBinary(
+    gatewayBinary,
+    expectedGatewaySha256,
+  );
   const sandbox = await mkdtemp(
     path.join(os.tmpdir(), "optimike-agentgateway-"),
   );
@@ -892,7 +1084,7 @@ async function main() {
   await mkdir(logDir, { recursive: true });
   await writeFile(
     path.join(vaultPath, "Gateway.md"),
-    "# Gateway\n\nRead retry fixture.\n",
+    vaultFixtureContent,
     "utf8",
   );
   await writeFile(
@@ -914,7 +1106,8 @@ async function main() {
     OBSIDIAN_RUNTIME_MODE: "headless-readonly",
     OBSIDIAN_VAULT: vaultPath,
     OBSIDIAN_CACHE_SOURCE: "filesystem",
-    OBSIDIAN_ENABLE_CACHE: "false",
+    OBSIDIAN_SHARED_CACHE_DB_PATH: path.join(runArtifactsDir, "cache.sqlite"),
+    OBSIDIAN_ENABLE_CACHE: "true",
     MCP_WRITE_MODE: "readonly",
     SEMANTIC_SEARCH_PREWARM: "false",
     MCP_TRANSPORT_TYPE: "http",
@@ -938,9 +1131,10 @@ async function main() {
     MCP_HTTP_EXPENSIVE_MAX_IN_FLIGHT_PER_IDENTITY: "1",
     MCP_HTTP_MUTATION_MAX_IN_FLIGHT: "1",
     MCP_HTTP_MUTATION_MAX_IN_FLIGHT_PER_IDENTITY: "1",
-    MCP_HTTP_MAX_QUEUED: "8",
-    MCP_HTTP_MAX_QUEUED_PER_IDENTITY: "4",
+    MCP_HTTP_MAX_QUEUED: "0",
+    MCP_HTTP_MAX_QUEUED_PER_IDENTITY: "0",
     MCP_HTTP_QUEUE_WAIT_TIMEOUT_MS: "1000",
+    MCP_HTTP_REQUEST_BODY_READ_TIMEOUT_MS: "15000",
   };
   for (const variable of ttlVariables) backendEnv[variable] = String(ttlMs);
 
@@ -963,10 +1157,16 @@ async function main() {
   });
 
   let gateway;
+  let primaryError;
   try {
     await waitForUrl(
       new URL(`http://127.0.0.1:${backendPort}/healthz`),
       backend,
+    );
+    await waitForStatus(
+      new URL(`http://127.0.0.1:${backendPort}/readyz`),
+      backend,
+      200,
     );
     gateway = await startGateway(
       gatewayBinary,
@@ -977,6 +1177,9 @@ async function main() {
     const baseUrl = new URL(`http://127.0.0.1:${gatewayPort}`);
     const tokenA = await signToken("gateway-client-a");
     const tokenB = await signToken("gateway-client-b");
+    const cancellationObserverToken = await signToken(
+      "gateway-cancellation-observer",
+    );
     const clientA = await initializeClient(baseUrl, tokenA, "gateway-a", 1);
     const clientB = await initializeClient(baseUrl, tokenB, "gateway-b", 2);
 
@@ -986,8 +1189,14 @@ async function main() {
     const tools = toolList(listed.payload);
     assert.ok(tools.length > 0, "gateway returned no MCP tools");
     const read = await readRetryProof(clientA, baseUrl, tools);
-    await streamCancellationProof(clientA, baseUrl, logDir);
+    await streamCancellationProof(
+      clientA,
+      baseUrl,
+      logDir,
+      cancellationObserverToken,
+    );
     const concurrency = await concurrentProof(clientA, clientB, baseUrl);
+    await concurrencyRecoveryProof(clientA, baseUrl);
     const handoff = await externalHandoffProof({
       issuer: clientA,
       other: clientB,
@@ -1008,8 +1217,20 @@ async function main() {
     });
     assert.equal(status.status, 200);
     const statusText = await status.text();
-    assert.equal(statusText.includes(jwtSecret), false);
-    assert.equal(statusText.includes(externalRoot), false);
+    const statusPayload = JSON.parse(statusText);
+    assert.equal(
+      containsStringFragment(statusPayload, [jwtSecret]),
+      false,
+      "authenticated status disclosed the JWT secret",
+    );
+    assert.equal(
+      containsStringFragment(statusPayload, [
+        externalRoot,
+        physicalPathSentinel,
+      ]),
+      false,
+      "authenticated status disclosed the physical external-root path",
+    );
     await waitForCompletionLog(
       logDir,
       "gateway-e2e:status.1",
@@ -1025,6 +1246,7 @@ async function main() {
       schemaVersion: 1,
       gateway: "agentgateway",
       upstreamCommit: process.env.AGENTGATEWAY_COMMIT ?? "unknown",
+      binarySha256: gatewaySha256,
       selectedConfig: gateway.candidate,
       invocationArgs: gateway.args,
       directBackendPort: backendPort,
@@ -1064,11 +1286,41 @@ async function main() {
       );
     }
     console.log(JSON.stringify(report, null, 2));
-  } finally {
-    await stopChild(gateway?.child);
-    await stopChild(backend);
-    await rm(sandbox, { recursive: true, force: true });
-    await rm(runArtifactsDir, { recursive: true, force: true });
+  } catch (error) {
+    primaryError = error;
+  }
+
+  const teardownErrors = [];
+  for (const [label, action] of [
+    ["gateway process", () => stopChild(gateway?.child)],
+    ["backend process", () => stopChild(backend)],
+    ["gateway sandbox", () => rm(sandbox, { recursive: true, force: true })],
+    [
+      "gateway run artifacts",
+      () => rm(runArtifactsDir, { recursive: true, force: true }),
+    ],
+  ]) {
+    try {
+      await action();
+    } catch (error) {
+      teardownErrors.push(
+        new Error(`failed to clean ${label}`, { cause: error }),
+      );
+    }
+  }
+
+  if (primaryError && teardownErrors.length > 0) {
+    throw new AggregateError(
+      [primaryError, ...teardownErrors],
+      "gateway compatibility proof failed and teardown also reported errors",
+    );
+  }
+  if (primaryError) throw primaryError;
+  if (teardownErrors.length > 0) {
+    throw new AggregateError(
+      teardownErrors,
+      "gateway compatibility teardown failed",
+    );
   }
 }
 
