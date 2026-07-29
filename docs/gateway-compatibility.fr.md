@@ -103,7 +103,9 @@ Pour un pilote distant, exiger en plus :
 
 - terminaison TLS avec frontière de confiance revue ;
 - réseau privé ou allowlist d’ingress explicite ;
-- vérification par Optimike de l’issuer, de l’audience et des scopes JWT ;
+- mode OAuth conforme afin qu’Optimike valide l’issuer, l’audience et les
+  scopes. Le mode JWT à secret partagé utilisé par le harness loopback valide
+  la signature et les scopes, mais n’impose ni issuer ni audience ;
 - aucune confiance dans `X-Forwarded-For` sans proxy immédiat explicitement
   approuvé ;
 - timeouts explicites et aucun retry automatique de mutation ;

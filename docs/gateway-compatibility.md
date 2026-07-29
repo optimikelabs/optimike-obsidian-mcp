@@ -100,7 +100,9 @@ For a remote pilot, additionally require:
 
 - TLS termination with a reviewed trust boundary;
 - a private network or explicit ingress allowlist;
-- bearer/JWT issuer, audience and scope validation by Optimike;
+- standards-compliant OAuth mode so Optimike validates issuer, audience and
+  scopes. The shared-secret JWT mode used by the loopback harness validates the
+  signature and scopes, but does not enforce issuer or audience;
 - no trust in `X-Forwarded-For` unless the immediate proxy is explicitly
   configured as trusted;
 - explicit timeouts and no automatic mutation retries;

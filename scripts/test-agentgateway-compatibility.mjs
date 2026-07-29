@@ -28,6 +28,42 @@ const fixtureRelativePath = "artifact.txt";
 const fixtureContent = "Optimike gateway handoff fixture\n";
 const physicalPathSentinel = "PHYSICAL-GATEWAY-FIXTURE-PATH";
 
+async function readAllLogs(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const chunks = [];
+  for (const entry of entries) {
+    const candidate = path.join(directory, entry.name);
+    if (entry.isDirectory()) chunks.push(await readAllLogs(candidate));
+    else chunks.push(await readFile(candidate, "utf8").catch(() => ""));
+  }
+  return chunks.join("\n");
+}
+
+async function waitForCompletionLog(
+  logDir,
+  correlationId,
+  incidentId,
+  timeoutMs = 5000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const logs = await readAllLogs(logDir);
+    const completion = logs
+      .split(/\r?\n/u)
+      .find(
+        (line) =>
+          line.includes("HTTP request completed.") &&
+          line.includes(correlationId) &&
+          line.includes(incidentId),
+      );
+    if (completion) return completion;
+    await sleep(50);
+  }
+  throw new Error(
+    `backend did not log forwarded correlation identifiers ${correlationId}/${incidentId}`,
+  );
+}
+
 async function unusedPort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -595,7 +631,46 @@ async function externalHandoffProof({
   return { tool: tool.name, args: first.args };
 }
 
-async function streamCancellationProof(client, baseUrl) {
+async function statusSnapshot(baseUrl, token, headers = {}) {
+  const response = await fetch(new URL("/statusz", baseUrl), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...headers,
+    },
+  });
+  if (response.status !== 200) {
+    throw new Error(
+      `authenticated status failed: ${response.status} ${await response.text()}`,
+    );
+  }
+  return response.json();
+}
+
+async function waitForActiveRequests(baseUrl, token, predicate, label) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const status = await statusSnapshot(baseUrl, token);
+    const activeRequests = status.controls?.sessions?.activeRequests;
+    if (typeof activeRequests === "number" && predicate(activeRequests)) {
+      return activeRequests;
+    }
+    await sleep(50);
+  }
+  throw new Error(`timed out waiting for upstream active requests: ${label}`);
+}
+
+async function waitForAdmission(baseUrl, token, predicate, label) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const status = await statusSnapshot(baseUrl, token);
+    const admission = status.controls?.admission;
+    if (admission && predicate(admission)) return admission;
+    await sleep(50);
+  }
+  throw new Error(`timed out waiting for upstream admission state: ${label}`);
+}
+
+async function openEventStream(client, baseUrl, correlationId, incidentId) {
   const controller = new AbortController();
   const response = await Promise.race([
     fetch(new URL("/mcp", baseUrl), {
@@ -604,6 +679,8 @@ async function streamCancellationProof(client, baseUrl) {
         Accept: "text/event-stream",
         Authorization: `Bearer ${client.token}`,
         "Mcp-Session-Id": client.sessionId,
+        "X-Correlation-Id": correlationId,
+        "X-Incident-Id": incidentId,
       },
       signal: controller.signal,
     }),
@@ -612,8 +689,39 @@ async function streamCancellationProof(client, baseUrl) {
     }),
   ]);
   assert.equal(response.status, 200);
-  controller.abort();
-  await response.body?.cancel().catch(() => undefined);
+  return { controller, response };
+}
+
+async function closeEventStream(stream) {
+  stream.controller.abort();
+  await stream.response.body?.cancel().catch(() => undefined);
+}
+
+async function streamCancellationProof(client, baseUrl, logDir) {
+  const baseline = await statusSnapshot(baseUrl, client.token);
+  const baselineActive = baseline.controls.sessions.activeRequests;
+  const correlationId = "gateway-e2e:cancel.1";
+  const incidentId = "gateway-e2e-cancel-001";
+  const stream = await openEventStream(
+    client,
+    baseUrl,
+    correlationId,
+    incidentId,
+  );
+  await waitForActiveRequests(
+    baseUrl,
+    client.token,
+    (active) => active >= baselineActive + 1,
+    "gateway stream reached Optimike",
+  );
+  await closeEventStream(stream);
+  await waitForActiveRequests(
+    baseUrl,
+    client.token,
+    (active) => active <= baselineActive,
+    "gateway cancellation reached Optimike",
+  );
+  await waitForCompletionLog(logDir, correlationId, incidentId);
   const ping = await call(client, baseUrl, "ping");
   assert.equal(ping.response.status, 200, ping.text);
 }
@@ -653,20 +761,80 @@ async function sameSessionIdentityProof(owner, intruder, baseUrl) {
   assert.equal(result.response.status, 404);
 }
 
+function startBlockedProtocolRequest(client, baseUrl, id) {
+  const encoder = new TextEncoder();
+  let bodyController;
+  const body = new ReadableStream({
+    start(controller) {
+      bodyController = controller;
+      controller.enqueue(
+        encoder.encode(`{"jsonrpc":"2.0","id":${id},"method":"ping"`),
+      );
+    },
+  });
+  const responsePromise = fetch(new URL("/mcp", baseUrl), {
+    method: "POST",
+    headers: {
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${client.token}`,
+      "Mcp-Session-Id": client.sessionId,
+    },
+    body,
+    duplex: "half",
+  });
+  return {
+    responsePromise,
+    release() {
+      bodyController.enqueue(encoder.encode("}"));
+      bodyController.close();
+    },
+  };
+}
+
 async function concurrentProof(a, b, baseUrl) {
-  const calls = Array.from({ length: 24 }, (_, index) =>
-    call(index % 2 === 0 ? a : b, baseUrl, "ping"),
+  const blockedA = startBlockedProtocolRequest(a, baseUrl, 1200);
+  const blockedB = startBlockedProtocolRequest(b, baseUrl, 1201);
+  await waitForAdmission(
+    baseUrl,
+    a.token,
+    (admission) => admission.inFlight >= 2,
+    "both slow request bodies reached Optimike",
   );
-  const results = await Promise.all(calls);
-  for (const result of results) {
-    assert.ok(
-      [200, 429, 503].includes(result.response.status),
-      `unexpected concurrent status ${result.response.status}: ${result.text}`,
-    );
-    if (result.response.status === 429 || result.response.status === 503) {
-      assert.ok(result.response.headers.get("retry-after"));
+  const rejected = await call(a, baseUrl, "ping");
+  assert.equal(
+    rejected.response.status,
+    503,
+    `synchronized overload was not rejected: ${rejected.text}`,
+  );
+  assert.ok(rejected.response.headers.get("retry-after"));
+  assert.ok(rejected.response.headers.get("x-optimike-backpressure"));
+  blockedA.release();
+  blockedB.release();
+  const completed = await Promise.all([
+    blockedA.responsePromise,
+    blockedB.responsePromise,
+  ]);
+  for (const response of completed) {
+    if (response.status !== 200) {
+      throw new Error(
+        `blocked request failed after release: ${response.status} ${await response.text()}`,
+      );
     }
+    await response.arrayBuffer();
   }
+  await waitForAdmission(
+    baseUrl,
+    a.token,
+    (admission) => admission.inFlight === 0,
+    "slow request bodies completed upstream",
+  );
+  const recovered = await call(a, baseUrl, "ping");
+  assert.equal(recovered.response.status, 200, recovered.text);
+  return {
+    rejectedStatus: rejected.response.status,
+    retryAfter: rejected.response.headers.get("retry-after"),
+  };
 }
 
 async function mutationReplayHarnessStatus(client, baseUrl, tools) {
@@ -818,8 +986,8 @@ async function main() {
     const tools = toolList(listed.payload);
     assert.ok(tools.length > 0, "gateway returned no MCP tools");
     const read = await readRetryProof(clientA, baseUrl, tools);
-    await streamCancellationProof(clientA, baseUrl);
-    await concurrentProof(clientA, clientB, baseUrl);
+    await streamCancellationProof(clientA, baseUrl, logDir);
+    const concurrency = await concurrentProof(clientA, clientB, baseUrl);
     const handoff = await externalHandoffProof({
       issuer: clientA,
       other: clientB,
@@ -842,6 +1010,11 @@ async function main() {
     const statusText = await status.text();
     assert.equal(statusText.includes(jwtSecret), false);
     assert.equal(statusText.includes(externalRoot), false);
+    await waitForCompletionLog(
+      logDir,
+      "gateway-e2e:status.1",
+      "gateway-e2e-001",
+    );
 
     const selectedConfigOut = process.env.AGENTGATEWAY_SELECTED_CONFIG_OUT;
     if (selectedConfigOut) {
@@ -861,7 +1034,10 @@ async function main() {
         sessionHeader: "passed",
         verifiedIdentityIsolation: "passed",
         sessionIdentityBinding: "passed",
-        concurrentRequests: "passed",
+        concurrentRequests: {
+          status: "passed-with-synchronized-overload",
+          ...concurrency,
+        },
         retryAfterPropagation: "passed",
         readRetry: { status: "passed", tool: read.tool },
         streamCancellation: "passed",
@@ -875,7 +1051,7 @@ async function main() {
         physicalPathDisclosure: "not-observed",
         mutationReplay: mutation,
         quotaIsolation: quota,
-        authenticatedStatusAndCustomHeaders: "passed",
+        authenticatedStatusAndCorrelationHeaders: "passed",
       },
     };
     const reportOut = process.env.AGENTGATEWAY_REPORT_OUT;
