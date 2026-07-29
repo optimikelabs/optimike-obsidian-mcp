@@ -2,6 +2,8 @@
 
 French version: [README.fr.md](README.fr.md)
 
+![Map of the Optimike Obsidian MCP documentation by reader need](assets/readme/documentation-hub.en.svg)
+
 This page routes readers to one authoritative document for each question.
 French operator guides are linked alongside their English equivalents.
 

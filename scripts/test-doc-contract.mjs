@@ -5,7 +5,7 @@ import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
-const excludedDirectories = new Set([".git", "dist", "node_modules"]);
+const excludedDirectories = new Set([".git", ".tmp", "dist", "node_modules"]);
 
 async function markdownFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

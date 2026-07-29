@@ -4,6 +4,8 @@ French version: [runtime-capability-matrix.fr.md](runtime-capability-matrix.fr.m
 
 Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Headless Server Profile](headless-server-profile.md), [MCP Routing Guide](mcp-routing-guide.md), [External Roots Setup](external-roots-setup.md)
 
+![Runtime profile chooser for live, hybrid and headless Optimike Obsidian MCP deployments](assets/readme/runtime-profiles.en.svg)
+
 Optimike Obsidian MCP has five runtime contracts. Headless modes run over a synchronized Markdown vault. They do not run Obsidian Desktop, load community plugins, expose the command palette, or provide live UI state.
 
 ## Recommended Use

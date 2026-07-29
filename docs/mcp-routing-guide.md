@@ -7,6 +7,8 @@ Related docs: [README](../README.md), [Operations](../OPERATIONS.md),
 [Headless Server Profile](headless-server-profile.md), and
 [External document roots](external-roots-setup.md)
 
+![Decision path for routing agent work through Optimike Obsidian MCP](assets/readme/routing-guide.en.svg)
+
 This guide helps agents choose the right layer for Obsidian work.
 
 ## Default Decision

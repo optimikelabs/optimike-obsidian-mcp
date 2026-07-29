@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ticket flow.
 - Bilingual OSS gateway audit selecting agentgateway for the first pilot while
   keeping authorization, scopes, CAS, idempotency and rollback in Optimike MCP.
+- Generated bilingual SVG explainers for the product overview, documentation
+  hub, operations, security, runtime profiles and agent routing, with a
+  deterministic generator and visual-contract tests.
 
 ### Fixed
 
@@ -53,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Canvas, move and admin tools to the modes that actually register them.
 - External-root documentation now distinguishes the default read/handoff
   contract from the separately gated local-stdio move/repair transaction.
+- README entrypoints now expose the local move/repair exception without
+  presenting HTTP handoff or external roots as a generic mutation surface.
 - The bundled Inspector HTTP example is now explicitly development-only instead
   of presenting an unused JWT secret as authentication.
 - HTTP and Inspector launch scripts now use cross-platform Node wrappers.

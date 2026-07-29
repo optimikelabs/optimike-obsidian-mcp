@@ -5,25 +5,25 @@ Hub documentaire : [docs/README.fr.md](docs/README.fr.md)
 Exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
 Sécurité : [SECURITY.fr.md](SECURITY.fr.md)
 
-![Optimike Obsidian MCP hero](docs/assets/hero-optimike-obsidian-mcp.png)
+![Vue d’ensemble d’Optimike Obsidian MCP entre clients agentiques, Obsidian et documents externes gouvernés](docs/assets/readme/overview.fr.svg)
 
 Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle
 gouvernée au-dessus d’un coffre Obsidian. Il réunit opérations Desktop,
 fonctionnement headless résilient, Tasks et Operon, Bases, recherche
-sémantique, observabilité runtime et accès explicite en lecture seule à des
+sémantique, observabilité runtime et accès explicitement gouverné à des
 documents autorisés hors du coffre.
 
 ## Carte des capacités
 
-| Domaine                 | Ce que fournit le MCP                                                | Dépendance principale                                  |
-| ----------------------- | -------------------------------------------------------------------- | ------------------------------------------------------ |
-| Notes                   | Lecture, liste, recherche, mise à jour, frontmatter et tags          | Coffre ; Local REST API pour la surface live complète  |
-| Bases et Canvas         | Requêtes/écritures Bases, validation et helpers Canvas bornés        | Bases Bridge pour Bases en live                        |
-| Tâches                  | Lecture/requête Tasks + 13 outils Operon gouvernés                   | Tasks ; Kairélys/Operon Bridge pour les mutations live |
-| Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable        | `.smart-env` + embedding Ollama ou OpenAI              |
-| Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions | Filesystem local                                       |
-| Documents externes      | Racines logiques, liste/stat/hash/lecture et handoff vérifié         | Allowlist locale à la machine                          |
-| Administration headless | Opérations bornées sur notes, métadonnées et fichiers                | Coffre copié ou dédié recommandé                       |
+| Domaine                 | Ce que fournit le MCP                                                | Dépendance principale                                 |
+| ----------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- |
+| Notes                   | Lecture, liste, recherche, mise à jour, frontmatter et tags          | Coffre ; Local REST API pour la surface live complète |
+| Bases et Canvas         | Requêtes/écritures Bases, validation et helpers Canvas bornés        | Bases Bridge pour Bases en live                       |
+| Tâches                  | Lecture/requête Tasks + 13 outils Operon gouvernés                   | Lectures Tasks ; Kairélys/Public API v1 pour muter    |
+| Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable        | `.smart-env` + embedding Ollama ou OpenAI             |
+| Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions | Filesystem local                                      |
+| Documents externes      | Lectures/handoff gouvernés + move local opt-in avec réparation       | Allowlist ; stdio local pour le move                  |
+| Administration headless | Opérations bornées sur notes, métadonnées et filesystem du coffre    | Mode guarded/filesystem sur un coffre copié           |
 
 Le registre actuel des outils vit dans
 [Surface des outils](docs/obsidian_mcp_tools_spec.md). Leur disponibilité dépend
@@ -35,7 +35,7 @@ des écritures.
 
 | Besoin                                   | Profil recommandé                              | Posture                     |
 | ---------------------------------------- | ---------------------------------------------- | --------------------------- |
-| Codex ou autre client local              | `dist/stdio-proxy.js`                          | Profil local par défaut     |
+| Codex (vérifié) ou client stdio local    | `dist/stdio-proxy.js`                          | Profil local par défaut     |
 | Automatisation Obsidian Desktop          | `live` ou `hybrid` via le proxy stdio          | Desktop de confiance        |
 | CI, serveur ou copie synchronisée        | `headless-readonly`                            | Profil headless le plus sûr |
 | Écritures bornées sur coffre copié/dédié | `headless-guarded`, puis `headless-filesystem` | Opt-in explicite            |
@@ -106,16 +106,25 @@ Les snapshots Operon obsolètes restent toujours en lecture seule.
 
 ## Racines documentaires externes
 
-Les racines externes sont désactivées par défaut. Elles forment un courtier
-d’autorisation en lecture seule, pas un index externe, un moteur de
-synchronisation ou une sauvegarde.
+Les racines externes sont désactivées par défaut. Leurs lectures et handoffs
+ordinaires forment un courtier d’autorisation default-deny, pas un index
+externe, un moteur de synchronisation ou une sauvegarde.
 
 Le même outil `external_handoff` choisit une livraison adaptée au transport :
 
 - le stdio local retourne un `local_path` vérifié et temporaire ;
 - le HTTP direct authentifié peut retourner un `http_ticket` opt-in, lié à
   l’identité et à usage unique ;
-- aucun mode ne divulgue le chemin source ni n’autorise de mutation externe.
+- aucun mode de livraison ne divulgue le chemin source ni n’autorise une
+  mutation.
+
+Une seule mutation volontairement étroite existe hors du parcours de handoff :
+le stdio local via `headless-filesystem`, sur un coffre copié ou dédié, peut
+déplacer ou renommer un fichier régulier dans une même racine opt-in et réparer
+les références ÉLYSIA exactes. Elle exige inventaire et plan durable, gates
+d’écriture explicites, préconditions de hash/CAS, journal et rollback
+compensatoire. Elle n’est pas exposée en HTTP direct et n’ajoute ni création,
+ni remplacement, ni suppression, ni upload, ni synchronisation.
 
 Le cœur MCP n’embarque pas de moteur PDF, Office ou OCR. Le client appelant
 assure l’extraction binaire et vérifie taille et SHA-256.

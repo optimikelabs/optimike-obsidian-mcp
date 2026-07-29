@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Documentation, routed by intent</title>
+  <desc id="description">Start with the question. Land in the right contract.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B87333"/>
+    </marker>
+  </defs>
+  <style>
+    .eyebrow,.meta,.pill{font-family:"JetBrains Mono","SFMono-Regular",Consolas,monospace;font-weight:700;letter-spacing:1.2px}
+    .title{font-family:Newsreader,Georgia,serif;font-size:45px;font-weight:700;fill:#1A1A1A}
+    .sectionTitle{font-family:Newsreader,Georgia,serif;font-size:34px;font-weight:700;fill:#F7F5F0}
+    .subtitle{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:19px;fill:#2E5A7C}
+    .eyebrow{font-size:14px;fill:#B87333}
+    .meta{font-size:13px;fill:#2E5A7C}
+    .label{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:18px;font-weight:700;fill:#1A1A1A}
+    .body{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:17px;fill:#1A1A1A}
+    .small{font-family:"DM Sans",Inter,Arial,sans-serif;font-size:15px;fill:#2E5A7C}
+    .pill{font-size:12px}
+    .inverse{fill:#F7F5F0}
+    .accent{fill:#B87333}
+    .positive{fill:#4A7C59}
+  </style>
+  <rect width="1200" height="630" fill="#F7F5F0"/>
+  <rect x="0" y="0" width="16" height="630" fill="#B87333"/>
+  <text x="54" y="40" class="eyebrow" text-anchor="start">OPTIMIKE · OBSIDIAN MCP</text>
+  <text x="1148" y="40" class="eyebrow" text-anchor="end">02</text>
+  <text x="54" y="92" class="title" text-anchor="start">Documentation, routed by intent</text>
+  <text x="54" y="122" class="subtitle" text-anchor="start">Start with the question. Land in the right contract.</text>
+
+  <rect x="54" y="158" width="1094" height="70" rx="20" fill="#131316" stroke="#131316" stroke-width="2"/>
+  <text x="86" y="185" class="eyebrow" text-anchor="start">START HERE</text>
+  <text x="86" y="210" class="label inverse" text-anchor="start">Overview</text>
+  <line x1="600" y1="228" x2="600" y2="268" stroke="#B87333" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="54" y="290" class="meta" text-anchor="start">UNDERSTAND</text>
+  <text x="426" y="290" class="meta" text-anchor="start">OPERATE</text>
+  <text x="798" y="290" class="meta" text-anchor="start">PROTECT</text>
+  <rect x="54" y="306" width="340" height="176" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <rect x="426" y="306" width="340" height="176" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <rect x="798" y="306" width="350" height="176" rx="18" fill="#EFEDE8" stroke="#E0DCD4" stroke-width="2"/>
+  <rect x="78" y="332" width="46" height="34" rx="17" fill="#B87333" stroke="#B87333" stroke-width="0"/>
+  <text x="101" y="354" class="pill" fill="#F7F5F0" text-anchor="middle">01</text>
+  <text x="78" y="396" class="label" text-anchor="start">Runtime profiles</text>
+  <text x="78" y="430" class="body" text-anchor="start">Routing guide</text>
+  <rect x="450" y="332" width="46" height="34" rx="17" fill="#2E5A7C" stroke="#2E5A7C" stroke-width="0"/>
+  <text x="473" y="354" class="pill" fill="#F7F5F0" text-anchor="middle">02</text>
+  <text x="450" y="396" class="label" text-anchor="start">Operations</text>
+  <text x="450" y="430" class="body" text-anchor="start">External roots</text>
+  <rect x="822" y="332" width="46" height="34" rx="17" fill="#4A7C59" stroke="#4A7C59" stroke-width="0"/>
+  <text x="845" y="354" class="pill" fill="#F7F5F0" text-anchor="middle">03</text>
+  <text x="822" y="396" class="label" text-anchor="start">Security</text>
+  <text x="822" y="430" class="body" text-anchor="start">Routing guide</text>
+  <rect x="310" y="514" width="580" height="48" rx="24" fill="#F7F5F0" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="600" y="545" class="small" text-anchor="middle">Six focused guides · one runtime truth</text>
+  <line x1="54" y1="590" x2="1148" y2="590" stroke="#E0DCD4" stroke-width="2"/>
+  <text x="54" y="614" class="meta" text-anchor="start">optimike-obsidian-mcp</text>
+  <text x="1148" y="614" class="meta" text-anchor="end">EN</text>
+</svg>

@@ -2,6 +2,8 @@
 
 English version: [README.md](README.md)
 
+![Carte de la documentation Optimike Obsidian MCP selon le besoin du lecteur](assets/readme/documentation-hub.fr.svg)
+
 Cette page route chaque lecteur vers un document faisant autorité pour sa
 question.
 

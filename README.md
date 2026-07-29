@@ -5,12 +5,12 @@ Documentation hub: [docs/README.md](docs/README.md)
 Operations: [OPERATIONS.md](OPERATIONS.md)
 Security: [SECURITY.md](SECURITY.md)
 
-![Optimike Obsidian MCP hero](docs/assets/hero-optimike-obsidian-mcp.png)
+![Overview of Optimike Obsidian MCP between agent clients, Obsidian and governed external documents](docs/assets/readme/overview.en.svg)
 
 Optimike Obsidian MCP gives MCP clients a governed operational surface over an
 Obsidian vault. It combines live Desktop operations, resilient headless modes,
 structured task and Bases support, semantic search, runtime observability, and
-explicit read-only access to configured documents outside the vault.
+explicitly governed access to configured documents outside the vault.
 
 ## Capability map
 
@@ -18,11 +18,11 @@ explicit read-only access to configured documents outside the vault.
 | ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------- |
 | Notes                   | Read, list, search, update, frontmatter and tags                       | Vault; Local REST API for the full live surface    |
 | Bases and Canvas        | Bases query/write tools, format validation and bounded Canvas helpers  | Bases Bridge for live Bases                        |
-| Tasks                   | Obsidian Tasks-compatible list/query plus 13 governed Operon tools     | Tasks; Kairélys/Operon Bridge for live mutations   |
+| Tasks                   | Obsidian Tasks-compatible list/query plus 13 governed Operon tools     | Tasks reads; Kairélys/Public API v1 for mutations  |
 | Semantic search         | Smart Connections index search with durable metadata cache             | `.smart-env` plus Ollama or OpenAI query embedding |
 | Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions | Local filesystem                                   |
-| External documents      | Logical roots, list/stat/hash/read and explicit verified handoff       | Machine-local allowlist                            |
-| Headless administration | Guarded note, metadata and filesystem operations                       | Copied or dedicated vault recommended              |
+| External documents      | Governed reads/handoff plus opt-in local move with exact link repair   | Allowlist; local stdio for move                    |
+| Headless administration | Guarded note, metadata and vault-filesystem operations                 | Guarded/filesystem mode on a copied vault          |
 
 The current tool registry is documented in
 [Tool Surface](docs/obsidian_mcp_tools_spec.md). Availability varies by runtime
@@ -33,7 +33,7 @@ before enabling writes.
 
 | Need                                       | Recommended profile                                     | Posture                 |
 | ------------------------------------------ | ------------------------------------------------------- | ----------------------- |
-| Codex or another local client              | `dist/stdio-proxy.js`                                   | Default local profile   |
+| Codex (verified) or a local stdio client   | `dist/stdio-proxy.js`                                   | Default local profile   |
 | Obsidian Desktop automation                | `live` or `hybrid` through the stdio proxy              | Trusted Desktop         |
 | CI, server or synchronized vault copy      | `headless-readonly`                                     | Safest headless profile |
 | Bounded writes on a copied/dedicated vault | `headless-guarded` then `headless-filesystem`           | Explicit opt-in         |
@@ -104,16 +104,24 @@ Stale Operon snapshots remain read-only.
 
 ## External document roots
 
-External roots are disabled by default. They are a read-only authorization
-broker, not an external index, sync engine or backup system.
+External roots are disabled by default. Their ordinary reads and handoffs form
+a default-deny authorization broker, not an external index, sync engine or
+backup system.
 
 The same `external_handoff` tool selects a transport-aware delivery:
 
 - local stdio returns a verified short-lived `local_path`;
 - authenticated direct HTTP may return an opt-in, identity-bound, single-use
   `http_ticket`;
-- neither mode discloses the physical source path or authorizes external
+- neither delivery mode discloses the physical source path or authorizes a
   mutation.
+
+One deliberately narrow mutation exists outside the handoff path: local stdio
+through `headless-filesystem` on a copied or dedicated vault can move or rename
+one regular file within the same opted-in root and repair exact ÉLYSIA
+references. It requires an inventory and durable plan, explicit write gates,
+hash/CAS preconditions, a journal and compensating rollback. It is not exposed
+over direct HTTP and does not add create, replace, delete, upload or sync.
 
 The MCP core does not embed PDF, Office or OCR engines. The calling client owns
 binary extraction and must verify size and SHA-256.

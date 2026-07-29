@@ -2,7 +2,7 @@
 
 French version: [OPERATIONS.fr.md](OPERATIONS.fr.md)
 
-![Optimike Obsidian MCP runtime architecture](docs/assets/runtime-architecture-optimike-obsidian-mcp.png)
+![Optimike Obsidian MCP operating model with a lightweight client proxy and shared backend](docs/assets/readme/operations.en.svg)
 
 This guide explains how the server actually runs, what it depends on, how Tasks and semantic search work, and what keeps the runtime memory footprint low.
 
