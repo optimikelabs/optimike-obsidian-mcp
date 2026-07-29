@@ -145,6 +145,15 @@ async function rateLimitResponse(
   decision: RateLimitDecision,
 ): Promise<Response> {
   const requestState = getHttpRequestState(c.req.raw);
+  const preAuthRejection = scope !== "client-identity";
+  const rpcId = preAuthRejection ? null : await requestJsonRpcId(c);
+  if (preAuthRejection && c.req.method === "POST") {
+    // Source limiting runs before the request-body guard. Never clone or parse
+    // an untrusted body on this rejection path; cancel it instead.
+    void c.req.raw.body
+      ?.cancel("pre-authentication source rate limit")
+      .catch(() => undefined);
+  }
   c.header("Retry-After", String(decision.retryAfterSeconds));
   c.header("RateLimit-Limit", String(decision.limit));
   c.header("RateLimit-Remaining", String(decision.remaining));
@@ -177,7 +186,7 @@ async function rateLimitResponse(
             ? "Rate-limit state capacity is temporarily exhausted."
             : "Rate limit exceeded.",
       },
-      id: await requestJsonRpcId(c),
+      id: rpcId,
     },
     429,
   );
@@ -596,11 +605,11 @@ export async function startHttpTransport(
     });
   });
 
-  // The raw POST body is bounded before any rejection path that may inspect
-  // its JSON-RPC id (rate limit or authentication error handling).
-  app.use(MCP_ENDPOINT_PATH, httpRequestBodyGuardMiddleware);
   app.use(MCP_ENDPOINT_PATH, preAuthRateLimitMiddleware);
   app.use(externalHandoffEndpoint, preAuthRateLimitMiddleware);
+  // Source limiting must happen before buffering. Its 429 path never reads the
+  // body; this guard then protects authentication and identity-quota errors.
+  app.use(MCP_ENDPOINT_PATH, httpRequestBodyGuardMiddleware);
   app.use(MCP_ENDPOINT_PATH, authMiddleware);
   app.use(externalHandoffEndpoint, authMiddleware);
   app.use(MCP_ENDPOINT_PATH, authenticatedIdentityRateLimitMiddleware);

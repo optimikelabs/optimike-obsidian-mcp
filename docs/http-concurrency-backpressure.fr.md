@@ -36,9 +36,12 @@ Toutes les valeurs sont validées avant l’ouverture du listener HTTP. Une limi
 
 Une file de taille zéro est possible uniquement lorsque les deux limites de file sont à zéro. Toute saturation produit alors un refus déterministe immédiat.
 
-Avant que l’authentification ou les deux couches de quota puissent lire l’id
-JSON-RPC, une garde transport ne lit jamais plus que la taille configurée. Un
-corps déclaré ou streamé au-delà de la limite est refusé en HTTP `413`. Un corps
+Le quota par IP source s’applique avant toute mise en mémoire du corps. Son
+refus pré-authentification en `429` utilise l’id JSON-RPC `null`, ne clone ni ne
+parse le corps non fiable et annule le flux entrant. Après ce contrôle source,
+une garde transport ne lit jamais plus que la taille configurée avant que
+l’authentification ou le quota d’identité puisse lire l’id JSON-RPC. Un corps
+déclaré ou streamé au-delà de la limite est refusé en HTTP `413`. Un corps
 chunked qui ne se termine pas avant le deadline serveur est annulé et refusé en
 HTTP `408`.
 

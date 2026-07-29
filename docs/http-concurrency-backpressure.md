@@ -36,11 +36,13 @@ All values are validated before the HTTP listener starts. Per-identity limits ca
 
 A zero queue is allowed only when both queue limits are zero. This produces immediate deterministic rejection whenever capacity is unavailable.
 
-Before authentication or either rate-limit layer can inspect a JSON-RPC id, a
-transport guard reads at most the configured body limit. Declared and streamed
-bodies above the limit are rejected with HTTP `413`. A chunked body that does
-not complete before the server deadline is cancelled and rejected with HTTP
-`408`.
+The source-IP limiter runs before any request-body buffering. Its pre-auth
+`429` response uses JSON-RPC `id: null`, never clones or parses the untrusted
+body, and cancels the incoming stream. After that source check, a transport
+guard reads at most the configured body limit before authentication or the
+identity quota can inspect a JSON-RPC id. Declared and streamed bodies above the
+limit are rejected with HTTP `413`. A chunked body that does not complete
+before the server deadline is cancelled and rejected with HTTP `408`.
 
 After identity verification, `POST` body inspection still holds a standard
 admission slot. The same byte limit and server deadline apply to that admitted
