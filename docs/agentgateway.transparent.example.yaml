@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+#
+# Transparent access-plane example for Optimike MCP.
+# Keep Optimike authentication enabled. Do not add automatic mutation retries.
+gateways:
+  optimike:
+    # Replaced with an ephemeral loopback port by the compatibility harness.
+    port: 3100
+    protocol: HTTP
+
+routes:
+  - name: optimike-complete-http-surface
+    gateways: [optimike]
+    matches:
+      - path:
+          pathPrefix: /
+    backends:
+      # Replaced with the ephemeral Optimike backend by the harness.
+      - host: 127.0.0.1:3101

@@ -155,6 +155,7 @@ synced vault.
 - Runtime modes: [Runtime Capability Matrix](docs/runtime-capability-matrix.md)
 - Agent routing: [MCP Routing Guide](docs/mcp-routing-guide.md)
 - Headless deployment: [Headless Server Profile](docs/headless-server-profile.md)
+- OSS gateway integration: [Gateway Compatibility](docs/gateway-compatibility.md)
 - External documents: [External Roots Setup](docs/external-roots-setup.md)
 - Architecture decisions and status: [ADR Index](docs/adr/README.md)
 - Public ÉLYSIA task profile: [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
