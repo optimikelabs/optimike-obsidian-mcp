@@ -344,9 +344,15 @@ async function startBackend(sandbox, vaultPath) {
   });
 
   const baseUrl = new URL(`http://127.0.0.1:${port}`);
-  await waitForEndpoint(new URL("/healthz", baseUrl), 200, child);
-  await waitForEndpoint(new URL("/readyz", baseUrl), 200, child);
-  return { baseUrl, child, logDir };
+  const instance = { baseUrl, child, logDir };
+  try {
+    await waitForEndpoint(new URL("/healthz", baseUrl), 200, child);
+    await waitForEndpoint(new URL("/readyz", baseUrl), 200, child);
+    return instance;
+  } catch (error) {
+    await stopBackend(instance);
+    throw error;
+  }
 }
 
 async function stopBackend(instance) {
@@ -633,7 +639,8 @@ try {
     vaultHashBefore,
     "headless-readonly pilot changed the disposable vault",
   );
-  const completionLogs = (await readAllLogs(backend.logDir))
+  const allLogs = await readAllLogs(backend.logDir);
+  const completionLogs = allLogs
     .split(/\r?\n/u)
     .filter((line) => line.includes("HTTP request completed."))
     .join("\n");
@@ -642,15 +649,19 @@ try {
     tokenB,
     monitorToken,
     jwtSecret,
-    vaultPath,
     "Headless multi-client pilot",
   ]) {
     assert.equal(
-      completionLogs.includes(secret),
+      allLogs.includes(secret),
       false,
-      "structured request logs leaked a token, secret, path or note content",
+      "server logs leaked a token, authentication secret or note content",
     );
   }
+  assert.equal(
+    completionLogs.includes(vaultPath),
+    false,
+    "structured request logs leaked the physical vault path",
+  );
 
   console.log(
     "PASS: a disposable headless-readonly filesystem vault served two distinct authenticated HTTP clients concurrently; readiness and status reported filesystem provenance without live Obsidian or mutations; notes, search, tasks and Bases reads succeeded; the vault hash stayed unchanged, structured logs disclosed no secrets or content, vault/Bases write tools were absent, and the stable Operon registry denied mutation without its live Desktop Bridge",

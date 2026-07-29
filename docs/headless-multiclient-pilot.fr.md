@@ -47,6 +47,7 @@ OBSIDIAN_VAULT=/srv/obsidian/optimike-pilot-vault
 OBSIDIAN_CACHE_SOURCE=filesystem
 OBSIDIAN_SHARED_CACHE_DB_PATH=/var/lib/optimike-mcp/cache/shared-cache.sqlite
 OBSIDIAN_ENABLE_CACHE=true
+LOGS_DIR=/var/log/optimike-mcp
 MCP_WRITE_MODE=readonly
 MCP_TRANSPORT_TYPE=http
 MCP_HTTP_HOST=127.0.0.1
@@ -130,7 +131,9 @@ ce pilote.
    mutations Operon échouent fermé sans Bridge live et qu’aucun fichier du
    coffre n’a changé.
 
-Go uniquement si toutes les étapes sont vertes et si les logs corrèlent les
-requêtes sans token, contenu de note ou chemin physique du coffre. Le déploiement
-reste pilote tant que le reverse proxy, la gateway, l’émetteur OAuth réel ou la
-frontière réseau distante n’ont pas été revus sur l’hôte cible.
+Go uniquement si toutes les étapes sont vertes. Aucun enregistrement de log ne
+doit contenir de token bearer, secret d’authentification ou contenu de note ;
+les événements structurés de fin de requête HTTP doivent aussi omettre les
+chemins physiques du coffre. Le déploiement reste pilote tant que le reverse
+proxy, la gateway, l’émetteur OAuth réel ou la frontière réseau distante n’ont
+pas été revus sur l’hôte cible.

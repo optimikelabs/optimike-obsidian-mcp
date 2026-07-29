@@ -46,6 +46,7 @@ OBSIDIAN_VAULT=/srv/obsidian/optimike-pilot-vault
 OBSIDIAN_CACHE_SOURCE=filesystem
 OBSIDIAN_SHARED_CACHE_DB_PATH=/var/lib/optimike-mcp/cache/shared-cache.sqlite
 OBSIDIAN_ENABLE_CACHE=true
+LOGS_DIR=/var/log/optimike-mcp
 MCP_WRITE_MODE=readonly
 MCP_TRANSPORT_TYPE=http
 MCP_HTTP_HOST=127.0.0.1
@@ -126,7 +127,8 @@ values. Binding Optimike directly to `0.0.0.0` is not part of this pilot.
 9. Confirm that vault/Bases write tools are absent, Operon mutations fail closed
    without the live Bridge, and no vault file changed.
 
-Go only when all steps are green and logs contain request correlation without
-tokens, note content or physical vault paths. Keep the deployment in pilot if a
-reverse proxy, gateway, real OAuth issuer or remote network boundary has not
-been reviewed on the target host.
+Go only when all steps are green. No log record may contain bearer tokens,
+authentication secrets or note content; structured HTTP completion records
+must also omit physical vault paths. Keep the deployment in pilot if a reverse
+proxy, gateway, real OAuth issuer or remote network boundary has not been
+reviewed on the target host.
