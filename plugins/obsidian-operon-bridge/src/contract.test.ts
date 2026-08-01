@@ -108,6 +108,8 @@ function normalized(): OperonBridgeTask {
 test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("operon", "2.4.0"), true);
   assert.equal(isVersionCompatible("operon", "2.5.0"), true);
+  assert.equal(isVersionCompatible("operon", "3.0.0"), true);
+  assert.equal(isVersionCompatible("operon", "3.0.1"), false);
   assert.equal(isVersionCompatible("operon", "2.5.1"), false);
   assert.equal(isVersionCompatible("operon", "2.5.2"), false);
   assert.equal(isVersionCompatible("kairelys", "2.5.0"), false);

@@ -26,6 +26,7 @@ import {
   type CachedMutation,
 } from "./contract";
 import { resolveTaskEnginePlugin } from "./task-engine-runtime";
+import { OperonDeveloperApiRuntimeAdapter } from "./developer-api-adapter";
 
 const EXTENSION_ID = "optimike-operon-bridge";
 const REST_PREFIX = `/extensions/${EXTENSION_ID}/v1`;
@@ -89,6 +90,7 @@ interface OperonRuntime {
   priorities: RuntimePriorityDefinition[];
   language: string;
   defaultPipelineName: string | null;
+  developerApi?: OperonDeveloperApiRuntimeAdapter;
 }
 
 interface BridgeCapabilities {
@@ -311,6 +313,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private mountTimeout: number | null = null;
   private indexValidationInFlight: Promise<void> | null = null;
   private mutationResults = new Map<string, CachedMutation>();
+  private developerApiAdapter: OperonDeveloperApiRuntimeAdapter | null = null;
+  private developerApiPlugin: object | null = null;
 
   async onload(): Promise<void> {
     const stored =
@@ -376,11 +380,55 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     return api as OperonPublicApiV1;
   }
 
+  private getDeveloperApiAdapter(
+    plugin: unknown,
+  ): OperonDeveloperApiRuntimeAdapter {
+    if (
+      this.developerApiAdapter &&
+      this.developerApiPlugin === (plugin && typeof plugin === "object" ? plugin : null)
+    ) {
+      return this.developerApiAdapter;
+    }
+    const pluginObject = plugin && typeof plugin === "object" ? plugin : null;
+    if (!pluginObject) throw new Error("Operon plugin instance is unavailable.");
+    this.developerApiPlugin = pluginObject;
+    this.developerApiAdapter = new OperonDeveloperApiRuntimeAdapter(
+      this,
+      plugin,
+    );
+    return this.developerApiAdapter;
+  }
+
   private getOperonRuntime(): OperonRuntime | null {
     const resolved = resolveTaskEnginePlugin((this.app as any).plugins);
     if (!resolved) return null;
     const plugin = resolved.plugin as any;
     const version = String(plugin?.manifest?.version ?? "").trim();
+    if (
+      resolved.id === "operon" &&
+      version === OPERON_BRIDGE_TESTED_VERSION &&
+      OperonDeveloperApiRuntimeAdapter.canHandle(plugin)
+    ) {
+      const developerApi = this.getDeveloperApiAdapter(plugin);
+      return {
+        plugin,
+        pluginId: resolved.id,
+        pluginName: resolved.name,
+        api: null,
+        version,
+        compatible: true,
+        indexer: developerApi.indexer,
+        pipelines: developerApi.pipelines,
+        keyMappings: developerApi.keyMappings,
+        priorities: developerApi.priorities,
+        language: developerApi.language,
+        defaultPipelineName: developerApi.defaultPipelineName,
+        developerApi,
+      };
+    }
+    if (resolved.id === "operon" && version === OPERON_BRIDGE_TESTED_VERSION) {
+      return null;
+    }
     const indexer = plugin?.indexer;
     if (
       !indexer ||
@@ -446,6 +494,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private semanticConfiguration(
     runtime: OperonRuntime,
   ): OperonSemanticConfiguration {
+    if (runtime.developerApi) return runtime.developerApi.semanticConfiguration;
     const settings = runtime.plugin?.settings ?? {};
     const templates =
       typeof runtime.plugin?.getFileTaskTemplateOptions === "function"
@@ -588,6 +637,24 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     runtime: OperonRuntime | null,
     ready = false,
   ): BridgeCapabilities {
+    if (runtime?.developerApi) {
+      const readable = Boolean(runtime.compatible && ready);
+      return {
+        status: true,
+        configuration: Boolean(runtime.compatible),
+        list: readable,
+        get: readable,
+        query: readable,
+        validate: readable,
+        adopt: false,
+        create: false,
+        update: false,
+        transition: false,
+        filterQuery: false,
+        relocate: false,
+        convert: false,
+      };
+    }
     const readable = Boolean(runtime?.compatible && ready);
     const publicCapabilities =
       readable && runtime?.api ? runtime.api.capabilities() : null;
@@ -624,6 +691,20 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   }> {
     if (!runtime?.compatible)
       return { ready: false, generation: null, diagnostics: null };
+    if (runtime.developerApi) {
+      await runtime.developerApi.refresh();
+      const generation = runtime.indexer.getGeneration();
+      const diagnostics = await runtime.indexer.getIndexV8Diagnostics();
+      return {
+        generation: generation > 0 ? generation : null,
+        diagnostics,
+        ready: isIndexReady({
+          compatible: runtime.compatible,
+          generation,
+          diagnostics,
+        }),
+      };
+    }
     const generation = runtime.indexer.getGeneration();
     let diagnostics: RuntimeIndexDiagnostics | null = null;
     try {
@@ -720,6 +801,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           .map(([pluginId, versions]) => `${pluginId}: ${versions.join(", ")}`)
           .join("; "),
       },
+      developerApi: runtime?.developerApi?.status ?? null,
       index: {
         ready,
         generation: indexState.generation,
@@ -1592,6 +1674,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       .get(async (_req: any, res: any) => {
         try {
           const runtime = this.requireRuntime();
+          await this.indexState(runtime);
           sendJson(res, 200, this.configurationPayload(runtime));
         } catch (error) {
           sendJson(
