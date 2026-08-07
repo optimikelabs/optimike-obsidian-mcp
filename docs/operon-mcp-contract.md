@@ -2,7 +2,7 @@
 
 ## Surface
 
-The main MCP server registers thirteen Operon tools:
+The main MCP server registers twenty-one Operon tools:
 
 - `operon_status`
 - `operon_get_configuration`
@@ -11,12 +11,20 @@ The main MCP server registers thirteen Operon tools:
 - `operon_query_tasks`
 - `operon_query_saved_filter`
 - `operon_validate`
+- `operon_get_diagnostics`
+- `operon_find_tasks`
+- `operon_resolve_task`
+- `operon_get_relationships`
+- `operon_build_context`
+- `operon_get_timer_state`
 - `operon_adopt_task`
 - `operon_create_task`
 - `operon_update_task`
 - `operon_transition_task`
 - `operon_convert_task`
 - `operon_relocate_task`
+- `operon_list_pending_recoveries`
+- `operon_recover_mutation`
 
 There is no second MCP server.
 
@@ -33,11 +41,19 @@ SQLite cache state lives in `operon_task_snapshot` and `operon_snapshot_meta`. M
 
 `operon_query_saved_filter` is intentionally live-only: it delegates to Operon's native filter evaluator and never pretends that a headless parser can reproduce plugin semantics.
 
+The six additional Developer API reads are also live-only. They expose native
+runtime diagnostics, ranked finder, entity resolution, bounded relationship
+graphs, bounded context packs, and timer state. The MCP caps finder results at
+50, relationships/context at 100, relationship/context depth at 3, and context
+hydration to notes, links, and custom fields. It deliberately excludes raw
+source Markdown, tracker/reminder history, placement and mutation-readiness
+packs.
+
 The cached metadata also stores the configuration used for that snapshot. Tasks project `statusId` and `pipelineId`, and queries accept `statusIds` / `pipelineIds`. Agents must prefer those stable IDs and canonical key names from `operon_get_configuration`; visible French or English labels are presentation values, not durable API identifiers.
 
 ## Mutations
 
-Mutation tools call Bridge REST routes backed by Operon Public API v1. They do not edit Markdown, call `TaskWriter` directly, invoke UI commands, or reflect into private methods.
+Mutation tools call Bridge REST routes backed by the loaded engine's official mutation surface. Operon `3.1.1` uses Developer API V1 typed preview → apply plans with host-owned recovery; legacy Kairélys versions continue to use their Public API v1 contract. No route edits Markdown, calls `TaskWriter` directly, invokes UI commands, or reflects into private methods.
 
 Common controls:
 
@@ -45,6 +61,8 @@ Common controls:
 - `idempotencyKey` is mandatory;
 - existing Operon tasks require `expectedRevision`;
 - legacy checkbox adoption requires an exact one-based `line` and `expectedLine` precondition;
+- Operon 3.1.1 previews and applies one exact host-sealed plan;
+- `outcome-unknown` is surfaced with its recovery reference and never blind-retried;
 - after apply, the Bridge rereads the verified live index;
 - the MCP refreshes its SQLite snapshot;
 - no mutation is available from a stale/headless snapshot.
@@ -58,8 +76,9 @@ Apply additionally requires `OPERON_MUTATIONS_ENABLED=true` and the Bridge setti
 - `MCP_WRITE_MODE=readonly`: dry-run only.
 - `MCP_WRITE_MODE=guarded`: adopt, create, update, transition, and inline relocation apply are allowed with their normal preconditions.
 - `MCP_WRITE_MODE=full`: conversion apply is additionally allowed.
+- `operon_recover_mutation` also requires `MCP_WRITE_MODE=full` because it may complete an uncertain prior write; it only recovers the exact `recoveryRef` plan.
 
-`OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for file tasks or `targetPath` for inline tasks. Scoped conversion apply is allowed in guarded mode only when the current source and explicit destination are both inside the allowlist.
+`OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for legacy file-task creation or `targetPath` for inline tasks. Official Operon 3.1.1 still rejects arbitrary `targetFolder` because its Developer API has no exact folder-only target contract. Scoped conversion apply is allowed in guarded mode only when the current source and explicit destination are both inside the allowlist.
 
 Conversion remains classified as destructive because file-to-inline moves the source file to trash and inline-to-file replaces the source line with a durable link.
 
@@ -67,15 +86,17 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 `operon_adopt_task` upgrades one existing plain Markdown or Obsidian Tasks checkbox in place. The target file, one-based line, and exact source line must still match; otherwise the operation returns `conflict` without writing. Supported Tasks dates, priority and tags are translated by Operon before the line is indexed, and optional `statusId` uses the live language-stable workflow identity. The final task must be proven at the same path and line.
 
-`operon_create_task` creates inline or file tasks through Operon's creator services. File tasks may include unmanaged YAML properties and an explicit vault-relative `targetFolder`; inline tasks may use an explicit vault-relative Markdown `targetPath`. `statusId` is supported at creation so automations do not hard-code translated labels.
+`operon_create_task` creates inline or file tasks through Operon's creator services. On official Operon 3.1.1, typed fields, tags, stable `statusId`, relationships, exact inline `targetPath`, and configured/default file templates are supported. Unmanaged YAML properties and arbitrary `targetFolder` placement are legacy-only; the official Developer API path rejects them instead of using a fallback.
 
-`operon_update_task` accepts exactly one group per call: description, managed fields/tags, or one unmanaged file property. Status transitions use the dedicated tool.
+`operon_update_task` accepts exactly one group per call: description, managed fields/tags, or one unmanaged file property. Status transitions use the dedicated tool. Unmanaged file properties are supported only by the legacy Public API path; official Operon 3.1.1 rejects them explicitly.
 
-`operon_transition_task` prefers a stable status ID from `operon_get_configuration`, while still accepting exactly one current configured workflow value for compatibility. It preserves Operon's dependency, recurrence, aggregate, terminal-date, archive, and auto-unpin semantics.
+`operon_transition_task` prefers a stable status ID from `operon_get_configuration`, while still accepting exactly one current configured workflow value for compatibility. Operon 3.1.1 transition preview/apply is available through the Bridge. Elevated transitions require fresh host-owned consent: the confirmation modal is constructed in the owning vault window and an unattended request fails closed after 45 seconds. The CLI/native official path remains an operator diagnostic surface, not a bypass; no Markdown/private fallback is introduced.
 
-`operon_convert_task` converts inline ↔ file through Operon's transition-safe paths. File-to-inline requires an explicit `targetPath`; scoped inline-to-file conversion requires an explicit `targetFolder`.
+`operon_convert_task` converts inline ↔ file through Operon's transition-safe paths. File-to-inline requires an explicit `targetPath`. Official Operon 3.1.1 uses its configured target/template contract and does not accept arbitrary `targetFolder`; the legacy Public API path retains scoped folder support.
 
-`operon_relocate_task` moves an inline task to an explicit Markdown `targetPath` through Operon while preserving `operonId`. Source and target are verified after the index settles.
+`operon_relocate_task` moves an inline task to an explicit Markdown `targetPath` through Operon while preserving `operonId`. Official Operon 3.1.1 resolves a live blank destination line through `context.build`; it never guesses a line or writes the file directly. Source and target are verified after the index settles.
+
+`operon_list_pending_recoveries` lists durable official recovery references without applying anything. `operon_recover_mutation` invokes the official same-plan recovery, requires both opt-ins plus full MCP write mode, and preserves the original `planDigest`/`recoveryRef` evidence.
 
 ## Verified pilot behavior
 

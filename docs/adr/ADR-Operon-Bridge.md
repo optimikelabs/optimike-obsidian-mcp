@@ -3,7 +3,7 @@
 - Status: accepted for bounded pilot
 - Date: 2026-07-21
 - MCP baseline: `optimikelabs/optimike-obsidian-mcp@8cea94610a526e50a017d334be6008b8dab79500`
-- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf` and `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`
+- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, and official `3.1.1` Developer API V1
 
 ## Problem
 
@@ -14,8 +14,8 @@ Operon unifies inline and file tasks around stable identity and one domain model
 Use one MCP server and three explicit layers:
 
 ```text
-Optimike Operon 2.5.0 minimal GPL fork
-    ↓ OperonPublicApiV1
+Official Operon 3.1.1 / legacy Kairélys
+    ↓ Developer API V1 / PublicApiV1
 Optimike Operon Bridge
     ↓ Local REST API contract v1
 Optimike Obsidian MCP
@@ -23,7 +23,7 @@ Optimike Obsidian MCP
 Agents
 ```
 
-Official Operon `2.4.0` and `2.5.0` remain supported for reads. Mutations appear only when Public API v1 is present. No fallback crosses that capability boundary.
+Official Operon `2.4.0` and `2.5.0` remain supported for reads. Official Operon `3.1.1` uses its host-verified Developer API V1 for typed mutation plans; legacy Kairélys uses Public API v1. No fallback crosses either capability boundary.
 
 ## Component decisions
 
@@ -32,7 +32,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Mutations appear
 - `KEEP` — Tasks and TaskNotes during the pilot and until a separate production cutover gate.
 - `ADD` — companion Bridge for live reads and guarded mutations.
 - `ADD` — minimal Operon GPL fork exposing only generic Public API v1 wrappers over existing domain orchestrators.
-- `ADD` — thirteen Operon MCP tools, snapshot tables, and durable mutation journal.
+- `ADD` — twenty-one governed Operon MCP tools, including six bounded native reads, snapshot tables, durable mutation journal, and same-plan recovery.
 - `REJECT` — MCP-side Operon parser/domain reimplementation.
 - `REJECT` — raw Markdown/YAML mutation fallback.
 - `REJECT` — reflective production calls to private Operon methods.
@@ -40,7 +40,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Mutations appear
 
 ## Public API boundary
 
-`OperonPublicApiV1` exposes capability discovery plus in-place checkbox adoption, create, update, transition, and convert. The implementation stays inside Operon and calls its existing parser/converter, creator, workflow, writer, dependency, recurrence, aggregate, archive, and conversion paths.
+`OperonPublicApiV1` remains the legacy Kairélys boundary. Official Operon `3.1.1` exposes host-verified Developer API V1 reads plus preview/apply/recovery for typed create, update, transition, conversion, and inline relocation. Elevated or destructive applies require fresh host-owned consent in the owning vault window and fail closed after a bounded timeout. The implementation stays inside Operon and calls its existing parser/converter, creator, workflow, writer, dependency, recurrence, aggregate, archive, and conversion paths.
 
 The fork delta must remain limited to this generic API and contract tests. No ÉLYSIA-specific workflow, UX, view, calendar, Kanban, or data-model logic belongs in the fork. An upstream PR remains preferred; the fork is the production fallback.
 
@@ -52,7 +52,7 @@ If live access fails, the last snapshot may be returned only as `operon-cache` w
 
 ## Mutation model
 
-Every apply requires a live Bridge, Public API v1, the Bridge mutation toggle, and `OPERON_MUTATIONS_ENABLED=true`. Existing Operon-task mutations require `expectedRevision`; legacy checkbox adoption requires an exact source path, one-based line and `expectedLine`; every request requires `idempotencyKey`; `dryRun` defaults to true.
+Every apply requires a live Bridge, the matching official mutation surface, the Bridge mutation toggle, and `OPERON_MUTATIONS_ENABLED=true`. Existing Operon-task mutations require `expectedRevision`; legacy checkbox adoption requires an exact source path, one-based line and `expectedLine`; every request requires `idempotencyKey`; `dryRun` defaults to true. Official Operon 3.1.1 applies only the exact host-sealed preview plan and surfaces `outcome-unknown` with recovery metadata. Recovery is a separate same-plan route, never a new mutation.
 
 The Bridge returns before/requested/after and waits for a verified idle index after apply. The MCP reserves the idempotency key durably before the Bridge call, stores the result in `operon_mutation_journal`, and blocks blind retry after an uncertain timeout/restart. The same completed key and request never call the Bridge twice, while reuse with a different request is rejected as a conflict.
 
@@ -63,12 +63,12 @@ To avoid false atomicity, update accepts exactly one group per operation: descri
 - Live/hybrid with API: exact reads and mutations according to capabilities.
 - Headless: cached reads only; no mutation.
 - `readonly`: dry-run only.
-- `guarded`: adopt/create/update/transition apply.
+- `guarded`: adopt/create/update/transition/relocate apply with normal preconditions and fresh consent when the sealed plan is elevated.
 - `full`: conversion apply in addition.
 
 ## Evidence gates
 
-The disposable Operon 2.5 vault has passed file/inline creation, ÉLYSIA properties, hierarchy, dependency rejection/release, status transitions, identity-preserving conversions, reindex, plugin restart, live/stale cache, idempotency, revision conflicts, and duplicate-ID P0 refusal.
+The disposable Operon 2.5 vault passed file/inline creation, ÉLYSIA properties, hierarchy, dependency rejection/release, status transitions, identity-preserving conversions, reindex, plugin restart, live/stale cache, idempotency, revision conflicts, and duplicate-ID P0 refusal. Operon 3.1.1 has passed host grant/identity checks, live exact reads, typed preview/apply for the validated mutation families, transition consent in the owning vault window, postflight, idempotent replay, and restart/recovery without a Markdown/private-API fallback.
 
 Still required before production cutover:
 

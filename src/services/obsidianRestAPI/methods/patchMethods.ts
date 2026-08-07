@@ -5,43 +5,152 @@
  */
 
 import { RequestContext } from "../../../utils/index.js";
-import { PatchOptions, Period, RequestFunction } from "../types.js";
+import {
+  PatchDestination,
+  PatchOptions,
+  PatchPayload,
+  RequestFunction,
+} from "../types.js";
 import { encodeVaultPath } from "../../../utils/obsidian/obsidianApiUtils.js";
 
+function isHeadingAddress(value: unknown): value is string[] | null {
+  return (
+    value === null ||
+    (Array.isArray(value) &&
+      value.every((segment) => typeof segment === "string"))
+  );
+}
+
+function isPatchDestination(value: unknown): value is PatchDestination {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const candidateKeys = Object.keys(candidate);
+  if (
+    candidateKeys.length !== 2 ||
+    !candidateKeys.includes("parent") ||
+    !candidateKeys.includes("place") ||
+    !isHeadingAddress(candidate.parent)
+  ) {
+    return false;
+  }
+  if (candidate.place === "first" || candidate.place === "last") {
+    return true;
+  }
+  if (
+    typeof candidate.place !== "object" ||
+    candidate.place === null ||
+    Array.isArray(candidate.place)
+  ) {
+    return false;
+  }
+
+  const place = candidate.place as Record<string, unknown>;
+  const keys = Object.keys(place);
+  return (
+    (keys.length === 1 &&
+      keys[0] === "before" &&
+      isHeadingAddress(place.before)) ||
+    (keys.length === 1 && keys[0] === "after" && isHeadingAddress(place.after))
+  );
+}
+
 /**
- * Helper to construct headers for PATCH requests.
+ * Builds a JSON-native markdown-patch 2.x instruction.
  */
-function buildPatchHeaders(options: PatchOptions): Record<string, string> {
-  const headers: Record<string, string> = {
-    Operation: options.operation,
-    "Target-Type": options.targetType,
-    // Spec requires URL encoding for non-ASCII characters in Target header
-    Target: encodeURIComponent(options.target),
+function buildPatchInstruction(
+  payload: PatchPayload,
+  options: PatchOptions,
+): Record<string, unknown> {
+  if (options.operation === "delete" && payload !== undefined) {
+    throw new TypeError(
+      "A delete PATCH instruction must not include a payload.",
+    );
+  }
+  if (options.operation !== "delete" && payload === undefined) {
+    throw new TypeError(
+      `A ${options.operation} PATCH instruction requires a payload.`,
+    );
+  }
+  if (options.within !== undefined && options.createTargetIfMissing === true) {
+    throw new TypeError(
+      "A PATCH instruction cannot combine within with createTargetIfMissing.",
+    );
+  }
+  if (
+    options.scope === "parent" &&
+    (options.targetType !== "heading" || options.operation !== "replace")
+  ) {
+    throw new TypeError(
+      'The "parent" scope is valid only for a heading replace instruction.',
+    );
+  }
+  if (options.scope === "parent" && !isPatchDestination(payload)) {
+    throw new TypeError(
+      'A heading "parent" scope instruction requires a valid destination payload.',
+    );
+  }
+  if (
+    options.scope === "marker" &&
+    options.operation !== "delete" &&
+    typeof payload !== "string"
+  ) {
+    throw new TypeError(
+      'A non-delete "marker" scope instruction requires a string payload.',
+    );
+  }
+
+  const instruction: Record<string, unknown> = {
+    targetType: options.targetType,
+    target: options.target,
+    operation: options.operation,
   };
-  if (options.targetDelimiter) {
-    headers["Target-Delimiter"] = options.targetDelimiter;
+
+  if (options.within !== undefined) {
+    instruction.within = options.within;
   }
-  if (options.trimTargetWhitespace !== undefined) {
-    headers["Trim-Target-Whitespace"] = String(options.trimTargetWhitespace);
+  if (options.scope !== undefined) {
+    instruction.scope = options.scope;
   }
-  // Add Create-Target-If-Missing header if provided in options
+  if (options.ifMatch !== undefined) {
+    instruction.ifMatch = options.ifMatch;
+  }
   if (options.createTargetIfMissing !== undefined) {
-    headers["Create-Target-If-Missing"] = String(options.createTargetIfMissing);
+    instruction.createTargetIfMissing = options.createTargetIfMissing;
   }
-  if (options.contentType) {
-    headers["Content-Type"] = options.contentType;
+  if (options.rejectIfContentPreexists !== undefined) {
+    instruction.rejectIfContentPreexists = options.rejectIfContentPreexists;
+  }
+
+  if (options.operation === "delete") {
+    return instruction;
+  }
+
+  if (options.scope === "parent") {
+    instruction.destination = payload as PatchDestination;
+  } else if (options.scope === "marker") {
+    instruction.content = payload;
+  } else if (options.targetType === "frontmatter") {
+    // Frontmatter always uses the structured `value` carrier, including for
+    // strings, numbers, booleans, arrays, objects, and null.
+    instruction.value = payload;
+  } else if (typeof payload === "string") {
+    instruction.content = payload;
   } else {
-    // Default to markdown if not specified, especially for non-JSON content
-    headers["Content-Type"] = "text/markdown";
+    // Non-string block content represents structured table rows.
+    instruction.value = payload;
   }
-  return headers;
+
+  return instruction;
 }
 
 /**
  * Patches a specific file in the vault.
  * @param _request - The internal request function from the service instance.
  * @param filePath - Vault-relative path to the file.
- * @param content - The content to insert/replace (string or JSON for tables/frontmatter).
+ * @param payload - The content, structured value, or move destination.
  * @param options - Patch operation details (operation, targetType, target, etc.).
  * @param context - Request context.
  * @returns {Promise<void>} Resolves on success (200 OK).
@@ -49,22 +158,21 @@ function buildPatchHeaders(options: PatchOptions): Record<string, string> {
 export async function patchFile(
   _request: RequestFunction,
   filePath: string,
-  content: string | object, // Allow object for JSON content type
+  payload: PatchPayload,
   options: PatchOptions,
   context: RequestContext,
 ): Promise<void> {
-  const headers = buildPatchHeaders(options);
-  const requestData =
-    typeof content === "object" ? JSON.stringify(content) : content;
+  const instruction = buildPatchInstruction(payload, options);
   const encodedPath = encodeVaultPath(filePath);
 
-  // PATCH returns 200 OK according to spec
   await _request<void>(
     {
       method: "PATCH",
-      url: `/vault${encodedPath}`, // Use the encoded path
-      headers: headers,
-      data: requestData,
+      url: `/vault${encodedPath}`,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      data: instruction,
     },
     context,
     "patchFile",
@@ -74,61 +182,29 @@ export async function patchFile(
 /**
  * Patches the currently active file in Obsidian.
  * @param _request - The internal request function from the service instance.
- * @param content - The content to insert/replace.
+ * @param payload - The content, structured value, or move destination.
  * @param options - Patch operation details.
  * @param context - Request context.
  * @returns {Promise<void>} Resolves on success (200 OK).
  */
 export async function patchActiveFile(
   _request: RequestFunction,
-  content: string | object,
+  payload: PatchPayload,
   options: PatchOptions,
   context: RequestContext,
 ): Promise<void> {
-  const headers = buildPatchHeaders(options);
-  const requestData =
-    typeof content === "object" ? JSON.stringify(content) : content;
+  const instruction = buildPatchInstruction(payload, options);
 
   await _request<void>(
     {
       method: "PATCH",
       url: `/active/`,
-      headers: headers,
-      data: requestData,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      data: instruction,
     },
     context,
     "patchActiveFile",
-  );
-}
-
-/**
- * Patches a periodic note.
- * @param _request - The internal request function from the service instance.
- * @param period - The period type ('daily', 'weekly', etc.).
- * @param content - The content to insert/replace.
- * @param options - Patch operation details.
- * @param context - Request context.
- * @returns {Promise<void>} Resolves on success (200 OK).
- */
-export async function patchPeriodicNote(
-  _request: RequestFunction,
-  period: Period,
-  content: string | object,
-  options: PatchOptions,
-  context: RequestContext,
-): Promise<void> {
-  const headers = buildPatchHeaders(options);
-  const requestData =
-    typeof content === "object" ? JSON.stringify(content) : content;
-
-  await _request<void>(
-    {
-      method: "PATCH",
-      url: `/periodic/${period}/`,
-      headers: headers,
-      data: requestData,
-    },
-    context,
-    "patchPeriodicNote",
   );
 }

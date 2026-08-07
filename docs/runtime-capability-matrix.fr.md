@@ -63,13 +63,21 @@ Scan, plan et status sont read-only. Apply et rollback exigent en plus
 `MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, la capacité `move` de
 la racine et un backend qui expose `obsidian_search_replace` conditionnel.
 
-Tous les modes enregistrent aussi les 13 outils du contrat Operon :
+Tous les modes enregistrent aussi les 21 outils du contrat Operon :
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
 `operon_get_task`, `operon_query_tasks`, `operon_query_saved_filter`,
-`operon_validate`, `operon_adopt_task`, `operon_create_task`,
-`operon_update_task`, `operon_transition_task`, `operon_convert_task` et
-`operon_relocate_task`. Hors mode live, ils restent limités aux snapshots
-validés en lecture seule ; toute mutation échoue fermée.
+`operon_validate`, `operon_get_diagnostics`, `operon_find_tasks`,
+`operon_resolve_task`, `operon_get_relationships`, `operon_build_context`,
+`operon_get_timer_state`, `operon_adopt_task`, `operon_create_task`,
+`operon_update_task`, `operon_transition_task`, `operon_convert_task`,
+`operon_relocate_task`, `operon_list_pending_recoveries` et
+`operon_recover_mutation`. Hors mode live, ils restent limités aux snapshots
+validés en lecture seule ; toute mutation échoue fermée. Pour Operon 3.1.1,
+la transition en apply est disponible lorsque la Developer API live annonce la
+capacité ; le Bridge borne les résultats incertains et n’effectue jamais de
+retry aveugle. Les preuves complètes utilisent le build local corrigé pendant
+l’examen des PR upstream #135, #137 et #139. Les diagnostics CLI/Developer API
+natifs restent séparés.
 
 La livraison du handoff est un contrat de transport, pas une capacité d’écriture
 du mode runtime :

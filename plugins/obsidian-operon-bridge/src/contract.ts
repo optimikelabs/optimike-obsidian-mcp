@@ -1,9 +1,24 @@
 export const OPERON_BRIDGE_CONTRACT_VERSION = "1" as const;
-export const OPERON_BRIDGE_TESTED_VERSION = "3.0.0" as const;
+export const OPERON_BRIDGE_TESTED_VERSION = "3.1.1" as const;
+export const OPERON_BRIDGE_DEVELOPER_API_VERSIONS = ["3.0.1", "3.1.0", OPERON_BRIDGE_TESTED_VERSION] as const;
 export const OPERON_BRIDGE_SUPPORTED_VERSIONS = {
-  operon: ["2.4.0", "2.5.0", OPERON_BRIDGE_TESTED_VERSION],
+  operon: ["2.4.0", "2.5.0", ...OPERON_BRIDGE_DEVELOPER_API_VERSIONS],
   kairelys: ["2.5.1", "2.5.2", "2.5.3", "2.6.1", "2.6.2", "2.6.3"],
 } as const;
+
+// Fail closed only for upstream mutation paths that have not produced a
+// trustworthy terminal or durable recovery result in live acceptance.
+// Operon 3.1.1 is enabled after the inline settlement path was corrected and
+// revalidated with a modified-time frontmatter integration.
+export const OPERON_BRIDGE_BLOCKED_MUTATIONS = {
+  "3.0.1": ["transition"],
+  "3.1.0": [],
+  "3.1.1": [],
+} as const;
+
+export function isDeveloperApiVersion(version: string): boolean {
+  return (OPERON_BRIDGE_DEVELOPER_API_VERSIONS as readonly string[]).includes(version.trim());
+}
 
 export function isCanonicalVaultRelativePath(value: unknown): value is string {
 	if (
@@ -197,6 +212,23 @@ export interface RuntimePriorityDefinition {
 	description?: string;
 }
 
+export function resolvePriorityStableId(
+  value: unknown,
+  priorities: readonly RuntimePriorityDefinition[],
+): string | null {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+  const matches = priorities
+    .filter(
+      (priority) =>
+        priority.id === normalized || priority.label === normalized,
+    )
+    .map((priority) => priority.id)
+    .filter((id): id is string => Boolean(id));
+  const unique = [...new Set(matches)];
+  return unique.length === 1 ? unique[0] ?? null : null;
+}
+
 export interface RuntimeFileTaskTemplate {
 	id: string;
 	name: string;
@@ -317,6 +349,10 @@ export interface RuntimeKeyMapping {
   enabled?: boolean;
   isSystem?: boolean;
   isInternal?: boolean;
+  source?: "built-in" | "custom";
+  mappingStatus?: "mapped" | "unmapped" | "collision" | "reserved";
+  mutationClass?: "general-update" | "semantic-capability" | "runtime-owned";
+  mutationOwner?: string;
 }
 
 export interface OperonTaskDates {

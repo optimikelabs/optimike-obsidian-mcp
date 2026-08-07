@@ -19,7 +19,7 @@ documents autorisés hors du coffre.
 | ----------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- |
 | Notes                   | Lecture, liste, recherche, mise à jour, frontmatter et tags          | Coffre ; Local REST API pour la surface live complète |
 | Bases et Canvas         | Requêtes/écritures Bases, validation et helpers Canvas bornés        | Bases Bridge pour Bases en live                       |
-| Tâches                  | Lecture/requête Tasks + 13 outils Operon gouvernés                   | Lectures Tasks ; Kairélys/Public API v1 pour muter    |
+| Tâches                  | Lecture/requête Tasks + 21 outils Operon gouvernés                   | Operon 3.1.1 Developer API V1 via le Bridge            |
 | Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable        | `.smart-env` + embedding Ollama ou OpenAI             |
 | Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions | Filesystem local                                      |
 | Documents externes      | Lectures/handoff gouvernés + move local opt-in avec réparation       | Allowlist ; stdio local pour le move                  |
@@ -91,8 +91,10 @@ Activer seulement les surfaces utilisées :
   notes, métadonnées et tags en live ;
 - **Bases Bridge (REST)** inclus : opérations `.base` en live ;
 - **Smart Connections** : index sémantique `.smart-env` ;
-- **Kairélys 2.6.3+ / Operon compatible** et
-  **Optimike Operon Bridge** inclus : tâches live gouvernées ;
+- **Operon 3.1.1** et **Optimike Operon Bridge** inclus : tâches live
+  gouvernées via la Developer API officielle V1 ;
+- la compatibilité Kairélys reste disponible comme chemin legacy/rollback
+  borné, mais n’est plus le moteur de production ;
 - **Obsidian Tasks** : parsing et configuration Tasks canoniques.
 
 L’apply Operon exige deux opt-ins :
@@ -103,6 +105,26 @@ OPERON_MUTATIONS_ENABLED=true
 ```
 
 Les snapshots Operon obsolètes restent toujours en lecture seule.
+
+Le MCP expose une surface agentique gouvernée, pas toutes les fonctions de la
+CLI Operon. Les diagnostics natifs, la recherche/résolution, les relations et
+contextes bornés ainsi que l’état du timer sont disponibles en lecture seule.
+Les écritures avancées et commandes opérateur larges restent dans la CLI ; voir
+l’[audit CLI / Developer API](docs/operon-cli-audit.md). L’apply de transition
+est disponible via le Bridge. Les plans élevés ou destructifs demandent une
+confirmation fraîche dans la fenêtre Obsidian propriétaire et échouent fermés
+après 45 secondes si elle ne peut pas être présentée.
+
+Note de compatibilité : l’adaptateur cible Operon officiel `3.1.1`, mais les
+preuves d’acceptation complètes de ce dépôt utilisent notre build local corrigé
+pendant l’examen des correctifs upstream [#135](https://github.com/hasanyilmaz/operon/pull/135),
+[#137](https://github.com/hasanyilmaz/operon/pull/137) et
+[#139](https://github.com/hasanyilmaz/operon/pull/139). Operon officiel `3.1.1`
+reste utilisable pour les lectures et la plupart des mutations gouvernées, mais
+le settlement des frontmatters de date, le consentement entre plusieurs fenêtres
+Obsidian et les renommages implicites de File Tasks conservent les limites
+upstream décrites dans ces PR. Le MCP ne bascule jamais vers Markdown ou des
+API privées quand l’un de ces cas n’est pas supporté.
 
 ## Racines documentaires externes
 
@@ -165,6 +187,7 @@ partagée hors du vrai coffre synchronisé.
 - Outils actuels : [Surface des outils](docs/obsidian_mcp_tools_spec.md)
 - Modes runtime : [Matrice des capacités](docs/runtime-capability-matrix.fr.md)
 - Routage agentique : [Guide de routage](docs/mcp-routing-guide.fr.md)
+- Surface Operon et routage CLI : [Audit CLI / Developer API](docs/operon-cli-audit.md)
 - Déploiement headless : [Profil serveur headless](docs/headless-server-profile.fr.md)
 - Pilote Linux headless multi-client : [pilote et matrice des capacités](docs/headless-multiclient-pilot.fr.md)
 - Intégration gateway OSS : [Compatibilité gateways](docs/gateway-compatibility.fr.md)

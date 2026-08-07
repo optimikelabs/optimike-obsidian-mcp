@@ -7,10 +7,19 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `2.4.0` or `2.5.0` enabled
+- Operon `3.1.1` enabled for the official Developer API V1 pilot; `2.4.0` / `2.5.0` remain legacy-read fixtures
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
+
+The adapter targets official Operon `3.1.1`. The complete acceptance evidence
+listed below uses the patched local Operon build while upstream fixes are under
+review in [#135](https://github.com/hasanyilmaz/operon/pull/135),
+[#137](https://github.com/hasanyilmaz/operon/pull/137), and
+[#139](https://github.com/hasanyilmaz/operon/pull/139). Stock `3.1.1` remains
+usable for reads and most governed mutations, but unsupported or uncertain
+settlement is fail-closed; this recipe never authorizes a Markdown/private-API
+fallback or a blind retry.
 
 ## 1. Automated checks
 
@@ -69,8 +78,11 @@ PASS when:
 - index generation is greater than zero;
 - diagnostics report `health=healthy`, `runtimePhase=idle`,
   `verifiedThisSession=true`, and `dirtySourceCount=0`;
-- official Operon reports mutation capabilities false, while the minimal
-  Public API v1 fork reports adopt/create/update/transition/convert true;
+- official Operon `3.1.1` reports the exact grant and typed Developer API
+  surface; the Bridge advertises only the mutation capabilities that the live
+  runtime proves, and bounds uncertain applies without a blind retry;
+- `adopt` remains false on official Operon; legacy Kairélys/Public API probes
+  are tested separately;
 - duplicate conflict count is zero.
 
 FAIL if the route claims compatibility while Operon is absent or incompatible.
@@ -161,11 +173,13 @@ operon_update_task
 operon_transition_task
 operon_convert_task
 operon_relocate_task
+operon_list_pending_recoveries
+operon_recover_mutation
 ```
 
 PASS when:
 
-- all thirteen tools are registered;
+- all twenty-one tools are registered;
 - the first complete call creates a snapshot;
 - subsequent calls with unchanged generation do not rewrite the full snapshot;
 - responses say `source=operon-live`, `stale=false`.
@@ -197,7 +211,8 @@ FAIL if cached data is presented as live.
 
 ## 11. Incompatibility test
 
-Disable Operon or use any test manifest version outside `2.4.0` and `2.5.0`.
+Disable Operon or use any test manifest version outside the explicit allowlist
+(`2.4.0`, `2.5.0`, and official `3.1.1`).
 
 PASS:
 
@@ -237,8 +252,12 @@ Review Local REST routes, MCP tools, and the loaded Operon capability probe.
 
 PASS:
 
-- official Operon without Public API v1 remains read-only;
-- the minimal Operon fork exposes native saved-filter queries plus adopt/create/update/transition/convert/relocate through a versioned API;
+- official Operon without an active Developer API V1 grant remains read-only;
+- official Operon 3.1.1 exposes typed create/update/transition/convert/relocate
+  only after the grant; an uncertain transition apply is bounded by the Bridge,
+  while `adopt`, unmanaged properties, and arbitrary
+  `targetFolder` remain explicitly unsupported;
+- the minimal Operon fork exposes native saved-filter queries plus adopt/create/update/transition/convert/relocate through its versioned Public API;
 - dry-run is the default;
 - apply requires live capabilities and an idempotency key;
 - existing Operon-task apply requires the live expected revision;
@@ -250,7 +269,9 @@ PASS:
 
 Run `scripts/smoke-operon-mutations.mjs` in guarded mode, then
 `scripts/smoke-operon-rich-mutations.mjs` in full mode against a disposable
-vault.
+vault when validating the legacy Kairélys/Public API path. For official
+Operon 3.1.1 use section 16; do not expect unmanaged properties or arbitrary
+`targetFolder` values to map to Developer API V1.
 
 PASS:
 
@@ -261,6 +282,56 @@ PASS:
 - inline → file → inline preserves `operonId`;
 - idempotency replay returns the original `operationId`;
 - stale revision returns conflict without writing.
+
+## 16. Official Operon 3.1.1 native Developer API pilot
+
+Use a copied/disposable vault and the official `3.1.1` plugin assets. Do not
+edit Operon's `data.json` directly: register the consumer through the official
+Developer API integration UI/wrapper and approve the exact pending grant.
+
+PASS requires one complete native routine covering:
+
+- host-verified consumer identity and rejection of a forged copy;
+- health, capabilities, catalog, and exact live task read;
+- typed `tasks.*.preview` followed by `mutations.apply`;
+- stable plan digest, receipt, postflight, and final state;
+- replay of the same completed plan as `already-applied`;
+- restart with a changed `sessionId`/instance epoch and recovery of the same
+  plan reference, without a blind retry;
+- no Markdown/private-method fallback.
+
+The 2026-08-01 disposable pilot passed all checks, including Windows-native
+path mutation and restart/recovery. Official package evidence was verified
+against the 3.1.1 release assets before installation. This proves the native
+Operon contract; it does not authorize production mutation enablement. The
+current complete acceptance record uses the patched local build while the
+upstream fixes linked above remain under review.
+
+## 17. Official Operon 3.1.1 Bridge/MCP adapter pilot
+
+The same disposable vault was then used with the production Bridge build and
+the official grant, without changing the real vault or pushing the repository.
+
+PASS:
+
+- live read through the Bridge with `operonVersion=3.1.1` and hydrated writable
+  fields/tags;
+- typed create preview/apply and idempotent replay;
+- typed update preview/apply, idempotent replay, and stale
+  `expectedRevision` conflict without a write;
+- recovery route and adapter unit coverage for same-plan recovery;
+- both Bridge and MCP mutation opt-ins remained explicit.
+
+LIMITATION:
+
+- stock `3.1.1` can still expose an uncertain transition settlement on the
+  known [Operon #99](https://github.com/hasanyilmaz/operon/issues/99) / [#101](https://github.com/hasanyilmaz/operon/pull/101)
+  path. The patched local acceptance build reaches the terminal/recoverable
+  proof; no retry or fallback is performed when the stock runtime cannot prove
+  its result. The maintenance and frontmatter/window/rename fixes are tracked
+  in upstream [#135](https://github.com/hasanyilmaz/operon/pull/135),
+  [#137](https://github.com/hasanyilmaz/operon/pull/137), and
+  [#139](https://github.com/hasanyilmaz/operon/pull/139).
 
 ## Executed pilot result — 2026-07-21
 

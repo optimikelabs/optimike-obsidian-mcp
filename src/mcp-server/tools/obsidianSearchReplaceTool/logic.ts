@@ -20,15 +20,8 @@ import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 /** Defines the possible types of targets for the search/replace operation. */
 const TargetTypeSchema = z
-  .enum(["filePath", "activeFile", "periodicNote"])
-  .describe(
-    "Specifies the target note: 'filePath', 'activeFile', or 'periodicNote'.",
-  );
-
-/** Defines the valid periods for periodic notes. */
-const PeriodicNotePeriodSchema = z
-  .enum(["daily", "weekly", "monthly", "quarterly", "yearly"])
-  .describe("Valid periods for 'periodicNote' target type.");
+  .enum(["filePath", "activeFile"])
+  .describe("Specifies the target note: 'filePath' or 'activeFile'.");
 
 /**
  * Defines the structure for a single search and replace operation block.
@@ -48,18 +41,17 @@ const ReplacementBlockSchema = z.object({
  * This is used as the foundation for both the registration shape and the refined internal schema.
  */
 const BaseObsidianSearchReplaceInputSchema = z.object({
-  /** Specifies the target note: 'filePath', 'activeFile', or 'periodicNote'. */
+  /** Specifies the target note: 'filePath' or 'activeFile'. */
   targetType: TargetTypeSchema,
   /**
    * Identifier for the target. Required and must be a vault-relative path if targetType is 'filePath'.
-   * Required and must be a valid period string (e.g., 'daily') if targetType is 'periodicNote'.
    * Not used if targetType is 'activeFile'. The tool attempts a case-insensitive fallback if the exact filePath is not found.
    */
   targetIdentifier: z
     .string()
     .optional()
     .describe(
-      "Required if targetType is 'filePath' (vault-relative path) or 'periodicNote' (period string: 'daily', etc.). Tries case-insensitive fallback for filePath.",
+      "Required if targetType is 'filePath' (vault-relative path). Tries case-insensitive fallback for filePath.",
     ),
   /** An array of one or more search/replace operations to perform sequentially on the note content. */
   replacements: z
@@ -137,19 +129,8 @@ export const ObsidianSearchReplaceInputSchema =
   BaseObsidianSearchReplaceInputSchema.refine(
     (data) => {
       // Rule 1: Validate targetIdentifier based on targetType
-      if (
-        (data.targetType === "filePath" ||
-          data.targetType === "periodicNote") &&
-        !data.targetIdentifier
-      ) {
+      if (data.targetType === "filePath" && !data.targetIdentifier) {
         return false; // Missing targetIdentifier
-      }
-      if (
-        data.targetType === "periodicNote" &&
-        data.targetIdentifier &&
-        !PeriodicNotePeriodSchema.safeParse(data.targetIdentifier).success
-      ) {
-        return false; // Invalid period
       }
       // Rule 2: flexibleWhitespace cannot be true if useRegex is true
       if (data.flexibleWhitespace && data.useRegex) {
@@ -160,12 +141,12 @@ export const ObsidianSearchReplaceInputSchema =
     {
       // Custom error message for refinement failures
       message:
-        "Validation failed: targetIdentifier is required and must be valid for 'filePath' or 'periodicNote'. Also, 'flexibleWhitespace' cannot be true if 'useRegex' is true.",
+        "Validation failed: targetIdentifier is required for 'filePath'. Also, 'flexibleWhitespace' cannot be true if 'useRegex' is true.",
       // Point error reporting to potentially problematic fields
       path: ["targetIdentifier", "flexibleWhitespace", "useRegex"],
     },
   ).describe(
-    "Performs one or more search-and-replace operations within a target Obsidian note (file path, active, or periodic). Reads the file, applies replacements sequentially in memory, and writes the modified content back, overwriting the original. Supports string/regex search, case sensitivity toggle, replacing first/all occurrences, flexible whitespace matching (non-regex), and whole word matching.",
+    "Performs one or more search-and-replace operations within a target Obsidian note (file path or active file). Reads the file, applies replacements sequentially in memory, and writes the modified content back, overwriting the original. Supports string/regex search, case sensitivity toggle, replacing first/all occurrences, flexible whitespace matching (non-regex), and whole word matching.",
   );
 
 // ====================================================================================
@@ -253,7 +234,6 @@ function escapeRegex(str: string): string {
  *
  * @param {z.infer<typeof TargetTypeSchema>} targetType - The type of the target note.
  * @param {string | undefined} effectiveFilePath - The vault-relative path (potentially corrected by case-insensitive fallback). Undefined for non-filePath targets.
- * @param {z.infer<typeof PeriodicNotePeriodSchema> | undefined} period - The parsed period if targetType is 'periodicNote'.
  * @param {ObsidianRestApiService} obsidianService - The Obsidian API service instance.
  * @param {RequestContext} context - The request context for logging and correlation.
  * @returns {Promise<NoteJson | null>} A promise resolving to the NoteJson object or null if retrieval fails.
@@ -261,13 +241,11 @@ function escapeRegex(str: string): string {
 async function getFinalState(
   targetType: z.infer<typeof TargetTypeSchema>,
   effectiveFilePath: string | undefined,
-  period: z.infer<typeof PeriodicNotePeriodSchema> | undefined,
   obsidianService: ObsidianRestApiService,
   context: RequestContext,
 ): Promise<NoteJson | null> {
   const operation = "getFinalStateAfterSearchReplace";
-  const targetDesc =
-    effectiveFilePath ?? (period ? `periodic ${period}` : "active file");
+  const targetDesc = effectiveFilePath ?? "active file";
   logger.debug(`Attempting to retrieve final state for target: ${targetDesc}`, {
     ...context,
     operation,
@@ -283,12 +261,6 @@ async function getFinalState(
       )) as NoteJson;
     } else if (targetType === "activeFile") {
       noteJson = (await obsidianService.getActiveFile(
-        "json",
-        context,
-      )) as NoteJson;
-    } else if (targetType === "periodicNote" && period) {
-      noteJson = (await obsidianService.getPeriodicNote(
-        period,
         "json",
         context,
       )) as NoteJson;
@@ -347,7 +319,6 @@ export const processObsidianSearchReplace = async (
 
   let effectiveFilePath = targetIdentifier; // Store the path used (might be updated by fallback)
   let targetDescription = targetIdentifier ?? "active file"; // For logging and error messages
-  let targetPeriod: z.infer<typeof PeriodicNotePeriodSchema> | undefined;
 
   logger.debug(`Processing obsidian_search_replace request`, {
     ...context,
@@ -473,7 +444,7 @@ export const processObsidianSearchReplace = async (
           throw readError;
         }
       }
-    } else if (targetType === "activeFile") {
+    } else {
       logger.debug(`Reading content from active file.`, readContext);
       originalContent = (await obsidianService.getActiveFile(
         "markdown",
@@ -482,30 +453,6 @@ export const processObsidianSearchReplace = async (
       targetDescription = "the active file";
       effectiveFilePath = undefined; // Not applicable
       logger.debug(`Successfully read active file content.`, readContext);
-    } else {
-      // periodicNote
-      if (!targetIdentifier) {
-        // Should be caught by schema
-        throw new McpError(
-          BaseErrorCode.VALIDATION_ERROR,
-          "targetIdentifier is required for targetType 'periodicNote'.",
-          readContext,
-        );
-      }
-      // Parse period (already validated by refined schema)
-      targetPeriod = PeriodicNotePeriodSchema.parse(targetIdentifier);
-      targetDescription = `periodic note '${targetPeriod}'`;
-      effectiveFilePath = undefined; // Not applicable
-      logger.debug(`Reading content from ${targetDescription}.`, readContext);
-      originalContent = (await obsidianService.getPeriodicNote(
-        targetPeriod,
-        "markdown",
-        readContext,
-      )) as string;
-      logger.debug(
-        `Successfully read ${targetDescription} content.`,
-        readContext,
-      );
     }
   } catch (error) {
     // Catch and handle errors during the initial read phase
@@ -766,15 +713,8 @@ export const processObsidianSearchReplace = async (
             writeContext,
           );
         }
-      } else if (targetType === "activeFile") {
-        await obsidianService.updateActiveFile(modifiedContent, writeContext);
       } else {
-        // periodicNote
-        await obsidianService.updatePeriodicNote(
-          targetPeriod!,
-          modifiedContent,
-          writeContext,
-        );
+        await obsidianService.updateActiveFile(modifiedContent, writeContext);
       }
       logger.info(
         `Successfully updated ${targetDescription} with ${totalReplacementsMade} replacement(s).`,
@@ -793,7 +733,6 @@ export const processObsidianSearchReplace = async (
             getFinalState(
               targetType,
               effectiveFilePath,
-              targetPeriod,
               obsidianService,
               context,
             ),
@@ -858,7 +797,6 @@ export const processObsidianSearchReplace = async (
           getFinalState(
             targetType,
             effectiveFilePath,
-            targetPeriod,
             obsidianService,
             context,
           ),

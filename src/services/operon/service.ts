@@ -22,11 +22,19 @@ import {
   OperonConvertTaskSchema,
   OperonCreateTaskSchema,
   OperonFilterQuerySchema,
+  OperonTaskFinderSchema,
+  OperonResolveTaskSchema,
+  OperonRelationshipsSchema,
+  OperonContextSchema,
+  OperonNativeReadEnvelopeSchema,
   OperonRelocateTaskSchema,
+  OperonRecoverMutationSchema,
+  OperonPendingRecoveriesSchema,
   OperonMutationResultSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
   isCanonicalOperonVaultRelativePath,
+  resolveOperonPriorityStableId,
   type OperonBridgePage,
   type OperonConfiguration,
   type OperonQuery,
@@ -39,7 +47,12 @@ import {
   type OperonConvertTask,
   type OperonCreateTask,
   type OperonFilterQuery,
+  type OperonTaskFinder,
+  type OperonResolveTask,
+  type OperonRelationships,
+  type OperonContext,
   type OperonRelocateTask,
+  type OperonRecoverMutation,
   type OperonMutationResult,
   type OperonTransitionTask,
   type OperonUpdateTask,
@@ -132,6 +145,12 @@ function readOnlyCapabilities(): OperonCapabilities {
     get: true,
     query: true,
     validate: true,
+    diagnostics: false,
+    finder: false,
+    resolve: false,
+    relationships: false,
+    context: false,
+    timers: false,
     adopt: false,
     create: false,
     update: false,
@@ -139,6 +158,7 @@ function readOnlyCapabilities(): OperonCapabilities {
     convert: false,
     filterQuery: false,
     relocate: false,
+    recovery: false,
   };
 }
 
@@ -208,7 +228,10 @@ export class OperonService {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      timeout: 60_000,
+      // Operon 3.1.1 can settle a semantic transition/project-serial graph
+      // after roughly 80 seconds. Keep the MCP client alive longer than the
+      // Bridge's bounded Developer API apply budget.
+      timeout: 180_000,
       httpsAgent: new https.Agent({
         rejectUnauthorized: config.obsidianVerifySsl,
       }),
@@ -446,6 +469,7 @@ export class OperonService {
       | "relocate",
     payload: Record<string, unknown>,
     after: OperonTask,
+    priorities: OperonConfiguration["configuration"]["priorities"]["items"],
   ): string | null {
     const requested =
       action === "adopt"
@@ -502,7 +526,13 @@ export class OperonService {
           ? (request.fields as Record<string, unknown>)
           : {};
       for (const [key, value] of Object.entries(fields)) {
-        if (key !== "status" && after.fields[key] !== String(value))
+        if (key === "status") continue;
+        const expectedValue =
+          key === "priority"
+            ? resolveOperonPriorityStableId(value, priorities) ??
+              String(value).trim()
+            : String(value);
+        if (after.fields[key] !== expectedValue)
           return `Managed field '${key}' does not match the request.`;
       }
       const properties =
@@ -665,10 +695,12 @@ export class OperonService {
           }),
         );
       }
+      const configuration = await this.fetchLiveConfiguration();
       const mismatch = this.mutationOutcomeMismatch(
         action,
         payload,
         result.after,
+        configuration.configuration.priorities.items,
       );
       if (mismatch) {
         throw new McpError(
@@ -736,6 +768,16 @@ export class OperonService {
     }
   }
 
+  private async isConfiguredFileTaskFolderAllowed(): Promise<boolean> {
+    try {
+      const configuration = await this.fetchLiveConfiguration();
+      const folder = configuration.configuration.creation.fileTasksFolder.trim();
+      return folder.length > 0 && this.isAllowedMutationPath(folder);
+    } catch {
+      return false;
+    }
+  }
+
   private async assertMutationPathScope(
     action:
       | "adopt"
@@ -787,6 +829,12 @@ export class OperonService {
         this.assertAllowedMutationPath(task.targetPath, "create targetPath");
         return;
       }
+      if (
+        task?.source === "file" &&
+        await this.isConfiguredFileTaskFolderAllowed()
+      ) {
+        return;
+      }
       {
         throw new McpError(
           BaseErrorCode.FORBIDDEN,
@@ -822,6 +870,12 @@ export class OperonService {
           payload.targetFolder,
           "convert targetFolder",
         );
+        return;
+      }
+      if (
+        target === "file" &&
+        await this.isConfiguredFileTaskFolderAllowed()
+      ) {
         return;
       }
       if (
@@ -1587,6 +1641,102 @@ export class OperonService {
     };
   }
 
+  private async nativeRead(
+    operation: "diagnostics" | "finder" | "resolve" | "relationships" | "context" | "timers",
+    method: "get" | "post",
+    path: string,
+    payload?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (!liveModeConfigured()) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        `Operon ${operation} requires the live Obsidian Desktop Bridge.`,
+        this.requestContext(`operon_${operation}`),
+      );
+    }
+    const status = await this.fetchLiveStatus();
+    if (!status.capabilities[operation]) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        `Operon Bridge capability is unavailable: ${operation}.`,
+        this.requestContext(`operon_${operation}`, {
+          capabilities: status.capabilities,
+        }),
+      );
+    }
+    const response = method === "get"
+      ? await this.getClient().get(path)
+      : await this.getClient().post(path, payload ?? {});
+    const parsed = OperonNativeReadEnvelopeSchema.safeParse(response.data);
+    if (!parsed.success || parsed.data.operation !== operation) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        `Operon Bridge ${operation} returned an incompatible payload.`,
+        this.requestContext(`operon_${operation}`, {
+          issues: parsed.success ? [] : parsed.error.issues,
+        }),
+      );
+    }
+    return {
+      ...parsed.data,
+      operonVersion: status.operon.version ?? "unknown",
+      bridgeVersion: status.bridge.version,
+      capabilities: status.capabilities,
+    };
+  }
+
+  async diagnostics(): Promise<Record<string, unknown>> {
+    return this.nativeRead(
+      "diagnostics",
+      "get",
+      `${BRIDGE_PREFIX}/diagnostics`,
+    );
+  }
+
+  async findTasks(input: unknown): Promise<Record<string, unknown>> {
+    const params: OperonTaskFinder = OperonTaskFinderSchema.parse(input);
+    return this.nativeRead(
+      "finder",
+      "post",
+      `${BRIDGE_PREFIX}/tasks/finder`,
+      params,
+    );
+  }
+
+  async resolveTask(input: unknown): Promise<Record<string, unknown>> {
+    const params: OperonResolveTask = OperonResolveTaskSchema.parse(input);
+    return this.nativeRead(
+      "resolve",
+      "post",
+      `${BRIDGE_PREFIX}/entities/resolve`,
+      params,
+    );
+  }
+
+  async relationships(input: unknown): Promise<Record<string, unknown>> {
+    const params: OperonRelationships = OperonRelationshipsSchema.parse(input);
+    return this.nativeRead(
+      "relationships",
+      "post",
+      `${BRIDGE_PREFIX}/relationships`,
+      params,
+    );
+  }
+
+  async context(input: unknown): Promise<Record<string, unknown>> {
+    const params: OperonContext = OperonContextSchema.parse(input);
+    return this.nativeRead(
+      "context",
+      "post",
+      `${BRIDGE_PREFIX}/context`,
+      params,
+    );
+  }
+
+  async timers(): Promise<Record<string, unknown>> {
+    return this.nativeRead("timers", "get", `${BRIDGE_PREFIX}/timers`);
+  }
+
   async createTask(input: unknown): Promise<OperonMutationResult> {
     const params: OperonCreateTask = OperonCreateTaskSchema.parse(input);
     return this.executeMutation(
@@ -1658,6 +1808,98 @@ export class OperonService {
       `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/relocate`,
       params,
     );
+  }
+
+  async pendingRecoveries(): Promise<Record<string, unknown>> {
+    if (!liveModeConfigured()) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Operon recovery requires the live Obsidian Desktop Bridge.",
+        this.requestContext("operonPendingRecoveries"),
+      );
+    }
+    const status = await this.fetchLiveStatus();
+    if (!status.capabilities.recovery) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Operon Bridge does not expose official Developer API recovery.",
+        this.requestContext("operonPendingRecoveries"),
+      );
+    }
+    const response = await this.getClient().get(
+      `${BRIDGE_PREFIX}/mutations/pending-recoveries`,
+    );
+    const parsed = OperonPendingRecoveriesSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        "Operon Bridge pending-recoveries returned an incompatible payload.",
+        this.requestContext("operonPendingRecoveries", {
+          issues: parsed.error.issues,
+        }),
+      );
+    }
+    return parsed.data;
+  }
+
+  async recoverMutation(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonRecoverMutation = OperonRecoverMutationSchema.parse(input);
+    if (!liveModeConfigured()) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Operon recovery requires the live Obsidian Desktop Bridge.",
+        this.requestContext("operon_recover_mutation", {
+          recoveryRef: params.recoveryRef,
+        }),
+      );
+    }
+    if (!config.operonMutationsEnabled) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "Operon recovery is disabled. Set OPERON_MUTATIONS_ENABLED=true only after validating the live Bridge.",
+        this.requestContext("operon_recover_mutation", {
+          recoveryRef: params.recoveryRef,
+        }),
+      );
+    }
+    const status = await this.fetchLiveStatus();
+    if (!status.capabilities.recovery) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Operon Bridge does not expose official Developer API recovery.",
+        this.requestContext("operon_recover_mutation", {
+          recoveryRef: params.recoveryRef,
+        }),
+      );
+    }
+    assertWriteAllowed({
+      operation: "operon_recover_mutation",
+      action: "apply",
+      target: params.recoveryRef,
+      allowInReadonly: false,
+      allowInGuarded: false,
+      context: this.requestContext("operon_recover_mutation", {
+        recoveryRef: params.recoveryRef,
+        idempotencyKey: params.idempotencyKey,
+      }),
+    });
+    const response = await this.getClient().post(
+      `${BRIDGE_PREFIX}/mutations/recover`,
+      params,
+      { validateStatus: () => true },
+    );
+    const parsed = OperonMutationResultSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        `Invalid Operon recovery response (${response.status}).`,
+        this.requestContext("operon_recover_mutation", {
+          recoveryRef: params.recoveryRef,
+          issues: parsed.error.issues,
+        }),
+      );
+    }
+    return parsed.data;
   }
 
   async getTask(options: {

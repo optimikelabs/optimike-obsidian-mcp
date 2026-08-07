@@ -19,10 +19,8 @@ import { assertWriteAllowed } from "../../../services/writePolicy.js";
 
 /** Defines the possible types of targets for the update operation. */
 const TargetTypeSchema = z
-  .enum(["filePath", "activeFile", "periodicNote"])
-  .describe(
-    "Specifies the target note: 'filePath', 'activeFile', or 'periodicNote'.",
-  );
+  .enum(["filePath", "activeFile"])
+  .describe("Specifies the target note: 'filePath' or 'activeFile'.");
 
 /** Defines the only allowed modification type for this tool implementation. */
 const ModificationTypeSchema = z
@@ -37,11 +35,6 @@ const WholeFileModeSchema = z
   .describe(
     "Specifies the whole-file operation: 'append', 'prepend', or 'overwrite'.",
   );
-
-/** Defines the valid periods for periodic notes. */
-const PeriodicNotePeriodSchema = z
-  .enum(["daily", "weekly", "monthly", "quarterly", "yearly"])
-  .describe("Valid periods for 'periodicNote' target type.");
 
 /**
  * Base Zod schema containing fields common to all update operations within this tool.
@@ -58,14 +51,13 @@ const BaseUpdateSchema = z.object({
     ),
   /**
    * Identifier for the target. Required and must be a vault-relative path if targetType is 'filePath'.
-   * Required and must be a valid period string (e.g., 'daily') if targetType is 'periodicNote'.
    * Not used if targetType is 'activeFile'.
    */
   targetIdentifier: z
     .string()
     .optional()
     .describe(
-      "Identifier for 'filePath' (vault-relative path) or 'periodicNote' (period string). Not used for 'activeFile'.",
+      "Identifier for 'filePath' (vault-relative path). Not used for 'activeFile'.",
     ),
 });
 
@@ -115,18 +107,18 @@ const WholeFileUpdateSchema = BaseUpdateSchema.extend({
  */
 const ObsidianUpdateNoteRegistrationSchema = z
   .object({
-    /** Specifies the target note: 'filePath' (requires targetIdentifier), 'activeFile' (currently open file), or 'periodicNote' (requires targetIdentifier with period like 'daily'). */
+    /** Specifies the target note: 'filePath' (requires targetIdentifier) or 'activeFile' (currently open file). */
     targetType: TargetTypeSchema,
     /** The content for the modification. Must be a string for whole-file operations. */
     content: z
       .string()
       .describe("The content for the modification (must be a string)."),
-    /** Identifier for the target when targetType is 'filePath' (vault-relative path, e.g., 'Notes/My File.md') or 'periodicNote' (period string: 'daily', 'weekly', etc.). Not used for 'activeFile'. */
+    /** Identifier for the target when targetType is 'filePath' (vault-relative path, e.g., 'Notes/My File.md'). Not used for 'activeFile'. */
     targetIdentifier: z
       .string()
       .optional()
       .describe(
-        "Identifier for 'filePath' (path) or 'periodicNote' (period). Not used for 'activeFile'.",
+        "Identifier for 'filePath' (vault-relative path). Not used for 'activeFile'.",
       ),
     /** Determines the modification strategy: must be 'wholeFile'. */
     modificationType: ModificationTypeSchema,
@@ -161,7 +153,7 @@ const ObsidianUpdateNoteRegistrationSchema = z
       .describe("If true, returns the final file content in the response."),
   })
   .describe(
-    "Tool to modify Obsidian notes (specified by file path, active file, or periodic note) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options control creation and overwrite behavior.",
+    "Tool to modify Obsidian notes (specified by file path or active file) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options control creation and overwrite behavior.",
   );
 
 /**
@@ -191,19 +183,7 @@ export type ObsidianUpdateNoteRegistrationInput = z.infer<
  */
 export const ObsidianUpdateNoteInputSchema = WholeFileUpdateSchema.refine(
   (data) => {
-    // Rule 1: If targetType is 'filePath' or 'periodicNote', targetIdentifier must be provided.
-    if (
-      (data.targetType === "filePath" || data.targetType === "periodicNote") &&
-      !data.targetIdentifier
-    ) {
-      return false;
-    }
-    // Rule 2: If targetType is 'periodicNote', targetIdentifier must be a valid period string.
-    if (
-      data.targetType === "periodicNote" &&
-      data.targetIdentifier &&
-      !PeriodicNotePeriodSchema.safeParse(data.targetIdentifier).success
-    ) {
+    if (data.targetType === "filePath" && !data.targetIdentifier) {
       return false;
     }
     // All checks passed
@@ -211,8 +191,7 @@ export const ObsidianUpdateNoteInputSchema = WholeFileUpdateSchema.refine(
   },
   {
     // Custom error message for refinement failure.
-    message:
-      "targetIdentifier is required and must be a valid path for targetType 'filePath', or a valid period ('daily', 'weekly', etc.) for targetType 'periodicNote'.",
+    message: "targetIdentifier is required for targetType 'filePath'.",
     path: ["targetIdentifier"], // Associate the error with the targetIdentifier field.
   },
 );
@@ -265,8 +244,7 @@ export interface ObsidianUpdateNoteResponse {
  * Attempts to retrieve the final state (content and stats) of the target note after an update operation.
  * Uses the appropriate Obsidian API method based on the target type.
  * @param {z.infer<typeof TargetTypeSchema>} targetType - The type of the target note.
- * @param {string | undefined} targetIdentifier - The identifier (path or period) if applicable.
- * @param {z.infer<typeof PeriodicNotePeriodSchema> | undefined} period - The parsed period if targetType is 'periodicNote'.
+ * @param {string | undefined} targetIdentifier - The vault-relative path when targeting a file.
  * @param {ObsidianRestApiService} obsidianService - The Obsidian API service instance.
  * @param {RequestContext} context - The request context for logging and correlation.
  * @returns {Promise<NoteJson | null>} A promise resolving to the NoteJson object or null if no target could be resolved.
@@ -274,7 +252,6 @@ export interface ObsidianUpdateNoteResponse {
 async function getFinalState(
   targetType: z.infer<typeof TargetTypeSchema>,
   targetIdentifier: string | undefined,
-  period: z.infer<typeof PeriodicNotePeriodSchema> | undefined,
   obsidianService: ObsidianRestApiService,
   context: RequestContext,
 ): Promise<NoteJson | null> {
@@ -293,12 +270,6 @@ async function getFinalState(
     )) as NoteJson;
   } else if (targetType === "activeFile") {
     noteJson = (await obsidianService.getActiveFile(
-      "json",
-      context,
-    )) as NoteJson;
-  } else if (targetType === "periodicNote" && period) {
-    noteJson = (await obsidianService.getPeriodicNote(
-      period,
       "json",
       context,
     )) as NoteJson;
@@ -361,23 +332,7 @@ export const processObsidianUpdateNote = async (
   const contentString = params.content;
   const mode = params.wholeFileMode;
   let wasCreated = false; // Flag to track if the file was newly created by the operation
-  let targetPeriod: z.infer<typeof PeriodicNotePeriodSchema> | undefined;
   let writtenContentForStats = contentString;
-
-  // Parse the period if the target is a periodic note
-  if (params.targetType === "periodicNote" && targetId) {
-    // Use safeParse for robustness, though refined schema should guarantee validity
-    const parseResult = PeriodicNotePeriodSchema.safeParse(targetId);
-    if (!parseResult.success) {
-      // This should ideally not happen due to the refined schema, but handle defensively
-      throw new McpError(
-        BaseErrorCode.VALIDATION_ERROR,
-        `Invalid period provided for periodicNote: ${targetId}`,
-        context,
-      );
-    }
-    targetPeriod = parseResult.data;
-  }
 
   assertWriteAllowed({
     operation: "obsidian_update_note",
@@ -415,12 +370,6 @@ export const processObsidianUpdateNote = async (
             );
           } else if (params.targetType === "activeFile") {
             await obsidianService.getActiveFile("json", checkContext);
-          } else if (params.targetType === "periodicNote" && targetPeriod) {
-            await obsidianService.getPeriodicNote(
-              targetPeriod,
-              "json",
-              checkContext,
-            );
           }
           // If any of the above succeed without throwing, the target exists.
           existsBefore = true;
@@ -548,12 +497,6 @@ export const processObsidianUpdateNote = async (
               "markdown",
               readContext,
             )) as string;
-          } else if (params.targetType === "periodicNote" && targetPeriod) {
-            existingContent = (await obsidianService.getPeriodicNote(
-              targetPeriod,
-              "markdown",
-              readContext,
-            )) as string;
           }
           logger.debug(
             `Successfully read existing content. Length: ${existingContent.length}`,
@@ -603,19 +546,17 @@ export const processObsidianUpdateNote = async (
         );
       } else if (params.targetType === "activeFile") {
         await obsidianService.updateActiveFile(newContent, writeContext);
-      } else if (params.targetType === "periodicNote" && targetPeriod) {
-        await obsidianService.updatePeriodicNote(
-          targetPeriod,
-          newContent,
-          writeContext,
-        );
       }
       logger.debug(
         `Successfully wrote combined content for ${mode}`,
         writeContext,
       );
       if (params.targetType === "filePath") {
-        await refreshFileCacheBestEffort(vaultCacheService, targetId, writeContext);
+        await refreshFileCacheBestEffort(
+          vaultCacheService,
+          targetId,
+          writeContext,
+        );
       }
     } else {
       // Handle 'overwrite' mode directly.
@@ -631,21 +572,17 @@ export const processObsidianUpdateNote = async (
         case "activeFile":
           await obsidianService.updateActiveFile(contentString, updateContext);
           break;
-        case "periodicNote":
-          // targetPeriod is guaranteed by refined schema check
-          await obsidianService.updatePeriodicNote(
-            targetPeriod!,
-            contentString,
-            updateContext,
-          );
-          break;
       }
       logger.debug(
         `Successfully performed overwrite on target: ${params.targetType} ${targetId ?? "(active)"}`,
         updateContext,
       );
       if (params.targetType === "filePath") {
-        await refreshFileCacheBestEffort(vaultCacheService, targetId, updateContext);
+        await refreshFileCacheBestEffort(
+          vaultCacheService,
+          targetId,
+          updateContext,
+        );
       }
     }
 
@@ -667,13 +604,15 @@ export const processObsidianUpdateNote = async (
             getFinalState(
               params.targetType,
               targetId,
-              targetPeriod,
               obsidianService,
               context,
             ),
           {
             operationName: "getFinalStateAfterUpdate",
-            context: { ...context, operation: "getFinalStateAfterUpdateAttempt" },
+            context: {
+              ...context,
+              operation: "getFinalStateAfterUpdateAttempt",
+            },
             maxRetries: 3,
             delayMs: 250,
             shouldRetry: (error: unknown) => {
@@ -717,7 +656,10 @@ export const processObsidianUpdateNote = async (
       try {
         const stat = await retryWithDelay(
           async () => {
-            const metadata = await obsidianService.getFileMetadata(targetId, context);
+            const metadata = await obsidianService.getFileMetadata(
+              targetId,
+              context,
+            );
             if (!metadata) {
               throw new McpError(
                 BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -729,7 +671,10 @@ export const processObsidianUpdateNote = async (
           },
           {
             operationName: "getFileMetadataAfterUpdate",
-            context: { ...context, operation: "getFileMetadataAfterUpdateAttempt" },
+            context: {
+              ...context,
+              operation: "getFileMetadataAfterUpdateAttempt",
+            },
             maxRetries: 3,
             delayMs: 250,
             shouldRetry: (error: unknown) =>
@@ -763,13 +708,15 @@ export const processObsidianUpdateNote = async (
             getFinalState(
               params.targetType,
               targetId,
-              targetPeriod,
               obsidianService,
               context,
             ),
           {
             operationName: "getFinalStateForStatsAfterUpdate",
-            context: { ...context, operation: "getFinalStateForStatsAfterUpdateAttempt" },
+            context: {
+              ...context,
+              operation: "getFinalStateForStatsAfterUpdateAttempt",
+            },
             maxRetries: 3,
             delayMs: 250,
             shouldRetry: (error: unknown) =>
@@ -806,11 +753,7 @@ export const processObsidianUpdateNote = async (
       messageAction = mode === "overwrite" ? "overwritten" : `${mode}ed`;
     }
     const targetName =
-      params.targetType === "filePath"
-        ? `'${targetId}'`
-        : params.targetType === "periodicNote"
-          ? `'${targetId}' note`
-          : "the active file";
+      params.targetType === "filePath" ? `'${targetId}'` : "the active file";
     let successMessage = `File content successfully ${messageAction} for ${targetName}.`; // Use let
     logger.info(successMessage, context); // Log initial success message
 
@@ -839,11 +782,10 @@ export const processObsidianUpdateNote = async (
     }
 
     if (params.targetType !== "filePath" && finalState?.path) {
-      await refreshFileCacheBestEffort(
-        vaultCacheService,
-        finalState.path,
-        { ...context, operation: "postWriteCacheRefresh" },
-      );
+      await refreshFileCacheBestEffort(vaultCacheService, finalState.path, {
+        ...context,
+        operation: "postWriteCacheRefresh",
+      });
     }
 
     // Construct the final response object.

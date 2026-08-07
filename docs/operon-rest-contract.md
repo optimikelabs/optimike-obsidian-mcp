@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with the official Operon `3.0.0` Developer API V1 read pilot, with Kairélys `2.5.1` through `2.5.3` (based on Operon `2.5.0`), and with Kairélys `2.6.1` through `2.6.3` (based on Operon `2.6.0`). Compatibility is decided by plugin ID and version together. Mutations are exposed only when the loaded instance implements the supported mutation contract; there is no raw Markdown or private-reflection fallback.
+The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with official Operon `3.1.1` through the Developer API V1, with Kairélys `2.5.1` through `2.5.3` (based on Operon `2.5.0`), and with Kairélys `2.6.1` through `2.6.3` (based on Operon `2.6.0`). Compatibility is decided by plugin ID and version together. Operon 3.1.1 mutations use the official Developer API V1 preview/apply/recovery surface; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
 
 Prefix:
 
@@ -15,16 +15,18 @@ All routes inherit Local REST API authentication and TLS behavior.
 ## Compatibility and capabilities
 
 - Bridge contract: `1`
-- Latest tested compatibility target: official Operon `3.0.0` read pilot
+- Latest tested compatibility target: official Operon `3.1.1` Developer API V1 read/write pilot
 - Official Operon legacy read allowlist: `2.4.0`, `2.5.0`
-- Official Operon Developer API V1 read pilot: `3.0.0`
+- Official Operon Developer API V1 read/write pilot: `3.1.1`
 - Kairélys read allowlist: `2.5.1`, `2.5.2`, `2.5.3`, `2.6.1`, `2.6.2`, `2.6.3`
-- Mutation contract: Operon Public API `1`
+- Legacy mutation contract: Operon Public API `1`
 - Official Operon `2.5.0`: read-only
-- Official Operon `3.0.0`: read-only through Developer API V1; grant state is reported in `/status`
+- Official Operon `3.1.1`: typed create/update/transition/convert/relocate through Developer API V1 when the grant is active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
 - Kairélys `2.5.1` through `2.5.3` and `2.6.1` through `2.6.3` with Public API v1: read-write
 
 `GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future Operon version is not assumed compatible merely because its Markdown looks similar.
+
+The adapter targets the official `3.1.1` contract. The complete acceptance evidence in this repository uses a patched local Operon build while upstream fixes are under review in [#135](https://github.com/hasanyilmaz/operon/pull/135), [#137](https://github.com/hasanyilmaz/operon/pull/137), and [#139](https://github.com/hasanyilmaz/operon/pull/139); the known transition investigation remains tracked by [#99](https://github.com/hasanyilmaz/operon/issues/99) and [#101](https://github.com/hasanyilmaz/operon/pull/101). Stock `3.1.1` remains usable for reads and most governed mutations, but those limitations stay fail-closed. No Markdown or private-API fallback is introduced.
 
 Readiness requires a compatible plugin, positive generation, healthy idle V8 index, zero dirty sources, and a task count matching diagnostics. A duplicate-ID conflict is reported separately and causes MCP snapshot refresh refusal.
 
@@ -40,9 +42,15 @@ The `revision` covers the normalized projection and source mtime. Every existing
 
 - `GET /status`
 - `GET /configuration`
+- `GET /diagnostics`
 - `GET /tasks?cursor=0&limit=100&includeProperties=false`
 - `GET /tasks/:operonId?includeProperties=false`
 - `POST /tasks/query`
+- `POST /tasks/finder`
+- `POST /entities/resolve`
+- `POST /relationships`
+- `POST /context`
+- `GET /timers`
 - `POST /tasks/filter`
 - `GET /validate?includeProperties=false`
 
@@ -52,6 +60,13 @@ Query supports task IDs, language-stable `statusIds` / `pipelineIds`, visible st
 
 `POST /tasks/filter` accepts a saved `filterSetId` plus optional scope and pagination. It evaluates through Operon's native filter engine and is never synthesized from the stale MCP snapshot.
 
+The six native Developer API read routes return the official result inside a
+versioned `{ operation, result }` Bridge envelope. Finder is capped at 50 rows;
+relationship and context results at 100 entities/edges with depth at most 3.
+Context hydration allows only notes, links, and custom fields. These routes are
+unavailable on legacy Operon/Kairélys engines and never fall back to the CLI,
+Markdown parsing, or private APIs.
+
 Live validation reports duplicate IDs, missing sources, unknown workflow statuses, missing parents, and missing blockers. P0 prevents a new MCP snapshot from replacing the last known-good one.
 
 ## Mutation controls
@@ -60,7 +75,7 @@ All mutation routes require `idempotencyKey`. The key is bound to the canonical 
 
 Every mutation destination is validated without normalization at both the MCP and Bridge boundaries. `targetPath` must be an exact vault-relative Markdown path; `targetFolder` must be an exact vault-relative folder path. Leading or trailing whitespace, backslashes, absolute paths, empty segments, trailing separators, `.` and `..` are rejected before any call to the task engine.
 
-Mutation capabilities remain false until **Allow task mutations** is explicitly enabled in Bridge settings. The MCP has a separate `OPERON_MUTATIONS_ENABLED` apply opt-in.
+Mutation capabilities remain false until **Allow task mutations** is explicitly enabled in Bridge settings. The MCP has a separate `OPERON_MUTATIONS_ENABLED` apply opt-in. On official Operon 3.1.1, the Bridge requests the typed mutation grant only while that setting is enabled; a pending or revoked grant remains a live `503`/read-only condition.
 
 Responses use:
 
@@ -70,7 +85,7 @@ Responses use:
   "contractVersion": "1",
   "operationId": "uuid",
   "idempotencyKey": "client-key",
-  "status": "planned | applied | conflict | rejected | failed",
+  "status": "planned | applied | already-applied | outcome-unknown | conflict | not-ready | not-found | invalid-input | rejected | failed",
   "before": {},
   "requested": {},
   "after": {},
@@ -80,7 +95,22 @@ Responses use:
 }
 ```
 
-The Bridge waits for Operon's index to return to a verified idle state before proving `after`. If the final state cannot be proven, it records `failed/outcome_unverified` and does not invite a blind retry.
+For Operon 3.1.1, the Bridge sends the exact preview plan to `apply`; it never reconstructs or retries a plan after the host reports `outcome-unknown`. The response carries `recoveryRef`, `planDigest`, and `mutationMayHaveApplied` when recovery is required. The Bridge waits for Operon's index to return to a verified idle state before proving `after`. If the final state cannot be proven, it records `failed/outcome_unverified` and does not invite a blind retry. A Bridge apply is bounded at 120 seconds; a timeout is uncertain, not a permission to retry.
+
+### `GET /mutations/pending-recoveries`
+
+Returns the durable recovery references currently owned by this Bridge consumer. It is read-only and requires the official Developer API recovery surface.
+
+### `POST /mutations/recover`
+
+```json
+{
+  "idempotencyKey": "recovery-001",
+  "recoveryRef": "dvr1_..."
+}
+```
+
+This calls Operon's official `mutations.recover({ recoveryRef })` for the same plan. It never accepts a new mutation spec and never uses Markdown or private APIs. Recovery keeps the same two opt-ins and is restricted to the full MCP write mode.
 
 ### `POST /tasks/adopt`
 
@@ -116,9 +146,9 @@ Adoption upgrades one existing checkbox in place through Operon. `line` is one-b
 }
 ```
 
-Creation uses Operon's Task Creator paths, template resolution, identity generation, indexing, dependency reconciliation, aggregates, and workflow transition logic.
+Creation uses Operon's Task Creator paths, template resolution, identity generation, indexing, dependency reconciliation, aggregates, and workflow transition logic. Official Operon 3.1.1 maps the MCP payload to its typed create plan; unmanaged properties and arbitrary `targetFolder` placement are rejected because they are not part of the official Developer API contract.
 
-`statusId` is preferred over `fields.status`: it remains stable when a vault translates the displayed pipeline and status labels. Supplying both is rejected. An explicit `targetDateKey` forces the configured Obsidian daily-note path rather than opening Operon's interactive target picker; an explicit `targetPath` remains available for vault-specific periodic-note layouts.
+`statusId` is preferred over `fields.status`: it remains stable when a vault translates the displayed pipeline and status labels. Supplying both is rejected. `targetDateKey` is projected to the official `dateDue` field; destination selection remains governed by the configured Operon target policy. An explicit inline `targetPath` remains available for vault-specific layouts.
 
 ### `POST /tasks/:operonId/update`
 
@@ -138,7 +168,7 @@ One request must contain exactly one mutation group:
 
 - description only;
 - managed fields and/or tags;
-- exactly one unmanaged file property.
+- exactly one unmanaged file property on the legacy Public API path.
 
 This rule prevents false atomicity across Obsidian rename, managed-field, and raw-property write paths.
 
@@ -157,6 +187,8 @@ Status is not accepted by `update`; use the transition route.
 
 Exactly one of stable `statusId` or the current configured `Pipeline.Status` string is required. Checkbox, terminal dates, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, and view refreshes remain Operon's responsibility.
 
+The route remains documented for the legacy Kairélys/Public API path and is also available for official Operon `3.1.1` when the live Developer API advertises it. A stock runtime that cannot produce a terminal or recoverable result is reported as unavailable/uncertain; the Bridge never retries blindly or falls back to Markdown/private APIs.
+
 ### `POST /tasks/:operonId/convert`
 
 ```json
@@ -169,7 +201,7 @@ Exactly one of stable `statusId` or the current configured `Pipeline.Status` str
 }
 ```
 
-Inline-to-file accepts an optional `fileTemplateId`. File-to-inline requires an explicit different Markdown `targetPath`. Conversion uses Operon's transition-safe paths; no copy/delete logic lives in the MCP.
+Inline-to-file accepts an optional `fileTemplateId`. File-to-inline requires an explicit different Markdown `targetPath`. Conversion uses Operon's transition-safe paths; no copy/delete logic lives in the MCP. Official Operon 3.1.1 accepts configured/default template targets for inline-to-file and a configured-target/exact path for file-to-inline; arbitrary `targetFolder` is legacy-only.
 
 ### `POST /tasks/:operonId/relocate`
 
@@ -182,7 +214,7 @@ Inline-to-file accepts an optional `fileTemplateId`. File-to-inline requires an 
 }
 ```
 
-Relocation is limited to inline tasks. Operon writes the target and removes the source through a compensated domain operation, preserving `operonId`; the Bridge then proves the final indexed source/path before returning `applied`.
+Relocation is limited to inline tasks. The Bridge asks official Operon 3.1.1 for a live blank placement candidate, then sends the exact destination in the preview plan. Operon writes the target and removes the source through its domain operation, preserving `operonId`; the Bridge then proves the final indexed source/path before returning `applied`.
 
 ## Errors
 

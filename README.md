@@ -18,7 +18,7 @@ explicitly governed access to configured documents outside the vault.
 | ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------- |
 | Notes                   | Read, list, search, update, frontmatter and tags                       | Vault; Local REST API for the full live surface    |
 | Bases and Canvas        | Bases query/write tools, format validation and bounded Canvas helpers  | Bases Bridge for live Bases                        |
-| Tasks                   | Obsidian Tasks-compatible list/query plus 13 governed Operon tools     | Tasks reads; Kairélys/Public API v1 for mutations  |
+| Tasks                   | Obsidian Tasks-compatible list/query plus 21 governed Operon tools     | Operon 3.1.1 Developer API V1 through the Bridge   |
 | Semantic search         | Smart Connections index search with durable metadata cache             | `.smart-env` plus Ollama or OpenAI query embedding |
 | Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions | Local filesystem                                   |
 | External documents      | Governed reads/handoff plus opt-in local move with exact link repair   | Allowlist; local stdio for move                    |
@@ -89,8 +89,10 @@ Enable only the surfaces you use:
   live note, metadata and tag operations;
 - bundled **Bases Bridge (REST)**: live `.base` operations;
 - **Smart Connections**: semantic index under `.smart-env`;
-- **Kairélys 2.6.3+ / compatible Operon** and the bundled
-  **Optimike Operon Bridge**: governed live task operations;
+- **Operon 3.1.1** and the bundled **Optimike Operon Bridge**: governed live
+  task operations through the official Developer API V1;
+- Kairélys compatibility remains available as a bounded legacy/rollback path,
+  not as the production owner;
 - **Obsidian Tasks**: canonical Tasks parsing and configuration.
 
 Operon apply requires two explicit opt-ins:
@@ -101,6 +103,25 @@ OPERON_MUTATIONS_ENABLED=true
 ```
 
 Stale Operon snapshots remain read-only.
+
+The MCP exposes a curated agent surface rather than every Operon CLI function.
+Native diagnostics, finder/resolve, bounded relationships/context and timer
+state are available as read-only tools. Advanced writes and broad operator
+commands stay in the CLI. See the [Operon CLI / Developer API audit](docs/operon-cli-audit.md).
+Transition apply is available through the Bridge. Elevated or destructive plans
+still require fresh confirmation in the owning Obsidian vault window and fail
+closed after 45 seconds when no confirmation can be presented.
+
+Compatibility note: the adapter targets official Operon `3.1.1`, but the full
+acceptance evidence in this repository uses our patched local Operon build while
+upstream fixes are under review in [#135](https://github.com/hasanyilmaz/operon/pull/135),
+[#137](https://github.com/hasanyilmaz/operon/pull/137), and
+[#139](https://github.com/hasanyilmaz/operon/pull/139). Stock Operon `3.1.1`
+remains usable for reads and most governed mutations, but modified-time
+frontmatter settlement, consent across multiple Obsidian windows, and implicit
+File Task renames retain the upstream limitations described in those PRs. The
+MCP does not fall back to Markdown or private APIs when one of these cases is
+not supported.
 
 ## External document roots
 
@@ -162,6 +183,7 @@ synced vault.
 - Current tools: [Tool Surface](docs/obsidian_mcp_tools_spec.md)
 - Runtime modes: [Runtime Capability Matrix](docs/runtime-capability-matrix.md)
 - Agent routing: [MCP Routing Guide](docs/mcp-routing-guide.md)
+- Operon surface and CLI routing: [Operon CLI / Developer API audit](docs/operon-cli-audit.md)
 - Headless deployment: [Headless Server Profile](docs/headless-server-profile.md)
 - Linux headless multi-client pilot: [Pilot and capability matrix](docs/headless-multiclient-pilot.md)
 - OSS gateway integration: [Gateway Compatibility](docs/gateway-compatibility.md)

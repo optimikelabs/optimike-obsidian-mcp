@@ -20,7 +20,6 @@ import * as basesMethods from "./methods/basesMethods.js";
 import * as commandMethods from "./methods/commandMethods.js";
 import * as openMethods from "./methods/openMethods.js";
 import * as patchMethods from "./methods/patchMethods.js";
-import * as periodicNoteMethods from "./methods/periodicNoteMethods.js";
 import * as searchMethods from "./methods/searchMethods.js";
 import * as vaultMethods from "./methods/vaultMethods.js";
 import {
@@ -41,7 +40,7 @@ import {
   NoteStat,
   ObsidianCommand,
   PatchOptions,
-  Period,
+  PatchPayload,
   SimpleSearchResult,
 } from "./types.js"; // Import types from the new file
 
@@ -159,10 +158,18 @@ export class ObsidianRestApiService {
                 errorCode = BaseErrorCode.VALIDATION_ERROR; // Method not allowed often implies incorrect usage
                 errorMessage = `Obsidian API Method Not Allowed: ${requestConfig.method} on ${requestConfig.url}`;
                 break;
+              case 409:
+                errorCode = BaseErrorCode.CONFLICT;
+                errorMessage = `Obsidian API Conflict: ${JSON.stringify(axiosError.response.data)}`;
+                break;
               case 412:
                 errorCode = BaseErrorCode.CONFLICT;
                 errorMessage =
                   "Obsidian API Precondition Failed: the note changed after it was read.";
+                break;
+              case 422:
+                errorCode = BaseErrorCode.VALIDATION_ERROR;
+                errorMessage = `Obsidian API Unprocessable Entity: ${JSON.stringify(axiosError.response.data)}`;
                 break;
               case 503:
                 errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;
@@ -583,106 +590,26 @@ export class ObsidianRestApiService {
     );
   }
 
-  // --- Periodic Notes Methods ---
-  // PATCH methods for periodic notes are complex and omitted for brevity
-
-  /**
-   * Gets the content of a periodic note (daily, weekly, etc.).
-   * @param period - The period type ('daily', 'weekly', 'monthly', 'quarterly', 'yearly').
-   * @param format - 'markdown' or 'json'.
-   * @param context - Request context.
-   * @returns The note content or NoteJson.
-   */
-  async getPeriodicNote(
-    period: Period,
-    format: "markdown" | "json" = "markdown",
-    context: RequestContext,
-  ): Promise<string | NoteJson> {
-    return periodicNoteMethods.getPeriodicNote(
-      this._request.bind(this),
-      period,
-      format,
-      context,
-    );
-  }
-
-  /**
-   * Updates (overwrites) the content of a periodic note. Creates if needed.
-   * @param period - The period type.
-   * @param content - The new content.
-   * @param context - Request context.
-   * @returns {Promise<void>} Resolves on success (204 No Content).
-   */
-  async updatePeriodicNote(
-    period: Period,
-    content: string,
-    context: RequestContext,
-  ): Promise<void> {
-    return periodicNoteMethods.updatePeriodicNote(
-      this._request.bind(this),
-      period,
-      content,
-      context,
-    );
-  }
-
-  /**
-   * Appends content to a periodic note. Creates if needed.
-   * @param period - The period type.
-   * @param content - The content to append.
-   * @param context - Request context.
-   * @returns {Promise<void>} Resolves on success (204 No Content).
-   */
-  async appendPeriodicNote(
-    period: Period,
-    content: string,
-    context: RequestContext,
-  ): Promise<void> {
-    return periodicNoteMethods.appendPeriodicNote(
-      this._request.bind(this),
-      period,
-      content,
-      context,
-    );
-  }
-
-  /**
-   * Deletes a periodic note.
-   * @param period - The period type.
-   * @param context - Request context.
-   * @returns {Promise<void>} Resolves on success (204 No Content).
-   */
-  async deletePeriodicNote(
-    period: Period,
-    context: RequestContext,
-  ): Promise<void> {
-    return periodicNoteMethods.deletePeriodicNote(
-      this._request.bind(this),
-      period,
-      context,
-    );
-  }
-
   // --- Patch Methods ---
 
   /**
    * Patches a specific file in the vault using granular controls.
    * @param filePath - Vault-relative path to the file.
-   * @param content - The content to insert/replace (string or JSON for tables/frontmatter).
+   * @param payload - The value to apply. Omit it for delete operations.
    * @param options - Patch operation details (operation, targetType, target, etc.).
    * @param context - Request context.
    * @returns {Promise<void>} Resolves on success (200 OK).
    */
   async patchFile(
     filePath: string,
-    content: string | object,
+    payload: PatchPayload,
     options: PatchOptions,
     context: RequestContext,
   ): Promise<void> {
     return patchMethods.patchFile(
       this._request.bind(this),
       filePath,
-      content,
+      payload,
       options,
       context,
     );
@@ -690,42 +617,19 @@ export class ObsidianRestApiService {
 
   /**
    * Patches the currently active file in Obsidian using granular controls.
-   * @param content - The content to insert/replace.
+   * @param payload - The value to apply. Omit it for delete operations.
    * @param options - Patch operation details.
    * @param context - Request context.
    * @returns {Promise<void>} Resolves on success (200 OK).
    */
   async patchActiveFile(
-    content: string | object,
+    payload: PatchPayload,
     options: PatchOptions,
     context: RequestContext,
   ): Promise<void> {
     return patchMethods.patchActiveFile(
       this._request.bind(this),
-      content,
-      options,
-      context,
-    );
-  }
-
-  /**
-   * Patches a periodic note using granular controls.
-   * @param period - The period type ('daily', 'weekly', etc.).
-   * @param content - The content to insert/replace.
-   * @param options - Patch operation details.
-   * @param context - Request context.
-   * @returns {Promise<void>} Resolves on success (200 OK).
-   */
-  async patchPeriodicNote(
-    period: Period,
-    content: string | object,
-    options: PatchOptions,
-    context: RequestContext,
-  ): Promise<void> {
-    return patchMethods.patchPeriodicNote(
-      this._request.bind(this),
-      period,
-      content,
+      payload,
       options,
       context,
     );

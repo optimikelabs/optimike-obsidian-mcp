@@ -5,6 +5,10 @@ import {
   OperonBridgePageSchema,
   OperonConvertTaskSchema,
   OperonFilterQuerySchema,
+  OperonTaskFinderSchema,
+  OperonResolveTaskSchema,
+  OperonRelationshipsSchema,
+  OperonContextSchema,
   OperonRelocateTaskSchema,
   OperonConfigurationSchema,
   OperonCreateTaskSchema,
@@ -16,7 +20,17 @@ import {
   OperonVaultMarkdownPathSchema,
   OperonVaultRelativePathSchema,
   queryOperonSnapshot,
+  resolveOperonPriorityStableId,
 } from "../dist/services/operon/contract.js";
+
+assert.equal(
+  resolveOperonPriorityStableId("F", [
+    { id: "pr_a", label: "A" },
+    { id: "pr_f", label: "F" },
+  ]),
+  "pr_f",
+  "MCP postflight must compare priority labels against stable runtime ids",
+);
 
 const capabilities = {
   status: true,
@@ -512,6 +526,45 @@ assert.equal(
   false,
 );
 
+const finder = OperonTaskFinderSchema.parse({
+  text: "projet operon",
+  scope: "recent",
+  project: { mode: "tree", rootOperonId: task.operonId },
+});
+assert.equal(finder.limit, 20);
+assert.equal(
+  OperonTaskFinderSchema.safeParse({ text: "x", limit: 51 }).success,
+  false,
+);
+assert.equal(
+  OperonResolveTaskSchema.safeParse({
+    selector: { kind: "search", query: "Operon", limit: 21 },
+  }).success,
+  false,
+);
+assert.equal(
+  OperonRelationshipsSchema.parse({ operonId: task.operonId }).depth,
+  1,
+);
+assert.equal(
+  OperonContextSchema.safeParse({
+    purpose: "analysis",
+    projection: "task-neighborhood",
+  }).success,
+  false,
+  "task-neighborhood must be rooted in an exact operonId",
+);
+assert.equal(
+  OperonContextSchema.safeParse({
+    purpose: "planning",
+    projection: "planning-workload",
+    filters: { checkbox: ["open"] },
+    include: ["notes", "links"],
+    limit: 50,
+  }).success,
+  true,
+);
+
 console.log(
-  "PASS: Operon MCP read/mutation schemas, filtering, property gating, and freshness envelope",
+  "PASS: Operon MCP native read/mutation schemas, filtering, property gating, and freshness envelope",
 );

@@ -25,6 +25,20 @@ This guide helps agents choose the right layer for Obsidian work.
 | App-native Obsidian actions or diagnostics                                   | Obsidian CLI                                                  | Useful as a Desktop/app control plane, not strict headless.             |
 | Knowing how to write Obsidian Markdown, Bases, or Canvas syntax              | Obsidian-format skills or docs                                | Skills teach format conventions; they do not execute MCP operations.    |
 
+## Local REST API 5.x targeting
+
+For live writes, use Local REST API 5.0.2 or later within the supported 5.x
+line, and choose an explicit vault-relative `filePath` whenever possible. Use
+`activeFile` only when the currently open Desktop note is intentionally the
+target. Targeted metadata PATCH requests use the Local REST API 5.x JSON
+instruction contract; do not construct deprecated 1.x PATCH headers.
+
+Do not route periodic notes through `/periodic/...`: those endpoints were
+removed from the Local REST API core. Resolve the intended periodic note to an
+explicit vault-relative path first, then use the ordinary note tools. The
+optional upstream Periodic Notes API extension is a separate integration and is
+not assumed by Optimike MCP.
+
 ## New In V2.2
 
 Use `obsidian_validate_format` before risky writes or generated content:

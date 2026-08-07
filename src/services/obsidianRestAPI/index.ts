@@ -13,7 +13,6 @@ export * as basesMethods from "./methods/basesMethods.js";
 export * as commandMethods from "./methods/commandMethods.js";
 export * as openMethods from "./methods/openMethods.js";
 export * as patchMethods from "./methods/patchMethods.js";
-export * as periodicNoteMethods from "./methods/periodicNoteMethods.js";
 export * as searchMethods from "./methods/searchMethods.js";
 export * as vaultMethods from "./methods/vaultMethods.js";
 export { VaultCacheService } from "./vaultCache/index.js";

@@ -17,6 +17,12 @@ const capabilities = {
   get: true,
   query: true,
   validate: true,
+  diagnostics: true,
+  finder: true,
+  resolve: true,
+  relationships: true,
+  context: true,
+  timers: true,
   adopt: false,
   create: false,
   update: false,
@@ -234,6 +240,39 @@ const server = http.createServer((request, response) => {
     sendJson(response, 200, validationPayload());
     return;
   }
+  const nativeReadOperation =
+    request.method === "GET" && url.pathname.endsWith("/diagnostics")
+      ? "diagnostics"
+      : request.method === "GET" && url.pathname.endsWith("/timers")
+        ? "timers"
+        : request.method === "POST" && url.pathname.endsWith("/tasks/finder")
+          ? "finder"
+          : request.method === "POST" && url.pathname.endsWith("/entities/resolve")
+            ? "resolve"
+            : request.method === "POST" && url.pathname.endsWith("/relationships")
+              ? "relationships"
+              : request.method === "POST" && url.pathname.endsWith("/context")
+                ? "context"
+                : null;
+  if (nativeReadOperation) {
+    sendJson(response, 200, {
+      ok: true,
+      contractVersion: "1",
+      source: "operon-live",
+      stale: false,
+      operation: nativeReadOperation,
+      result: {
+        ok: true,
+        kind: `${nativeReadOperation}-test-result`,
+        state:
+          nativeReadOperation === "timers"
+            ? { active: null, transition: null }
+            : undefined,
+      },
+      limitations: ["read-only"],
+    });
+    return;
+  }
   if (request.method === "POST" && url.pathname.endsWith("/tasks/query")) {
     state.postCalls += 1;
     let body = "";
@@ -376,6 +415,40 @@ try {
     limit: 1,
   });
   assert.equal("properties" in stripped.tasks[0], false);
+
+  assert.equal((await service.diagnostics()).operation, "diagnostics");
+  assert.equal(
+    (await service.findTasks({ text: "bridge", limit: 10 })).operation,
+    "finder",
+  );
+  assert.equal(
+    (await service.resolveTask({
+      selector: { kind: "operon-id", operonId: "a" },
+    })).operation,
+    "resolve",
+  );
+  assert.equal(
+    (await service.relationships({ operonId: "a" })).operation,
+    "relationships",
+  );
+  assert.equal(
+    (await service.context({
+      purpose: "analysis",
+      projection: "task-neighborhood",
+      operonId: "a",
+    })).operation,
+    "context",
+  );
+  assert.equal(
+    (await service.context({
+      purpose: "read",
+      projection: "exact-task",
+      operonId: "a",
+    })).operation,
+    "context",
+    "exact-task context must preserve Operon's projection-specific defaults",
+  );
+  assert.equal((await service.timers()).operation, "timers");
 
   state.mode = "offline";
   const offline = await service.ensureSnapshot(false);

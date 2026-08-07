@@ -26,8 +26,8 @@ import {
 /**
  * Registers the 'obsidian_update_note' tool with the MCP server.
  *
- * This tool allows modification of Obsidian notes (specified by file path,
- * the active file, or a periodic note) using whole-file operations:
+ * This tool allows modification of Obsidian notes (specified by file path
+ * or the active file) using whole-file operations:
  * 'append', 'prepend', or 'overwrite'. It includes options for creating
  * missing files/targets and controlling overwrite behavior.
  *
@@ -48,7 +48,7 @@ export const registerObsidianUpdateNoteTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_update_note";
   const toolDescription =
-    "Tool to modify Obsidian notes (specified by file path, the active file, or a periodic note) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options allow creating missing files/targets and controlling overwrite behavior. Returns success status, message, a formatted timestamp string, file stats (stats), and optionally the final file content.";
+    "Tool to modify Obsidian notes (specified by file path or the active file) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options allow creating missing files/targets and controlling overwrite behavior. Returns success status, message, a formatted timestamp string, file stats (stats), and optionally the final file content.";
 
   // Create a context for the registration process itself for better traceability.
   const registrationContext: RequestContext =
