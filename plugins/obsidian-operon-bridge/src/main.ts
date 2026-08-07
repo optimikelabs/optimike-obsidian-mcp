@@ -10,6 +10,7 @@ import {
   mutationPathValidationError,
   resolveMutationPreflight,
   resolvePriorityStableId,
+  workflowStatusMatches,
   isVersionCompatible,
   normalizeTask,
   queryTasks,
@@ -1534,13 +1535,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (capability === "transition" || capability === "create") {
       if (
         typeof requested.status === "string" &&
-        after.status !== requested.status.trim()
+        !workflowStatusMatches(after, requested.status, runtime.pipelines)
       ) {
         return "Task status does not match the requested status value.";
       }
       if (
         typeof requested.statusId === "string" &&
-        after.statusId !== requested.statusId.trim()
+        !workflowStatusMatches(after, requested.statusId, runtime.pipelines)
       ) {
         return "Task status does not match the requested stable status id.";
       }

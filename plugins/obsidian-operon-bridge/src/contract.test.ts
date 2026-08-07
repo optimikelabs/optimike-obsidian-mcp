@@ -14,6 +14,8 @@ import {
   paginateTasks,
   queryTasks,
   resolveWorkflow,
+  resolveWorkflowStatus,
+  workflowStatusMatches,
 	settingsSignature,
 	shouldAttemptIndexValidation,
   mutationPathValidationError,
@@ -30,6 +32,40 @@ test("resolves a requested priority label to the stable id used by postflight", 
   assert.equal(resolvePriorityStableId("F", priorities), "pr_f");
   assert.equal(resolvePriorityStableId(" pr_f ", priorities), "pr_f");
   assert.equal(resolvePriorityStableId("unknown", priorities), null);
+});
+
+test("resolves bare workflow labels for postflight status matching", () => {
+  const workflowPipelines = [
+    {
+      id: "pl_project",
+      name: "Project",
+      statuses: [{ id: "st_project_done", label: "Done" }],
+    },
+  ];
+  assert.deepEqual(resolveWorkflowStatus("Done", workflowPipelines), {
+    pipeline: "Project",
+    label: "Done",
+    value: "Project.Done",
+    id: "st_project_done",
+  });
+  const after = {
+    status: "Project.Done",
+    statusId: "st_project_done",
+    statusLabel: "Done",
+    pipeline: "Project",
+    pipelineId: "pl_project",
+  };
+  assert.equal(workflowStatusMatches(after, "Done", workflowPipelines), true);
+  assert.equal(workflowStatusMatches(after, "st_project_done", workflowPipelines), true);
+  assert.equal(workflowStatusMatches(after, "Project.Done", workflowPipelines), true);
+  assert.equal(workflowStatusMatches(after, "Planned", workflowPipelines), false);
+
+  const ambiguousPipelines = [
+    ...workflowPipelines,
+    { id: "pl_pipeline", name: "Pipeline", statuses: [{ id: "st_pipeline_done", label: "Done" }] },
+  ];
+  assert.equal(resolveWorkflowStatus("Done", ambiguousPipelines), null);
+  assert.equal(workflowStatusMatches(after, "Done", ambiguousPipelines), false);
 });
 
 const pipelines = [

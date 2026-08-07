@@ -229,6 +229,54 @@ export function resolvePriorityStableId(
   return unique.length === 1 ? unique[0] ?? null : null;
 }
 
+export interface ResolvedWorkflowStatus {
+  pipeline: string;
+  label: string;
+  value: string;
+  id: string | null;
+}
+
+export function resolveWorkflowStatus(
+  value: unknown,
+  pipelines: readonly RuntimePipeline[],
+): ResolvedWorkflowStatus | null {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+  const matches = pipelines.flatMap((pipeline) =>
+    (pipeline.statuses ?? [])
+      .filter((status) =>
+        status.id === normalized
+        || status.label === normalized
+        || `${pipeline.name}.${status.label}` === normalized,
+      )
+      .map((status) => ({
+        pipeline: pipeline.name,
+        label: status.label,
+        value: `${pipeline.name}.${status.label}`,
+        id: status.id?.trim() || null,
+      })),
+  );
+  return matches.length === 1 ? matches[0] ?? null : null;
+}
+
+export function workflowStatusMatches(
+  actual: Pick<OperonBridgeTask, "status" | "statusId" | "statusLabel" | "pipeline" | "pipelineId">,
+  requested: unknown,
+  pipelines: readonly RuntimePipeline[],
+): boolean {
+  const normalized = String(requested ?? "").trim();
+  if (!normalized) return false;
+  const resolved = resolveWorkflowStatus(normalized, pipelines);
+  if (!resolved) {
+    return actual.status === normalized || actual.statusId === normalized;
+  }
+  return (
+    actual.status === resolved.value
+    || (resolved.id !== null && actual.statusId === resolved.id)
+    || (actual.pipeline === resolved.pipeline && actual.statusLabel === resolved.label)
+  );
+}
+
 export interface RuntimeFileTaskTemplate {
 	id: string;
 	name: string;
