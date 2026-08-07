@@ -21,6 +21,7 @@ import {
   OperonVaultRelativePathSchema,
   queryOperonSnapshot,
   resolveOperonPriorityStableId,
+  resolveOperonWorkflowStatus,
 } from "../dist/services/operon/contract.js";
 
 assert.equal(
@@ -132,6 +133,14 @@ const configuration = OperonConfigurationSchema.parse({
 assert.equal(
   configuration.configuration.workflow.pipelines[0].statuses[0].id,
   "st_project_finished",
+);
+assert.equal(
+  resolveOperonWorkflowStatus(
+    "Terminé",
+    configuration.configuration.workflow,
+  )?.value,
+  "Project.Terminé",
+  "MCP postflight must resolve a short status label to the canonical workflow value",
 );
 
 const task = OperonTaskSchema.parse({

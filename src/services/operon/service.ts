@@ -35,6 +35,7 @@ import {
   OperonUpdateTaskSchema,
   isCanonicalOperonVaultRelativePath,
   resolveOperonPriorityStableId,
+  resolveOperonWorkflowStatus,
   type OperonBridgePage,
   type OperonConfiguration,
   type OperonQuery,
@@ -470,6 +471,7 @@ export class OperonService {
     payload: Record<string, unknown>,
     after: OperonTask,
     priorities: OperonConfiguration["configuration"]["priorities"]["items"],
+    workflow: OperonConfiguration["configuration"]["workflow"],
   ): string | null {
     const requested =
       action === "adopt"
@@ -547,11 +549,16 @@ export class OperonService {
       }
     }
     if (action === "transition" || action === "create") {
-      if (
-        typeof request.status === "string" &&
-        after.status !== request.status.trim()
-      )
-        return "Task status does not match the request.";
+      if (typeof request.status === "string") {
+        const requestedStatus = resolveOperonWorkflowStatus(request.status, workflow);
+        const statusMatches = requestedStatus
+          ? after.status === requestedStatus.value
+            || after.status === `${requestedStatus.pipeline}.${requestedStatus.label}`
+            || after.statusId === requestedStatus.id
+            || after.statusLabel === requestedStatus.label
+          : after.status === request.status.trim();
+        if (!statusMatches) return "Task status does not match the request.";
+      }
       if (
         typeof request.statusId === "string" &&
         after.statusId !== request.statusId.trim()
@@ -701,6 +708,7 @@ export class OperonService {
         payload,
         result.after,
         configuration.configuration.priorities.items,
+        configuration.configuration.workflow,
       );
       if (mismatch) {
         throw new McpError(
@@ -1844,6 +1852,25 @@ export class OperonService {
 
   async recoverMutation(input: unknown): Promise<OperonMutationResult> {
     const params: OperonRecoverMutation = OperonRecoverMutationSchema.parse(input);
+    const requested = { recoveryRef: params.recoveryRef };
+    const requestedJson = stableJson(requested);
+    // Recovery is itself idempotent at the MCP boundary. A completed
+    // recovery must replay from the durable journal after an MCP restart,
+    // without requiring the Bridge to be reachable a second time.
+    const existing = this.readMutationJournal(params.idempotencyKey);
+    if (existing) {
+      if (existing.action !== "recover" || existing.requestedJson !== requestedJson) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Idempotency key was already used for a different Operon recovery request.",
+          this.requestContext("operon_recover_mutation", {
+            recoveryRef: params.recoveryRef,
+            idempotencyKey: params.idempotencyKey,
+          }),
+        );
+      }
+      return existing.result;
+    }
     if (!liveModeConfigured()) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -1883,6 +1910,13 @@ export class OperonService {
         idempotencyKey: params.idempotencyKey,
       }),
     });
+    const reservedResult = this.reserveMutationJournal(
+      "recover",
+      null,
+      params.idempotencyKey,
+      requested,
+    );
+    if (reservedResult) return reservedResult.result;
     const response = await this.getClient().post(
       `${BRIDGE_PREFIX}/mutations/recover`,
       params,
@@ -1899,6 +1933,7 @@ export class OperonService {
         }),
       );
     }
+    this.writeMutationJournal("recover", null, requested, parsed.data);
     return parsed.data;
   }
 

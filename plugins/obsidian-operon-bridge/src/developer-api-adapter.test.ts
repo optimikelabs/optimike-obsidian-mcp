@@ -129,6 +129,102 @@ test("Operon 3 Developer API adapter stays unavailable when the host grant is pe
   assert.equal(adapter.status.reason, "grant-pending");
 });
 
+test("Operon 3 Developer API adapter keeps approved capabilities usable with a partial grant", async () => {
+  const granted = new Set([
+    "system.health",
+    "system.capabilities",
+    "catalog.read",
+    "tasks.read",
+    "tasks.query",
+    "tasks.update.preview",
+    "tasks.update.apply",
+  ]);
+  const requests: string[][] = [];
+  const api = {
+    hasCapability: (name: string) => granted.has(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => ({ ok: true, contextRevision: { index: { ramGeneration: 22 } } }),
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        settingsFingerprint: "settings-22",
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async () => ({
+        ok: true,
+        tasks: [],
+        page: { nextCursor: undefined, truncated: false },
+        contextRevision: { index: { ramGeneration: 22 } },
+      }),
+    },
+    mutations: {
+      preview: async () => ({ ok: true, plan: { planDigest: "partial-plan" } }),
+      apply: async () => ({ status: "applied" as const }),
+      pendingRecoveries: async () => ({ ok: true, recoveries: [] }),
+      recover: async () => ({ status: "already-applied" as const }),
+    },
+  };
+  const operon = {
+    getDeveloperApiV1: (_candidate: unknown, request: { requestedCapabilities: readonly string[] }) => {
+      requests.push([...request.requestedCapabilities]);
+      const denied = request.requestedCapabilities.filter(
+        (capability) => !granted.has(capability),
+      );
+      if (denied.length > 0) {
+        return {
+          ok: false,
+          status: {
+            ...readyStatus(),
+            reason: "grant-pending",
+            grant: {
+              state: "pending",
+              grantedCapabilities: [...granted],
+              pendingCapabilities: denied,
+            },
+          },
+          error: { code: "authority-insufficient", reason: "partial grant" },
+        };
+      }
+      return {
+        ok: true,
+        status: {
+          ...readyStatus(),
+          grant: {
+            state: "active",
+            // The official baseline-only session does not disclose the
+            // persisted non-baseline grant set; the adapter must probe core
+            // capabilities independently before composing a read session.
+            grantedCapabilities: request.requestedCapabilities.every(
+              (capability) => capability === "system.health" || capability === "system.capabilities",
+            ) ? [] : [...granted],
+            effectiveCapabilities: [...request.requestedCapabilities],
+          },
+        },
+        api,
+      };
+    },
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
+
+  assert.equal(await adapter.refresh(true), true);
+  assert.equal(adapter.hasMutationCapability("update"), true);
+  assert.equal(adapter.hasMutationCapability("transition"), false);
+  assert.equal(adapter.hasReadCapability("tasks.finder"), false);
+  assert.equal(
+    requests.every((requested) => requested.every((capability) => granted.has(capability))),
+    true,
+    "the adapter must not request an unapproved optional capability together with approved ones",
+  );
+});
+
 test("Operon 3 Developer API adapter previews and applies an exact typed update plan", async () => {
   const task = {
     identity: { operonId: "abc1234" },
@@ -429,4 +525,101 @@ test("Operon 3 Developer API adapter exposes only bounded official read operatio
   assert.equal(received.get("relationships")?.kind, "relationship");
   assert.equal(received.get("context")?.kind, "context");
   assert.equal(received.get("timers")?.kind, "timer-read");
+});
+
+test("Operon 3 Developer API adapter follows pagination beyond the former 25,000-task boundary", async () => {
+  let queryCount = 0;
+  const api = {
+    hasCapability: (name: string) => [
+      "system.health",
+      "system.capabilities",
+      "catalog.read",
+      "tasks.read",
+      "tasks.query",
+    ].includes(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => ({ ok: true, contextRevision: { index: { ramGeneration: 23 } } }),
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        settingsFingerprint: "settings-23",
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async (request: { cursor?: string }) => {
+        queryCount += 1;
+        const index = Number(request.cursor ?? "0");
+        const next = index < 100 ? String(index + 1) : undefined;
+        return {
+          ok: true,
+          tasks: [{
+            identity: { operonId: `page-${index}` },
+            description: `Page ${index}`,
+            representation: "inline" as const,
+            locator: { representation: "inline" as const, filePath: "Tasks.md", lineNumber: index + 1 },
+            checkbox: "open" as const,
+          }],
+          page: { nextCursor: next, truncated: next !== undefined },
+          contextRevision: { index: { ramGeneration: 23 } },
+        };
+      },
+    },
+  };
+  const operon = {
+    getDeveloperApiV1: () => ({ ok: true, status: readyStatus(), api }),
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
+
+  assert.equal(await adapter.refresh(), true);
+  assert.equal(queryCount, 101);
+  assert.equal(adapter.indexer.taskCount, 101);
+});
+
+test("Operon 3 Developer API adapter refuses an explicitly truncated page without a cursor", async () => {
+  const api = {
+    hasCapability: (name: string) => [
+      "system.health",
+      "system.capabilities",
+      "catalog.read",
+      "tasks.read",
+      "tasks.query",
+    ].includes(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => ({ ok: true }),
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        settingsFingerprint: "settings-truncated",
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async () => ({
+        ok: true,
+        tasks: [],
+        page: { truncated: true },
+      }),
+    },
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(
+    consumer,
+    { getDeveloperApiV1: () => ({ ok: true, status: readyStatus(), api }) },
+  );
+
+  assert.equal(await adapter.refresh(), false);
+  assert.match(adapter.status.error?.reason ?? "", /truncation/u);
+  assert.equal((await adapter.indexer.getIndexV8Diagnostics()).health, "degraded");
 });

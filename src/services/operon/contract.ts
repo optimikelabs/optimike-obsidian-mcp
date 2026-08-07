@@ -195,6 +195,41 @@ export const OperonConfigurationSchema = z.object({
 
 export type OperonConfiguration = z.infer<typeof OperonConfigurationSchema>;
 
+export function resolveOperonWorkflowStatus(
+  value: unknown,
+  workflow: OperonConfiguration["configuration"]["workflow"],
+): {
+  pipeline: string;
+  label: string;
+  id: string | null;
+  value: string;
+} | null {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+  const matches = workflow.pipelines.flatMap((pipeline) =>
+    pipeline.statuses
+      .filter((status) => (
+        status.id === normalized
+        || status.value === normalized
+        || `${pipeline.name}.${status.label}` === normalized
+        || status.label === normalized
+      ))
+      .map((status) => ({
+        pipeline: pipeline.name,
+        label: status.label,
+        id: status.id,
+        value: status.value,
+      })),
+  );
+  const unique = new Map(
+    matches.map((match) => [
+      `${match.pipeline}\0${match.id ?? match.value}`,
+      match,
+    ]),
+  );
+  return unique.size === 1 ? [...unique.values()][0] ?? null : null;
+}
+
 export function resolveOperonPriorityStableId(
   value: unknown,
   priorities: readonly { id: string | null; label: string }[],

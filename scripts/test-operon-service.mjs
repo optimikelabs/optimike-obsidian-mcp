@@ -28,11 +28,40 @@ const capabilities = {
   update: false,
   transition: false,
   convert: false,
+  recovery: false,
 };
 
 const semanticConfiguration = {
   language: "fr",
-  workflow: { language: "fr", defaultPipelineName: "Project", pipelines: [] },
+  workflow: {
+    language: "fr",
+    defaultPipelineName: "Project",
+    pipelines: [{
+      id: "pl_project",
+      name: "Project",
+      description: null,
+      statuses: [
+        {
+          id: "st_project_in_progress",
+          label: "InProgress",
+          value: "Project.InProgress",
+          isFinished: false,
+          isCancelled: false,
+          isScheduledTarget: false,
+          isTrackingTarget: true,
+        },
+        {
+          id: "st_project_done",
+          label: "Done",
+          value: "Project.Done",
+          isFinished: true,
+          isCancelled: false,
+          isScheduledTarget: false,
+          isTrackingTarget: false,
+        },
+      ],
+    }],
+  },
   priorities: { defaultPriority: "C", items: [] },
   keys: [],
   creation: {
@@ -135,6 +164,7 @@ const state = {
   postCalls: 0,
   validationCalls: 0,
   mutationCalls: 0,
+  recoveryCalls: 0,
   mutations: false,
 };
 
@@ -174,6 +204,7 @@ function statusPayload() {
           update: true,
           transition: true,
           convert: true,
+          recovery: true,
         }
       : capabilities,
     source: "operon-runtime",
@@ -273,6 +304,16 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
+  const taskGetMatch =
+    request.method === "GET" &&
+    /\/extensions\/optimike-operon-bridge\/v1\/tasks\/([^/]+)$/u.exec(
+      url.pathname,
+    );
+  if (taskGetMatch) {
+    const task = tasks.find((candidate) => candidate.operonId === taskGetMatch[1]);
+    sendJson(response, task ? 200 : 404, task ? { task } : { error: "not_found" });
+    return;
+  }
   if (request.method === "POST" && url.pathname.endsWith("/tasks/query")) {
     state.postCalls += 1;
     let body = "";
@@ -306,6 +347,62 @@ const server = http.createServer((request, response) => {
         hasMore: generationDrift && !secondPage,
         tasks: pageTasks,
         limitations: ["read-only"],
+      });
+    });
+    return;
+  }
+  if (request.method === "POST" && url.pathname.endsWith("/mutations/recover")) {
+    state.recoveryCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-recovery-${state.recoveryCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: "already-applied",
+        before: null,
+        requested: { recoveryRef: params.recoveryRef },
+        after: null,
+        planDigest: "plan-recovery-test",
+        recoveryRef: params.recoveryRef,
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
+  }
+  if (request.method === "POST" && /\/tasks\/([^/]+)\/transition$/u.test(url.pathname)) {
+    state.mutationCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      const operonId = /\/tasks\/([^/]+)\/transition$/u.exec(url.pathname)?.[1] ?? "a";
+      const before = tasks.find((candidate) => candidate.operonId === operonId) ?? tasks[0];
+      const after = makeTask(operonId, {
+        status: "Project.Done",
+        statusId: "st_project_done",
+        statusLabel: "Done",
+        fields: { ...before.fields, status: "Project.Done" },
+      });
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-transition-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: "applied",
+        before,
+        requested: params,
+        after,
+        source: "operon-live",
+        stale: false,
       });
     });
     return;
@@ -372,10 +469,11 @@ process.env.OBSIDIAN_VAULT = tempRoot;
 process.env.OBSIDIAN_SHARED_CACHE_DB_PATH = dbPath;
 process.env.MCP_WRITE_MODE = "readonly";
 process.env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES =
-  "Efforts/Projets/Internes/Operon Pilot";
+  "Efforts/Projets";
 process.env.SEMANTIC_SEARCH_PREWARM = "false";
 
 const { OperonService } = await import("../dist/services/operon/service.js");
+const { config } = await import("../dist/config/index.js");
 
 try {
   const service = new OperonService();
@@ -670,6 +768,38 @@ try {
     "explicit allowed inline target must reach the Bridge",
   );
 
+  // Enable the guarded apply path only for the explicit postflight/recovery
+  // checks below; the earlier assertion proves the default remains fail-closed.
+  config.operonMutationsEnabled = true;
+  config.mcpWriteMode = "full";
+
+  const transitioned = await service.transitionTask({
+    idempotencyKey: "test-transition-short-status",
+    dryRun: false,
+    operonId: "a",
+    expectedRevision: tasks[0].revision,
+    status: "Done",
+  });
+  assert.equal(transitioned.status, "applied");
+  assert.equal(
+    transitioned.after.status,
+    "Project.Done",
+    "a short status label must be proven against the canonical workflow value",
+  );
+
+  const recoveryInput = {
+    idempotencyKey: "test-recovery-idempotency",
+    recoveryRef: "dvr1_test-recovery-ref",
+  };
+  const recovered = await service.recoverMutation(recoveryInput);
+  assert.equal(recovered.status, "already-applied");
+  assert.equal(state.recoveryCalls, 1);
+  state.mode = "offline";
+  const restartedRecovery = await new OperonService().recoverMutation(recoveryInput);
+  assert.equal(restartedRecovery.replayed, true);
+  assert.equal(state.recoveryCalls, 1, "completed recovery must replay from the MCP journal after restart");
+  state.mode = "normal";
+
   const concurrentInput = {
     idempotencyKey: "test-concurrent-idempotency",
     dryRun: true,
@@ -737,7 +867,7 @@ try {
   );
 
   console.log(
-    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, pagination/validation drift preservation, scoped mutations, and durable/concurrent mutation idempotency",
+    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, pagination/validation drift preservation, short-status postflight, durable recovery replay, scoped mutations, and durable/concurrent mutation idempotency",
   );
 } finally {
   await new Promise((resolve, reject) =>

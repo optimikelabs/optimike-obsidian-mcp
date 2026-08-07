@@ -38,6 +38,8 @@ export interface DeveloperApiChannelStatus {
   };
   readonly grant?: {
     readonly state?: string;
+    readonly requestedCapabilities?: readonly string[];
+    readonly grantedCapabilities?: readonly string[];
     readonly effectiveCapabilities?: readonly string[];
   };
   readonly error?: DeveloperApiError;
@@ -386,18 +388,23 @@ const BASELINE_CAPABILITIES = [
   "system.capabilities",
 ] as const;
 
-const READ_CAPABILITIES = [
+const CORE_READ_CAPABILITIES = [
   ...BASELINE_CAPABILITIES,
-  "system.diagnostics",
   "catalog.read",
   "tasks.read",
   "tasks.query",
+] as const;
+
+const OPTIONAL_READ_CAPABILITIES = [
+  "system.diagnostics",
   "tasks.finder",
   "entities.resolve",
   "relationships.read",
   "context.build",
   "timers.read",
 ] as const;
+
+const MAX_TASK_QUERY_PAGES = 10_000;
 
 export type DeveloperApiReadCapability =
   | "system.diagnostics"
@@ -737,6 +744,16 @@ function isDeveloperApiAccessor(value: unknown): value is DeveloperApiAccessor {
   return typeof candidate.getDeveloperApiV1 === "function";
 }
 
+function grantedCapabilitiesFromStatus(
+  status: DeveloperApiChannelStatus,
+): ReadonlySet<string> | null {
+  const granted = status.grant?.grantedCapabilities;
+  // A baseline-only Developer API session intentionally reports an empty
+  // granted list; that means "not disclosed", not "nothing is approved".
+  if (Array.isArray(granted) && granted.length > 0) return new Set(granted);
+  return null;
+}
+
 export class OperonDeveloperApiRuntimeAdapter {
   readonly indexer: DeveloperApiRuntimeIndexer = {
     getAllTasks: () => this.tasks,
@@ -765,7 +782,10 @@ export class OperonDeveloperApiRuntimeAdapter {
   private configuration: OperonSemanticConfiguration = emptyConfiguration();
   private channelStatus: DeveloperApiChannelStatus = {};
   private readApi: DeveloperApiV1 | null = null;
-  private mutationApi: DeveloperApiV1 | null = null;
+  private readonly optionalReadApis = new Map<DeveloperApiReadCapability, DeveloperApiV1>();
+  private readonly mutationApis = new Map<DeveloperApiMutationCapability, DeveloperApiV1>();
+  private recoveryApi: DeveloperApiV1 | null = null;
+  private grantedCapabilities: ReadonlySet<string> | null = null;
   private refreshInFlight: Promise<boolean> | null = null;
 
   constructor(
@@ -792,10 +812,42 @@ export class OperonDeveloperApiRuntimeAdapter {
   }
 
   private async refreshInternal(includeMutationCapabilities: boolean): Promise<boolean> {
-    const api = this.connect(READ_CAPABILITIES);
+    this.readApi = null;
+    this.optionalReadApis.clear();
+    this.mutationApis.clear();
+    this.recoveryApi = null;
+    this.grantedCapabilities = null;
+
+    // Establish a baseline session first. Operon evaluates a requested set as
+    // one grant: asking for an unapproved optional capability must not revoke
+    // access to capabilities that were already approved.
+    const baselineApi = this.connect(BASELINE_CAPABILITIES);
+    if (!baselineApi) {
+      this.readApi = null;
+      this.setUnavailableDiagnostics();
+      return false;
+    }
+    // Probe the three core read capabilities independently before asking for
+    // their composite session. Operon rejects the whole requested set when
+    // one capability is still pending, so the probes preserve a usable
+    // partial grant and let us fail closed only when the index itself cannot
+    // be read completely.
+    const coreProbeEntries = CORE_READ_CAPABILITIES
+      .filter((capability) => !BASELINE_CAPABILITIES.includes(capability as (typeof BASELINE_CAPABILITIES)[number]))
+      .map((capability) => [
+        capability,
+        this.connectApproved([...BASELINE_CAPABILITIES, capability], false),
+      ] as const);
+    if (coreProbeEntries.some(([capability, candidate]) => (
+      !candidate || !candidate.hasCapability(capability)
+    ))) {
+      this.readApi = null;
+      this.setUnavailableDiagnostics();
+      return false;
+    }
+    const api = this.connectApproved(CORE_READ_CAPABILITIES);
     if (!api) {
       this.readApi = null;
-      this.mutationApi = null;
       this.setUnavailableDiagnostics();
       return false;
     }
@@ -834,9 +886,18 @@ export class OperonDeveloperApiRuntimeAdapter {
         dirtySourceCount: 0,
       };
       this.readApi = api;
-      this.mutationApi = includeMutationCapabilities
-        ? this.connectMutationApi()
-        : null;
+      this.recoveryApi = baselineApi;
+      for (const capability of OPTIONAL_READ_CAPABILITIES) {
+        const optionalApi = this.connectApproved(
+          [...BASELINE_CAPABILITIES, capability],
+          false,
+        );
+        if (optionalApi?.hasCapability(capability)) {
+          this.optionalReadApis.set(capability, optionalApi);
+          if (!this.recoveryApi && optionalApi.mutations) this.recoveryApi = optionalApi;
+        }
+      }
+      if (includeMutationCapabilities) this.connectMutationApis();
       return true;
     } catch (error) {
       this.readApi = null;
@@ -856,18 +917,23 @@ export class OperonDeveloperApiRuntimeAdapter {
   }
 
   hasMutationCapability(capability: DeveloperApiMutationCapability): boolean {
-    const api = this.mutationApi;
+    const api = this.mutationApis.get(capability);
     if (!api?.mutations?.preview || !api.mutations.apply) return false;
     const [preview, apply] = MUTATION_CAPABILITIES[capability];
     return api.hasCapability(preview) && api.hasCapability(apply);
   }
 
   hasReadCapability(capability: DeveloperApiReadCapability): boolean {
-    return Boolean(this.readApi?.hasCapability(capability));
+    return Boolean(
+      this.readApi?.hasCapability(capability)
+      || this.optionalReadApis.get(capability)?.hasCapability(capability),
+    );
   }
 
   private requireReadApi(capability: DeveloperApiReadCapability): DeveloperApiV1 {
-    const api = this.readApi;
+    const api = this.readApi?.hasCapability(capability)
+      ? this.readApi
+      : this.optionalReadApis.get(capability);
     if (!api || !api.hasCapability(capability)) {
       throw new Error(`Operon Developer API V1 read grant is unavailable: ${capability}.`);
     }
@@ -938,30 +1004,60 @@ export class OperonDeveloperApiRuntimeAdapter {
   }
 
   hasRecoverySupport(): boolean {
-    const mutations = this.mutationApi?.mutations;
+    const mutations = this.recoveryApi?.mutations;
     return Boolean(
       mutations?.recover && mutations.pendingRecoveries,
     );
   }
 
-  private connectMutationApi(): DeveloperApiV1 | null {
-    const requested = [
-      ...READ_CAPABILITIES,
-      ...Object.values(MUTATION_CAPABILITIES).flat(),
-    ];
-    const api = this.connect(requested);
-    if (!api?.mutations?.preview || !api.mutations.apply) return null;
-    return api;
+  private connectApproved(
+    requestedCapabilities: readonly string[],
+    updateStatus = true,
+  ): DeveloperApiV1 | null {
+    if (
+      this.grantedCapabilities
+      && requestedCapabilities.some((capability) => (
+        !BASELINE_CAPABILITIES.includes(capability as (typeof BASELINE_CAPABILITIES)[number])
+        && !this.grantedCapabilities?.has(capability)
+      ))
+    ) {
+      return null;
+    }
+    return this.connect(requestedCapabilities, updateStatus);
   }
 
-  private connect(requestedCapabilities: readonly string[]): DeveloperApiV1 | null {
+  private connectMutationApis(): void {
+    for (const [capability, pair] of Object.entries(MUTATION_CAPABILITIES) as [
+      DeveloperApiMutationCapability,
+      readonly [string, string],
+    ][]) {
+      const api = this.connectApproved(
+        [...CORE_READ_CAPABILITIES, ...pair],
+        false,
+      );
+      if (
+        api?.mutations?.preview
+        && pair.every((required) => api.hasCapability(required))
+      ) {
+        this.mutationApis.set(capability, api);
+        if (!this.recoveryApi) this.recoveryApi = api;
+      }
+    }
+  }
+
+  private connect(
+    requestedCapabilities: readonly string[],
+    updateStatus = true,
+  ): DeveloperApiV1 | null {
     if (!this.accessor) return null;
     const access = this.accessor.getDeveloperApiV1(this.consumerPlugin, {
       contractVersion: 1,
       runtimeApi: { min: 1, max: 1 },
       requestedCapabilities,
     });
-    this.channelStatus = access.status;
+    if (updateStatus) this.channelStatus = access.status;
+    const grant = grantedCapabilitiesFromStatus(access.status);
+    if (grant) this.grantedCapabilities = grant;
     if (!access.ok || !access.api) {
       return null;
     }
@@ -977,7 +1073,8 @@ export class OperonDeveloperApiRuntimeAdapter {
     const rawTasks: DeveloperApiTask[] = [];
     let cursor: string | undefined;
     let generation: number | null = null;
-    for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
+    const seenCursors = new Set<string>();
+    for (let pageNumber = 0; pageNumber < MAX_TASK_QUERY_PAGES; pageNumber += 1) {
       const result = await api.tasks.query({
         contractVersion: 1,
         requestId: requestId(),
@@ -1001,8 +1098,24 @@ export class OperonDeveloperApiRuntimeAdapter {
       const candidateGeneration = result.contextRevision?.index?.ramGeneration;
       if (Number.isInteger(candidateGeneration)) generation = candidateGeneration ?? null;
       const nextCursor = result.page?.nextCursor;
-      if (!nextCursor || nextCursor === cursor) break;
+      if (!nextCursor) {
+        if (result.page?.truncated === true) {
+          throw new Error(
+            `Operon task query reported truncation without a continuation cursor after ${tasks.length} tasks.`,
+          );
+        }
+        break;
+      }
+      if (nextCursor === cursor || seenCursors.has(nextCursor)) {
+        throw new Error("Operon task query returned a repeated pagination cursor.");
+      }
+      seenCursors.add(nextCursor);
       cursor = nextCursor;
+    }
+    if (cursor && seenCursors.size >= MAX_TASK_QUERY_PAGES) {
+      throw new Error(
+        `Operon task query exceeded the ${MAX_TASK_QUERY_PAGES}-page safety limit while still truncated; the live index is incomplete.`,
+      );
     }
     return { tasks, rawTasks, generation };
   }
@@ -1013,7 +1126,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     requested: Record<string, unknown>,
     dryRun: boolean,
   ): Promise<DeveloperApiMutationResult> {
-    const api = this.mutationApi;
+    const api = this.mutationApis.get(capability);
     const mutations = api?.mutations;
     if (!api || !mutations?.preview || !mutations.apply || !this.hasMutationCapability(capability)) {
       return this.mutationFailure(
@@ -1187,7 +1300,7 @@ export class OperonDeveloperApiRuntimeAdapter {
   }
 
   async pendingRecoveries(): Promise<DeveloperApiPendingRecoveryResult> {
-    const api = this.mutationApi;
+    const api = this.recoveryApi;
     const pending = api?.mutations?.pendingRecoveries;
     if (!api || !pending) {
       return {
@@ -1213,7 +1326,7 @@ export class OperonDeveloperApiRuntimeAdapter {
   }
 
   async recoverMutation(recoveryRef: string): Promise<DeveloperApiMutationResult> {
-    const api = this.mutationApi;
+    const api = this.recoveryApi;
     const recover = api?.mutations?.recover;
     if (!api || !recover) {
       return this.mutationFailure(
