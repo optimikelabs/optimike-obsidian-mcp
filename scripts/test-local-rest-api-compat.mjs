@@ -5,6 +5,11 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
+// This script validates the local REST contract without contacting Obsidian.
+// Keep the imported service in a deterministic headless profile so CI does not
+// require a live API key merely to inspect its prototype.
+process.env.OBSIDIAN_RUNTIME_MODE = "headless-readonly";
+process.env.OBSIDIAN_VAULT = root;
 const context = {
   requestId: "local-rest-api-compat-test",
   timestamp: new Date(0).toISOString(),
