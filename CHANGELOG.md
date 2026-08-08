@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bilingual Operon MCP contract and CLI audit documenting the complete 23-tool
+  surface, the governed MCP-versus-CLI boundary, stock 3.1.1 capability limits,
+  and the completed relationship and recurrence acceptance evidence.
+
 - Six bounded, read-only Operon 3.1.1 Developer API tools for native
   diagnostics, ranked finder, entity resolution, relationships, context packs,
   and timer state; no CLI passthrough or new mutation class is exposed.

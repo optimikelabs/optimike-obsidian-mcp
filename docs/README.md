@@ -17,7 +17,7 @@ French operator guides are linked alongside their English equivalents.
 | A gateway integrator            | [OSS Gateway Compatibility](gateway-compatibility.md) | [HTTP Security](http-multiclient-security.md), [Backpressure](http-concurrency-backpressure.md)                              |
 | An MCP client integrator        | [Tool Surface](obsidian_mcp_tools_spec.md)            | [Runtime Matrix](runtime-capability-matrix.md)                                                                               |
 | An external-document operator   | [External Roots Setup](external-roots-setup.md)       | [External Roots ADR](adr/ADR-External-Document-Roots.md), [Reference Integrity ADR](adr/ADR-External-Reference-Integrity.md) |
-| A Tasks/Operon operator         | [Operon MCP Contract](operon-mcp-contract.md)         | [Local Validation](operon-local-validation.md), [public ÉLYSIA profile](../profiles/elysia-tasks/README.fr.md)               |
+| A Tasks/Operon operator         | [Operon MCP Contract](operon-mcp-contract.md)         | [CLI/API audit](operon-cli-audit.md), [Local Validation](operon-local-validation.md), [public ÉLYSIA profile](../profiles/elysia-tasks/README.fr.md) |
 | A contributor or reviewer       | [Architecture decisions](adr/README.md)               | [Repository tree](tree.md), plugin READMEs                                                                                   |
 
 ## Find the authoritative page
@@ -33,6 +33,7 @@ French operator guides are linked alongside their English equivalents.
 | What is the supported HTTP security boundary?              | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
 | Which OSS gateway profile has been proven end to end?      | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
 | How are Operon reads and mutations governed?               | [Operon MCP Contract](operon-mcp-contract.md)                                         |
+| Why does MCP expose Operon functions instead of calling the CLI? | [Operon CLI / Developer API audit](operon-cli-audit.md)                           |
 | Why was an architecture decision made?                     | [ADR Index](adr/README.md)                                                            |
 | What changed?                                              | [Changelog](../CHANGELOG.md)                                                          |
 
@@ -48,6 +49,7 @@ French operator guides are linked alongside their English equivalents.
 
 - Tasks-compatible reads: [Tool Surface](obsidian_mcp_tools_spec.md#tasks);
 - governed Operon contract: [Operon MCP Contract](operon-mcp-contract.md);
+- MCP versus CLI boundary: [Operon CLI / Developer API audit](operon-cli-audit.md);
 - bundled bridge implementation: [Operon Bridge README](../plugins/obsidian-operon-bridge/README.md);
 - bundled Bases implementation: [Bases Bridge README](../plugins/obsidian-bases-bridge/README.md).
 

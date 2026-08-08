@@ -108,7 +108,12 @@ The MCP exposes a curated agent surface rather than every Operon CLI function.
 Native diagnostics, finder/resolve, bounded relationships/context and timer
 state are available as read-only tools. Dedicated relationship and recurrence
 writes use official sealed preview/apply plans; destructive and operator
-commands stay in the CLI. See the [Operon CLI / Developer API audit](docs/operon-cli-audit.md).
+commands stay in the CLI. Agents use MCP because it adds bounded schemas,
+least-privilege capability checks, dry-run, revision locking, durable
+idempotency, postflight verification and exact-plan recovery. A generic CLI
+passthrough would bypass those guarantees. See the
+[Operon MCP contract](docs/operon-mcp-contract.md) and
+[Operon CLI / Developer API audit](docs/operon-cli-audit.md).
 Transition apply is available through the Bridge. Elevated or destructive plans
 still require fresh confirmation in the owning Obsidian vault window and fail
 closed after 45 seconds when no confirmation can be presented.
@@ -122,7 +127,9 @@ remains usable for reads and most governed mutations, but modified-time
 frontmatter settlement, consent across multiple Obsidian windows, and implicit
 File Task renames retain the upstream limitations described in those PRs. The
 MCP does not fall back to Markdown or private APIs when one of these cases is
-not supported.
+not supported. The unscoped transition edge case remains tracked in
+[#99](https://github.com/hasanyilmaz/operon/issues/99) and
+[#101](https://github.com/hasanyilmaz/operon/pull/101).
 
 ## External document roots
 
@@ -184,6 +191,7 @@ synced vault.
 - Current tools: [Tool Surface](docs/obsidian_mcp_tools_spec.md)
 - Runtime modes: [Runtime Capability Matrix](docs/runtime-capability-matrix.md)
 - Agent routing: [MCP Routing Guide](docs/mcp-routing-guide.md)
+- Operon tools and guarantees: [Operon MCP Contract](docs/operon-mcp-contract.md)
 - Operon surface and CLI routing: [Operon CLI / Developer API audit](docs/operon-cli-audit.md)
 - Headless deployment: [Headless Server Profile](docs/headless-server-profile.md)
 - Linux headless multi-client pilot: [Pilot and capability matrix](docs/headless-multiclient-pilot.md)

@@ -81,10 +81,14 @@ Every mode also registers the 23 Operon contract tools:
 `operon_update_recurrence`, `operon_convert_task`,
 `operon_relocate_task`, `operon_list_pending_recoveries`, and
 `operon_recover_mutation`. In non-live modes they remain limited to validated
-read-only snapshots; mutation calls fail closed. Official Operon 3.1.1
-transition apply is available in live mode. Elevated transitions require fresh
+read-only snapshots; mutation calls fail closed. Registration does not imply
+runtime availability: official Operon `3.1.1` currently returns unavailable for
+saved-filter evaluation and adoption. Relationship and recurrence apply passed
+the dedicated patched-3.1.1 live pilot. Stock 3.1.1 retains the bounded upstream
+limits in #99/#101, #135, #137 and #139. Elevated transitions require fresh
 confirmation in the owning Obsidian vault window; unattended consent fails
-closed after 45 seconds. Native CLI/Developer API diagnostics remain separate.
+closed after 45 seconds. See the [Operon MCP contract](operon-mcp-contract.md)
+and [CLI/API audit](operon-cli-audit.md).
 
 Handoff delivery is a transport contract, not a runtime-mode write capability:
 

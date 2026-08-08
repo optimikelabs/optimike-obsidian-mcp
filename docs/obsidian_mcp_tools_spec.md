@@ -80,6 +80,10 @@ dependency of this MCP.
 
 ## Operon (contract v1)
 
+French reference: [Operon MCP contract (French)](operon-mcp-contract.fr.md).
+The authoritative English guarantees and compatibility matrix are in the
+[Operon MCP contract](operon-mcp-contract.md).
+
 - `operon_status`: inspect live Bridge compatibility and persisted snapshot state;
 - `operon_get_configuration`: read the live task-semantic Operon settings and their signed stale fallback;
   optional `forceRefresh` requests a complete live rebuild.
@@ -89,7 +93,7 @@ dependency of this MCP.
 - `operon_query_tasks`: filter by task IDs, stable pipeline/status IDs, visible workflow labels, text, source, checkbox, priority,
   tier, paths, tags, parents, dates, canonical/custom fields, or unmanaged file-task
   properties.
-- `operon_query_saved_filter`: evaluate one saved filter through Operon's native live filter engine.
+- `operon_query_saved_filter`: evaluate one saved filter only when the live engine advertises the native capability; official Operon 3.1.1 currently returns a structured unavailable result, while compatible legacy engines may implement it.
 - `operon_validate`: live duplicate/source/workflow graph validation, or a limited
   snapshot-only validation with explicit caveats.
 - `operon_get_diagnostics`: native Developer API lifecycle, persistence, grant, catalog, capability, and transport diagnostics.
@@ -98,8 +102,8 @@ dependency of this MCP.
 - `operon_get_relationships`: bounded explicit, derived, and inferred relationship graph for one stable task.
 - `operon_build_context`: bounded exact-task, neighborhood, project, planning, or creation context with a strict hydration allowlist.
 - `operon_get_timer_state`: read active and transitioning timer state without exposing timer control.
-- `operon_adopt_task`: upgrade one exact legacy checkbox in place with line-level optimistic locking.
-- `operon_create_task`: create inline/file tasks through Operon Public API v1.
+- `operon_adopt_task`: upgrade one exact legacy checkbox only when the loaded engine advertises adoption; official Operon 3.1.1 currently returns a structured unavailable result.
+- `operon_create_task`: create inline/file tasks through the loaded engine's official Developer API V1 or bounded legacy Public API v1 surface.
 - `operon_update_task`: update one mutation group with expected revision.
 - `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards when the live Developer API advertises the capability; the Bridge bounds uncertain stock-runtime applies and never retries blindly.
 - `operon_set_relationships`: replace or clear parent/blocker edges with revision locking, graph validation, and inverse-edge postflight; apply is allowed in `guarded`.
