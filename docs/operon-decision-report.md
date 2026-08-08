@@ -1,127 +1,104 @@
 # Operon integration decision report
 
-## Current status — 2026-08-07
+## Current status — 2026-08-08
 
-The published MCP adapter now targets official Operon `3.1.1` and Bridge
-`0.5.1`. The complete local acceptance run is green on the patched Operon
-build, including transition, expected-revision conflicts, idempotent replay,
-restart/recovery, and postflight. The upstream compatibility fixes remain
-under review in [#135](https://github.com/hasanyilmaz/operon/pull/135),
-[#137](https://github.com/hasanyilmaz/operon/pull/137), and
-[#139](https://github.com/hasanyilmaz/operon/pull/139); the known transition
-investigation is [#99](https://github.com/hasanyilmaz/operon/issues/99) /
-[#101](https://github.com/hasanyilmaz/operon/pull/101). Stock Operon `3.1.1`
-remains supported for reads and most governed mutations, but the Bridge stays
-fail-closed when the stock runtime cannot prove a result. No Markdown/private
-API fallback is used.
+Optimike Obsidian MCP `main` targets official Operon `3.1.1` through Bridge
+`0.5.1` and Developer API V1. The canonical server registers twenty-three
+governed Operon tools. Kairélys remains disabled and retained only for bounded
+rollback compatibility.
 
-## Historical pilot record — 2026-08-01
+The complete local acceptance run is green on the patched Operon `3.1.1`
+build. Stock `3.1.1` remains supported for reads and most governed mutations,
+with fail-closed limitations tracked in:
 
-**CUTOVER COMPLETE on 2026-08-01.** The production vault was backed up,
-Operon `3.0.1` was installed and validated live, the current Bridge `0.5.0` was
-installed, and Kairélys was disabled but retained for reversible rollback.
-The cutover is read/operationally green; the official transition apply remains
-explicitly gated because its Bridge path has not produced a terminal or
-recoverable result.
+- transition settlement: [#99](https://github.com/hasanyilmaz/operon/issues/99)
+  and [#101](https://github.com/hasanyilmaz/operon/pull/101);
+- modified-time frontmatter settlement:
+  [#135](https://github.com/hasanyilmaz/operon/pull/135);
+- consent across multiple Obsidian windows:
+  [#137](https://github.com/hasanyilmaz/operon/pull/137);
+- implicit File Task description/rename behavior:
+  [#139](https://github.com/hasanyilmaz/operon/pull/139).
 
-## Implemented
+No MCP or Bridge route falls back to raw Markdown, private Operon methods or UI
+commands when a capability is missing or an outcome is uncertain.
 
-- legacy Operon Public API v1 compatibility for bounded Kairélys/2.5 fixtures;
-- Bridge read/write capability probe;
-- REST status/configuration/list/get/query/saved-filter/validate, six bounded
-  native Developer API reads, adopt/create/update/transition/convert/relocate,
-  plus official recovery;
-- twenty-one MCP tools in the canonical server;
-- dry-run by default;
-- live expected-revision conflicts;
-- Bridge and durable MCP idempotency;
-- before/requested/after evidence and post-write re-read;
-- central write policy integration;
+## Implemented surface
+
+- official Operon `3.1.1` Developer API V1 adapter;
+- Bridge status/configuration/list/get/query/validate and complete pagination;
+- six bounded native reasoning reads: diagnostics, finder, entity resolution,
+  relationships, context and timer state;
+- governed create, update, transition, relationship replacement, recurrence,
+  conversion and inline relocation;
+- registered compatibility tools for adoption and saved-filter evaluation,
+  returning unavailable on official `3.1.1` until native capabilities exist;
+- durable pending-recovery listing and exact-plan recovery;
+- dry-run by default, live `expectedRevision`, durable idempotency and postflight;
 - SQLite live/stale snapshots and mutation journal;
-- no Markdown/private-method fallback;
-- official Operon 3.0.1 Developer API V1 read/write pilot, with Bridge transition capability withheld pending a terminal REST proof;
-- exact read allowlist for Operon 2.4.0 and 2.5.0;
-- official Operon `3.0.1` Developer API V1 integration with host-owned recovery;
-- CLI/Developer API audit separating operator functions from the curated MCP
-  surface.
+- double mutation opt-in and mode-based write policy;
+- no generic CLI passthrough.
 
-## Verified in disposable Operon 2.5 vault
+## Why MCP and CLI remain separate
 
-| Evidence                                             | Result                                            |
-| ---------------------------------------------------- | ------------------------------------------------- |
-| Native file and inline fixtures                      | PASS                                              |
-| Direct MCP file and inline creation                  | PASS                                              |
-| Managed fields and tags                              | PASS                                              |
-| Unmanaged `north_star` / `rang` file properties      | PASS                                              |
-| Parent and blocker links plus inverse reconciliation | PASS                                              |
-| Completion blocked while dependency open             | PASS                                              |
-| Completion after blocker finished                    | PASS                                              |
-| Inline → file → inline with same `operonId`          | PASS                                              |
-| Dry-run default                                      | PASS                                              |
-| Durable idempotency replay                           | PASS                                              |
-| Stale revision conflict                              | PASS                                              |
-| Full V8 reindex parity                               | PASS — 13 tasks before/after, generation advanced |
-| Operon/Bridge plugin restart                         | PASS — 13 tasks, read-write restored              |
-| Live → cache fallback                                | PASS — same task/revision, `stale: true`          |
-| Duplicate identity                                   | PASS — P0 detected, last good snapshot retained   |
-| Final validation                                     | PASS — P0/P1/P2 = 0/0/0                           |
-| Actual Sync topology                                 | UNVERIFIED                                        |
-| 2.5 pilot production migration                      | NOT APPLICABLE — cutover is recorded below       |
+The MCP is the agent control plane. It exposes only bounded semantic operations
+with least-privilege capabilities, revision locking, idempotency, postflight and
+recovery evidence.
 
-## Production cutover result — 2026-08-01
+The CLI is the operator/admin surface. It remains appropriate for native
+acceptance, broad diagnostics, recovery investigation, one-off administration,
+delete, reminders, pinned state and timer control/session.
 
-| Check | Result |
-| --- | --- |
-| Backup | PASS — `E:\Mes Vibes Programmes\backups\elysia-operon-cutover-20260801-1620`, 268 files |
-| Official Operon assets | PASS — `3.0.1` release `main.js`, `manifest.json`, and `styles.css` verified before install |
-| Live plugin state | PASS — Operon `3.0.1`, Bridge `0.5.0`, 25 tasks, live generation and index ready |
-| MCP live read/configuration | PASS — `source=operon-live`, `stale=false` |
-| Native read expansion | PASS — diagnostics, finder, resolve, relationships, context and timers through Bridge/MCP service |
-| Developer API grant | PASS — exact five new read capabilities approved through Operon's official integration controller; no pending capability |
-| Live validation | PASS — P0/P1/P2 = 0/0/0, no violations |
-| Kairélys | PASS — disabled and retained; configuration hash unchanged |
-| Bridge transition | GATED — isolated transition apply exceeded 120 s and returned `outcome-unknown`; task unchanged and no pending recovery |
+CLI availability alone is not sufficient to expose a function to agents. A
+generic passthrough would bypass the Bridge contract and hide capability drift.
 
-The transition reproduction was performed only in the disposable pilot, with
-the capability gate temporarily removed from a test copy of the Bridge and then
-the normal `0.4.7` build restored. The real vault was not mutated by this
-probe.
+## Operon 3.1.1 acceptance evidence
 
-Bridge `0.5.0` was then installed with a dedicated local backup. Its official
-Developer API grant was expanded only for `tasks.finder`, `entities.resolve`,
-`relationships.read`, `context.build`, and `timers.read`. The live postflight
-returned 25 tasks, all six new capability flags, a resolved exact identity,
-bounded finder/context results, relationship and timer state, and the same
-results through the MCP service. No task mutation was performed.
+The patched local acceptance build passed:
 
-## Defects discovered and corrected
+- host-owned grant and consumer identity checks;
+- live configuration, exact reads and coherent 25-task inventory;
+- typed preview/apply, postflight and receipt evidence;
+- stale-revision conflict and idempotent replay without a second write;
+- transition and same-plan recovery after restart;
+- relationship replacement, inverse-edge verification and blocked terminal
+  transition enforcement;
+- recurrence add, scope change and explicit clear;
+- exact restoration of the two relationship tasks;
+- fixture removal through the operator CLI;
+- restart with live source, no residual relationship or recurrence state, no
+  pending recovery and `P0/P1/P2 = 0/0/0`.
 
-1. Immediate post-write reads could hit Operon's transient reindex window and report unavailable after a successful write. The Bridge now waits boundedly for a verified idle index and records `outcome_unverified` without blind retry if proof never arrives.
-2. A combined rename + managed fields + unmanaged properties request could partially apply because Obsidian metadata lagged after rename. The contract now permits exactly one mutation group per operation and one unmanaged property per call.
-3. Creating a child legitimately changes parent aggregates and therefore its revision. The rich smoke recipe now rereads the parent before transition; stale parent revisions are rejected as designed.
+The MCP repository passed `check:operon`, Bridge typecheck/build and tests,
+contract/service tests, tool-annotation checks, documentation checks and the
+Linux/Windows GitHub CI matrix.
 
-## Remaining risks
+## Historical evidence
 
-- Official transition latency/settlement behavior still needs an upstream or
-  Bridge-level fix and a fresh terminal proof.
-- Real Sync behavior remains unverified.
-- Cockpit equivalence and low-energy human workflow remain unproven.
-- Dependency audit is clean at the audited SHAs; future upstream advisories remain a maintenance risk.
-- Advanced CLI functions are intentionally not generic MCP passthroughs.
+The disposable Operon `2.5.0`/Kairélys pilot remains historical evidence for
+legacy Public API v1 only. It proved file/inline creation, managed and unmanaged
+properties, hierarchy/dependencies, blocked/released transitions, conversion,
+idempotency, stale-revision conflict, reindex/restart, stale cache and duplicate
+ID refusal. It is not presented as Developer API V1 evidence.
 
-## Recommendation
+The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
+remain historical. Current targets are Operon `3.1.1` and CLI `1.0.9`.
 
-Keep the current cutover active for supported read/create/update/convert/
-relocate operations. Use the MCP for governed agent workflows, including
-native diagnostics, finder/resolve, bounded relationships/context and timer
-observation. Use the Operon CLI for broad administration, deep recovery
-investigation, native acceptance and one-off operator actions. Keep Kairélys disabled but retained until a separate
-non-dependency proof authorizes removal. Do not enable Bridge transition apply
-or remove its capability gate without a fresh terminal/recovery proof.
+## Deliberately excluded or unavailable
 
-## Next action
+- deletion: CLI operator action until a reversible `operon_trash_task` contract
+  exists;
+- reminders, pinned state and timer control/session: retained in the CLI;
+- adoption and saved filters: tools remain registered for compatibility but the
+  official `3.1.1` Developer API does not expose their native capabilities;
+- generic CLI execution: rejected;
+- actual multi-device Sync topology: not run by this local acceptance pilot.
 
-Prepare a focused upstream/Bridge transition report with the exact
-`outcome-unknown` evidence, then rerun a disposable terminal/recovery proof
-after a fix. Separately audit the real vault's Kairélys non-dependency before
-considering removal.
+## Decision
+
+Keep the current Operon integration active. Use MCP/Bridge for governed agent
+workflows and CLI for broad operator work. Keep Kairélys disabled but available
+for rollback until a separate non-dependency proof authorizes removal.
+
+The code and local acceptance work are complete. Remaining work is upstream
+review/release monitoring and the separate real Sync/non-dependency decision.

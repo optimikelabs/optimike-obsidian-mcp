@@ -167,6 +167,12 @@ operon_get_task
 operon_query_tasks
 operon_query_saved_filter
 operon_validate
+operon_get_diagnostics
+operon_find_tasks
+operon_resolve_task
+operon_get_relationships
+operon_build_context
+operon_get_timer_state
 operon_adopt_task
 operon_create_task
 operon_update_task
@@ -182,6 +188,8 @@ operon_recover_mutation
 PASS when:
 
 - all twenty-three tools are registered;
+- official Operon `3.1.1` returns structured unavailable results for adoption
+  and saved-filter evaluation until it advertises those native capabilities;
 - the first complete call creates a snapshot;
 - subsequent calls with unchanged generation do not rewrite the full snapshot;
 - responses say `source=operon-live`, `stale=false`.
@@ -207,6 +215,18 @@ PASS: same task identities and values; revisions change only when normalized tas
 8. Remove the fixture only through the operator CLI after backup and explicit confirmation.
 
 PASS: live source, exact inverse edges, scoped recurrence state, idempotent replay, stale-revision conflict, exact restoration, and `P0/P1/P2 = 0/0/0`.
+
+Executed result on 2026-08-08 with the patched local Operon `3.1.1`
+acceptance build:
+
+- relationship dry-run/apply passed on `oo96ct2` and `1dbefy1`;
+- the inverse edge was verified, the same key replayed without a second write,
+  a stale revision conflicted, and both tasks were restored;
+- a dedicated recurrence fixture passed add, scope change and explicit clear;
+- Obsidian and MCP restart preserved a stable recovery state;
+- final inventory returned 25 tasks outside the removed fixture, live source,
+  no residual relationship/recurrence state, no pending recovery, and
+  `P0/P1/P2 = 0/0/0`.
 
 ## 10. Stale fallback
 

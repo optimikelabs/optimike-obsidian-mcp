@@ -1,5 +1,7 @@
 # Operon tools in Optimike Obsidian MCP
 
+French version: [operon-mcp-contract.fr.md](operon-mcp-contract.fr.md)
+
 ## Surface
 
 The main MCP server registers twenty-three Operon tools:
@@ -32,6 +34,16 @@ There is no second MCP server.
 
 `operon_get_configuration` is the agent-facing equivalent of the historical Tasks settings loader. It reads the live Operon runtime through the Bridge instead of duplicating `data.json` parsing in Node. The response includes the settings that change task meaning or creation behavior, a deterministic signature, and an explicitly stale cached fallback for headless use.
 
+## Why MCP does not simply call the CLI
+
+The CLI is the broad operator surface for native diagnostics, administration,
+recovery investigation and one-off actions. MCP is the agent control plane. A
+function enters MCP only with a bounded semantic schema, least-privilege
+capability check, dry-run, revision locking, durable idempotency, postflight and
+matching recovery/human gates. A generic CLI passthrough would bypass those
+guarantees, expose overly broad commands and make capability drift invisible to
+agents. CLI availability alone is therefore not an MCP admission criterion.
+
 ## Reads and freshness
 
 Every read response declares `source`, `stale`, snapshot time/age, Operon and Bridge versions, contract version, capabilities, and limitations.
@@ -41,7 +53,7 @@ Every read response declares `source`, `stale`, snapshot time/age, Operon and Br
 
 SQLite cache state lives in `operon_task_snapshot` and `operon_snapshot_meta`. Malformed payloads, incomplete pagination, generation drift, duplicate IDs, incompatible versions, unready index, or P0 validation never replace the last known-good snapshot.
 
-`operon_query_saved_filter` is intentionally live-only: it delegates to Operon's native filter evaluator and never pretends that a headless parser can reproduce plugin semantics.
+`operon_query_saved_filter` is intentionally live-only and capability-gated. It delegates to the loaded engine's native filter evaluator and never pretends that a headless parser can reproduce plugin semantics. Official Operon `3.1.1` does not currently advertise this capability, so the registered tool returns a structured unavailable result; compatible legacy engines may provide it.
 
 The six additional Developer API reads are also live-only. They expose native
 runtime diagnostics, ranked finder, entity resolution, bounded relationship
@@ -86,7 +98,7 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 ### Tool-specific rules
 
-`operon_adopt_task` upgrades one existing plain Markdown or Obsidian Tasks checkbox in place. The target file, one-based line, and exact source line must still match; otherwise the operation returns `conflict` without writing. Supported Tasks dates, priority and tags are translated by Operon before the line is indexed, and optional `statusId` uses the live language-stable workflow identity. The final task must be proven at the same path and line.
+`operon_adopt_task` is a registered compatibility tool, not an official Operon `3.1.1` capability. When a compatible legacy engine advertises adoption, it upgrades one existing plain Markdown or Obsidian Tasks checkbox in place. The target file, one-based line, and exact source line must still match; otherwise the operation returns `conflict` without writing. Official Operon `3.1.1` returns a structured unavailable result and the MCP does not simulate adoption with a Markdown edit.
 
 `operon_create_task` creates inline or file tasks through Operon's creator services. On official Operon 3.1.1, typed fields, tags, stable `statusId`, relationships, exact inline `targetPath`, and configured/default file templates are supported. Unmanaged YAML properties and arbitrary `targetFolder` placement are legacy-only; the official Developer API path rejects them instead of using a fallback.
 
@@ -122,8 +134,8 @@ On legacy Operon `2.5.0`/Kairélys in a disposable vault, direct MCP calls histo
 
 Production activation and Tasks/TaskNotes migration remain separate manual gates.
 
-The equivalent relationship and recurrence claims apply to official Operon `3.1.1` only after the dedicated 3.1.1 pilot recipe below has passed; legacy evidence is not presented as Developer API evidence.
+The dedicated Operon `3.1.1` pilot passed on the patched local acceptance build: relationship dry-run/apply, inverse-edge verification, idempotent replay, stale-revision conflict, blocked terminal-transition enforcement, exact restoration, recurrence add/scope-change/clear, restart/recovery stability, live source, no residual relationship/recurrence state, and `P0/P1/P2 = 0/0/0`. Stock `3.1.1` remains subject to the upstream limitations in #99/#101, #135, #137 and #139; the Bridge reports uncertainty or unavailability without retrying or falling back.
 
-## Deliberately excluded writes
+## Deliberately unavailable or excluded capabilities
 
-Deletion, reminders, pinned state, timer control/session, adoption, and saved-filter management remain outside the official agent mutation surface. Adoption and saved filters are unavailable until official capabilities exist. Delete remains an operator CLI action. A future `operon_trash_task` may be considered only with guaranteed restoration under the same `operonId`, reconciled relations, durable journal evidence, and an explicit human confirmation; it is not implemented.
+Deletion, reminders, pinned state, timer control/session, adoption, and saved-filter management remain outside the official agent mutation surface. The adoption and saved-filter tools stay registered for compatibility but return unavailable on official Operon `3.1.1` until native capabilities exist. Delete remains an operator CLI action. A future `operon_trash_task` may be considered only with guaranteed restoration under the same `operonId`, reconciled relations, durable journal evidence, and an explicit human confirmation; it is not implemented.

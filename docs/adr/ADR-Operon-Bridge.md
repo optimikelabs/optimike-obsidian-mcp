@@ -1,13 +1,14 @@
 # ADR — Operon Bridge for Optimike Obsidian MCP
 
-- Status: accepted for bounded pilot
+- Status: accepted and implemented on `main`
 - Date: 2026-07-21
+- Amended: 2026-08-08
 - MCP baseline: `optimikelabs/optimike-obsidian-mcp@8cea94610a526e50a017d334be6008b8dab79500`
 - Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, and official `3.1.1` Developer API V1
 
 ## Problem
 
-Operon unifies inline and file tasks around stable identity and one domain model, but official releases expose no public versioned mutation API. Agent writes must preserve workflow normalization, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, conversions, and index/view reconciliation. Direct Markdown edits or direct `TaskWriter` calls do not satisfy that contract.
+Operon unifies inline and file tasks around stable identity and one domain model. Earlier releases exposed no public versioned mutation API; official Operon `3.1.1` now exposes Developer API V1. Agent writes must still preserve workflow normalization, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, conversions, and index/view reconciliation. Direct Markdown edits or direct `TaskWriter` calls do not satisfy that contract.
 
 ## Decision
 
@@ -31,8 +32,8 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Official Operon 
 - `KEEP` — existing runtime modes, REST client, logger, errors, stdio/HTTP transports, write policy, and shared SQLite.
 - `KEEP` — Tasks and TaskNotes during the pilot and until a separate production cutover gate.
 - `ADD` — companion Bridge for live reads and guarded mutations.
-- `ADD` — minimal Operon GPL fork exposing only generic Public API v1 wrappers over existing domain orchestrators.
-- `ADD` — twenty-one governed Operon MCP tools, including six bounded native reads, snapshot tables, durable mutation journal, and same-plan recovery.
+- `KEEP` — the legacy Kairélys/Public API v1 path only as a bounded rollback compatibility surface.
+- `ADD` — twenty-three governed Operon MCP tools, including six bounded native reads, relationship and recurrence writes, snapshot tables, durable mutation journal, and same-plan recovery.
 - `REJECT` — MCP-side Operon parser/domain reimplementation.
 - `REJECT` — raw Markdown/YAML mutation fallback.
 - `REJECT` — reflective production calls to private Operon methods.
@@ -42,7 +43,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Official Operon 
 
 `OperonPublicApiV1` remains the legacy Kairélys boundary. Official Operon `3.1.1` exposes host-verified Developer API V1 reads plus preview/apply/recovery for typed create, update, transition, relationship replacement, recurrence update, conversion, and inline relocation. Elevated or destructive applies require fresh host-owned consent in the owning vault window and fail closed after a bounded timeout. The implementation stays inside Operon and calls its existing parser/converter, creator, workflow, writer, dependency, recurrence, aggregate, archive, and conversion paths.
 
-The fork delta must remain limited to this generic API and contract tests. No ÉLYSIA-specific workflow, UX, view, calendar, Kanban, or data-model logic belongs in the fork. An upstream PR remains preferred; the fork is the production fallback.
+No ÉLYSIA-specific workflow, UX, view, calendar, Kanban, or data-model logic belongs in Operon. Compatibility fixes remain generic upstream PRs; the MCP never depends on private methods or an ÉLYSIA-specific Operon fork.
 
 ## Read model
 
@@ -63,12 +64,12 @@ To avoid false atomicity, update accepts exactly one group per operation: descri
 - Live/hybrid with API: exact reads and mutations according to capabilities.
 - Headless: cached reads only; no mutation.
 - `readonly`: dry-run only.
-- `guarded`: adopt/create/update/transition/relocate apply with normal preconditions and fresh consent when the sealed plan is elevated.
-- `full`: conversion apply in addition.
+- `guarded`: capability-backed adopt/create/update/transition/relationship/relocate apply with normal preconditions and fresh consent when the sealed plan is elevated.
+- `full`: conversion, recurrence and exact-plan recovery apply in addition.
 
 ## Evidence gates
 
-The disposable Operon 2.5 vault passed file/inline creation, ÉLYSIA properties, hierarchy, dependency rejection/release, status transitions, identity-preserving conversions, reindex, plugin restart, live/stale cache, idempotency, revision conflicts, and duplicate-ID P0 refusal. Operon 3.1.1 has passed host grant/identity checks, live exact reads, typed preview/apply for the validated mutation families, transition consent in the owning vault window, postflight, idempotent replay, and restart/recovery without a Markdown/private-API fallback.
+The disposable Operon 2.5 vault passed file/inline creation, ÉLYSIA properties, hierarchy, dependency rejection/release, status transitions, identity-preserving conversions, reindex, plugin restart, live/stale cache, idempotency, revision conflicts, and duplicate-ID P0 refusal. The patched local Operon 3.1.1 acceptance build passed host grant/identity checks, live exact reads, typed preview/apply for the validated mutation families, relationship inverse-edge verification, scoped recurrence add/change/clear, transition consent in the owning vault window, postflight, idempotent replay, exact restoration, and restart/recovery without a Markdown/private-API fallback. Stock 3.1.1 retains the upstream limitations linked from the Operon MCP contract.
 
 Still required before production cutover:
 

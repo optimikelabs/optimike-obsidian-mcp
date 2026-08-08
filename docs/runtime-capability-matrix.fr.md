@@ -73,12 +73,13 @@ Tous les modes enregistrent aussi les 23 outils du contrat Operon :
 `operon_update_recurrence`, `operon_convert_task`,
 `operon_relocate_task`, `operon_list_pending_recoveries` et
 `operon_recover_mutation`. Hors mode live, ils restent limités aux snapshots
-validés en lecture seule ; toute mutation échoue fermée. Pour Operon 3.1.1,
-la transition en apply est disponible lorsque la Developer API live annonce la
-capacité ; le Bridge borne les résultats incertains et n’effectue jamais de
-retry aveugle. Les preuves complètes utilisent le build local corrigé pendant
-l’examen des PR upstream #135, #137 et #139. Les diagnostics CLI/Developer API
-natifs restent séparés.
+validés en lecture seule ; toute mutation échoue fermée. L’enregistrement ne
+garantit pas la disponibilité runtime : Operon officiel `3.1.1` renvoie encore
+une indisponibilité pour les filtres sauvegardés et l’adoption. Les relations et
+la récurrence ont passé le pilote live dédié sur le build 3.1.1 corrigé. La
+version officielle conserve les limites bornées #99/#101, #135, #137 et #139.
+Voir le [contrat MCP Operon](operon-mcp-contract.fr.md) et
+l’[audit CLI/API](operon-cli-audit.fr.md).
 
 La livraison du handoff est un contrat de transport, pas une capacité d’écriture
 du mode runtime :

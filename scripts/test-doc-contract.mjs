@@ -71,12 +71,22 @@ const commonTools = [
   "operon_query_tasks",
   "operon_query_saved_filter",
   "operon_validate",
+  "operon_get_diagnostics",
+  "operon_find_tasks",
+  "operon_resolve_task",
+  "operon_get_relationships",
+  "operon_build_context",
+  "operon_get_timer_state",
   "operon_adopt_task",
   "operon_create_task",
   "operon_update_task",
   "operon_transition_task",
+  "operon_set_relationships",
+  "operon_update_recurrence",
   "operon_convert_task",
   "operon_relocate_task",
+  "operon_list_pending_recoveries",
+  "operon_recover_mutation",
 ];
 for (const tool of commonTools) {
   assert.ok(matrix.includes(`\`${tool}\``), `Matrix omits ${tool}`);
@@ -109,10 +119,30 @@ const bilingualPairs = [
   ["docs/runtime-capability-matrix.md", "docs/runtime-capability-matrix.fr.md"],
   ["docs/mcp-routing-guide.md", "docs/mcp-routing-guide.fr.md"],
   ["docs/headless-server-profile.md", "docs/headless-server-profile.fr.md"],
+  ["docs/operon-mcp-contract.md", "docs/operon-mcp-contract.fr.md"],
+  ["docs/operon-cli-audit.md", "docs/operon-cli-audit.fr.md"],
 ];
 for (const pair of bilingualPairs) {
   for (const file of pair) await access(path.join(root, file));
 }
+
+const operonContract = await text("docs/operon-mcp-contract.md");
+const operonContractFr = await text("docs/operon-mcp-contract.fr.md");
+const operonAudit = await text("docs/operon-cli-audit.md");
+const operonAuditFr = await text("docs/operon-cli-audit.fr.md");
+for (const content of [operonContract, operonContractFr]) {
+  for (const tool of commonTools.filter((tool) => tool.startsWith("operon_"))) {
+    assert.ok(content.includes(`\`${tool}\``), `Operon contract omits ${tool}`);
+  }
+}
+assert.doesNotMatch(operonAudit, /acceptance remains pending/i);
+assert.doesNotMatch(operonAuditFr, /acceptation (?:live )?reste en attente/i);
+assert.match(operonAudit, /no\s+residual relationship\/recurrence state/i);
+assert.match(operonAuditFr, /aucun résidu/i);
+assert.match(operonContract, /generic CLI passthrough/i);
+assert.match(operonContractFr, /passthrough CLI générique/i);
+assert.match(operonContract, /structured unavailable result/i);
+assert.match(operonContractFr, /indisponibilité structurée/i);
 
 const brokenLinks = [];
 for (const file of await markdownFiles(root)) {

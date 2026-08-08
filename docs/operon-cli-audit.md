@@ -1,5 +1,7 @@
 # Operon CLI / Developer API audit
 
+French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
+
 Date: 2026-08-08
 Reference: official Operon `3.1.1`, Operon CLI `1.0.9`, Developer API V1 and `cli-manifest-v1.json`.
 
@@ -28,13 +30,15 @@ Do not expose a generic CLI passthrough through MCP.
 
 ## Surface comparison
 
-The MCP currently exposes the governed task surface plus native saved-filter
-evaluation and six bounded Developer API reads:
+The MCP registers twenty-three governed tools plus six bounded Developer API
+reasoning reads. Two compatibility tools, saved-filter evaluation and adoption,
+remain unavailable on official Operon `3.1.1` until the runtime advertises the
+native capabilities:
 
-- reads: status, configuration, list/get/query, saved filters, validation;
+- reads: status, configuration, list/get/query, capability-gated saved filters, validation;
 - native reasoning reads: diagnostics, finder, resolve, relationships, context,
   and timer state;
-- mutations: adopt, create, update, transition, relationships, recurrence, convert, relocate;
+- mutations: capability-gated adoption, create, update, transition, relationships, recurrence, convert, relocate;
 - recovery: list pending official recoveries and recover one exact plan.
 
 The official CLI/Developer API additionally exposes:
@@ -77,10 +81,12 @@ production Bridge pilot also passed live read, typed create/update/transition
 preview/apply, replay, and stale revision conflict.
 
 The relationship and recurrence extensions pass the adapter, Bridge contract,
-service, policy, idempotency/restart and documentation suites. Their new live
-acceptance remains pending: the isolated 3.1.1 pilot persists the exact nine-
-capability expansion request, but the Operon settings panel currently renders
-no consumer row or approval controls. The grant is not edited or bypassed.
+service, policy, idempotency/restart and documentation suites. Their dedicated
+live Operon `3.1.1` acceptance also passed on the patched local build:
+relationship dry-run/apply, inverse-edge verification, idempotent replay,
+stale-revision conflict, blocked terminal transition, exact restoration,
+recurrence add/scope-change/clear, restart/recovery stability, live source, no
+residual relationship/recurrence state, and `P0/P1/P2 = 0/0/0`.
 
 Stock `3.1.1` may still return the bounded `outcome-unknown` transition result
 tracked by [Operon #99](https://github.com/hasanyilmaz/operon/issues/99) and
@@ -89,7 +95,8 @@ passes the terminal/recovery proof; when the stock runtime cannot prove its
 result, the Bridge reports the uncertainty and does not retry or fall back to
 Markdown/private APIs. This remains a capability gate, not a hidden bypass.
 
-The read audit and implementation of the two useful advanced writes are complete; live promotion waits for the official grant UI. Other advanced writes remain outside MCP until each has a
+The read audit, implementation and live acceptance of the two useful advanced
+writes are complete. Other advanced writes remain outside MCP until each has a
 dedicated preview/apply, revision, postflight, recovery and human-gate contract;
 CLI availability alone is not sufficient evidence to expose them to agents.
 

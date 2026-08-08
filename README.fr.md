@@ -109,11 +109,14 @@ Les snapshots Operon obsolètes restent toujours en lecture seule.
 Le MCP expose une surface agentique gouvernée, pas toutes les fonctions de la
 CLI Operon. Les diagnostics natifs, la recherche/résolution, les relations et
 contextes bornés ainsi que l’état du timer sont disponibles en lecture seule.
-Les écritures avancées et commandes opérateur larges restent dans la CLI ; voir
-l’[audit CLI / Developer API](docs/operon-cli-audit.md). L’apply de transition
-est disponible via le Bridge. Les plans élevés ou destructifs demandent une
-confirmation fraîche dans la fenêtre Obsidian propriétaire et échouent fermés
-après 45 secondes si elle ne peut pas être présentée.
+Les relations et la récurrence disposent aussi d’écritures dédiées via des
+plans officiels scellés. Les agents passent par le MCP parce qu’il ajoute des
+schémas bornés, le moindre privilège, le dry-run, le verrouillage de révision,
+l’idempotence durable, la vérification postflight et la récupération du plan
+exact. Un relais CLI générique contournerait ces garanties. Les commandes
+destructives ou d’administration restent dans la CLI. Voir le
+[contrat MCP Operon](docs/operon-mcp-contract.fr.md) et
+l’[audit CLI / Developer API](docs/operon-cli-audit.fr.md).
 
 Note de compatibilité : l’adaptateur cible Operon officiel `3.1.1`, mais les
 preuves d’acceptation complètes de ce dépôt utilisent notre build local corrigé
@@ -124,7 +127,10 @@ reste utilisable pour les lectures et la plupart des mutations gouvernées, mais
 le settlement des frontmatters de date, le consentement entre plusieurs fenêtres
 Obsidian et les renommages implicites de File Tasks conservent les limites
 upstream décrites dans ces PR. Le MCP ne bascule jamais vers Markdown ou des
-API privées quand l’un de ces cas n’est pas supporté.
+API privées quand l’un de ces cas n’est pas supporté. Le cas particulier des
+transitions sans portée `project-serial` reste suivi dans
+[#99](https://github.com/hasanyilmaz/operon/issues/99) et
+[#101](https://github.com/hasanyilmaz/operon/pull/101).
 
 ## Racines documentaires externes
 
@@ -187,7 +193,8 @@ partagée hors du vrai coffre synchronisé.
 - Outils actuels : [Surface des outils](docs/obsidian_mcp_tools_spec.md)
 - Modes runtime : [Matrice des capacités](docs/runtime-capability-matrix.fr.md)
 - Routage agentique : [Guide de routage](docs/mcp-routing-guide.fr.md)
-- Surface Operon et routage CLI : [Audit CLI / Developer API](docs/operon-cli-audit.md)
+- Outils Operon et garanties : [Contrat MCP Operon](docs/operon-mcp-contract.fr.md)
+- Surface Operon et routage CLI : [Audit CLI / Developer API](docs/operon-cli-audit.fr.md)
 - Déploiement headless : [Profil serveur headless](docs/headless-server-profile.fr.md)
 - Pilote Linux headless multi-client : [pilote et matrice des capacités](docs/headless-multiclient-pilot.fr.md)
 - Intégration gateway OSS : [Compatibilité gateways](docs/gateway-compatibility.fr.md)
