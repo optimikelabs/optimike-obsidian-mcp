@@ -7,10 +7,19 @@ import {
   OperonCreateTaskSchema,
   OperonFilterQuerySchema,
   OperonRelocateTaskSchema,
+  OperonRecoverMutationSchema,
+  OperonTaskFinderSchema,
+  OperonResolveTaskSchema,
+  OperonRelationshipsSchema,
+  OperonContextSchema,
+  OperonContextInputSchema,
   OperonQuerySchema,
   OperonTransitionTaskSchema,
   OperonTransitionTaskInputSchema,
   OperonUpdateTaskSchema,
+  OperonSetRelationshipsSchema,
+  OperonSetRelationshipsInputSchema,
+  OperonUpdateRecurrenceSchema,
 } from "../../../services/operon/contract.js";
 import { OperonService } from "../../../services/operon/service.js";
 import { McpError } from "../../../types-global/errors.js";
@@ -144,6 +153,58 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
   );
 
   server.tool(
+    "operon_get_diagnostics",
+    "Read Operon 3.1.1 native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault.",
+    {},
+    READ_ONLY_ANNOTATIONS,
+    async () => runTool(() => service.diagnostics()),
+  );
+
+  server.tool(
+    "operon_find_tasks",
+    "Run Operon's native ranked task/project finder with bounded filters, scopes, representations, project mode, cursor, and at most 50 rows. Prefer this over broad text query when ranking, overdue/today/recent scope, or project-tree counts matter.",
+    OperonTaskFinderSchema.shape,
+    READ_ONLY_ANNOTATIONS,
+    async (params: z.infer<typeof OperonTaskFinderSchema>) =>
+      runTool(() => service.findTasks(params)),
+  );
+
+  server.tool(
+    "operon_resolve_task",
+    "Resolve an Operon task selector through the native entity resolver and return resolved, ambiguous, or not-found with bounded candidates. Use before acting when you have a path, note name, locator, search phrase, or uncertain identity instead of guessing an operonId.",
+    OperonResolveTaskSchema.shape,
+    READ_ONLY_ANNOTATIONS,
+    async (params: z.infer<typeof OperonResolveTaskSchema>) =>
+      runTool(() => service.resolveTask(params)),
+  );
+
+  server.tool(
+    "operon_get_relationships",
+    "Read the bounded native relationship graph for one stable operonId, including explicit, derived, and inferred edges plus hydrated task summaries. Depth is capped at 3 and results at 100.",
+    OperonRelationshipsSchema.shape,
+    READ_ONLY_ANNOTATIONS,
+    async (params: z.infer<typeof OperonRelationshipsSchema>) =>
+      runTool(() => service.relationships(params)),
+  );
+
+  server.tool(
+    "operon_build_context",
+    "Build a bounded native Operon context pack for exact-task, neighborhood, project analysis, planning workload, or creation context. Only notes, links, and custom fields may be hydrated; source Markdown, tracker history, reminders, placement, and mutation-readiness packs are intentionally excluded.",
+    OperonContextInputSchema.shape,
+    READ_ONLY_ANNOTATIONS,
+    async (params: z.infer<typeof OperonContextSchema>) =>
+      runTool(() => service.context(params)),
+  );
+
+  server.tool(
+    "operon_get_timer_state",
+    "Read Operon's native active timer and in-flight timer transition state. This is observation only; timer start, stop, and session edits remain operator-controlled outside MCP.",
+    {},
+    READ_ONLY_ANNOTATIONS,
+    async () => runTool(() => service.timers()),
+  );
+
+  server.tool(
     "operon_adopt_task",
     "Adopt one existing plain Markdown or Obsidian Tasks checkbox in place as an Operon inline task. Requires an exact one-based line and expectedLine precondition, plus idempotencyKey; dryRun defaults to true. The live Operon domain path preserves supported Tasks metadata and no raw Markdown fallback exists.",
     OperonAdoptTaskSchema.shape,
@@ -195,5 +256,40 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonRelocateTaskSchema>) =>
       runTool(() => service.relocateTask(params)),
+  );
+
+  server.tool(
+    "operon_set_relationships",
+    "Replace or explicitly clear parentTask, blocking, or blockedBy through Operon Developer API V1. The tool rejects duplicate, self, and contradictory dependency targets; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    OperonSetRelationshipsInputSchema.shape,
+    MUTATION_ANNOTATIONS,
+    async (params: z.infer<typeof OperonSetRelationshipsSchema>) =>
+      runTool(() => service.setRelationships(params)),
+  );
+
+  server.tool(
+    "operon_update_recurrence",
+    "Set or explicitly clear an Operon recurrence rule and its official temporal fields for this-task or this-and-following. This apply is reserved for full write policy; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    OperonUpdateRecurrenceSchema.shape,
+    MUTATION_ANNOTATIONS,
+    async (params: z.infer<typeof OperonUpdateRecurrenceSchema>) =>
+      runTool(() => service.updateRecurrence(params)),
+  );
+
+  server.tool(
+    "operon_list_pending_recoveries",
+    "List durable official Operon Developer API mutation recoveries. Read-only: it does not retry or apply anything; use the returned recoveryRef only with operon_recover_mutation after inspecting the uncertain outcome.",
+    {},
+    READ_ONLY_ANNOTATIONS,
+    async () => runTool(() => service.pendingRecoveries()),
+  );
+
+  server.tool(
+    "operon_recover_mutation",
+    "Recover exactly one uncertain official Operon mutation by recoveryRef. This replays the same durable plan only; it never constructs a new mutation. Requires idempotencyKey, OPERON_MUTATIONS_ENABLED=true, and MCP_WRITE_MODE=full.",
+    OperonRecoverMutationSchema.shape,
+    MUTATION_ANNOTATIONS,
+    async (params: z.infer<typeof OperonRecoverMutationSchema>) =>
+      runTool(() => service.recoverMutation(params)),
   );
 }

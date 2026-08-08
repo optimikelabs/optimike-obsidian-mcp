@@ -5,6 +5,10 @@ import {
   OperonBridgePageSchema,
   OperonConvertTaskSchema,
   OperonFilterQuerySchema,
+  OperonTaskFinderSchema,
+  OperonResolveTaskSchema,
+  OperonRelationshipsSchema,
+  OperonContextSchema,
   OperonRelocateTaskSchema,
   OperonConfigurationSchema,
   OperonCreateTaskSchema,
@@ -13,10 +17,23 @@ import {
   OperonTaskSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
+  OperonSetRelationshipsSchema,
+  OperonUpdateRecurrenceSchema,
   OperonVaultMarkdownPathSchema,
   OperonVaultRelativePathSchema,
   queryOperonSnapshot,
+  resolveOperonPriorityStableId,
+  resolveOperonWorkflowStatus,
 } from "../dist/services/operon/contract.js";
+
+assert.equal(
+  resolveOperonPriorityStableId("F", [
+    { id: "pr_a", label: "A" },
+    { id: "pr_f", label: "F" },
+  ]),
+  "pr_f",
+  "MCP postflight must compare priority labels against stable runtime ids",
+);
 
 const capabilities = {
   status: true,
@@ -118,6 +135,12 @@ const configuration = OperonConfigurationSchema.parse({
 assert.equal(
   configuration.configuration.workflow.pipelines[0].statuses[0].id,
   "st_project_finished",
+);
+assert.equal(
+  resolveOperonWorkflowStatus("Terminé", configuration.configuration.workflow)
+    ?.value,
+  "Project.Terminé",
+  "MCP postflight must resolve a short status label to the canonical workflow value",
 );
 
 const task = OperonTaskSchema.parse({
@@ -504,6 +527,53 @@ const relocation = OperonRelocateTaskSchema.parse({
   targetPath: "Efforts/Projets/Cible.md",
 });
 assert.equal(relocation.dryRun, true);
+const relationshipsMutation = OperonSetRelationshipsSchema.parse({
+  operonId: "abc1234",
+  expectedRevision: task.revision,
+  idempotencyKey: "contract-relationships-1",
+  relationships: { parentTask: null, blocking: ["bcd2345"], blockedBy: [] },
+});
+assert.equal(relationshipsMutation.dryRun, true);
+for (const invalidRelationships of [
+  { blocking: ["bcd2345", "bcd2345"] },
+  { blocking: ["bcd2345"], blockedBy: ["bcd2345"] },
+  { parentTask: "abc1234" },
+]) {
+  assert.equal(
+    OperonSetRelationshipsSchema.safeParse({
+      operonId: "abc1234",
+      expectedRevision: task.revision,
+      idempotencyKey: "contract-relationships-invalid",
+      relationships: invalidRelationships,
+    }).success,
+    false,
+  );
+}
+const recurrenceMutation = OperonUpdateRecurrenceSchema.parse({
+  operonId: "abc1234",
+  expectedRevision: task.revision,
+  idempotencyKey: "contract-recurrence-1",
+  scope: "this-and-following",
+  changes: { repeat: "every week", datetimeRepeatEnd: null },
+});
+assert.equal(recurrenceMutation.dryRun, true);
+assert.equal(
+  OperonUpdateRecurrenceSchema.safeParse({
+    ...recurrenceMutation,
+    scope: "all-tasks",
+  }).success,
+  false,
+);
+assert.equal(
+  OperonUpdateTaskSchema.safeParse({
+    operonId: "abc1234",
+    expectedRevision: task.revision,
+    idempotencyKey: "contract-update-dedicated-field",
+    patch: { fields: { repeat: "every week" } },
+  }).success,
+  false,
+  "general updates must not simulate recurrence mutations",
+);
 assert.equal(
   OperonRelocateTaskSchema.safeParse({
     ...relocation,
@@ -512,6 +582,45 @@ assert.equal(
   false,
 );
 
+const finder = OperonTaskFinderSchema.parse({
+  text: "projet operon",
+  scope: "recent",
+  project: { mode: "tree", rootOperonId: task.operonId },
+});
+assert.equal(finder.limit, 20);
+assert.equal(
+  OperonTaskFinderSchema.safeParse({ text: "x", limit: 51 }).success,
+  false,
+);
+assert.equal(
+  OperonResolveTaskSchema.safeParse({
+    selector: { kind: "search", query: "Operon", limit: 21 },
+  }).success,
+  false,
+);
+assert.equal(
+  OperonRelationshipsSchema.parse({ operonId: task.operonId }).depth,
+  1,
+);
+assert.equal(
+  OperonContextSchema.safeParse({
+    purpose: "analysis",
+    projection: "task-neighborhood",
+  }).success,
+  false,
+  "task-neighborhood must be rooted in an exact operonId",
+);
+assert.equal(
+  OperonContextSchema.safeParse({
+    purpose: "planning",
+    projection: "planning-workload",
+    filters: { checkbox: ["open"] },
+    include: ["notes", "links"],
+    limit: 50,
+  }).success,
+  true,
+);
+
 console.log(
-  "PASS: Operon MCP read/mutation schemas, filtering, property gating, and freshness envelope",
+  "PASS: Operon MCP native read/mutation schemas, filtering, property gating, and freshness envelope",
 );

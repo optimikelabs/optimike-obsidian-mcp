@@ -41,6 +41,9 @@ const DEFAULT_MUTATION_TOOLS = [
   "operon_transition_task",
   "operon_convert_task",
   "operon_relocate_task",
+  "operon_set_relationships",
+  "operon_update_recurrence",
+  "operon_recover_mutation",
 ].join(",");
 
 function envInteger(defaultValue: number, min: number, max: number) {

@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	OPERON_BRIDGE_BLOCKED_MUTATIONS,
+	OPERON_BRIDGE_DEVELOPER_API_VERSIONS,
 	filterTasks,
 	isCanonicalVaultMarkdownPath,
 	isCanonicalVaultRelativePath,
+	isDeveloperApiVersion,
 	isIndexReady,
   isVersionCompatible,
   normalizeTask,
+  resolvePriorityStableId,
   paginateTasks,
   queryTasks,
   resolveWorkflow,
+  resolveWorkflowStatus,
+  workflowStatusMatches,
 	settingsSignature,
 	shouldAttemptIndexValidation,
   mutationPathValidationError,
@@ -17,6 +23,50 @@ import {
   type OperonBridgeTask,
   type RuntimeIndexedTask,
 } from "./contract";
+
+test("resolves a requested priority label to the stable id used by postflight", () => {
+  const priorities = [
+    { id: "pr_a", label: "A" },
+    { id: "pr_f", label: "F" },
+  ];
+  assert.equal(resolvePriorityStableId("F", priorities), "pr_f");
+  assert.equal(resolvePriorityStableId(" pr_f ", priorities), "pr_f");
+  assert.equal(resolvePriorityStableId("unknown", priorities), null);
+});
+
+test("resolves bare workflow labels for postflight status matching", () => {
+  const workflowPipelines = [
+    {
+      id: "pl_project",
+      name: "Project",
+      statuses: [{ id: "st_project_done", label: "Done" }],
+    },
+  ];
+  assert.deepEqual(resolveWorkflowStatus("Done", workflowPipelines), {
+    pipeline: "Project",
+    label: "Done",
+    value: "Project.Done",
+    id: "st_project_done",
+  });
+  const after = {
+    status: "Project.Done",
+    statusId: "st_project_done",
+    statusLabel: "Done",
+    pipeline: "Project",
+    pipelineId: "pl_project",
+  };
+  assert.equal(workflowStatusMatches(after, "Done", workflowPipelines), true);
+  assert.equal(workflowStatusMatches(after, "st_project_done", workflowPipelines), true);
+  assert.equal(workflowStatusMatches(after, "Project.Done", workflowPipelines), true);
+  assert.equal(workflowStatusMatches(after, "Planned", workflowPipelines), false);
+
+  const ambiguousPipelines = [
+    ...workflowPipelines,
+    { id: "pl_pipeline", name: "Pipeline", statuses: [{ id: "st_pipeline_done", label: "Done" }] },
+  ];
+  assert.equal(resolveWorkflowStatus("Done", ambiguousPipelines), null);
+  assert.equal(workflowStatusMatches(after, "Done", ambiguousPipelines), false);
+});
 
 const pipelines = [
   {
@@ -105,9 +155,42 @@ function normalized(): OperonBridgeTask {
   });
 }
 
+test("task revision is invariant across the unmanaged-properties projection", () => {
+  const options = {
+    task: {
+      ...task,
+      primary: { ...task.primary, format: "yaml" as const },
+    },
+    pipelines,
+    keyMappings: [
+      { canonicalKey: "status", visiblePropertyName: "status" },
+      { canonicalKey: "priority", visiblePropertyName: "priority" },
+    ],
+    frontmatter: {
+      status: "Project.InProgress",
+      priority: "A",
+      rang: 4,
+      north_star: true,
+    },
+    sourceMtime: 1234,
+    operonVersion: "3.1.1",
+    bridgeVersion: "0.5.1",
+  };
+  const projected = normalizeTask({ ...options, includeProperties: true });
+  const redacted = normalizeTask({ ...options, includeProperties: false });
+
+  assert.deepEqual(projected.properties, { rang: 4, north_star: true });
+  assert.equal(redacted.properties, undefined);
+  assert.equal(redacted.revision, projected.revision);
+});
+
 test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("operon", "2.4.0"), true);
   assert.equal(isVersionCompatible("operon", "2.5.0"), true);
+  assert.equal(isVersionCompatible("operon", "3.0.0"), false);
+  assert.equal(isVersionCompatible("operon", "3.0.1"), true);
+  assert.equal(isVersionCompatible("operon", "3.1.0"), true);
+  assert.equal(isVersionCompatible("operon", "3.1.1"), true);
   assert.equal(isVersionCompatible("operon", "2.5.1"), false);
   assert.equal(isVersionCompatible("operon", "2.5.2"), false);
   assert.equal(isVersionCompatible("kairelys", "2.5.0"), false);
@@ -120,6 +203,16 @@ test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("kairelys", "2.6.2"), true);
   assert.equal(isVersionCompatible("kairelys", "2.6.3"), true);
   assert.equal(isVersionCompatible("kairelys", "2.6.4"), false);
+});
+
+test("official Developer API versions remain explicit and only unverified mutations stay fail-closed", () => {
+	assert.deepEqual(OPERON_BRIDGE_DEVELOPER_API_VERSIONS, ["3.0.1", "3.1.0", "3.1.1"]);
+	assert.equal(isDeveloperApiVersion("3.0.1"), true);
+	assert.equal(isDeveloperApiVersion("3.1.0"), true);
+	assert.equal(isDeveloperApiVersion("3.1.1"), true);
+	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.0.1"], ["transition"]);
+	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.0"], []);
+	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.1"], []);
 });
 
 test("mutation paths are rejected instead of normalized at the Bridge boundary", () => {

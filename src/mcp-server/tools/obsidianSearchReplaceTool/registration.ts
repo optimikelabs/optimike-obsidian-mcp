@@ -26,7 +26,7 @@ import {
  * Registers the 'obsidian_search_replace' tool with the MCP server.
  *
  * This tool performs one or more search-and-replace operations within a specified
- * Obsidian note (identified by file path, the active file, or a periodic note).
+ * Obsidian note (identified by file path or the active file).
  * It reads the note content, applies the replacements sequentially based on the
  * provided options (regex, case sensitivity, etc.), writes the modified content
  * back to the vault, and returns the operation results.
@@ -48,7 +48,7 @@ export const registerObsidianSearchReplaceTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_search_replace";
   const toolDescription =
-    "Performs one or more search-and-replace operations within a target Obsidian note (file path, active, or periodic). Reads the file, applies replacements sequentially in memory, and writes the modified content back, overwriting the original. Supports string/regex search, case sensitivity toggle, replacing first/all occurrences, flexible whitespace matching (non-regex), and whole word matching. Returns success status, message, replacement count, a formatted timestamp string, file stats (stats), and optionally the final file content.";
+    "Performs one or more search-and-replace operations within a target Obsidian note (file path or active file). Reads the file, applies replacements sequentially in memory, and writes the modified content back, overwriting the original. Supports string/regex search, case sensitivity toggle, replacing first/all occurrences, flexible whitespace matching (non-regex), and whole word matching. Returns success status, message, replacement count, a formatted timestamp string, file stats (stats), and optionally the final file content.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =

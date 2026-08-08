@@ -328,24 +328,62 @@ export interface BaseConfigUpsertResponse {
 }
 
 /**
- * Options for PATCH operations.
+ * Values accepted by the JSON-native markdown-patch 2.x contract.
  */
-export interface PatchOptions {
-  operation: "append" | "prepend" | "replace";
-  targetType: "heading" | "block" | "frontmatter";
-  target: string; // The specific heading, block ID, or frontmatter key
-  targetDelimiter?: string; // Default '::' for nested headings
-  trimTargetWhitespace?: boolean; // Default false
-  /**
-   * If true, creates the target if it's missing.
-   * This is implemented via the `Create-Target-If-Missing` HTTP header.
-   * Particularly useful for adding new frontmatter keys.
-   */
-  createTargetIfMissing?: boolean;
-  contentType?: "text/markdown" | "application/json"; // For request body type inference
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+/**
+ * Destination used when moving a heading (`scope: "parent"`).
+ */
+export interface PatchDestination {
+  parent: string[] | null;
+  place:
+    | "first"
+    | "last"
+    | { before: string[] | null }
+    | { after: string[] | null };
 }
 
 /**
- * Type alias for periodic note periods.
+ * Payload supplied to a markdown-patch 2.x instruction.
+ *
+ * The request builder maps it to `content`, `value`, or `destination` from the
+ * target type and scope. `undefined` is valid only for a delete instruction.
  */
-export type Period = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
+export type PatchPayload = JsonValue | PatchDestination | undefined;
+
+interface PatchOptionsBase {
+  operation: "append" | "prepend" | "replace" | "delete";
+  scope?: "content" | "marker" | "markerAndContent" | "parent";
+  /**
+   * Optimistic-concurrency token returned as `version` by a document map.
+   */
+  ifMatch?: string;
+  createTargetIfMissing?: boolean;
+  rejectIfContentPreexists?: boolean;
+}
+
+/**
+ * Options for a JSON-native markdown-patch 2.x operation.
+ *
+ * Heading targets are addressed by an array from the top-level heading to the
+ * target. `null` or an empty array addresses the document root. Block and
+ * frontmatter targets remain scalar identifiers.
+ */
+export type PatchOptions =
+  | (PatchOptionsBase & {
+      targetType: "heading";
+      target: string[] | null;
+      within?: number;
+    })
+  | (PatchOptionsBase & {
+      targetType: "block" | "frontmatter";
+      target: string;
+      within?: never;
+    });

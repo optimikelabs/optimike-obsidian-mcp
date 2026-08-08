@@ -29,22 +29,43 @@ Related docs:
   features: tags, admin move/archive/delete, batch frontmatter, minimal Bases
   writes, and JSON Canvas helpers. Operon remains read-only.
 
+### Local REST API 5.x contract
+
+The live adapter requires Local REST API 5.0.2 or later within the supported 5.x
+line. Targeted PATCH requests use the native JSON instruction format:
+`Content-Type: application/json`, with `targetType`, `target`, `operation`, and
+the typed `content` or `value` payload in the request body. It does not use the
+deprecated 1.x `Operation`, `Target-*`, or `Markdown-Patch-Version: 1` headers.
+The vendored YAML and JSON snapshots under `docs/obsidian-api/` are generated
+from the
+[official 5.0.2 OpenAPI document](https://github.com/coddingtonbear/obsidian-local-rest-api/blob/5.0.2/docs/openapi.yaml).
+
+The Local REST API core no longer provides `/periodic/...` routes. Consequently,
+`obsidian_update_note` and `obsidian_search_replace` accept only explicit
+`filePath` and live `activeFile` targets. Resolve a daily, weekly, monthly,
+quarterly, or yearly note to its vault-relative path before calling these
+tools. The optional upstream Periodic Notes API extension is not a hidden
+dependency of this MCP.
+
 ## Core Notes
 
 - `obsidian_read_note`: read a vault note by path, with cache fallback.
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
 - `obsidian_global_search`: text/regex search across cached vault content.
-- `obsidian_update_note`: live REST note update, or guarded headless
-  append/prepend in filesystem modes.
-- `obsidian_search_replace`: live REST search/replace, or guarded exact
-  filesystem search/replace in headless write modes.
+- `obsidian_update_note`: live REST note update for an explicit `filePath` or
+  the live `activeFile`, or guarded headless append/prepend for an explicit
+  `filePath` in filesystem modes.
+- `obsidian_search_replace`: live REST search/replace for an explicit
+  `filePath` or the live `activeFile`, or guarded exact `filePath`
+  search/replace in headless write modes.
 - `obsidian_delete_note`: live REST delete; in `headless-filesystem`, explicit
   filesystem delete requires `expectedHash` or `expectedMtime`.
 
 ## Metadata And Tags
 
-- `obsidian_manage_frontmatter`: live frontmatter operations; in headless guarded
-  modes, supports bounded filesystem `set`.
+- `obsidian_manage_frontmatter`: live frontmatter operations using Local REST
+  API 5.x typed JSON values; in headless guarded modes, supports bounded
+  filesystem `set`.
 - `obsidian_batch_frontmatter`: filesystem batch frontmatter operations with
   dry-run/default safety.
 - `obsidian_manage_tags`: live tag tool, or filesystem tag add/remove/list,
@@ -71,20 +92,39 @@ Related docs:
 - `operon_query_saved_filter`: evaluate one saved filter through Operon's native live filter engine.
 - `operon_validate`: live duplicate/source/workflow graph validation, or a limited
   snapshot-only validation with explicit caveats.
+- `operon_get_diagnostics`: native Developer API lifecycle, persistence, grant, catalog, capability, and transport diagnostics.
+- `operon_find_tasks`: bounded ranked task/project finder with native recent/today/overdue and project-tree semantics.
+- `operon_resolve_task`: native resolution of stable IDs, locators, paths, note names, or search selectors without guessing identity.
+- `operon_get_relationships`: bounded explicit, derived, and inferred relationship graph for one stable task.
+- `operon_build_context`: bounded exact-task, neighborhood, project, planning, or creation context with a strict hydration allowlist.
+- `operon_get_timer_state`: read active and transitioning timer state without exposing timer control.
 - `operon_adopt_task`: upgrade one exact legacy checkbox in place with line-level optimistic locking.
 - `operon_create_task`: create inline/file tasks through Operon Public API v1.
 - `operon_update_task`: update one mutation group with expected revision.
-- `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards.
+- `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards when the live Developer API advertises the capability; the Bridge bounds uncertain stock-runtime applies and never retries blindly.
+- `operon_set_relationships`: replace or clear parent/blocker edges with revision locking, graph validation, and inverse-edge postflight; apply is allowed in `guarded`.
+- `operon_update_recurrence`: set or clear official recurrence fields with explicit series scope; apply requires `full`.
 - `operon_convert_task`: convert inline/file shape in `MCP_WRITE_MODE=full`.
 - `operon_relocate_task`: move an inline task to another Markdown note while preserving `operonId`.
+- `operon_list_pending_recoveries`: list durable official Developer API recovery references without applying them.
+- `operon_recover_mutation`: recover one exact official mutation plan by `recoveryRef`; requires both mutation opt-ins and full MCP write mode.
 
 Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`,
 Operon/Bridge versions, capabilities, and limitations.
 
-Mutations require a live Bridge and Operon Public API v1. Official Operon remains
-read-only; the minimal Optimike fork supplies the API. Dry-run is the default,
-idempotency is mandatory, existing tasks require `expectedRevision`, and there
-is no direct Markdown fallback.
+Mutations require a live Bridge and the loaded engine's official contract.
+Operon 3.1.1 uses Developer API V1 typed preview/apply/recovery; legacy
+Kairélys uses Public API v1. Dry-run is the default, idempotency is mandatory,
+existing tasks require `expectedRevision`, and there is no direct Markdown
+fallback.
+
+The complete acceptance evidence uses the patched local Operon build while
+upstream PRs [#135](https://github.com/hasanyilmaz/operon/pull/135),
+[#137](https://github.com/hasanyilmaz/operon/pull/137), and
+[#139](https://github.com/hasanyilmaz/operon/pull/139) are under review. Stock
+3.1.1 remains supported for reads and most mutations, but the documented
+frontmatter-settlement, multi-window-consent, and File Task rename limitations
+remain fail-closed; no private or Markdown fallback is introduced.
 
 ## Semantic Search
 

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Six bounded, read-only Operon 3.1.1 Developer API tools for native
+  diagnostics, ranked finder, entity resolution, relationships, context packs,
+  and timer state; no CLI passthrough or new mutation class is exposed.
+
+- Official Operon 3.1.1 Developer API V1 adapter coverage for governed task
+  reads, typed preview/apply/recovery mutations, stable status identities,
+  postflight evidence, and same-plan idempotent replay through the Bridge.
+- Explicit compatibility note for stock Operon 3.1.1 versus the patched local
+  acceptance build while upstream PRs #135, #137, and #139 are under review.
+
 - Default-deny external document roots with logical root IDs, bounded listing,
   metadata, hashing, UTF-8 reads, and explicit local stdio handoff for clients
   with their own PDF or Office tools.
@@ -47,6 +57,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generated bilingual SVG explainers for the product overview, documentation
   hub, operations, security, runtime profiles and agent routing, with a
   deterministic generator and visual-contract tests.
+
+### Changed
+
+- The live adapter now requires Local REST API 5.0.2 or later within the
+  supported 5.x line and sends native JSON PATCH instructions with typed
+  frontmatter values instead of deprecated 1.x PATCH headers.
+
+### Removed
+
+- Removed the obsolete core `/periodic/...` service routes and the
+  `periodicNote` target from `obsidian_update_note` and
+  `obsidian_search_replace`. Periodic notes must now be addressed through an
+  explicit vault-relative path; the optional upstream Periodic Notes API
+  extension remains a separate integration.
 
 ### Fixed
 
