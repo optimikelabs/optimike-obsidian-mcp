@@ -47,6 +47,13 @@ export const OperonTaskSchema = z.object({
       completed: z.number().int().nonnegative(),
     })
     .optional(),
+  recurrence: z
+    .object({
+      repeating: z.boolean(),
+      seriesId: z.string().nullable(),
+      occurrenceDate: z.string().nullable(),
+    })
+    .optional(),
   revision: z.string().min(1),
   sourceKind: z.literal("operon-index"),
   operonVersion: z.string().min(1),
@@ -72,6 +79,8 @@ export const OperonCapabilitiesSchema = z.object({
   create: z.boolean(),
   update: z.boolean(),
   transition: z.boolean(),
+  relationshipMutation: z.boolean().optional().default(false),
+  recurrenceMutation: z.boolean().optional().default(false),
   convert: z.boolean(),
   filterQuery: z.boolean().optional().default(false),
   relocate: z.boolean().optional().default(false),
@@ -208,12 +217,13 @@ export function resolveOperonWorkflowStatus(
   if (!normalized) return null;
   const matches = workflow.pipelines.flatMap((pipeline) =>
     pipeline.statuses
-      .filter((status) => (
-        status.id === normalized
-        || status.value === normalized
-        || `${pipeline.name}.${status.label}` === normalized
-        || status.label === normalized
-      ))
+      .filter(
+        (status) =>
+          status.id === normalized ||
+          status.value === normalized ||
+          `${pipeline.name}.${status.label}` === normalized ||
+          status.label === normalized,
+      )
       .map((status) => ({
         pipeline: pipeline.name,
         label: status.label,
@@ -227,7 +237,7 @@ export function resolveOperonWorkflowStatus(
       match,
     ]),
   );
-  return unique.size === 1 ? [...unique.values()][0] ?? null : null;
+  return unique.size === 1 ? ([...unique.values()][0] ?? null) : null;
 }
 
 export function resolveOperonPriorityStableId(
@@ -238,13 +248,12 @@ export function resolveOperonPriorityStableId(
   if (!normalized) return null;
   const matches = priorities
     .filter(
-      (priority) =>
-        priority.id === normalized || priority.label === normalized,
+      (priority) => priority.id === normalized || priority.label === normalized,
     )
     .map((priority) => priority.id)
     .filter((id): id is string => Boolean(id));
   const unique = [...new Set(matches)];
-  return unique.length === 1 ? unique[0] ?? null : null;
+  return unique.length === 1 ? (unique[0] ?? null) : null;
 }
 
 export const OperonStatusSchema = z.object({
@@ -406,7 +415,10 @@ export const OperonTaskFinderSchema = z.object({
     parentOperonId: true,
     filePath: true,
   }).optional(),
-  representations: z.array(z.enum(["inline", "file"])).max(2).optional(),
+  representations: z
+    .array(z.enum(["inline", "file"]))
+    .max(2)
+    .optional(),
   scope: z.enum(["normal", "overdue", "happens-today", "recent"]).optional(),
   project: z
     .object({
@@ -431,7 +443,10 @@ const OperonTaskLocatorSchema = z.discriminatedUnion("representation", [
 ]);
 
 export const OperonTaskSelectorSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("operon-id"), operonId: z.string().trim().min(1).max(256) }),
+  z.object({
+    kind: z.literal("operon-id"),
+    operonId: z.string().trim().min(1).max(256),
+  }),
   z.object({
     kind: z.literal("exact-locator"),
     locator: OperonTaskLocatorSchema,
@@ -480,27 +495,27 @@ export const OperonRelationshipsSchema = z.object({
 });
 
 export const OperonContextInputSchema = z.object({
-    purpose: z.enum(["read", "analysis", "planning", "creation"]),
-    projection: z.enum([
-      "exact-task",
-      "task-neighborhood",
-      "project-analysis",
-      "planning-workload",
-      "creation-context",
-    ]),
-    operonId: z.string().trim().min(1).max(256).optional(),
-    filters: OperonNativeTaskFiltersSchema.optional(),
-    include: z
-      .array(z.enum(["notes", "links", "custom-fields"]))
-      .max(3)
-      .optional(),
-    // Projection-specific defaults belong to Operon's native context contract:
-    // exact-task is 1/0, while neighborhood and the other projections have
-    // different bounds. Do not inject neighborhood defaults here.
-    limit: z.number().int().positive().max(100).optional(),
-    depth: z.number().int().nonnegative().max(3).optional(),
-    cursor: z.string().trim().min(1).max(1_024).optional(),
-  });
+  purpose: z.enum(["read", "analysis", "planning", "creation"]),
+  projection: z.enum([
+    "exact-task",
+    "task-neighborhood",
+    "project-analysis",
+    "planning-workload",
+    "creation-context",
+  ]),
+  operonId: z.string().trim().min(1).max(256).optional(),
+  filters: OperonNativeTaskFiltersSchema.optional(),
+  include: z
+    .array(z.enum(["notes", "links", "custom-fields"]))
+    .max(3)
+    .optional(),
+  // Projection-specific defaults belong to Operon's native context contract:
+  // exact-task is 1/0, while neighborhood and the other projections have
+  // different bounds. Do not inject neighborhood defaults here.
+  limit: z.number().int().positive().max(100).optional(),
+  depth: z.number().int().nonnegative().max(3).optional(),
+  cursor: z.string().trim().min(1).max(1_024).optional(),
+});
 
 export const OperonContextSchema = OperonContextInputSchema.superRefine(
   (value, context) => {
@@ -683,6 +698,22 @@ export const OperonUpdatePatchSchema = z
     properties: z.record(OperonRawPropertyValueSchema).optional(),
   })
   .superRefine((value, context) => {
+    const dedicatedFields = new Set([
+      "parentTask",
+      "blocking",
+      "blockedBy",
+      "repeat",
+      "datetimeRepeatEnd",
+    ]);
+    for (const field of Object.keys(value.fields ?? {})) {
+      if (dedicatedFields.has(field)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["fields", field],
+          message: `Managed field '${field}' must use the dedicated relationship or recurrence mutation tool.`,
+        });
+      }
+    }
     const groupCount = [
       value.description !== undefined,
       value.tags !== undefined || value.fields !== undefined,
@@ -768,6 +799,98 @@ export const OperonRelocateTaskSchema = MutationControlSchema.extend({
   targetPath: OperonVaultMarkdownPathSchema,
 });
 
+const OperonIdSchema = z.string().regex(/^[a-z0-9]{7}$/u, {
+  message: "Operon ids must contain exactly seven lowercase letters or digits.",
+});
+
+const UniqueOperonIdsSchema = z
+  .array(OperonIdSchema)
+  .max(100)
+  .superRefine((values, context) => {
+    if (new Set(values).size !== values.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Relationship target ids must be unique.",
+      });
+    }
+  });
+
+const OperonRelationshipReplacementSchema = z
+  .object({
+    parentTask: OperonIdSchema.nullable().optional(),
+    blocking: UniqueOperonIdsSchema.optional(),
+    blockedBy: UniqueOperonIdsSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!Object.keys(value).length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide at least one relationship field to replace or clear.",
+      });
+    }
+    const overlap = new Set(value.blocking ?? []);
+    for (const id of value.blockedBy ?? []) {
+      if (overlap.has(id)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Task '${id}' cannot be both blocking and blockedBy.`,
+        });
+      }
+    }
+  });
+
+export const OperonSetRelationshipsInputSchema = MutationControlSchema.extend({
+  operonId: OperonIdSchema,
+  expectedRevision: z.string().min(1),
+  relationships: OperonRelationshipReplacementSchema,
+});
+
+export const OperonSetRelationshipsSchema =
+  OperonSetRelationshipsInputSchema.superRefine((value, context) => {
+    const targets = [
+      ...(value.relationships.parentTask
+        ? [value.relationships.parentTask]
+        : []),
+      ...(value.relationships.blocking ?? []),
+      ...(value.relationships.blockedBy ?? []),
+    ];
+    if (targets.includes(value.operonId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A task cannot reference itself.",
+      });
+    }
+  });
+
+const OperonRecurrenceChangesSchema = z
+  .object({
+    repeat: z.string().trim().min(1).nullable().optional(),
+    datetimeRepeatEnd: z.string().trim().min(1).nullable().optional(),
+    dateScheduled: z.string().trim().min(1).nullable().optional(),
+    dateStarted: z.string().trim().min(1).nullable().optional(),
+    dateDue: z.string().trim().min(1).nullable().optional(),
+    datetimeStart: z.string().trim().min(1).nullable().optional(),
+    datetimeEnd: z.string().trim().min(1).nullable().optional(),
+    estimate: z.number().finite().nonnegative().nullable().optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!Object.keys(value).length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide at least one recurrence field to set or clear.",
+      });
+    }
+  });
+
+export const OperonUpdateRecurrenceSchema = MutationControlSchema.extend({
+  operonId: OperonIdSchema,
+  expectedRevision: z.string().min(1),
+  scope: z.enum(["this-task", "this-and-following"]),
+  changes: OperonRecurrenceChangesSchema,
+});
+
 export const OperonRecoverMutationSchema = z.object({
   idempotencyKey: z.string().min(8).max(200),
   recoveryRef: z.string().trim().min(1).max(512),
@@ -804,6 +927,7 @@ export const OperonMutationResultSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   retryable: z.boolean().optional(),
   planDigest: z.string().optional(),
+  plan: z.record(z.unknown()).optional(),
   recoveryRef: z.string().optional(),
   mutationMayHaveApplied: z.boolean().optional(),
   nativeStatus: z.string().optional(),
@@ -819,6 +943,12 @@ export type OperonRelationships = z.infer<typeof OperonRelationshipsSchema>;
 export type OperonContext = z.infer<typeof OperonContextSchema>;
 export type OperonAdoptTask = z.infer<typeof OperonAdoptTaskSchema>;
 export type OperonUpdateTask = z.infer<typeof OperonUpdateTaskSchema>;
+export type OperonSetRelationships = z.infer<
+  typeof OperonSetRelationshipsSchema
+>;
+export type OperonUpdateRecurrence = z.infer<
+  typeof OperonUpdateRecurrenceSchema
+>;
 export type OperonTransitionTask = z.infer<typeof OperonTransitionTaskSchema>;
 export type OperonConvertTask = z.infer<typeof OperonConvertTaskSchema>;
 export type OperonFilterQuery = z.infer<typeof OperonFilterQuerySchema>;

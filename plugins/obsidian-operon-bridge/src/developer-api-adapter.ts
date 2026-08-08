@@ -83,6 +83,11 @@ interface DeveloperApiTask {
     readonly blockedByOperonIds?: readonly string[];
     readonly relatedOperonIds?: readonly string[];
   };
+  readonly recurrence?: {
+    readonly repeating: boolean;
+    readonly seriesId?: string;
+    readonly occurrenceDate?: string;
+  };
   readonly pinned?: boolean;
   readonly customFields?: Record<string, unknown>;
   readonly sourceRevision?: {
@@ -108,7 +113,10 @@ interface DeveloperApiContextRevision {
 interface DeveloperApiTaskQueryResult {
   readonly ok: boolean;
   readonly tasks?: readonly DeveloperApiTask[];
-  readonly page?: { readonly nextCursor?: string; readonly truncated?: boolean };
+  readonly page?: {
+    readonly nextCursor?: string;
+    readonly truncated?: boolean;
+  };
   readonly contextRevision?: DeveloperApiContextRevision;
   readonly error?: DeveloperApiError;
 }
@@ -167,7 +175,12 @@ interface DeveloperApiMutationPreviewResult {
 }
 
 interface DeveloperApiMutationExecutionResult {
-  readonly status?: "applied" | "already-applied" | "partial" | "failed" | "outcome-unknown";
+  readonly status?:
+    | "applied"
+    | "already-applied"
+    | "partial"
+    | "failed"
+    | "outcome-unknown";
   readonly mutationMayHaveApplied?: boolean;
   readonly retryAllowed?: boolean;
   readonly receipt?: {
@@ -213,7 +226,10 @@ interface DeveloperApiField {
   readonly source: string;
   readonly mappingStatus: string;
   readonly readable: boolean;
-  readonly mutationClass?: "general-update" | "semantic-capability" | "runtime-owned";
+  readonly mutationClass?:
+    | "general-update"
+    | "semantic-capability"
+    | "runtime-owned";
   readonly mutationOwner?: string;
 }
 
@@ -221,8 +237,14 @@ interface DeveloperApiCatalog {
   readonly ok: boolean;
   readonly settingsFingerprint?: string;
   readonly taxonomy?: {
-    readonly defaultPipeline?: { readonly configuredValue?: string; readonly id?: string };
-    readonly defaultPriority?: { readonly configuredValue?: string; readonly id?: string };
+    readonly defaultPipeline?: {
+      readonly configuredValue?: string;
+      readonly id?: string;
+    };
+    readonly defaultPriority?: {
+      readonly configuredValue?: string;
+      readonly id?: string;
+    };
     readonly pipelines?: readonly {
       readonly id: string;
       readonly name: string;
@@ -332,9 +354,15 @@ interface DeveloperApiV1 {
     readonly read: (request: unknown) => Promise<DeveloperApiReadResult>;
   };
   readonly mutations?: {
-    readonly preview: (input: unknown) => Promise<DeveloperApiMutationPreviewResult>;
-    readonly apply: (input: unknown) => Promise<DeveloperApiMutationExecutionResult>;
-    readonly recover?: (input: unknown) => Promise<DeveloperApiMutationExecutionResult>;
+    readonly preview: (
+      input: unknown,
+    ) => Promise<DeveloperApiMutationPreviewResult>;
+    readonly apply: (
+      input: unknown,
+    ) => Promise<DeveloperApiMutationExecutionResult>;
+    readonly recover?: (
+      input: unknown,
+    ) => Promise<DeveloperApiMutationExecutionResult>;
     readonly pendingRecoveries?: () => Promise<DeveloperApiPendingRecoveriesResult>;
   };
 }
@@ -343,6 +371,8 @@ export type DeveloperApiMutationCapability =
   | "create"
   | "update"
   | "transition"
+  | "relationships"
+  | "recurrence"
   | "convert"
   | "relocate";
 
@@ -375,6 +405,12 @@ export interface DeveloperApiPendingRecoveryResult {
   readonly message?: string;
 }
 
+export interface DeveloperApiRecurrenceState {
+  readonly repeating: boolean;
+  readonly seriesId: string | null;
+  readonly occurrenceDate: string | null;
+}
+
 export interface DeveloperApiRuntimeIndexer {
   readonly getAllTasks: () => RuntimeIndexedTask[];
   readonly getTask: (operonId: string) => RuntimeIndexedTask | undefined;
@@ -383,10 +419,7 @@ export interface DeveloperApiRuntimeIndexer {
   taskCount: number;
 }
 
-const BASELINE_CAPABILITIES = [
-  "system.health",
-  "system.capabilities",
-] as const;
+const BASELINE_CAPABILITIES = ["system.health", "system.capabilities"] as const;
 
 const CORE_READ_CAPABILITIES = [
   ...BASELINE_CAPABILITIES,
@@ -421,6 +454,8 @@ const MUTATION_CAPABILITIES: Record<
   create: ["tasks.create.preview", "tasks.create.apply"],
   update: ["tasks.update.preview", "tasks.update.apply"],
   transition: ["tasks.transition.preview", "tasks.transition.apply"],
+  relationships: ["tasks.relationship.preview", "tasks.relationship.apply"],
+  recurrence: ["tasks.recurrence.preview", "tasks.recurrence.apply"],
   convert: ["tasks.convert.preview", "tasks.convert.apply"],
   relocate: ["tasks.inline.relocate.preview", "tasks.inline.relocate.apply"],
 };
@@ -476,7 +511,11 @@ function requestId(): string {
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = globalThis.setTimeout(() => {
-      reject(new Error(`Operon Developer API apply exceeded the ${timeoutMs}ms Bridge budget.`));
+      reject(
+        new Error(
+          `Operon Developer API apply exceeded the ${timeoutMs}ms Bridge budget.`,
+        ),
+      );
     }, timeoutMs);
     promise.then(
       (value) => {
@@ -493,7 +532,8 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 
 function stringValue(value: unknown): string | undefined {
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   return undefined;
 }
 
@@ -518,7 +558,12 @@ function listValue(values: readonly string[] | undefined): string {
 }
 
 function developerErrorMessage(error: DeveloperApiError | undefined): string {
-  return error?.reason ?? error?.message ?? error?.code ?? "Operon Developer API unavailable.";
+  return (
+    error?.reason ??
+    error?.message ??
+    error?.code ??
+    "Operon Developer API unavailable."
+  );
 }
 
 function emptyConfiguration(): OperonSemanticConfiguration {
@@ -552,7 +597,11 @@ function emptyConfiguration(): OperonSemanticConfiguration {
       fileRepeatDestination: "",
       fileRepeatCustomFolder: "",
     },
-    indexing: { excludedFolders: [], fullReindexOnStartup: false, indexEventDebounceMs: 0 },
+    indexing: {
+      excludedFolders: [],
+      fullReindexOnStartup: false,
+      indexEventDebounceMs: 0,
+    },
     docs: { folder: "", autoUpdateEnabled: false },
     views: { filters: [] },
   };
@@ -562,13 +611,18 @@ function toRuntimeTask(task: DeveloperApiTask): RuntimeIndexedTask {
   const fieldValues: Record<string, string> = {};
   const writeField = (key: string, value: unknown): void => {
     const normalized = fieldValue(value);
-    if (normalized !== undefined && normalized !== "") fieldValues[key] = normalized;
+    if (normalized !== undefined && normalized !== "")
+      fieldValues[key] = normalized;
   };
 
   if (task.workflow) {
-    writeField("status", `${task.workflow.pipeline.label}.${task.workflow.status.label}`);
+    writeField(
+      "status",
+      `${task.workflow.pipeline.label}.${task.workflow.status.label}`,
+    );
   }
-  if (task.priority) writeField("priority", task.priority.id || task.priority.label);
+  if (task.priority)
+    writeField("priority", task.priority.id || task.priority.label);
   writeField("dateDue", task.dates?.due);
   writeField("dateScheduled", task.dates?.scheduled);
   writeField("dateStarted", task.dates?.started);
@@ -585,16 +639,19 @@ function toRuntimeTask(task: DeveloperApiTask): RuntimeIndexedTask {
   writeField("blockedBy", relationships?.blockedByOperonIds);
   writeField("related", relationships?.relatedOperonIds);
 
-  for (const [key, value] of Object.entries(task.customFields ?? {})) writeField(key, value);
+  for (const [key, value] of Object.entries(task.customFields ?? {}))
+    writeField(key, value);
   for (const field of task.writableFields ?? []) {
     if (field.present) writeField(field.canonicalKey, field.value);
   }
 
-  const tagsValue = task.writableFields?.find((field) => field.canonicalKey === "tags")?.value
-    ?? task.customFields?.tags;
+  const tagsValue =
+    task.writableFields?.find((field) => field.canonicalKey === "tags")
+      ?.value ?? task.customFields?.tags;
   const tags = Array.isArray(tagsValue) ? tagsValue.map(String) : [];
   const locator = task.locator;
-  const isInline = task.representation === "inline" && locator.representation === "inline";
+  const isInline =
+    task.representation === "inline" && locator.representation === "inline";
 
   return {
     operonId: task.identity.operonId,
@@ -604,11 +661,23 @@ function toRuntimeTask(task: DeveloperApiTask): RuntimeIndexedTask {
     tags,
     primary: {
       filePath: locator.filePath,
-      lineNumber: isInline && Number.isInteger(locator.lineNumber) ? locator.lineNumber ?? 0 : 0,
+      lineNumber:
+        isInline && Number.isInteger(locator.lineNumber)
+          ? (locator.lineNumber ?? 0)
+          : 0,
       format: isInline ? "inline" : "yaml",
     },
     datetimeModified: task.datetimes?.modified ?? "",
     tier: "warm",
+    ...(task.recurrence
+      ? {
+          recurrence: {
+            repeating: task.recurrence.repeating,
+            seriesId: task.recurrence.seriesId ?? null,
+            occurrenceDate: task.recurrence.occurrenceDate ?? null,
+          },
+        }
+      : {}),
   };
 }
 
@@ -619,47 +688,57 @@ function catalogConfiguration(catalog: DeveloperApiCatalog): {
   configuration: OperonSemanticConfiguration;
 } {
   const taxonomy = catalog.taxonomy ?? {};
-  const pipelines: RuntimePipeline[] = (taxonomy.pipelines ?? []).map((pipeline) => ({
-    id: pipeline.id,
-    name: pipeline.name,
-    description: pipeline.description,
-    statuses: (pipeline.statuses ?? []).map((status) => ({
-      id: status.id,
-      label: status.label,
-      isFinished: status.isFinished,
-      isCancelled: status.isCancelled,
-      isScheduledTarget: status.isScheduledTarget,
-      isTrackingTarget: status.isTrackingTarget,
-    })),
-  }));
-  const keyMappings: RuntimeKeyMapping[] = (catalog.fields ?? []).map((field) => ({
-    canonicalKey: field.canonicalKey,
-    visiblePropertyName: field.displayName,
-    type: field.valueType,
-    enabled: field.readable,
-    isSystem: field.source === "built-in",
-    isInternal: field.mappingStatus === "reserved",
-    source: field.source === "custom" ? "custom" : "built-in",
-    mappingStatus:
-      field.mappingStatus === "unmapped" ||
-      field.mappingStatus === "collision" ||
-      field.mappingStatus === "reserved"
-        ? field.mappingStatus
-        : "mapped",
-    mutationClass: field.mutationClass,
-    mutationOwner: field.mutationOwner,
-  }));
-  const priorities: RuntimePriorityDefinition[] = (taxonomy.priorities ?? []).map((priority) => ({
+  const pipelines: RuntimePipeline[] = (taxonomy.pipelines ?? []).map(
+    (pipeline) => ({
+      id: pipeline.id,
+      name: pipeline.name,
+      description: pipeline.description,
+      statuses: (pipeline.statuses ?? []).map((status) => ({
+        id: status.id,
+        label: status.label,
+        isFinished: status.isFinished,
+        isCancelled: status.isCancelled,
+        isScheduledTarget: status.isScheduledTarget,
+        isTrackingTarget: status.isTrackingTarget,
+      })),
+    }),
+  );
+  const keyMappings: RuntimeKeyMapping[] = (catalog.fields ?? []).map(
+    (field) => ({
+      canonicalKey: field.canonicalKey,
+      visiblePropertyName: field.displayName,
+      type: field.valueType,
+      enabled: field.readable,
+      isSystem: field.source === "built-in",
+      isInternal: field.mappingStatus === "reserved",
+      source: field.source === "custom" ? "custom" : "built-in",
+      mappingStatus:
+        field.mappingStatus === "unmapped" ||
+        field.mappingStatus === "collision" ||
+        field.mappingStatus === "reserved"
+          ? field.mappingStatus
+          : "mapped",
+      mutationClass: field.mutationClass,
+      mutationOwner: field.mutationOwner,
+    }),
+  );
+  const priorities: RuntimePriorityDefinition[] = (
+    taxonomy.priorities ?? []
+  ).map((priority) => ({
     id: priority.id,
     label: priority.label,
     color: priority.color,
     description: priority.description,
   }));
   const defaultPipeline = taxonomy.defaultPipeline;
-  const defaultPipelineName = pipelines.find((pipeline) => pipeline.id === defaultPipeline?.id)?.name
-    ?? defaultPipeline?.configuredValue
-    ?? null;
-  const defaultPriority = taxonomy.defaultPriority?.id ?? taxonomy.defaultPriority?.configuredValue ?? null;
+  const defaultPipelineName =
+    pipelines.find((pipeline) => pipeline.id === defaultPipeline?.id)?.name ??
+    defaultPipeline?.configuredValue ??
+    null;
+  const defaultPriority =
+    taxonomy.defaultPriority?.id ??
+    taxonomy.defaultPriority?.configuredValue ??
+    null;
   const creation = catalog.policies?.creation;
   const automation = catalog.policies?.automation;
   const configuration = emptyConfiguration();
@@ -707,11 +786,14 @@ function catalogConfiguration(catalog: DeveloperApiCatalog): {
     inlineTaskTargetFile: creation?.inlineTaskTargetFile ?? "",
     inlineTaskHeading: creation?.inlineTaskHeading ?? "",
     inlineTaskDailyNoteAddStartDate: creation?.dailyNoteAddsStartDate === true,
-    inlineTaskDailyNoteAddScheduledDate: creation?.dailyNoteAddsScheduledDate === true,
+    inlineTaskDailyNoteAddScheduledDate:
+      creation?.dailyNoteAddsScheduledDate === true,
     taskCreatorDefaultToFileTask: creation?.defaultToFileTask === true,
     taskCreatorDefaultFileTemplateId: creation?.defaultFileTemplateId ?? null,
     fileTaskTemplateFolder: creation?.fileTaskTemplateFolder ?? "",
-    availableFileTaskTemplates: (creation?.fileTaskTemplateCandidates ?? []).map((template) => ({
+    availableFileTaskTemplates: (
+      creation?.fileTaskTemplateCandidates ?? []
+    ).map((template) => ({
       id: template.id,
       name: template.name,
       path: template.sourcePath ?? null,
@@ -722,12 +804,14 @@ function catalogConfiguration(catalog: DeveloperApiCatalog): {
   };
   configuration.automation = {
     ...configuration.automation,
-    autoCompleteParentWhenAllChildrenTerminal: automation?.autoCompleteParentWhenAllChildrenTerminal === true,
+    autoCompleteParentWhenAllChildrenTerminal:
+      automation?.autoCompleteParentWhenAllChildrenTerminal === true,
     cascadeCancelToDescendants: automation?.cascadeCancelToDescendants === true,
     fileTaskAutoArchiveEnabled: automation?.fileTaskAutoArchiveEnabled === true,
     fileTaskArchiveFolder: automation?.fileTaskArchiveFolder ?? "",
     fileTaskArchiveDelaySeconds: automation?.fileTaskArchiveDelaySeconds ?? 0,
-    fileTaskArchiveOnlyFromFileTasksFolder: automation?.fileTaskArchiveOnlyFromFileTasksFolder === true,
+    fileTaskArchiveOnlyFromFileTasksFolder:
+      automation?.fileTaskArchiveOnlyFromFileTasksFolder === true,
     fileRepeatDestination: automation?.fileRepeatDestination ?? "",
     fileRepeatCustomFolder: automation?.fileRepeatCustomFolder ?? "",
   };
@@ -757,7 +841,8 @@ function grantedCapabilitiesFromStatus(
 export class OperonDeveloperApiRuntimeAdapter {
   readonly indexer: DeveloperApiRuntimeIndexer = {
     getAllTasks: () => this.tasks,
-    getTask: (operonId: string) => this.tasks.find((task) => task.operonId === operonId),
+    getTask: (operonId: string) =>
+      this.tasks.find((task) => task.operonId === operonId),
     getGeneration: () => this.generation,
     getIndexV8Diagnostics: async () => this.getDiagnostics(),
     taskCount: 0,
@@ -782,8 +867,14 @@ export class OperonDeveloperApiRuntimeAdapter {
   private configuration: OperonSemanticConfiguration = emptyConfiguration();
   private channelStatus: DeveloperApiChannelStatus = {};
   private readApi: DeveloperApiV1 | null = null;
-  private readonly optionalReadApis = new Map<DeveloperApiReadCapability, DeveloperApiV1>();
-  private readonly mutationApis = new Map<DeveloperApiMutationCapability, DeveloperApiV1>();
+  private readonly optionalReadApis = new Map<
+    DeveloperApiReadCapability,
+    DeveloperApiV1
+  >();
+  private readonly mutationApis = new Map<
+    DeveloperApiMutationCapability,
+    DeveloperApiV1
+  >();
   private recoveryApi: DeveloperApiV1 | null = null;
   private grantedCapabilities: ReadonlySet<string> | null = null;
   private refreshInFlight: Promise<boolean> | null = null;
@@ -805,13 +896,17 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   async refresh(includeMutationCapabilities = false): Promise<boolean> {
     if (this.refreshInFlight) return this.refreshInFlight;
-    this.refreshInFlight = this.refreshInternal(includeMutationCapabilities).finally(() => {
+    this.refreshInFlight = this.refreshInternal(
+      includeMutationCapabilities,
+    ).finally(() => {
       this.refreshInFlight = null;
     });
     return this.refreshInFlight;
   }
 
-  private async refreshInternal(includeMutationCapabilities: boolean): Promise<boolean> {
+  private async refreshInternal(
+    includeMutationCapabilities: boolean,
+  ): Promise<boolean> {
     this.readApi = null;
     this.optionalReadApis.clear();
     this.mutationApis.clear();
@@ -832,15 +927,24 @@ export class OperonDeveloperApiRuntimeAdapter {
     // one capability is still pending, so the probes preserve a usable
     // partial grant and let us fail closed only when the index itself cannot
     // be read completely.
-    const coreProbeEntries = CORE_READ_CAPABILITIES
-      .filter((capability) => !BASELINE_CAPABILITIES.includes(capability as (typeof BASELINE_CAPABILITIES)[number]))
-      .map((capability) => [
-        capability,
-        this.connectApproved([...BASELINE_CAPABILITIES, capability], false),
-      ] as const);
-    if (coreProbeEntries.some(([capability, candidate]) => (
-      !candidate || !candidate.hasCapability(capability)
-    ))) {
+    const coreProbeEntries = CORE_READ_CAPABILITIES.filter(
+      (capability) =>
+        !BASELINE_CAPABILITIES.includes(
+          capability as (typeof BASELINE_CAPABILITIES)[number],
+        ),
+    ).map(
+      (capability) =>
+        [
+          capability,
+          this.connectApproved([...BASELINE_CAPABILITIES, capability], false),
+        ] as const,
+    );
+    if (
+      coreProbeEntries.some(
+        ([capability, candidate]) =>
+          !candidate || !candidate.hasCapability(capability),
+      )
+    ) {
       this.readApi = null;
       this.setUnavailableDiagnostics();
       return false;
@@ -854,7 +958,9 @@ export class OperonDeveloperApiRuntimeAdapter {
     try {
       const health = await api.system.health();
       if (!health.ok) {
-        this.channelStatus = health.error ? { error: health.error } : this.channelStatus;
+        this.channelStatus = health.error
+          ? { error: health.error }
+          : this.channelStatus;
         this.setUnavailableDiagnostics();
         return false;
       }
@@ -870,14 +976,20 @@ export class OperonDeveloperApiRuntimeAdapter {
       this.tasks = tasks.tasks;
       this.rawTasks = tasks.rawTasks;
       this.indexer.taskCount = this.tasks.length;
-      this.generation = tasks.generation
-        ?? health.contextRevision?.index?.ramGeneration
-        ?? this.generation + 1;
+      this.generation =
+        tasks.generation ??
+        health.contextRevision?.index?.ramGeneration ??
+        this.generation + 1;
       this.pipelines.splice(0, this.pipelines.length, ...snapshot.pipelines);
-      this.keyMappings.splice(0, this.keyMappings.length, ...snapshot.keyMappings);
+      this.keyMappings.splice(
+        0,
+        this.keyMappings.length,
+        ...snapshot.keyMappings,
+      );
       this.priorities.splice(0, this.priorities.length, ...snapshot.priorities);
       this.configuration = snapshot.configuration;
-      this.defaultPipelineName = snapshot.configuration.workflow.defaultPipelineName;
+      this.defaultPipelineName =
+        snapshot.configuration.workflow.defaultPipelineName;
       this.diagnostics = {
         health: "healthy",
         runtimePhase: "idle",
@@ -894,10 +1006,12 @@ export class OperonDeveloperApiRuntimeAdapter {
         );
         if (optionalApi?.hasCapability(capability)) {
           this.optionalReadApis.set(capability, optionalApi);
-          if (!this.recoveryApi && optionalApi.mutations) this.recoveryApi = optionalApi;
+          if (!this.recoveryApi && optionalApi.mutations)
+            this.recoveryApi = optionalApi;
         }
       }
       if (includeMutationCapabilities) this.connectMutationApis();
+      this.requestMissingCapabilities(includeMutationCapabilities);
       return true;
     } catch (error) {
       this.readApi = null;
@@ -910,7 +1024,9 @@ export class OperonDeveloperApiRuntimeAdapter {
       };
       this.channelStatus = {
         ...this.channelStatus,
-        error: { reason: error instanceof Error ? error.message : String(error) },
+        error: {
+          reason: error instanceof Error ? error.message : String(error),
+        },
       };
       return false;
     }
@@ -925,17 +1041,21 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   hasReadCapability(capability: DeveloperApiReadCapability): boolean {
     return Boolean(
-      this.readApi?.hasCapability(capability)
-      || this.optionalReadApis.get(capability)?.hasCapability(capability),
+      this.readApi?.hasCapability(capability) ||
+        this.optionalReadApis.get(capability)?.hasCapability(capability),
     );
   }
 
-  private requireReadApi(capability: DeveloperApiReadCapability): DeveloperApiV1 {
+  private requireReadApi(
+    capability: DeveloperApiReadCapability,
+  ): DeveloperApiV1 {
     const api = this.readApi?.hasCapability(capability)
       ? this.readApi
       : this.optionalReadApis.get(capability);
     if (!api || !api.hasCapability(capability)) {
-      throw new Error(`Operon Developer API V1 read grant is unavailable: ${capability}.`);
+      throw new Error(
+        `Operon Developer API V1 read grant is unavailable: ${capability}.`,
+      );
     }
     return api;
   }
@@ -944,7 +1064,9 @@ export class OperonDeveloperApiRuntimeAdapter {
     return this.requireReadApi("system.diagnostics").system.diagnostics();
   }
 
-  async findTasks(request: Record<string, unknown>): Promise<DeveloperApiReadResult> {
+  async findTasks(
+    request: Record<string, unknown>,
+  ): Promise<DeveloperApiReadResult> {
     const api = this.requireReadApi("tasks.finder");
     if (!api.tasks.find) throw new Error("Operon tasks.finder is unavailable.");
     return api.tasks.find({
@@ -956,9 +1078,12 @@ export class OperonDeveloperApiRuntimeAdapter {
     });
   }
 
-  async resolveEntity(request: Record<string, unknown>): Promise<DeveloperApiReadResult> {
+  async resolveEntity(
+    request: Record<string, unknown>,
+  ): Promise<DeveloperApiReadResult> {
     const api = this.requireReadApi("entities.resolve");
-    if (!api.entities?.resolve) throw new Error("Operon entities.resolve is unavailable.");
+    if (!api.entities?.resolve)
+      throw new Error("Operon entities.resolve is unavailable.");
     return api.entities.resolve({
       contractVersion: 1,
       requestId: requestId(),
@@ -968,9 +1093,12 @@ export class OperonDeveloperApiRuntimeAdapter {
     });
   }
 
-  async readRelationships(request: Record<string, unknown>): Promise<DeveloperApiReadResult> {
+  async readRelationships(
+    request: Record<string, unknown>,
+  ): Promise<DeveloperApiReadResult> {
     const api = this.requireReadApi("relationships.read");
-    if (!api.relationships?.get) throw new Error("Operon relationships.read is unavailable.");
+    if (!api.relationships?.get)
+      throw new Error("Operon relationships.read is unavailable.");
     return api.relationships.get({
       contractVersion: 1,
       requestId: requestId(),
@@ -980,9 +1108,12 @@ export class OperonDeveloperApiRuntimeAdapter {
     });
   }
 
-  async buildContext(request: Record<string, unknown>): Promise<DeveloperApiPlacementResult> {
+  async buildContext(
+    request: Record<string, unknown>,
+  ): Promise<DeveloperApiPlacementResult> {
     const api = this.requireReadApi("context.build");
-    if (!api.context?.build) throw new Error("Operon context.build is unavailable.");
+    if (!api.context?.build)
+      throw new Error("Operon context.build is unavailable.");
     return api.context.build({
       contractVersion: 1,
       requestId: requestId(),
@@ -994,7 +1125,8 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   async readTimers(): Promise<DeveloperApiReadResult> {
     const api = this.requireReadApi("timers.read");
-    if (!api.timers?.read) throw new Error("Operon timers.read is unavailable.");
+    if (!api.timers?.read)
+      throw new Error("Operon timers.read is unavailable.");
     return api.timers.read({
       contractVersion: 1,
       requestId: requestId(),
@@ -1003,11 +1135,23 @@ export class OperonDeveloperApiRuntimeAdapter {
     });
   }
 
+  async recurrenceState(
+    operonId: string,
+  ): Promise<DeveloperApiRecurrenceState | null> {
+    const api = this.mutationApis.get("recurrence");
+    if (!api) return null;
+    const task = await this.getExactTask(api, operonId);
+    if (!task) return null;
+    return {
+      repeating: task.recurrence?.repeating === true,
+      seriesId: task.recurrence?.seriesId ?? null,
+      occurrenceDate: task.recurrence?.occurrenceDate ?? null,
+    };
+  }
+
   hasRecoverySupport(): boolean {
     const mutations = this.recoveryApi?.mutations;
-    return Boolean(
-      mutations?.recover && mutations.pendingRecoveries,
-    );
+    return Boolean(mutations?.recover && mutations.pendingRecoveries);
   }
 
   private connectApproved(
@@ -1015,11 +1159,13 @@ export class OperonDeveloperApiRuntimeAdapter {
     updateStatus = true,
   ): DeveloperApiV1 | null {
     if (
-      this.grantedCapabilities
-      && requestedCapabilities.some((capability) => (
-        !BASELINE_CAPABILITIES.includes(capability as (typeof BASELINE_CAPABILITIES)[number])
-        && !this.grantedCapabilities?.has(capability)
-      ))
+      this.grantedCapabilities &&
+      requestedCapabilities.some(
+        (capability) =>
+          !BASELINE_CAPABILITIES.includes(
+            capability as (typeof BASELINE_CAPABILITIES)[number],
+          ) && !this.grantedCapabilities?.has(capability),
+      )
     ) {
       return null;
     }
@@ -1036,12 +1182,29 @@ export class OperonDeveloperApiRuntimeAdapter {
         false,
       );
       if (
-        api?.mutations?.preview
-        && pair.every((required) => api.hasCapability(required))
+        api?.mutations?.preview &&
+        pair.every((required) => api.hasCapability(required))
       ) {
         this.mutationApis.set(capability, api);
         if (!this.recoveryApi) this.recoveryApi = api;
       }
+    }
+  }
+
+  private requestMissingCapabilities(includeMutations: boolean): void {
+    if (!this.grantedCapabilities) return;
+    const desired = [
+      ...OPTIONAL_READ_CAPABILITIES,
+      ...(includeMutations ? Object.values(MUTATION_CAPABILITIES).flat() : []),
+    ];
+    const missing = [...new Set(desired)].filter(
+      (capability) => !this.grantedCapabilities?.has(capability),
+    );
+    if (missing.length > 0) {
+      // Establish approved sessions first, then leave one exact expansion
+      // request pending for operator review. A later successful probe must
+      // not erase that request.
+      this.connect([...BASELINE_CAPABILITIES, ...missing], false);
     }
   }
 
@@ -1061,6 +1224,13 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (!access.ok || !access.api) {
       return null;
     }
+    // Keep the channel status aligned with the strongest successful session.
+    // Mutation probes intentionally avoid replacing useful read status when a
+    // capability is unavailable, but a granted write session must be visible
+    // to diagnostics instead of leaving the baseline reads-only admission.
+    if (!updateStatus && access.status.admission?.writes === true) {
+      this.channelStatus = access.status;
+    }
     return access.api;
   }
 
@@ -1074,7 +1244,11 @@ export class OperonDeveloperApiRuntimeAdapter {
     let cursor: string | undefined;
     let generation: number | null = null;
     const seenCursors = new Set<string>();
-    for (let pageNumber = 0; pageNumber < MAX_TASK_QUERY_PAGES; pageNumber += 1) {
+    for (
+      let pageNumber = 0;
+      pageNumber < MAX_TASK_QUERY_PAGES;
+      pageNumber += 1
+    ) {
       const result = await api.tasks.query({
         contractVersion: 1,
         requestId: requestId(),
@@ -1090,13 +1264,16 @@ export class OperonDeveloperApiRuntimeAdapter {
           ? await this.getExactTask(api, task.identity.operonId)
           : task;
         if (!hydrated) {
-          throw new Error(`Task disappeared during the live read: ${task.identity.operonId}.`);
+          throw new Error(
+            `Task disappeared during the live read: ${task.identity.operonId}.`,
+          );
         }
         rawTasks.push(hydrated);
         tasks.push(toRuntimeTask(hydrated));
       }
       const candidateGeneration = result.contextRevision?.index?.ramGeneration;
-      if (Number.isInteger(candidateGeneration)) generation = candidateGeneration ?? null;
+      if (Number.isInteger(candidateGeneration))
+        generation = candidateGeneration ?? null;
       const nextCursor = result.page?.nextCursor;
       if (!nextCursor) {
         if (result.page?.truncated === true) {
@@ -1107,7 +1284,9 @@ export class OperonDeveloperApiRuntimeAdapter {
         break;
       }
       if (nextCursor === cursor || seenCursors.has(nextCursor)) {
-        throw new Error("Operon task query returned a repeated pagination cursor.");
+        throw new Error(
+          "Operon task query returned a repeated pagination cursor.",
+        );
       }
       seenCursors.add(nextCursor);
       cursor = nextCursor;
@@ -1128,7 +1307,12 @@ export class OperonDeveloperApiRuntimeAdapter {
   ): Promise<DeveloperApiMutationResult> {
     const api = this.mutationApis.get(capability);
     const mutations = api?.mutations;
-    if (!api || !mutations?.preview || !mutations.apply || !this.hasMutationCapability(capability)) {
+    if (
+      !api ||
+      !mutations?.preview ||
+      !mutations.apply ||
+      !this.hasMutationCapability(capability)
+    ) {
       return this.mutationFailure(
         "not-ready",
         `Operon Developer API V1 mutation grant is unavailable: ${capability}.`,
@@ -1140,7 +1324,12 @@ export class OperonDeveloperApiRuntimeAdapter {
     let task: DeveloperApiTask | null = null;
     if (capability !== "create") {
       if (!operonId) {
-        return this.mutationFailure("invalid-input", "An operonId is required for this mutation.", null, false);
+        return this.mutationFailure(
+          "invalid-input",
+          "An operonId is required for this mutation.",
+          null,
+          false,
+        );
       }
       try {
         task = await this.getExactTask(api, operonId);
@@ -1152,7 +1341,13 @@ export class OperonDeveloperApiRuntimeAdapter {
           false,
         );
       }
-      if (!task) return this.mutationFailure("not-found", `Operon task not found: ${operonId}.`, operonId, false);
+      if (!task)
+        return this.mutationFailure(
+          "not-found",
+          `Operon task not found: ${operonId}.`,
+          operonId,
+          false,
+        );
     }
 
     let mapped: {
@@ -1238,12 +1433,14 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (status === "partial" || status === "outcome-unknown") {
       return this.mutationFailure(
         "outcome-unknown",
-        developerErrorMessage(execution.error) || "Operon requires recovery of the same mutation plan.",
+        developerErrorMessage(execution.error) ||
+          "Operon requires recovery of the same mutation plan.",
         operonId,
         false,
         {
           nativeStatus: status,
-          recoveryRef: execution.recovery?.recoveryRef ?? preview.plan.recoveryRef,
+          recoveryRef:
+            execution.recovery?.recoveryRef ?? preview.plan.recoveryRef,
           planDigest: execution.recovery?.planDigest ?? preview.plan.planDigest,
           mutationMayHaveApplied: true,
         },
@@ -1252,7 +1449,8 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (status === "failed") {
       return this.mutationFailure(
         this.mapNativeErrorCode(execution.error),
-        developerErrorMessage(execution.error) || "Operon rejected the mutation.",
+        developerErrorMessage(execution.error) ||
+          "Operon rejected the mutation.",
         operonId,
         false,
         { nativeStatus: status },
@@ -1306,7 +1504,8 @@ export class OperonDeveloperApiRuntimeAdapter {
       return {
         ok: false,
         recoveries: [],
-        message: "Operon Developer API V1 pending-recovery support is unavailable.",
+        message:
+          "Operon Developer API V1 pending-recovery support is unavailable.",
       };
     }
     try {
@@ -1325,7 +1524,9 @@ export class OperonDeveloperApiRuntimeAdapter {
     }
   }
 
-  async recoverMutation(recoveryRef: string): Promise<DeveloperApiMutationResult> {
+  async recoverMutation(
+    recoveryRef: string,
+  ): Promise<DeveloperApiMutationResult> {
     const api = this.recoveryApi;
     const recover = api?.mutations?.recover;
     if (!api || !recover) {
@@ -1365,9 +1566,9 @@ export class OperonDeveloperApiRuntimeAdapter {
         operonId: null,
         code: status,
         nativeStatus: status,
-        planDigest: execution.receipt?.planDigest ?? execution.recovery?.planDigest,
-        recoveryRef:
-          execution.recovery?.recoveryRef ?? normalizedRecoveryRef,
+        planDigest:
+          execution.receipt?.planDigest ?? execution.recovery?.planDigest,
+        recoveryRef: execution.recovery?.recoveryRef ?? normalizedRecoveryRef,
         retryable: false,
         mutationMayHaveApplied: execution.mutationMayHaveApplied ?? true,
       };
@@ -1375,13 +1576,13 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (status === "partial" || status === "outcome-unknown") {
       return this.mutationFailure(
         "outcome-unknown",
-        developerErrorMessage(execution.error) || "Operon still requires recovery of the same mutation plan.",
+        developerErrorMessage(execution.error) ||
+          "Operon still requires recovery of the same mutation plan.",
         null,
         false,
         {
           nativeStatus: status,
-          recoveryRef:
-            execution.recovery?.recoveryRef ?? normalizedRecoveryRef,
+          recoveryRef: execution.recovery?.recoveryRef ?? normalizedRecoveryRef,
           planDigest: execution.recovery?.planDigest,
           mutationMayHaveApplied: true,
         },
@@ -1413,18 +1614,34 @@ export class OperonDeveloperApiRuntimeAdapter {
     };
   }
 
-  private mapNativeErrorCode(error: DeveloperApiError | undefined): DeveloperApiMutationResult["code"] {
+  private mapNativeErrorCode(
+    error: DeveloperApiError | undefined,
+  ): DeveloperApiMutationResult["code"] {
     const code = String(error?.code ?? "").toLocaleLowerCase();
-    if (code.includes("conflict") || code.includes("revision")) return "conflict";
-    if (code.includes("not-found") || code.includes("missing")) return "not-found";
-    if (code.includes("invalid") || code.includes("validation")) return "invalid-input";
-    if (code.includes("authority") || code.includes("grant") || code.includes("capability")) return "not-ready";
+    if (code.includes("conflict") || code.includes("revision"))
+      return "conflict";
+    if (code.includes("not-found") || code.includes("missing"))
+      return "not-found";
+    if (code.includes("invalid") || code.includes("validation"))
+      return "invalid-input";
+    if (
+      code.includes("authority") ||
+      code.includes("grant") ||
+      code.includes("capability")
+    )
+      return "not-ready";
     return "rejected";
   }
 
-  private async getExactTask(api: DeveloperApiV1, operonId: string): Promise<DeveloperApiTask | null> {
+  private async getExactTask(
+    api: DeveloperApiV1,
+    operonId: string,
+  ): Promise<DeveloperApiTask | null> {
     if (!api.tasks.get) {
-      return this.rawTasks.find((task) => task.identity.operonId === operonId) ?? null;
+      return (
+        this.rawTasks.find((task) => task.identity.operonId === operonId) ??
+        null
+      );
     }
     const result = await api.tasks.get({
       contractVersion: 1,
@@ -1432,7 +1649,13 @@ export class OperonDeveloperApiRuntimeAdapter {
       kind: "task-get",
       consistency: "live-verified",
       selector: { kind: "operon-id", operonId },
-      include: ["notes", "links", "custom-fields", "source-markdown", "writable-fields"],
+      include: [
+        "notes",
+        "links",
+        "custom-fields",
+        "source-markdown",
+        "writable-fields",
+      ],
     });
     if (!result.ok) {
       if (this.mapNativeErrorCode(result.error) === "not-found") return null;
@@ -1442,7 +1665,10 @@ export class OperonDeveloperApiRuntimeAdapter {
   }
 
   private exactTarget(task: DeveloperApiTask): Record<string, unknown> {
-    if (task.representation === "inline" && task.locator.representation === "inline") {
+    if (
+      task.representation === "inline" &&
+      task.locator.representation === "inline"
+    ) {
       if (!Number.isInteger(task.locator.lineNumber)) {
         throw new Error("The live task has no exact inline line locator.");
       }
@@ -1463,54 +1689,86 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   private canonicalField(field: string): string {
     const mapping = this.keyMappings.find(
-      (candidate) => candidate.canonicalKey === field || candidate.visiblePropertyName === field,
+      (candidate) =>
+        candidate.canonicalKey === field ||
+        candidate.visiblePropertyName === field,
     );
     return mapping?.canonicalKey ?? field;
   }
 
   private fieldType(field: string): string | null {
     const canonical = this.canonicalField(field);
-    const mapping = this.keyMappings.find((candidate) => candidate.canonicalKey === canonical);
-    if (mapping?.mappingStatus && mapping.mappingStatus !== "mapped") return null;
-    if (mapping?.mutationClass && mapping.mutationClass !== "general-update") return null;
-    const candidate = String(mapping?.type ?? GENERAL_FIELD_TYPES[canonical] ?? "").toLocaleLowerCase();
-    return ["text", "date", "datetime", "number", "list", "checkbox"].includes(candidate)
+    const mapping = this.keyMappings.find(
+      (candidate) => candidate.canonicalKey === canonical,
+    );
+    if (mapping?.mappingStatus && mapping.mappingStatus !== "mapped")
+      return null;
+    if (mapping?.mutationClass && mapping.mutationClass !== "general-update")
+      return null;
+    const candidate = String(
+      mapping?.type ?? GENERAL_FIELD_TYPES[canonical] ?? "",
+    ).toLocaleLowerCase();
+    return ["text", "date", "datetime", "number", "list", "checkbox"].includes(
+      candidate,
+    )
       ? candidate
       : null;
   }
 
   private isCustomGeneralField(field: string): boolean {
     const canonical = this.canonicalField(field);
-    const mapping = this.keyMappings.find((candidate) => candidate.canonicalKey === canonical);
-    return mapping?.source === "custom"
-      && mapping.mappingStatus === "mapped"
-      && mapping.mutationClass === "general-update";
+    const mapping = this.keyMappings.find(
+      (candidate) => candidate.canonicalKey === canonical,
+    );
+    return (
+      mapping?.source === "custom" &&
+      mapping.mappingStatus === "mapped" &&
+      mapping.mutationClass === "general-update"
+    );
   }
 
   private updateValue(field: string, value: unknown): Record<string, unknown> {
     const canonical = this.canonicalField(field);
     const valueType = this.fieldType(canonical);
-    if (!valueType) throw new Error(`Managed field '${field}' is not writable through the official Developer API.`);
+    if (!valueType)
+      throw new Error(
+        `Managed field '${field}' is not writable through the official Developer API.`,
+      );
     if (value === null || value === undefined || value === "") {
       return { operation: "clear", field: canonical, valueType };
     }
     if (valueType === "number") {
       const parsed = Number(value);
-      if (!Number.isFinite(parsed)) throw new Error(`Field '${field}' requires a finite number.`);
+      if (!Number.isFinite(parsed))
+        throw new Error(`Field '${field}' requires a finite number.`);
       return { field: canonical, valueType, value: parsed };
     }
     if (valueType === "list") {
       const values = Array.isArray(value)
-        ? value.map(String).map((item) => item.trim()).filter(Boolean)
-        : String(value).split(/[;,]/u).map((item) => item.trim()).filter(Boolean);
+        ? value
+            .map(String)
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : String(value)
+            .split(/[;,]/u)
+            .map((item) => item.trim())
+            .filter(Boolean);
       return { field: canonical, valueType, value: values };
     }
     if (valueType === "checkbox") {
       const normalized = String(value).toLocaleLowerCase();
-      if (!["true", "false", "1", "0", "yes", "no", "on", "off"].includes(normalized)) {
+      if (
+        !["true", "false", "1", "0", "yes", "no", "on", "off"].includes(
+          normalized,
+        )
+      ) {
         throw new Error(`Field '${field}' requires a boolean value.`);
       }
-      return { field: canonical, valueType, value: ["true", "1", "yes", "on"].includes(normalized) };
+      return {
+        field: canonical,
+        valueType,
+        value: ["true", "1", "yes", "on"].includes(normalized),
+      };
     }
     return { field: canonical, valueType, value: String(value) };
   }
@@ -1529,7 +1787,7 @@ export class OperonDeveloperApiRuntimeAdapter {
         .map((status) => status.id),
     );
     const unique = [...new Set(matches.filter(Boolean))];
-    return unique.length === 1 ? unique[0] ?? null : null;
+    return unique.length === 1 ? (unique[0] ?? null) : null;
   }
 
   private resolvePriorityId(value: unknown): string | null {
@@ -1554,28 +1812,38 @@ export class OperonDeveloperApiRuntimeAdapter {
     const target = this.exactTarget(task);
     if (capability === "update") {
       if (requested.properties && typeof requested.properties === "object") {
-        throw new Error("Unmanaged properties are not exposed by Operon Developer API V1; no raw Markdown fallback is used.");
+        throw new Error(
+          "Unmanaged properties are not exposed by Operon Developer API V1; no raw Markdown fallback is used.",
+        );
       }
       const changes: Record<string, unknown>[] = [];
       if (Object.prototype.hasOwnProperty.call(requested, "description")) {
         changes.push(this.updateValue("description", requested.description));
       }
-      if (Array.isArray(requested.tags)) changes.push(this.updateValue("tags", requested.tags));
+      if (Array.isArray(requested.tags))
+        changes.push(this.updateValue("tags", requested.tags));
       const fields = requested.fields;
       if (fields && typeof fields === "object" && !Array.isArray(fields)) {
-        for (const [field, value] of Object.entries(fields as Record<string, unknown>)) {
-          if (field === "status") throw new Error("Use the transition route for status changes.");
+        for (const [field, value] of Object.entries(
+          fields as Record<string, unknown>,
+        )) {
+          if (field === "status")
+            throw new Error("Use the transition route for status changes.");
           const canonical = this.canonicalField(field);
           if (canonical === "priority") {
             const priorityId = this.resolvePriorityId(value);
-            if (!priorityId) throw new Error("fields.priority must resolve to one stable Operon priority id.");
+            if (!priorityId)
+              throw new Error(
+                "fields.priority must resolve to one stable Operon priority id.",
+              );
             changes.push(this.updateValue(canonical, priorityId));
           } else {
             changes.push(this.updateValue(canonical, value));
           }
         }
       }
-      if (changes.length === 0) throw new Error("The update contains no official writable field.");
+      if (changes.length === 0)
+        throw new Error("The update contains no official writable field.");
       return {
         capability: "tasks.update.preview",
         mutationKind: "task.update",
@@ -1584,8 +1852,13 @@ export class OperonDeveloperApiRuntimeAdapter {
       };
     }
     if (capability === "transition") {
-      const statusId = String(requested.statusId ?? "").trim() || this.resolveStatusId(requested.status);
-      if (!statusId) throw new Error("status or statusId must resolve to one stable Operon status id.");
+      const statusId =
+        String(requested.statusId ?? "").trim() ||
+        this.resolveStatusId(requested.status);
+      if (!statusId)
+        throw new Error(
+          "status or statusId must resolve to one stable Operon status id.",
+        );
       return {
         capability: "tasks.transition.preview",
         mutationKind: "task.transition",
@@ -1593,35 +1866,171 @@ export class OperonDeveloperApiRuntimeAdapter {
         spec: {
           operation: "transition",
           targetStatusId: statusId,
-          ...(task.workflow?.status.id ? { expectedStatusId: task.workflow.status.id } : {}),
+          ...(task.workflow?.status.id
+            ? { expectedStatusId: task.workflow.status.id }
+            : {}),
         },
+      };
+    }
+    if (capability === "relationships") {
+      const relationshipFields = [
+        "parentTask",
+        "blocking",
+        "blockedBy",
+      ] as const;
+      const changes: Record<string, unknown>[] = [];
+      const desired: Record<string, string[]> = {};
+      for (const field of relationshipFields) {
+        if (!Object.prototype.hasOwnProperty.call(requested, field)) continue;
+        const raw = requested[field];
+        if (field === "parentTask" && raw !== null && typeof raw !== "string") {
+          throw new Error(
+            "parentTask must be one canonical Operon id or null.",
+          );
+        }
+        if (field !== "parentTask" && !Array.isArray(raw)) {
+          throw new Error(`${field} must be an array of canonical Operon ids.`);
+        }
+        const targetOperonIds =
+          field === "parentTask"
+            ? raw === null
+              ? []
+              : [String(raw).trim()]
+            : Array.isArray(raw)
+              ? raw.map((value) => String(value).trim())
+              : [];
+        if (targetOperonIds.some((value) => !/^[a-z0-9]{7}$/u.test(value))) {
+          throw new Error(
+            `${field} must contain only canonical seven-character Operon ids.`,
+          );
+        }
+        if (new Set(targetOperonIds).size !== targetOperonIds.length) {
+          throw new Error(`${field} contains duplicate Operon ids.`);
+        }
+        if (targetOperonIds.includes(task.identity.operonId)) {
+          throw new Error("A task cannot reference itself.");
+        }
+        desired[field] = targetOperonIds;
+        changes.push({ field, targetOperonIds });
+      }
+      if (
+        (desired.blocking ?? []).some((id) =>
+          (desired.blockedBy ?? []).includes(id),
+        )
+      ) {
+        throw new Error("One target cannot be both blocking and blockedBy.");
+      }
+      if (changes.length === 0)
+        throw new Error(
+          "The relationship update contains no replacement field.",
+        );
+      return {
+        capability: "tasks.relationship.preview",
+        mutationKind: "task.relationship",
+        target,
+        spec: { operation: "replace-relationships", changes },
+      };
+    }
+    if (capability === "recurrence") {
+      const scope = requested.scope;
+      if (scope !== "this-task" && scope !== "this-and-following") {
+        throw new Error("scope must be this-task or this-and-following.");
+      }
+      const requestedChanges = requested.changes;
+      if (
+        !requestedChanges ||
+        typeof requestedChanges !== "object" ||
+        Array.isArray(requestedChanges)
+      ) {
+        throw new Error("changes must contain at least one recurrence field.");
+      }
+      const valueTypes: Record<
+        string,
+        "text" | "date" | "datetime" | "number"
+      > = {
+        repeat: "text",
+        datetimeRepeatEnd: "datetime",
+        dateScheduled: "date",
+        dateStarted: "date",
+        dateDue: "date",
+        datetimeStart: "datetime",
+        datetimeEnd: "datetime",
+        estimate: "number",
+      };
+      const changes = Object.entries(
+        requestedChanges as Record<string, unknown>,
+      ).map(([field, value]) => {
+        const valueType = valueTypes[field];
+        if (!valueType)
+          throw new Error(`Unsupported recurrence field: ${field}.`);
+        if (
+          value !== null &&
+          (valueType === "number"
+            ? typeof value !== "number" || !Number.isFinite(value) || value < 0
+            : typeof value !== "string" || value.trim().length === 0)
+        ) {
+          throw new Error(
+            `Invalid ${valueType} value for recurrence field '${field}'.`,
+          );
+        }
+        return value === null
+          ? { operation: "clear", field, valueType }
+          : { field, valueType, value };
+      });
+      if (changes.length === 0)
+        throw new Error("The recurrence update contains no change.");
+      return {
+        capability: "tasks.recurrence.preview",
+        mutationKind: "task.recurrence",
+        target,
+        spec: { operation: "update-recurrence", scope, changes },
       };
     }
     if (capability === "convert") {
       const targetRepresentation = requested.target;
-      if (targetRepresentation !== "inline" && targetRepresentation !== "file") {
+      if (
+        targetRepresentation !== "inline" &&
+        targetRepresentation !== "file"
+      ) {
         throw new Error("target must be either inline or file.");
       }
       if (requested.targetFolder) {
-        throw new Error("targetFolder is not supported by the official Developer API V1 conversion surface; use a configured target or an exact targetPath where supported.");
+        throw new Error(
+          "targetFolder is not supported by the official Developer API V1 conversion surface; use a configured target or an exact targetPath where supported.",
+        );
       }
       if (targetRepresentation === "file") {
-        if (task.representation !== "inline") throw new Error("The live task is not an inline task.");
+        if (task.representation !== "inline")
+          throw new Error("The live task is not an inline task.");
         const templateId = String(
-          requested.fileTemplateId ?? this.configuration.creation.taskCreatorDefaultFileTemplateId ?? "",
+          requested.fileTemplateId ??
+            this.configuration.creation.taskCreatorDefaultFileTemplateId ??
+            "",
         ).trim();
-        if (!templateId) throw new Error("fileTemplateId or an Operon default file template is required for inline-to-file conversion.");
+        if (!templateId)
+          throw new Error(
+            "fileTemplateId or an Operon default file template is required for inline-to-file conversion.",
+          );
         return {
           capability: "tasks.convert.preview",
           mutationKind: "task.convert",
           target,
           representation: "file",
-          spec: { operation: "convert", from: "inline", to: "file", templateId },
+          spec: {
+            operation: "convert",
+            from: "inline",
+            to: "file",
+            templateId,
+          },
         };
       }
-      if (task.representation !== "file") throw new Error("The live task is not a file task.");
+      if (task.representation !== "file")
+        throw new Error("The live task is not a file task.");
       const targetPath = String(requested.targetPath ?? "").trim();
-      if (!targetPath) throw new Error("targetPath is required for file-to-inline conversion.");
+      if (!targetPath)
+        throw new Error(
+          "targetPath is required for file-to-inline conversion.",
+        );
       return {
         capability: "tasks.convert.preview",
         mutationKind: "task.convert",
@@ -1636,12 +2045,20 @@ export class OperonDeveloperApiRuntimeAdapter {
         },
       };
     }
-    if (task.representation !== "inline" || task.locator.representation !== "inline") {
-      throw new Error("Only inline tasks can be relocated by the official Developer API V1.");
+    if (
+      task.representation !== "inline" ||
+      task.locator.representation !== "inline"
+    ) {
+      throw new Error(
+        "Only inline tasks can be relocated by the official Developer API V1.",
+      );
     }
     const targetPath = String(requested.targetPath ?? "").trim();
     if (!targetPath) throw new Error("targetPath is required for relocation.");
-    if (!api.context?.build) throw new Error("Operon context.build is unavailable; no destination line can be guessed safely.");
+    if (!api.context?.build)
+      throw new Error(
+        "Operon context.build is unavailable; no destination line can be guessed safely.",
+      );
     const context = await api.context.build({
       contractVersion: 1,
       requestId: requestId(),
@@ -1662,7 +2079,10 @@ export class OperonDeveloperApiRuntimeAdapter {
           )
         : undefined
       : undefined;
-    if (!candidate?.locator || !Number.isInteger(candidate.locator.lineNumber)) {
+    if (
+      !candidate?.locator ||
+      !Number.isInteger(candidate.locator.lineNumber)
+    ) {
       throw new Error(
         context.ok
           ? `No blank inline placement candidate is available in '${targetPath}'.`
@@ -1697,25 +2117,40 @@ export class OperonDeveloperApiRuntimeAdapter {
     representation?: "inline" | "file";
   } {
     const source = requested.source;
-    if (source !== "inline" && source !== "file") throw new Error("source must be either inline or file.");
+    if (source !== "inline" && source !== "file")
+      throw new Error("source must be either inline or file.");
     if (requested.properties && typeof requested.properties === "object") {
-      throw new Error("Unmanaged properties are not exposed by Operon Developer API V1; no raw Markdown fallback is used.");
+      throw new Error(
+        "Unmanaged properties are not exposed by Operon Developer API V1; no raw Markdown fallback is used.",
+      );
     }
     if (requested.targetFolder) {
-      throw new Error("targetFolder is not supported by the official Developer API V1 create surface; use an exact configured target instead.");
+      throw new Error(
+        "targetFolder is not supported by the official Developer API V1 create surface; use an exact configured target instead.",
+      );
     }
     const description = String(requested.description ?? "").trim();
     if (!description) throw new Error("description is required.");
-    const targetPath = typeof requested.targetPath === "string" ? requested.targetPath.trim() : "";
-    const target: Record<string, unknown> = source === "inline"
-      ? targetPath
-        ? { representation: "inline", mode: "exact-path", filePath: targetPath }
-        : { representation: "inline", mode: "configured-default" }
-      : {
-          representation: "file",
-          mode: "configured-default",
-          ...(requested.fileTemplateId ? { templateId: String(requested.fileTemplateId) } : {}),
-        };
+    const targetPath =
+      typeof requested.targetPath === "string"
+        ? requested.targetPath.trim()
+        : "";
+    const target: Record<string, unknown> =
+      source === "inline"
+        ? targetPath
+          ? {
+              representation: "inline",
+              mode: "exact-path",
+              filePath: targetPath,
+            }
+          : { representation: "inline", mode: "configured-default" }
+        : {
+            representation: "file",
+            mode: "configured-default",
+            ...(requested.fileTemplateId
+              ? { templateId: String(requested.fileTemplateId) }
+              : {}),
+          };
     const fields: Record<string, unknown>[] = [];
     const rawFields = requested.fields;
     let statusId = String(requested.statusId ?? "").trim() || null;
@@ -1723,17 +2158,29 @@ export class OperonDeveloperApiRuntimeAdapter {
     let parent: Record<string, unknown> | undefined;
     const related: Record<string, unknown>[] = [];
     const dependencies: Record<string, unknown>[] = [];
-    if (rawFields && typeof rawFields === "object" && !Array.isArray(rawFields)) {
-      for (const [field, value] of Object.entries(rawFields as Record<string, unknown>)) {
+    if (
+      rawFields &&
+      typeof rawFields === "object" &&
+      !Array.isArray(rawFields)
+    ) {
+      for (const [field, value] of Object.entries(
+        rawFields as Record<string, unknown>,
+      )) {
         if (field === "status") {
           const resolved = this.resolveStatusId(value);
-          if (!resolved) throw new Error("fields.status must resolve to one stable Operon status id.");
+          if (!resolved)
+            throw new Error(
+              "fields.status must resolve to one stable Operon status id.",
+            );
           statusId = resolved;
           continue;
         }
         if (field === "priority") {
           priorityId = this.resolvePriorityId(value);
-          if (!priorityId) throw new Error("fields.priority must resolve to one stable Operon priority id.");
+          if (!priorityId)
+            throw new Error(
+              "fields.priority must resolve to one stable Operon priority id.",
+            );
           continue;
         }
         if (field === "parentTask") {
@@ -1742,7 +2189,8 @@ export class OperonDeveloperApiRuntimeAdapter {
           continue;
         }
         if (field === "related") {
-          for (const relatedId of this.listInput(value)) related.push({ kind: "existing", operonId: relatedId });
+          for (const relatedId of this.listInput(value))
+            related.push({ kind: "existing", operonId: relatedId });
           continue;
         }
         if (field === "blockedBy" || field === "blocking") {
@@ -1755,16 +2203,37 @@ export class OperonDeveloperApiRuntimeAdapter {
           continue;
         }
         const canonical = this.canonicalField(field);
-        const valueType = CREATE_FIELD_TYPES[canonical] ?? this.fieldType(canonical);
-        if (!valueType) throw new Error(`Create field '${field}' is not supported by the official Developer API.`);
-        fields.push(this.createField(canonical, value, valueType, this.isCustomGeneralField(canonical)));
+        const valueType =
+          CREATE_FIELD_TYPES[canonical] ?? this.fieldType(canonical);
+        if (!valueType)
+          throw new Error(
+            `Create field '${field}' is not supported by the official Developer API.`,
+          );
+        fields.push(
+          this.createField(
+            canonical,
+            value,
+            valueType,
+            this.isCustomGeneralField(canonical),
+          ),
+        );
       }
     }
-    if (typeof requested.targetDateKey === "string" && requested.targetDateKey.trim()) {
-      fields.push({ kind: "date", field: "dateDue", value: requested.targetDateKey.trim() });
+    if (
+      typeof requested.targetDateKey === "string" &&
+      requested.targetDateKey.trim()
+    ) {
+      fields.push({
+        kind: "date",
+        field: "dateDue",
+        value: requested.targetDateKey.trim(),
+      });
     }
     if (Array.isArray(requested.tags)) {
-      const tags = requested.tags.map(String).map((tag) => tag.replace(/^#/u, "").trim()).filter(Boolean);
+      const tags = requested.tags
+        .map(String)
+        .map((tag) => tag.replace(/^#/u, "").trim())
+        .filter(Boolean);
       return {
         capability: "tasks.create.preview",
         mutationKind: "task.create",
@@ -1772,18 +2241,20 @@ export class OperonDeveloperApiRuntimeAdapter {
         targetPath,
         spec: {
           operation: "create",
-          items: [{
-            itemRef: `bridge-${requestId()}`,
-            description,
-            target,
-            fields,
-            tags,
-            ...(statusId ? { statusId } : {}),
-            ...(priorityId ? { priorityId } : {}),
-            ...(parent ? { parent } : {}),
-            ...(related.length ? { related } : {}),
-            ...(dependencies.length ? { dependencies } : {}),
-          }],
+          items: [
+            {
+              itemRef: `bridge-${requestId()}`,
+              description,
+              target,
+              fields,
+              tags,
+              ...(statusId ? { statusId } : {}),
+              ...(priorityId ? { priorityId } : {}),
+              ...(parent ? { parent } : {}),
+              ...(related.length ? { related } : {}),
+              ...(dependencies.length ? { dependencies } : {}),
+            },
+          ],
         },
       };
     }
@@ -1794,17 +2265,19 @@ export class OperonDeveloperApiRuntimeAdapter {
       targetPath,
       spec: {
         operation: "create",
-        items: [{
-          itemRef: `bridge-${requestId()}`,
-          description,
-          target,
-          fields,
-          ...(statusId ? { statusId } : {}),
-          ...(priorityId ? { priorityId } : {}),
-          ...(parent ? { parent } : {}),
-          ...(related.length ? { related } : {}),
-          ...(dependencies.length ? { dependencies } : {}),
-        }],
+        items: [
+          {
+            itemRef: `bridge-${requestId()}`,
+            description,
+            target,
+            fields,
+            ...(statusId ? { statusId } : {}),
+            ...(priorityId ? { priorityId } : {}),
+            ...(parent ? { parent } : {}),
+            ...(related.length ? { related } : {}),
+            ...(dependencies.length ? { dependencies } : {}),
+          },
+        ],
       },
     };
   }
@@ -1824,7 +2297,8 @@ export class OperonDeveloperApiRuntimeAdapter {
   ): Record<string, unknown> {
     if (valueType === "number") {
       const parsed = Number(value);
-      if (!Number.isFinite(parsed)) throw new Error(`Create field '${field}' requires a finite number.`);
+      if (!Number.isFinite(parsed))
+        throw new Error(`Create field '${field}' requires a finite number.`);
       return custom
         ? { kind: "custom", field, valueType, value: parsed }
         : { kind: "number", field, value: parsed };
@@ -1837,10 +2311,17 @@ export class OperonDeveloperApiRuntimeAdapter {
     }
     if (valueType === "checkbox") {
       const normalized = String(value).toLocaleLowerCase();
-      if (!["true", "false", "1", "0", "yes", "no", "on", "off"].includes(normalized)) {
+      if (
+        !["true", "false", "1", "0", "yes", "no", "on", "off"].includes(
+          normalized,
+        )
+      ) {
         throw new Error(`Create field '${field}' requires a boolean value.`);
       }
-      if (!custom) throw new Error(`Create field '${field}' has unsupported value type '${valueType}'.`);
+      if (!custom)
+        throw new Error(
+          `Create field '${field}' has unsupported value type '${valueType}'.`,
+        );
       return {
         kind: "custom",
         field,
@@ -1849,7 +2330,9 @@ export class OperonDeveloperApiRuntimeAdapter {
       };
     }
     if (!["text", "date", "datetime"].includes(valueType)) {
-      throw new Error(`Create field '${field}' has unsupported value type '${valueType}'.`);
+      throw new Error(
+        `Create field '${field}' has unsupported value type '${valueType}'.`,
+      );
     }
     return custom
       ? { kind: "custom", field, valueType, value: String(value) }
@@ -1866,9 +2349,18 @@ export class OperonDeveloperApiRuntimeAdapter {
     this.rawTasks = after.rawTasks;
     const description = String(requested.description ?? "").trim();
     const candidates = after.rawTasks.filter((task) => {
-      if (beforeIds.has(task.identity.operonId) || task.description !== description) return false;
-      if (mapped.representation && task.representation !== mapped.representation) return false;
-      if (mapped.targetPath && task.locator.filePath !== mapped.targetPath) return false;
+      if (
+        beforeIds.has(task.identity.operonId) ||
+        task.description !== description
+      )
+        return false;
+      if (
+        mapped.representation &&
+        task.representation !== mapped.representation
+      )
+        return false;
+      if (mapped.targetPath && task.locator.filePath !== mapped.targetPath)
+        return false;
       return true;
     });
     if (candidates.length !== 1) return null;

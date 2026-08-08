@@ -17,6 +17,8 @@ import {
   OperonTaskSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
+  OperonSetRelationshipsSchema,
+  OperonUpdateRecurrenceSchema,
   OperonVaultMarkdownPathSchema,
   OperonVaultRelativePathSchema,
   queryOperonSnapshot,
@@ -135,10 +137,8 @@ assert.equal(
   "st_project_finished",
 );
 assert.equal(
-  resolveOperonWorkflowStatus(
-    "Terminé",
-    configuration.configuration.workflow,
-  )?.value,
+  resolveOperonWorkflowStatus("Terminé", configuration.configuration.workflow)
+    ?.value,
   "Project.Terminé",
   "MCP postflight must resolve a short status label to the canonical workflow value",
 );
@@ -527,6 +527,53 @@ const relocation = OperonRelocateTaskSchema.parse({
   targetPath: "Efforts/Projets/Cible.md",
 });
 assert.equal(relocation.dryRun, true);
+const relationshipsMutation = OperonSetRelationshipsSchema.parse({
+  operonId: "abc1234",
+  expectedRevision: task.revision,
+  idempotencyKey: "contract-relationships-1",
+  relationships: { parentTask: null, blocking: ["bcd2345"], blockedBy: [] },
+});
+assert.equal(relationshipsMutation.dryRun, true);
+for (const invalidRelationships of [
+  { blocking: ["bcd2345", "bcd2345"] },
+  { blocking: ["bcd2345"], blockedBy: ["bcd2345"] },
+  { parentTask: "abc1234" },
+]) {
+  assert.equal(
+    OperonSetRelationshipsSchema.safeParse({
+      operonId: "abc1234",
+      expectedRevision: task.revision,
+      idempotencyKey: "contract-relationships-invalid",
+      relationships: invalidRelationships,
+    }).success,
+    false,
+  );
+}
+const recurrenceMutation = OperonUpdateRecurrenceSchema.parse({
+  operonId: "abc1234",
+  expectedRevision: task.revision,
+  idempotencyKey: "contract-recurrence-1",
+  scope: "this-and-following",
+  changes: { repeat: "every week", datetimeRepeatEnd: null },
+});
+assert.equal(recurrenceMutation.dryRun, true);
+assert.equal(
+  OperonUpdateRecurrenceSchema.safeParse({
+    ...recurrenceMutation,
+    scope: "all-tasks",
+  }).success,
+  false,
+);
+assert.equal(
+  OperonUpdateTaskSchema.safeParse({
+    operonId: "abc1234",
+    expectedRevision: task.revision,
+    idempotencyKey: "contract-update-dedicated-field",
+    patch: { fields: { repeat: "every week" } },
+  }).success,
+  false,
+  "general updates must not simulate recurrence mutations",
+);
 assert.equal(
   OperonRelocateTaskSchema.safeParse({
     ...relocation,

@@ -155,6 +155,35 @@ function normalized(): OperonBridgeTask {
   });
 }
 
+test("task revision is invariant across the unmanaged-properties projection", () => {
+  const options = {
+    task: {
+      ...task,
+      primary: { ...task.primary, format: "yaml" as const },
+    },
+    pipelines,
+    keyMappings: [
+      { canonicalKey: "status", visiblePropertyName: "status" },
+      { canonicalKey: "priority", visiblePropertyName: "priority" },
+    ],
+    frontmatter: {
+      status: "Project.InProgress",
+      priority: "A",
+      rang: 4,
+      north_star: true,
+    },
+    sourceMtime: 1234,
+    operonVersion: "3.1.1",
+    bridgeVersion: "0.5.1",
+  };
+  const projected = normalizeTask({ ...options, includeProperties: true });
+  const redacted = normalizeTask({ ...options, includeProperties: false });
+
+  assert.deepEqual(projected.properties, { rang: 4, north_star: true });
+  assert.equal(redacted.properties, undefined);
+  assert.equal(redacted.revision, projected.revision);
+});
+
 test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("operon", "2.4.0"), true);
   assert.equal(isVersionCompatible("operon", "2.5.0"), true);

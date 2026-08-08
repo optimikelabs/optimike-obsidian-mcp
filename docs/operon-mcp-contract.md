@@ -2,7 +2,7 @@
 
 ## Surface
 
-The main MCP server registers twenty-one Operon tools:
+The main MCP server registers twenty-three Operon tools:
 
 - `operon_status`
 - `operon_get_configuration`
@@ -21,6 +21,8 @@ The main MCP server registers twenty-one Operon tools:
 - `operon_create_task`
 - `operon_update_task`
 - `operon_transition_task`
+- `operon_set_relationships`
+- `operon_update_recurrence`
 - `operon_convert_task`
 - `operon_relocate_task`
 - `operon_list_pending_recoveries`
@@ -74,8 +76,8 @@ Apply additionally requires `OPERON_MUTATIONS_ENABLED=true` and the Bridge setti
 ### Write policy
 
 - `MCP_WRITE_MODE=readonly`: dry-run only.
-- `MCP_WRITE_MODE=guarded`: adopt, create, update, transition, and inline relocation apply are allowed with their normal preconditions.
-- `MCP_WRITE_MODE=full`: conversion apply is additionally allowed.
+- `MCP_WRITE_MODE=guarded`: adopt, create, update, transition, relationship replacement, and inline relocation apply are allowed with their normal preconditions.
+- `MCP_WRITE_MODE=full`: conversion and recurrence apply are additionally allowed.
 - `operon_recover_mutation` also requires `MCP_WRITE_MODE=full` because it may complete an uncertain prior write; it only recovers the exact `recoveryRef` plan.
 
 `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for legacy file-task creation or `targetPath` for inline tasks. Official Operon 3.1.1 still rejects arbitrary `targetFolder` because its Developer API has no exact folder-only target contract. Scoped conversion apply is allowed in guarded mode only when the current source and explicit destination are both inside the allowlist.
@@ -90,6 +92,10 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 `operon_update_task` accepts exactly one group per call: description, managed fields/tags, or one unmanaged file property. Status transitions use the dedicated tool. Unmanaged file properties are supported only by the legacy Public API path; official Operon 3.1.1 rejects them explicitly.
 
+`operon_set_relationships` replaces or explicitly clears `parentTask`, `blocking`, and `blockedBy`. It rejects duplicate targets, self-reference, and a target present in both dependency directions before preview. Operon seals the complete affected-resource set and performs graph/cycle validation; after apply the Bridge verifies the source and every changed inverse dependency edge.
+
+`operon_update_recurrence` changes only the official recurrence surface with an explicit `this-task` or `this-and-following` scope. `null` clears a field. Recurrence is not simulated through `operon_update_task`; apply requires full mode, and the Bridge rereads every requested normalized field after the sealed plan completes.
+
 `operon_transition_task` prefers a stable status ID from `operon_get_configuration`, while still accepting exactly one current configured workflow value for compatibility. Operon 3.1.1 transition preview/apply is available through the Bridge. Elevated transitions require fresh host-owned consent: the confirmation modal is constructed in the owning vault window and an unattended request fails closed after 45 seconds. The CLI/native official path remains an operator diagnostic surface, not a bypass; no Markdown/private fallback is introduced.
 
 `operon_convert_task` converts inline ↔ file through Operon's transition-safe paths. File-to-inline requires an explicit `targetPath`. Official Operon 3.1.1 uses its configured target/template contract and does not accept arbitrary `targetFolder`; the legacy Public API path retains scoped folder support.
@@ -100,7 +106,7 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 ## Verified pilot behavior
 
-On Operon `2.5.0` in a disposable vault, direct MCP calls proved:
+On legacy Operon `2.5.0`/Kairélys in a disposable vault, direct MCP calls historically proved:
 
 - file and inline creation;
 - managed fields, tags, and unmanaged ÉLYSIA properties;
@@ -115,3 +121,9 @@ On Operon `2.5.0` in a disposable vault, direct MCP calls proved:
 - duplicate-ID P0 detection and refusal to replace the last good snapshot.
 
 Production activation and Tasks/TaskNotes migration remain separate manual gates.
+
+The equivalent relationship and recurrence claims apply to official Operon `3.1.1` only after the dedicated 3.1.1 pilot recipe below has passed; legacy evidence is not presented as Developer API evidence.
+
+## Deliberately excluded writes
+
+Deletion, reminders, pinned state, timer control/session, adoption, and saved-filter management remain outside the official agent mutation surface. Adoption and saved filters are unavailable until official capabilities exist. Delete remains an operator CLI action. A future `operon_trash_task` may be considered only with guaranteed restoration under the same `operonId`, reconciled relations, durable journal evidence, and an explicit human confirmation; it is not implemented.

@@ -71,13 +71,14 @@ Scan, plan and status are read-only. Apply and rollback additionally require
 capability, and a backend mode that exposes conditional
 `obsidian_search_replace`.
 
-Every mode also registers the 21 Operon contract tools:
+Every mode also registers the 23 Operon contract tools:
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
 `operon_get_task`, `operon_query_tasks`, `operon_query_saved_filter`,
 `operon_validate`, `operon_get_diagnostics`, `operon_find_tasks`,
 `operon_resolve_task`, `operon_get_relationships`, `operon_build_context`,
 `operon_get_timer_state`, `operon_adopt_task`, `operon_create_task`,
-`operon_update_task`, `operon_transition_task`, `operon_convert_task`,
+`operon_update_task`, `operon_transition_task`, `operon_set_relationships`,
+`operon_update_recurrence`, `operon_convert_task`,
 `operon_relocate_task`, `operon_list_pending_recoveries`, and
 `operon_recover_mutation`. In non-live modes they remain limited to validated
 read-only snapshots; mutation calls fail closed. Official Operon 3.1.1

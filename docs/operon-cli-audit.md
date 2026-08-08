@@ -1,7 +1,7 @@
 # Operon CLI / Developer API audit
 
-Date: 2026-08-07
-Reference: official Operon `3.1.1`, Developer API V1 and `packages/operon-cli/cli-manifest-v1.json`.
+Date: 2026-08-08
+Reference: official Operon `3.1.1`, Operon CLI `1.0.9`, Developer API V1 and `cli-manifest-v1.json`.
 
 The original 2026-08-01 CLI observations were made against Operon `3.0.1` and
 remain historical evidence. The current MCP adapter targets `3.1.1`; its full
@@ -34,7 +34,7 @@ evaluation and six bounded Developer API reads:
 - reads: status, configuration, list/get/query, saved filters, validation;
 - native reasoning reads: diagnostics, finder, resolve, relationships, context,
   and timer state;
-- mutations: adopt, create, update, transition, convert, relocate;
+- mutations: adopt, create, update, transition, relationships, recurrence, convert, relocate;
 - recovery: list pending official recoveries and recover one exact plan.
 
 The official CLI/Developer API additionally exposes:
@@ -60,7 +60,9 @@ operation with a clear ÉLYSIA use case and a matching proof/guard.
 | relationships read | High | Medium | Implemented with one exact root, depth ≤ 3 and result cap |
 | context pack | High | Medium | Implemented with projections, size caps and hydration allowlist |
 | timer read | Medium | Low | Implemented as observation only; no timer control |
-| recurrence/reminder/relationship writes | Medium-High | High | Defer; separate typed tools, preview/apply, revision and postflight required |
+| relationship writes | High | Medium-High | Implemented as complete typed replacement with revision, sealed preview/apply, inverse-edge postflight and recovery |
+| recurrence writes | Medium-High | High | Implemented as scoped typed update; apply requires full mode, postflight and recovery |
+| reminder writes | Medium | High | Defer; keep in CLI until a concrete agent use case and dedicated contract exist |
 | timer control/session | Medium | High | Defer; changes active execution state and needs an explicit human gate |
 | pinned state | Low-Medium | Medium | Defer; presentation/state preference, not a core ÉLYSIA action |
 | delete | Medium | Destructive | Do not expose until a dedicated reversible-trash contract exists |
@@ -74,6 +76,12 @@ receipt/postflight, idempotent replay, restart, and same-plan recovery. The
 production Bridge pilot also passed live read, typed create/update/transition
 preview/apply, replay, and stale revision conflict.
 
+The relationship and recurrence extensions pass the adapter, Bridge contract,
+service, policy, idempotency/restart and documentation suites. Their new live
+acceptance remains pending: the isolated 3.1.1 pilot persists the exact nine-
+capability expansion request, but the Operon settings panel currently renders
+no consumer row or approval controls. The grant is not edited or bypassed.
+
 Stock `3.1.1` may still return the bounded `outcome-unknown` transition result
 tracked by [Operon #99](https://github.com/hasanyilmaz/operon/issues/99) and
 [#101](https://github.com/hasanyilmaz/operon/pull/101). The patched local build
@@ -81,7 +89,7 @@ passes the terminal/recovery proof; when the stock runtime cannot prove its
 result, the Bridge reports the uncertainty and does not retry or fall back to
 Markdown/private APIs. This remains a capability gate, not a hidden bypass.
 
-The read audit is complete. Advanced writes remain outside MCP until each has a
+The read audit and implementation of the two useful advanced writes are complete; live promotion waits for the official grant UI. Other advanced writes remain outside MCP until each has a
 dedicated preview/apply, revision, postflight, recovery and human-gate contract;
 CLI availability alone is not sufficient evidence to expose them to agents.
 

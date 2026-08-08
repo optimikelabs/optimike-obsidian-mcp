@@ -63,13 +63,14 @@ Scan, plan et status sont read-only. Apply et rollback exigent en plus
 `MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, la capacité `move` de
 la racine et un backend qui expose `obsidian_search_replace` conditionnel.
 
-Tous les modes enregistrent aussi les 21 outils du contrat Operon :
+Tous les modes enregistrent aussi les 23 outils du contrat Operon :
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
 `operon_get_task`, `operon_query_tasks`, `operon_query_saved_filter`,
 `operon_validate`, `operon_get_diagnostics`, `operon_find_tasks`,
 `operon_resolve_task`, `operon_get_relationships`, `operon_build_context`,
 `operon_get_timer_state`, `operon_adopt_task`, `operon_create_task`,
-`operon_update_task`, `operon_transition_task`, `operon_convert_task`,
+`operon_update_task`, `operon_transition_task`, `operon_set_relationships`,
+`operon_update_recurrence`, `operon_convert_task`,
 `operon_relocate_task`, `operon_list_pending_recoveries` et
 `operon_recover_mutation`. Hors mode live, ils restent limités aux snapshots
 validés en lecture seule ; toute mutation échoue fermée. Pour Operon 3.1.1,

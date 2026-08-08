@@ -21,7 +21,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 - Kairélys read allowlist: `2.5.1`, `2.5.2`, `2.5.3`, `2.6.1`, `2.6.2`, `2.6.3`
 - Legacy mutation contract: Operon Public API `1`
 - Official Operon `2.5.0`: read-only
-- Official Operon `3.1.1`: typed create/update/transition/convert/relocate through Developer API V1 when the grant is active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
+- Official Operon `3.1.1`: typed create/update/transition/relationship/recurrence/convert/relocate through Developer API V1 when the grant is active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
 - Kairélys `2.5.1` through `2.5.3` and `2.6.1` through `2.6.3` with Public API v1: read-write
 
 `GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future Operon version is not assumed compatible merely because its Markdown looks similar.
@@ -173,6 +173,7 @@ One request must contain exactly one mutation group:
 This rule prevents false atomicity across Obsidian rename, managed-field, and raw-property write paths.
 
 Status is not accepted by `update`; use the transition route.
+Relationship and recurrence fields are also rejected here; use their dedicated routes.
 
 ### `POST /tasks/:operonId/transition`
 
@@ -188,6 +189,40 @@ Status is not accepted by `update`; use the transition route.
 Exactly one of stable `statusId` or the current configured `Pipeline.Status` string is required. Checkbox, terminal dates, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, and view refreshes remain Operon's responsibility.
 
 The route remains documented for the legacy Kairélys/Public API path and is also available for official Operon `3.1.1` when the live Developer API advertises it. A stock runtime that cannot produce a terminal or recoverable result is reported as unavailable/uncertain; the Bridge never retries blindly or falls back to Markdown/private APIs.
+
+### `POST /tasks/:operonId/relationships`
+
+```json
+{
+  "idempotencyKey": "relationships-001",
+  "expectedRevision": "fnv1a32:...",
+  "dryRun": false,
+  "relationships": {
+    "parentTask": null,
+    "blocking": ["bcd2345"],
+    "blockedBy": []
+  }
+}
+```
+
+Every supplied field is a complete replacement; `null`/an empty array clears it. Duplicates, self-reference, contradictory dependency directions and graph cycles are rejected. The sealed plan includes all affected task resources; postflight verifies the source plus inverse `blocking`/`blockedBy` edges.
+
+### `POST /tasks/:operonId/recurrence`
+
+```json
+{
+  "idempotencyKey": "recurrence-001",
+  "expectedRevision": "fnv1a32:...",
+  "dryRun": false,
+  "scope": "this-and-following",
+  "changes": {
+    "repeat": "every week",
+    "datetimeRepeatEnd": null
+  }
+}
+```
+
+Scope is mandatory and must be `this-task` or `this-and-following`. Supported fields are `repeat`, `datetimeRepeatEnd`, `dateScheduled`, `dateStarted`, `dateDue`, `datetimeStart`, `datetimeEnd`, and `estimate`; `null` is an explicit clear. Apply requires `MCP_WRITE_MODE=full`.
 
 ### `POST /tasks/:operonId/convert`
 

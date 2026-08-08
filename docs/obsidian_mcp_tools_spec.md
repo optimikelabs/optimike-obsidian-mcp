@@ -102,6 +102,8 @@ dependency of this MCP.
 - `operon_create_task`: create inline/file tasks through Operon Public API v1.
 - `operon_update_task`: update one mutation group with expected revision.
 - `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards when the live Developer API advertises the capability; the Bridge bounds uncertain stock-runtime applies and never retries blindly.
+- `operon_set_relationships`: replace or clear parent/blocker edges with revision locking, graph validation, and inverse-edge postflight; apply is allowed in `guarded`.
+- `operon_update_recurrence`: set or clear official recurrence fields with explicit series scope; apply requires `full`.
 - `operon_convert_task`: convert inline/file shape in `MCP_WRITE_MODE=full`.
 - `operon_relocate_task`: move an inline task to another Markdown note while preserving `operonId`.
 - `operon_list_pending_recoveries`: list durable official Developer API recovery references without applying them.

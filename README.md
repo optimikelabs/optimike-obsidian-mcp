@@ -18,7 +18,7 @@ explicitly governed access to configured documents outside the vault.
 | ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------- |
 | Notes                   | Read, list, search, update, frontmatter and tags                       | Vault; Local REST API for the full live surface    |
 | Bases and Canvas        | Bases query/write tools, format validation and bounded Canvas helpers  | Bases Bridge for live Bases                        |
-| Tasks                   | Obsidian Tasks-compatible list/query plus 21 governed Operon tools     | Operon 3.1.1 Developer API V1 through the Bridge   |
+| Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools     | Operon 3.1.1 Developer API V1 through the Bridge   |
 | Semantic search         | Smart Connections index search with durable metadata cache             | `.smart-env` plus Ollama or OpenAI query embedding |
 | Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions | Local filesystem                                   |
 | External documents      | Governed reads/handoff plus opt-in local move with exact link repair   | Allowlist; local stdio for move                    |
@@ -106,7 +106,8 @@ Stale Operon snapshots remain read-only.
 
 The MCP exposes a curated agent surface rather than every Operon CLI function.
 Native diagnostics, finder/resolve, bounded relationships/context and timer
-state are available as read-only tools. Advanced writes and broad operator
+state are available as read-only tools. Dedicated relationship and recurrence
+writes use official sealed preview/apply plans; destructive and operator
 commands stay in the CLI. See the [Operon CLI / Developer API audit](docs/operon-cli-audit.md).
 Transition apply is available through the Bridge. Elevated or destructive plans
 still require fresh confirmation in the owning Obsidian vault window and fail

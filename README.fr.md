@@ -19,7 +19,7 @@ documents autorisés hors du coffre.
 | ----------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- |
 | Notes                   | Lecture, liste, recherche, mise à jour, frontmatter et tags          | Coffre ; Local REST API pour la surface live complète |
 | Bases et Canvas         | Requêtes/écritures Bases, validation et helpers Canvas bornés        | Bases Bridge pour Bases en live                       |
-| Tâches                  | Lecture/requête Tasks + 21 outils Operon gouvernés                   | Operon 3.1.1 Developer API V1 via le Bridge            |
+| Tâches                  | Lecture/requête Tasks + 23 outils Operon gouvernés                   | Operon 3.1.1 Developer API V1 via le Bridge           |
 | Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable        | `.smart-env` + embedding Ollama ou OpenAI             |
 | Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions | Filesystem local                                      |
 | Documents externes      | Lectures/handoff gouvernés + move local opt-in avec réparation       | Allowlist ; stdio local pour le move                  |

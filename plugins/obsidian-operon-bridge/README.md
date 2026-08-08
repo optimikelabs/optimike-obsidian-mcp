@@ -48,6 +48,8 @@ Prefix: `/extensions/optimike-operon-bridge/v1`
 - `POST /tasks/:operonId/transition`
 - `POST /tasks/:operonId/convert`
 - `POST /tasks/:operonId/relocate`
+- `POST /tasks/:operonId/relationships`
+- `POST /tasks/:operonId/recurrence`
 - `GET /mutations/pending-recoveries`
 - `POST /mutations/recover`
 
@@ -55,7 +57,7 @@ All routes inherit Local REST API authentication and local TLS settings. Saved f
 
 Mutation paths are strict, exact vault-relative paths. The MCP and Bridge reject leading or trailing whitespace, backslashes, absolute paths, empty segments, traversal, and non-Markdown `targetPath` values; they never trim or rewrite an invalid destination into a valid one.
 
-Mutation apply is disabled by default. Operon 3.1.1 mutation routes are advertised only when the Bridge setting is enabled, the official grant exposes the matching preview/apply capabilities, and the MCP runtime has the separate `OPERON_MUTATIONS_ENABLED` opt-in.
+Mutation apply is disabled by default. Operon 3.1.1 mutation routes are advertised only when the Bridge setting is enabled, the official grant exposes the matching preview/apply capabilities, and the MCP runtime has the separate `OPERON_MUTATIONS_ENABLED` opt-in. Relationship apply rereads the source and inverse dependency edges; recurrence uses the official scoped recurrence plan and never passes through the generic update route.
 
 ## Build
 

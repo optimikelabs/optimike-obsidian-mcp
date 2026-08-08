@@ -36,31 +36,33 @@ const semanticConfiguration = {
   workflow: {
     language: "fr",
     defaultPipelineName: "Project",
-    pipelines: [{
-      id: "pl_project",
-      name: "Project",
-      description: null,
-      statuses: [
-        {
-          id: "st_project_in_progress",
-          label: "InProgress",
-          value: "Project.InProgress",
-          isFinished: false,
-          isCancelled: false,
-          isScheduledTarget: false,
-          isTrackingTarget: true,
-        },
-        {
-          id: "st_project_done",
-          label: "Done",
-          value: "Project.Done",
-          isFinished: true,
-          isCancelled: false,
-          isScheduledTarget: false,
-          isTrackingTarget: false,
-        },
-      ],
-    }],
+    pipelines: [
+      {
+        id: "pl_project",
+        name: "Project",
+        description: null,
+        statuses: [
+          {
+            id: "st_project_in_progress",
+            label: "InProgress",
+            value: "Project.InProgress",
+            isFinished: false,
+            isCancelled: false,
+            isScheduledTarget: false,
+            isTrackingTarget: true,
+          },
+          {
+            id: "st_project_done",
+            label: "Done",
+            value: "Project.Done",
+            isFinished: true,
+            isCancelled: false,
+            isScheduledTarget: false,
+            isTrackingTarget: false,
+          },
+        ],
+      },
+    ],
   },
   priorities: { defaultPriority: "C", items: [] },
   keys: [],
@@ -147,7 +149,7 @@ function makeTask(operonId, overrides = {}) {
       modified: "2026-07-20T11:00:00",
     },
     fields: { status: "Project.InProgress", priority: "A" },
-    properties: { north_star: operonId === "a" },
+    properties: { north_star: operonId === "abc1234" },
     revision: `fnv1a32:${operonId.padEnd(8, "0").slice(0, 8)}`,
     sourceKind: "operon-index",
     operonVersion: "2.4.0",
@@ -156,7 +158,7 @@ function makeTask(operonId, overrides = {}) {
   };
 }
 
-const tasks = [makeTask("a"), makeTask("b")];
+const tasks = [makeTask("abc1234"), makeTask("bcd2345")];
 const state = {
   mode: "normal",
   generation: 1,
@@ -203,6 +205,8 @@ function statusPayload() {
           create: true,
           update: true,
           transition: true,
+          relationshipMutation: true,
+          recurrenceMutation: true,
           convert: true,
           recovery: true,
         }
@@ -278,9 +282,12 @@ const server = http.createServer((request, response) => {
         ? "timers"
         : request.method === "POST" && url.pathname.endsWith("/tasks/finder")
           ? "finder"
-          : request.method === "POST" && url.pathname.endsWith("/entities/resolve")
+          : request.method === "POST" &&
+              url.pathname.endsWith("/entities/resolve")
             ? "resolve"
-            : request.method === "POST" && url.pathname.endsWith("/relationships")
+            : request.method === "POST" &&
+                url.pathname.endsWith("/relationships") &&
+                !url.pathname.includes("/tasks/")
               ? "relationships"
               : request.method === "POST" && url.pathname.endsWith("/context")
                 ? "context"
@@ -310,8 +317,14 @@ const server = http.createServer((request, response) => {
       url.pathname,
     );
   if (taskGetMatch) {
-    const task = tasks.find((candidate) => candidate.operonId === taskGetMatch[1]);
-    sendJson(response, task ? 200 : 404, task ? { task } : { error: "not_found" });
+    const task = tasks.find(
+      (candidate) => candidate.operonId === taskGetMatch[1],
+    );
+    sendJson(
+      response,
+      task ? 200 : 404,
+      task ? { task } : { error: "not_found" },
+    );
     return;
   }
   if (request.method === "POST" && url.pathname.endsWith("/tasks/query")) {
@@ -351,7 +364,10 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
-  if (request.method === "POST" && url.pathname.endsWith("/mutations/recover")) {
+  if (
+    request.method === "POST" &&
+    url.pathname.endsWith("/mutations/recover")
+  ) {
     state.recoveryCalls += 1;
     let body = "";
     request.on("data", (chunk) => {
@@ -376,7 +392,10 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
-  if (request.method === "POST" && /\/tasks\/([^/]+)\/transition$/u.test(url.pathname)) {
+  if (
+    request.method === "POST" &&
+    /\/tasks\/([^/]+)\/transition$/u.test(url.pathname)
+  ) {
     state.mutationCalls += 1;
     let body = "";
     request.on("data", (chunk) => {
@@ -384,8 +403,10 @@ const server = http.createServer((request, response) => {
     });
     request.on("end", () => {
       const params = body ? JSON.parse(body) : {};
-      const operonId = /\/tasks\/([^/]+)\/transition$/u.exec(url.pathname)?.[1] ?? "a";
-      const before = tasks.find((candidate) => candidate.operonId === operonId) ?? tasks[0];
+      const operonId =
+        /\/tasks\/([^/]+)\/transition$/u.exec(url.pathname)?.[1] ?? "abc1234";
+      const before =
+        tasks.find((candidate) => candidate.operonId === operonId) ?? tasks[0];
       const after = makeTask(operonId, {
         status: "Project.Done",
         statusId: "st_project_done",
@@ -401,6 +422,91 @@ const server = http.createServer((request, response) => {
         before,
         requested: params,
         after,
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
+  }
+  if (
+    request.method === "POST" &&
+    /\/tasks\/([^/]+)\/relationships$/u.test(url.pathname)
+  ) {
+    state.mutationCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      const operonId =
+        /\/tasks\/([^/]+)\/relationships$/u.exec(url.pathname)?.[1] ??
+        "abc1234";
+      const before = tasks[0];
+      const desired = params.relationships ?? {};
+      const after = makeTask(operonId, {
+        parentTask: Object.hasOwn(desired, "parentTask")
+          ? desired.parentTask
+          : before.parentTask,
+        blocking: Object.hasOwn(desired, "blocking")
+          ? desired.blocking
+          : before.blocking,
+        blockedBy: Object.hasOwn(desired, "blockedBy")
+          ? desired.blockedBy
+          : before.blockedBy,
+      });
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-relationships-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: params.dryRun === false ? "applied" : "planned",
+        before,
+        requested: desired,
+        after: params.dryRun === false ? after : null,
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
+  }
+  if (
+    request.method === "POST" &&
+    /\/tasks\/([^/]+)\/recurrence$/u.test(url.pathname)
+  ) {
+    state.mutationCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      const operonId =
+        /\/tasks\/([^/]+)\/recurrence$/u.exec(url.pathname)?.[1] ?? "abc1234";
+      const before = tasks[0];
+      const fields = { ...before.fields };
+      for (const [field, value] of Object.entries(params.changes ?? {})) {
+        if (value === null) delete fields[field];
+        else fields[field] = String(value);
+      }
+      const repeating = typeof fields.repeat === "string" && fields.repeat.length > 0;
+      const after = makeTask(operonId, {
+        fields,
+        recurrence: {
+          repeating,
+          seriesId: repeating ? "rsabc12" : null,
+          occurrenceDate: repeating ? (fields.dateScheduled ?? "2026-08-10") : null,
+        },
+      });
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-recurrence-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: params.dryRun === false ? "applied" : "planned",
+        before,
+        requested: { scope: params.scope, changes: params.changes },
+        after: params.dryRun === false ? after : null,
         source: "operon-live",
         stale: false,
       });
@@ -468,8 +574,7 @@ process.env.OBSIDIAN_VERIFY_SSL = "false";
 process.env.OBSIDIAN_VAULT = tempRoot;
 process.env.OBSIDIAN_SHARED_CACHE_DB_PATH = dbPath;
 process.env.MCP_WRITE_MODE = "readonly";
-process.env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES =
-  "Efforts/Projets";
+process.env.OPERON_MUTATION_ALLOWED_PATH_PREFIXES = "Efforts/Projets";
 process.env.SEMANTIC_SEARCH_PREWARM = "false";
 
 const { OperonService } = await import("../dist/services/operon/service.js");
@@ -506,9 +611,9 @@ try {
     limit: 10,
   });
   assert.equal(propertyQuery.total, 1);
-  assert.equal(propertyQuery.tasks[0].operonId, "a");
+  assert.equal(propertyQuery.tasks[0].operonId, "abc1234");
   const stripped = await service.query({
-    operonIds: ["a"],
+    operonIds: ["abc1234"],
     includeProperties: false,
     limit: 1,
   });
@@ -520,29 +625,35 @@ try {
     "finder",
   );
   assert.equal(
-    (await service.resolveTask({
-      selector: { kind: "operon-id", operonId: "a" },
-    })).operation,
+    (
+      await service.resolveTask({
+        selector: { kind: "operon-id", operonId: "abc1234" },
+      })
+    ).operation,
     "resolve",
   );
   assert.equal(
-    (await service.relationships({ operonId: "a" })).operation,
+    (await service.relationships({ operonId: "abc1234" })).operation,
     "relationships",
   );
   assert.equal(
-    (await service.context({
-      purpose: "analysis",
-      projection: "task-neighborhood",
-      operonId: "a",
-    })).operation,
+    (
+      await service.context({
+        purpose: "analysis",
+        projection: "task-neighborhood",
+        operonId: "abc1234",
+      })
+    ).operation,
     "context",
   );
   assert.equal(
-    (await service.context({
-      purpose: "read",
-      projection: "exact-task",
-      operonId: "a",
-    })).operation,
+    (
+      await service.context({
+        purpose: "read",
+        projection: "exact-task",
+        operonId: "abc1234",
+      })
+    ).operation,
     "context",
     "exact-task context must preserve Operon's projection-specific defaults",
   );
@@ -771,12 +882,67 @@ try {
   // Enable the guarded apply path only for the explicit postflight/recovery
   // checks below; the earlier assertion proves the default remains fail-closed.
   config.operonMutationsEnabled = true;
+  config.mcpWriteMode = "guarded";
+
+  const relationshipsInput = {
+    idempotencyKey: "test-relationships-apply",
+    dryRun: false,
+    operonId: "abc1234",
+    expectedRevision: tasks[0].revision,
+    relationships: { parentTask: null, blocking: ["bcd2345"], blockedBy: [] },
+  };
+  const relationshipsApplied =
+    await service.setRelationships(relationshipsInput);
+  assert.equal(relationshipsApplied.status, "applied");
+  assert.deepEqual(relationshipsApplied.after.blocking, ["bcd2345"]);
+  const callsAfterRelationshipApply = state.mutationCalls;
+  const relationshipsRestartReplay = await new OperonService().setRelationships(
+    relationshipsInput,
+  );
+  assert.equal(relationshipsRestartReplay.replayed, true);
+  assert.equal(
+    state.mutationCalls,
+    callsAfterRelationshipApply,
+    "relationship replay after restart must use the durable MCP journal",
+  );
+
+  await assert.rejects(
+    service.updateRecurrence({
+      idempotencyKey: "test-recurrence-guarded",
+      dryRun: false,
+      operonId: "abc1234",
+      expectedRevision: tasks[0].revision,
+      scope: "this-task",
+      changes: { repeat: "mode=schedule|freq=week|interval=1" },
+    }),
+    (error) => error?.code === "FORBIDDEN",
+    "recurrence apply must require full write mode",
+  );
+
   config.mcpWriteMode = "full";
+
+  const recurrenceApplied = await service.updateRecurrence({
+    idempotencyKey: "test-recurrence-apply",
+    dryRun: false,
+    operonId: "abc1234",
+    expectedRevision: tasks[0].revision,
+    scope: "this-and-following",
+    changes: {
+      repeat: "mode=schedule|freq=week|interval=1",
+      datetimeRepeatEnd: null,
+    },
+  });
+  assert.equal(recurrenceApplied.status, "applied");
+  assert.equal(
+    recurrenceApplied.after.fields.repeat,
+    "mode=schedule|freq=week|interval=1",
+  );
+  assert.equal(recurrenceApplied.after.recurrence.repeating, true);
 
   const transitioned = await service.transitionTask({
     idempotencyKey: "test-transition-short-status",
     dryRun: false,
-    operonId: "a",
+    operonId: "abc1234",
     expectedRevision: tasks[0].revision,
     status: "Done",
   });
@@ -795,9 +961,15 @@ try {
   assert.equal(recovered.status, "already-applied");
   assert.equal(state.recoveryCalls, 1);
   state.mode = "offline";
-  const restartedRecovery = await new OperonService().recoverMutation(recoveryInput);
+  const restartedRecovery = await new OperonService().recoverMutation(
+    recoveryInput,
+  );
   assert.equal(restartedRecovery.replayed, true);
-  assert.equal(state.recoveryCalls, 1, "completed recovery must replay from the MCP journal after restart");
+  assert.equal(
+    state.recoveryCalls,
+    1,
+    "completed recovery must replay from the MCP journal after restart",
+  );
   state.mode = "normal";
 
   const concurrentInput = {

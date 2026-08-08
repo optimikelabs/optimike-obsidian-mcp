@@ -33,6 +33,8 @@ import {
   OperonMutationResultSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
+  OperonSetRelationshipsSchema,
+  OperonUpdateRecurrenceSchema,
   isCanonicalOperonVaultRelativePath,
   resolveOperonPriorityStableId,
   resolveOperonWorkflowStatus,
@@ -45,6 +47,8 @@ import {
   type OperonTaskPage,
   type OperonValidation,
   type OperonAdoptTask,
+  type OperonSetRelationships,
+  type OperonUpdateRecurrence,
   type OperonConvertTask,
   type OperonCreateTask,
   type OperonFilterQuery,
@@ -124,6 +128,15 @@ interface SnapshotMeta {
 }
 
 type OperonCapabilities = z.infer<typeof OperonCapabilitiesSchema>;
+type OperonMutationAction =
+  | "adopt"
+  | "create"
+  | "update"
+  | "transition"
+  | "relationships"
+  | "recurrence"
+  | "convert"
+  | "relocate";
 
 let sharedRefreshPromise: Promise<OperonSnapshotEnvelope> | null = null;
 
@@ -156,6 +169,8 @@ function readOnlyCapabilities(): OperonCapabilities {
     create: false,
     update: false,
     transition: false,
+    relationshipMutation: false,
+    recurrenceMutation: false,
     convert: false,
     filterQuery: false,
     relocate: false,
@@ -402,13 +417,7 @@ export class OperonService {
   }
 
   private async executeMutation(
-    action:
-      | "adopt"
-      | "create"
-      | "update"
-      | "transition"
-      | "convert"
-      | "relocate",
+    action: OperonMutationAction,
     operonId: string | null,
     idempotencyKey: string,
     dryRun: boolean,
@@ -461,13 +470,7 @@ export class OperonService {
   }
 
   private mutationOutcomeMismatch(
-    action:
-      | "adopt"
-      | "create"
-      | "update"
-      | "transition"
-      | "convert"
-      | "relocate",
+    action: OperonMutationAction,
     payload: Record<string, unknown>,
     after: OperonTask,
     priorities: OperonConfiguration["configuration"]["priorities"]["items"],
@@ -531,8 +534,8 @@ export class OperonService {
         if (key === "status") continue;
         const expectedValue =
           key === "priority"
-            ? resolveOperonPriorityStableId(value, priorities) ??
-              String(value).trim()
+            ? (resolveOperonPriorityStableId(value, priorities) ??
+              String(value).trim())
             : String(value);
         if (after.fields[key] !== expectedValue)
           return `Managed field '${key}' does not match the request.`;
@@ -550,12 +553,16 @@ export class OperonService {
     }
     if (action === "transition" || action === "create") {
       if (typeof request.status === "string") {
-        const requestedStatus = resolveOperonWorkflowStatus(request.status, workflow);
+        const requestedStatus = resolveOperonWorkflowStatus(
+          request.status,
+          workflow,
+        );
         const statusMatches = requestedStatus
-          ? after.status === requestedStatus.value
-            || after.status === `${requestedStatus.pipeline}.${requestedStatus.label}`
-            || after.statusId === requestedStatus.id
-            || after.statusLabel === requestedStatus.label
+          ? after.status === requestedStatus.value ||
+            after.status ===
+              `${requestedStatus.pipeline}.${requestedStatus.label}` ||
+            after.statusId === requestedStatus.id ||
+            after.statusLabel === requestedStatus.label
           : after.status === request.status.trim();
         if (!statusMatches) return "Task status does not match the request.";
       }
@@ -564,6 +571,66 @@ export class OperonService {
         after.statusId !== request.statusId.trim()
       )
         return "Task status id does not match the request.";
+    }
+    if (action === "relationships") {
+      const relationships = payload.relationships;
+      const expected =
+        relationships &&
+        typeof relationships === "object" &&
+        !Array.isArray(relationships)
+          ? (relationships as Record<string, unknown>)
+          : {};
+      if (Object.prototype.hasOwnProperty.call(expected, "parentTask")) {
+        const expectedParent =
+          expected.parentTask === null
+            ? null
+            : String(expected.parentTask).trim();
+        if (after.parentTask !== expectedParent)
+          return "Task parent relationship does not match the request.";
+      }
+      for (const field of ["blocking", "blockedBy"] as const) {
+        if (!Object.prototype.hasOwnProperty.call(expected, field)) continue;
+        const targets = Array.isArray(expected[field])
+          ? expected[field].map(String).sort()
+          : [];
+        if (stableJson([...after[field]].sort()) !== stableJson(targets)) {
+          return `Task ${field} relationships do not match the request.`;
+        }
+      }
+    }
+    if (action === "recurrence") {
+      const changes = payload.changes;
+      const requestedChanges =
+        changes && typeof changes === "object" && !Array.isArray(changes)
+          ? (changes as Record<string, unknown>)
+          : {};
+      for (const [field, value] of Object.entries(requestedChanges)) {
+        if (field === "repeat" || field === "datetimeRepeatEnd") continue;
+        if (value === null) {
+          if (after.fields[field] !== undefined && after.fields[field] !== "")
+            return `Recurrence field '${field}' was not cleared.`;
+        } else if (after.fields[field] !== String(value)) {
+          return `Recurrence field '${field}' does not match the request.`;
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(requestedChanges, "repeat")) {
+        const repeat = requestedChanges.repeat;
+        if (
+          repeat === null &&
+          (after.recurrence?.repeating === true ||
+            after.recurrence?.seriesId != null ||
+            after.recurrence?.occurrenceDate != null)
+        ) {
+          return "The official recurrence state was not cleared.";
+        }
+        if (
+          typeof repeat === "string" &&
+          (!after.recurrence?.repeating ||
+            !/^rs[a-z0-9]{5}$/u.test(after.recurrence.seriesId ?? ""))
+        ) {
+          return "The official recurrence state is not active.";
+        }
+      }
     }
     if (action === "convert") {
       if (
@@ -590,13 +657,7 @@ export class OperonService {
   }
 
   private async performMutation(
-    action:
-      | "adopt"
-      | "create"
-      | "update"
-      | "transition"
-      | "convert"
-      | "relocate",
+    action: OperonMutationAction,
     operonId: string | null,
     idempotencyKey: string,
     dryRun: boolean,
@@ -618,7 +679,13 @@ export class OperonService {
       );
     }
     const status = await this.fetchLiveStatus();
-    if (!status.capabilities[action]) {
+    const capability =
+      action === "relationships"
+        ? "relationshipMutation"
+        : action === "recurrence"
+          ? "recurrenceMutation"
+          : action;
+    if (!status.capabilities[capability]) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
         `Operon Bridge capability is unavailable: ${action}.`,
@@ -629,7 +696,12 @@ export class OperonService {
       );
     }
     await this.assertMutationPathScope(action, operonId, payload, dryRun);
-    const operation = `operon_${action}_task` as const;
+    const operation =
+      action === "relationships"
+        ? "operon_set_relationships"
+        : action === "recurrence"
+          ? "operon_update_recurrence"
+          : (`operon_${action}_task` as const);
     const mutationData =
       action === "create"
         ? payload.task
@@ -659,12 +731,13 @@ export class OperonService {
       operation,
       action: dryRun ? "dry_run" : "apply",
       target: operonId ?? "new-task",
-      destructive: action === "convert" && !dryRun,
+      destructive: (action === "convert" || action === "recurrence") && !dryRun,
       allowInReadonly: dryRun,
       allowInGuarded:
         dryRun ||
-        action !== "convert" ||
-        config.operonMutationAllowedPathPrefixes.length > 0,
+        (action !== "recurrence" &&
+          (action !== "convert" ||
+            config.operonMutationAllowedPathPrefixes.length > 0)),
       frontmatterKeys,
       context: this.requestContext(operation, { operonId, idempotencyKey }),
     });
@@ -779,7 +852,8 @@ export class OperonService {
   private async isConfiguredFileTaskFolderAllowed(): Promise<boolean> {
     try {
       const configuration = await this.fetchLiveConfiguration();
-      const folder = configuration.configuration.creation.fileTasksFolder.trim();
+      const folder =
+        configuration.configuration.creation.fileTasksFolder.trim();
       return folder.length > 0 && this.isAllowedMutationPath(folder);
     } catch {
       return false;
@@ -787,13 +861,7 @@ export class OperonService {
   }
 
   private async assertMutationPathScope(
-    action:
-      | "adopt"
-      | "create"
-      | "update"
-      | "transition"
-      | "convert"
-      | "relocate",
+    action: OperonMutationAction,
     operonId: string | null,
     payload: Record<string, unknown>,
     dryRun: boolean,
@@ -839,7 +907,7 @@ export class OperonService {
       }
       if (
         task?.source === "file" &&
-        await this.isConfiguredFileTaskFolderAllowed()
+        (await this.isConfiguredFileTaskFolderAllowed())
       ) {
         return;
       }
@@ -882,7 +950,7 @@ export class OperonService {
       }
       if (
         target === "file" &&
-        await this.isConfiguredFileTaskFolderAllowed()
+        (await this.isConfiguredFileTaskFolderAllowed())
       ) {
         return;
       }
@@ -1650,7 +1718,13 @@ export class OperonService {
   }
 
   private async nativeRead(
-    operation: "diagnostics" | "finder" | "resolve" | "relationships" | "context" | "timers",
+    operation:
+      | "diagnostics"
+      | "finder"
+      | "resolve"
+      | "relationships"
+      | "context"
+      | "timers",
     method: "get" | "post",
     path: string,
     payload?: Record<string, unknown>,
@@ -1672,9 +1746,10 @@ export class OperonService {
         }),
       );
     }
-    const response = method === "get"
-      ? await this.getClient().get(path)
-      : await this.getClient().post(path, payload ?? {});
+    const response =
+      method === "get"
+        ? await this.getClient().get(path)
+        : await this.getClient().post(path, payload ?? {});
     const parsed = OperonNativeReadEnvelopeSchema.safeParse(response.data);
     if (!parsed.success || parsed.data.operation !== operation) {
       throw new McpError(
@@ -1818,6 +1893,32 @@ export class OperonService {
     );
   }
 
+  async setRelationships(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonSetRelationships =
+      OperonSetRelationshipsSchema.parse(input);
+    return this.executeMutation(
+      "relationships",
+      params.operonId,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/relationships`,
+      params,
+    );
+  }
+
+  async updateRecurrence(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonUpdateRecurrence =
+      OperonUpdateRecurrenceSchema.parse(input);
+    return this.executeMutation(
+      "recurrence",
+      params.operonId,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/recurrence`,
+      params,
+    );
+  }
+
   async pendingRecoveries(): Promise<Record<string, unknown>> {
     if (!liveModeConfigured()) {
       throw new McpError(
@@ -1851,7 +1952,8 @@ export class OperonService {
   }
 
   async recoverMutation(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonRecoverMutation = OperonRecoverMutationSchema.parse(input);
+    const params: OperonRecoverMutation =
+      OperonRecoverMutationSchema.parse(input);
     const requested = { recoveryRef: params.recoveryRef };
     const requestedJson = stableJson(requested);
     // Recovery is itself idempotent at the MCP boundary. A completed
@@ -1859,7 +1961,10 @@ export class OperonService {
     // without requiring the Bridge to be reachable a second time.
     const existing = this.readMutationJournal(params.idempotencyKey);
     if (existing) {
-      if (existing.action !== "recover" || existing.requestedJson !== requestedJson) {
+      if (
+        existing.action !== "recover" ||
+        existing.requestedJson !== requestedJson
+      ) {
         throw new McpError(
           BaseErrorCode.CONFLICT,
           "Idempotency key was already used for a different Operon recovery request.",

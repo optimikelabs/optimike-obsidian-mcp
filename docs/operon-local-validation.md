@@ -171,6 +171,8 @@ operon_adopt_task
 operon_create_task
 operon_update_task
 operon_transition_task
+operon_set_relationships
+operon_update_recurrence
 operon_convert_task
 operon_relocate_task
 operon_list_pending_recoveries
@@ -179,7 +181,7 @@ operon_recover_mutation
 
 PASS when:
 
-- all twenty-one tools are registered;
+- all twenty-three tools are registered;
 - the first complete call creates a snapshot;
 - subsequent calls with unchanged generation do not rewrite the full snapshot;
 - responses say `source=operon-live`, `stale=false`.
@@ -192,6 +194,19 @@ PASS when:
 4. Repeat REST and MCP parity.
 
 PASS: same task identities and values; revisions change only when normalized task/source data changes.
+
+## 9a. Relationship and recurrence pilot
+
+1. Back up the pilot notes before any apply.
+2. Dry-run a complete relationship replacement between the two dedicated pilot tasks.
+3. Apply with the current `expectedRevision`, reread both tasks, and verify the inverse blocker edge.
+4. Replay the exact `idempotencyKey`; the original operation must be returned without another write.
+5. Verify an open blocker rejects a terminal transition, then restore both relationship sets exactly.
+6. On a dedicated temporary recurrence fixture, dry-run/apply a rule, change scope with a fresh revision, then clear every recurrence field with `null`.
+7. Restart Obsidian and MCP; confirm no relationship or recurrence residue and stable recovery state.
+8. Remove the fixture only through the operator CLI after backup and explicit confirmation.
+
+PASS: live source, exact inverse edges, scoped recurrence state, idempotent replay, stale-revision conflict, exact restoration, and `P0/P1/P2 = 0/0/0`.
 
 ## 10. Stale fallback
 

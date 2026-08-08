@@ -119,6 +119,8 @@ interface BridgeCapabilities {
   create: boolean;
   update: boolean;
   transition: boolean;
+  relationshipMutation: boolean;
+  recurrenceMutation: boolean;
   convert: boolean;
   filterQuery: boolean;
   relocate: boolean;
@@ -414,12 +416,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   ): OperonDeveloperApiRuntimeAdapter {
     if (
       this.developerApiAdapter &&
-      this.developerApiPlugin === (plugin && typeof plugin === "object" ? plugin : null)
+      this.developerApiPlugin ===
+        (plugin && typeof plugin === "object" ? plugin : null)
     ) {
       return this.developerApiAdapter;
     }
     const pluginObject = plugin && typeof plugin === "object" ? plugin : null;
-    if (!pluginObject) throw new Error("Operon plugin instance is unavailable.");
+    if (!pluginObject)
+      throw new Error("Operon plugin instance is unavailable.");
     this.developerApiPlugin = pluginObject;
     this.developerApiAdapter = new OperonDeveloperApiRuntimeAdapter(
       this,
@@ -668,11 +672,16 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   ): BridgeCapabilities {
     if (runtime?.developerApi) {
       const readable = Boolean(runtime.compatible && ready);
-      const mutationEnabled = Boolean(runtime.compatible && ready && this.settings.mutationsEnabled);
+      const mutationEnabled = Boolean(
+        runtime.compatible && ready && this.settings.mutationsEnabled,
+      );
       const supports = (capability: DeveloperApiMutationCapability): boolean =>
         mutationEnabled &&
-        !(OPERON_BRIDGE_BLOCKED_MUTATIONS[runtime.version as keyof typeof OPERON_BRIDGE_BLOCKED_MUTATIONS] ?? [])
-          .includes(capability as never) &&
+        !(
+          OPERON_BRIDGE_BLOCKED_MUTATIONS[
+            runtime.version as keyof typeof OPERON_BRIDGE_BLOCKED_MUTATIONS
+          ] ?? []
+        ).includes(capability as never) &&
         runtime.developerApi!.hasMutationCapability(capability);
       return {
         status: true,
@@ -681,20 +690,31 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         get: readable,
         query: readable,
         validate: readable,
-        diagnostics: readable && runtime.developerApi!.hasReadCapability("system.diagnostics"),
-        finder: readable && runtime.developerApi!.hasReadCapability("tasks.finder"),
-        resolve: readable && runtime.developerApi!.hasReadCapability("entities.resolve"),
-        relationships: readable && runtime.developerApi!.hasReadCapability("relationships.read"),
-        context: readable && runtime.developerApi!.hasReadCapability("context.build"),
-        timers: readable && runtime.developerApi!.hasReadCapability("timers.read"),
+        diagnostics:
+          readable &&
+          runtime.developerApi!.hasReadCapability("system.diagnostics"),
+        finder:
+          readable && runtime.developerApi!.hasReadCapability("tasks.finder"),
+        resolve:
+          readable &&
+          runtime.developerApi!.hasReadCapability("entities.resolve"),
+        relationships:
+          readable &&
+          runtime.developerApi!.hasReadCapability("relationships.read"),
+        context:
+          readable && runtime.developerApi!.hasReadCapability("context.build"),
+        timers:
+          readable && runtime.developerApi!.hasReadCapability("timers.read"),
         adopt: false,
         create: supports("create"),
         update: supports("update"),
         transition: supports("transition"),
-      filterQuery: false,
-      relocate: supports("relocate"),
-      convert: supports("convert"),
-      recovery: mutationEnabled && runtime.developerApi!.hasRecoverySupport(),
+        relationshipMutation: supports("relationships"),
+        recurrenceMutation: supports("recurrence"),
+        filterQuery: false,
+        relocate: supports("relocate"),
+        convert: supports("convert"),
+        recovery: mutationEnabled && runtime.developerApi!.hasRecoverySupport(),
       };
     }
     const readable = Boolean(runtime?.compatible && ready);
@@ -718,6 +738,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       create: Boolean(mutation?.ready && mutation.create),
       update: Boolean(mutation?.ready && mutation.update),
       transition: Boolean(mutation?.ready && mutation.transition),
+      relationshipMutation: false,
+      recurrenceMutation: false,
       filterQuery: Boolean(
         publicCapabilities?.ready && publicCapabilities.filterQuery,
       ),
@@ -729,13 +751,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
 
   private limitations(runtime: OperonRuntime | null, ready: boolean): string[] {
     const capabilities = this.capabilities(runtime, ready);
-    return (
-      capabilities.create ||
+    return capabilities.create ||
       capabilities.update ||
       capabilities.transition ||
+      capabilities.relationshipMutation ||
+      capabilities.recurrenceMutation ||
       capabilities.convert ||
       capabilities.relocate
-    )
       ? BASE_LIMITATIONS
       : READ_ONLY_LIMITATIONS;
   }
@@ -844,7 +866,16 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       bridge: {
         id: this.manifest.id,
         version: this.manifest.version,
-        mode: capabilities.update ? "read-write" : "read-only",
+        mode:
+          capabilities.update ||
+          capabilities.transition ||
+          capabilities.relationshipMutation ||
+          capabilities.recurrenceMutation ||
+          capabilities.create ||
+          capabilities.convert ||
+          capabilities.relocate
+            ? "read-write"
+            : "read-only",
       },
       operon: {
         present: Boolean(runtime),
@@ -885,7 +916,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     if (!runtime.compatible) {
       throw new Error(
-        `${runtime.pluginName} ${runtime.version || "unknown"} is not in the tested Bridge allowlist (${Object.entries(OPERON_BRIDGE_SUPPORTED_VERSIONS).map(([pluginId, versions]) => `${pluginId}: ${versions.join(", ")}`).join("; ")}).`,
+        `${runtime.pluginName} ${runtime.version || "unknown"} is not in the tested Bridge allowlist (${Object.entries(
+          OPERON_BRIDGE_SUPPORTED_VERSIONS,
+        )
+          .map(([pluginId, versions]) => `${pluginId}: ${versions.join(", ")}`)
+          .join("; ")}).`,
       );
     }
     return runtime;
@@ -901,7 +936,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     );
     const file = abstract instanceof TFile ? abstract : null;
     const frontmatter =
-      includeProperties && task.primary.format === "yaml" && file
+      task.primary.format === "yaml" && file
         ? (this.app.metadataCache.getFileCache(file)?.frontmatter as
             | Record<string, unknown>
             | undefined)
@@ -1131,9 +1166,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   }
 
   private requireMutationRuntime(
-    capability:
-      | "adopt"
-      | DeveloperApiMutationCapability,
+    capability: "adopt" | DeveloperApiMutationCapability,
   ): OperonRuntime {
     if (!this.settings.mutationsEnabled) {
       throw new Error(
@@ -1150,7 +1183,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       return runtime;
     }
     const available = runtime.api?.capabilities();
-    if (!runtime.api || !available?.ready || !available[capability]) {
+    if (
+      capability === "relationships" ||
+      capability === "recurrence" ||
+      !runtime.api ||
+      !available?.ready ||
+      !available[capability]
+    ) {
       throw new Error(
         `Operon Public API v1 capability is unavailable: ${capability}.`,
       );
@@ -1174,7 +1213,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   }
 
   private async executeDeveloperRead(
-    operation: "diagnostics" | "finder" | "resolve" | "relationships" | "context" | "timers",
+    operation:
+      | "diagnostics"
+      | "finder"
+      | "resolve"
+      | "relationships"
+      | "context"
+      | "timers",
     capability: DeveloperApiReadCapability,
     execute: (adapter: OperonDeveloperApiRuntimeAdapter) => Promise<unknown>,
   ): Promise<{ httpStatus: number; payload: Record<string, unknown> }> {
@@ -1182,7 +1227,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     await this.indexState(runtime);
     const adapter = runtime.developerApi;
     if (!adapter || !adapter.hasReadCapability(capability)) {
-      throw new Error(`Operon Developer API V1 read capability is unavailable: ${capability}.`);
+      throw new Error(
+        `Operon Developer API V1 read capability is unavailable: ${capability}.`,
+      );
     }
     const result = await execute(adapter);
     if (!result || typeof result !== "object" || Array.isArray(result)) {
@@ -1194,7 +1241,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         httpStatus: 422,
         payload: errorPayload(
           new Error(
-            typeof (record.error as { reason?: unknown } | undefined)?.reason === "string"
+            typeof (record.error as { reason?: unknown } | undefined)
+              ?.reason === "string"
               ? String((record.error as { reason: string }).reason)
               : `Operon ${operation} rejected the read request.`,
           ),
@@ -1241,14 +1289,17 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (preflight.kind === "response") return preflight.response;
     const runtime = this.requireDeveloperApiMutationRuntime();
     await this.indexState(runtime);
-    const native: DeveloperApiMutationResult = await runtime.developerApi!.recoverMutation(recoveryRef);
+    const native: DeveloperApiMutationResult =
+      await runtime.developerApi!.recoverMutation(recoveryRef);
     const payload: Record<string, unknown> = {
       ok: native.ok,
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
       operationId: this.mutationOperationId(),
       idempotencyKey,
       status: native.ok
-        ? native.code === "already-applied" ? "already-applied" : "applied"
+        ? native.code === "already-applied"
+          ? "already-applied"
+          : "applied"
         : native.code,
       before: null,
       requested,
@@ -1324,10 +1375,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (preflight.kind === "validation-error") {
       return {
         httpStatus: 400,
-        payload: errorPayload(
-          new Error(preflight.message),
-          "validation_error",
-        ),
+        payload: errorPayload(new Error(preflight.message), "validation_error"),
       };
     }
     const canonicalTargetPath = targetPath as string;
@@ -1465,7 +1513,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   }
 
   private mutationOutcomeMismatch(
-    capability: "create" | "update" | "transition" | "convert" | "relocate",
+    capability: DeveloperApiMutationCapability,
     after: OperonBridgeTask | null,
     requested: Record<string, unknown>,
     runtime: OperonRuntime,
@@ -1512,10 +1560,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         if (key === "status") continue;
         const expectedValue =
           key === "priority"
-            ? resolvePriorityStableId(
-                value,
-                runtime.priorities,
-              ) ?? String(value).trim()
+            ? (resolvePriorityStableId(value, runtime.priorities) ??
+              String(value).trim())
             : String(value);
         if (after.fields[key] !== expectedValue)
           return `Managed field '${key}' does not match the request.`;
@@ -1546,6 +1592,63 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         return "Task status does not match the requested stable status id.";
       }
     }
+    if (capability === "relationships") {
+      const expectedParent = Object.prototype.hasOwnProperty.call(
+        requested,
+        "parentTask",
+      )
+        ? requested.parentTask === null
+          ? null
+          : String(requested.parentTask).trim()
+        : after.parentTask;
+      const expectedBlocking = Object.prototype.hasOwnProperty.call(
+        requested,
+        "blocking",
+      )
+        ? Array.isArray(requested.blocking)
+          ? requested.blocking.map(String).sort()
+          : []
+        : [...after.blocking].sort();
+      const expectedBlockedBy = Object.prototype.hasOwnProperty.call(
+        requested,
+        "blockedBy",
+      )
+        ? Array.isArray(requested.blockedBy)
+          ? requested.blockedBy.map(String).sort()
+          : []
+        : [...after.blockedBy].sort();
+      if (after.parentTask !== expectedParent)
+        return "Task parent relationship does not match the request.";
+      if (
+        stableJson([...after.blocking].sort()) !== stableJson(expectedBlocking)
+      ) {
+        return "Task blocking relationships do not match the request.";
+      }
+      if (
+        stableJson([...after.blockedBy].sort()) !==
+        stableJson(expectedBlockedBy)
+      ) {
+        return "Task blockedBy relationships do not match the request.";
+      }
+    }
+    if (capability === "recurrence") {
+      const changes = requested.changes;
+      if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
+        return "Recurrence changes are missing from the request.";
+      }
+      for (const [field, value] of Object.entries(
+        changes as Record<string, unknown>,
+      )) {
+        if (field === "repeat" || field === "datetimeRepeatEnd") continue;
+        if (value === null) {
+          if (after.fields[field] !== undefined && after.fields[field] !== "") {
+            return `Recurrence field '${field}' was not cleared.`;
+          }
+        } else if (after.fields[field] !== String(value)) {
+          return `Recurrence field '${field}' does not match the request.`;
+        }
+      }
+    }
     if (capability === "convert") {
       if (
         (requested.target === "inline" || requested.target === "file") &&
@@ -1573,8 +1676,83 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     return null;
   }
 
+  private async recurrenceStateMismatch(
+    runtime: OperonRuntime,
+    operonId: string,
+    requested: Record<string, unknown>,
+  ): Promise<string | null> {
+    const changes = requested.changes;
+    if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
+      return "Recurrence changes are missing from the request.";
+    }
+    if (!("repeat" in changes)) return null;
+    const expectedRepeat = (changes as Record<string, unknown>).repeat;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const state = await runtime.developerApi?.recurrenceState(operonId);
+      if (state) {
+        if (
+          expectedRepeat === null &&
+          !state.repeating &&
+          state.seriesId === null &&
+          state.occurrenceDate === null
+        ) {
+          return null;
+        }
+        if (
+          typeof expectedRepeat === "string" &&
+          state.repeating &&
+          /^rs[a-z0-9]{5}$/u.test(state.seriesId ?? "")
+        ) {
+          return null;
+        }
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 125));
+    }
+    return expectedRepeat === null
+      ? "The official recurrence state was not cleared after apply."
+      : "The official recurrence state is not active after apply.";
+  }
+
+  private async relationshipInverseMismatch(
+    sourceOperonId: string,
+    before: OperonBridgeTask,
+    after: OperonBridgeTask,
+  ): Promise<string | null> {
+    const targetIds = new Set([
+      ...before.blocking,
+      ...before.blockedBy,
+      ...after.blocking,
+      ...after.blockedBy,
+    ]);
+    for (const targetOperonId of targetIds) {
+      let lastMismatch = `Relationship target '${targetOperonId}' is missing after apply.`;
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const target = (await this.oneTaskAfterMutation(targetOperonId, false))
+          .task;
+        if (target) {
+          const blockedByMatches =
+            target.blockedBy.includes(sourceOperonId) ===
+            after.blocking.includes(targetOperonId);
+          const blockingMatches =
+            target.blocking.includes(sourceOperonId) ===
+            after.blockedBy.includes(targetOperonId);
+          if (blockedByMatches && blockingMatches) {
+            lastMismatch = "";
+            break;
+          }
+          lastMismatch = !blockedByMatches
+            ? `Inverse blockedBy relationship is inconsistent on '${targetOperonId}'.`
+            : `Inverse blocking relationship is inconsistent on '${targetOperonId}'.`;
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 125));
+      }
+      if (lastMismatch) return lastMismatch;
+    }
+    return null;
+  }
+
   private async executeExistingMutation(
-    capability: "update" | "transition" | "convert" | "relocate",
+    capability: Exclude<DeveloperApiMutationCapability, "create">,
     operonId: string,
     body: Record<string, unknown>,
     requested: Record<string, unknown>,
@@ -1677,7 +1855,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             ? {
                 error: {
                   code: native.code,
-                  message: native.message ?? "Operon rejected the mutation preview.",
+                  message:
+                    native.message ?? "Operon rejected the mutation preview.",
                 },
                 retryable: native.retryable,
               }
@@ -1687,7 +1866,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         };
         this.cacheMutation(idempotencyKey, signature, payload);
         return {
-          httpStatus: native.ok ? 200 : native.code === "conflict" ? 409 : native.code === "not-ready" ? 503 : 422,
+          httpStatus: native.ok
+            ? 200
+            : native.code === "conflict"
+              ? 409
+              : native.code === "not-ready"
+                ? 503
+                : 422,
           payload,
         };
       }
@@ -1752,21 +1937,46 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         this.cacheMutation(idempotencyKey, signature, payload);
         return { httpStatus: 500, payload };
       }
-      const mismatch = this.mutationOutcomeMismatch(capability, afterRead.task, requested, runtime);
-      const applied = native.ok && !mismatch;
+      const mismatch = this.mutationOutcomeMismatch(
+        capability,
+        afterRead.task,
+        requested,
+        runtime,
+      );
+      const inverseMismatch =
+        native.ok && !mismatch && capability === "relationships"
+          ? await this.relationshipInverseMismatch(
+              operonId,
+              beforeRead.task,
+              afterRead.task!,
+            )
+          : null;
+      const recurrenceMismatch =
+        native.ok && !mismatch && capability === "recurrence"
+          ? await this.recurrenceStateMismatch(runtime, operonId, requested)
+          : null;
+      const outcomeMismatch = mismatch ?? inverseMismatch ?? recurrenceMismatch;
+      const applied = native.ok && !outcomeMismatch;
       const payload = {
         ok: applied,
         contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
         operationId,
         idempotencyKey,
-        status: applied ? (native.code === "already-applied" ? "already-applied" : "applied") : "failed",
+        status: applied
+          ? native.code === "already-applied"
+            ? "already-applied"
+            : "applied"
+          : "failed",
         before: beforeRead.task,
         requested,
         after: afterRead.task,
         ...(native.planDigest ? { planDigest: native.planDigest } : {}),
         ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
-        ...(mismatch
-          ? { error: { code: "outcome_mismatch", message: mismatch }, retryable: false }
+        ...(outcomeMismatch
+          ? {
+              error: { code: "outcome_mismatch", message: outcomeMismatch },
+              retryable: false,
+            }
           : {}),
         source: "operon-live",
         stale: false,
@@ -1817,20 +2027,34 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       return { httpStatus: 500, payload };
     }
     const mismatch = result.ok
-      ? this.mutationOutcomeMismatch(capability, afterRead.task, requested, runtime)
+      ? this.mutationOutcomeMismatch(
+          capability,
+          afterRead.task,
+          requested,
+          runtime,
+        )
       : null;
-    const applied = result.ok && !mismatch;
+    const inverseMismatch =
+      result.ok && !mismatch && capability === "relationships"
+        ? await this.relationshipInverseMismatch(
+            operonId,
+            beforeRead.task,
+            afterRead.task!,
+          )
+        : null;
+    const outcomeMismatch = mismatch ?? inverseMismatch;
+    const applied = result.ok && !outcomeMismatch;
     const payload = {
       ok: applied,
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
       operationId,
       idempotencyKey,
-      status: applied ? "applied" : mismatch ? "failed" : "rejected",
+      status: applied ? "applied" : outcomeMismatch ? "failed" : "rejected",
       before: beforeRead.task,
       requested,
       after: afterRead.task,
-      error: mismatch
-        ? { code: "outcome_mismatch", message: mismatch }
+      error: outcomeMismatch
+        ? { code: "outcome_mismatch", message: outcomeMismatch }
         : result.ok
           ? undefined
           : {
@@ -1842,7 +2066,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       stale: false,
     };
     this.cacheMutation(idempotencyKey, signature, payload);
-    return { httpStatus: applied ? 200 : mismatch ? 500 : 422, payload };
+    return { httpStatus: applied ? 200 : outcomeMismatch ? 500 : 422, payload };
   }
 
   private async executeCreateMutation(
@@ -1906,7 +2130,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             ? {
                 error: {
                   code: native.code,
-                  message: native.message ?? "Operon rejected the task creation preview.",
+                  message:
+                    native.message ??
+                    "Operon rejected the task creation preview.",
                 },
                 retryable: native.retryable,
               }
@@ -1916,7 +2142,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         };
         this.cacheMutation(idempotencyKey, signature, payload);
         return {
-          httpStatus: native.ok ? 200 : native.code === "not-ready" ? 503 : native.code === "conflict" ? 409 : 422,
+          httpStatus: native.ok
+            ? 200
+            : native.code === "not-ready"
+              ? 503
+              : native.code === "conflict"
+                ? 409
+                : 422,
           payload,
         };
       }
@@ -1956,7 +2188,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           payload,
         };
       }
-      let afterRead: Awaited<ReturnType<OptimikeOperonBridgePlugin["oneTask"]>> | null = null;
+      let afterRead: Awaited<
+        ReturnType<OptimikeOperonBridgePlugin["oneTask"]>
+      > | null = null;
       try {
         afterRead = await this.oneTaskAfterMutation(native.operonId, true);
       } catch (error) {
@@ -1981,21 +2215,33 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         this.cacheMutation(idempotencyKey, signature, payload);
         return { httpStatus: 500, payload };
       }
-      const mismatch = this.mutationOutcomeMismatch("create", afterRead.task, requested, runtime);
+      const mismatch = this.mutationOutcomeMismatch(
+        "create",
+        afterRead.task,
+        requested,
+        runtime,
+      );
       const applied = native.ok && !mismatch;
       const payload = {
         ok: applied,
         contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
         operationId,
         idempotencyKey,
-        status: applied ? (native.code === "already-applied" ? "already-applied" : "applied") : "failed",
+        status: applied
+          ? native.code === "already-applied"
+            ? "already-applied"
+            : "applied"
+          : "failed",
         before: null,
         requested,
         after: afterRead.task,
         ...(native.planDigest ? { planDigest: native.planDigest } : {}),
         ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
         ...(mismatch
-          ? { error: { code: "outcome_mismatch", message: mismatch }, retryable: false }
+          ? {
+              error: { code: "outcome_mismatch", message: mismatch },
+              retryable: false,
+            }
           : {}),
         source: "operon-live",
         stale: false,
@@ -2117,76 +2363,88 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         }
       });
 
-    api.addRoute(`${REST_PREFIX}/diagnostics`).get(async (_req: any, res: any) => {
-      try {
-        const result = await this.executeDeveloperRead(
-          "diagnostics",
-          "system.diagnostics",
-          (adapter) => adapter.readDiagnostics(),
-        );
-        sendJson(res, result.httpStatus, result.payload);
-      } catch (error) {
-        sendJson(res, 503, errorPayload(error, "operon_diagnostics_unavailable"));
-      }
-    });
+    api
+      .addRoute(`${REST_PREFIX}/diagnostics`)
+      .get(async (_req: any, res: any) => {
+        try {
+          const result = await this.executeDeveloperRead(
+            "diagnostics",
+            "system.diagnostics",
+            (adapter) => adapter.readDiagnostics(),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(
+            res,
+            503,
+            errorPayload(error, "operon_diagnostics_unavailable"),
+          );
+        }
+      });
 
-    api.addRoute(`${REST_PREFIX}/tasks/finder`).post(async (req: any, res: any) => {
-      try {
-        const body = this.bodyRecord(req);
-        const requested = pickDefined(body, [
-          "text",
-          "filters",
-          "representations",
-          "scope",
-          "project",
-          "limit",
-          "cursor",
-        ]);
-        const result = await this.executeDeveloperRead(
-          "finder",
-          "tasks.finder",
-          (adapter) => adapter.findTasks(requested),
-        );
-        sendJson(res, result.httpStatus, result.payload);
-      } catch (error) {
-        sendJson(res, 400, errorPayload(error, "operon_finder_error"));
-      }
-    });
+    api
+      .addRoute(`${REST_PREFIX}/tasks/finder`)
+      .post(async (req: any, res: any) => {
+        try {
+          const body = this.bodyRecord(req);
+          const requested = pickDefined(body, [
+            "text",
+            "filters",
+            "representations",
+            "scope",
+            "project",
+            "limit",
+            "cursor",
+          ]);
+          const result = await this.executeDeveloperRead(
+            "finder",
+            "tasks.finder",
+            (adapter) => adapter.findTasks(requested),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 400, errorPayload(error, "operon_finder_error"));
+        }
+      });
 
-    api.addRoute(`${REST_PREFIX}/entities/resolve`).post(async (req: any, res: any) => {
-      try {
-        const body = this.bodyRecord(req);
-        const requested = pickDefined(body, ["selector", "limit"]);
-        const result = await this.executeDeveloperRead(
-          "resolve",
-          "entities.resolve",
-          (adapter) => adapter.resolveEntity(requested),
-        );
-        sendJson(res, result.httpStatus, result.payload);
-      } catch (error) {
-        sendJson(res, 400, errorPayload(error, "operon_resolve_error"));
-      }
-    });
+    api
+      .addRoute(`${REST_PREFIX}/entities/resolve`)
+      .post(async (req: any, res: any) => {
+        try {
+          const body = this.bodyRecord(req);
+          const requested = pickDefined(body, ["selector", "limit"]);
+          const result = await this.executeDeveloperRead(
+            "resolve",
+            "entities.resolve",
+            (adapter) => adapter.resolveEntity(requested),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 400, errorPayload(error, "operon_resolve_error"));
+        }
+      });
 
-    api.addRoute(`${REST_PREFIX}/relationships`).post(async (req: any, res: any) => {
-      try {
-        const body = this.bodyRecord(req);
-        const operonId = String(body.operonId ?? "").trim();
-        if (!operonId) throw new Error("operonId is required.");
-        const requested = {
-          selector: { kind: "operon-id", operonId },
-          ...pickDefined(body, ["kinds", "limit", "depth"]),
-        };
-        const result = await this.executeDeveloperRead(
-          "relationships",
-          "relationships.read",
-          (adapter) => adapter.readRelationships(requested),
-        );
-        sendJson(res, result.httpStatus, result.payload);
-      } catch (error) {
-        sendJson(res, 400, errorPayload(error, "operon_relationships_error"));
-      }
-    });
+    api
+      .addRoute(`${REST_PREFIX}/relationships`)
+      .post(async (req: any, res: any) => {
+        try {
+          const body = this.bodyRecord(req);
+          const operonId = String(body.operonId ?? "").trim();
+          if (!operonId) throw new Error("operonId is required.");
+          const requested = {
+            selector: { kind: "operon-id", operonId },
+            ...pickDefined(body, ["kinds", "limit", "depth"]),
+          };
+          const result = await this.executeDeveloperRead(
+            "relationships",
+            "relationships.read",
+            (adapter) => adapter.readRelationships(requested),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 400, errorPayload(error, "operon_relationships_error"));
+        }
+      });
 
     api.addRoute(`${REST_PREFIX}/context`).post(async (req: any, res: any) => {
       try {
@@ -2238,7 +2496,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
               res,
               503,
               errorPayload(
-                new Error(result.message ?? "Operon recovery state is unavailable."),
+                new Error(
+                  result.message ?? "Operon recovery state is unavailable.",
+                ),
                 "recovery_unavailable",
               ),
             );
@@ -2260,7 +2520,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       .addRoute(`${REST_PREFIX}/mutations/recover`)
       .post(async (req: any, res: any) => {
         try {
-          const result = await this.executeRecoveryMutation(this.bodyRecord(req));
+          const result = await this.executeRecoveryMutation(
+            this.bodyRecord(req),
+          );
           sendJson(res, result.httpStatus, result.payload);
         } catch (error) {
           sendJson(res, 503, errorPayload(error, "recovery_unavailable"));
@@ -2533,6 +2795,66 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             body,
             requested,
             (operonApi) => operonApi.transitionTask(operonId, requested),
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+        }
+      });
+
+    api
+      .addRoute(`${REST_PREFIX}/tasks/:operonId/relationships`)
+      .post(async (req: any, res: any) => {
+        try {
+          const operonId = decodeURIComponent(
+            String(req?.params?.operonId ?? ""),
+          ).trim();
+          const body = this.bodyRecord(req);
+          const requested =
+            body.relationships &&
+            typeof body.relationships === "object" &&
+            !Array.isArray(body.relationships)
+              ? (body.relationships as Record<string, unknown>)
+              : {};
+          const result = await this.executeExistingMutation(
+            "relationships",
+            operonId,
+            body,
+            requested,
+            async () => {
+              throw new Error(
+                "Relationship mutation requires Operon Developer API V1.",
+              );
+            },
+          );
+          sendJson(res, result.httpStatus, result.payload);
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "mutation_unavailable"));
+        }
+      });
+
+    api
+      .addRoute(`${REST_PREFIX}/tasks/:operonId/recurrence`)
+      .post(async (req: any, res: any) => {
+        try {
+          const operonId = decodeURIComponent(
+            String(req?.params?.operonId ?? ""),
+          ).trim();
+          const body = this.bodyRecord(req);
+          const requested = {
+            scope: body.scope,
+            changes: body.changes,
+          };
+          const result = await this.executeExistingMutation(
+            "recurrence",
+            operonId,
+            body,
+            requested,
+            async () => {
+              throw new Error(
+                "Recurrence mutation requires Operon Developer API V1.",
+              );
+            },
           );
           sendJson(res, result.httpStatus, result.payload);
         } catch (error) {

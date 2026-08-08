@@ -17,6 +17,9 @@ import {
   OperonTransitionTaskSchema,
   OperonTransitionTaskInputSchema,
   OperonUpdateTaskSchema,
+  OperonSetRelationshipsSchema,
+  OperonSetRelationshipsInputSchema,
+  OperonUpdateRecurrenceSchema,
 } from "../../../services/operon/contract.js";
 import { OperonService } from "../../../services/operon/service.js";
 import { McpError } from "../../../types-global/errors.js";
@@ -151,7 +154,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_get_diagnostics",
-     "Read Operon 3.1.1 native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault.",
+    "Read Operon 3.1.1 native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault.",
     {},
     READ_ONLY_ANNOTATIONS,
     async () => runTool(() => service.diagnostics()),
@@ -253,6 +256,24 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonRelocateTaskSchema>) =>
       runTool(() => service.relocateTask(params)),
+  );
+
+  server.tool(
+    "operon_set_relationships",
+    "Replace or explicitly clear parentTask, blocking, or blockedBy through Operon Developer API V1. The tool rejects duplicate, self, and contradictory dependency targets; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    OperonSetRelationshipsInputSchema.shape,
+    MUTATION_ANNOTATIONS,
+    async (params: z.infer<typeof OperonSetRelationshipsSchema>) =>
+      runTool(() => service.setRelationships(params)),
+  );
+
+  server.tool(
+    "operon_update_recurrence",
+    "Set or explicitly clear an Operon recurrence rule and its official temporal fields for this-task or this-and-following. This apply is reserved for full write policy; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    OperonUpdateRecurrenceSchema.shape,
+    MUTATION_ANNOTATIONS,
+    async (params: z.infer<typeof OperonUpdateRecurrenceSchema>) =>
+      runTool(() => service.updateRecurrence(params)),
   );
 
   server.tool(

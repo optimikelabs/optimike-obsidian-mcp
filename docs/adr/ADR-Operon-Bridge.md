@@ -40,7 +40,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Official Operon 
 
 ## Public API boundary
 
-`OperonPublicApiV1` remains the legacy Kairélys boundary. Official Operon `3.1.1` exposes host-verified Developer API V1 reads plus preview/apply/recovery for typed create, update, transition, conversion, and inline relocation. Elevated or destructive applies require fresh host-owned consent in the owning vault window and fail closed after a bounded timeout. The implementation stays inside Operon and calls its existing parser/converter, creator, workflow, writer, dependency, recurrence, aggregate, archive, and conversion paths.
+`OperonPublicApiV1` remains the legacy Kairélys boundary. Official Operon `3.1.1` exposes host-verified Developer API V1 reads plus preview/apply/recovery for typed create, update, transition, relationship replacement, recurrence update, conversion, and inline relocation. Elevated or destructive applies require fresh host-owned consent in the owning vault window and fail closed after a bounded timeout. The implementation stays inside Operon and calls its existing parser/converter, creator, workflow, writer, dependency, recurrence, aggregate, archive, and conversion paths.
 
 The fork delta must remain limited to this generic API and contract tests. No ÉLYSIA-specific workflow, UX, view, calendar, Kanban, or data-model logic belongs in the fork. An upstream PR remains preferred; the fork is the production fallback.
 
