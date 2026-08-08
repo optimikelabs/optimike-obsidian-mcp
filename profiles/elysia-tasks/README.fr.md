@@ -76,20 +76,22 @@ Le fichier de référence est [`v1/profile.json`](v1/profile.json).
 
 ## Skill agentique publique
 
-La skill portable [`elysia-task-gouverneur`](skills/elysia-task-gouverneur/SKILL.md) permet à un agent de piloter ce profil via les 13 outils `operon_*` du MCP Optimike.
+La skill portable [`elysia-task-gouverneur`](skills/elysia-task-gouverneur/SKILL.md) permet à un agent de piloter ce profil via les 23 outils `operon_*` gouvernés du MCP Optimike.
 
 Elle couvre :
 
-- création, adoption, mise à jour, transition, conversion et relocalisation ;
-- audit et triage par saved filters ;
+- création, mise à jour, transition, relations, récurrence, conversion et relocalisation ; adoption seulement lorsque le moteur annonce la capacité ;
+- audit et triage par saved filters lorsqu’ils existent, sinon par requêtes bornées dérivées du profil ;
 - cycle de vie des backlogs de projet ;
-- diagnostic du runtime et du cache ;
+- diagnostic du runtime, du cache, des grants et récupération du même plan incertain ;
 - dry-run, révisions optimistes, idempotence et preuve après application.
 - admission P90-J avant création/adoption et clés d’idempotence distinctes pour le plan et l’application.
 
 La skill ne contient aucun chemin absolu, aucune tâche réelle, aucun identifiant privé et aucune copie de configuration `data.json`. Les règles propres à un coffre doivent être fournies comme politique locale au moment de l’exécution.
 
 La version publique suit son propre versionnement et n’est pas un miroir automatique d’une configuration privée. Toute évolution doit être promue après contrôle de portabilité et de non-régression.
+
+La CLI reste la surface opérateur pour la suppression, les rappels, le pin et le contrôle du timer. La skill n’expose aucun passthrough CLI générique.
 
 Pour l’installer dans un runtime Agent Skills, copier le dossier complet :
 

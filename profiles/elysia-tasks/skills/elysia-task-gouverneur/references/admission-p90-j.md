@@ -21,6 +21,8 @@ Décider si un item mérite un cycle de vie de tâche avant toute création ou a
 - `REJECT_DUPLICATE`
 - `DEFER_CAPACITY`
 
+`ADOPT` est un verdict d’admission, pas une garantie technique. Si la capacité `adopt` manque, conserver la checkbox ou demander une action opérateur ; ne jamais contourner l’absence par une édition Markdown.
+
 ## Sortie minimale
 
 ```yaml

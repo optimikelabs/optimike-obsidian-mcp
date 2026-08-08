@@ -22,13 +22,13 @@ Pour un audit de conformité ÉLYSIA, ouvrir `profiles/elysia-tasks/v1/profile.j
 - `fs_elysia_periodic_leakage`
 - `fs_elysia_folder_open` avec un `scopePath` explicite
 
-Appeler `operon_query_saved_filter` ; ne pas reconstruire la logique du filtre côté agent.
+Si `filterQuery: true`, appeler `operon_query_saved_filter`. Sinon, lire les critères dans `profile.json` et les traduire dans `operon_query_tasks` ou `operon_find_tasks` pour cette exécution seulement. Ne pas figer une seconde copie de la logique dans la skill.
 
 ## Méthode
 
 1. Exécuter le préflight live.
 2. Déclarer le périmètre et la politique de référence.
-3. Interroger le saved filter ou les tâches concernées.
+3. Interroger le saved filter lorsqu’il est disponible, sinon les tâches concernées avec les critères du profil.
 4. Séparer faits, écarts au profil, politique locale et interprétation.
 5. Proposer uniquement les mutations nécessaires.
 6. Pour un audit complet, comparer toutes les tâches ouvertes à l’union des surfaces et exiger `open_without_surface = 0`, `now_not_in_week = 0` et `periodic_non_inbox = 0`.

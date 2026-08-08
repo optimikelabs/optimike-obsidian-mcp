@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ÉLYSIA Task Gouverneur `1.2.0`, aligned with the complete 23-tool Operon
+  surface, capability-gated adoption/saved filters, governed relationships and
+  recurrence, exact-plan recovery, and the explicit MCP/CLI boundary.
+
 - Bilingual Operon MCP contract and CLI audit documenting the complete 23-tool
   surface, the governed MCP-versus-CLI boundary, stock 3.1.1 capability limits,
   and the completed relationship and recurrence acceptance evidence.

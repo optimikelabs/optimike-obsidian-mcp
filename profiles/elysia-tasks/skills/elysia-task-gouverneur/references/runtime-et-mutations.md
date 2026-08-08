@@ -32,6 +32,12 @@ Lecture :
 - `operon_query_tasks`
 - `operon_query_saved_filter`
 - `operon_validate`
+- `operon_get_diagnostics`
+- `operon_find_tasks`
+- `operon_resolve_task`
+- `operon_get_relationships`
+- `operon_build_context`
+- `operon_get_timer_state`
 
 Mutation :
 
@@ -39,8 +45,19 @@ Mutation :
 - `operon_create_task`
 - `operon_update_task`
 - `operon_transition_task`
+- `operon_set_relationships`
+- `operon_update_recurrence`
 - `operon_convert_task`
 - `operon_relocate_task`
+
+Récupération :
+
+- `operon_list_pending_recoveries`
+- `operon_recover_mutation`
+
+Le serveur enregistre vingt-trois outils. Leur présence ne remplace jamais le contrôle de capacité live. Operon officiel `3.1.1` n’annonce actuellement ni `adopt` ni `filterQuery` : les outils restent enregistrés pour compatibilité mais doivent renvoyer une indisponibilité structurée. `operon_query_tasks` est la requête structurée Operon ; l’ancien outil non préfixé `query_tasks` relève du legacy Markdown.
+
+Les relations sont admises en mode `guarded`. La récurrence et la récupération exigent le mode `full`. La CLI reste la surface opérateur/admin et n’est pas relayée génériquement par le MCP.
 
 ## Protocole
 
@@ -54,12 +71,12 @@ Pour une tâche existante :
 6. Relire la tâche et sa révision ; arrêter ou recalculer si elle a changé.
 7. Construire une clé d’application distincte : `<intention>-apply-<nonce>`.
 8. Appliquer avec `dryRun: false` et la révision actuelle.
-9. Relire la tâche, vérifier le filtre attendu et appeler `operon_validate`.
+9. Relire la tâche, vérifier la surface attendue et appeler `operon_validate`. Utiliser un saved filter seulement si `filterQuery` est disponible ; sinon traduire les critères du profil dans une requête bornée pour cette exécution.
 10. Si la tâche apparaît dans `fs_elysia_now`, prouver sa présence dans `fs_elysia_week` et rapporter `invisible: false`.
 
 Ne jamais réutiliser la clé du dry-run pour l’apply : `dryRun` fait partie de la requête canonique.
 
-Pour une création, aucune révision antérieure n’existe : destination, pipeline, statut initial et clé d’idempotence doivent être explicites. Pour une adoption, verrouiller le chemin, la ligne et le contenu attendu de la checkbox.
+Pour une création, aucune révision antérieure n’existe : destination, pipeline, statut initial et clé d’idempotence doivent être explicites. Pour une adoption, exiger d’abord `adopt: true`, puis verrouiller le chemin, la ligne et le contenu attendu. Après une mutation de relations, relire la source et les relations inverses. Après une mutation de récurrence, vérifier règle et portée. Après `outcome-unknown`, récupérer uniquement le même `recoveryRef` ; ne jamais rejouer la mutation initiale.
 
 ## Interdits
 
@@ -68,3 +85,5 @@ Pour une création, aucune révision antérieure n’existe : destination, pipel
 - Aucune écriture miroir vers un autre moteur de tâches.
 - Aucune opération bulk avant un dry-run borné.
 - Aucun succès annoncé si l’état final n’a pas été relu.
+- Aucun retry aveugle après un résultat incertain.
+- Aucune suppression, gestion de rappel, pin ou commande de timer via le MCP.
