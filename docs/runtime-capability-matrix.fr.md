@@ -74,10 +74,11 @@ Tous les modes enregistrent aussi les 23 outils du contrat Operon :
 `operon_relocate_task`, `operon_list_pending_recoveries` et
 `operon_recover_mutation`. Hors mode live, ils restent limités aux snapshots
 validés en lecture seule ; toute mutation échoue fermée. L’enregistrement ne
-garantit pas la disponibilité runtime : Operon officiel `3.1.1` renvoie encore
-une indisponibilité pour les filtres sauvegardés et l’adoption. Les relations et
-la récurrence ont passé le pilote live dédié sur le build 3.1.1 corrigé. La
-version officielle conserve les limites bornées #99/#101, #135, #137 et #139.
+garantit pas la disponibilité runtime : Operon officiel `3.2.x` exécute les
+filtres sauvegardés après un grant exact `tasks.filter-query`, mais ne publie pas
+leur catalogue ; l’adoption reste indisponible. Les relations et la récurrence
+ont passé le pilote live dédié 3.2.0. Les limites bornées #99/#101 et #139
+restent ouvertes. Le renderer Settings manquant en 3.2.1 est suivi dans #145/#146.
 Voir le [contrat MCP Operon](operon-mcp-contract.fr.md) et
 l’[audit CLI/API](operon-cli-audit.fr.md).
 

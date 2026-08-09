@@ -2,17 +2,17 @@
 
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
-Date: 2026-08-08
-Reference: official Operon `3.1.1`, Operon CLI `1.0.9`, Developer API V1 and `cli-manifest-v1.json`.
+Date: 2026-08-09
+Reference: official Operon `3.2.1`, Operon CLI `1.1.0`, Developer API V1 and `cli-manifest-v1.json`.
 
 The original 2026-08-01 CLI observations were made against Operon `3.0.1` and
-remain historical evidence. The current MCP adapter targets `3.1.1`; its full
-acceptance proof uses the patched local Operon build while upstream fixes are
-under review in [#135](https://github.com/hasanyilmaz/operon/pull/135),
-[#137](https://github.com/hasanyilmaz/operon/pull/137), and
-[#139](https://github.com/hasanyilmaz/operon/pull/139). Stock `3.1.1` remains
-the supported production target for reads and most governed mutations, with
-uncertain transition settlement tracked by [#99](https://github.com/hasanyilmaz/operon/issues/99)
+remain historical evidence. The current MCP adapter targets `3.2.1` while the
+complete live acceptance evidence remains on the contract-compatible local
+`3.2.0` build. The missing 3.2.1 settings renderer is tracked in
+[#145](https://github.com/hasanyilmaz/operon/issues/145) and
+[#146](https://github.com/hasanyilmaz/operon/pull/146). Fixes #135 and #137 are already merged. File Task rename safety
+remains tracked in [#139](https://github.com/hasanyilmaz/operon/pull/139), and
+uncertain transition settlement in [#99](https://github.com/hasanyilmaz/operon/issues/99)
 and [#101](https://github.com/hasanyilmaz/operon/pull/101). The MCP remains
 fail-closed and does not fall back to Markdown or private APIs.
 
@@ -30,10 +30,10 @@ Do not expose a generic CLI passthrough through MCP.
 
 ## Surface comparison
 
-The MCP registers twenty-three governed tools plus six bounded Developer API
-reasoning reads. Two compatibility tools, saved-filter evaluation and adoption,
-remain unavailable on official Operon `3.1.1` until the runtime advertises the
-native capabilities:
+The MCP registers twenty-three governed tools, including six bounded Developer
+API reasoning reads. Saved-filter execution is available on Operon `3.2.x`
+after an exact `tasks.filter-query` grant, but the official API does not expose
+the saved-filter catalog. Adoption remains an unavailable compatibility tool:
 
 - reads: status, configuration, list/get/query, capability-gated saved filters, validation;
 - native reasoning reads: diagnostics, finder, resolve, relationships, context,
@@ -74,7 +74,7 @@ operation with a clear ÉLYSIA use case and a matching proof/guard.
 
 ## Current proof boundary
 
-Official Operon `3.1.1` native Developer API acceptance on the patched local
+Official Operon `3.2.0` native Developer API acceptance on the local
 build passed host grant and identity checks, live reads, typed preview/apply,
 receipt/postflight, idempotent replay, restart, and same-plan recovery. The
 production Bridge pilot also passed live read, typed create/update/transition
@@ -82,18 +82,18 @@ preview/apply, replay, and stale revision conflict.
 
 The relationship and recurrence extensions pass the adapter, Bridge contract,
 service, policy, idempotency/restart and documentation suites. Their dedicated
-live Operon `3.1.1` acceptance also passed on the patched local build:
+live Operon `3.2.0` acceptance also passed on the local build:
 relationship dry-run/apply, inverse-edge verification, idempotent replay,
 stale-revision conflict, blocked terminal transition, exact restoration,
-recurrence add/scope-change/clear, restart/recovery stability, live source, no
-residual relationship/recurrence state, and `P0/P1/P2 = 0/0/0`.
+recurrence add/scope-change/clear, restart/recovery stability, saved-filter
+execution with opaque pagination, live source, 25 tasks after fixture cleanup,
+no residual relationship/recurrence state, and `P0/P1/P2 = 0/0/0`.
 
-Stock `3.1.1` may still return the bounded `outcome-unknown` transition result
+The remaining official transition edge may still return the bounded `outcome-unknown` result
 tracked by [Operon #99](https://github.com/hasanyilmaz/operon/issues/99) and
-[#101](https://github.com/hasanyilmaz/operon/pull/101). The patched local build
-passes the terminal/recovery proof; when the stock runtime cannot prove its
-result, the Bridge reports the uncertainty and does not retry or fall back to
-Markdown/private APIs. This remains a capability gate, not a hidden bypass.
+[#101](https://github.com/hasanyilmaz/operon/pull/101). When the runtime cannot
+prove its result, the Bridge reports the uncertainty and does not retry or fall
+back to Markdown/private APIs. This remains a capability gate, not a hidden bypass.
 
 The read audit, implementation and live acceptance of the two useful advanced
 writes are complete. Other advanced writes remain outside MCP until each has a
@@ -119,8 +119,9 @@ capabilities as available, while the CLI invocation itself is not reliable for
 them on this pilot. `tasks.query` also emitted strict-V1 warnings for malformed
 datetime metadata, omitting those fields rather than failing the whole query.
 
-Conclusion: the CLI is a broader operator surface, but it is not a dependable
-transport layer for MCP on this Windows installation. Keep the MCP/Bridge
-contract independent and bounded; keep the CLI for operator diagnostics,
-native acceptance and recovery investigation until Operon fixes the affected
-Windows handlers. No real mutation was applied during this audit.
+Conclusion: the CLI is a broader operator surface, but it was not a dependable
+transport layer for MCP on that historical Windows installation. The current
+package version is `1.1.0`, but this update does not claim every former handler
+failure was requalified through the CLI. Keep the MCP/Bridge contract independent
+and bounded; keep the CLI for operator diagnostics, native acceptance and
+recovery investigation. No real mutation was applied during the historical audit.

@@ -255,6 +255,50 @@ export class OperonService {
     return this.client;
   }
 
+  private bridgeHttpError(error: unknown, operation: string): never {
+    if (!axios.isAxiosError(error) || !error.response) throw error;
+    const status = error.response.status;
+    const payload =
+      error.response.data && typeof error.response.data === "object"
+        ? (error.response.data as Record<string, unknown>)
+        : null;
+    const nativeError =
+      payload?.error && typeof payload.error === "object"
+        ? (payload.error as Record<string, unknown>)
+        : null;
+    const code =
+      status === 400 || status === 422
+        ? BaseErrorCode.VALIDATION_ERROR
+        : status === 401
+          ? BaseErrorCode.UNAUTHORIZED
+          : status === 403
+            ? BaseErrorCode.FORBIDDEN
+            : status === 404
+              ? BaseErrorCode.NOT_FOUND
+              : status === 409
+                ? BaseErrorCode.CONFLICT
+                : status === 429
+                  ? BaseErrorCode.RATE_LIMITED
+                  : status >= 500
+                    ? BaseErrorCode.SERVICE_UNAVAILABLE
+                    : BaseErrorCode.INTERNAL_ERROR;
+    const message =
+      typeof nativeError?.message === "string"
+        ? nativeError.message
+        : typeof payload?.message === "string"
+          ? payload.message
+          : `Operon Bridge request failed with HTTP ${status}.`;
+    throw new McpError(
+      code,
+      message,
+      this.requestContext(operation, {
+        httpStatus: status,
+        bridgeCode:
+          typeof nativeError?.code === "string" ? nativeError.code : undefined,
+      }),
+    );
+  }
+
   private openDb(): DatabaseSync {
     mkdirSync(path.dirname(this.dbPath), { recursive: true });
     const db = new DatabaseSync(this.dbPath);
@@ -1693,10 +1737,14 @@ export class OperonService {
         this.requestContext("operonQuerySavedFilter"),
       );
     }
-    const response = await this.getClient().post(
-      `${BRIDGE_PREFIX}/tasks/filter`,
-      params,
-    );
+    const response = await this.getClient()
+      .post(
+        `${BRIDGE_PREFIX}/tasks/filter`,
+        params,
+      )
+      .catch((error: unknown) =>
+        this.bridgeHttpError(error, "operonQuerySavedFilter"),
+      );
     const parsed = OperonBridgePageSchema.safeParse(response.data);
     if (!parsed.success) {
       throw new McpError(

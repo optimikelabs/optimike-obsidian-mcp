@@ -20,7 +20,7 @@ explicitly governed access to configured documents outside the vault.
 | ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------- |
 | Notes                   | Read, list, search, update, frontmatter and tags                       | Vault; Local REST API for the full live surface    |
 | Bases and Canvas        | Bases query/write tools, format validation and bounded Canvas helpers  | Bases Bridge for live Bases                        |
-| Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools     | Operon 3.1.1 Developer API V1 through the Bridge   |
+| Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools     | Operon 3.2.1 Developer API V1 through the Bridge   |
 | Semantic search         | Smart Connections index search with durable metadata cache             | `.smart-env` plus Ollama or OpenAI query embedding |
 | Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions | Local filesystem                                   |
 | External documents      | Governed reads/handoff plus opt-in local move with exact link repair   | Allowlist; local stdio for move                    |
@@ -91,7 +91,7 @@ Enable only the surfaces you use:
   live note, metadata and tag operations;
 - bundled **Bases Bridge (REST)**: live `.base` operations;
 - **Smart Connections**: semantic index under `.smart-env`;
-- **Operon 3.1.1** and the bundled **Optimike Operon Bridge**: governed live
+- **Operon 3.2.1** and the bundled **Optimike Operon Bridge**: governed live
   task operations through the official Developer API V1;
 - Kairélys compatibility remains available as a bounded legacy/rollback path,
   not as the production owner;
@@ -120,16 +120,20 @@ Transition apply is available through the Bridge. Elevated or destructive plans
 still require fresh confirmation in the owning Obsidian vault window and fail
 closed after 45 seconds when no confirmation can be presented.
 
-Compatibility note: the adapter targets official Operon `3.1.1`, but the full
-acceptance evidence in this repository uses our patched local Operon build while
-upstream fixes are under review in [#135](https://github.com/hasanyilmaz/operon/pull/135),
-[#137](https://github.com/hasanyilmaz/operon/pull/137), and
-[#139](https://github.com/hasanyilmaz/operon/pull/139). Stock Operon `3.1.1`
-remains usable for reads and most governed mutations, but modified-time
-frontmatter settlement, consent across multiple Obsidian windows, and implicit
-File Task renames retain the upstream limitations described in those PRs. The
-MCP does not fall back to Markdown or private APIs when one of these cases is
-not supported. The unscoped transition edge case remains tracked in
+Compatibility note: the adapter targets official Operon `3.2.1` and Bridge
+`0.6.0`; `3.2.0` remains explicitly compatible and is the version used by the
+complete live acceptance run. Modified-time frontmatter settlement and
+multi-window consent were merged upstream before these releases. Saved-filter execution is available
+through the additive task-workflow Developer API after an exact grant, but the
+official API does not expose the saved-filter catalog: callers must supply an
+exact `filterSetId` obtained from Operon's UI/configuration or an operator
+workflow. Adoption remains unavailable on the official Developer API. Operon
+3.2.1 still omits the declarative Settings renderer for Developer API grant
+controls; the fix is tracked in [#145](https://github.com/hasanyilmaz/operon/issues/145)
+and [#146](https://github.com/hasanyilmaz/operon/pull/146).
+No MCP route falls back to Markdown or private APIs. Implicit File Task renames
+remain tracked in [#139](https://github.com/hasanyilmaz/operon/pull/139), and the
+unscoped transition edge case remains tracked in
 [#99](https://github.com/hasanyilmaz/operon/issues/99) and
 [#101](https://github.com/hasanyilmaz/operon/pull/101).
 

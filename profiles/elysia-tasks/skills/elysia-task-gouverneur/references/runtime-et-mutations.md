@@ -55,7 +55,7 @@ Récupération :
 - `operon_list_pending_recoveries`
 - `operon_recover_mutation`
 
-Le serveur enregistre vingt-trois outils. Leur présence ne remplace jamais le contrôle de capacité live. Operon officiel `3.1.1` n’annonce actuellement ni `adopt` ni `filterQuery` : les outils restent enregistrés pour compatibilité mais doivent renvoyer une indisponibilité structurée. `operon_query_tasks` est la requête structurée Operon ; l’ancien outil non préfixé `query_tasks` relève du legacy Markdown.
+Le serveur enregistre vingt-trois outils. Leur présence ne remplace jamais le contrôle de capacité live. Operon officiel `3.2.0` exécute les filtres sauvegardés après un grant exact `tasks.filter-query` et avec un `filterSetId` exact, mais ne publie pas le catalogue de ces IDs. `adopt` reste indisponible et doit échouer de façon structurée. `operon_query_tasks` est la requête structurée Operon ; l’ancien outil non préfixé `query_tasks` relève du legacy Markdown.
 
 Les relations sont admises en mode `guarded`. La récurrence et la récupération exigent le mode `full`. La CLI reste la surface opérateur/admin et n’est pas relayée génériquement par le MCP.
 
@@ -71,7 +71,7 @@ Pour une tâche existante :
 6. Relire la tâche et sa révision ; arrêter ou recalculer si elle a changé.
 7. Construire une clé d’application distincte : `<intention>-apply-<nonce>`.
 8. Appliquer avec `dryRun: false` et la révision actuelle.
-9. Relire la tâche, vérifier la surface attendue et appeler `operon_validate`. Utiliser un saved filter seulement si `filterQuery` est disponible ; sinon traduire les critères du profil dans une requête bornée pour cette exécution.
+9. Relire la tâche, vérifier la surface attendue et appeler `operon_validate`. Utiliser un saved filter seulement si `filterQuery` est disponible et si son ID exact vient de l’UI/configuration d’Operon ou d’un workflow opérateur ; sinon traduire les critères du profil dans une requête bornée pour cette exécution.
 10. Si la tâche apparaît dans `fs_elysia_now`, prouver sa présence dans `fs_elysia_week` et rapporter `invisible: false`.
 
 Ne jamais réutiliser la clé du dry-run pour l’apply : `dryRun` fait partie de la requête canonique.

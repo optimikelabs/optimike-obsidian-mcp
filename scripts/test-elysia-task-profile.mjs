@@ -37,7 +37,7 @@ assert.ok(frontmatterMatch, "public task skill must have YAML frontmatter");
 const frontmatter = parseYaml(frontmatterMatch[1]);
 
 assert.equal(frontmatter.name, "elysia-task-gouverneur");
-assert.equal(frontmatter.metadata.version, "1.2.0");
+assert.equal(frontmatter.metadata.version, "1.3.0");
 assert.equal(frontmatter.metadata.skill_structure, "graph");
 assert.equal(frontmatter.metadata.portability_class, "profile-bound-portable");
 assert.equal(frontmatter.metadata.profile_id, profile.profileId);

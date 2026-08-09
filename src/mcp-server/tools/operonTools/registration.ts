@@ -100,7 +100,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_get_configuration",
-    "Read the task-semantic Operon configuration from the live plugin runtime: language, stable workflow/status IDs, priority definitions, canonical-to-visible key mappings, creation targets/templates, task automations, excluded folders, documentation location, and saved filter catalog. Falls back only to an explicitly stale persisted snapshot.",
+    "Read the task-semantic Operon configuration from the live plugin runtime: language, stable workflow/status IDs, priority definitions, canonical-to-visible key mappings, creation targets/templates, task automations, excluded folders, and documentation location. A saved-filter catalog is included only when the official runtime exposes one. Falls back only to an explicitly stale persisted snapshot.",
     ForceRefreshSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof ForceRefreshSchema>) =>
@@ -127,7 +127,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_query_saved_filter",
-    "Evaluate one saved Operon filter through Operon's native filter engine. Use filterSetId from operon_get_configuration; optional scopePath limits results to one note or folder. This capability is live-only because headless snapshots cannot reproduce plugin filter semantics.",
+    "Evaluate one saved Operon filter through Operon's native filter engine. filterSetId must be an exact ID obtained from Operon's UI/configuration or an operator workflow; Operon 3.2 can execute a filter but does not expose the saved-filter catalog through its official Developer API. optional scopePath limits results to one note or folder. This capability is live-only because headless snapshots cannot reproduce plugin filter semantics.",
     OperonFilterQuerySchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonFilterQuerySchema>) =>
@@ -154,7 +154,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_get_diagnostics",
-    "Read Operon 3.1.1 native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault.",
+    "Read Operon 3.2 native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault.",
     {},
     READ_ONLY_ANNOTATIONS,
     async () => runTool(() => service.diagnostics()),
@@ -206,7 +206,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_adopt_task",
-    "Adopt one existing plain Markdown or Obsidian Tasks checkbox in place as an Operon inline task. Requires an exact one-based line and expectedLine precondition, plus idempotencyKey; dryRun defaults to true. The live Operon domain path preserves supported Tasks metadata and no raw Markdown fallback exists.",
+    "Adopt one existing plain Markdown or Obsidian Tasks checkbox in place only when the live engine advertises adoption. Requires an exact one-based line and expectedLine precondition, plus idempotencyKey; dryRun defaults to true. Official Operon 3.2 does not currently expose this capability, and no raw Markdown fallback exists.",
     OperonAdoptTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonAdoptTaskSchema>) =>
@@ -215,7 +215,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_create_task",
-    "Create an Operon inline or file task through Operon Public API v1. dryRun defaults to true. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
+    "Create an Operon inline or file task through the loaded engine's supported official API. dryRun defaults to true. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
     OperonCreateTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonCreateTaskSchema>) =>

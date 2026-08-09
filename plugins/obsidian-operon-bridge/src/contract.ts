@@ -1,8 +1,10 @@
 export const OPERON_BRIDGE_CONTRACT_VERSION = "1" as const;
-export const OPERON_BRIDGE_TESTED_VERSION = "3.1.1" as const;
+export const OPERON_BRIDGE_TESTED_VERSION = "3.2.1" as const;
 export const OPERON_BRIDGE_DEVELOPER_API_VERSIONS = [
 	"3.0.1",
 	"3.1.0",
+	"3.1.1",
+	"3.2.0",
 	OPERON_BRIDGE_TESTED_VERSION,
 ] as const;
 export const OPERON_BRIDGE_SUPPORTED_VERSIONS = {
@@ -18,6 +20,8 @@ export const OPERON_BRIDGE_BLOCKED_MUTATIONS = {
 	"3.0.1": ["transition"],
 	"3.1.0": [],
 	"3.1.1": [],
+	"3.2.0": [],
+	"3.2.1": [],
 } as const;
 
 export function isDeveloperApiVersion(version: string): boolean {

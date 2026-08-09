@@ -2,7 +2,7 @@
 name: elysia-task-gouverneur
 description: 'Orchestre les tâches d’un coffre compatible avec le profil public ÉLYSIA Tasks via les 23 outils operon_* gouvernés : opérations ponctuelles, relations, récurrence, récupération, audits, triage, cycle de vie et santé du runtime, avec capacités live, IDs stables, dry-run et validation humaine.'
 metadata:
-  version: '1.2.0'
+  version: 1.3.0
   skill_structure: graph
   portability_class: profile-bound-portable
   profile_id: elysia.tasks

@@ -6,7 +6,7 @@ const consumer = {
   manifest: {
     id: "optimike-operon-bridge",
     name: "Optimike Operon Bridge",
-    version: "0.5.0",
+    version: "0.6.0",
   },
 };
 
@@ -138,6 +138,191 @@ test("Operon 3 Developer API adapter reads a live task snapshot through the offi
     (await adapter.indexer.getIndexV8Diagnostics()).health,
     "healthy",
   );
+});
+
+test("Operon 3.2 adapter evaluates saved filters through the additive task-workflow Developer API", async () => {
+  let filterRequest: Record<string, unknown> = {};
+  const api = {
+    hasCapability: (name: string) =>
+      [
+        "system.health",
+        "system.capabilities",
+        "catalog.read",
+        "tasks.read",
+        "tasks.query",
+      ].includes(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => ({
+        ok: true,
+        contextRevision: { index: { ramGeneration: 32 } },
+      }),
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        settingsFingerprint: "settings-32",
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [],
+        filters: [
+          {
+            id: "filter-now",
+            name: "Maintenant",
+            icon: "zap",
+            root: { type: "group", children: [] },
+          },
+        ],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async () => ({
+        ok: true,
+        tasks: [],
+        page: { truncated: false },
+        contextRevision: { index: { ramGeneration: 32 } },
+      }),
+    },
+  };
+  const operon = {
+    getDeveloperApiV1: () => ({ ok: true, status: readyStatus(), api }),
+    getTaskWorkflowDeveloperApiV1: (
+      _candidate: unknown,
+      request: { requestedCapabilities: readonly string[] },
+    ) => ({
+      ok: request.requestedCapabilities[0] === "tasks.filter-query",
+      api: {
+        tasks: {
+          filterQuery: async (input: Record<string, unknown>) => {
+            filterRequest = input;
+            return {
+              ok: true,
+              tasks: [],
+              page: {
+                actualCount: 0,
+                returnedCount: 0,
+                truncated: false,
+                asOf: "2026-08-09T16:50:02Z",
+              },
+              contextRevision: { index: { ramGeneration: 32 } },
+            };
+          },
+        },
+      },
+    }),
+  };
+
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
+  assert.equal(await adapter.refresh(), true);
+  assert.equal(adapter.hasFilterQueryCapability(), true);
+  assert.deepEqual(adapter.semanticConfiguration.views.filters[0], {
+    id: "filter-now",
+    name: "Maintenant",
+    icon: "zap",
+    definition: {
+      id: "filter-now",
+      name: "Maintenant",
+      icon: "zap",
+      root: { type: "group", children: [] },
+    },
+  });
+  const result = await adapter.querySavedFilter({
+    filterSetId: "filter-now",
+    scopePath: "Efforts/Projets",
+    includeProperties: true,
+    limit: 25,
+    cursor: "opaque-filter-cursor",
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(filterRequest, {
+    contractVersion: 1,
+    requestId: filterRequest.requestId,
+    kind: "task-filter-query",
+    consistency: "live-verified",
+    filterSetId: "filter-now",
+    scope: { kind: "folder-tree", path: "Efforts/Projets" },
+    include: ["custom-fields"],
+    limit: 25,
+    cursor: "opaque-filter-cursor",
+  });
+});
+
+test("a pending Operon 3.2 filter grant does not hide approved core reads or mutations", async () => {
+  const granted = new Set([
+    "system.health",
+    "system.capabilities",
+    "catalog.read",
+    "tasks.read",
+    "tasks.query",
+    "tasks.update.preview",
+    "tasks.update.apply",
+  ]);
+  const api = {
+    hasCapability: (name: string) => granted.has(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => ({
+        ok: true,
+        contextRevision: { index: { ramGeneration: 33 } },
+      }),
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        settingsFingerprint: "settings-33",
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async () => ({
+        ok: true,
+        tasks: [],
+        page: { truncated: false },
+        contextRevision: { index: { ramGeneration: 33 } },
+      }),
+    },
+    mutations: {
+      preview: async () => ({ ok: true, plan: { planDigest: "filter-pending" } }),
+      apply: async () => ({ status: "applied" as const }),
+    },
+  };
+  const operon = {
+    getDeveloperApiV1: (
+      _candidate: unknown,
+      request: { requestedCapabilities: readonly string[] },
+    ) => ({
+      ok: request.requestedCapabilities.every((capability) => granted.has(capability)),
+      status: {
+        ...readyStatus(),
+        admission: { reads: true, writes: true },
+        grant: {
+          state: "active",
+          grantedCapabilities: [...granted],
+          effectiveCapabilities: request.requestedCapabilities,
+        },
+      },
+      api,
+    }),
+    getTaskWorkflowDeveloperApiV1: () => ({
+      ok: false,
+      error: {
+        code: "authority-insufficient",
+        reason: "tasks.filter-query grant pending",
+      },
+    }),
+  };
+
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
+  assert.equal(await adapter.refresh(true), true);
+  assert.equal(adapter.indexer.getGeneration(), 33);
+  assert.equal(adapter.hasMutationCapability("update"), true);
+  assert.equal(adapter.hasFilterQueryCapability(), false);
 });
 
 test("Operon 3 Developer API adapter stays unavailable when the host grant is pending", async () => {

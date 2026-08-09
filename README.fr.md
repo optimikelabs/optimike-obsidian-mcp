@@ -21,7 +21,7 @@ documents autorisés hors du coffre.
 | ----------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- |
 | Notes                   | Lecture, liste, recherche, mise à jour, frontmatter et tags          | Coffre ; Local REST API pour la surface live complète |
 | Bases et Canvas         | Requêtes/écritures Bases, validation et helpers Canvas bornés        | Bases Bridge pour Bases en live                       |
-| Tâches                  | Lecture/requête Tasks + 23 outils Operon gouvernés                   | Operon 3.1.1 Developer API V1 via le Bridge           |
+| Tâches                  | Lecture/requête Tasks + 23 outils Operon gouvernés                   | Operon 3.2.1 Developer API V1 via le Bridge           |
 | Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable        | `.smart-env` + embedding Ollama ou OpenAI             |
 | Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions | Filesystem local                                      |
 | Documents externes      | Lectures/handoff gouvernés + move local opt-in avec réparation       | Allowlist ; stdio local pour le move                  |
@@ -93,7 +93,7 @@ Activer seulement les surfaces utilisées :
   notes, métadonnées et tags en live ;
 - **Bases Bridge (REST)** inclus : opérations `.base` en live ;
 - **Smart Connections** : index sémantique `.smart-env` ;
-- **Operon 3.1.1** et **Optimike Operon Bridge** inclus : tâches live
+- **Operon 3.2.1** et **Optimike Operon Bridge** inclus : tâches live
   gouvernées via la Developer API officielle V1 ;
 - la compatibilité Kairélys reste disponible comme chemin legacy/rollback
   borné, mais n’est plus le moteur de production ;
@@ -120,16 +120,20 @@ destructives ou d’administration restent dans la CLI. Voir le
 [contrat MCP Operon](docs/operon-mcp-contract.fr.md) et
 l’[audit CLI / Developer API](docs/operon-cli-audit.fr.md).
 
-Note de compatibilité : l’adaptateur cible Operon officiel `3.1.1`, mais les
-preuves d’acceptation complètes de ce dépôt utilisent notre build local corrigé
-pendant l’examen des correctifs upstream [#135](https://github.com/hasanyilmaz/operon/pull/135),
-[#137](https://github.com/hasanyilmaz/operon/pull/137) et
-[#139](https://github.com/hasanyilmaz/operon/pull/139). Operon officiel `3.1.1`
-reste utilisable pour les lectures et la plupart des mutations gouvernées, mais
-le settlement des frontmatters de date, le consentement entre plusieurs fenêtres
-Obsidian et les renommages implicites de File Tasks conservent les limites
-upstream décrites dans ces PR. Le MCP ne bascule jamais vers Markdown ou des
-API privées quand l’un de ces cas n’est pas supporté. Le cas particulier des
+Note de compatibilité : l’adaptateur cible Operon officiel `3.2.1` et le Bridge
+`0.6.0` ; `3.2.0` reste explicitement compatible et porte le pilote live complet.
+Le settlement des frontmatters de date et le consentement multi-fenêtres
+ont été fusionnés upstream avant ces versions. L’exécution des filtres
+sauvegardés est maintenant disponible via la Developer API task-workflow après
+un grant exact, mais l’API officielle ne publie pas leur catalogue : il faut
+fournir un `filterSetId` exact obtenu dans l’UI/configuration d’Operon ou par un
+workflow opérateur. L’adoption reste indisponible dans l’API officielle. Operon
+3.2.1 omet encore le renderer déclaratif des contrôles de grant Developer API ;
+le correctif est suivi dans [#145](https://github.com/hasanyilmaz/operon/issues/145)
+et [#146](https://github.com/hasanyilmaz/operon/pull/146).
+Le MCP ne bascule jamais vers Markdown ou des API privées. Les renommages
+implicites de File Tasks restent suivis dans
+[#139](https://github.com/hasanyilmaz/operon/pull/139), et le cas particulier des
 transitions sans portée `project-serial` reste suivi dans
 [#99](https://github.com/hasanyilmaz/operon/issues/99) et
 [#101](https://github.com/hasanyilmaz/operon/pull/101).

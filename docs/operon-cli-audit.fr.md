@@ -2,18 +2,20 @@
 
 English version: [operon-cli-audit.md](operon-cli-audit.md)
 
-Date : 2026-08-08
+Date : 2026-08-09
 
-Référence : Operon officiel `3.1.1`, Operon CLI `1.0.9`, Developer API V1 et
+Référence : Operon officiel `3.2.1`, Operon CLI `1.1.0`, Developer API V1 et
 `cli-manifest-v1.json`.
 
 Les observations CLI initiales du 1er août 2026 utilisaient Operon `3.0.1` et
-restent des preuves historiques. L’adaptateur MCP cible `3.1.1`. La preuve
-d’acceptation complète utilise le build local corrigé pendant la review des PR
-upstream #135, #137 et #139. La version officielle reste utilisable pour les
-lectures et la plupart des mutations gouvernées. Le cas de transition incertain
-est suivi dans #99/#101. Le MCP échoue fermé et ne bascule jamais vers Markdown
-ou une API privée.
+restent des preuves historiques. L’adaptateur MCP cible `3.2.1`, tandis que le
+pilote live complet reste porté par le build local `3.2.0`, compatible au niveau
+du contrat. Le renderer manquant en 3.2.1 est suivi dans
+[#145](https://github.com/hasanyilmaz/operon/issues/145) et
+[#146](https://github.com/hasanyilmaz/operon/pull/146). Les correctifs #135 et #137 sont déjà fusionnés. La sécurité
+de renommage File Task reste suivie dans #139 et le cas de transition incertain
+dans #99/#101. Le MCP échoue fermé et ne bascule jamais vers Markdown ou une API
+privée.
 
 ## Décision
 
@@ -32,10 +34,11 @@ un agent.
 
 ## Comparaison des surfaces
 
-Le MCP enregistre vingt-trois outils gouvernés et six lectures de raisonnement
-Developer API bornées. Deux outils de compatibilité, filtres sauvegardés et
-adoption, restent indisponibles sur Operon officiel `3.1.1` tant que le runtime
-n’annonce pas les capacités natives :
+Le MCP enregistre vingt-trois outils gouvernés, dont six lectures de raisonnement
+Developer API bornées. L’exécution des filtres sauvegardés fonctionne sur Operon
+`3.2.x` après un grant exact `tasks.filter-query`, mais l’API officielle ne
+publie pas leur catalogue. L’adoption reste un outil de compatibilité
+indisponible :
 
 - lectures : statut, configuration, liste/get/query, filtre sauvegardé borné par
   capacité et validation ;
@@ -71,7 +74,7 @@ avec un cas d’usage ÉLYSIA clair, une capacité officielle et des gardes prou
 
 ## Frontière de preuve actuelle
 
-Le build local corrigé Operon `3.1.1` a passé le grant et l’identité hôte, les
+Le build local Operon `3.2.0` a passé le grant et l’identité hôte, les
 lectures live, preview/apply typés, receipt/postflight, replay idempotent,
 redémarrage et récupération du même plan. Le pilote Bridge a aussi passé
 création, update, transition, conflit de révision et replay.
@@ -80,13 +83,12 @@ Les relations et la récurrence ont passé les suites adaptateur, contrat Bridge
 service, policy, idempotence/redémarrage et documentation, puis leur pilote live
 dédié : dry-run/apply, relation inverse, replay, conflit périmé, blocage de
 transition terminale, restauration exacte, ajout/changement de portée/retrait de
-récurrence, redémarrage stable, source live, aucun résidu et
-`P0/P1/P2 = 0/0/0`.
+récurrence, redémarrage stable, exécution d’un filtre avec pagination opaque,
+source live, 25 tâches après nettoyage, aucun résidu et `P0/P1/P2 = 0/0/0`.
 
-La version officielle non corrigée peut encore produire le résultat borné
-`outcome-unknown` du chemin #99/#101. Les limites frontmatter/date,
-multi-fenêtres et File Task sont suivies dans #135, #137 et #139. Le Bridge
-expose l’incertitude et ne rejoue pas la mutation.
+Le chemin #99/#101 peut encore produire un résultat borné `outcome-unknown`.
+La limite File Task reste suivie dans #139. Le Bridge expose l’incertitude et ne
+rejoue pas la mutation.
 
 Les autres écritures avancées restent hors MCP jusqu’à disposer chacune d’un
 contrat preview/apply, révision, postflight, récupération et confirmation
@@ -101,7 +103,8 @@ setup, profil, doctor offline, `health`, `task.get`, `tasks.query` et
 Sur cette version, plusieurs handlers pourtant annoncés par `health` échouaient
 avant leur exécution avec `obsidian-cli-exit-failed` ou
 `persistent-write-failed`. Cette preuve reste historique et ne doit pas être
-présentée comme l’état de la CLI `1.0.9`.
+présentée comme l’état de la CLI `1.1.0`, dont la version installable a seulement
+été vérifiée dans cette mise à jour.
 
 La conclusion d’architecture ne change pas : la CLI est la surface opérateur
 large. Le MCP/Bridge reste le contrat agentique indépendant, borné et vérifiable.
