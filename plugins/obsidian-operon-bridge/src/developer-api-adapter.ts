@@ -1087,7 +1087,14 @@ export class OperonDeveloperApiRuntimeAdapter {
       // consent request. Probe it only after preserving every already-granted
       // core read and mutation session, so a pending filter grant cannot make
       // the established V1 surface appear unavailable during the same refresh.
-      this.filterQueryApi = this.connectFilterQuery();
+      try {
+        this.filterQueryApi = this.connectFilterQuery();
+      } catch {
+        // Saved-filter execution is an additive Operon 3.2 capability. A
+        // broken or temporarily incompatible optional accessor must not tear
+        // down the already-verified core Developer API session.
+        this.filterQueryApi = null;
+      }
       return true;
     } catch (error) {
       this.readApi = null;

@@ -249,7 +249,7 @@ test("Operon 3.2 adapter evaluates saved filters through the additive task-workf
   });
 });
 
-test("a pending Operon 3.2 filter grant does not hide approved core reads or mutations", async () => {
+test("an unavailable Operon 3.2 filter accessor does not hide approved core reads or mutations", async () => {
   const granted = new Set([
     "system.health",
     "system.capabilities",
@@ -323,6 +323,17 @@ test("a pending Operon 3.2 filter grant does not hide approved core reads or mut
   assert.equal(adapter.indexer.getGeneration(), 33);
   assert.equal(adapter.hasMutationCapability("update"), true);
   assert.equal(adapter.hasFilterQueryCapability(), false);
+
+  const throwingAdapter = new OperonDeveloperApiRuntimeAdapter(consumer, {
+    ...operon,
+    getTaskWorkflowDeveloperApiV1: () => {
+      throw new Error("optional task-workflow accessor unavailable");
+    },
+  });
+  assert.equal(await throwingAdapter.refresh(true), true);
+  assert.equal(throwingAdapter.indexer.getGeneration(), 33);
+  assert.equal(throwingAdapter.hasMutationCapability("update"), true);
+  assert.equal(throwingAdapter.hasFilterQueryCapability(), false);
 });
 
 test("Operon 3 Developer API adapter stays unavailable when the host grant is pending", async () => {
