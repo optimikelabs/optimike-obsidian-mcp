@@ -120,6 +120,9 @@ carry a runtime-instance owner backed by a durable heartbeat lease, so another
 MCP process sharing the journal cannot mistake PID reuse for the original live
 executor; an expired or explicitly closed owner remains recoverable through the
 exact plan.
+Transitions leaving `applying` are fenced by both the observed runtime-instance
+owner and the exact durable payload version. A stale executor returning after
+lease expiry cannot terminalize a plan that recovery reassigned to a new owner.
 The default journal path is also namespaced by a stable non-secret digest of
 the configured runtime mode, REST base URL, and vault path, with an explicit
 profile-ID override for deployment topologies that need one. Backend-specific

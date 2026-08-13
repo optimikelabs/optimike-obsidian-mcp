@@ -210,10 +210,18 @@ export class ObsidianNoteReplaceJournal {
     expected: ObsidianNoteReplaceStatus[],
     next: ObsidianNoteReplaceStatus,
     failure?: string,
+    expectedExecutionOwnerId?: string,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
     if (!current || !expected.includes(current.status)) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    if (
+      current.status === "applying" &&
+      (!expectedExecutionOwnerId ||
+        current.executionOwner?.instanceId !== expectedExecutionOwnerId)
+    ) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
     const updated: ObsidianNoteReplacePlan = {
@@ -231,7 +239,8 @@ export class ObsidianNoteReplaceJournal {
       .prepare(
         `UPDATE obsidian_note_replace_plans
          SET status = ?, payload_json = ?, updated_at = ?
-         WHERE operation_id = ? AND status IN (${placeholders})`,
+         WHERE operation_id = ? AND status IN (${placeholders})
+           AND payload_json = ?`,
       )
       .run(
         next,
@@ -239,6 +248,7 @@ export class ObsidianNoteReplaceJournal {
         updated.updatedAt,
         operationId,
         ...expected,
+        JSON.stringify(current),
       );
     if (Number(result.changes) !== 1) {
       throw new ObsidianNoteReplaceConcurrencyError();

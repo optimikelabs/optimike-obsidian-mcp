@@ -307,7 +307,7 @@ export class ObsidianNoteReplaceOperationAdapter
     if (read.bindingFingerprint !== plan.bindingFingerprint) {
       return receipt(
         this.transitionOrReload(
-          plan.operationId,
+          plan,
           [plan.status],
           "conflict",
           "Recovery found a different backend instance.",
@@ -316,7 +316,7 @@ export class ObsidianNoteReplaceOperationAdapter
     }
     if (read.sha256 === plan.afterSha256) {
       return receipt(
-        this.transitionOrReload(plan.operationId, [plan.status], "committed"),
+        this.transitionOrReload(plan, [plan.status], "committed"),
       );
     }
     if (read.sha256 !== plan.beforeSha256) {
@@ -365,7 +365,7 @@ export class ObsidianNoteReplaceOperationAdapter
       const status = StatusSchema.parse(await this.backend.status());
       if (status.backend.bindingFingerprint !== plan.bindingFingerprint) {
         return this.transitionOrReload(
-          plan.operationId,
+          plan,
           ["applying"],
           "rejected",
           "The atomic-write backend instance no longer matches the sealed plan.",
@@ -373,7 +373,7 @@ export class ObsidianNoteReplaceOperationAdapter
       }
       if (!status.backend.writeEnabled) {
         return this.transitionOrReload(
-          plan.operationId,
+          plan,
           ["applying"],
           "rejected",
           "Atomic note writes were disabled before apply.",
@@ -399,7 +399,7 @@ export class ObsidianNoteReplaceOperationAdapter
         );
       }
       return this.transitionOrReload(
-        plan.operationId,
+        plan,
         ["applying"],
         "committed",
       );
@@ -408,7 +408,7 @@ export class ObsidianNoteReplaceOperationAdapter
         error instanceof McpError && error.code === BaseErrorCode.CONFLICT;
       if (conflict) {
         return this.transitionOrReload(
-          plan.operationId,
+          plan,
           ["applying"],
           "conflict",
           error.message,
@@ -418,7 +418,7 @@ export class ObsidianNoteReplaceOperationAdapter
         error instanceof McpError && error.code === BaseErrorCode.FORBIDDEN;
       if (rejected) {
         return this.transitionOrReload(
-          plan.operationId,
+          plan,
           ["applying"],
           "rejected",
           error.message,
@@ -443,7 +443,7 @@ export class ObsidianNoteReplaceOperationAdapter
     );
     if (read.bindingFingerprint !== plan.bindingFingerprint) {
       return this.transitionOrReload(
-        plan.operationId,
+        plan,
         [plan.status],
         "conflict",
         "The atomic-write backend instance changed.",
@@ -451,7 +451,7 @@ export class ObsidianNoteReplaceOperationAdapter
     }
     if (read.sha256 === plan.afterSha256) {
       return this.transitionOrReload(
-        plan.operationId,
+        plan,
         [plan.status],
         "committed",
       );
@@ -471,7 +471,7 @@ export class ObsidianNoteReplaceOperationAdapter
   ): ObsidianNoteReplacePlan {
     if (plan.status === "outcome_unknown") return plan;
     return this.transitionOrReload(
-      plan.operationId,
+      plan,
       ["applying"],
       "outcome_unknown",
       failure,
@@ -479,16 +479,24 @@ export class ObsidianNoteReplaceOperationAdapter
   }
 
   private transitionOrReload(
-    operationId: string,
+    observed: ObsidianNoteReplacePlan,
     expected: ObsidianNoteReplacePlan["status"][],
     next: ObsidianNoteReplacePlan["status"],
     failure?: string,
   ): ObsidianNoteReplacePlan {
     try {
-      return this.journal.transition(operationId, expected, next, failure);
+      return this.journal.transition(
+        observed.operationId,
+        expected,
+        next,
+        failure,
+        observed.status === "applying"
+          ? observed.executionOwner?.instanceId
+          : undefined,
+      );
     } catch (error) {
       if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
-      const current = this.journal.get(operationId);
+      const current = this.journal.get(observed.operationId);
       if (!current) throw error;
       return current;
     }

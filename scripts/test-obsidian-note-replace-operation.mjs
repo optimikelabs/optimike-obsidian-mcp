@@ -4,7 +4,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ObsidianNoteReplaceOperationAdapter } from "../dist/services/operations/obsidianNoteReplaceOperationAdapter.js";
-import { ObsidianNoteReplaceJournal } from "../dist/services/operations/obsidianNoteReplaceJournal.js";
+import {
+  ObsidianNoteReplaceConcurrencyError,
+  ObsidianNoteReplaceJournal,
+} from "../dist/services/operations/obsidianNoteReplaceJournal.js";
 import { requestLogMetadata } from "../dist/services/obsidianRestAPI/requestLogMetadata.js";
 import { BaseErrorCode, McpError } from "../dist/types-global/errors.js";
 
@@ -504,6 +507,7 @@ try {
       sharedPath,
       leaseOptions,
     );
+    journals.push(ownerJournal);
     const applying = ownerJournal.create({
       idempotencyKey: "live-owner",
       requestDigest: sha256("live-owner-request"),
@@ -513,11 +517,16 @@ try {
       nextContent: "content owned by the live executor",
       bindingFingerprint: sha256("fixture-vault-instance"),
     });
-    ownerJournal.transition(applying.operationId, ["planned"], "applying");
+    const originalExecution = ownerJournal.transition(
+      applying.operationId,
+      ["planned"],
+      "applying",
+    );
     const observerJournal = new ObsidianNoteReplaceJournal(
       sharedPath,
       leaseOptions,
     );
+    journals.push(observerJournal);
     assert.equal(observerJournal.get(applying.operationId).status, "applying");
     // A restarted process can reuse the same OS PID (for example PID 1 in a
     // container). Only expiry of the previous instance lease proves that its
@@ -526,6 +535,31 @@ try {
     const interrupted = observerJournal.get(applying.operationId);
     assert.equal(interrupted.status, "outcome_unknown");
     assert.match(interrupted.failure, /process restarted/u);
+    observerJournal.renewExecutionLease();
+    const recoveredExecution = observerJournal.transition(
+      applying.operationId,
+      ["outcome_unknown"],
+      "applying",
+    );
+    assert.notEqual(
+      recoveredExecution.executionOwner.instanceId,
+      originalExecution.executionOwner.instanceId,
+    );
+    assert.throws(
+      () =>
+        ownerJournal.transition(
+          applying.operationId,
+          ["applying"],
+          "conflict",
+          "stale executor must not terminalize the recovered owner",
+          originalExecution.executionOwner.instanceId,
+        ),
+      ObsidianNoteReplaceConcurrencyError,
+    );
+    assert.equal(
+      observerJournal.get(applying.operationId).executionOwner.instanceId,
+      recoveredExecution.executionOwner.instanceId,
+    );
     ownerJournal.close();
     observerJournal.close();
   }
@@ -550,11 +584,17 @@ try {
       nextContent: sensitiveTerminalContent,
       bindingFingerprint: sha256("fixture-vault-instance"),
     });
-    journal.transition(terminal.operationId, ["planned"], "applying");
+    const terminalApplying = journal.transition(
+      terminal.operationId,
+      ["planned"],
+      "applying",
+    );
     const committed = journal.transition(
       terminal.operationId,
       ["applying"],
       "committed",
+      undefined,
+      terminalApplying.executionOwner.instanceId,
     );
     assert.equal(committed.nextContent, "");
     for (const persistedPath of [retentionPath, `${retentionPath}-wal`]) {
