@@ -24,7 +24,12 @@ const requiredFiles = [
   "SECURITY.fr.md",
   "docs/README.md",
   "docs/README.fr.md",
+  "docs/governed-note-replacement.md",
+  "docs/governed-note-replacement.fr.md",
   "docs/adr/README.md",
+  "scripts/test-governed-note-replace-mcp.mjs",
+  "scripts/test-governed-note-replace-http.mjs",
+  "scripts/smoke-atomic-note-mcp-live.mjs",
   "plugins/obsidian-bases-bridge/build/main.js",
   "plugins/obsidian-bases-bridge/build/manifest.json",
   "plugins/obsidian-atomic-write-bridge/build/main.js",
@@ -41,5 +46,5 @@ if (missing.length > 0) {
 }
 
 console.log(
-  `PASS: package contains ${requiredFiles.length} runnable server and Bridge artifacts`,
+  `PASS: package contains ${requiredFiles.length} runnable server, governed-operation, documentation and Bridge artifacts`,
 );

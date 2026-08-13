@@ -30,10 +30,10 @@ for (const tool of tools) {
 
 assert.match(surface, /Recovery is not undo/i);
 assert.match(surface, /No generic public `operation_\*` surface/i);
-assert.match(adr, /exact-plan reconciliation\/resumption/i);
+assert.match(adr, /exact-plan reconciliation(?:\/| or )resumption/i);
 assert.match(adr, /outside that boundary/i);
 assert.match(contract, /not undo/i);
-assert.match(contractFr, /pas un undo/i);
+assert.match(contractFr, /n[’']est pas `?undo`?/i);
 assert.match(readme, /test:governed-note-replace-mcp/);
 assert.match(readmeFr, /test:governed-note-replace-mcp/);
 assert.equal(
@@ -44,8 +44,19 @@ assert.equal(
   pkg.scripts["smoke:atomic-note-mcp-live"],
   "npm run build && node scripts/smoke-atomic-note-mcp-live.mjs",
 );
+assert.equal(
+  pkg.scripts["test:governed-note-replace-http"],
+  "npm run build && node scripts/test-governed-note-replace-http.mjs",
+);
+assert.ok(pkg.files.includes("docs/governed-note-replacement.md"));
+assert.ok(pkg.files.includes("docs/governed-note-replacement.fr.md"));
+const envExample = await text(".env.server.example");
+assert.match(envExample, /MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH=\//);
+const changelog = await text("CHANGELOG.md");
+assert.match(changelog, /## \[Unreleased\][\s\S]*obsidian_note_replace_plan/);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
+await access("scripts/test-governed-note-replace-http.mjs");
 await access("scripts/smoke-atomic-note-mcp-live.mjs");
 
 console.log("PASS: governed atomic note replacement documentation is coherent");

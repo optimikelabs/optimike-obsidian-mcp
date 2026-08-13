@@ -6,7 +6,7 @@ import {
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
 import { McpError } from "../../../types-global/errors.js";
-import { getGovernedNoteReplaceRuntime } from "./runtime.js";
+import type { GovernedNoteReplaceRuntime } from "./runtime.js";
 
 const PlanSchema = z.object({
   path: z
@@ -78,8 +78,8 @@ async function runTool(operation: () => Promise<unknown>) {
 
 export async function registerGovernedNoteReplaceTools(
   server: McpServer,
+  runtime: GovernedNoteReplaceRuntime | undefined,
 ): Promise<void> {
-  const runtime = getGovernedNoteReplaceRuntime();
   if (!runtime) return;
 
   server.tool(

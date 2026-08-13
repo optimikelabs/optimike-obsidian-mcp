@@ -151,6 +151,13 @@ const EnvSchema = z
         "MCP_EXTERNAL_MOVE_JOURNAL_PATH must be absolute.",
       )
       .optional(),
+    MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: z
+      .string()
+      .refine(
+        (value) => path.isAbsolute(value),
+        "MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH must be absolute.",
+      )
+      .optional(),
     MCP_EXTERNAL_MOVE_PROFILE_ID: z
       .string()
       .regex(
@@ -403,6 +410,15 @@ export const config = {
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       "external-moves.sqlite",
+    ),
+  obsidianNoteReplaceJournalPath:
+    env.MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH ||
+    path.join(
+      process.env.LOCALAPPDATA ||
+        process.env.XDG_STATE_HOME ||
+        path.join(os.homedir(), ".local", "state"),
+      "optimike-obsidian-mcp",
+      "obsidian-note-replace.sqlite",
     ),
   mcpWriteMode:
     env.MCP_WRITE_MODE ||

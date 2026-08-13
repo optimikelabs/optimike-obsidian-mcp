@@ -3,6 +3,7 @@
 Version anglaise : [runtime-capability-matrix.md](runtime-capability-matrix.md)
 
 Docs liées : [Présentation](../README.fr.md), [Exploitation](../OPERATIONS.fr.md),
+[Contrat de remplacement gouverné](governed-note-replacement.fr.md),
 [Surface des outils](obsidian_mcp_tools_spec.md), [Sécurité](../SECURITY.fr.md).
 
 ![Aide au choix entre les profils live, hybrid et headless d’Optimike Obsidian MCP](assets/readme/runtime-profiles.fr.svg)

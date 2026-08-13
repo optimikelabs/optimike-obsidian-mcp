@@ -11,6 +11,10 @@ import { logger, McpLogLevel } from "./utils/internal/logger.js"; // Import logg
 import { ObsidianRestApiService } from "./services/obsidianRestAPI/index.js";
 import { VaultCacheService } from "./services/obsidianRestAPI/vaultCache/index.js"; // Import VaultCacheService
 import { prewarmSemanticSearch } from "./mcp-server/tools/semanticSearchTool/registration.js";
+import {
+  createGovernedNoteReplaceRuntime,
+  type GovernedNoteReplaceRuntime,
+} from "./mcp-server/tools/governedNoteReplaceTools/index.js";
 
 /**
  * The main MCP server instance (only stored globally for stdio shutdown).
@@ -32,6 +36,11 @@ let obsidianService: ObsidianRestApiService | undefined;
  * @type {VaultCacheService | undefined}
  */
 let vaultCacheService: VaultCacheService | undefined;
+/**
+ * Process-wide governed note-replacement runtime shared by stdio or every
+ * Streamable HTTP MCP session.
+ */
+let governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined;
 
 /**
  * Gracefully shuts down the main MCP server.
@@ -90,7 +99,18 @@ const shutdown = async (signal: string) => {
       );
     }
 
-    // Add any other necessary cleanup here (e.g., closing database connections if added later)
+    if (governedNoteReplaceRuntime) {
+      logger.info(
+        "Closing governed note-replacement runtime...",
+        shutdownContext,
+      );
+      governedNoteReplaceRuntime.close();
+      governedNoteReplaceRuntime = undefined;
+      logger.info(
+        "Governed note-replacement runtime closed successfully",
+        shutdownContext,
+      );
+    }
 
     logger.info("Graceful shutdown completed successfully", shutdownContext);
     process.exit(0);
@@ -293,6 +313,14 @@ const start = async () => {
     } else {
       logger.info("Vault cache is disabled by configuration.", startupContext);
     }
+    governedNoteReplaceRuntime =
+      createGovernedNoteReplaceRuntime(obsidianService);
+    logger.info(
+      governedNoteReplaceRuntime
+        ? "Governed note-replacement runtime is enabled and process-shared."
+        : "Governed note-replacement runtime is unavailable without a shared live Obsidian REST service.",
+      startupContext,
+    );
     logger.info("Shared services instantiated.", startupContext);
     // --- End Service Instantiation ---
 
@@ -308,6 +336,7 @@ const start = async () => {
     const serverOrHttpInstance = await initializeAndStartServer(
       obsidianService,
       vaultCacheService,
+      governedNoteReplaceRuntime,
     );
 
     if (
@@ -457,6 +486,8 @@ const start = async () => {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
+    governedNoteReplaceRuntime?.close();
+    governedNoteReplaceRuntime = undefined;
     process.exit(1);
   }
 };

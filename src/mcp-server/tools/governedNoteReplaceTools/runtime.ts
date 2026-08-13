@@ -1,12 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import os from "node:os";
-import nodePath from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
 import { z } from "zod";
 import { config } from "../../../config/index.js";
 import { validateObsidianMarkdown } from "../../../services/obsidianFormatService.js";
-import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import {
   type AtomicWriteBackend,
   ObsidianNoteReplaceOperationAdapter,
@@ -115,15 +113,23 @@ function validateReplacement(
   nextContent: string,
   phase: "plan" | "effect",
 ): void {
-  const validation = validateObsidianMarkdown(nextContent);
+  let validation: ReturnType<typeof validateObsidianMarkdown>;
+  try {
+    validation = validateObsidianMarkdown(nextContent);
+  } catch {
+    throw new McpError(
+      phase === "plan" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.FORBIDDEN,
+      "The sealed next content is not valid conservative Obsidian Markdown.",
+      { reason: "markdown_validation_failed" },
+    );
+  }
   if (!validation.ok) {
     throw new McpError(
       phase === "plan" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.FORBIDDEN,
       "The sealed next content is not valid conservative Obsidian Markdown.",
       {
-        validationErrors: validation.errors.map(({ code, message, path }) => ({
+        validationErrors: validation.errors.map(({ code, path }) => ({
           code,
-          message,
           path,
         })),
       },
@@ -136,9 +142,13 @@ function validateReplacement(
   } catch (error) {
     throw new McpError(
       phase === "plan" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.FORBIDDEN,
-      `Protected frontmatter cannot be compared safely: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      "Protected frontmatter cannot be compared safely because the YAML structure is invalid.",
+      {
+        reason:
+          error instanceof Error
+            ? "frontmatter_parse_failed"
+            : "frontmatter_parse_failed_unknown",
+      },
     );
   }
   if (changed.length > 0) {
@@ -224,33 +234,6 @@ function operationIdFromRef(reference: string): string {
   return operationId;
 }
 
-function machineStateRoot(): string {
-  return (
-    process.env.LOCALAPPDATA ||
-    process.env.XDG_STATE_HOME ||
-    nodePath.join(os.homedir(), ".local", "state")
-  );
-}
-
-function journalPath(): string {
-  const configured =
-    process.env.MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH?.trim();
-  if (configured) {
-    if (!nodePath.isAbsolute(configured)) {
-      throw new McpError(
-        BaseErrorCode.CONFIGURATION_ERROR,
-        "MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH must be absolute.",
-      );
-    }
-    return configured;
-  }
-  return nodePath.join(
-    machineStateRoot(),
-    "optimike-obsidian-mcp",
-    "obsidian-note-replace.sqlite",
-  );
-}
-
 export class GovernedNoteReplaceRuntime {
   private closed = false;
 
@@ -301,32 +284,25 @@ export class GovernedNoteReplaceRuntime {
   }
 }
 
-let singleton: GovernedNoteReplaceRuntime | undefined;
-let exitHookInstalled = false;
-
-function runtimeEnabled(): boolean {
-  return (
-    config.obsidianRuntimeMode === "live" ||
-    (config.obsidianRuntimeMode === "hybrid" && Boolean(config.obsidianApiKey))
-  );
-}
-
-export function getGovernedNoteReplaceRuntime():
+export function createGovernedNoteReplaceRuntime(
+  obsidianService: ObsidianRestApiService | undefined,
+):
   | GovernedNoteReplaceRuntime
   | undefined {
-  if (!runtimeEnabled()) return undefined;
-  if (singleton) return singleton;
+  if (!obsidianService) return undefined;
 
-  const journal = new ObsidianNoteReplaceJournal(journalPath());
+  const journal = new ObsidianNoteReplaceJournal(
+    config.obsidianNoteReplaceJournalPath,
+  );
   const backend = new GovernedAtomicWriteBackend(
-    new RestAtomicWriteBackend(new ObsidianRestApiService()),
+    new RestAtomicWriteBackend(obsidianService),
   );
   const adapter = new ObsidianNoteReplaceOperationAdapter(backend, journal);
-  singleton = new GovernedNoteReplaceRuntime(backend, journal, adapter);
+  const runtime = new GovernedNoteReplaceRuntime(backend, journal, adapter);
 
-  if (!exitHookInstalled) {
-    exitHookInstalled = true;
-    process.once("exit", () => singleton?.close());
-  }
-  return singleton;
+  // The application lifecycle closes the runtime explicitly. This synchronous
+  // exit hook is a final fail-safe for startup paths that terminate through
+  // process.exit before graceful shutdown can run.
+  process.once("exit", () => runtime.close());
+  return runtime;
 }

@@ -9,7 +9,7 @@ setup or operations guides, not in this index.
 | [Governed HTTP delivery](ADR-HTTP-External-Artifact-Delivery.md)                                                   | Accepted and implemented on `main` for authenticated loopback; remote remains pilot | Adds `http_ticket`; HTTP mutation remains denied                         |
 | [External reference integrity](ADR-External-Reference-Integrity.md) / [FR](ADR-External-Reference-Integrity.fr.md) | Accepted and implemented for a local stdio pilot                                    | Same-root file move, exact ÉLYSIA reference repair, journal and rollback |
 | [Operon Bridge](ADR-Operon-Bridge.md)                                                                              | Accepted for bounded pilot                                                          | Versioned task-domain bridge and guarded mutation contract               |
-| [Common governed operation runtime](ADR-Common-Operation-Runtime.md)                                               | Accepted for internal pilots; external-move and atomic-note adapters implemented     | Shared plan, apply, status, receipt and exact-plan recovery vocabulary   |
+| [Common governed operation runtime](ADR-Common-Operation-Runtime.md)                                               | Accepted; public atomic-note projection implemented, live canary pending     | Shared plan, apply, status, receipt and exact-plan recovery vocabulary   |
 
 ## Status vocabulary
 

@@ -61,6 +61,7 @@ import { registerBasesUpsertConfigTool } from "./tools/basesUpsertConfigTool/ind
 import { registerListAllTasksTool } from "./tools/listAllTasksTool/index.js";
 import { registerQueryTasksTool } from "./tools/queryTasksTool/index.js";
 import { registerRuntimeTools } from "./tools/runtimeTools/index.js";
+import type { GovernedNoteReplaceRuntime } from "./tools/governedNoteReplaceTools/index.js";
 import { registerExternalRootsTools } from "./tools/externalRootsTools/index.js";
 import {
   DESTRUCTIVE_TOOL_ANNOTATIONS,
@@ -1608,6 +1609,7 @@ function registerHeadlessGuardedWriteTools(
  *
  * @param {ObsidianRestApiService} obsidianService - The shared Obsidian REST API service instance.
  * @param {VaultCacheService | undefined} vaultCacheService - The shared Vault Cache service instance, which may be undefined if disabled.
+ * @param {GovernedNoteReplaceRuntime | undefined} governedNoteReplaceRuntime - The process-wide governed note runtime shared by every MCP session.
  * @returns {Promise<McpServer>} A promise resolving with the configured `McpServer` instance.
  * @throws {Error} If any resource or tool registration fails.
  * @private
@@ -1615,6 +1617,7 @@ function registerHeadlessGuardedWriteTools(
 async function createMcpServerInstance(
   obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
+  governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
 ): Promise<McpServer> {
   const context = requestContextService.createRequestContext({
     operation: "createMcpServerInstance",
@@ -1695,7 +1698,11 @@ async function createMcpServerInstance(
     );
     await registerListAllTasksTool(server, vaultCacheService);
     await registerQueryTasksTool(server, vaultCacheService);
-    await registerRuntimeTools(server, vaultCacheService);
+    await registerRuntimeTools(
+      server,
+      vaultCacheService,
+      governedNoteReplaceRuntime,
+    );
     const externalRootsService = config.externalRootsFile
       ? await ExternalRootsService.fromConfigFile(config.externalRootsFile)
       : undefined;
@@ -1806,6 +1813,7 @@ async function createMcpServerInstance(
  *
  * @param {ObsidianRestApiService} obsidianService - The shared Obsidian REST API service instance.
  * @param {VaultCacheService | undefined} vaultCacheService - The shared Vault Cache service instance.
+ * @param {GovernedNoteReplaceRuntime | undefined} governedNoteReplaceRuntime - The process-wide governed note runtime shared by every MCP session.
  * @returns {Promise<McpServer | void>} Resolves with the `McpServer` instance for 'stdio', or `void` for 'http'.
  * @throws {Error} If the configured transport type is unsupported or if transport setup fails.
  * @private
@@ -1813,6 +1821,7 @@ async function createMcpServerInstance(
 async function startTransport(
   obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
+  governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
 ): Promise<McpServer | ServerType | void> {
   const transportType = config.mcpTransportType;
   const context = requestContextService.createRequestContext({
@@ -1829,7 +1838,11 @@ async function startTransport(
     // For HTTP, startHttpTransport manages its own lifecycle and server instances per session.
     // It needs a factory function to create new McpServer instances, passing along the shared services.
     const mcpServerFactory = async () =>
-      createMcpServerInstance(obsidianService, vaultCacheService);
+      createMcpServerInstance(
+        obsidianService,
+        vaultCacheService,
+        governedNoteReplaceRuntime,
+      );
     const httpServerInstance = await startHttpTransport(
       mcpServerFactory,
       context,
@@ -1847,6 +1860,7 @@ async function startTransport(
     const server = await createMcpServerInstance(
       obsidianService,
       vaultCacheService,
+      governedNoteReplaceRuntime,
     );
     logger.debug("Delegating to connectStdioTransport...", context);
     await connectStdioTransport(server, context);
@@ -1873,12 +1887,14 @@ async function startTransport(
  *
  * @param {ObsidianRestApiService} obsidianService - The shared Obsidian REST API service instance, instantiated by the caller (e.g., index.ts).
  * @param {VaultCacheService | undefined} vaultCacheService - The shared Vault Cache service instance, instantiated by the caller (e.g., index.ts).
+ * @param {GovernedNoteReplaceRuntime | undefined} governedNoteReplaceRuntime - The process-wide governed note runtime shared by every MCP session.
  * @returns {Promise<void | McpServer>} For 'stdio', resolves with `McpServer`. For 'http', runs indefinitely.
  *   Rejects on critical failure, leading to process exit.
  */
 export async function initializeAndStartServer(
   obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
+  governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
 ): Promise<void | McpServer | ServerType> {
   const context = requestContextService.createRequestContext({
     operation: "initializeAndStartServer",
@@ -1896,7 +1912,11 @@ export async function initializeAndStartServer(
     );
 
     // Initiate the transport setup based on configuration, passing shared services.
-    const result = await startTransport(obsidianService, vaultCacheService);
+    const result = await startTransport(
+      obsidianService,
+      vaultCacheService,
+      governedNoteReplaceRuntime,
+    );
     logger.info(
       "MCP Server initialization sequence completed successfully.",
       context,

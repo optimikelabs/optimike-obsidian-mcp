@@ -87,6 +87,10 @@ const commonTools = [
   "operon_relocate_task",
   "operon_list_pending_recoveries",
   "operon_recover_mutation",
+  "obsidian_note_replace_plan",
+  "obsidian_note_replace_apply",
+  "obsidian_note_replace_status",
+  "obsidian_note_replace_recover",
 ];
 for (const tool of commonTools) {
   assert.ok(matrix.includes(`\`${tool}\``), `Matrix omits ${tool}`);
@@ -96,6 +100,11 @@ assert.match(matrix, /\| Admin filesystem\s+\| No\s+\| No/);
 assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 
 const packageJson = JSON.parse(await text("package.json"));
+assert.equal(
+  packageJson.version,
+  "2.5.0",
+  "2.6 candidate must not bump the stable package before the live canary",
+);
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts.inspect, "node scripts/run-inspector.mjs");
@@ -117,6 +126,7 @@ const bilingualPairs = [
   ["docs/README.md", "docs/README.fr.md"],
   ["docs/external-roots-setup.md", "docs/external-roots-setup.fr.md"],
   ["docs/runtime-capability-matrix.md", "docs/runtime-capability-matrix.fr.md"],
+  ["docs/governed-note-replacement.md", "docs/governed-note-replacement.fr.md"],
   ["docs/mcp-routing-guide.md", "docs/mcp-routing-guide.fr.md"],
   ["docs/headless-server-profile.md", "docs/headless-server-profile.fr.md"],
   ["docs/operon-mcp-contract.md", "docs/operon-mcp-contract.fr.md"],
@@ -125,6 +135,28 @@ const bilingualPairs = [
 for (const pair of bilingualPairs) {
   for (const file of pair) await access(path.join(root, file));
 }
+
+const governedNoteContract = await text("docs/governed-note-replacement.md");
+const governedNoteContractFr = await text(
+  "docs/governed-note-replacement.fr.md",
+);
+for (const content of [governedNoteContract, governedNoteContractFr]) {
+  for (const tool of commonTools.filter((tool) =>
+    tool.startsWith("obsidian_note_replace_"),
+  )) {
+    assert.ok(content.includes(`\`${tool}\``), `Note contract omits ${tool}`);
+  }
+  assert.match(content, /planRef/u);
+  assert.match(content, /operation_\*/u);
+  assert.match(content, /Vault\.process/u);
+}
+assert.match(governedNoteContract, /not undo/i);
+assert.match(governedNoteContractFr, /n’est pas `undo`/iu);
+assert.match(governedNoteContract, /`status` first/i);
+assert.match(governedNoteContractFr, /appeler d’abord\s+`status`/iu);
+
+const envExample = await text(".env.server.example");
+assert.match(envExample, /MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH=\//u);
 
 const operonContract = await text("docs/operon-mcp-contract.md");
 const operonContractFr = await text("docs/operon-mcp-contract.fr.md");

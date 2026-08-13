@@ -9,7 +9,10 @@ import {
   runRuntimeMaintenance,
 } from "../../../services/runtimeState.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
-import { registerGovernedNoteReplaceTools } from "../governedNoteReplaceTools/index.js";
+import {
+  registerGovernedNoteReplaceTools,
+  type GovernedNoteReplaceRuntime,
+} from "../governedNoteReplaceTools/index.js";
 import { registerOperonTools } from "../operonTools/index.js";
 
 const MaintenanceInputSchema = z.object({
@@ -28,6 +31,7 @@ const MaintenanceInputSchema = z.object({
 export async function registerRuntimeTools(
   server: McpServer,
   vaultCacheService: VaultCacheService | undefined,
+  governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
 ): Promise<void> {
   server.tool(
     "obsidian_runtime_status",
@@ -69,6 +73,6 @@ export async function registerRuntimeTools(
     }),
   );
 
-  await registerGovernedNoteReplaceTools(server);
+  await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
   await registerOperonTools(server);
 }

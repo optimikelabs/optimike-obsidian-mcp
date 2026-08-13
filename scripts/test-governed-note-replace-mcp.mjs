@@ -307,6 +307,16 @@ function assertNoSecret(value, label) {
   );
 }
 
+function assertNoJournalPath(value, label) {
+  const serialized =
+    typeof value === "string" ? value : JSON.stringify(value);
+  assert.equal(
+    serialized.includes(journalPath),
+    false,
+    `${label} leaked the private journal path`,
+  );
+}
+
 const testRootParent = path.join(process.cwd(), ".tmp");
 mkdirSync(testRootParent, { recursive: true });
 const testRoot = mkdtempSync(
@@ -410,8 +420,31 @@ try {
   );
   await headless.close();
 
+  const hybrid = await startClient("readonly", "hybrid");
+  const hybridTools = await hybrid.client.listTools();
+  assert.deepEqual(
+    hybridTools.tools
+      .map((tool) => tool.name)
+      .filter((name) => name.startsWith("obsidian_note_replace_"))
+      .sort(),
+    TOOL_NAMES,
+  );
+  await hybrid.close();
+
   session = await startClient("full", "live");
   const listed = await session.client.listTools();
+  for (const genericName of [
+    "operation_plan",
+    "operation_apply",
+    "operation_status",
+    "operation_recover",
+  ]) {
+    assert.equal(
+      listed.tools.some((tool) => tool.name === genericName),
+      false,
+      `${genericName} must remain internal`,
+    );
+  }
   const governed = listed.tools
     .filter((tool) => tool.name.startsWith("obsidian_note_replace_"))
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -455,6 +488,22 @@ try {
     [...(byName.get("obsidian_note_replace_status")?.inputSchema.required ?? [])].sort(),
     ["planRef"],
   );
+  assert.deepEqual(
+    [...(byName.get("obsidian_note_replace_recover")?.inputSchema.required ?? [])].sort(),
+    ["idempotencyKey", "planRef"],
+  );
+  assert.deepEqual(
+    Object.keys(
+      byName.get("obsidian_note_replace_apply")?.inputSchema.properties ?? {},
+    ).sort(),
+    ["idempotencyKey", "planRef"],
+  );
+  assert.deepEqual(
+    Object.keys(
+      byName.get("obsidian_note_replace_recover")?.inputSchema.properties ?? {},
+    ).sort(),
+    ["idempotencyKey", "planRef"],
+  );
 
   fake.reset();
   const protectedAttempt = await call(
@@ -482,6 +531,22 @@ try {
     true,
   );
   assert.match(invalidMarkdown.payload.error.message, /not valid/u);
+
+  const invalidSecretFrontmatter = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: `---\ncréation: 2026-08-13\nprivate: [${SECRET}\n---\nbody\n`,
+      idempotencyKey: "invalid-secret-frontmatter",
+    },
+    true,
+  );
+  assert.match(
+    invalidSecretFrontmatter.payload.error.message,
+    /not valid|cannot be compared safely/u,
+  );
+  assertNoSecret(invalidSecretFrontmatter.result, "invalid frontmatter error");
 
   fake.reset();
   const secretContent = nextContent("nominal", `${SECRET}\n`);
@@ -575,19 +640,23 @@ try {
     nextContent: nextContent("loser"),
     idempotencyKey: "two-plan-loser",
   });
+  const blockedWinner = fake.blockNextCas();
   const writesBeforeRace = fake.successfulWrites;
-  const winner = await call(session, "obsidian_note_replace_apply", {
+  const winnerPromise = call(session, "obsidian_note_replace_apply", {
     planRef: winnerPlan.payload.planRef,
     idempotencyKey: "two-plan-winner",
   });
+  await blockedWinner.entered;
   const loser = await call(session, "obsidian_note_replace_apply", {
     planRef: loserPlan.payload.planRef,
     idempotencyKey: "two-plan-loser",
   });
-  assertTerminal(winner.payload, "committed");
-  assertTerminal(loser.payload, "conflict");
+  blockedWinner.release();
+  const winner = await winnerPromise;
+  assertTerminal(loser.payload, "committed");
+  assertTerminal(winner.payload, "conflict");
   assert.equal(fake.successfulWrites - writesBeforeRace, 1);
-  assert.equal(fake.content, nextContent("winner"));
+  assert.equal(fake.content, nextContent("loser"));
 
   fake.reset();
   const gatePlan = await call(session, "obsidian_note_replace_plan", {
@@ -764,12 +833,18 @@ try {
   });
   assert.equal(fake.casRequests, statusCasBefore);
 
-  for (const result of observed) assertNoSecret(result, "MCP response");
+  for (const result of observed) {
+    assertNoSecret(result, "MCP response");
+    assertNoJournalPath(result, "MCP response");
+  }
   for (const stderr of [...stderrs, session.stderr()]) {
     assertNoSecret(stderr, "MCP stderr");
+    assertNoJournalPath(stderr, "MCP stderr");
   }
   for (const file of listFiles(logsPath)) {
-    assertNoSecret(readFileSync(file, "utf8"), `log ${file}`);
+    const log = readFileSync(file, "utf8");
+    assertNoSecret(log, `log ${file}`);
+    assertNoJournalPath(log, `log ${file}`);
   }
 
   console.log(

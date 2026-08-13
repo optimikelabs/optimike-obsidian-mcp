@@ -56,8 +56,8 @@ atomic guarantee covers the target-note transition enforced by
 `Vault.process`; sync, watchers, plugins, indexers, and external automations are
 outside that recovery boundary.
 
-See the [Tool Surface](docs/obsidian_mcp_tools_spec.md#governed-atomic-note-replacement)
-and [Runtime Matrix](docs/runtime-capability-matrix.md).
+See the [governed note contract](docs/governed-note-replacement.md), the [Tool Surface](docs/obsidian_mcp_tools_spec.md#governed-atomic-note-replacement),
+and the [Runtime Matrix](docs/runtime-capability-matrix.md).
 
 ## Other integrations
 
@@ -88,6 +88,7 @@ npm run build
 npm run test:runtime
 npm run test:operation-runtime
 npm run test:governed-note-replace-mcp
+npm run test:governed-note-replace-http
 npm run test:external-roots
 npm run test:docs
 npm run test:package

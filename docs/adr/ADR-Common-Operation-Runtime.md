@@ -84,19 +84,25 @@ The public projection is deliberately domain-specific:
 - `obsidian_note_replace_status`
 - `obsidian_note_replace_recover`
 
-One process-shared runtime owns the existing adapter and its single journal
-across stdio and per-session HTTP MCP servers. Planning and every possible
+One application-lifecycle runtime owns the existing adapter, shared REST
+backend, and single journal across stdio and every per-session HTTP MCP
+server. It is constructed once at process startup, injected into each server
+instance, and closed explicitly during shutdown. Planning and every possible
 effect revalidate the current MCP write policy. The same Bridge read supplies
 the current Markdown used for protected-frontmatter comparison and the SHA-256
 sealed as the before proof.
 
-Recovery is exact-plan reconciliation or resumption, never restoration of the
+Recovery is exact-plan reconciliation/resumption, never restoration of the
 previous note. The guaranteed effect boundary is the one target-note transition
 enforced by `Vault.process` CAS. Sync, watchers, plugins, indexers, and external
 automations are outside that boundary and are not claimed reversible.
 
 The public contract is owned by the
 [Tool Surface](../obsidian_mcp_tools_spec.md#governed-atomic-note-replacement).
+
+The public projection remains a release candidate until the live Obsidian
+Desktop canary passes. CI and deterministic MCP fixtures do not substitute
+for that operator-owned gate.
 
 ## Explicit exclusions
 

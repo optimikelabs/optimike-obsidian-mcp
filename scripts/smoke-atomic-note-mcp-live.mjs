@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -43,6 +43,8 @@ mkdirSync(tempParent, { recursive: true });
 const tempRoot = mkdtempSync(path.join(tempParent, "atomic-note-mcp-live-"));
 const journalPath = path.join(tempRoot, "note-replace.sqlite");
 const logsPath = path.join(tempRoot, "logs");
+const backupPath = path.join(tempRoot, "original-content.md");
+const backupMetadataPath = path.join(tempRoot, "original-content.json");
 mkdirSync(logsPath, { recursive: true });
 
 const transport = new StdioClientTransport({
@@ -115,8 +117,67 @@ async function planApplyStatus(nextContent, key) {
   return { planned, applied, status };
 }
 
+function sha256(content) {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+async function proveDirectBridgeCasConflict() {
+  const [{ ObsidianRestApiService }, { requestContextService }] =
+    await Promise.all([
+      import("../dist/services/obsidianRestAPI/index.js"),
+      import("../dist/utils/index.js"),
+    ]);
+  const rest = new ObsidianRestApiService();
+  const context = requestContextService.createRequestContext({
+    operation: "AtomicNoteMcpLiveCanaryDirectCasConflict",
+    target: canaryPath,
+  });
+  const status = await rest.getAtomicWriteStatus(context);
+  const before = await rest.readAtomicWriteNote(
+    { contractVersion: 1, path: canaryPath },
+    context,
+  );
+  let conflictCode;
+  try {
+    await rest.replaceAtomicWriteNote(
+      {
+        contractVersion: 1,
+        path: canaryPath,
+        bindingFingerprint: status.backend.bindingFingerprint,
+        expectedSha256: "0".repeat(64),
+        nextContent: before.content,
+      },
+      context,
+    );
+    assert.fail("Atomic Write Bridge accepted an intentionally stale SHA-256.");
+  } catch (error) {
+    conflictCode =
+      error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : undefined;
+    assert.match(
+      error instanceof Error ? error.message : String(error),
+      /conflict|hash|409/iu,
+    );
+  }
+  const after = await rest.readAtomicWriteNote(
+    { contractVersion: 1, path: canaryPath },
+    context,
+  );
+  assert.equal(after.sha256, before.sha256);
+  assert.equal(after.content, before.content);
+  return {
+    outcome: "conflict",
+    code: conflictCode,
+    unchangedSha256: after.sha256,
+  };
+}
+
 let originalContent;
 let restored = false;
+let runId;
+let evidenceFile;
+let backupWritten = false;
 try {
   await client.connect(transport);
   const { tools } = await client.listTools();
@@ -131,7 +192,27 @@ try {
   }
 
   originalContent = await readNote();
-  const runId = randomUUID();
+  runId = randomUUID();
+  writeFileSync(backupPath, originalContent, { encoding: "utf8", mode: 0o600 });
+  writeFileSync(
+    backupMetadataPath,
+    `${JSON.stringify(
+      {
+        canaryPath,
+        createdAt: new Date().toISOString(),
+        sha256: sha256(originalContent),
+        backupPath,
+        recoveryInstruction:
+          "If the canary process terminates before restoration, restore original-content.md only to the explicit canary note.",
+      },
+      null,
+      2,
+    )}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  backupWritten = true;
+
+  const directCas = await proveDirectBridgeCasConflict();
   const nominalContent = `${originalContent}${
     originalContent.endsWith("\n") ? "" : "\n"
   }\n<!-- optimike-atomic-note-canary:${runId}:nominal -->\n`;
@@ -175,23 +256,34 @@ try {
   assert.equal(await readNote(), originalContent);
   restored = true;
 
-  console.log(
-    JSON.stringify(
-      {
-        ok: true,
-        canaryPath,
-        toolsVerified: 4,
-        nominalOutcome: nominal.status.outcome,
-        replayOutcome: replay.outcome,
-        winnerOutcome: winner.status.outcome,
-        staleOutcome: stale.outcome,
-        restoreOutcome: restore.status.outcome,
-        restored,
-      },
-      null,
-      2,
-    ),
+  const evidence = {
+    ok: true,
+    runId,
+    completedAt: new Date().toISOString(),
+    canaryPath,
+    toolsVerified: 4,
+    directBridgeCas: directCas,
+    nominalOutcome: nominal.status.outcome,
+    replayOutcome: replay.outcome,
+    winnerOutcome: winner.status.outcome,
+    staleOutcome: stale.outcome,
+    restoreOutcome: restore.status.outcome,
+    originalSha256: sha256(originalContent),
+    nominalSha256: sha256(nominalContent),
+    winnerSha256: sha256(winnerContent),
+    finalSha256: sha256(await readNote()),
+    restored,
+  };
+  evidenceFile = path.join(
+    tempParent,
+    `atomic-note-mcp-live-evidence-${runId}.json`,
   );
+  writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+
+  console.log(JSON.stringify({ ...evidence, evidenceFile }, null, 2));
 } finally {
   if (originalContent !== undefined && !restored) {
     try {
@@ -209,6 +301,8 @@ try {
             canaryPath,
             restored: false,
             evidenceDirectory: tempRoot,
+            backupPath,
+            backupMetadataPath,
             recoveryRequired: true,
             error:
               restoreError instanceof Error
@@ -224,7 +318,13 @@ try {
   await client.close().catch(() => undefined);
   if (restored) {
     rmSync(tempRoot, { recursive: true, force: true });
+    if (evidenceFile) console.error(`Canary evidence written to ${evidenceFile}`);
+  } else if (backupWritten) {
+    console.error(
+      `Canary recovery evidence retained at ${tempRoot}; restore only the explicit canary note from ${backupPath}.`,
+    );
   } else {
-    console.error(`Canary evidence retained at ${tempRoot}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    console.error("Canary failed before the first mutation; no note recovery is required.");
   }
 }

@@ -183,6 +183,48 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 <vault>/.obsidian/plugins/obsidian-tasks-plugin/data.json
 ```
 
+## Remplacement atomique gouverné d’une note
+
+Les outils live `obsidian_note_replace_*` exposent l’adaptateur atomique 2.5
+sans créer un second moteur de transaction. Un seul journal process-wide est
+partagé par stdio et toutes les sessions HTTP MCP. Son chemin par défaut reste
+local à la machine ; `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` doit être absolu
+et rester hors du coffre, des dépôts, dossiers synchronisés et diagnostics
+publics.
+
+Séquence client :
+
+1. `obsidian_note_replace_plan(path, nextContent, idempotencyKey)` ;
+2. `obsidian_note_replace_apply(planRef, idempotencyKey)` ;
+3. après timeout ou réponse perdue, appeler `obsidian_note_replace_status` ;
+4. appeler `obsidian_note_replace_recover` uniquement si le reçu autorise la
+   récupération du plan exact.
+
+Le `planRef` est opaque. Apply et recover n’acceptent jamais une nouvelle cible,
+un nouveau contenu ou un nouveau hash. Recover réconcilie ou reprend le même
+plan scellé ; ce n’est pas un undo. La politique MCP courante, le frontmatter
+protégé et le write gate désactivé par défaut de l’Atomic Write Bridge restent
+actifs au planning et avant chaque effet possible.
+
+Avant merge ou release, activer l’Atomic Write Bridge uniquement dans un coffre
+Desktop jetable, créer une note canary `.md` existante et dédiée, puis exécuter
+dans PowerShell :
+
+```powershell
+$env:OBSIDIAN_ATOMIC_NOTE_CANARY_PATH="Canary/Atomic Note.md"
+$env:OBSIDIAN_ATOMIC_NOTE_CANARY_CONFIRM="I_UNDERSTAND_THIS_NOTE_WILL_BE_TEMPORARILY_REPLACED"
+$env:OBSIDIAN_API_KEY="<cle-local-rest-api>"
+$env:MCP_WRITE_MODE="guarded"
+npm run smoke:atomic-note-mcp-live
+```
+
+Le canary sauvegarde le contenu initial avant sa première mutation, prouve les
+quatre outils MCP, le refus d’un CAS Bridge périmé, l’apply nominal, le replay,
+status, un conflit déterministe et la restauration. Un succès conserve une
+preuve JSON expurgée sous `.tmp/` ; une interruption garde le dossier de backup
+privé et affiche l’unique chemin de récupération. Ne jamais viser une note
+utilisateur ordinaire.
+
 ## Tasks : comment ça marche maintenant
 
 Tasks n’est plus un MCP séparé requis pour Codex.

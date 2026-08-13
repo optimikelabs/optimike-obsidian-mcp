@@ -181,6 +181,43 @@ The final server can expose different capabilities depending on which Obsidian p
 <vault>/.obsidian/plugins/obsidian-tasks-plugin/data.json
 ```
 
+## Governed atomic note replacement
+
+The live `obsidian_note_replace_*` tools expose the existing 2.5 atomic-note
+adapter without adding a second transaction engine. One process-wide journal
+is shared by stdio and every HTTP MCP session. Its default path is machine-local;
+set `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` only to an absolute path outside
+the vault, repositories, synchronized folders and public diagnostics.
+
+Client sequence:
+
+1. `obsidian_note_replace_plan(path, nextContent, idempotencyKey)`;
+2. `obsidian_note_replace_apply(planRef, idempotencyKey)`;
+3. after any timeout or lost response, call `obsidian_note_replace_status`;
+4. call `obsidian_note_replace_recover` only when the receipt authorizes
+   exact-plan recovery.
+
+`planRef` is opaque. Apply and recover never accept a new target, content or
+hash. Recover reconciles or resumes the same sealed plan; it is not undo. The
+current MCP write policy, protected frontmatter and the default-off Atomic Write
+Bridge gate remain effective at planning and before every possible effect.
+
+Before merge or release, enable the Atomic Write Bridge only in a disposable
+Desktop vault, create one dedicated existing `.md` canary note, then run:
+
+```bash
+OBSIDIAN_ATOMIC_NOTE_CANARY_PATH="Canary/Atomic Note.md" \
+OBSIDIAN_ATOMIC_NOTE_CANARY_CONFIRM=I_UNDERSTAND_THIS_NOTE_WILL_BE_TEMPORARILY_REPLACED \
+OBSIDIAN_API_KEY="<local-rest-api-key>" MCP_WRITE_MODE=guarded \
+npm run smoke:atomic-note-mcp-live
+```
+
+The canary saves the original content before its first mutation, proves the four
+MCP tools, a direct Bridge CAS rejection, nominal apply, replay, status,
+deterministic conflict and restoration. A successful run leaves a redacted JSON
+proof under `.tmp/`; an interrupted run retains the private backup directory and
+prints the one explicit recovery path. Never point it at an ordinary user note.
+
 ## Tasks: How It Works Now
 
 Tasks are no longer a separate MCP requirement for Codex.
