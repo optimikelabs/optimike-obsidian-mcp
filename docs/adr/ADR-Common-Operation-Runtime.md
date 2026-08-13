@@ -102,10 +102,12 @@ independent from Operon's Developer API grant.
 
 The adapter stores the sealed next content in a private SQLite WAL journal so
 the exact plan can be recovered after a lost response. Terminal rows expire
-after 30 days; non-terminal and `outcome_unknown` rows are retained for
+after 30 days and their sealed content is redacted as soon as a stable terminal
+state is recorded; non-terminal and `outcome_unknown` rows are retained for
 recovery. The disposable fixture covers conflict without write, committed
-replay, idempotency-key binding, lost-response reconciliation, and exact-plan
-recovery after a request failure.
+replay, concurrent status reconciliation, idempotency-key binding,
+lost-response reconciliation, active-daemon retention, and exact-plan recovery
+after a request failure.
 
 ## Explicit exclusions
 

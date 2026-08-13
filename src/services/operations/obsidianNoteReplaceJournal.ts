@@ -27,10 +27,40 @@ export type ObsidianNoteReplacePlan = {
   failure?: string;
 };
 
+export class ObsidianNoteReplaceConcurrencyError extends Error {
+  constructor() {
+    super("The note replacement state changed concurrently.");
+  }
+}
+
+export type ObsidianNoteReplaceJournalOptions = {
+  now?: () => number;
+  terminalRetentionMs?: number;
+  purgeIntervalMs?: number;
+};
+
+const STABLE_TERMINAL = new Set<ObsidianNoteReplaceStatus>([
+  "committed",
+  "conflict",
+  "rejected",
+  "failed",
+]);
+
 export class ObsidianNoteReplaceJournal {
   private readonly db: DatabaseSync;
+  private readonly now: () => number;
+  private readonly terminalRetentionMs: number;
+  private readonly purgeIntervalMs: number;
+  private nextPurgeAt = 0;
 
-  constructor(databasePath: string) {
+  constructor(
+    databasePath: string,
+    options: ObsidianNoteReplaceJournalOptions = {},
+  ) {
+    this.now = options.now ?? Date.now;
+    this.terminalRetentionMs =
+      options.terminalRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
+    this.purgeIntervalMs = options.purgeIntervalMs ?? 60 * 60 * 1000;
     mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(databasePath);
     this.db.exec("PRAGMA journal_mode=WAL");
@@ -46,16 +76,7 @@ export class ObsidianNoteReplaceJournal {
         updated_at TEXT NOT NULL
       )
     `);
-    const terminalRetentionCutoff = new Date(
-      Date.now() - 30 * 24 * 60 * 60 * 1000,
-    ).toISOString();
-    this.db
-      .prepare(
-        `DELETE FROM obsidian_note_replace_plans
-         WHERE status IN ('committed', 'conflict', 'rejected', 'failed')
-           AND updated_at < ?`,
-      )
-      .run(terminalRetentionCutoff);
+    this.maybePurgeTerminalPlans();
     for (const privatePath of [
       databasePath,
       `${databasePath}-wal`,
@@ -80,6 +101,7 @@ export class ObsidianNoteReplaceJournal {
       "operationId" | "status" | "createdAt" | "updatedAt"
     >,
   ): ObsidianNoteReplacePlan {
+    this.maybePurgeTerminalPlans();
     const existing = this.getByIdempotencyKey(input.idempotencyKey);
     if (existing) {
       if (existing.requestDigest !== input.requestDigest) {
@@ -89,7 +111,7 @@ export class ObsidianNoteReplaceJournal {
       }
       return existing;
     }
-    const now = new Date().toISOString();
+    const now = new Date(this.now()).toISOString();
     const plan: ObsidianNoteReplacePlan = {
       ...input,
       operationId: randomUUID(),
@@ -115,6 +137,7 @@ export class ObsidianNoteReplaceJournal {
   }
 
   get(operationId: string): ObsidianNoteReplacePlan | undefined {
+    this.maybePurgeTerminalPlans();
     const row = this.db
       .prepare(
         "SELECT payload_json FROM obsidian_note_replace_plans WHERE operation_id = ?",
@@ -126,6 +149,7 @@ export class ObsidianNoteReplaceJournal {
   }
 
   getByIdempotencyKey(key: string): ObsidianNoteReplacePlan | undefined {
+    this.maybePurgeTerminalPlans();
     const row = this.db
       .prepare(
         "SELECT payload_json FROM obsidian_note_replace_plans WHERE idempotency_key = ?",
@@ -142,14 +166,16 @@ export class ObsidianNoteReplaceJournal {
     next: ObsidianNoteReplaceStatus,
     failure?: string,
   ): ObsidianNoteReplacePlan {
+    this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
     if (!current || !expected.includes(current.status)) {
-      throw new Error("The note replacement state changed concurrently.");
+      throw new ObsidianNoteReplaceConcurrencyError();
     }
     const updated: ObsidianNoteReplacePlan = {
       ...current,
       status: next,
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(this.now()).toISOString(),
+      ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };
     const placeholders = expected.map(() => "?").join(", ");
@@ -167,8 +193,22 @@ export class ObsidianNoteReplaceJournal {
         ...expected,
       );
     if (Number(result.changes) !== 1) {
-      throw new Error("The note replacement state changed concurrently.");
+      throw new ObsidianNoteReplaceConcurrencyError();
     }
     return updated;
+  }
+
+  private maybePurgeTerminalPlans(): void {
+    const now = this.now();
+    if (now < this.nextPurgeAt) return;
+    const cutoff = new Date(now - this.terminalRetentionMs).toISOString();
+    this.db
+      .prepare(
+        `DELETE FROM obsidian_note_replace_plans
+         WHERE status IN ('committed', 'conflict', 'rejected', 'failed')
+           AND updated_at < ?`,
+      )
+      .run(cutoff);
+    this.nextPurgeAt = now + this.purgeIntervalMs;
   }
 }

@@ -17,6 +17,7 @@ import {
   type OperationReceipt,
 } from "./contract.js";
 import {
+  ObsidianNoteReplaceConcurrencyError,
   ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
 } from "./obsidianNoteReplaceJournal.js";
@@ -301,7 +302,7 @@ export class ObsidianNoteReplaceOperationAdapter
       read.sha256 !== plan.beforeSha256
     ) {
       return receipt(
-        this.journal.transition(
+        this.transitionOrReload(
           plan.operationId,
           [plan.status],
           "conflict",
@@ -338,7 +339,7 @@ export class ObsidianNoteReplaceOperationAdapter
     try {
       const status = StatusSchema.parse(await this.backend.status());
       if (status.backend.bindingFingerprint !== plan.bindingFingerprint) {
-        return this.journal.transition(
+        return this.transitionOrReload(
           plan.operationId,
           ["applying"],
           "rejected",
@@ -346,7 +347,7 @@ export class ObsidianNoteReplaceOperationAdapter
         );
       }
       if (!status.backend.writeEnabled) {
-        return this.journal.transition(
+        return this.transitionOrReload(
           plan.operationId,
           ["applying"],
           "rejected",
@@ -371,7 +372,7 @@ export class ObsidianNoteReplaceOperationAdapter
           "Atomic-write postflight did not match the sealed plan.",
         );
       }
-      return this.journal.transition(
+      return this.transitionOrReload(
         plan.operationId,
         ["applying"],
         "committed",
@@ -386,7 +387,7 @@ export class ObsidianNoteReplaceOperationAdapter
       }
       const conflict =
         error instanceof McpError && error.code === BaseErrorCode.CONFLICT;
-      return this.journal.transition(
+      return this.transitionOrReload(
         plan.operationId,
         ["applying"],
         conflict ? "conflict" : "outcome_unknown",
@@ -400,7 +401,7 @@ export class ObsidianNoteReplaceOperationAdapter
   ): Promise<ObsidianNoteReplacePlan> {
     const reconciled = await this.reconcile(plan);
     if (reconciled.status !== "applying") return reconciled;
-    return this.journal.transition(
+    return this.transitionOrReload(
       plan.operationId,
       ["applying"],
       "outcome_unknown",
@@ -415,7 +416,7 @@ export class ObsidianNoteReplaceOperationAdapter
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
     if (read.bindingFingerprint !== plan.bindingFingerprint) {
-      return this.journal.transition(
+      return this.transitionOrReload(
         plan.operationId,
         [plan.status],
         "conflict",
@@ -423,14 +424,14 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 === plan.afterSha256) {
-      return this.journal.transition(
+      return this.transitionOrReload(
         plan.operationId,
         [plan.status],
         "committed",
       );
     }
     if (read.sha256 !== plan.beforeSha256) {
-      return this.journal.transition(
+      return this.transitionOrReload(
         plan.operationId,
         [plan.status],
         "conflict",
@@ -438,5 +439,21 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     return plan;
+  }
+
+  private transitionOrReload(
+    operationId: string,
+    expected: ObsidianNoteReplacePlan["status"][],
+    next: ObsidianNoteReplacePlan["status"],
+    failure?: string,
+  ): ObsidianNoteReplacePlan {
+    try {
+      return this.journal.transition(operationId, expected, next, failure);
+    } catch (error) {
+      if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+      const current = this.journal.get(operationId);
+      if (!current) throw error;
+      return current;
+    }
   }
 }

@@ -18,6 +18,7 @@ class FakeAtomicWriteBackend {
   replaceCalls = 0;
   failBeforeWriteOnce = false;
   loseResponseAfterWriteOnce = false;
+  afterWriteBeforeReturn = undefined;
 
   async status() {
     return {
@@ -61,6 +62,10 @@ class FakeAtomicWriteBackend {
       throw new McpError(BaseErrorCode.CONFLICT, "Fixture hash conflict.");
     }
     this.content = payload.nextContent;
+    if (this.afterWriteBeforeReturn) {
+      await this.afterWriteBeforeReturn();
+      this.afterWriteBeforeReturn = undefined;
+    }
     if (this.loseResponseAfterWriteOnce) {
       this.loseResponseAfterWriteOnce = false;
       throw new McpError(
@@ -147,6 +152,22 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture("concurrent-status");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "committed during concurrent status",
+      idempotencyKey: "concurrent-status",
+    });
+    backend.afterWriteBeforeReturn = async () => {
+      const concurrent = await adapter.status(planned.planRef);
+      assert.equal(concurrent.outcome, "committed");
+    };
+    const committed = await adapter.apply(planned.planRef, "concurrent-status");
+    assert.equal(committed.outcome, "committed");
+    assert.equal(backend.replaceCalls, 1);
+  }
+
+  {
     const { backend, adapter } = fixture("recover-same-plan");
     backend.failBeforeWriteOnce = true;
     const planned = await adapter.plan({
@@ -189,6 +210,46 @@ try {
       }),
       /different note replacement/u,
     );
+  }
+
+  {
+    let now = Date.parse("2026-08-13T00:00:00.000Z");
+    const journal = new ObsidianNoteReplaceJournal(
+      path.join(temporaryRoot, "retention.sqlite"),
+      {
+        now: () => now,
+        terminalRetentionMs: 1_000,
+        purgeIntervalMs: 100,
+      },
+    );
+    journals.push(journal);
+    const terminal = journal.create({
+      idempotencyKey: "retention-terminal",
+      requestDigest: sha256("retention-request"),
+      path: "Fixture/Retention.md",
+      beforeSha256: sha256("before"),
+      afterSha256: sha256("after"),
+      nextContent: "sensitive terminal content",
+      bindingFingerprint: sha256("fixture-vault-instance"),
+    });
+    journal.transition(terminal.operationId, ["planned"], "applying");
+    const committed = journal.transition(
+      terminal.operationId,
+      ["applying"],
+      "committed",
+    );
+    assert.equal(committed.nextContent, "");
+    now += 2_000;
+    journal.create({
+      idempotencyKey: "retention-trigger",
+      requestDigest: sha256("retention-trigger"),
+      path: "Fixture/Trigger.md",
+      beforeSha256: sha256("before"),
+      afterSha256: sha256("next"),
+      nextContent: "next",
+      bindingFingerprint: sha256("fixture-vault-instance"),
+    });
+    assert.equal(journal.get(terminal.operationId), undefined);
   }
 
   console.log(
