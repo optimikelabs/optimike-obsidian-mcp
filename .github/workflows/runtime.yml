@@ -22,6 +22,7 @@ jobs:
       - run: npm ci
       - run: npm run test:runtime
       - run: npm run test:external-roots
+      - run: npm run test:operation-runtime
       - run: npm run test:profiles
       - run: npm run test:tool-annotations
       - run: npm run test:docs
@@ -126,8 +127,13 @@ jobs:
       - name: Install Operon Bridge dependencies
         working-directory: plugins/obsidian-operon-bridge
         run: npm ci
+      - name: Install Atomic Write Bridge dependencies
+        working-directory: plugins/obsidian-atomic-write-bridge
+        run: npm ci
       - name: Test Bases Bridge
         run: npm run check:bases-bridge
+      - name: Test Atomic Write runtime and Bridge
+        run: npm run check:atomic-write
       - name: Build MCP server
         run: npm run build
       - name: Build installable Bridges
@@ -141,4 +147,12 @@ jobs:
           path: |
             plugins/obsidian-bases-bridge/build/main.js
             plugins/obsidian-bases-bridge/build/manifest.json
+          if-no-files-found: error
+      - name: Upload Atomic Write Bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimike-atomic-write-bridge
+          path: |
+            plugins/obsidian-atomic-write-bridge/build/main.js
+            plugins/obsidian-atomic-write-bridge/build/manifest.json
           if-no-files-found: error

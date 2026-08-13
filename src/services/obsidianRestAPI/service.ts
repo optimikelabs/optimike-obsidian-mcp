@@ -16,14 +16,21 @@ import {
   requestContextService,
 } from "../../utils/index.js"; // Added requestContextService
 import * as activeFileMethods from "./methods/activeFileMethods.js";
+import * as atomicWriteMethods from "./methods/atomicWriteMethods.js";
 import * as basesMethods from "./methods/basesMethods.js";
 import * as commandMethods from "./methods/commandMethods.js";
 import * as openMethods from "./methods/openMethods.js";
 import * as patchMethods from "./methods/patchMethods.js";
 import * as searchMethods from "./methods/searchMethods.js";
 import * as vaultMethods from "./methods/vaultMethods.js";
+import { requestLogMetadata } from "./requestLogMetadata.js";
 import {
   ApiStatusResponse, // Import PatchOptions type
+  AtomicWriteCasRequest,
+  AtomicWriteCasResponse,
+  AtomicWriteReadRequest,
+  AtomicWriteReadResponse,
+  AtomicWriteStatusResponse,
   BaseConfigResponse,
   BaseConfigUpsertRequest,
   BaseConfigUpsertResponse,
@@ -210,7 +217,7 @@ export class ObsidianRestApiService {
       {
         operation: `ObsidianAPI_${operationName}_Wrapper`,
         context: context,
-        input: requestConfig, // Log request config (sanitized by ErrorHandler)
+        input: requestLogMetadata(requestConfig),
         errorCode: BaseErrorCode.INTERNAL_ERROR, // Default if wrapper itself fails
       },
     );
@@ -234,6 +241,37 @@ export class ObsidianRestApiService {
       },
       context,
       "checkStatus",
+    );
+  }
+
+  async getAtomicWriteStatus(
+    context: RequestContext,
+  ): Promise<AtomicWriteStatusResponse> {
+    return atomicWriteMethods.getAtomicWriteStatus(
+      this._request.bind(this),
+      context,
+    );
+  }
+
+  async readAtomicWriteNote(
+    payload: AtomicWriteReadRequest,
+    context: RequestContext,
+  ): Promise<AtomicWriteReadResponse> {
+    return atomicWriteMethods.readAtomicWriteNote(
+      this._request.bind(this),
+      payload,
+      context,
+    );
+  }
+
+  async replaceAtomicWriteNote(
+    payload: AtomicWriteCasRequest,
+    context: RequestContext,
+  ): Promise<AtomicWriteCasResponse> {
+    return atomicWriteMethods.replaceAtomicWriteNote(
+      this._request.bind(this),
+      payload,
+      context,
     );
   }
 

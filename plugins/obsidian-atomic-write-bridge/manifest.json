@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-atomic-write-bridge",
+  "name": "Optimike Atomic Write Bridge",
+  "version": "0.1.0",
+  "minAppVersion": "1.1.0",
+  "author": "Optimike",
+  "authorUrl": "https://github.com/optimikelabs",
+  "description": "Expose une écriture atomique SHA-256 pour les notes via l'API d'extension de Local REST API.",
+  "isDesktopOnly": true
+}

@@ -27,6 +27,8 @@ const requiredFiles = [
   "docs/adr/README.md",
   "plugins/obsidian-bases-bridge/build/main.js",
   "plugins/obsidian-bases-bridge/build/manifest.json",
+  "plugins/obsidian-atomic-write-bridge/build/main.js",
+  "plugins/obsidian-atomic-write-bridge/build/manifest.json",
   "plugins/obsidian-operon-bridge/build/main.js",
   "plugins/obsidian-operon-bridge/build/manifest.json",
 ];

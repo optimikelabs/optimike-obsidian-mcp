@@ -52,6 +52,7 @@ question.
 - frontière MCP et CLI : [Audit CLI / Developer API](operon-cli-audit.fr.md) ;
 - bridge Operon inclus : [README Operon Bridge](../plugins/obsidian-operon-bridge/README.md) ;
 - bridge Bases inclus : [README Bases Bridge](../plugins/obsidian-bases-bridge/README.md).
+- pilote compare-and-replace Markdown : [README Atomic Write Bridge](../plugins/obsidian-atomic-write-bridge/README.md).
 
 ### Recherche et runtime
 

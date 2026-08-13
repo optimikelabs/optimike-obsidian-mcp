@@ -2,8 +2,7 @@
 
 [![Dernière version](https://img.shields.io/github/v/release/optimikelabs/optimike-obsidian-mcp?display_name=tag&sort=semver)](https://github.com/optimikelabs/optimike-obsidian-mcp/releases/latest)
 
-English version: [README.md](README.md)
-Hub documentaire : [docs/README.fr.md](docs/README.fr.md)
+English version: [README.md](README.md) · Hub documentaire : [docs/README.fr.md](docs/README.fr.md)
 Exploitation : [OPERATIONS.fr.md](OPERATIONS.fr.md)
 Sécurité : [SECURITY.fr.md](SECURITY.fr.md)
 
@@ -92,6 +91,7 @@ Activer seulement les surfaces utilisées :
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) :
   notes, métadonnées et tags en live ;
 - **Bases Bridge (REST)** inclus : opérations `.base` en live ;
+- **Optimike Atomic Write Bridge** inclus : compare-and-replace SHA-256 opt-in pour le pilote interne sur les notes ;
 - **Smart Connections** : index sémantique `.smart-env` ;
 - **Operon 3.2.1** et **Optimike Operon Bridge** inclus : tâches live
   gouvernées via la Developer API officielle V1 ;
@@ -107,6 +107,8 @@ OPERON_MUTATIONS_ENABLED=true
 ```
 
 Les snapshots Operon obsolètes restent toujours en lecture seule.
+
+Le remplacement atomique des notes a son propre réglage, désactivé par défaut, et ne requiert pas le grant Developer API d’Operon.
 
 Le MCP expose une surface agentique gouvernée, pas toutes les fonctions de la
 CLI Operon. Les diagnostics natifs, la recherche/résolution, les relations et

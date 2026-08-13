@@ -25,6 +25,50 @@ export type RequestFunction = <T = any>(
   operationName: string,
 ) => Promise<T>;
 
+export type AtomicWriteReadRequest = {
+  contractVersion: 1;
+  path: string;
+};
+
+export type AtomicWriteCasRequest = AtomicWriteReadRequest & {
+  bindingFingerprint: string;
+  expectedSha256: string;
+  nextContent: string;
+};
+
+export type AtomicWriteStatusResponse = {
+  ok: true;
+  contractVersion: 1;
+  plugin: { id: string; version: string };
+  backend: {
+    kind: "obsidian-vault-process";
+    bindingFingerprint: string;
+    atomicCas: true;
+    writeEnabled: boolean;
+  };
+  limits: { markdownOnly: true };
+};
+
+export type AtomicWriteReadResponse = {
+  ok: true;
+  contractVersion: 1;
+  path: string;
+  content: string;
+  sha256: string;
+  size: number;
+  bindingFingerprint: string;
+};
+
+export type AtomicWriteCasResponse = {
+  ok: true;
+  contractVersion: 1;
+  path: string;
+  beforeSha256: string;
+  afterSha256: string;
+  size: number;
+  bindingFingerprint: string;
+};
+
 /**
  * Filesystem metadata for a note.
  */

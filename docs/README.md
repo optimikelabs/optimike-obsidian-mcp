@@ -52,6 +52,7 @@ French operator guides are linked alongside their English equivalents.
 - MCP versus CLI boundary: [Operon CLI / Developer API audit](operon-cli-audit.md);
 - bundled bridge implementation: [Operon Bridge README](../plugins/obsidian-operon-bridge/README.md);
 - bundled Bases implementation: [Bases Bridge README](../plugins/obsidian-bases-bridge/README.md).
+- atomic Markdown compare-and-replace pilot: [Atomic Write Bridge README](../plugins/obsidian-atomic-write-bridge/README.md).
 
 ### Search and runtime
 
