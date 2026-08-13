@@ -116,9 +116,10 @@ private journal are owned by one application-lifecycle runtime. The runtime is
 constructed once with the shared REST service, injected into the stdio server
 and every per-session HTTP MCP server, and closed explicitly during process
 shutdown. No session creates a competing journal or REST client. Applying rows
-carry a runtime owner, so another local MCP process sharing the durable journal
-cannot reclassify a live executor as interrupted; dead or explicitly closed
-owners remain recoverable through the exact plan.
+carry a runtime-instance owner backed by a durable heartbeat lease, so another
+MCP process sharing the journal cannot mistake PID reuse for the original live
+executor; an expired or explicitly closed owner remains recoverable through the
+exact plan.
 
 The public projection remains domain-specific:
 

@@ -494,7 +494,16 @@ try {
 
   {
     const sharedPath = path.join(temporaryRoot, "live-owner.sqlite");
-    const ownerJournal = new ObsidianNoteReplaceJournal(sharedPath);
+    let leaseNow = Date.parse("2026-08-13T00:00:00.000Z");
+    const leaseOptions = {
+      now: () => leaseNow,
+      executionLeaseMs: 1_000,
+      executionSweepIntervalMs: 100,
+    };
+    const ownerJournal = new ObsidianNoteReplaceJournal(
+      sharedPath,
+      leaseOptions,
+    );
     const applying = ownerJournal.create({
       idempotencyKey: "live-owner",
       requestDigest: sha256("live-owner-request"),
@@ -505,12 +514,19 @@ try {
       bindingFingerprint: sha256("fixture-vault-instance"),
     });
     ownerJournal.transition(applying.operationId, ["planned"], "applying");
-    const observerJournal = new ObsidianNoteReplaceJournal(sharedPath);
+    const observerJournal = new ObsidianNoteReplaceJournal(
+      sharedPath,
+      leaseOptions,
+    );
     assert.equal(observerJournal.get(applying.operationId).status, "applying");
-    ownerJournal.close();
+    // A restarted process can reuse the same OS PID (for example PID 1 in a
+    // container). Only expiry of the previous instance lease proves that its
+    // executor disappeared.
+    leaseNow += 2_000;
     const interrupted = observerJournal.get(applying.operationId);
     assert.equal(interrupted.status, "outcome_unknown");
-    assert.match(interrupted.failure, /owning runtime closed/u);
+    assert.match(interrupted.failure, /process restarted/u);
+    ownerJournal.close();
     observerJournal.close();
   }
 

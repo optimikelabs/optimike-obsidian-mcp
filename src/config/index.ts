@@ -158,6 +158,12 @@ const EnvSchema = z
         "MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH must be absolute.",
       )
       .optional(),
+    MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: z.coerce
+      .number()
+      .int()
+      .min(100)
+      .max(300_000)
+      .default(30_000),
     MCP_EXTERNAL_MOVE_PROFILE_ID: z
       .string()
       .regex(
@@ -420,6 +426,8 @@ export const config = {
       "optimike-obsidian-mcp",
       "obsidian-note-replace.sqlite",
     ),
+  obsidianNoteReplaceExecutionLeaseMs:
+    env.MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS,
   mcpWriteMode:
     env.MCP_WRITE_MODE ||
     (env.OBSIDIAN_RUNTIME_MODE === "headless-guarded"

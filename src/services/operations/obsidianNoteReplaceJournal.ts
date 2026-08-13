@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
-import { hostname } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -28,8 +27,6 @@ export type ObsidianNoteReplacePlan = {
   failure?: string;
   executionOwner?: {
     instanceId: string;
-    pid: number;
-    hostname: string;
   };
 };
 
@@ -43,6 +40,8 @@ export type ObsidianNoteReplaceJournalOptions = {
   now?: () => number;
   terminalRetentionMs?: number;
   purgeIntervalMs?: number;
+  executionLeaseMs?: number;
+  executionSweepIntervalMs?: number;
 };
 
 const STABLE_TERMINAL = new Set<ObsidianNoteReplaceStatus>([
@@ -57,12 +56,11 @@ export class ObsidianNoteReplaceJournal {
   private readonly now: () => number;
   private readonly terminalRetentionMs: number;
   private readonly purgeIntervalMs: number;
-  private readonly executionOwner = {
-    instanceId: randomUUID(),
-    pid: process.pid,
-    hostname: hostname(),
-  };
+  private readonly executionLeaseMs: number;
+  private readonly executionSweepIntervalMs: number;
+  private readonly executionOwner = { instanceId: randomUUID() };
   private nextPurgeAt = 0;
+  private nextExecutionSweepAt = 0;
   private walCheckpointRequired = false;
   private closed = false;
 
@@ -74,11 +72,15 @@ export class ObsidianNoteReplaceJournal {
     this.terminalRetentionMs =
       options.terminalRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
     this.purgeIntervalMs = options.purgeIntervalMs ?? 60 * 60 * 1000;
+    this.executionLeaseMs = options.executionLeaseMs ?? 30_000;
+    this.executionSweepIntervalMs =
+      options.executionSweepIntervalMs ?? 1_000;
     mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(databasePath);
     this.db.exec("PRAGMA journal_mode=WAL");
     this.db.exec("PRAGMA synchronous=FULL");
     this.db.exec("PRAGMA secure_delete=ON");
+    this.db.exec("PRAGMA busy_timeout=5000");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS obsidian_note_replace_plans (
         operation_id TEXT PRIMARY KEY,
@@ -89,6 +91,13 @@ export class ObsidianNoteReplaceJournal {
         updated_at TEXT NOT NULL
       )
     `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS obsidian_note_replace_runtime_leases (
+        instance_id TEXT PRIMARY KEY,
+        heartbeat_at TEXT NOT NULL
+      )
+    `);
+    this.renewExecutionLease();
     this.markInterruptedPlans();
     this.maybePurgeTerminalPlans();
     for (const privatePath of [
@@ -109,7 +118,24 @@ export class ObsidianNoteReplaceJournal {
     if (this.closed) return;
     this.closed = true;
     this.markOwnedPlansInterrupted();
+    this.db
+      .prepare(
+        "DELETE FROM obsidian_note_replace_runtime_leases WHERE instance_id = ?",
+      )
+      .run(this.executionOwner.instanceId);
     this.db.close();
+  }
+
+  renewExecutionLease(): void {
+    if (this.closed) return;
+    const heartbeatAt = new Date(this.now()).toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO obsidian_note_replace_runtime_leases (instance_id, heartbeat_at)
+         VALUES (?, ?)
+         ON CONFLICT(instance_id) DO UPDATE SET heartbeat_at = excluded.heartbeat_at`,
+      )
+      .run(this.executionOwner.instanceId, heartbeatAt);
   }
 
   create(
@@ -154,6 +180,7 @@ export class ObsidianNoteReplaceJournal {
   }
 
   get(operationId: string): ObsidianNoteReplacePlan | undefined {
+    this.maybeMarkInterruptedPlans();
     this.maybePurgeTerminalPlans();
     const row = this.db
       .prepare(
@@ -166,6 +193,7 @@ export class ObsidianNoteReplaceJournal {
   }
 
   getByIdempotencyKey(key: string): ObsidianNoteReplacePlan | undefined {
+    this.maybeMarkInterruptedPlans();
     this.maybePurgeTerminalPlans();
     const row = this.db
       .prepare(
@@ -258,7 +286,7 @@ export class ObsidianNoteReplaceJournal {
     try {
       for (const row of rows) {
         const current = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
-        if (this.executionOwnerIsAlive(current.executionOwner)) continue;
+        if (this.executionOwnerHasFreshLease(current.executionOwner)) continue;
         const interrupted: ObsidianNoteReplacePlan = {
           ...current,
           status: "outcome_unknown",
@@ -274,6 +302,13 @@ export class ObsidianNoteReplaceJournal {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  private maybeMarkInterruptedPlans(): void {
+    const now = this.now();
+    if (now < this.nextExecutionSweepAt) return;
+    this.markInterruptedPlans();
+    this.nextExecutionSweepAt = now + this.executionSweepIntervalMs;
   }
 
   private markOwnedPlansInterrupted(): void {
@@ -314,24 +349,21 @@ export class ObsidianNoteReplaceJournal {
     }
   }
 
-  private executionOwnerIsAlive(
+  private executionOwnerHasFreshLease(
     owner: ObsidianNoteReplacePlan["executionOwner"],
   ): boolean {
-    if (!owner || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) {
-      return false;
-    }
-    if (owner.hostname !== this.executionOwner.hostname) {
-      // The default journal is machine-local. If an operator deliberately puts
-      // it on shared storage, fail closed instead of declaring a remote owner
-      // interrupted without a distributed lease.
-      return true;
-    }
-    try {
-      process.kill(owner.pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
+    if (!owner?.instanceId) return false;
+    const row = this.db
+      .prepare(
+        "SELECT heartbeat_at FROM obsidian_note_replace_runtime_leases WHERE instance_id = ?",
+      )
+      .get(owner.instanceId) as { heartbeat_at: string } | undefined;
+    if (!row) return false;
+    const heartbeatAt = Date.parse(row.heartbeat_at);
+    return (
+      Number.isFinite(heartbeatAt) &&
+      heartbeatAt >= this.now() - this.executionLeaseMs
+    );
   }
 
   private checkpointSensitiveFrames(): void {

@@ -104,9 +104,10 @@ across three independent MCP sessions. It proves that per-session server
 factories share one application runtime and one journal, commit one backend CAS,
 and close that authority cleanly at process shutdown.
 
-Every applying row also records its runtime owner. Opening the same durable
-journal from another local MCP process leaves a live owner's row untouched;
-only a dead owner or an explicit owner shutdown makes exact-plan recovery
+Every applying row also records its runtime instance owner. A durable heartbeat
+lease proves that exact instance is still active without trusting a reusable OS
+PID. Opening the same journal from another MCP process leaves a fresh lease
+untouched; lease expiry or explicit owner shutdown makes exact-plan recovery
 eligible. This prevents an independently launched client from manufacturing an
 interruption while another process is still executing the CAS.
 

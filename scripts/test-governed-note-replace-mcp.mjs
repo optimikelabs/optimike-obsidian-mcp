@@ -343,6 +343,7 @@ function childEnv(writeMode = "full", runtimeMode = "live") {
     MCP_GUARDED_MAX_WRITE_CHARS: "100000",
     MCP_PROTECTED_FRONTMATTER_KEYS: "création,modification",
     MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: journalPath,
+    MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: "250",
     OBSIDIAN_RUNTIME_MODE: runtimeMode,
     OBSIDIAN_BASE_URL: fake.baseUrl,
     OBSIDIAN_VERIFY_SSL: "false",
@@ -734,6 +735,7 @@ try {
   await enteredHang;
   await session.close();
   await interruptedApply;
+  await new Promise((resolve) => setTimeout(resolve, 350));
   session = await startClient("full", "live");
   const interruptedStatus = await call(
     session,

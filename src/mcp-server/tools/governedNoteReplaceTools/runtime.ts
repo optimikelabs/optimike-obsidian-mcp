@@ -236,12 +236,20 @@ function operationIdFromRef(reference: string): string {
 
 export class GovernedNoteReplaceRuntime {
   private closed = false;
+  private readonly leaseHeartbeat: NodeJS.Timeout;
 
   constructor(
     private readonly backend: GovernedAtomicWriteBackend,
     private readonly journal: ObsidianNoteReplaceJournal,
     private readonly adapter: ObsidianNoteReplaceOperationAdapter,
-  ) {}
+    leaseHeartbeatMs = 5_000,
+  ) {
+    this.leaseHeartbeat = setInterval(
+      () => this.journal.renewExecutionLease(),
+      leaseHeartbeatMs,
+    );
+    this.leaseHeartbeat.unref();
+  }
 
   plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
     assertCurrentWritePolicy("plan", input.path, input.nextContent);
@@ -274,6 +282,7 @@ export class GovernedNoteReplaceRuntime {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    clearInterval(this.leaseHeartbeat);
     this.journal.close();
   }
 
@@ -293,12 +302,21 @@ export function createGovernedNoteReplaceRuntime(
 
   const journal = new ObsidianNoteReplaceJournal(
     config.obsidianNoteReplaceJournalPath,
+    { executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs },
   );
   const backend = new GovernedAtomicWriteBackend(
     new RestAtomicWriteBackend(obsidianService),
   );
   const adapter = new ObsidianNoteReplaceOperationAdapter(backend, journal);
-  const runtime = new GovernedNoteReplaceRuntime(backend, journal, adapter);
+  const runtime = new GovernedNoteReplaceRuntime(
+    backend,
+    journal,
+    adapter,
+    Math.max(
+      100,
+      Math.min(5_000, Math.floor(config.obsidianNoteReplaceExecutionLeaseMs / 3)),
+    ),
+  );
 
   // The application lifecycle closes the runtime explicitly. This synchronous
   // exit hook is a final fail-safe for startup paths that terminate through
