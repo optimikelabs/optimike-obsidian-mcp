@@ -40,6 +40,7 @@
     "docs/adr/ADR-External-Reference-Integrity.md",
     "docs/adr/ADR-External-Reference-Integrity.fr.md",
     "docs/adr/ADR-Operon-Bridge.md",
+    "docs/adr/ADR-Common-Operation-Runtime.md",
     "docs/adr/README.md",
     "docs/operon-decision-report.md",
     "docs/operon-local-validation.md",
@@ -132,7 +133,8 @@
     "test:launchers": "npm run build && node scripts/test-launchers.mjs",
     "test:external-reference-parser": "node scripts/test-external-reference-parser.mjs",
     "test:obsidian-cas": "node scripts/test-obsidian-cas.mjs && node scripts/test-obsidian-search-replace-cas.mjs",
-    "test:external-move": "node scripts/test-external-move-integrity.mjs"
+    "test:external-move": "node scripts/test-external-move-integrity.mjs",
+    "test:operation-runtime": "npm run build && node scripts/test-external-move-integrity.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
