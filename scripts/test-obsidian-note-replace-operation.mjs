@@ -18,6 +18,7 @@ class FakeAtomicWriteBackend {
   content = "before";
   replaceCalls = 0;
   failBeforeWriteOnce = false;
+  rejectBeforeWriteOnce = false;
   loseResponseAfterWriteOnce = false;
   afterStatus = undefined;
   afterRead = undefined;
@@ -66,6 +67,13 @@ class FakeAtomicWriteBackend {
 
   async replace(payload) {
     this.replaceCalls += 1;
+    if (this.rejectBeforeWriteOnce) {
+      this.rejectBeforeWriteOnce = false;
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "Atomic note writes are disabled in the bridge settings.",
+      );
+    }
     if (payload.bindingFingerprint !== this.bindingFingerprint) {
       throw new McpError(BaseErrorCode.CONFLICT, "Fixture binding conflict.");
     }
@@ -159,6 +167,24 @@ try {
     const result = await adapter.apply(planned.planRef, "conflict");
     assert.equal(result.outcome, "conflict");
     assert.equal(backend.content, "concurrent edit");
+  }
+
+  {
+    const { backend, adapter } = fixture("disabled-between-status-and-cas");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "must not be written after disable",
+      idempotencyKey: "disabled-between-status-and-cas",
+    });
+    backend.rejectBeforeWriteOnce = true;
+    const result = await adapter.apply(
+      planned.planRef,
+      "disabled-between-status-and-cas",
+    );
+    assert.equal(result.outcome, "rejected");
+    assert.equal(result.recoveryAllowed, false);
+    assert.equal(backend.content, "before");
+    assert.equal(backend.replaceCalls, 1);
   }
 
   {

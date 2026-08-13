@@ -414,6 +414,16 @@ export class ObsidianNoteReplaceOperationAdapter
           error.message,
         );
       }
+      const rejected =
+        error instanceof McpError && error.code === BaseErrorCode.FORBIDDEN;
+      if (rejected) {
+        return this.transitionOrReload(
+          plan.operationId,
+          ["applying"],
+          "rejected",
+          error.message,
+        );
+      }
       const reconciled = await this.reconcile(plan).catch(() => plan);
       if (reconciled.status !== "applying") {
         return reconciled;
