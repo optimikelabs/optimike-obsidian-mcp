@@ -2,8 +2,7 @@
 
 [![Latest release](https://img.shields.io/github/v/release/optimikelabs/optimike-obsidian-mcp?display_name=tag&sort=semver)](https://github.com/optimikelabs/optimike-obsidian-mcp/releases/latest)
 
-French version: [README.fr.md](README.fr.md)
-Documentation hub: [docs/README.md](docs/README.md)
+French version: [README.fr.md](README.fr.md) · Documentation hub: [docs/README.md](docs/README.md)
 Operations: [OPERATIONS.md](OPERATIONS.md)
 Security: [SECURITY.md](SECURITY.md)
 
@@ -121,18 +120,19 @@ still require fresh confirmation in the owning Obsidian vault window and fail
 closed after 45 seconds when no confirmation can be presented.
 
 Compatibility note: the adapter negotiates Operon Developer API V1 with
-`contractVersion: 1` and `runtimeApi: 1`. Versions proven by a complete live
-acceptance run are `certified`; an otherwise unknown Operon release exposing
-the same validated contract is `compatible-provisional` instead of being
+`contractVersion: 1` and `runtimeApi: 1`. Versions in the explicit certified
+set report `certified`; an otherwise unknown Operon release exposing the same
+validated contract is `compatible-provisional` instead of being
 blocked by its product version alone. Missing capabilities fail closed only for
 the affected tools, while known regressions remain explicitly denied.
-Operon `3.2.0` is the version used by the complete live acceptance run. Modified-time frontmatter settlement and
+Operon `3.2.0` remains the earlier certified pilot baseline. Modified-time frontmatter settlement and
 multi-window consent were merged upstream before these releases. Saved-filter execution is available
 through the additive task-workflow Developer API after an exact grant, but the
 official API does not expose the saved-filter catalog: callers must supply an
 exact `filterSetId` obtained from Operon's UI/configuration or an operator
 workflow. Adoption remains unavailable on the official Developer API. Operon
-3.2.1 still omits the declarative Settings renderer for Developer API grant
+`3.3.0` passed the complete live pilot and remains admitted as
+`compatible-provisional` by the contract-first policy rather than a product-version allowlist. Operon still omits the declarative Settings renderer for Developer API grant
 controls; the fix is tracked in [#145](https://github.com/hasanyilmaz/operon/issues/145)
 and [#146](https://github.com/hasanyilmaz/operon/pull/146).
 No MCP route falls back to Markdown or private APIs. Implicit File Task renames

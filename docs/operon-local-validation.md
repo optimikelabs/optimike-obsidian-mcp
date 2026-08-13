@@ -7,13 +7,15 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `3.2.1` enabled for current compatibility checks; `3.2.0` remains the complete live-pilot baseline and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Operon `3.3.0` for the completed contract-first live pilot; `3.2.1` remains in the explicit certified set, and `2.4.0` / `2.5.0` remain legacy-read fixtures
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
 
-The adapter targets official Operon `3.2.1`; the complete live acceptance run
-used the contract-compatible local `3.2.0` build. The missing 3.2.1 grant-control
+The adapter certifies through Operon `3.2.1` and provisionally admits `3.3.0`
+only when contract negotiation succeeds. The `3.3.0` live acceptance run is
+complete and green; keeping its runtime state provisional preserves the
+contract-first policy. The missing grant-control
 renderer is tracked in upstream #145/#146. Fixes #135 and #137 are already merged. File Task rename safety remains
 tracked by [#139](https://github.com/hasanyilmaz/operon/pull/139), and transition
 settlement by #99/#101. Unsupported or uncertain paths stay fail-closed; this

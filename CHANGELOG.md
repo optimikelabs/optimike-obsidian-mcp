@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-13
+
 ### Added
 
 - Operon `3.2.1` / CLI `1.1.0` compatibility through Bridge `0.6.0`, retaining
@@ -17,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   approved core reads or mutations.
 - Saved-filter pagination and Bridge HTTP error mapping coverage, preserving
   typed `404`/`422` failures instead of reporting generic internal errors.
+- Contract-negotiated Operon compatibility: unknown releases such as `3.3.0`
+  are admitted as `compatible-provisional` only when Developer API V1
+  negotiation and runtime schema validation succeed.
+- Complete live acceptance of Operon `3.3.0` with Bridge `0.7.0`: persisted
+  grants, bounded startup retry, governed apply/replay/conflict/postflight,
+  thirty tasks, zero validation violations and zero pending recoveries.
+- Common governed operation runtime contract with `plan`, `apply`, `status`,
+  durable receipts and exact-plan `recover`, proven first through the existing
+  `external_move` transaction and disposable restart fixtures.
 
 ### Changed
 
@@ -26,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ÉLYSIA Task Gouverneur active skill `2.2` and distributed profile skill
   `1.3.0` align with the 3.2 capability boundary. Adoption remains unavailable
   without a Markdown or CLI fallback.
+- Optimike Operon Bridge `0.7.0` no longer blocks all users on an unknown Operon
+  product version when the negotiated Developer API contract remains valid;
+  malformed or unavailable contracts still fail closed.
+- Transient Operon startup states are retried for a bounded window before the
+  Bridge reports structured unavailability.
+- Compensated terminal `external_move` plans reject delayed apply retries and
+  cannot be reactivated after rollback.
 
 ## [2.4.0] - 2026-08-09
 

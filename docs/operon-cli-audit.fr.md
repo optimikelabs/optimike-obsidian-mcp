@@ -2,15 +2,16 @@
 
 English version: [operon-cli-audit.md](operon-cli-audit.md)
 
-Date : 2026-08-09
+Date : 2026-08-13
 
-Référence : Operon officiel `3.2.1`, Operon CLI `1.1.0`, Developer API V1 et
+Référence : Operon officiel `3.3.0` admis provisoirement par contrat, Operon
+`3.2.1` certifié, Operon CLI `1.1.0`, Developer API V1 et
 `cli-manifest-v1.json`.
 
 Les observations CLI initiales du 1er août 2026 utilisaient Operon `3.0.1` et
-restent des preuves historiques. L’adaptateur MCP cible `3.2.1`, tandis que le
-pilote live complet reste porté par le build local `3.2.0`, compatible au niveau
-du contrat. Le renderer manquant en 3.2.1 est suivi dans
+restent des preuves historiques. L’adaptateur MCP certifie `3.2.1` et admet
+`3.3.0` provisoirement après négociation du contrat. Le pilote live complet
+`3.3.0` est vert ; le renderer manquant est suivi dans
 [#145](https://github.com/hasanyilmaz/operon/issues/145) et
 [#146](https://github.com/hasanyilmaz/operon/pull/146). Les correctifs #135 et #137 sont déjà fusionnés. La sécurité
 de renommage File Task reste suivie dans #139 et le cas de transition incertain
@@ -35,8 +36,8 @@ un agent.
 ## Comparaison des surfaces
 
 Le MCP enregistre vingt-trois outils gouvernés, dont six lectures de raisonnement
-Developer API bornées. L’exécution des filtres sauvegardés fonctionne sur Operon
-`3.2.x` après un grant exact `tasks.filter-query`, mais l’API officielle ne
+Developer API bornées. L’exécution des filtres sauvegardés fonctionne lorsque
+le contrat négocié annonce `tasks.filter-query`, après un grant exact, mais l’API officielle ne
 publie pas leur catalogue. L’adoption reste un outil de compatibilité
 indisponible :
 

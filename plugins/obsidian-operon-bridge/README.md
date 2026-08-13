@@ -27,7 +27,11 @@ Saved-filter execution requires an exact grant and exact `filterSetId`; the
 official API does not expose the saved-filter catalog. Adoption, unmanaged
 properties, and arbitrary `targetFolder` destinations remain unsupported and
 are rejected explicitly. The complete live pilot used the local 3.2.0 build.
-The equivalent Settings UI fix for 3.2.1 is tracked in upstream
+Operon `3.3.0` is admitted as `compatible-provisional` when Developer API V1
+negotiation and runtime validation succeed. Its complete live pilot passed;
+Bridge `0.7.0` deliberately preserves the contract-first provisional path
+instead of making a product-version allowlist authoritative again.
+The Settings UI fix is tracked in upstream
 [#145](https://github.com/hasanyilmaz/operon/issues/145) and
 [#146](https://github.com/hasanyilmaz/operon/pull/146). Uncertain outcomes remain fail-closed;
 the Bridge never retries blindly or falls back to Markdown/private APIs. File

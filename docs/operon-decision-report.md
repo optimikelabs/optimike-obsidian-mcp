@@ -1,15 +1,17 @@
 # Operon integration decision report
 
-## Current status — 2026-08-09
+## Current status — 2026-08-13
 
-Optimike Obsidian MCP targets official Operon `3.2.1` through Bridge `0.6.0`
-and Developer API V1. The canonical server registers twenty-three
+Optimike Obsidian MCP Bridge `0.7.0` certifies Operon through `3.2.1` and admits
+Operon `3.3.0` as `compatible-provisional` only after successful Developer API
+V1 negotiation and schema validation. The canonical server registers twenty-three
 governed Operon tools. Kairélys remains disabled and retained only for bounded
 rollback compatibility.
 
-The complete local acceptance run is green on a contract-compatible Operon `3.2.0` build carrying
-only the settings-renderer fix that restores Developer API grant controls. The
-equivalent 3.2.1 fix is tracked in upstream #145/#146. Remaining fail-closed
+The complete local acceptance run is green on Operon `3.3.0` with Bridge
+`0.7.0`: persisted grants, governed apply/replay/conflict/postflight, thirty
+tasks, zero validation violations and zero recovery. The Settings fix remains
+tracked in upstream #145/#146. Remaining fail-closed
 limitations are tracked in:
 
 - transition settlement: [#99](https://github.com/hasanyilmaz/operon/issues/99)
