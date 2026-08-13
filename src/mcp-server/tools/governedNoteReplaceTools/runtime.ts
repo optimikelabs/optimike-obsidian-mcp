@@ -313,8 +313,8 @@ export function createGovernedNoteReplaceRuntime(
     journal,
     adapter,
     Math.max(
-      100,
-      Math.min(5_000, Math.floor(config.obsidianNoteReplaceExecutionLeaseMs / 3)),
+      250,
+      Math.min(5_000, Math.floor(config.obsidianNoteReplaceExecutionLeaseMs / 4)),
     ),
   );
 

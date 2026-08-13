@@ -270,20 +270,19 @@ export class ObsidianNoteReplaceJournal {
   }
 
   private markInterruptedPlans(): void {
-    const rows = this.db
-      .prepare(
-        "SELECT operation_id, payload_json FROM obsidian_note_replace_plans WHERE status = 'applying'",
-      )
-      .all() as Array<{ operation_id: string; payload_json: string }>;
-    if (rows.length === 0) return;
     const updatedAt = new Date(this.now()).toISOString();
     const update = this.db.prepare(
       `UPDATE obsidian_note_replace_plans
        SET status = 'outcome_unknown', payload_json = ?, updated_at = ?
-       WHERE operation_id = ? AND status = 'applying'`,
+       WHERE operation_id = ? AND status = 'applying' AND payload_json = ?`,
     );
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      const rows = this.db
+        .prepare(
+          "SELECT operation_id, payload_json FROM obsidian_note_replace_plans WHERE status = 'applying'",
+        )
+        .all() as Array<{ operation_id: string; payload_json: string }>;
       for (const row of rows) {
         const current = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
         if (this.executionOwnerHasFreshLease(current.executionOwner)) continue;
@@ -295,7 +294,12 @@ export class ObsidianNoteReplaceJournal {
           failure:
             "The process restarted while apply was in progress; exact-plan recovery is required.",
         };
-        update.run(JSON.stringify(interrupted), updatedAt, row.operation_id);
+        update.run(
+          JSON.stringify(interrupted),
+          updatedAt,
+          row.operation_id,
+          row.payload_json,
+        );
       }
       this.db.exec("COMMIT");
     } catch (error) {
@@ -312,24 +316,23 @@ export class ObsidianNoteReplaceJournal {
   }
 
   private markOwnedPlansInterrupted(): void {
-    const rows = this.db
-      .prepare(
-        "SELECT operation_id, payload_json FROM obsidian_note_replace_plans WHERE status = 'applying'",
-      )
-      .all() as Array<{ operation_id: string; payload_json: string }>;
-    const owned = rows.filter((row) => {
-      const plan = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
-      return plan.executionOwner?.instanceId === this.executionOwner.instanceId;
-    });
-    if (owned.length === 0) return;
     const updatedAt = new Date(this.now()).toISOString();
     const update = this.db.prepare(
       `UPDATE obsidian_note_replace_plans
        SET status = 'outcome_unknown', payload_json = ?, updated_at = ?
-       WHERE operation_id = ? AND status = 'applying'`,
+       WHERE operation_id = ? AND status = 'applying' AND payload_json = ?`,
     );
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      const rows = this.db
+        .prepare(
+          "SELECT operation_id, payload_json FROM obsidian_note_replace_plans WHERE status = 'applying'",
+        )
+        .all() as Array<{ operation_id: string; payload_json: string }>;
+      const owned = rows.filter((row) => {
+        const plan = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
+        return plan.executionOwner?.instanceId === this.executionOwner.instanceId;
+      });
       for (const row of owned) {
         const current = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
         const interrupted: ObsidianNoteReplacePlan = {
@@ -340,7 +343,12 @@ export class ObsidianNoteReplaceJournal {
           failure:
             "The owning runtime closed while apply was in progress; exact-plan recovery is required.",
         };
-        update.run(JSON.stringify(interrupted), updatedAt, row.operation_id);
+        update.run(
+          JSON.stringify(interrupted),
+          updatedAt,
+          row.operation_id,
+          row.payload_json,
+        );
       }
       this.db.exec("COMMIT");
     } catch (error) {

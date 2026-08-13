@@ -110,6 +110,11 @@ PID. Opening the same journal from another MCP process leaves a fresh lease
 untouched; lease expiry or explicit owner shutdown makes exact-plan recovery
 eligible. This prevents an independently launched client from manufacturing an
 interruption while another process is still executing the CAS.
+The default journal filename is separately namespaced by a stable non-secret
+digest of the configured runtime mode, REST base URL, and vault path; an
+operator may provide an explicit stable profile ID. Plans and idempotency keys
+therefore cannot cross backend profiles unless an operator deliberately forces
+the same journal path.
 
 `npm run smoke:atomic-note-mcp-live` is a separate fail-closed operator canary.
 It requires an explicit disposable existing note and confirmation string,

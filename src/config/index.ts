@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -161,9 +162,16 @@ const EnvSchema = z
     MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: z.coerce
       .number()
       .int()
-      .min(100)
+      .min(1_000)
       .max(300_000)
       .default(30_000),
+    MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID: z
+      .string()
+      .regex(
+        /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u,
+        "MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID must be a stable lowercase logical identifier.",
+      )
+      .optional(),
     MCP_EXTERNAL_MOVE_PROFILE_ID: z
       .string()
       .regex(
@@ -291,6 +299,24 @@ if (!parsedEnv.success) {
 }
 
 const env = parsedEnv.data;
+
+const noteReplaceProfileId =
+  env.MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID ||
+  createHash("sha256")
+    .update(
+      JSON.stringify({
+        runtimeMode: env.OBSIDIAN_RUNTIME_MODE,
+        baseUrl: env.OBSIDIAN_BASE_URL.replace(/\/+$/u, ""),
+        vault: env.OBSIDIAN_VAULT
+          ? process.platform === "win32"
+            ? path.resolve(env.OBSIDIAN_VAULT).toLowerCase()
+            : path.resolve(env.OBSIDIAN_VAULT)
+          : null,
+      }),
+      "utf8",
+    )
+    .digest("hex")
+    .slice(0, 16);
 
 // --- Directory Ensurance Function ---
 const ensureDirectory = (
@@ -421,10 +447,10 @@ export const config = {
     env.MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-        process.env.XDG_STATE_HOME ||
+      process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
-      "obsidian-note-replace.sqlite",
+      `obsidian-note-replace-${noteReplaceProfileId}.sqlite`,
     ),
   obsidianNoteReplaceExecutionLeaseMs:
     env.MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS,

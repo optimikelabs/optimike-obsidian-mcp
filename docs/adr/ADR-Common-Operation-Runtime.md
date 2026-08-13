@@ -120,6 +120,10 @@ carry a runtime-instance owner backed by a durable heartbeat lease, so another
 MCP process sharing the journal cannot mistake PID reuse for the original live
 executor; an expired or explicitly closed owner remains recoverable through the
 exact plan.
+The default journal path is also namespaced by a stable non-secret digest of
+the configured runtime mode, REST base URL, and vault path, with an explicit
+profile-ID override for deployment topologies that need one. Backend-specific
+plans and idempotency keys do not share an implicit machine-global namespace.
 
 The public projection remains domain-specific:
 

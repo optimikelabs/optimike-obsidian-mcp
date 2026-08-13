@@ -116,6 +116,11 @@ sans faire confiance à un PID réutilisable. Un autre processus MCP laisse
 intact un bail frais ; son expiration ou l'arrêt explicite du propriétaire
 autorise le recovery du plan exact. Un client lancé séparément ne peut donc pas
 fabriquer une interruption pendant que le premier exécute encore le CAS.
+Le nom du journal par défaut est en plus séparé par une empreinte stable et non
+secrète du mode runtime, de l’URL REST et du chemin de coffre configurés ;
+l’opérateur peut fournir un identifiant de profil stable explicite. Plans et
+clés d’idempotence ne peuvent donc pas traverser deux profils backend, sauf si
+l’opérateur impose volontairement le même chemin de journal.
 
 `npm run smoke:atomic-note-mcp-live` est un canary opérateur séparé qui échoue
 fermé. Il exige une note jetable existante explicitement nommée et une chaîne de

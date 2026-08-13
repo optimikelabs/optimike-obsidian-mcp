@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -24,6 +25,29 @@ const PROTECTED_LINE = "création: 2026-08-13";
 const INITIAL_CONTENT = `---\n${PROTECTED_LINE}\nstatut: actif\n---\nbefore\n`;
 const DEFAULT_BINDING = sha256("governed-note-replace-fixture-vault");
 const SECRET = "sealed-next-content-MUST-NOT-LEAK-47f5108a";
+
+function defaultJournalPath(baseUrl) {
+  const env = { ...process.env };
+  delete env.MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH;
+  Object.assign(env, {
+    NODE_ENV: "test",
+    OBSIDIAN_RUNTIME_MODE: "live",
+    OBSIDIAN_API_KEY: "fixture-api-key",
+    OBSIDIAN_BASE_URL: baseUrl,
+    XDG_STATE_HOME: path.join(process.cwd(), ".tmp", "profile-state"),
+  });
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      "import { config } from './dist/config/index.js'; console.log(config.obsidianNoteReplaceJournalPath);",
+    ],
+    { cwd: process.cwd(), env, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim().split(/\r?\n/u).at(-1);
+}
 
 function sha256(content) {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -330,6 +354,11 @@ mkdirSync(logsPath, { recursive: true });
 
 const fake = new FakeObsidianAtomicWriteServer();
 await fake.listen();
+assert.notEqual(
+  defaultJournalPath("http://127.0.0.1:27123"),
+  defaultJournalPath("http://127.0.0.1:27233"),
+  "different configured backends must not share the default journal",
+);
 const observed = [];
 const stderrs = [];
 
@@ -343,7 +372,7 @@ function childEnv(writeMode = "full", runtimeMode = "live") {
     MCP_GUARDED_MAX_WRITE_CHARS: "100000",
     MCP_PROTECTED_FRONTMATTER_KEYS: "création,modification",
     MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: journalPath,
-    MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: "250",
+    MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: "1000",
     OBSIDIAN_RUNTIME_MODE: runtimeMode,
     OBSIDIAN_BASE_URL: fake.baseUrl,
     OBSIDIAN_VERIFY_SSL: "false",
@@ -735,7 +764,7 @@ try {
   await enteredHang;
   await session.close();
   await interruptedApply;
-  await new Promise((resolve) => setTimeout(resolve, 350));
+  await new Promise((resolve) => setTimeout(resolve, 1_200));
   session = await startClient("full", "live");
   const interruptedStatus = await call(
     session,

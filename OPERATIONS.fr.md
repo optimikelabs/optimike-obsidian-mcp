@@ -191,6 +191,10 @@ partagé par stdio et toutes les sessions HTTP MCP. Son chemin par défaut reste
 local à la machine ; `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` doit être absolu
 et rester hors du coffre, des dépôts, dossiers synchronisés et diagnostics
 publics.
+Le nom de fichier par défaut est séparé par une empreinte non secrète du mode
+runtime, de l’URL REST et du chemin de coffre configurés. Définir l’identité
+logique stable optionnelle `MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID` lorsque la
+topologie de déploiement exige un profil backend explicite.
 Les plans `applying` utilisent un bail durable avec heartbeat de l'instance
 runtime. La valeur par défaut
 `MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS=30000` retarde le recovery après

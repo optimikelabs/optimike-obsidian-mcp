@@ -188,6 +188,10 @@ adapter without adding a second transaction engine. One process-wide journal
 is shared by stdio and every HTTP MCP session. Its default path is machine-local;
 set `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` only to an absolute path outside
 the vault, repositories, synchronized folders and public diagnostics.
+The default filename is namespaced by a non-secret digest of the configured
+runtime mode, REST base URL and vault path. Set the optional stable
+`MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID` when deployment topology requires an
+explicit logical backend identity.
 Applying plans use a durable runtime-instance heartbeat lease. The default
 `MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS=30000` delays crash recovery by
 up to 30 seconds so PID reuse or a briefly delayed heartbeat cannot authorize a
