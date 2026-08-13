@@ -774,8 +774,9 @@ try {
   const operationLostSource = path.join(rootPath, "operation-lost.txt");
   const operationLostTarget = path.join(archivePath, "operation-lost.txt");
   await writeFile(operationLostSource, "operation lost response", "utf8");
+  const operationLostJournalPath = path.join(sandbox, "operation-lost.sqlite");
   const operationLostJournal = new ExternalMoveJournal(
-    path.join(sandbox, "operation-lost.sqlite"),
+    operationLostJournalPath,
   );
   const operationLostAdapter = new ExternalMoveOperationAdapter(
     new ExternalMoveCoordinator(service, new FakeVault(), operationLostJournal),
@@ -790,7 +791,18 @@ try {
     operationLostPlan.planRef,
     "operation-runtime-lost-response",
   );
-  const operationLostStatus = await operationLostAdapter.status(
+  operationLostJournal.close();
+  const operationLostRestartedJournal = new ExternalMoveJournal(
+    operationLostJournalPath,
+  );
+  const operationLostRestartedAdapter = new ExternalMoveOperationAdapter(
+    new ExternalMoveCoordinator(
+      service,
+      new FakeVault(),
+      operationLostRestartedJournal,
+    ),
+  );
+  const operationLostStatus = await operationLostRestartedAdapter.status(
     operationLostPlan.planRef,
   );
   assert.equal(operationLostStatus.outcome, "committed");
@@ -799,7 +811,7 @@ try {
     await readFile(operationLostTarget, "utf8"),
     "operation lost response",
   );
-  operationLostJournal.close();
+  operationLostRestartedJournal.close();
 
   // An interrupted apply is recovered only through the same persisted plan.
   const operationRecoverySource = path.join(rootPath, "operation-recovery.txt");
@@ -808,8 +820,12 @@ try {
     "operation-recovery.txt",
   );
   await writeFile(operationRecoverySource, "operation recovery", "utf8");
+  const operationRecoveryJournalPath = path.join(
+    sandbox,
+    "operation-recovery.sqlite",
+  );
   const operationRecoveryJournal = new ExternalMoveJournal(
-    path.join(sandbox, "operation-recovery.sqlite"),
+    operationRecoveryJournalPath,
   );
   const operationRecoveryCoordinator = new ExternalMoveCoordinator(
     service,
@@ -839,14 +855,25 @@ try {
     ["applying_file"],
     "file_moved",
   );
-  const interruptedStatus = await operationRecoveryAdapter.status(
+  operationRecoveryJournal.close();
+  const operationRecoveryRestartedJournal = new ExternalMoveJournal(
+    operationRecoveryJournalPath,
+  );
+  const operationRecoveryRestartedAdapter = new ExternalMoveOperationAdapter(
+    new ExternalMoveCoordinator(
+      service,
+      new FakeVault(),
+      operationRecoveryRestartedJournal,
+    ),
+  );
+  const interruptedStatus = await operationRecoveryRestartedAdapter.status(
     operationRecoveryPlan.planRef,
   );
   assert.equal(interruptedStatus.phase, "applying");
   assert.equal(interruptedStatus.outcome, null);
   assert.equal(interruptedStatus.recoveryAllowed, true);
   assert.equal(interruptedStatus.recoveryRef, operationRecoveryPlan.planRef);
-  const operationRecovered = await operationRecoveryAdapter.recover(
+  const operationRecovered = await operationRecoveryRestartedAdapter.recover(
     operationRecoveryPlan.planRef,
     "operation-runtime-recovery",
   );
@@ -858,7 +885,7 @@ try {
     "operation recovery",
   );
   assert.equal(await exists(operationRecoveryTarget), false);
-  operationRecoveryJournal.close();
+  operationRecoveryRestartedJournal.close();
 
   console.log("External move integrity tests passed.");
 } finally {
