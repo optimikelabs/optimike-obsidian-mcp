@@ -28,7 +28,8 @@ official API does not expose the saved-filter catalog. Adoption, unmanaged
 properties, and arbitrary `targetFolder` destinations remain unsupported and
 are rejected explicitly. The complete live pilot used the local 3.2.0 build.
 Operon `3.3.0` is admitted as `compatible-provisional` when Developer API V1
-negotiation and runtime validation succeed. Its complete live pilot passed;
+negotiation succeeds. Its complete live pilot passed as a separate readiness
+proof;
 Bridge `0.7.0` deliberately preserves the contract-first provisional path
 instead of making a product-version allowlist authoritative again.
 The Settings UI fix is tracked in upstream
@@ -42,10 +43,15 @@ and [#101](https://github.com/hasanyilmaz/operon/pull/101).
 Compatibility is reported explicitly:
 
 - `certified`: the product version belongs to the Bridge's explicit certified
-  set and all negotiated runtime checks pass;
-- `compatible-provisional`: the product version is new, but the Developer API
-  V1 negotiation, capabilities, schemas, and live index checks pass;
+  set and its Developer API boundary is admitted;
+- `compatible-provisional`: the product version is outside that set but is not
+  denied and its Developer API V1 boundary is admitted;
 - `incompatible`: the contract boundary is absent, denied, or fails validation.
+
+Compatibility is admission, not live readiness. Check top-level `ok`,
+`index.ready`, and the advertised `capabilities` before using a route; an
+admitted runtime can still be temporarily unready while its index settles or
+recovers.
 
 The product version remains diagnostic metadata and may select a narrowly
 documented denylist entry. It is not the primary admission key for Operon 3.x.

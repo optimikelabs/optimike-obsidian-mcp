@@ -86,10 +86,14 @@ catalogue, la pagination complète des tâches et les diagnostics d’index.
 Le statut distingue :
 
 - `certified` : version produit appartenant à l’ensemble certifié explicite du
-  Bridge et dont les contrôles runtime négociés passent ;
-- `compatible-provisional` : release inconnue dont la frontière Developer API
-  V1 passe les mêmes contrôles runtime ;
+  Bridge et dont la frontière Developer API est admise ;
+- `compatible-provisional` : release non refusée hors de cet ensemble et dont
+  la frontière Developer API V1 est admise ;
 - `incompatible` : frontière absente, explicitement refusée ou invalide.
+
+Cet état de compatibilité est indépendant de la disponibilité live de l’index.
+Avant d’utiliser une route, le client doit aussi exiger `ok`, `index.ready` et
+la capacité exacte annoncée.
 
 Une régression comportementale connue peut rester bloquée par version et par
 opération. Une capacité optionnelle absente désactive seulement les outils qui
