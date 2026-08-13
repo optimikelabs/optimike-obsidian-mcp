@@ -14,7 +14,7 @@ Cette page route chaque lecteur vers l’autorité utile sans recopier les contr
 | Lancer et maintenir le service | [Exploitation](../OPERATIONS.fr.md) |
 | Connaître les outils | [Surface des outils](obsidian_mcp_tools_spec.md) |
 | Vérifier la disponibilité par mode | [Matrice runtime](runtime-capability-matrix.fr.md) |
-| Comprendre le remplacement atomique gouverné | [Contrat dédié](governed-note-replacement.fr.md) |
+| Comprendre le remplacement atomique gouverné | [Contrat des outils](obsidian_mcp_tools_spec.md#governed-atomic-note-replacement) |
 | Router un agent | [Guide de routage](mcp-routing-guide.fr.md) |
 | Déployer en headless | [Profil serveur](headless-server-profile.fr.md) |
 | Vérifier la frontière de sécurité | [Sécurité](../SECURITY.fr.md) |
@@ -29,7 +29,7 @@ Cette page route chaque lecteur vers l’autorité utile sans recopier les contr
 ### Coffre Obsidian
 
 - notes, métadonnées et tags : [surface des outils](obsidian_mcp_tools_spec.md#core-notes) ;
-- remplacement atomique gouverné : [contrat dédié](governed-note-replacement.fr.md) ;
+- remplacement atomique gouverné : [contrat des outils](obsidian_mcp_tools_spec.md#governed-atomic-note-replacement) ;
 - Bases : [surface des outils](obsidian_mcp_tools_spec.md#bases) ;
 - Canvas et validation : [surface des outils](obsidian_mcp_tools_spec.md#canvas-and-format-validation).
 
