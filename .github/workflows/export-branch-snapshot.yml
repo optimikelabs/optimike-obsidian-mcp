@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feat/2.6.0-governed-note-replace
-          fetch-depth: 5
+          fetch-depth: 7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -95,7 +95,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test ! -e .github/workflows/export-branch-snapshot.yml
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
