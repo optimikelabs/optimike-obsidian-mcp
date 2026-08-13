@@ -61,7 +61,8 @@ negotiates `contractVersion: 1` with `runtimeApi: 1`, and validates the granted
 capabilities, response shapes, live health, catalog, complete task pagination,
 and index diagnostics. Status distinguishes:
 
-- `certified`: a release that completed live acceptance;
+- `certified`: a product version in the Bridge's explicit certified set whose
+  negotiated runtime checks pass;
 - `compatible-provisional`: an unknown release whose Developer API V1 boundary
   passes the same runtime checks;
 - `incompatible`: an absent, denied, or invalid contract boundary.

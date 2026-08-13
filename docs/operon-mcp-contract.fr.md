@@ -85,7 +85,8 @@ catalogue, la pagination complète des tâches et les diagnostics d’index.
 
 Le statut distingue :
 
-- `certified` : release ayant passé l’acceptation live ;
+- `certified` : version produit appartenant à l’ensemble certifié explicite du
+  Bridge et dont les contrôles runtime négociés passent ;
 - `compatible-provisional` : release inconnue dont la frontière Developer API
   V1 passe les mêmes contrôles runtime ;
 - `incompatible` : frontière absente, explicitement refusée ou invalide.
