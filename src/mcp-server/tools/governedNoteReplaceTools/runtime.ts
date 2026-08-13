@@ -25,10 +25,25 @@ import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
 
 type CallContext =
-  | { kind: "plan"; path: string; nextContent: string }
+  | {
+      kind: "plan";
+      path: string;
+      nextContent: string;
+      expectedBeforeSha256?: string;
+    }
   | { kind: "apply" | "recover" };
 
 type FrontmatterRecord = Record<string, unknown>;
+
+export type GovernedNoteReplacePlanInput = ObsidianNoteReplacePlanInput & {
+  /**
+   * Internal projection precondition. Public note-replace callers do not set
+   * this field. A domain compiler may read a note, derive nextContent, then ask
+   * the note runtime to refuse planning if that exact source SHA changed before
+   * the adapter seals its own before proof.
+   */
+  expectedBeforeSha256?: string;
+};
 
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase();
@@ -183,6 +198,19 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
           "The planning read target differs from the requested note target.",
         );
       }
+      if (
+        context.expectedBeforeSha256 !== undefined &&
+        result.sha256 !== context.expectedBeforeSha256
+      ) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "The note changed while a domain projection was being compiled. Re-plan from the new source state.",
+          {
+            expectedBeforeSha256: context.expectedBeforeSha256,
+            actualBeforeSha256: result.sha256,
+          },
+        );
+      }
       assertCurrentWritePolicy("plan", payload.path, context.nextContent);
       validateReplacement(result.content, context.nextContent, "plan");
     }
@@ -251,10 +279,24 @@ export class GovernedNoteReplaceRuntime {
     this.leaseHeartbeat.unref();
   }
 
-  plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
+  /**
+   * Internal projection primitive. It exposes the current Atomic Write Bridge
+   * read to a domain compiler without creating another effect backend or
+   * journal. Callers must still seal the returned SHA through plan().
+   */
+  readCurrent(path: string) {
+    return this.backend.read({ contractVersion: 1, path });
+  }
+
+  plan(input: GovernedNoteReplacePlanInput): Promise<OperationReceipt> {
     assertCurrentWritePolicy("plan", input.path, input.nextContent);
     return this.backend.withContext(
-      { kind: "plan", path: input.path, nextContent: input.nextContent },
+      {
+        kind: "plan",
+        path: input.path,
+        nextContent: input.nextContent,
+        expectedBeforeSha256: input.expectedBeforeSha256,
+      },
       () => this.adapter.plan(input),
     );
   }
@@ -295,9 +337,7 @@ export class GovernedNoteReplaceRuntime {
 
 export function createGovernedNoteReplaceRuntime(
   obsidianService: ObsidianRestApiService | undefined,
-):
-  | GovernedNoteReplaceRuntime
-  | undefined {
+): GovernedNoteReplaceRuntime | undefined {
   if (!obsidianService) return undefined;
 
   const journal = new ObsidianNoteReplaceJournal(
@@ -314,7 +354,10 @@ export function createGovernedNoteReplaceRuntime(
     adapter,
     Math.max(
       250,
-      Math.min(5_000, Math.floor(config.obsidianNoteReplaceExecutionLeaseMs / 4)),
+      Math.min(
+        5_000,
+        Math.floor(config.obsidianNoteReplaceExecutionLeaseMs / 4),
+      ),
     ),
   );
 
