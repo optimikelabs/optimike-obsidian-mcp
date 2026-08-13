@@ -27,6 +27,7 @@ French operator guides are linked alongside their English equivalents.
 | Which tools exist?                                         | [Tool Surface](obsidian_mcp_tools_spec.md)                                            |
 | Which tools are available in each runtime?                 | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
 | How do I run and maintain the service?                     | [Operations](../OPERATIONS.md)                                                        |
+| How does governed atomic note replacement work?            | [Governed note replacement](governed-note-replacement.md)                             |
 | Which surface should an agent use?                         | [MCP Routing Guide](mcp-routing-guide.md)                                             |
 | How do I run without Obsidian Desktop?                     | [Headless Server Profile](headless-server-profile.md)                                 |
 | How do external reads, handoff, move and link repair work? | [External Roots Setup](external-roots-setup.md)                                       |
@@ -42,6 +43,7 @@ French operator guides are linked alongside their English equivalents.
 ### Vault and Obsidian structure
 
 - notes, metadata and tags: [Tool Surface](obsidian_mcp_tools_spec.md#core-notes);
+- governed atomic whole-note replacement: [contract and boundary](governed-note-replacement.md);
 - Bases: [Tool Surface](obsidian_mcp_tools_spec.md#bases);
 - Canvas and validation: [Tool Surface](obsidian_mcp_tools_spec.md#canvas-and-format-validation).
 
@@ -52,7 +54,7 @@ French operator guides are linked alongside their English equivalents.
 - MCP versus CLI boundary: [Operon CLI / Developer API audit](operon-cli-audit.md);
 - bundled bridge implementation: [Operon Bridge README](../plugins/obsidian-operon-bridge/README.md);
 - bundled Bases implementation: [Bases Bridge README](../plugins/obsidian-bases-bridge/README.md).
-- atomic Markdown compare-and-replace pilot: [Atomic Write Bridge README](../plugins/obsidian-atomic-write-bridge/README.md).
+- atomic Markdown compare-and-replace implementation: [Atomic Write Bridge README](../plugins/obsidian-atomic-write-bridge/README.md).
 
 ### Search and runtime
 
