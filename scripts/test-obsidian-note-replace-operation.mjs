@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ObsidianNoteReplaceOperationAdapter } from "../dist/services/operations/obsidianNoteReplaceOperationAdapter.js";
@@ -267,14 +267,14 @@ try {
 
   {
     let now = Date.parse("2026-08-13T00:00:00.000Z");
-    const journal = new ObsidianNoteReplaceJournal(
-      path.join(temporaryRoot, "retention.sqlite"),
-      {
-        now: () => now,
-        terminalRetentionMs: 1_000,
-        purgeIntervalMs: 100,
-      },
-    );
+    const retentionPath = path.join(temporaryRoot, "retention.sqlite");
+    const sensitiveTerminalContent =
+      "sensitive-terminal-content-4ec0d4b4-erase-from-wal";
+    const journal = new ObsidianNoteReplaceJournal(retentionPath, {
+      now: () => now,
+      terminalRetentionMs: 1_000,
+      purgeIntervalMs: 100,
+    });
     journals.push(journal);
     const terminal = journal.create({
       idempotencyKey: "retention-terminal",
@@ -282,7 +282,7 @@ try {
       path: "Fixture/Retention.md",
       beforeSha256: sha256("before"),
       afterSha256: sha256("after"),
-      nextContent: "sensitive terminal content",
+      nextContent: sensitiveTerminalContent,
       bindingFingerprint: sha256("fixture-vault-instance"),
     });
     journal.transition(terminal.operationId, ["planned"], "applying");
@@ -292,6 +292,15 @@ try {
       "committed",
     );
     assert.equal(committed.nextContent, "");
+    for (const persistedPath of [retentionPath, `${retentionPath}-wal`]) {
+      if (!existsSync(persistedPath)) continue;
+      assert.equal(
+        readFileSync(persistedPath).includes(
+          Buffer.from(sensitiveTerminalContent, "utf8"),
+        ),
+        false,
+      );
+    }
     now += 2_000;
     journal.create({
       idempotencyKey: "retention-trigger",
@@ -306,7 +315,7 @@ try {
   }
 
   console.log(
-    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, atomic conflict, concurrent replay, redacted logging, and lost-response reconciliation.",
+    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, atomic conflict, concurrent replay, redacted logging/WAL, and lost-response reconciliation.",
   );
 } finally {
   for (const journal of journals) journal.close();

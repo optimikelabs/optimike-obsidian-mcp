@@ -52,6 +52,7 @@ export class ObsidianNoteReplaceJournal {
   private readonly terminalRetentionMs: number;
   private readonly purgeIntervalMs: number;
   private nextPurgeAt = 0;
+  private walCheckpointRequired = false;
 
   constructor(
     databasePath: string,
@@ -195,20 +196,36 @@ export class ObsidianNoteReplaceJournal {
     if (Number(result.changes) !== 1) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
+    if (STABLE_TERMINAL.has(next)) {
+      this.walCheckpointRequired = true;
+      this.checkpointSensitiveFrames();
+    }
     return updated;
   }
 
   private maybePurgeTerminalPlans(): void {
+    if (this.walCheckpointRequired) this.checkpointSensitiveFrames();
     const now = this.now();
     if (now < this.nextPurgeAt) return;
     const cutoff = new Date(now - this.terminalRetentionMs).toISOString();
-    this.db
+    const result = this.db
       .prepare(
         `DELETE FROM obsidian_note_replace_plans
          WHERE status IN ('committed', 'conflict', 'rejected', 'failed')
            AND updated_at < ?`,
       )
       .run(cutoff);
+    if (Number(result.changes) > 0) {
+      this.walCheckpointRequired = true;
+      this.checkpointSensitiveFrames();
+    }
     this.nextPurgeAt = now + this.purgeIntervalMs;
+  }
+
+  private checkpointSensitiveFrames(): void {
+    const result = this.db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as {
+      busy?: number;
+    };
+    this.walCheckpointRequired = Number(result.busy ?? 0) !== 0;
   }
 }
