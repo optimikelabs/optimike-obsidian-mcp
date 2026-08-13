@@ -24,6 +24,7 @@ jobs:
       - run: npm run test:external-roots
       - run: npm run test:operation-runtime
       - run: node scripts/test-governed-note-replace-mcp.mjs
+      - run: node scripts/test-governed-note-replace-http.mjs
       - run: npm run test:profiles
       - run: npm run test:tool-annotations
       - run: npm run test:docs
