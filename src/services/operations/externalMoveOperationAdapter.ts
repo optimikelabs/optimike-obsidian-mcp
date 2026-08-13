@@ -196,7 +196,10 @@ function receipt(raw: Record<string, unknown>): OperationReceipt {
     ...(terminal ? { terminalAt: view.updatedAt } : {}),
     ...(recoverable ? { recoveryRef: reference } : {}),
     recoveryAllowed: recoverable,
-    applyAllowed: view.readyToApply && view.nextAction === "apply",
+    applyAllowed:
+      currentState.phase !== "terminal" &&
+      view.readyToApply &&
+      view.nextAction === "apply",
   };
 }
 
@@ -215,8 +218,11 @@ export class ExternalMoveOperationAdapter
     reference: string,
     idempotencyKey: string,
   ): Promise<OperationReceipt> {
+    const planId = planIdFromRef(reference);
     return receipt(
-      await this.coordinator.apply(planIdFromRef(reference), idempotencyKey),
+      await this.coordinator.apply(planId, idempotencyKey, {
+        allowCompensatedReapply: false,
+      }),
     );
   }
 
