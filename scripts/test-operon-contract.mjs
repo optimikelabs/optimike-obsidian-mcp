@@ -193,6 +193,9 @@ const status = OperonStatusSchema.parse({
     present: true,
     version: "2.4.0",
     compatible: true,
+    compatibilityState: "certified",
+    compatibilityAdmission: "legacy-version",
+    compatibilityReason: "Certified fixture runtime.",
     testedAgainst: "2.4.0",
     supportedRange: "2.4.0",
   },
@@ -231,6 +234,17 @@ const status = OperonStatusSchema.parse({
   limitations: ["read-only"],
 });
 assert.equal(status.index.generation, 42);
+const {
+  compatibilityState: _legacyCompatibilityState,
+  compatibilityAdmission: _legacyCompatibilityAdmission,
+  compatibilityReason: _legacyCompatibilityReason,
+  ...legacyOperonStatus
+} = status.operon;
+const legacyBridgeStatus = OperonStatusSchema.parse({
+  ...status,
+  operon: legacyOperonStatus,
+});
+assert.equal(legacyBridgeStatus.operon.compatibilityState, undefined);
 
 const bridgePage = OperonBridgePageSchema.parse({
   ok: true,

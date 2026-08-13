@@ -6,7 +6,7 @@ const consumer = {
   manifest: {
     id: "optimike-operon-bridge",
     name: "Optimike Operon Bridge",
-    version: "0.6.0",
+    version: "0.7.0",
   },
 };
 
@@ -359,6 +359,31 @@ test("Operon 3 Developer API adapter stays unavailable when the host grant is pe
   );
   assert.equal(adapter.indexer.taskCount, 0);
   assert.equal(adapter.status.reason, "grant-pending");
+});
+
+test("Operon 3 Developer API adapter turns malformed or throwing negotiation into diagnostics", async () => {
+  const throwing = new OperonDeveloperApiRuntimeAdapter(consumer, {
+    getDeveloperApiV1: () => {
+      throw new Error("contract handshake failed");
+    },
+  });
+  assert.equal(await throwing.refresh(), false);
+  assert.equal(throwing.status.error?.reason, "contract handshake failed");
+  assert.equal(throwing.negotiatedContractState, "invalid");
+
+  const incomplete = new OperonDeveloperApiRuntimeAdapter(consumer, {
+    getDeveloperApiV1: () => ({
+      ok: true,
+      status: readyStatus(),
+      api: { hasCapability: () => true },
+    }),
+  });
+  assert.equal(await incomplete.refresh(), false);
+  assert.equal(
+    incomplete.status.error?.reason,
+    "Operon Developer API V1 negotiation returned an incomplete runtime contract.",
+  );
+  assert.equal(incomplete.negotiatedContractState, "invalid");
 });
 
 test("Operon 3 Developer API adapter keeps approved capabilities usable with a partial grant", async () => {

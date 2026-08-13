@@ -53,6 +53,23 @@ Every read response declares `source`, `stale`, snapshot time/age, Operon and Br
 
 SQLite cache state lives in `operon_task_snapshot` and `operon_snapshot_meta`. Malformed payloads, incomplete pagination, generation drift, duplicate IDs, incompatible versions, unready index, or P0 validation never replace the last known-good snapshot.
 
+### Vacation-safe compatibility
+
+Operon 3.x admission follows the runtime contract, not an exact product-version
+allowlist. The Bridge requires the official `getDeveloperApiV1` accessor,
+negotiates `contractVersion: 1` with `runtimeApi: 1`, and validates the granted
+capabilities, response shapes, live health, catalog, complete task pagination,
+and index diagnostics. Status distinguishes:
+
+- `certified`: a release that completed live acceptance;
+- `compatible-provisional`: an unknown release whose Developer API V1 boundary
+  passes the same runtime checks;
+- `incompatible`: an absent, denied, or invalid contract boundary.
+
+Known behavioral regressions may remain denied by exact version and operation.
+Missing optional capabilities disable only dependent tools. A future contract
+version is never accepted silently.
+
 `operon_query_saved_filter` is intentionally live-only and capability-gated. On
 official Operon `3.2.0`, it delegates to the additive task-workflow Developer
 API after an exact `tasks.filter-query` grant. The caller must supply an exact
@@ -71,7 +88,7 @@ The cached metadata also stores the configuration used for that snapshot. Tasks 
 
 ## Mutations
 
-Mutation tools call Bridge REST routes backed by the loaded engine's official mutation surface. Operon `3.2.0` uses Developer API V1 typed preview → apply plans with host-owned recovery; legacy Kairélys versions continue to use their Public API v1 contract. No route edits Markdown, calls `TaskWriter` directly, invokes UI commands, or reflects into private methods.
+Mutation tools call Bridge REST routes backed by the loaded engine's official mutation surface. Operon 3.x uses Developer API V1 typed preview → apply plans with host-owned recovery; legacy Kairélys versions continue to use their Public API v1 contract. No route edits Markdown, calls `TaskWriter` directly, invokes UI commands, or reflects into private methods.
 
 Common controls:
 

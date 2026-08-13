@@ -2,15 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	OPERON_BRIDGE_BLOCKED_MUTATIONS,
+	OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS,
 	OPERON_BRIDGE_DEVELOPER_API_VERSIONS,
 	filterTasks,
 	isCanonicalVaultMarkdownPath,
 	isCanonicalVaultRelativePath,
-	isDeveloperApiVersion,
+	isCertifiedDeveloperApiVersion,
 	isIndexReady,
   isVersionCompatible,
   normalizeTask,
   resolvePriorityStableId,
+  resolveOperonCompatibility,
   paginateTasks,
   queryTasks,
   resolveWorkflow,
@@ -184,7 +186,7 @@ test("task revision is invariant across the unmanaged-properties projection", ()
   assert.equal(redacted.revision, projected.revision);
 });
 
-test("version compatibility is an explicit tested-version allowlist", () => {
+test("legacy version compatibility remains an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("operon", "2.4.0"), true);
   assert.equal(isVersionCompatible("operon", "2.5.0"), true);
   assert.equal(isVersionCompatible("operon", "3.0.0"), false);
@@ -205,7 +207,7 @@ test("version compatibility is an explicit tested-version allowlist", () => {
   assert.equal(isVersionCompatible("kairelys", "2.6.4"), false);
 });
 
-test("official Developer API versions remain explicit and only unverified mutations stay fail-closed", () => {
+test("certified Developer API versions remain explicit and only unverified mutations stay fail-closed", () => {
 	assert.deepEqual(OPERON_BRIDGE_DEVELOPER_API_VERSIONS, [
 		"3.0.1",
 		"3.1.0",
@@ -213,16 +215,60 @@ test("official Developer API versions remain explicit and only unverified mutati
 		"3.2.0",
 		"3.2.1",
 	]);
-	assert.equal(isDeveloperApiVersion("3.0.1"), true);
-	assert.equal(isDeveloperApiVersion("3.1.0"), true);
-	assert.equal(isDeveloperApiVersion("3.1.1"), true);
-	assert.equal(isDeveloperApiVersion("3.2.0"), true);
-	assert.equal(isDeveloperApiVersion("3.2.1"), true);
+	assert.equal(isCertifiedDeveloperApiVersion("3.0.1"), true);
+	assert.equal(isCertifiedDeveloperApiVersion("3.1.0"), true);
+	assert.equal(isCertifiedDeveloperApiVersion("3.1.1"), true);
+	assert.equal(isCertifiedDeveloperApiVersion("3.2.0"), true);
+	assert.equal(isCertifiedDeveloperApiVersion("3.2.1"), true);
 	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.0.1"], ["transition"]);
 	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.0"], []);
 	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.1"], []);
 	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.0"], []);
 	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.1"], []);
+});
+
+test("unknown Operon versions are admitted provisionally by the Developer API V1 contract", () => {
+	assert.deepEqual(
+		resolveOperonCompatibility({
+			pluginId: "operon",
+			version: "3.3.0",
+			hasDeveloperApiV1: true,
+		}),
+		{
+			state: "compatible-provisional",
+			admission: "developer-api-v1",
+			reason:
+				"The loaded Operon version is not yet certified, but it exposes the negotiated Developer API V1 boundary; runtime capability and schema checks remain mandatory.",
+		},
+	);
+	assert.equal(
+		resolveOperonCompatibility({
+			pluginId: "operon",
+			version: "3.3.0",
+			hasDeveloperApiV1: false,
+		}).state,
+		"incompatible",
+	);
+});
+
+test("certified and denied Developer API versions keep deterministic admission", () => {
+	assert.equal(
+		resolveOperonCompatibility({
+			pluginId: "operon",
+			version: "3.2.1",
+			hasDeveloperApiV1: true,
+		}).state,
+		"certified",
+	);
+	assert.match(OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS["3.0.0"] ?? "", /predates/u);
+	assert.equal(
+		resolveOperonCompatibility({
+			pluginId: "operon",
+			version: "3.0.0",
+			hasDeveloperApiV1: true,
+		}).state,
+		"incompatible",
+	);
 });
 
 test("mutation paths are rejected instead of normalized at the Bridge boundary", () => {

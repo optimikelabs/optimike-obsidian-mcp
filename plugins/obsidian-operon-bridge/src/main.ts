@@ -1,18 +1,17 @@
 import { App, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import {
   OPERON_BRIDGE_CONTRACT_VERSION,
-  OPERON_BRIDGE_SUPPORTED_VERSIONS,
+  OPERON_BRIDGE_LEGACY_VERSIONS,
   OPERON_BRIDGE_BLOCKED_MUTATIONS,
   OPERON_BRIDGE_TESTED_VERSION,
   isIndexReady,
-  isDeveloperApiVersion,
   isCanonicalVaultRelativePath,
   isCanonicalVaultMarkdownPath,
   mutationPathValidationError,
+  resolveOperonCompatibility,
   resolveMutationPreflight,
   resolvePriorityStableId,
   workflowStatusMatches,
-  isVersionCompatible,
   normalizeTask,
   queryTasks,
   settingsSignature,
@@ -26,6 +25,8 @@ import {
   type RuntimePriorityDefinition,
   type RuntimeFileTaskTemplate,
   type OperonBridgeConfiguration,
+  type OperonCompatibilityAdmission,
+  type OperonCompatibilityState,
   type OperonSemanticConfiguration,
   type OperonWorkflowTaxonomy,
   type CachedMutation,
@@ -82,6 +83,9 @@ interface OperonRuntime {
   api: OperonPublicApiV1 | null;
   version: string;
   compatible: boolean;
+  compatibilityState: OperonCompatibilityState;
+  compatibilityAdmission: OperonCompatibilityAdmission;
+  compatibilityReason: string;
   indexer: {
     getAllTasks: () => RuntimeIndexedTask[];
     getTask: (operonId: string) => RuntimeIndexedTask | undefined;
@@ -438,11 +442,15 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (!resolved) return null;
     const plugin = resolved.plugin as any;
     const version = String(plugin?.manifest?.version ?? "").trim();
-    if (
+    const hasDeveloperApiV1 =
       resolved.id === "operon" &&
-      isDeveloperApiVersion(version) &&
-      OperonDeveloperApiRuntimeAdapter.canHandle(plugin)
-    ) {
+      OperonDeveloperApiRuntimeAdapter.canHandle(plugin);
+    const compatibility = resolveOperonCompatibility({
+      pluginId: resolved.id,
+      version,
+      hasDeveloperApiV1,
+    });
+    if (resolved.id === "operon" && hasDeveloperApiV1) {
       const developerApi = this.getDeveloperApiAdapter(plugin);
       return {
         plugin,
@@ -450,7 +458,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         pluginName: resolved.name,
         api: null,
         version,
-        compatible: true,
+        compatible: compatibility.state !== "incompatible",
+        compatibilityState: compatibility.state,
+        compatibilityAdmission: compatibility.admission,
+        compatibilityReason: compatibility.reason,
         indexer: developerApi.indexer,
         pipelines: developerApi.pipelines,
         keyMappings: developerApi.keyMappings,
@@ -460,7 +471,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         developerApi,
       };
     }
-    if (resolved.id === "operon" && isDeveloperApiVersion(version)) {
+    if (
+      resolved.id === "operon" &&
+      compatibility.state === "incompatible" &&
+      !plugin?.indexer
+    ) {
       return null;
     }
     const indexer = plugin?.indexer;
@@ -479,7 +494,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       pluginName: resolved.name,
       api: this.readPublicApi(plugin),
       version,
-      compatible: isVersionCompatible(resolved.id, version),
+      compatible: compatibility.state !== "incompatible",
+      compatibilityState: compatibility.state,
+      compatibilityAdmission: compatibility.admission,
+      compatibilityReason: compatibility.reason,
       indexer,
       pipelines: Array.isArray(plugin?.settings?.pipelines)
         ? plugin.settings.pipelines
@@ -686,7 +704,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         runtime.developerApi!.hasMutationCapability(capability);
       return {
         status: true,
-        configuration: Boolean(runtime.compatible),
+        configuration: readable,
         list: readable,
         get: readable,
         query: readable,
@@ -851,6 +869,22 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
 
   private async statusPayload(): Promise<Record<string, unknown>> {
     const runtime = this.getOperonRuntime();
+    const loadedEngine = runtime
+      ? null
+      : resolveTaskEnginePlugin((this.app as any).plugins);
+    const loadedVersion = String(
+      (loadedEngine?.plugin as { manifest?: { version?: unknown } } | undefined)
+        ?.manifest?.version ?? "",
+    ).trim();
+    const unavailableCompatibility = loadedEngine
+      ? resolveOperonCompatibility({
+          pluginId: loadedEngine.id,
+          version: loadedVersion,
+          hasDeveloperApiV1:
+            loadedEngine.id === "operon" &&
+            OperonDeveloperApiRuntimeAdapter.canHandle(loadedEngine.plugin),
+        })
+      : null;
     const indexState = await this.indexState(runtime);
     const registry = runtime?.indexer.getDuplicateRegistry?.();
     const taskCount = runtime
@@ -862,8 +896,30 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       indexState.ready && indexState.diagnostics?.taskCount === taskCount,
     );
     const capabilities = this.capabilities(runtime, ready);
+    const contractInvalid =
+      runtime?.developerApi?.negotiatedContractState === "invalid";
+    const compatibilityReason = contractInvalid
+      ? (runtime?.developerApi?.status.error?.reason ??
+        "Operon Developer API V1 contract validation failed.")
+      : (runtime?.compatibilityReason ??
+        "No compatible task-engine runtime is currently available.");
+    const reportedCompatibilityState = contractInvalid
+      ? "incompatible"
+      : (runtime?.compatibilityState ??
+        unavailableCompatibility?.state ??
+        "incompatible");
+    const reportedCompatibilityAdmission = contractInvalid
+      ? "none"
+      : (runtime?.compatibilityAdmission ??
+        unavailableCompatibility?.admission ??
+        "none");
+    const reportedCompatibilityReason = contractInvalid
+      ? compatibilityReason
+      : (runtime?.compatibilityReason ??
+        unavailableCompatibility?.reason ??
+        compatibilityReason);
     return {
-      ok: Boolean(runtime?.compatible && ready),
+      ok: Boolean(runtime?.compatible && !contractInvalid && ready),
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
       bridge: {
         id: this.manifest.id,
@@ -880,15 +936,16 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             : "read-only",
       },
       operon: {
-        present: Boolean(runtime),
-        pluginId: runtime?.pluginId ?? null,
-        pluginName: runtime?.pluginName ?? null,
-        version: runtime?.version ?? null,
+        present: Boolean(runtime || loadedEngine),
+        pluginId: runtime?.pluginId ?? loadedEngine?.id ?? null,
+        pluginName: runtime?.pluginName ?? loadedEngine?.name ?? null,
+        version: runtime?.version ?? (loadedVersion || null),
         compatible: Boolean(runtime?.compatible),
+        compatibilityState: reportedCompatibilityState,
+        compatibilityAdmission: reportedCompatibilityAdmission,
+        compatibilityReason: reportedCompatibilityReason,
         testedAgainst: OPERON_BRIDGE_TESTED_VERSION,
-        supportedRange: Object.entries(OPERON_BRIDGE_SUPPORTED_VERSIONS)
-          .map(([pluginId, versions]) => `${pluginId}: ${versions.join(", ")}`)
-          .join("; "),
+        supportedRange: `operon: Developer API V1 (contractVersion 1, runtimeApi 1) or certified legacy ${OPERON_BRIDGE_LEGACY_VERSIONS.operon.join(", ")}; kairelys legacy: ${OPERON_BRIDGE_LEGACY_VERSIONS.kairelys.join(", ")}`,
       },
       developerApi: runtime?.developerApi?.status ?? null,
       index: {
@@ -918,11 +975,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     if (!runtime.compatible) {
       throw new Error(
-        `${runtime.pluginName} ${runtime.version || "unknown"} is not in the tested Bridge allowlist (${Object.entries(
-          OPERON_BRIDGE_SUPPORTED_VERSIONS,
-        )
-          .map(([pluginId, versions]) => `${pluginId}: ${versions.join(", ")}`)
-          .join("; ")}).`,
+        `${runtime.pluginName} ${runtime.version || "unknown"} is incompatible with the Bridge: ${runtime.compatibilityReason}`,
       );
     }
     return runtime;
@@ -2354,7 +2407,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       .get(async (_req: any, res: any) => {
         try {
           const runtime = this.requireRuntime();
-          await this.indexState(runtime);
+          const state = await this.indexState(runtime);
+          if (!state.ready) {
+            throw new Error(
+              "Operon Developer API V1 negotiation or live verification did not produce a ready configuration.",
+            );
+          }
           sendJson(res, 200, this.configurationPayload(runtime));
         } catch (error) {
           sendJson(

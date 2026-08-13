@@ -189,6 +189,14 @@ function statusPayload() {
       present: state.mode !== "absent",
       version: "2.4.0",
       compatible: state.mode !== "incompatible",
+      compatibilityState:
+        state.mode === "incompatible" ? "incompatible" : "certified",
+      compatibilityAdmission:
+        state.mode === "incompatible" ? "none" : "legacy-version",
+      compatibilityReason:
+        state.mode === "incompatible"
+          ? "Incompatible fixture runtime."
+          : "Certified fixture runtime.",
       testedAgainst: "2.4.0",
       supportedRange: "2.4.0",
     },

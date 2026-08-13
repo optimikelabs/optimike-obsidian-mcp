@@ -270,6 +270,17 @@ export const OperonStatusSchema = z.object({
     pluginName: z.string().nullable().optional(),
     version: z.string().nullable(),
     compatible: z.boolean(),
+    compatibilityState: z.enum([
+      "certified",
+      "compatible-provisional",
+      "incompatible",
+    ]).optional(),
+    compatibilityAdmission: z.enum([
+      "developer-api-v1",
+      "legacy-version",
+      "none",
+    ]).optional(),
+    compatibilityReason: z.string().min(1).optional(),
     testedAgainst: z.string(),
     supportedRange: z.string(),
   }),

@@ -15,7 +15,8 @@ If both plugins are enabled, the Bridge refuses to choose an owner. Disable one 
 
 - Obsidian Desktop
 - Operon `2.4.0` or `2.5.0` for legacy reads
-- Operon `3.2.1` for Developer API V1 reads and governed mutations (`3.0.1`, `3.1.0`, `3.1.1`, and `3.2.0` remain explicitly allowlisted)
+- Operon exposing the negotiated Developer API V1 contract (`contractVersion: 1`, `runtimeApi: 1`)
+- certified Developer API releases: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`; later compatible releases are admitted provisionally by contract rather than product-version allowlist
 - Kairélys `2.5.1` through `2.5.3` (based on Operon `2.5.0`) and Kairélys `2.6.1` through `2.6.3`
   (based on Operon `2.6.0`) with Public API v1 for mutations
 - Obsidian Local REST API
@@ -33,6 +34,18 @@ the Bridge never retries blindly or falls back to Markdown/private APIs. File
 Task rename safety remains tracked in [#139](https://github.com/hasanyilmaz/operon/pull/139),
 and the transition edge in [#99](https://github.com/hasanyilmaz/operon/issues/99)
 and [#101](https://github.com/hasanyilmaz/operon/pull/101).
+
+Compatibility is reported explicitly:
+
+- `certified`: the release completed the Bridge acceptance path;
+- `compatible-provisional`: the product version is new, but the Developer API
+  V1 negotiation, capabilities, schemas, and live index checks pass;
+- `incompatible`: the contract boundary is absent, denied, or fails validation.
+
+The product version remains diagnostic metadata and may select a narrowly
+documented denylist entry. It is not the primary admission key for Operon 3.x.
+An unavailable optional capability removes only the dependent route; it does
+not tear down already verified core reads or mutations.
 
 ## Routes
 
