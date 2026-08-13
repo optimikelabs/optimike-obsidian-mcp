@@ -361,6 +361,70 @@ test("Operon 3 Developer API adapter stays unavailable when the host grant is pe
   assert.equal(adapter.status.reason, "grant-pending");
 });
 
+test("Operon 3 Developer API adapter retries the bounded cache-ready startup window", async () => {
+  let healthCalls = 0;
+  const api = {
+    hasCapability: (name: string) =>
+      [
+        "system.health",
+        "system.capabilities",
+        "catalog.read",
+        "tasks.read",
+        "tasks.query",
+      ].includes(name),
+    channel: {
+      status: () =>
+        healthCalls === 0
+          ? {
+              ...readyStatus(),
+              availability: "degraded",
+              reason: "cache-ready",
+              retryAfterMs: 0,
+            }
+          : readyStatus(),
+    },
+    system: {
+      health: async () => {
+        healthCalls += 1;
+        return healthCalls === 1
+          ? { ok: false }
+          : {
+              ok: true,
+              contextRevision: { index: { ramGeneration: 34 } },
+            };
+      },
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        settingsFingerprint: "settings-34",
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async () => ({
+        ok: true,
+        tasks: [],
+        page: { truncated: false },
+        contextRevision: { index: { ramGeneration: 34 } },
+      }),
+    },
+  };
+  const operon = {
+    getDeveloperApiV1: () => ({ ok: true, status: api.channel.status(), api }),
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
+
+  assert.equal(await adapter.refresh(), true);
+  assert.equal(healthCalls, 2);
+  assert.equal(adapter.indexer.getGeneration(), 34);
+  assert.equal(adapter.status.reason, "ready");
+});
+
 test("Operon 3 Developer API adapter turns malformed or throwing negotiation into diagnostics", async () => {
   const throwing = new OperonDeveloperApiRuntimeAdapter(consumer, {
     getDeveloperApiV1: () => {

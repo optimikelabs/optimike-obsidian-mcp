@@ -884,6 +884,9 @@ function isDeveloperApiAccessor(value: unknown): value is DeveloperApiAccessor {
   return typeof candidate.getDeveloperApiV1 === "function";
 }
 
+const STARTUP_REFRESH_RETRY_LIMIT = 2;
+const STARTUP_REFRESH_RETRY_MAX_MS = 1_500;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -997,12 +1000,43 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   async refresh(includeMutationCapabilities = false): Promise<boolean> {
     if (this.refreshInFlight) return this.refreshInFlight;
-    this.refreshInFlight = this.refreshInternal(
+    this.refreshInFlight = this.refreshWithStartupRetry(
       includeMutationCapabilities,
     ).finally(() => {
       this.refreshInFlight = null;
     });
     return this.refreshInFlight;
+  }
+
+  private async refreshWithStartupRetry(
+    includeMutationCapabilities: boolean,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt <= STARTUP_REFRESH_RETRY_LIMIT; attempt += 1) {
+      if (await this.refreshInternal(includeMutationCapabilities)) return true;
+      const retryAfterMs = this.startupRetryDelayMs();
+      if (retryAfterMs === null || attempt === STARTUP_REFRESH_RETRY_LIMIT)
+        return false;
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, retryAfterMs);
+      });
+    }
+    return false;
+  }
+
+  private startupRetryDelayMs(): number | null {
+    if (
+      this.channelStatus.availability !== "degraded" ||
+      this.channelStatus.reason !== "cache-ready" ||
+      this.channelStatus.admission?.reads !== true
+    ) {
+      return null;
+    }
+    const requestedDelay = Number(this.channelStatus.retryAfterMs ?? 500);
+    if (!Number.isFinite(requestedDelay)) return 500;
+    return Math.min(
+      STARTUP_REFRESH_RETRY_MAX_MS,
+      Math.max(0, Math.trunc(requestedDelay)),
+    );
   }
 
   private async refreshInternal(
