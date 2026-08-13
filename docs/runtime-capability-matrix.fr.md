@@ -36,7 +36,7 @@ pas Obsidian Desktop et ne chargent pas ses plugins communautaires.
 | Bases list/schema/query | Bases Bridge | Bases Bridge | Non | Fallback local | Fallback local | Fallback local |
 | Bases create/upsert | Bases Bridge | Bases Bridge | Non | Non | Non | YAML et rows bornés |
 | Canvas create/edit | Non | Non | Non | Non | Non | Helpers JSON minimaux |
-| Admin move/delete | Non | Non | Non | Non | Non | Préconditions obligatoires |
+| Admin filesystem | Non | Non | Non | Non | Non | Move/delete préconditionnés |
 | Move externe avec réparation | Non | Non | Non | Non | Non | Stdio local + opt-ins exacts |
 
 ## Surface commune
