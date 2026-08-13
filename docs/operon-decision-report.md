@@ -81,7 +81,8 @@ idempotency, stale-revision conflict, reindex/restart, stale cache and duplicate
 ID refusal. It is not presented as Developer API V1 evidence.
 
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
-remain historical. Current targets are Operon `3.2.0` and CLI `1.1.0`.
+remain historical. The current runtime target is Operon `3.3.0` with Bridge
+`0.7.0`; CLI `1.1.0` remains the documented operator-reference target.
 
 ## Deliberately excluded or unavailable
 
