@@ -263,6 +263,40 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture("concurrent-recover");
+    let releaseWrite;
+    let markWriteEntered;
+    const writeEntered = new Promise((resolve) => {
+      markWriteEntered = resolve;
+    });
+    const writeReleased = new Promise((resolve) => {
+      releaseWrite = resolve;
+    });
+    backend.beforeWrite = async () => {
+      markWriteEntered();
+      await writeReleased;
+    };
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "one write despite concurrent recovery",
+      idempotencyKey: "concurrent-recover",
+    });
+    const firstApply = adapter.apply(planned.planRef, "concurrent-recover");
+    await writeEntered;
+    const recovery = await adapter.recover(
+      planned.planRef,
+      "concurrent-recover",
+    );
+    assert.equal(recovery.phase, "applying");
+    assert.equal(recovery.outcome, null);
+    assert.equal(backend.replaceCalls, 1);
+    releaseWrite();
+    const committed = await firstApply;
+    assert.equal(committed.outcome, "committed");
+    assert.equal(backend.replaceCalls, 1);
+  }
+
+  {
     const { backend, adapter } = fixture("recover-same-plan");
     backend.failBeforeWriteOnce = true;
     const planned = await adapter.plan({
@@ -343,6 +377,28 @@ try {
     assert.equal(metadata.hasBody, true);
     assert.equal(serialized.includes(privateBody), false);
     assert.equal(serialized.includes("private-token"), false);
+  }
+
+  {
+    const restartPath = path.join(temporaryRoot, "restart-interruption.sqlite");
+    const firstJournal = new ObsidianNoteReplaceJournal(restartPath);
+    const applying = firstJournal.create({
+      idempotencyKey: "restart-interruption",
+      requestDigest: sha256("restart-interruption-request"),
+      path: "Fixture/Restart.md",
+      beforeSha256: sha256("before"),
+      afterSha256: sha256("after"),
+      nextContent: "retained exact recovery content",
+      bindingFingerprint: sha256("fixture-vault-instance"),
+    });
+    firstJournal.transition(applying.operationId, ["planned"], "applying");
+    firstJournal.close();
+    const restartedJournal = new ObsidianNoteReplaceJournal(restartPath);
+    journals.push(restartedJournal);
+    const interrupted = restartedJournal.get(applying.operationId);
+    assert.equal(interrupted.status, "outcome_unknown");
+    assert.equal(interrupted.nextContent, "retained exact recovery content");
+    assert.match(interrupted.failure, /process restarted/u);
   }
 
   {

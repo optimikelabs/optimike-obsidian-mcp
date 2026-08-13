@@ -293,7 +293,12 @@ export class ObsidianNoteReplaceOperationAdapter
       return receipt(plan);
     }
     plan = await this.reconcile(plan);
-    if (plan.status !== "applying" && plan.status !== "outcome_unknown") {
+    if (plan.status === "applying") {
+      // A live executor still owns this plan. Only a persisted interruption
+      // marker (outcome_unknown) authorizes exact-plan re-execution.
+      return receipt(plan);
+    }
+    if (plan.status !== "outcome_unknown") {
       return receipt(plan);
     }
     const read = ReadSchema.parse(

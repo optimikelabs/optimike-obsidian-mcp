@@ -77,6 +77,7 @@ export class ObsidianNoteReplaceJournal {
         updated_at TEXT NOT NULL
       )
     `);
+    this.markInterruptedPlans();
     this.maybePurgeTerminalPlans();
     for (const privatePath of [
       databasePath,
@@ -220,6 +221,39 @@ export class ObsidianNoteReplaceJournal {
       this.checkpointSensitiveFrames();
     }
     this.nextPurgeAt = now + this.purgeIntervalMs;
+  }
+
+  private markInterruptedPlans(): void {
+    const rows = this.db
+      .prepare(
+        "SELECT operation_id, payload_json FROM obsidian_note_replace_plans WHERE status = 'applying'",
+      )
+      .all() as Array<{ operation_id: string; payload_json: string }>;
+    if (rows.length === 0) return;
+    const updatedAt = new Date(this.now()).toISOString();
+    const update = this.db.prepare(
+      `UPDATE obsidian_note_replace_plans
+       SET status = 'outcome_unknown', payload_json = ?, updated_at = ?
+       WHERE operation_id = ? AND status = 'applying'`,
+    );
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const row of rows) {
+        const current = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
+        const interrupted: ObsidianNoteReplacePlan = {
+          ...current,
+          status: "outcome_unknown",
+          updatedAt,
+          failure:
+            "The process restarted while apply was in progress; exact-plan recovery is required.",
+        };
+        update.run(JSON.stringify(interrupted), updatedAt, row.operation_id);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private checkpointSensitiveFrames(): void {
