@@ -206,13 +206,23 @@ test("version compatibility is an explicit tested-version allowlist", () => {
 });
 
 test("official Developer API versions remain explicit and only unverified mutations stay fail-closed", () => {
-	assert.deepEqual(OPERON_BRIDGE_DEVELOPER_API_VERSIONS, ["3.0.1", "3.1.0", "3.1.1"]);
+	assert.deepEqual(OPERON_BRIDGE_DEVELOPER_API_VERSIONS, [
+		"3.0.1",
+		"3.1.0",
+		"3.1.1",
+		"3.2.0",
+		"3.2.1",
+	]);
 	assert.equal(isDeveloperApiVersion("3.0.1"), true);
 	assert.equal(isDeveloperApiVersion("3.1.0"), true);
 	assert.equal(isDeveloperApiVersion("3.1.1"), true);
+	assert.equal(isDeveloperApiVersion("3.2.0"), true);
+	assert.equal(isDeveloperApiVersion("3.2.1"), true);
 	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.0.1"], ["transition"]);
 	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.0"], []);
 	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.1"], []);
+	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.0"], []);
+	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.1"], []);
 });
 
 test("mutation paths are rejected instead of normalized at the Bridge boundary", () => {

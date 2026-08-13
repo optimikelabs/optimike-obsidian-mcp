@@ -7,9 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Operon `3.2.1` / CLI `1.1.0` compatibility through Bridge `0.6.0`, retaining
+  explicit `3.2.0` support and including
+  native saved-filter execution via the additive `tasks.filter-query` grant and
+  opaque pagination.
+- Regression coverage proving that a pending filter grant cannot hide already
+  approved core reads or mutations.
+- Saved-filter pagination and Bridge HTTP error mapping coverage, preserving
+  typed `404`/`422` failures instead of reporting generic internal errors.
+
+### Changed
+
+- Saved-filter documentation now distinguishes execution from catalog
+  discovery: Operon 3.2 requires an exact caller-supplied `filterSetId` because
+  its official Developer API does not list the saved-filter catalog.
+- ÉLYSIA Task Gouverneur active skill `2.2` and distributed profile skill
+  `1.3.0` align with the 3.2 capability boundary. Adoption remains unavailable
+  without a Markdown or CLI fallback.
+
 ## [2.4.0] - 2026-08-09
 
 ### Added
+
+- ÉLYSIA Task Gouverneur `1.2.0`, aligned with the complete 23-tool Operon
+  surface, capability-gated adoption/saved filters, governed relationships and
+  recurrence, exact-plan recovery, and the explicit MCP/CLI boundary.
 
 - Bilingual Operon MCP contract and CLI audit documenting the complete 23-tool
   surface, the governed MCP-versus-CLI boundary, stock 3.1.1 capability limits,

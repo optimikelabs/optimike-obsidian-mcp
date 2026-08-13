@@ -15,22 +15,24 @@ If both plugins are enabled, the Bridge refuses to choose an owner. Disable one 
 
 - Obsidian Desktop
 - Operon `2.4.0` or `2.5.0` for legacy reads
-- Operon `3.1.1` for Developer API V1 reads and governed mutations (`3.0.1` and `3.1.0` remain explicitly allowlisted)
+- Operon `3.2.1` for Developer API V1 reads and governed mutations (`3.0.1`, `3.1.0`, `3.1.1`, and `3.2.0` remain explicitly allowlisted)
 - Kairélys `2.5.1` through `2.5.3` (based on Operon `2.5.0`) and Kairélys `2.6.1` through `2.6.3`
   (based on Operon `2.6.0`) with Public API v1 for mutations
 - Obsidian Local REST API
 
-Operon `3.1.1` uses the official Developer API V1 for live reads, previews, applies, and durable recovery. Its inline task-update settlement path has been revalidated with modified-time frontmatter writes that occur during apply on the patched local acceptance build. No Markdown/private-API fallback is used. `adopt`, unmanaged properties, and arbitrary `targetFolder` destinations remain unsupported on this path and are rejected explicitly.
-
-Stock `3.1.1` remains the supported target for reads and most governed
-mutations, but the full acceptance evidence is currently carried by that local
-build while upstream fixes are reviewed in [#135](https://github.com/hasanyilmaz/operon/pull/135),
-[#137](https://github.com/hasanyilmaz/operon/pull/137), and
-[#139](https://github.com/hasanyilmaz/operon/pull/139). The known transition
-settlement issue is tracked in [#99](https://github.com/hasanyilmaz/operon/issues/99)
-and [#101](https://github.com/hasanyilmaz/operon/pull/101). Uncertain outcomes
-remain fail-closed; the Bridge never retries blindly or falls back to Markdown
-or private APIs.
+Operon `3.2.0` and `3.2.1` use the official Developer API V1 for live reads, previews,
+applies, durable recovery, and the additive `tasks.filter-query` capability.
+Saved-filter execution requires an exact grant and exact `filterSetId`; the
+official API does not expose the saved-filter catalog. Adoption, unmanaged
+properties, and arbitrary `targetFolder` destinations remain unsupported and
+are rejected explicitly. The complete live pilot used the local 3.2.0 build.
+The equivalent Settings UI fix for 3.2.1 is tracked in upstream
+[#145](https://github.com/hasanyilmaz/operon/issues/145) and
+[#146](https://github.com/hasanyilmaz/operon/pull/146). Uncertain outcomes remain fail-closed;
+the Bridge never retries blindly or falls back to Markdown/private APIs. File
+Task rename safety remains tracked in [#139](https://github.com/hasanyilmaz/operon/pull/139),
+and the transition edge in [#99](https://github.com/hasanyilmaz/operon/issues/99)
+and [#101](https://github.com/hasanyilmaz/operon/pull/101).
 
 ## Routes
 
@@ -53,11 +55,11 @@ Prefix: `/extensions/optimike-operon-bridge/v1`
 - `GET /mutations/pending-recoveries`
 - `POST /mutations/recover`
 
-All routes inherit Local REST API authentication and local TLS settings. Saved filters run through Operon's native filter evaluator. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected before later payload validation. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine`. Dry-run is the default.
+All routes inherit Local REST API authentication and local TLS settings. Saved filters run through Operon's native filter evaluator with an exact caller-supplied `filterSetId`; the official 3.2 API does not list saved filters. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected before later payload validation. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine` on engines that advertise it. Dry-run is the default.
 
 Mutation paths are strict, exact vault-relative paths. The MCP and Bridge reject leading or trailing whitespace, backslashes, absolute paths, empty segments, traversal, and non-Markdown `targetPath` values; they never trim or rewrite an invalid destination into a valid one.
 
-Mutation apply is disabled by default. Operon 3.1.1 mutation routes are advertised only when the Bridge setting is enabled, the official grant exposes the matching preview/apply capabilities, and the MCP runtime has the separate `OPERON_MUTATIONS_ENABLED` opt-in. Relationship apply rereads the source and inverse dependency edges; recurrence uses the official scoped recurrence plan and never passes through the generic update route.
+Mutation apply is disabled by default. Operon 3.2.x mutation routes are advertised only when the Bridge setting is enabled, the official grant exposes the matching preview/apply capabilities, and the MCP runtime has the separate `OPERON_MUTATIONS_ENABLED` opt-in. Relationship apply rereads the source and inverse dependency edges; recurrence uses the official scoped recurrence plan and never passes through the generic update route.
 
 ## Build
 

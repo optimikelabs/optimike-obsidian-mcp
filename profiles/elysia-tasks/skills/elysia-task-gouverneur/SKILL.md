@@ -1,8 +1,8 @@
 ---
 name: elysia-task-gouverneur
-description: 'Orchestre les tâches d’un coffre compatible avec le profil public ÉLYSIA Tasks : opérations ponctuelles, audits, triage, cycle de vie et santé du runtime Kairélys/Operon via les outils operon_*, avec IDs stables, dry-run et validation humaine.'
+description: 'Orchestre les tâches d’un coffre compatible avec le profil public ÉLYSIA Tasks via les 23 outils operon_* gouvernés : opérations ponctuelles, relations, récurrence, récupération, audits, triage, cycle de vie et santé du runtime, avec capacités live, IDs stables, dry-run et validation humaine.'
 metadata:
-  version: '1.1.0'
+  version: 1.3.0
   skill_structure: graph
   portability_class: profile-bound-portable
   profile_id: elysia.tasks
@@ -17,7 +17,8 @@ Utilise le profil public `elysia.tasks` et la configuration live du moteur pour 
 
 ## Quand l’utiliser
 
-- Créer, adopter, modifier, terminer, convertir ou déplacer une tâche.
+- Créer, modifier, terminer, convertir ou déplacer une tâche ; adopter seulement si le runtime annonce la capacité.
+- Lire ou modifier des relations et récurrences, ou récupérer exactement une mutation incertaine.
 - Auditer ou trier un backlog compatible avec le profil ÉLYSIA Tasks.
 - Contrôler les filtres canoniques et le respect du propriétaire unique.
 - Diagnostiquer un runtime Kairélys/Operon stale, incompatible ou incohérent.
@@ -30,6 +31,8 @@ Utilise le profil public `elysia.tasks` et la configuration live du moteur pour 
 - Ne jamais muter une tâche par regex, patch Markdown, édition YAML brute ou déplacement de fichier.
 - Toute mutation d’une tâche existante passe par `expectedRevision`, `idempotencyKey`, dry-run, validation humaine, apply, relecture et `operon_validate`.
 - Runtime stale/non-live, capacité absente ou référence critique inaccessible : lecture seulement.
+- L’enregistrement d’un outil ne prouve ni sa capacité, ni son grant, ni un mode d’écriture suffisant.
+- Suppression, rappels, pin, contrôle de timer et passthrough CLI générique restent opérateur-only.
 - Une tâche appartient à un seul moteur. Ne jamais écrire en miroir dans Operon, Tasks et TaskNotes.
 - Toute création ou adoption passe par [admission-p90-j.md](references/admission-p90-j.md). Un plan ou une liste n’autorise pas automatiquement la création de tâches.
 
@@ -38,18 +41,15 @@ Utilise le profil public `elysia.tasks` et la configuration live du moteur pour 
 | Intention | `module_route` | Modules obligatoires |
 |---|---|---|
 | Créer ou adopter | `operation-ponctuelle` | [admission-p90-j.md](references/admission-p90-j.md) + [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
-| Modifier, terminer, convertir, déplacer | `operation-ponctuelle` | [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
+| Modifier, terminer, lier, gérer une récurrence, convertir ou déplacer | `operation-ponctuelle` | [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
+| Résultat incertain ou récupération | `sante-performance` | [sante-et-performance.md](references/sante-et-performance.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
 | Audit, triage, conformité ou saved filters | `audit-triage` | [audits-et-triage.md](references/audits-et-triage.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
 | Changement de phase d’un projet ou nettoyage de backlog | `cycle-vie-projet` | [cycle-de-vie-projet.md](references/cycle-de-vie-projet.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
 | Cache stale, incident, incompatibilité ou lenteur | `sante-performance` | [sante-et-performance.md](references/sante-et-performance.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
 
 ## Routage rapide
 
-- Création ou adoption -> ouvrir `admission-p90-j`, `operations-ponctuelles`, puis `runtime-et-mutations`.
-- Autre opération sur une tâche -> ouvrir `operations-ponctuelles` puis `runtime-et-mutations`.
-- Audit ou cockpit -> ouvrir `audits-et-triage` puis `runtime-et-mutations`.
-- Projet qui change de phase -> ouvrir `cycle-de-vie-projet` puis `runtime-et-mutations`.
-- Runtime stale ou incident -> ouvrir `sante-et-performance` puis `runtime-et-mutations`.
+Choisir une seule ligne de la `Reference Gate Map`, ouvrir tous ses modules, puis élargir seulement si la situation change de route.
 
 ## Profile Gate
 
@@ -95,10 +95,3 @@ Appliquer [contrat-de-sortie.md](references/contrat-de-sortie.md) et renseigner 
 - Cycle de vie projet : [cycle-de-vie-projet.md](references/cycle-de-vie-projet.md)
 - Santé et performance : [sante-et-performance.md](references/sante-et-performance.md)
 - Contrat de sortie : [contrat-de-sortie.md](references/contrat-de-sortie.md)
-
-## Exemples de déclencheurs
-
-- « Crée cette tâche dans le projet et mets-la dans le statut planifié. »
-- « Termine cette tâche via Operon sans modifier le Markdown. »
-- « Audite les tâches hors des racines autorisées par le profil ÉLYSIA. »
-- « Why is the Operon runtime stale? »

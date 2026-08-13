@@ -6,6 +6,7 @@ import {
   OPERON_BRIDGE_TESTED_VERSION,
   isIndexReady,
   isDeveloperApiVersion,
+  isCanonicalVaultRelativePath,
   isCanonicalVaultMarkdownPath,
   mutationPathValidationError,
   resolveMutationPreflight,
@@ -711,7 +712,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         transition: supports("transition"),
         relationshipMutation: supports("relationships"),
         recurrenceMutation: supports("recurrence"),
-        filterQuery: false,
+        filterQuery:
+          readable && runtime.developerApi!.hasFilterQueryCapability(),
         relocate: supports("relocate"),
         convert: supports("convert"),
         recovery: mutationEnabled && runtime.developerApi!.hasRecoverySupport(),
@@ -2647,6 +2649,112 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             return;
           }
           const runtime = this.requireRuntime();
+          if (runtime.developerApi) {
+            // A force-refresh temporarily rebuilds the additive capability
+            // sessions. Wait for the shared live snapshot first so a parallel
+            // status/configuration refresh cannot surface a false 503 here.
+            const snapshot = await this.allTasksSnapshot(
+              boolValue(body.includeProperties),
+            );
+            if (!runtime.developerApi.hasFilterQueryCapability()) {
+              sendJson(
+                res,
+                503,
+                errorPayload(
+                  new Error(
+                    "Operon saved-filter Developer API grant is unavailable.",
+                  ),
+                  "capability_unavailable",
+                ),
+              );
+              return;
+            }
+            const nativeResult = await runtime.developerApi.querySavedFilter({
+              filterSetId,
+              ...(typeof body.scopePath === "string" && body.scopePath.trim()
+                ? { scopePath: body.scopePath.trim() }
+                : {}),
+              includeProperties: boolValue(body.includeProperties),
+              limit: Math.min(
+                250,
+                Math.max(1, Math.trunc(numberValue(body.limit) ?? 100)),
+              ),
+              ...(typeof body.cursor === "string" && body.cursor
+                ? { cursor: body.cursor }
+                : {}),
+            });
+            if (!nativeResult.ok) {
+              sendJson(
+                res,
+                nativeResult.error?.code === "not-found" ? 404 : 422,
+                errorPayload(
+                  new Error(
+                    nativeResult.error?.reason ??
+                      nativeResult.error?.message ??
+                      nativeResult.error?.code ??
+                      "Operon saved-filter query failed.",
+                  ),
+                  nativeResult.error?.code ?? "filter_query_error",
+                ),
+              );
+              return;
+            }
+            const nativeGeneration =
+              nativeResult.contextRevision?.index?.ramGeneration;
+            if (
+              Number.isInteger(nativeGeneration) &&
+              nativeGeneration !== snapshot.generation
+            ) {
+              throw new Error(
+                "Operon generation changed while evaluating the saved filter; retry.",
+              );
+            }
+            const taskById = new Map(
+              snapshot.tasks.map((task) => [task.operonId, task]),
+            );
+            const tasks = (nativeResult.tasks ?? [])
+              .map((task) => taskById.get(task.identity.operonId))
+              .filter((task): task is OperonBridgeTask => Boolean(task));
+            if (tasks.length !== (nativeResult.tasks ?? []).length) {
+              throw new Error(
+                "Operon saved-filter results changed before hydration; retry.",
+              );
+            }
+            sendJson(res, 200, {
+              ok: true,
+              contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+              source: "operon-live",
+              stale: false,
+              generation: snapshot.generation,
+              settingsSignature: snapshot.settingsSignature,
+              total: nativeResult.page?.actualCount ?? tasks.length,
+              count: tasks.length,
+              cursor: typeof body.cursor === "string" ? body.cursor : "",
+              ...(nativeResult.page?.nextCursor
+                ? { nextCursor: nativeResult.page.nextCursor }
+                : {}),
+              hasMore: nativeResult.page?.truncated === true,
+              tasks,
+              limitations: this.limitations(runtime, true),
+            });
+            return;
+          }
+          if (
+            body.scopePath !== undefined &&
+            !isCanonicalVaultRelativePath(body.scopePath)
+          ) {
+            sendJson(
+              res,
+              400,
+              errorPayload(
+                new Error(
+                  "scopePath must be an exact canonical vault-relative note or folder path.",
+                ),
+                "validation_error",
+              ),
+            );
+            return;
+          }
           const publicCapabilities = runtime.api?.capabilities();
           if (
             !runtime.api ||

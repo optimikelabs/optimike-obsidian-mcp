@@ -75,10 +75,11 @@ Un payload invalide, une pagination tronquée, une génération instable, des ID
 dupliqués, une version incompatible, un index non prêt ou une validation P0
 n’écrasent jamais le dernier snapshot sain.
 
-`operon_query_saved_filter` est live-only et dépend d’une capacité native. La
-version officielle Operon `3.1.1` ne l’annonce pas actuellement : l’outil reste
-enregistré pour compatibilité mais renvoie une indisponibilité structurée. Le
-MCP ne tente pas de reproduire le moteur de filtres depuis le cache.
+`operon_query_saved_filter` est live-only et dépend d’une capacité native. Sur
+Operon officiel `3.2.0`, il utilise la Developer API task-workflow après un grant
+exact `tasks.filter-query`. L’appelant doit fournir un `filterSetId` exact :
+l’API officielle exécute les filtres mais n’en publie pas le catalogue. Le MCP
+ne tente jamais de reproduire leur sémantique depuis le cache.
 
 Les six lectures Developer API supplémentaires sont également live-only :
 diagnostics, recherche classée, résolution d’entité, graphe de relations borné,
@@ -93,7 +94,7 @@ anglais ne sont pas des identifiants d’automatisation durables.
 ## Mutations
 
 Les mutations passent par les routes REST du Bridge et la surface officielle du
-moteur chargé. Operon `3.1.1` utilise les plans typés preview/apply/recovery de
+moteur chargé. Operon `3.2.0` utilise les plans typés preview/apply/recovery de
 Developer API V1. Le chemin legacy Kairélys utilise Public API v1. Aucun chemin
 ne modifie directement le Markdown, n’appelle `TaskWriter`, ne lance une
 commande UI et ne réfléchit vers une méthode privée.
@@ -104,7 +105,7 @@ Contrôles communs :
 - `idempotencyKey` est obligatoire ;
 - une tâche Operon existante exige `expectedRevision` ;
 - l’adoption legacy exige `line` et `expectedLine` exacts ;
-- Operon `3.1.1` applique uniquement le plan prévisualisé et scellé par l’hôte ;
+- Operon `3.2.0` applique uniquement le plan prévisualisé et scellé par l’hôte ;
 - `outcome-unknown` est exposé avec sa référence de récupération et n’est jamais
   rejoué à l’aveugle ;
 - après apply, le Bridge relit l’index live vérifié et le MCP rafraîchit son
@@ -133,7 +134,7 @@ L’apply exige aussi `OPERON_MUTATIONS_ENABLED=true` et le réglage Bridge
 
 `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` peut limiter toutes les mutations à des
 dossiers relatifs au coffre. Les sources et destinations explicites doivent
-rester dans cette allowlist. Operon officiel `3.1.1` refuse encore un
+rester dans cette allowlist. Operon officiel `3.2.0` refuse encore un
 `targetFolder` arbitraire lorsqu’aucun contrat de destination exacte n’existe.
 
 La conversion reste destructive : file-to-inline déplace le fichier source
@@ -142,13 +143,13 @@ dans la corbeille et inline-to-file remplace la ligne source par un lien durable
 ### Règles propres aux outils
 
 `operon_adopt_task` est un outil de compatibilité enregistré, pas une capacité
-officielle d’Operon `3.1.1`. Un moteur legacy compatible peut adopter une
+officielle d’Operon `3.2.0`. Un moteur legacy compatible peut adopter une
 checkbox exacte avec verrouillage du chemin, de la ligne et du contenu source.
 Operon officiel renvoie une indisponibilité structurée et le MCP ne simule pas
 l’adoption en éditant le Markdown.
 
 `operon_create_task` crée une tâche inline ou fichier par les services officiels
-du moteur. Operon `3.1.1` accepte les champs typés, tags, `statusId`, relations,
+du moteur. Operon `3.2.0` accepte les champs typés, tags, `statusId`, relations,
 `targetPath` inline et templates configurés. Les propriétés YAML non gérées et
 les `targetFolder` arbitraires restent legacy-only.
 
@@ -190,9 +191,10 @@ Le chemin legacy Operon `2.5.0`/Kairélys a historiquement prouvé création,
 champs, relations, transitions, conversion, idempotence, conflits de révision,
 redémarrage, fallback stale et refus P0 des IDs dupliqués.
 
-Le pilote dédié Operon `3.1.1`, sur le build local corrigé, a ensuite prouvé :
+Le pilote dédié Operon `3.2.0`, sur le build local corrigé, a prouvé :
 
 - grant officiel, lecture live et plans typés preview/apply ;
+- exécution d’un filtre sauvegardé avec pagination opaque ;
 - dry-run, postflight, replay idempotent et conflit de révision périmée ;
 - relation source/inverse, blocage d’une transition terminale et restauration ;
 - ajout, changement de portée et suppression exacte d’une récurrence ;
@@ -200,17 +202,19 @@ Le pilote dédié Operon `3.1.1`, sur le build local corrigé, a ensuite prouvé
 - 25 tâches après nettoyage, aucune relation ou récurrence résiduelle ;
 - validation finale `P0/P1/P2 = 0/0/0`.
 
-La version officielle non corrigée conserve les limites upstream #99/#101,
-#135, #137 et #139. Le Bridge échoue fermé lorsque le runtime ne peut pas
-prouver le résultat.
+Le build local ne diffère de la release que par le correctif du renderer de
+réglages nécessaire pour afficher les contrôles de grant Developer API. Les
+limites upstream restantes sont #99/#101 et #139. Le Bridge échoue fermé lorsque
+le runtime ne peut pas prouver le résultat.
 
 ## Capacités indisponibles ou exclues
 
 Suppression, rappels, état épinglé, contrôle/session de timer, adoption et
 gestion des filtres sauvegardés restent hors de la surface officielle de
-mutation agentique. Les outils adoption et filtre sauvegardé restent enregistrés
-pour compatibilité mais renvoient une indisponibilité sur Operon officiel
-`3.1.1`.
+mutation agentique. L’**exécution** d’un filtre sauvegardé fonctionne sur
+Operon `3.2.0` avec un ID exact et le grant requis ; la découverte du catalogue,
+la création et l’édition des filtres ne sont pas exposées. L’adoption reste
+indisponible dans la Developer API officielle.
 
 La suppression reste une action opérateur dans la CLI. Un futur
 `operon_trash_task` ne pourra être envisagé qu’avec restauration garantie sous

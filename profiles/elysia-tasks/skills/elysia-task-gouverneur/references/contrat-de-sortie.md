@@ -9,6 +9,8 @@ runtime_preflight:
   configuration_lue: true | false
   capacite_requise: nom | aucune
   capacite_disponible: true | false | non_applicable
+  outil_charge: true | false | inconnu
+  mode_ecriture: readonly | guarded | full | inconnu
 references_ouvertes:
   - path: ressource exacte
     type: skill_reference | public_profile | local_policy | runtime
@@ -38,6 +40,9 @@ preuve_application:
   filtre_attendu_verifie: true | false | non_applicable
   invisible: false | true | non_applicable
   operon_validate: résultat réel
+  recovery_ref: identifiant | non_applicable
+  relations_inverses_verifiees: true | false | non_applicable
+  recurrence_portee_verifiee: true | false | non_applicable
   divergence: aucune | description
 ```
 

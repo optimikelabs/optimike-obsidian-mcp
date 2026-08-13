@@ -37,7 +37,7 @@ assert.ok(frontmatterMatch, "public task skill must have YAML frontmatter");
 const frontmatter = parseYaml(frontmatterMatch[1]);
 
 assert.equal(frontmatter.name, "elysia-task-gouverneur");
-assert.equal(frontmatter.metadata.version, "1.1.0");
+assert.equal(frontmatter.metadata.version, "1.3.0");
 assert.equal(frontmatter.metadata.skill_structure, "graph");
 assert.equal(frontmatter.metadata.portability_class, "profile-bound-portable");
 assert.equal(frontmatter.metadata.profile_id, profile.profileId);
@@ -74,6 +74,34 @@ const publicSkillFiles = [
   ),
 ];
 const publicSkillCorpus = publicSkillFiles.join("\n");
+const operonTools = [
+  "operon_status",
+  "operon_get_configuration",
+  "operon_list_tasks",
+  "operon_get_task",
+  "operon_query_tasks",
+  "operon_query_saved_filter",
+  "operon_validate",
+  "operon_get_diagnostics",
+  "operon_find_tasks",
+  "operon_resolve_task",
+  "operon_get_relationships",
+  "operon_build_context",
+  "operon_get_timer_state",
+  "operon_adopt_task",
+  "operon_create_task",
+  "operon_update_task",
+  "operon_transition_task",
+  "operon_set_relationships",
+  "operon_update_recurrence",
+  "operon_convert_task",
+  "operon_relocate_task",
+  "operon_list_pending_recoveries",
+  "operon_recover_mutation",
+];
+for (const tool of operonTools) {
+  assert.ok(publicSkillCorpus.includes(tool), `public task skill corpus is missing ${tool}`);
+}
 const forbiddenPrivateMarkers = [
   /\b[A-Z]:\\/,
   /\/Users\//,

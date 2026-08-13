@@ -29,6 +29,7 @@ const capabilities = {
   transition: false,
   convert: false,
   recovery: false,
+  filterQuery: true,
 };
 
 const semanticConfiguration = {
@@ -364,6 +365,48 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
+  if (request.method === "POST" && url.pathname.endsWith("/tasks/filter")) {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      if (params.filterSetId === "missing-filter") {
+        sendJson(response, 404, {
+          ok: false,
+          error: { code: "not-found", message: "Saved filter was not found." },
+        });
+        return;
+      }
+      if (params.filterSetId === "invalid-filter") {
+        sendJson(response, 422, {
+          ok: false,
+          error: {
+            code: "invalid-request",
+            message: "Saved filter request is invalid.",
+          },
+        });
+        return;
+      }
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        source: "operon-live",
+        stale: false,
+        generation: state.generation,
+        settingsSignature: "fnv1a32:settings",
+        total: tasks.length,
+        count: 1,
+        cursor: String(params.cursor ?? ""),
+        nextCursor: params.cursor ? undefined : "filter-page-2",
+        hasMore: !params.cursor,
+        tasks: [params.cursor ? tasks[1] : tasks[0]],
+        limitations: ["read-only"],
+      });
+    });
+    return;
+  }
   if (
     request.method === "POST" &&
     url.pathname.endsWith("/mutations/recover")
@@ -658,6 +701,36 @@ try {
     "exact-task context must preserve Operon's projection-specific defaults",
   );
   assert.equal((await service.timers()).operation, "timers");
+
+  const firstFilterPage = await service.querySavedFilter({
+    filterSetId: "elysia-now",
+    limit: 1,
+  });
+  assert.equal(firstFilterPage.count, 1);
+  assert.equal(firstFilterPage.hasMore, true);
+  assert.equal(firstFilterPage.tasks[0].operonId, "abc1234");
+  const secondFilterPage = await service.querySavedFilter({
+    filterSetId: "elysia-now",
+    limit: 1,
+    cursor: firstFilterPage.nextCursor,
+  });
+  assert.equal(secondFilterPage.count, 1);
+  assert.equal(secondFilterPage.hasMore, false);
+  assert.equal(secondFilterPage.tasks[0].operonId, "bcd2345");
+  await assert.rejects(
+    () =>
+      service.querySavedFilter({ filterSetId: "missing-filter", limit: 1 }),
+    (error) =>
+      error?.code === "NOT_FOUND" &&
+      error?.message === "Saved filter was not found.",
+  );
+  await assert.rejects(
+    () =>
+      service.querySavedFilter({ filterSetId: "invalid-filter", limit: 1 }),
+    (error) =>
+      error?.code === "VALIDATION_ERROR" &&
+      error?.message === "Saved filter request is invalid.",
+  );
 
   state.mode = "offline";
   const offline = await service.ensureSnapshot(false);

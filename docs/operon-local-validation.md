@@ -7,19 +7,17 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `3.1.1` enabled for the official Developer API V1 pilot; `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Operon `3.2.1` enabled for current compatibility checks; `3.2.0` remains the complete live-pilot baseline and `2.4.0` / `2.5.0` remain legacy-read fixtures
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
 
-The adapter targets official Operon `3.1.1`. The complete acceptance evidence
-listed below uses the patched local Operon build while upstream fixes are under
-review in [#135](https://github.com/hasanyilmaz/operon/pull/135),
-[#137](https://github.com/hasanyilmaz/operon/pull/137), and
-[#139](https://github.com/hasanyilmaz/operon/pull/139). Stock `3.1.1` remains
-usable for reads and most governed mutations, but unsupported or uncertain
-settlement is fail-closed; this recipe never authorizes a Markdown/private-API
-fallback or a blind retry.
+The adapter targets official Operon `3.2.1`; the complete live acceptance run
+used the contract-compatible local `3.2.0` build. The missing 3.2.1 grant-control
+renderer is tracked in upstream #145/#146. Fixes #135 and #137 are already merged. File Task rename safety remains
+tracked by [#139](https://github.com/hasanyilmaz/operon/pull/139), and transition
+settlement by #99/#101. Unsupported or uncertain paths stay fail-closed; this
+recipe never authorizes a Markdown/private-API fallback or a blind retry.
 
 ## 1. Automated checks
 
@@ -78,7 +76,7 @@ PASS when:
 - index generation is greater than zero;
 - diagnostics report `health=healthy`, `runtimePhase=idle`,
   `verifiedThisSession=true`, and `dirtySourceCount=0`;
-- official Operon `3.1.1` reports the exact grant and typed Developer API
+- official Operon `3.2.0` reports the exact grants and typed Developer APIs
   surface; the Bridge advertises only the mutation capabilities that the live
   runtime proves, and bounds uncertain applies without a blind retry;
 - `adopt` remains false on official Operon; legacy Kairélys/Public API probes
@@ -188,8 +186,9 @@ operon_recover_mutation
 PASS when:
 
 - all twenty-three tools are registered;
-- official Operon `3.1.1` returns structured unavailable results for adoption
-  and saved-filter evaluation until it advertises those native capabilities;
+- official Operon `3.2.0` returns a structured unavailable result for adoption;
+- saved-filter execution succeeds only after an exact `tasks.filter-query`
+  grant and caller-supplied filter ID; the official catalog remains unavailable;
 - the first complete call creates a snapshot;
 - subsequent calls with unchanged generation do not rewrite the full snapshot;
 - responses say `source=operon-live`, `stale=false`.
@@ -216,7 +215,7 @@ PASS: same task identities and values; revisions change only when normalized tas
 
 PASS: live source, exact inverse edges, scoped recurrence state, idempotent replay, stale-revision conflict, exact restoration, and `P0/P1/P2 = 0/0/0`.
 
-Executed result on 2026-08-08 with the patched local Operon `3.1.1`
+Executed result refreshed on 2026-08-09 with the local Operon `3.2.0`
 acceptance build:
 
 - relationship dry-run/apply passed on `oo96ct2` and `1dbefy1`;
@@ -247,7 +246,7 @@ FAIL if cached data is presented as live.
 ## 11. Incompatibility test
 
 Disable Operon or use any test manifest version outside the explicit allowlist
-(`2.4.0`, `2.5.0`, and official `3.1.1`).
+(`2.4.0`, `2.5.0`, `3.0.1`, `3.1.0`, `3.1.1`, and official `3.2.0`).
 
 PASS:
 
@@ -288,10 +287,11 @@ Review Local REST routes, MCP tools, and the loaded Operon capability probe.
 PASS:
 
 - official Operon without an active Developer API V1 grant remains read-only;
-- official Operon 3.1.1 exposes typed create/update/transition/convert/relocate
+- official Operon 3.2.0 exposes typed create/update/transition/relationship/recurrence/convert/relocate
   only after the grant; an uncertain transition apply is bounded by the Bridge,
   while `adopt`, unmanaged properties, and arbitrary
-  `targetFolder` remain explicitly unsupported;
+  `targetFolder` remain explicitly unsupported; saved-filter execution is
+  available after an exact grant and caller-supplied ID, without catalog listing;
 - the minimal Operon fork exposes native saved-filter queries plus adopt/create/update/transition/convert/relocate through its versioned Public API;
 - dry-run is the default;
 - apply requires live capabilities and an idempotency key;
@@ -305,7 +305,7 @@ PASS:
 Run `scripts/smoke-operon-mutations.mjs` in guarded mode, then
 `scripts/smoke-operon-rich-mutations.mjs` in full mode against a disposable
 vault when validating the legacy Kairélys/Public API path. For official
-Operon 3.1.1 use section 16; do not expect unmanaged properties or arbitrary
+Operon 3.2.0 use section 18; do not expect unmanaged properties or arbitrary
 `targetFolder` values to map to Developer API V1.
 
 PASS:
@@ -367,6 +367,40 @@ LIMITATION:
   in upstream [#135](https://github.com/hasanyilmaz/operon/pull/135),
   [#137](https://github.com/hasanyilmaz/operon/pull/137), and
   [#139](https://github.com/hasanyilmaz/operon/pull/139).
+
+## 18. Official Operon 3.2.0 Bridge/MCP acceptance — 2026-08-09
+
+The production-shaped ÉLYSIA pilot used Operon `3.2.0`, CLI `1.1.0`, Bridge
+`0.6.0`, both mutation opt-ins, and the official Developer APIs. The local
+Operon build included only the settings-renderer fix required to display grant
+controls.
+
+PASS:
+
+- live `operon-live` source, 25 tasks, compatible 3.2.0/0.6.0 runtime;
+- all intended capabilities true except adoption;
+- exact `tasks.filter-query` grant and saved-filter execution with opaque
+  pagination; catalog discovery correctly remains unavailable;
+- live `fs_elysia_now` replay returned 11 results, two three-item pages without
+  overlap, and remained available during concurrent status/query refreshes;
+- service regression coverage preserves Bridge `404` and `422` filter failures
+  as `NOT_FOUND` and `VALIDATION_ERROR` instead of `INTERNAL_ERROR`;
+- relationship preview/apply, inverse edge, idempotent replay, blocked terminal
+  transition and exact restoration;
+- recurrence create/change/clear with explicit scopes and normalized postflight;
+- temporary recurrence fixture backed up, removed through the operator CLI, and
+  verified absent from disk and index;
+- Obsidian and MCP backend restart, no pending recovery, no residual relation or
+  recurrence, and final `P0/P1/P2 = 0/0/0`.
+
+OPEN BOUNDARIES:
+
+- adoption is not exposed by the official Developer API;
+- saved-filter IDs must come from Operon's UI/configuration or an operator
+  workflow because the official API does not list the catalog;
+- #99/#101 and #139 remain fail-closed paths;
+- no deletion tool, generic CLI passthrough, raw Markdown or private API exists
+  in the MCP.
 
 ## Executed pilot result — 2026-07-21
 

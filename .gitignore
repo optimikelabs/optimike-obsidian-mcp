@@ -10,6 +10,7 @@ Thumbs.db
 # IDE and Editor Files
 .idea/
 .vscode/
+.obsidian/
 *.swp
 *.swo
 *~

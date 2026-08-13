@@ -5,6 +5,7 @@ import {
   type RuntimeKeyMapping,
   type RuntimePipeline,
   type RuntimePriorityDefinition,
+  isCanonicalVaultRelativePath,
   resolvePriorityStableId,
 } from "./contract";
 
@@ -271,6 +272,12 @@ interface DeveloperApiCatalog {
     }[];
   };
   readonly fields?: readonly DeveloperApiField[];
+  readonly filters?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly icon?: string;
+    readonly [key: string]: unknown;
+  }[];
   readonly policies?: {
     readonly creation?: {
       readonly defaultEstimateMinutes?: number;
@@ -315,6 +322,43 @@ interface DeveloperApiAccessor {
       readonly requestedCapabilities: readonly string[];
     },
   ) => DeveloperApiAccessResult;
+}
+
+interface TaskWorkflowFilterResult {
+  readonly ok: boolean;
+  readonly tasks?: readonly DeveloperApiTask[];
+  readonly page?: {
+    readonly actualCount?: number;
+    readonly returnedCount?: number;
+    readonly truncated?: boolean;
+    readonly nextCursor?: string;
+    readonly asOf?: string;
+  };
+  readonly contextRevision?: DeveloperApiContextRevision;
+  readonly error?: DeveloperApiError;
+}
+
+interface TaskWorkflowDeveloperApiV1 {
+  readonly tasks: {
+    readonly filterQuery: (
+      request: Record<string, unknown>,
+    ) => Promise<TaskWorkflowFilterResult>;
+  };
+}
+
+interface TaskWorkflowDeveloperApiAccessor {
+  readonly getTaskWorkflowDeveloperApiV1: (
+    consumerPlugin: DeveloperApiConsumerPlugin,
+    request: {
+      readonly contractVersion: 1;
+      readonly runtimeApi: { readonly min: 1; readonly max: 1 };
+      readonly requestedCapabilities: readonly ["tasks.filter-query"];
+    },
+  ) => {
+    readonly ok: boolean;
+    readonly api?: TaskWorkflowDeveloperApiV1;
+    readonly error?: DeveloperApiError;
+  };
 }
 
 interface DeveloperApiAccessResult {
@@ -819,6 +863,17 @@ function catalogConfiguration(catalog: DeveloperApiCatalog): {
     ...configuration.indexing,
     excludedFolders: [...(catalog.policies?.exclusions?.folders ?? [])],
   };
+  configuration.views = {
+    filters: (catalog.filters ?? []).map((filter) => ({
+      id: filter.id,
+      name: filter.name,
+      icon: filter.icon ?? null,
+      definition: JSON.parse(JSON.stringify(filter)) as Record<
+        string,
+        unknown
+      >,
+    })),
+  };
   return { pipelines, keyMappings, priorities, configuration };
 }
 
@@ -826,6 +881,16 @@ function isDeveloperApiAccessor(value: unknown): value is DeveloperApiAccessor {
   if (!value || typeof value !== "object") return false;
   const candidate = value as { readonly getDeveloperApiV1?: unknown };
   return typeof candidate.getDeveloperApiV1 === "function";
+}
+
+function isTaskWorkflowDeveloperApiAccessor(
+  value: unknown,
+): value is TaskWorkflowDeveloperApiAccessor {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as {
+    readonly getTaskWorkflowDeveloperApiV1?: unknown;
+  };
+  return typeof candidate.getTaskWorkflowDeveloperApiV1 === "function";
 }
 
 function grantedCapabilitiesFromStatus(
@@ -854,6 +919,7 @@ export class OperonDeveloperApiRuntimeAdapter {
   defaultPipelineName: string | null = null;
 
   private readonly accessor: DeveloperApiAccessor | null;
+  private readonly taskWorkflowAccessor: TaskWorkflowDeveloperApiAccessor | null;
   private tasks: RuntimeIndexedTask[] = [];
   private rawTasks: DeveloperApiTask[] = [];
   private generation = 0;
@@ -876,6 +942,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     DeveloperApiV1
   >();
   private recoveryApi: DeveloperApiV1 | null = null;
+  private filterQueryApi: TaskWorkflowDeveloperApiV1 | null = null;
   private grantedCapabilities: ReadonlySet<string> | null = null;
   private refreshInFlight: Promise<boolean> | null = null;
 
@@ -884,6 +951,9 @@ export class OperonDeveloperApiRuntimeAdapter {
     operonPlugin: unknown,
   ) {
     this.accessor = isDeveloperApiAccessor(operonPlugin) ? operonPlugin : null;
+    this.taskWorkflowAccessor = isTaskWorkflowDeveloperApiAccessor(operonPlugin)
+      ? operonPlugin
+      : null;
   }
 
   get semanticConfiguration(): OperonSemanticConfiguration {
@@ -911,6 +981,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     this.optionalReadApis.clear();
     this.mutationApis.clear();
     this.recoveryApi = null;
+    this.filterQueryApi = null;
     this.grantedCapabilities = null;
 
     // Establish a baseline session first. Operon evaluates a requested set as
@@ -1012,6 +1083,18 @@ export class OperonDeveloperApiRuntimeAdapter {
       }
       if (includeMutationCapabilities) this.connectMutationApis();
       this.requestMissingCapabilities(includeMutationCapabilities);
+      // The additive task-workflow accessor may create a new exact-capability
+      // consent request. Probe it only after preserving every already-granted
+      // core read and mutation session, so a pending filter grant cannot make
+      // the established V1 surface appear unavailable during the same refresh.
+      try {
+        this.filterQueryApi = this.connectFilterQuery();
+      } catch {
+        // Saved-filter execution is an additive Operon 3.2 capability. A
+        // broken or temporarily incompatible optional accessor must not tear
+        // down the already-verified core Developer API session.
+        this.filterQueryApi = null;
+      }
       return true;
     } catch (error) {
       this.readApi = null;
@@ -1044,6 +1127,65 @@ export class OperonDeveloperApiRuntimeAdapter {
       this.readApi?.hasCapability(capability) ||
         this.optionalReadApis.get(capability)?.hasCapability(capability),
     );
+  }
+
+  hasFilterQueryCapability(): boolean {
+    return Boolean(this.filterQueryApi?.tasks.filterQuery);
+  }
+
+  async querySavedFilter(
+    request: Record<string, unknown>,
+  ): Promise<TaskWorkflowFilterResult> {
+    const api = this.filterQueryApi;
+    if (!api?.tasks.filterQuery) {
+      throw new Error(
+        "Operon task-workflow Developer API grant is unavailable: tasks.filter-query.",
+      );
+    }
+    const filterSetId = String(request.filterSetId ?? "").trim();
+    if (!filterSetId) throw new Error("filterSetId is required.");
+    const rawScopePath = request.scopePath;
+    if (
+      rawScopePath !== undefined &&
+      !isCanonicalVaultRelativePath(rawScopePath)
+    ) {
+      throw new Error(
+        "scopePath must be an exact canonical vault-relative note or folder path.",
+      );
+    }
+    const scopePath = typeof rawScopePath === "string" ? rawScopePath : "";
+    const requestedLimit = Number(request.limit ?? 100);
+    const limit = Math.min(
+      250,
+      Math.max(
+        1,
+        Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 100,
+      ),
+    );
+    return api.tasks.filterQuery({
+      contractVersion: 1,
+      requestId: requestId(),
+      kind: "task-filter-query",
+      consistency: "live-verified",
+      filterSetId,
+      ...(scopePath
+        ? {
+            scope: {
+              kind: scopePath.toLocaleLowerCase().endsWith(".md")
+                ? "exact-file"
+                : "folder-tree",
+              path: scopePath,
+            },
+          }
+        : {}),
+      ...(request.includeProperties === true
+        ? { include: ["custom-fields"] }
+        : {}),
+      limit,
+      ...(typeof request.cursor === "string" && request.cursor
+        ? { cursor: request.cursor }
+        : {}),
+    });
   }
 
   private requireReadApi(
@@ -1189,6 +1331,19 @@ export class OperonDeveloperApiRuntimeAdapter {
         if (!this.recoveryApi) this.recoveryApi = api;
       }
     }
+  }
+
+  private connectFilterQuery(): TaskWorkflowDeveloperApiV1 | null {
+    if (!this.taskWorkflowAccessor) return null;
+    const access = this.taskWorkflowAccessor.getTaskWorkflowDeveloperApiV1(
+      this.consumerPlugin,
+      {
+        contractVersion: 1,
+        runtimeApi: { min: 1, max: 1 },
+        requestedCapabilities: ["tasks.filter-query"],
+      },
+    );
+    return access.ok && access.api?.tasks.filterQuery ? access.api : null;
   }
 
   private requestMissingCapabilities(includeMutations: boolean): void {
