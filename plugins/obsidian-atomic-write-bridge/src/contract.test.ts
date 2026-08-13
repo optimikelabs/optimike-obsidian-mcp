@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ATOMIC_WRITE_CONTRACT_VERSION,
+  assertBindingFingerprint,
+  BindingConflictError,
   compareAndReplace,
   HashConflictError,
   parseCasRequest,
@@ -32,20 +34,30 @@ test("read and CAS bodies are strict and versioned", () => {
     parseReadRequest({ contractVersion: 1, path: "Test.md", extra: true }),
   );
   const nextContent = "après";
+  const bindingFingerprint = sha256("fixture-backend");
   const expectedSha256 = sha256("avant");
   assert.deepEqual(
     parseCasRequest({
       contractVersion: 1,
       path: "Test.md",
+      bindingFingerprint,
       expectedSha256,
       nextContent,
     }),
     {
       contractVersion: 1,
       path: "Test.md",
+      bindingFingerprint,
       expectedSha256,
       nextContent,
     },
+  );
+  assert.doesNotThrow(() =>
+    assertBindingFingerprint(bindingFingerprint, bindingFingerprint),
+  );
+  assert.throws(
+    () => assertBindingFingerprint(bindingFingerprint, sha256("other-backend")),
+    BindingConflictError,
   );
 });
 

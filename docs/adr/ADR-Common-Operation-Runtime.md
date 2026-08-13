@@ -94,8 +94,8 @@ The disposable fixture covers:
 ## Second adapter: atomic note replacement
 
 `ObsidianNoteReplaceOperationAdapter` uses the bundled Atomic Write Bridge as
-its only effect surface. The bridge binds every response to a hashed
-device/install/vault-root fingerprint and executes SHA-256 compare-and-replace through Obsidian
+its only effect surface. The bridge binds every CAS request and response to a
+hashed device/install/vault-root fingerprint and executes SHA-256 compare-and-replace through Obsidian
 `Vault.process`, so the precondition and replacement occur in one atomic
 read-modify-write operation. Its write gate is disabled by default and remains
 independent from Operon's Developer API grant.
@@ -105,7 +105,7 @@ the exact plan can be recovered after a lost response. Terminal rows expire
 after 30 days and their sealed content is redacted as soon as a stable terminal
 state is recorded; non-terminal and `outcome_unknown` rows are retained for
 recovery. The disposable fixture covers conflict without write, committed
-replay, concurrent status reconciliation, idempotency-key binding,
+replay, backend-binding rejection, concurrent status reconciliation, idempotency-key binding,
 lost-response reconciliation, active-daemon retention, and exact-plan recovery
 after a request failure.
 

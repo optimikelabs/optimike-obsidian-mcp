@@ -11,6 +11,7 @@ export type NoteReadRequest = {
 };
 
 export type NoteCasRequest = NoteReadRequest & {
+  bindingFingerprint: string;
   expectedSha256: string;
   nextContent: string;
 };
@@ -18,6 +19,12 @@ export type NoteCasRequest = NoteReadRequest & {
 export class HashConflictError extends Error {
   constructor(readonly actualSha256: string) {
     super("The note changed after the plan was created.");
+  }
+}
+
+export class BindingConflictError extends Error {
+  constructor() {
+    super("The atomic-write backend instance does not match the sealed plan.");
   }
 }
 
@@ -87,6 +94,20 @@ function contractVersion(input: unknown): 1 {
   return ATOMIC_WRITE_CONTRACT_VERSION;
 }
 
+function sha256Digest(input: unknown, field: string): string {
+  if (typeof input !== "string" || !/^[a-f0-9]{64}$/u.test(input)) {
+    throw new Error(`${field} must be a lowercase SHA-256 digest.`);
+  }
+  return input;
+}
+
+export function assertBindingFingerprint(
+  requested: string,
+  current: string,
+): void {
+  if (requested !== current) throw new BindingConflictError();
+}
+
 export function parseReadRequest(input: unknown): NoteReadRequest {
   const body = bodyRecord(input);
   assertExactKeys(body, ["contractVersion", "path"]);
@@ -99,17 +120,12 @@ export function parseReadRequest(input: unknown): NoteReadRequest {
 export function parseCasRequest(input: unknown): NoteCasRequest {
   const body = bodyRecord(input);
   assertExactKeys(body, [
+    "bindingFingerprint",
     "contractVersion",
     "expectedSha256",
     "nextContent",
     "path",
   ]);
-  if (
-    typeof body.expectedSha256 !== "string" ||
-    !/^[a-f0-9]{64}$/u.test(body.expectedSha256)
-  ) {
-    throw new Error("expectedSha256 must be a lowercase SHA-256 digest.");
-  }
   if (typeof body.nextContent !== "string") {
     throw new Error("nextContent must be a string.");
   }
@@ -119,7 +135,11 @@ export function parseCasRequest(input: unknown): NoteCasRequest {
   return {
     contractVersion: contractVersion(body.contractVersion),
     path: validateVaultMarkdownPath(body.path),
-    expectedSha256: body.expectedSha256,
+    bindingFingerprint: sha256Digest(
+      body.bindingFingerprint,
+      "bindingFingerprint",
+    ),
+    expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"),
     nextContent: body.nextContent,
   };
 }

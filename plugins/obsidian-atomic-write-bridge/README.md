@@ -12,9 +12,9 @@ read-modify-write operation.
 - `POST /extensions/obsidian-atomic-write-bridge/notes/cas`
 
 Every request body is strict and versioned with `contractVersion: 1`. The CAS
-route accepts only an existing Markdown note, its exact lowercase SHA-256, and
-the complete next content. A concurrent change returns HTTP `409` and does not
-write.
+route accepts only an existing Markdown note, the sealed backend binding
+fingerprint, its exact lowercase SHA-256, and the complete next content. A
+backend or content mismatch returns HTTP `409` before `Vault.process` writes.
 
 Writes are disabled by default. The operator must explicitly enable **Allow
 atomic writes** in this bridge's Obsidian settings. Read and status remain

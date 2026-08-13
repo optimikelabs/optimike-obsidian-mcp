@@ -3,6 +3,8 @@ import { Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import {
   ATOMIC_WRITE_CONTRACT_VERSION,
   ATOMIC_WRITE_REST_PREFIX,
+  assertBindingFingerprint,
+  BindingConflictError,
   compareAndReplace,
   HashConflictError,
   parseCasRequest,
@@ -168,6 +170,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               return;
             }
             const request = parseCasRequest(req?.body);
+            assertBindingFingerprint(
+              request.bindingFingerprint,
+              this.bindingFingerprint,
+            );
             let beforeSha256 = "";
             const written = await this.app.vault.process(
               this.file(request.path),
@@ -191,6 +197,14 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               bindingFingerprint: this.bindingFingerprint,
             });
           } catch (error) {
+            if (error instanceof BindingConflictError) {
+              sendJson(
+                res,
+                409,
+                errorPayload("binding_conflict", error.message),
+              );
+              return;
+            }
             if (error instanceof HashConflictError) {
               sendJson(
                 res,

@@ -31,6 +31,7 @@ export type AtomicWriteReadRequest = {
 };
 
 export type AtomicWriteCasRequest = AtomicWriteReadRequest & {
+  bindingFingerprint: string;
   expectedSha256: string;
   nextContent: string;
 };

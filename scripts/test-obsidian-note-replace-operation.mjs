@@ -19,11 +19,12 @@ class FakeAtomicWriteBackend {
   replaceCalls = 0;
   failBeforeWriteOnce = false;
   loseResponseAfterWriteOnce = false;
+  afterStatus = undefined;
   beforeWrite = undefined;
   afterWriteBeforeReturn = undefined;
 
   async status() {
-    return {
+    const response = {
       ok: true,
       contractVersion: 1,
       plugin: { id: "obsidian-atomic-write-bridge", version: "0.1.0" },
@@ -35,6 +36,12 @@ class FakeAtomicWriteBackend {
       },
       limits: { markdownOnly: true },
     };
+    if (this.afterStatus) {
+      const afterStatus = this.afterStatus;
+      this.afterStatus = undefined;
+      await afterStatus();
+    }
+    return response;
   }
 
   async read(payload) {
@@ -52,6 +59,9 @@ class FakeAtomicWriteBackend {
 
   async replace(payload) {
     this.replaceCalls += 1;
+    if (payload.bindingFingerprint !== this.bindingFingerprint) {
+      throw new McpError(BaseErrorCode.CONFLICT, "Fixture binding conflict.");
+    }
     if (this.failBeforeWriteOnce) {
       this.failBeforeWriteOnce = false;
       throw new McpError(
@@ -142,6 +152,22 @@ try {
     const result = await adapter.apply(planned.planRef, "conflict");
     assert.equal(result.outcome, "conflict");
     assert.equal(backend.content, "concurrent edit");
+  }
+
+  {
+    const { backend, adapter } = fixture("binding-conflict");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "must not reach another vault",
+      idempotencyKey: "binding-conflict",
+    });
+    backend.afterStatus = async () => {
+      backend.bindingFingerprint = sha256("different-vault-instance");
+    };
+    const result = await adapter.apply(planned.planRef, "binding-conflict");
+    assert.equal(result.outcome, "conflict");
+    assert.equal(backend.content, "before");
+    assert.equal(backend.replaceCalls, 1);
   }
 
   {
@@ -315,7 +341,7 @@ try {
   }
 
   console.log(
-    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, atomic conflict, concurrent replay, redacted logging/WAL, and lost-response reconciliation.",
+    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, backend binding, atomic conflict, concurrent replay, redacted logging/WAL, and lost-response reconciliation.",
   );
 } finally {
   for (const journal of journals) journal.close();

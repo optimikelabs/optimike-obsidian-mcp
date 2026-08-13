@@ -360,6 +360,7 @@ export class ObsidianNoteReplaceOperationAdapter
         await this.backend.replace({
           contractVersion: 1,
           path: plan.path,
+          bindingFingerprint: plan.bindingFingerprint,
           expectedSha256: plan.beforeSha256,
           nextContent: plan.nextContent,
         }),
