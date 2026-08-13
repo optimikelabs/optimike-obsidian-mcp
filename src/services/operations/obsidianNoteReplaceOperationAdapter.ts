@@ -261,7 +261,9 @@ export class ObsidianNoteReplaceOperationAdapter
     if (plan.status === "committed") return receipt(plan);
     if (plan.status !== "planned") {
       if (plan.status === "applying") {
-        return receipt(await this.reconcileApplying(plan));
+        // A second caller may be observing a live executor. Reconcile only
+        // terminal proof; never classify an in-flight apply as interrupted.
+        return receipt(await this.reconcile(plan));
       }
       return receipt(plan);
     }
@@ -394,19 +396,6 @@ export class ObsidianNoteReplaceOperationAdapter
         error instanceof Error ? error.message : String(error),
       );
     }
-  }
-
-  private async reconcileApplying(
-    plan: ObsidianNoteReplacePlan,
-  ): Promise<ObsidianNoteReplacePlan> {
-    const reconciled = await this.reconcile(plan);
-    if (reconciled.status !== "applying") return reconciled;
-    return this.transitionOrReload(
-      plan.operationId,
-      ["applying"],
-      "outcome_unknown",
-      "A previous apply reached the backend without a durable terminal receipt.",
-    );
   }
 
   private async reconcile(

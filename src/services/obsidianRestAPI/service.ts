@@ -23,6 +23,7 @@ import * as openMethods from "./methods/openMethods.js";
 import * as patchMethods from "./methods/patchMethods.js";
 import * as searchMethods from "./methods/searchMethods.js";
 import * as vaultMethods from "./methods/vaultMethods.js";
+import { requestLogMetadata } from "./requestLogMetadata.js";
 import {
   ApiStatusResponse, // Import PatchOptions type
   AtomicWriteCasRequest,
@@ -216,7 +217,7 @@ export class ObsidianRestApiService {
       {
         operation: `ObsidianAPI_${operationName}_Wrapper`,
         context: context,
-        input: requestConfig, // Log request config (sanitized by ErrorHandler)
+        input: requestLogMetadata(requestConfig),
         errorCode: BaseErrorCode.INTERNAL_ERROR, // Default if wrapper itself fails
       },
     );

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { ObsidianNoteReplaceOperationAdapter } from "../dist/services/operations/obsidianNoteReplaceOperationAdapter.js";
 import { ObsidianNoteReplaceJournal } from "../dist/services/operations/obsidianNoteReplaceJournal.js";
+import { requestLogMetadata } from "../dist/services/obsidianRestAPI/requestLogMetadata.js";
 import { BaseErrorCode, McpError } from "../dist/types-global/errors.js";
 
 function sha256(content) {
@@ -18,6 +19,7 @@ class FakeAtomicWriteBackend {
   replaceCalls = 0;
   failBeforeWriteOnce = false;
   loseResponseAfterWriteOnce = false;
+  beforeWrite = undefined;
   afterWriteBeforeReturn = undefined;
 
   async status() {
@@ -56,6 +58,11 @@ class FakeAtomicWriteBackend {
         BaseErrorCode.SERVICE_UNAVAILABLE,
         "Fixture lost the request before the write.",
       );
+    }
+    if (this.beforeWrite) {
+      const beforeWrite = this.beforeWrite;
+      this.beforeWrite = undefined;
+      await beforeWrite();
     }
     const beforeSha256 = sha256(this.content);
     if (beforeSha256 !== payload.expectedSha256) {
@@ -168,6 +175,38 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture("concurrent-apply");
+    let releaseWrite;
+    let markWriteEntered;
+    const writeEntered = new Promise((resolve) => {
+      markWriteEntered = resolve;
+    });
+    const writeReleased = new Promise((resolve) => {
+      releaseWrite = resolve;
+    });
+    backend.beforeWrite = async () => {
+      markWriteEntered();
+      await writeReleased;
+    };
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "one write despite concurrent apply",
+      idempotencyKey: "concurrent-apply",
+    });
+    const firstApply = adapter.apply(planned.planRef, "concurrent-apply");
+    await writeEntered;
+    const replay = await adapter.apply(planned.planRef, "concurrent-apply");
+    assert.equal(replay.phase, "applying");
+    assert.equal(replay.outcome, null);
+    assert.equal(backend.replaceCalls, 1);
+    releaseWrite();
+    const committed = await firstApply;
+    assert.equal(committed.outcome, "committed");
+    assert.equal(backend.content, "one write despite concurrent apply");
+    assert.equal(backend.replaceCalls, 1);
+  }
+
+  {
     const { backend, adapter } = fixture("recover-same-plan");
     backend.failBeforeWriteOnce = true;
     const planned = await adapter.plan({
@@ -213,6 +252,20 @@ try {
   }
 
   {
+    const privateBody = "private vault content that must not be logged";
+    const metadata = requestLogMetadata({
+      method: "POST",
+      url: "/extensions/obsidian-atomic-write-bridge/notes/cas",
+      data: { nextContent: privateBody },
+      headers: { Authorization: "Bearer private-token" },
+    });
+    const serialized = JSON.stringify(metadata);
+    assert.equal(metadata.hasBody, true);
+    assert.equal(serialized.includes(privateBody), false);
+    assert.equal(serialized.includes("private-token"), false);
+  }
+
+  {
     let now = Date.parse("2026-08-13T00:00:00.000Z");
     const journal = new ObsidianNoteReplaceJournal(
       path.join(temporaryRoot, "retention.sqlite"),
@@ -253,7 +306,7 @@ try {
   }
 
   console.log(
-    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, atomic conflict, replay, and lost-response reconciliation.",
+    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, atomic conflict, concurrent replay, redacted logging, and lost-response reconciliation.",
   );
 } finally {
   for (const journal of journals) journal.close();
