@@ -318,6 +318,68 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture("concurrent-recovery-replay");
+    backend.failBeforeWriteOnce = true;
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "one write despite concurrent recovery replay",
+      idempotencyKey: "concurrent-recovery-replay",
+    });
+    const unknown = await adapter.apply(
+      planned.planRef,
+      "concurrent-recovery-replay",
+    );
+    assert.equal(unknown.outcome, "outcome_unknown");
+
+    let releaseFirstRead;
+    let markFirstReadEntered;
+    const firstReadEntered = new Promise((resolve) => {
+      markFirstReadEntered = resolve;
+    });
+    const firstReadReleased = new Promise((resolve) => {
+      releaseFirstRead = resolve;
+    });
+    backend.afterRead = async () => {
+      markFirstReadEntered();
+      await firstReadReleased;
+    };
+
+    let releaseWrite;
+    let markWriteEntered;
+    const writeEntered = new Promise((resolve) => {
+      markWriteEntered = resolve;
+    });
+    const writeReleased = new Promise((resolve) => {
+      releaseWrite = resolve;
+    });
+    backend.beforeWrite = async () => {
+      markWriteEntered();
+      await writeReleased;
+    };
+
+    const losingRecovery = adapter.recover(
+      planned.planRef,
+      "concurrent-recovery-replay",
+    );
+    await firstReadEntered;
+    const winningRecovery = adapter.recover(
+      planned.planRef,
+      "concurrent-recovery-replay",
+    );
+    await writeEntered;
+    releaseFirstRead();
+    const replay = await losingRecovery;
+    assert.equal(replay.phase, "applying");
+    assert.equal(replay.outcome, null);
+    assert.equal(backend.replaceCalls, 2);
+    releaseWrite();
+    const committed = await winningRecovery;
+    assert.equal(committed.outcome, "committed");
+    assert.equal(backend.content, "one write despite concurrent recovery replay");
+    assert.equal(backend.replaceCalls, 2);
+  }
+
+  {
     const { backend, adapter } = fixture("recover-race-to-after");
     backend.failBeforeWriteOnce = true;
     const planned = await adapter.plan({
