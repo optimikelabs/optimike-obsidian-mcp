@@ -334,10 +334,15 @@ export class ExternalMoveCoordinator {
   async apply(
     planId: string,
     idempotencyKey: string,
+    options: { allowCompensatedReapply?: boolean } = {},
   ): Promise<Record<string, unknown>> {
     let plan = this.requirePlan(planId, idempotencyKey);
     if (plan.status === "applied") return publicPlan(plan);
-    if (plan.status !== "planned" && plan.status !== "rolled_back") {
+    const applicableStatuses: ExternalMovePlan["status"][] =
+      options.allowCompensatedReapply === false
+        ? ["planned"]
+        : ["planned", "rolled_back"];
+    if (!applicableStatuses.includes(plan.status)) {
       throw new ExternalRootError(
         "precondition_failed",
         `External move plan is ${plan.status}, not applicable.`,
@@ -399,7 +404,7 @@ export class ExternalMoveCoordinator {
 
     plan = this.journal.transition(
       plan.planId,
-      ["planned", "rolled_back"],
+      applicableStatuses,
       "applying_file",
       {
         appliedRepairPaths: [],

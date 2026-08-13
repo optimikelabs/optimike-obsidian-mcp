@@ -880,12 +880,81 @@ try {
   assert.equal(operationRecovered.phase, "terminal");
   assert.equal(operationRecovered.outcome, "compensated");
   assert.equal(operationRecovered.postflight.status, "compensated");
+  assert.equal(operationRecovered.applyAllowed, false);
   assert.equal(
     await readFile(operationRecoverySource, "utf8"),
     "operation recovery",
   );
   assert.equal(await exists(operationRecoveryTarget), false);
+  await assert.rejects(
+    operationRecoveryRestartedAdapter.apply(
+      operationRecoveryPlan.planRef,
+      "operation-runtime-recovery",
+    ),
+    /rolled_back, not applicable/u,
+  );
+  assert.equal(
+    await readFile(operationRecoverySource, "utf8"),
+    "operation recovery",
+  );
+  assert.equal(await exists(operationRecoveryTarget), false);
+  const operationRecoveredStatus =
+    await operationRecoveryRestartedAdapter.status(
+      operationRecoveryPlan.planRef,
+    );
+  assert.equal(operationRecoveredStatus.applyAllowed, false);
   operationRecoveryRestartedJournal.close();
+
+  // Admission is atomic when apply preflight overlaps recovery.
+  const operationRaceSource = path.join(rootPath, "operation-race.txt");
+  const operationRaceTarget = path.join(archivePath, "operation-race.txt");
+  await writeFile(operationRaceSource, "operation race", "utf8");
+  const operationRaceJournal = new ExternalMoveJournal(
+    path.join(sandbox, "operation-race.sqlite"),
+  );
+  const operationRaceVault = new FakeVault();
+  const operationRaceCoordinator = new ExternalMoveCoordinator(
+    service,
+    operationRaceVault,
+    operationRaceJournal,
+  );
+  const operationRaceAdapter = new ExternalMoveOperationAdapter(
+    operationRaceCoordinator,
+  );
+  const operationRacePlan = await operationRaceAdapter.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "operation-race.txt",
+    targetRelativePath: "archive/operation-race.txt",
+    idempotencyKey: "operation-runtime-race",
+  });
+  let releaseApplyPreflight;
+  let signalApplyPreflight;
+  const applyPreflightReached = new Promise((resolve) => {
+    signalApplyPreflight = resolve;
+  });
+  operationRaceVault.assertConditionalWritesSupported = async () => {
+    signalApplyPreflight();
+    await new Promise((resolve) => {
+      releaseApplyPreflight = resolve;
+    });
+  };
+  const racedApply = operationRaceAdapter.apply(
+    operationRacePlan.planRef,
+    "operation-runtime-race",
+  );
+  await applyPreflightReached;
+  const racedRecovery = await operationRaceAdapter.recover(
+    operationRacePlan.planRef,
+    "operation-runtime-race",
+  );
+  assert.equal(racedRecovery.phase, "terminal");
+  assert.equal(racedRecovery.outcome, "compensated");
+  assert.equal(racedRecovery.applyAllowed, false);
+  releaseApplyPreflight();
+  await assert.rejects(racedApply, /state changed concurrently/u);
+  assert.equal(await readFile(operationRaceSource, "utf8"), "operation race");
+  assert.equal(await exists(operationRaceTarget), false);
+  operationRaceJournal.close();
 
   console.log("External move integrity tests passed.");
 } finally {
