@@ -28,6 +28,9 @@ const { ExternalMoveCoordinator } = await import(
 const { ExternalMoveJournal } = await import(
   "../dist/services/externalReferences/externalMoveJournal.js"
 );
+const { ExternalMoveOperationAdapter } = await import(
+  "../dist/services/operations/externalMoveOperationAdapter.js"
+);
 
 const sandbox = await mkdtemp(
   path.join(os.tmpdir(), "optimike-external-move-integrity-"),
@@ -678,6 +681,184 @@ try {
   );
   assert.equal(await readFile(manualSource, "utf8"), "manual");
   assert.equal(await exists(path.join(archivePath, "manual.txt")), false);
+
+  // The common operation adapter keeps the existing external-move journal as
+  // its durable authority while projecting plan/apply/status/recover receipts.
+  const operationDriftSource = path.join(rootPath, "operation-drift.txt");
+  const operationDriftTarget = path.join(archivePath, "operation-drift.txt");
+  await writeFile(operationDriftSource, "operation drift v1", "utf8");
+  const operationDriftJournal = new ExternalMoveJournal(
+    path.join(sandbox, "operation-drift.sqlite"),
+  );
+  const operationDriftCoordinator = new ExternalMoveCoordinator(
+    service,
+    new FakeVault(),
+    operationDriftJournal,
+  );
+  const operationDriftAdapter = new ExternalMoveOperationAdapter(
+    operationDriftCoordinator,
+  );
+  const operationDriftPlan = await operationDriftAdapter.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "operation-drift.txt",
+    targetRelativePath: "archive/operation-drift.txt",
+    idempotencyKey: "operation-runtime-drift",
+  });
+  assert.equal(operationDriftPlan.phase, "planned");
+  assert.equal(operationDriftPlan.outcome, null);
+  assert.equal(operationDriftPlan.applyAllowed, true);
+  assert.match(operationDriftPlan.planRef, /^external-move:v1:/u);
+  assert.match(operationDriftPlan.planDigest, /^[a-f0-9]{64}$/u);
+  assert.equal(
+    (await operationDriftAdapter.status(operationDriftPlan.planRef)).planDigest,
+    operationDriftPlan.planDigest,
+  );
+  await writeFile(operationDriftSource, "operation drift v2", "utf8");
+  await expectExternalCode(
+    () =>
+      operationDriftAdapter.apply(
+        operationDriftPlan.planRef,
+        "operation-runtime-drift",
+      ),
+    "precondition_failed",
+  );
+  assert.equal(
+    await readFile(operationDriftSource, "utf8"),
+    "operation drift v2",
+  );
+  assert.equal(await exists(operationDriftTarget), false);
+  operationDriftJournal.close();
+
+  const operationCommitSource = path.join(rootPath, "operation-commit.txt");
+  const operationCommitTarget = path.join(archivePath, "operation-commit.txt");
+  await writeFile(operationCommitSource, "operation commit", "utf8");
+  const operationCommitJournal = new ExternalMoveJournal(
+    path.join(sandbox, "operation-commit.sqlite"),
+  );
+  const operationCommitAdapter = new ExternalMoveOperationAdapter(
+    new ExternalMoveCoordinator(
+      service,
+      new FakeVault(),
+      operationCommitJournal,
+    ),
+  );
+  const operationCommitPlan = await operationCommitAdapter.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "operation-commit.txt",
+    targetRelativePath: "archive/operation-commit.txt",
+    idempotencyKey: "operation-runtime-commit",
+  });
+  const operationCommitted = await operationCommitAdapter.apply(
+    operationCommitPlan.planRef,
+    "operation-runtime-commit",
+  );
+  assert.equal(operationCommitted.phase, "terminal");
+  assert.equal(operationCommitted.outcome, "committed");
+  assert.equal(operationCommitted.postflight.status, "verified");
+  assert.equal(
+    await readFile(operationCommitTarget, "utf8"),
+    "operation commit",
+  );
+  const operationReplay = await operationCommitAdapter.apply(
+    operationCommitPlan.planRef,
+    "operation-runtime-commit",
+  );
+  assert.equal(operationReplay.operationId, operationCommitted.operationId);
+  assert.equal(operationReplay.planDigest, operationCommitted.planDigest);
+  assert.equal(operationReplay.outcome, "committed");
+  assert.equal(await exists(operationCommitSource), false);
+  operationCommitJournal.close();
+
+  // Dropping the successful apply response does not authorize a retry: status
+  // reconciles the durable committed receipt without another file effect.
+  const operationLostSource = path.join(rootPath, "operation-lost.txt");
+  const operationLostTarget = path.join(archivePath, "operation-lost.txt");
+  await writeFile(operationLostSource, "operation lost response", "utf8");
+  const operationLostJournal = new ExternalMoveJournal(
+    path.join(sandbox, "operation-lost.sqlite"),
+  );
+  const operationLostAdapter = new ExternalMoveOperationAdapter(
+    new ExternalMoveCoordinator(service, new FakeVault(), operationLostJournal),
+  );
+  const operationLostPlan = await operationLostAdapter.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "operation-lost.txt",
+    targetRelativePath: "archive/operation-lost.txt",
+    idempotencyKey: "operation-runtime-lost-response",
+  });
+  await operationLostAdapter.apply(
+    operationLostPlan.planRef,
+    "operation-runtime-lost-response",
+  );
+  const operationLostStatus = await operationLostAdapter.status(
+    operationLostPlan.planRef,
+  );
+  assert.equal(operationLostStatus.outcome, "committed");
+  assert.equal(operationLostStatus.planDigest, operationLostPlan.planDigest);
+  assert.equal(
+    await readFile(operationLostTarget, "utf8"),
+    "operation lost response",
+  );
+  operationLostJournal.close();
+
+  // An interrupted apply is recovered only through the same persisted plan.
+  const operationRecoverySource = path.join(rootPath, "operation-recovery.txt");
+  const operationRecoveryTarget = path.join(
+    archivePath,
+    "operation-recovery.txt",
+  );
+  await writeFile(operationRecoverySource, "operation recovery", "utf8");
+  const operationRecoveryJournal = new ExternalMoveJournal(
+    path.join(sandbox, "operation-recovery.sqlite"),
+  );
+  const operationRecoveryCoordinator = new ExternalMoveCoordinator(
+    service,
+    new FakeVault(),
+    operationRecoveryJournal,
+  );
+  const operationRecoveryAdapter = new ExternalMoveOperationAdapter(
+    operationRecoveryCoordinator,
+  );
+  const operationRecoveryPlan = await operationRecoveryAdapter.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "operation-recovery.txt",
+    targetRelativePath: "archive/operation-recovery.txt",
+    idempotencyKey: "operation-runtime-recovery",
+  });
+  const operationRecoveryStored = operationRecoveryJournal.get(
+    operationRecoveryPlan.operationId,
+  );
+  await service.applyMove(operationRecoveryStored.snapshot);
+  operationRecoveryJournal.transition(
+    operationRecoveryPlan.operationId,
+    ["planned"],
+    "applying_file",
+  );
+  operationRecoveryJournal.transition(
+    operationRecoveryPlan.operationId,
+    ["applying_file"],
+    "file_moved",
+  );
+  const interruptedStatus = await operationRecoveryAdapter.status(
+    operationRecoveryPlan.planRef,
+  );
+  assert.equal(interruptedStatus.phase, "applying");
+  assert.equal(interruptedStatus.outcome, null);
+  assert.equal(interruptedStatus.recoveryAllowed, true);
+  assert.equal(interruptedStatus.recoveryRef, operationRecoveryPlan.planRef);
+  const operationRecovered = await operationRecoveryAdapter.recover(
+    operationRecoveryPlan.planRef,
+    "operation-runtime-recovery",
+  );
+  assert.equal(operationRecovered.phase, "terminal");
+  assert.equal(operationRecovered.outcome, "compensated");
+  assert.equal(operationRecovered.postflight.status, "compensated");
+  assert.equal(
+    await readFile(operationRecoverySource, "utf8"),
+    "operation recovery",
+  );
+  assert.equal(await exists(operationRecoveryTarget), false);
+  operationRecoveryJournal.close();
 
   console.log("External move integrity tests passed.");
 } finally {

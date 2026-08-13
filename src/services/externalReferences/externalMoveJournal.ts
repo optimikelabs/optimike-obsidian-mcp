@@ -90,6 +90,10 @@ export class ExternalMoveJournal {
     }
   }
 
+  close(): void {
+    this.db.close();
+  }
+
   create(
     input: Omit<
       ExternalMovePlan,
