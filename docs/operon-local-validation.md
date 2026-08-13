@@ -247,12 +247,21 @@ FAIL if cached data is presented as live.
 
 ## 11. Incompatibility test
 
-Disable Operon or use any test manifest version outside the explicit allowlist
-(`2.4.0`, `2.5.0`, `3.0.1`, `3.1.0`, `3.1.1`, and official `3.2.0`).
+Use one of these disposable-vault fixtures:
+
+- disable Operon to exercise the unavailable path;
+- set the test manifest to `3.0.0`, which is explicitly denied; or
+- remove, break, or return a malformed `getDeveloperApiV1()` contract to make
+  Developer API V1 negotiation fail.
+
+Do not use a merely unknown product version as the incompatibility fixture. A
+non-denied release exposing the validated Developer API V1 contract is admitted
+as `compatible-provisional` by design.
 
 PASS:
 
-- Bridge status becomes unavailable/incompatible;
+- Bridge status becomes unavailable for the disabled fixture or incompatible
+  for the denied/broken-contract fixture;
 - no exception crashes Obsidian;
 - the MCP either serves a stale prior snapshot or returns a structured unavailable error.
 

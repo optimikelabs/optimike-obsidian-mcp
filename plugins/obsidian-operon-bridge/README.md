@@ -41,7 +41,8 @@ and [#101](https://github.com/hasanyilmaz/operon/pull/101).
 
 Compatibility is reported explicitly:
 
-- `certified`: the release completed the Bridge acceptance path;
+- `certified`: the product version belongs to the Bridge's explicit certified
+  set and all negotiated runtime checks pass;
 - `compatible-provisional`: the product version is new, but the Developer API
   V1 negotiation, capabilities, schemas, and live index checks pass;
 - `incompatible`: the contract boundary is absent, denied, or fails validation.
