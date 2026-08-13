@@ -2,154 +2,112 @@
 
 ## Status
 
-Accepted and implemented. The internal contract remains shared by the existing
+Accepted and implemented. The internal contract is shared by the existing
 `external_move` transaction and atomic Markdown note replacement. The latter is
-now exposed through four domain-specific MCP tools; no generic public
-`operation_*` surface is added and no write permission is widened.
+projected through four domain-specific MCP tools; no generic public
+`operation_*` surface is introduced and no write permission is widened.
 
 ## Context
 
 Operon already provides sealed mutation plans, durable receipts, idempotent
 replay, postflight verification, and same-plan recovery. The MCP's
 `external_move` path independently provides immutable inventory, CAS
-preconditions, a SQLite WAL journal, and compensation. Other Obsidian writes do
-not all share those guarantees, especially when Local REST cannot atomically
-enforce `If-Match`.
+preconditions, a SQLite WAL journal, and compensation. Other Obsidian writers
+do not automatically share those guarantees.
 
-Keeping a separate transaction vocabulary for every writer makes uncertain
-outcomes harder to reconcile and encourages callers to retry the original
-mutation. A common control-plane contract is needed without replacing domain
-validation or pretending that every backend has the same atomicity.
+A common internal control-plane vocabulary reduces blind retries after uncertain
+outcomes without replacing domain validators or pretending that every backend
+has the same atomicity.
 
 ## Decision
 
-Governed non-Operon writes may implement the internal `OperationAdapter`
-contract with four transitions:
+Governed non-Operon writes may implement four transitions:
 
-1. `plan` admits a canonical request, assigns a server `operationId`, binds the
-   caller's `idempotencyKey`, and returns an opaque `planRef` plus a stable
+1. `plan` admits one canonical request, assigns a server `operationId`, binds a
+   caller-owned `idempotencyKey`, and returns an opaque `planRef` with a stable
    `planDigest`.
-2. `apply` accepts only that sealed `planRef` and the matching idempotency key.
-   The adapter must durably record the applying state before its first effect
-   and revalidate all backend-specific preconditions.
-3. `status` reads durable state and evidence without executing an effect.
-4. `recover` reconciles, safely resumes, or performs the domain-defined
-   compensation for the exact same plan. It is not undo and never accepts a
+2. `apply` accepts only that sealed plan and matching idempotency key. Intent and
+   applying state must be durable before the first effect.
+3. `status` reads and reconciles durable authority without executing a new
+   mutation.
+4. `recover` reconciles, safely resumes, or performs domain-defined
+   compensation for the exact same plan. It is not undo and accepts no
    replacement mutation specification.
 
-The common state model separates progress from result:
+The shared receipt separates progress (`planned | applying | terminal`) from
+result (`committed`, `conflict`, `rejected`, `failed`, `outcome_unknown`,
+`compensated`, or `expired`). It carries operation and idempotency identities,
+backend and logical target, sealed plan identity, before/after proofs,
+postflight state, timestamps, and a recovery reference only when allowed.
 
-- `phase`: `planned | applying | terminal`;
-- `outcome`: `committed | conflict | rejected | failed | outcome_unknown |
-compensated | expired`, or `null` before a terminal result is known.
-
-Every receipt carries the contract version, operation and idempotency
-identities, operation kind, sealed plan identity, logical backend and target,
-before proof, optional after proof, postflight state, timestamps, and an exact
-recovery reference when recovery is allowed.
-
-## Identifier rules
-
-- `idempotencyKey` belongs to the caller and binds one canonical request.
-- `operationId` belongs to the server and identifies the durable operation.
-- `planRef` is an opaque adapter-bound handle; callers must not parse or rebuild
-  it.
-- `planDigest` is a stable digest of immutable admitted inputs and proofs. It is
-  not an authorization token.
-- `recoveryRef` points to the same plan. Recovery never creates a new plan.
+`planRef` is opaque and `planDigest` is evidence, not an authorization token.
+Recovery never creates a new plan.
 
 ## Adapter requirements
 
 An adapter must:
 
-- validate its backend result at runtime before projecting a common receipt;
-- preserve the backend's stricter capability, write-mode, consent, and CAS
-  gates;
+- validate backend results before projecting a common receipt;
+- preserve stricter capability, write-mode, consent, and CAS gates;
 - persist intent and intermediate state before effects;
-- make `status` read-only and replay-safe;
-- return `outcome_unknown` rather than invite blind retry when final state
-  cannot be proven;
-- expose only the evidence the backend can actually prove.
+- keep status read-only and replay-safe;
+- return `outcome_unknown` rather than invite blind retry;
+- expose only evidence the backend can prove.
 
-Domain tools remain the public MCP surface. A future generic operation surface
-requires both repeated live evidence across domains and a concrete cross-domain
-client use case; shared internal vocabulary alone is not sufficient.
+Domain tools remain the public MCP surface. A future generic operation API
+requires repeated live evidence across domains and a concrete cross-domain
+client use case; internal similarity alone is insufficient.
 
-## First adapter: external move
+## External move adapter
 
-`ExternalMoveOperationAdapter` reuses the existing `external_move` coordinator
-and journal as the sole durable authority. It maps the existing plan ID to an
-opaque versioned plan reference, binds the plan digest to source CAS, complete
-reference inventory, backend/vault/root identity, target, and repair set, and
-maps rollback to exact-plan recovery/compensation.
+`ExternalMoveOperationAdapter` reuses the existing move coordinator and journal
+as its sole durable authority. It binds source CAS, complete reference
+inventory, backend/vault/root identity, target, and repair set. Its disposable
+fixtures prove plan/status replay, source drift refusal, commit replay, lost
+response reconciliation, interrupted recovery, and verified compensation.
 
-The disposable fixture covers:
-
-- planning and stable status replay;
-- source drift rejected before any move;
-- commit and idempotent apply replay;
-- completed apply with a lost caller response reconciled through `status`;
-- an interrupted move recovered from the persisted intermediate state;
-- verified compensation back to the original file placement.
-
-## Second adapter: atomic note replacement
+## Atomic note adapter and public projection
 
 `ObsidianNoteReplaceOperationAdapter` uses the bundled Atomic Write Bridge as
-its only effect surface. The bridge binds every CAS request and response to a
-hashed device/install/vault-root fingerprint and executes SHA-256
-compare-and-replace through Obsidian `Vault.process`, so the precondition and
-replacement occur in one atomic read-modify-write operation. Its write gate is
-disabled by default and remains independent from Operon's Developer API grant.
+its only effect surface. The Bridge binds every request and response to one
+backend fingerprint and executes SHA-256 compare-and-replace through Obsidian
+`Vault.process`.
 
-The adapter stores the sealed next content in a private SQLite WAL journal so
-the exact plan can be recovered after a lost response. Terminal rows expire
-after 30 days and their sealed content is redacted as soon as a stable terminal
-state is recorded; non-terminal and `outcome_unknown` rows are retained for
-recovery. The disposable fixture covers conflict without write, committed
-replay, backend-binding rejection, concurrent status reconciliation,
-idempotency-key binding, lost-response reconciliation, active-daemon
-retention, and exact-plan recovery after a request failure.
-
-## Public atomic-note projection
+Its private SQLite WAL journal retains sealed next content only while exact-plan
+recovery may need it. Stable terminal rows redact that content and expire under
+the existing retention policy.
 
 The public projection is deliberately domain-specific:
 
-- `obsidian_note_replace_plan`;
-- `obsidian_note_replace_apply`;
-- `obsidian_note_replace_status`;
-- `obsidian_note_replace_recover`.
+- `obsidian_note_replace_plan`
+- `obsidian_note_replace_apply`
+- `obsidian_note_replace_status`
+- `obsidian_note_replace_recover`
 
-One process-shared runtime owns the existing adapter and its single private
-journal across stdio and per-session HTTP MCP servers. Planning and every
-possible effect revalidate the current MCP write policy. The planning read that
-seals the before hash also supplies the current Markdown used for structured
-protected-frontmatter comparison, avoiding a second authority for admission.
+One process-shared runtime owns the existing adapter and its single journal
+across stdio and per-session HTTP MCP servers. Planning and every possible
+effect revalidate the current MCP write policy. The same Bridge read supplies
+the current Markdown used for protected-frontmatter comparison and the SHA-256
+sealed as the before proof.
 
-Recovery is exact-plan reconciliation/resumption, never a request to restore
-the previous note. The guaranteed effect boundary is the one target-note
-transition enforced by `Vault.process` CAS. Notifications or downstream work
-performed by sync, watchers, plugins, indexers, or external automations are
-outside that boundary and are not claimed reversible.
+Recovery is exact-plan reconciliation or resumption, never restoration of the
+previous note. The guaranteed effect boundary is the one target-note transition
+enforced by `Vault.process` CAS. Sync, watchers, plugins, indexers, and external
+automations are outside that boundary and are not claimed reversible.
 
-The complete domain contract and validation boundary are documented in
-[Governed atomic note replacement](../governed-note-replacement.md).
+The public contract is owned by the
+[Tool Surface](../obsidian_mcp_tools_spec.md#governed-atomic-note-replacement).
 
 ## Explicit exclusions
 
-- Operon keeps its official Developer API plan and recovery contract; this
-  runtime does not wrap or replace it.
-- Frontmatter, Bases, and Canvas writes are not upgraded by declaration. The
-  public surface proves only complete Markdown note replacement through the
-  dedicated atomic bridge.
-- A receipt is evidence of the adapter's checks, not evidence of business
-  correctness outside its domain validator.
+- Operon keeps its official Developer API plan and recovery contract.
+- Frontmatter, Bases, and Canvas writers are not upgraded by declaration.
+- A receipt proves adapter checks, not business correctness outside its domain.
+- No generic public operation surface is part of the 2.6 candidate.
 
 ## Consequences
 
-The MCP has two tested non-Operon adapters using one shared operation
-vocabulary. Each domain journal remains its sole durable authority; the common
-runtime does not introduce a competing generic journal. Future adapters can
-reuse the contract, but admission remains fail-closed whenever the backend
-cannot prove CAS, durable status, or postflight. A generic public operation
-surface remains deliberately deferred; even after the live Obsidian canary, it
-requires a real cross-domain client need rather than only adapter similarity.
+Each domain journal remains its sole durable authority. Future adapters may
+reuse the internal vocabulary only when their backend can prove its own CAS,
+durable status, postflight, and recovery semantics. The first public projection
+therefore remains narrow, explicit, and independently governable.
