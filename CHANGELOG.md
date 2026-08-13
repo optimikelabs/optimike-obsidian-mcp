@@ -32,9 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning validates protected frontmatter and conservative Obsidian Markdown
   against the same Bridge read that seals the before hash. Apply and recover
   revalidate the current MCP write policy before any possible effect.
-- The 2.6 candidate remains versioned as `2.5.0` until the live operator canary
-  passes. No tag, release, merge, or generic public `operation_*` surface is
-  part of this candidate.
+- The live operator canary passed on 2026-08-14 with exact restoration of the
+  disposable note. The branch remains versioned as `2.5.0`; version bump, tag,
+  release, and merge stay separate repository-authority actions. No generic
+  public `operation_*` surface is part of this candidate.
 
 ## [2.5.0] - 2026-08-13
 

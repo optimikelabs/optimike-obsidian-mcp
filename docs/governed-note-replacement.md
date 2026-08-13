@@ -108,5 +108,6 @@ and close that authority cleanly at process shutdown.
 It requires an explicit disposable existing note and confirmation string,
 saves a durable private backup before mutation, proves a real Bridge CAS
 rejection and the four public MCP tools, restores the fixture, and writes a
-redacted evidence record. The PR must remain unmerged and unreleased while this
-live Desktop gate is pending.
+redacted evidence record. This live Desktop gate passed on 2026-08-14 with the
+final SHA-256 equal to the pre-mutation SHA-256. Merge, versioning, and release
+remain separate repository-authority decisions.

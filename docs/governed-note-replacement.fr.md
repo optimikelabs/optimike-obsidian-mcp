@@ -114,5 +114,6 @@ commitent un unique CAS backend et ferment proprement cette autorité au shutdow
 fermé. Il exige une note jetable existante explicitement nommée et une chaîne de
 confirmation, sauvegarde le contenu initial avant mutation, prouve un vrai
 refus CAS du Bridge et les quatre outils MCP publics, restaure la fixture et
-écrit une preuve expurgée. La PR reste non mergée et aucune release n’est
-publiée tant que cette gate Desktop live est en attente.
+écrit une preuve expurgée. Cette gate Desktop live a réussi le 2026-08-14,
+avec un SHA-256 final identique au SHA-256 avant mutation. Merge, version et
+release restent des décisions séparées de l’autorité du dépôt.

@@ -131,9 +131,9 @@ exact-plan reconciliation/resumption and is never undo. The guaranteed effect bo
 the one target-note transition enforced by `Vault.process` CAS. Sync, watchers,
 plugins, indexers, and external automations remain outside that boundary.
 
-No generic public `operation_*` surface is introduced. The candidate remains
-non-mergeable for release purposes until the real Obsidian Desktop operator
-canary passes.
+No generic public `operation_*` surface is introduced. The real Obsidian
+Desktop operator canary passed on 2026-08-14 with exact fixture restoration;
+merge, versioning, and release remain repository-authority decisions.
 
 ## Explicit exclusions
 
