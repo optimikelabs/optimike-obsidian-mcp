@@ -20,8 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Saved-filter pagination and Bridge HTTP error mapping coverage, preserving
   typed `404`/`422` failures instead of reporting generic internal errors.
 - Contract-negotiated Operon compatibility: unknown releases such as `3.3.0`
-  are admitted as `compatible-provisional` only when Developer API V1
-  negotiation and runtime schema validation succeed.
+  receive version/accessor admission as `compatible-provisional` when they are
+  not denied and expose `getDeveloperApiV1()`. Actual use still requires a
+  valid `developerApi` status, top-level `ok`, `index.ready`, and the exact
+  advertised capability.
 - Complete live acceptance of Operon `3.3.0` with Bridge `0.7.0`: persisted
   grants, bounded startup retry, governed apply/replay/conflict/postflight,
   thirty tasks, zero validation violations and zero pending recoveries.

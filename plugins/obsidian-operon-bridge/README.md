@@ -27,9 +27,9 @@ Saved-filter execution requires an exact grant and exact `filterSetId`; the
 official API does not expose the saved-filter catalog. Adoption, unmanaged
 properties, and arbitrary `targetFolder` destinations remain unsupported and
 are rejected explicitly. The complete live pilot used the local 3.2.0 build.
-Operon `3.3.0` is admitted as `compatible-provisional` when Developer API V1
-negotiation succeeds. Its complete live pilot passed as a separate readiness
-proof;
+Operon `3.3.0` is admitted as `compatible-provisional` because the non-denied
+version exposes the Developer API V1 accessor. Its complete live pilot passed
+the separate developer-API, schema, index, capability, and readiness gates;
 Bridge `0.7.0` deliberately preserves the contract-first provisional path
 instead of making a product-version allowlist authoritative again.
 The Settings UI fix is tracked in upstream

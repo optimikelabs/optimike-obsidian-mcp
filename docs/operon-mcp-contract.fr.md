@@ -86,9 +86,9 @@ catalogue, la pagination complète des tâches et les diagnostics d’index.
 Le statut distingue :
 
 - `certified` : version produit appartenant à l’ensemble certifié explicite du
-  Bridge et dont la frontière Developer API est admise ;
+  Bridge et dont l’accesseur Developer API est présent ;
 - `compatible-provisional` : release non refusée hors de cet ensemble et dont
-  la frontière Developer API V1 est admise ;
+  l’accesseur Developer API V1 est présent ;
 - `incompatible` : frontière absente, explicitement refusée ou invalide.
 
 Cet état de compatibilité est indépendant de la disponibilité live de l’index.

@@ -121,8 +121,9 @@ l’[audit CLI / Developer API](docs/operon-cli-audit.fr.md).
 
 Note de compatibilité : le Bridge `0.7.0` certifie les versions déjà validées
 jusqu’à `3.2.1` ; `3.2.0` reste la baseline certifiée antérieure. Operon `3.3.0` est admis
-en `compatible-provisional` lorsque la négociation Developer API V1 réussit ;
-son pilote live complet est validé, sans revenir à une allowlist produit.
+en `compatible-provisional` comme version non refusée exposant l’accesseur.
+L’usage live exige aussi `developerApi`, `ok`, `index.ready` et la capacité
+exacte. Son pilote complet est validé sans revenir à une allowlist produit.
 Le settlement des frontmatters de date et le consentement multi-fenêtres
 ont été fusionnés upstream avant ces versions. L’exécution des filtres
 sauvegardés est maintenant disponible via la Developer API task-workflow après

@@ -12,8 +12,9 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
 
-The adapter certifies through Operon `3.2.1` and provisionally admits `3.3.0`
-only when contract negotiation succeeds. The `3.3.0` live acceptance run is
+The adapter certifies through Operon `3.2.1` and gives `3.3.0` provisional
+version/accessor admission. The `3.3.0` live acceptance run separately proves
+the Developer API, schema, index, capability, and readiness gates and is
 complete and green; keeping its runtime state provisional preserves the
 contract-first policy. The missing grant-control
 renderer is tracked in upstream #145/#146. Fixes #135 and #137 are already merged. File Task rename safety remains
@@ -255,8 +256,9 @@ Use one of these disposable-vault fixtures:
   Developer API V1 negotiation fail.
 
 Do not use a merely unknown product version as the incompatibility fixture. A
-non-denied release exposing the validated Developer API V1 contract is admitted
-as `compatible-provisional` by design.
+non-denied release exposing the Developer API V1 accessor is admitted as
+`compatible-provisional` by design. It is not usable until `developerApi`,
+top-level `ok`, `index.ready`, and the requested capability also pass.
 
 PASS:
 
@@ -412,6 +414,41 @@ OPEN BOUNDARIES:
 - #99/#101 and #139 remain fail-closed paths;
 - no deletion tool, generic CLI passthrough, raw Markdown or private API exists
   in the MCP.
+
+## 19. Official Operon 3.3.0 contract-first acceptance — 2026-08-13
+
+Inputs:
+
+- official Operon `3.3.0`;
+- Optimike Operon Bridge `0.7.0`;
+- Local REST API and both mutation opt-ins enabled;
+- pre-cutover backup and rollback path verified;
+- existing ÉLYSIA task corpus, plus one bounded smoke task `1dbefy1` restored
+  after the run.
+
+PASS:
+
+- two complete Obsidian restarts retained the active
+  `optimike-operon-bridge` Developer API consumer at grant revision 6, with no
+  pending capability and no manual re-exposure;
+- the first live status recovered through the bounded `cache-ready` startup
+  retry and then reported `compatible-provisional`, a valid Developer API V1
+  channel, `index.ready=true`, and 30 tasks;
+- `operon_validate` returned `P0/P1/P2 = 0/0/0`;
+- saved-filter execution for exact ID `fs_elysia_now` succeeded;
+- smoke task `1dbefy1` passed sealed preview/apply, idempotent replay
+  (`replayed=true`), stale-revision conflict, semantic restoration, and
+  postflight re-read;
+- `operon_list_pending_recoveries` returned an empty list after restoration.
+
+NOT RUN LIVE:
+
+- forced response loss after apply. This remains covered by the disposable
+  operation fixtures; it was not induced against the production vault.
+
+The `compatible-provisional` label records version/accessor admission only.
+The successful Developer API status, schema, index, capability, and readiness
+checks above are the independent evidence that authorized this pilot.
 
 ## Executed pilot result — 2026-07-21
 

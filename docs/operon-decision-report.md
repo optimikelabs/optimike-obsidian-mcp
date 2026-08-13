@@ -3,10 +3,11 @@
 ## Current status — 2026-08-13
 
 Optimike Obsidian MCP Bridge `0.7.0` certifies Operon through `3.2.1` and admits
-Operon `3.3.0` as `compatible-provisional` only after successful Developer API
-V1 negotiation and schema validation. The canonical server registers twenty-three
-governed Operon tools. Kairélys remains disabled and retained only for bounded
-rollback compatibility.
+the non-denied Operon `3.3.0` version with its Developer API V1 accessor as
+`compatible-provisional`. Developer API status, schema, index readiness, and
+capabilities remain separate live-use gates. The canonical server registers
+twenty-three governed Operon tools. Kairélys remains disabled and retained only
+for bounded rollback compatibility.
 
 The complete local acceptance run is green on Operon `3.3.0` with Bridge
 `0.7.0`: persisted grants, governed apply/replay/conflict/postflight, thirty
@@ -79,6 +80,28 @@ legacy Public API v1 only. It proved file/inline creation, managed and unmanaged
 properties, hierarchy/dependencies, blocked/released transitions, conversion,
 idempotency, stale-revision conflict, reindex/restart, stale cache and duplicate
 ID refusal. It is not presented as Developer API V1 evidence.
+
+## Operon 3.3.0 acceptance evidence
+
+The 2026-08-13 production-shaped ÉLYSIA run used official Operon `3.3.0`,
+Bridge `0.7.0`, both mutation opt-ins, and Developer API V1. A pre-cutover
+backup and rollback path were verified before installation.
+
+Observed results:
+
+- two complete Obsidian restarts retained the active Bridge consumer grant at
+  revision 6 with no pending capability and required no manual re-exposure;
+- Bridge status reported `compatible-provisional`, a valid V1 channel, a ready
+  live index, and 30 tasks;
+- `operon_validate` returned `P0/P1/P2 = 0/0/0`, and the exact saved-filter
+  route `fs_elysia_now` executed successfully;
+- smoke task `1dbefy1` passed sealed preview/apply, idempotent replay,
+  stale-revision conflict, semantic restoration, and postflight re-read;
+- final pending recovery inventory was empty after restoration.
+
+The lost-response path was not forced against the live vault. Its exact-plan
+reconciliation remains fixture evidence, not part of this live acceptance
+claim.
 
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
 remain historical. The current runtime target is Operon `3.3.0` with Bridge

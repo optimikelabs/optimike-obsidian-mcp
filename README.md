@@ -121,10 +121,10 @@ closed after 45 seconds when no confirmation can be presented.
 
 Compatibility note: the adapter negotiates Operon Developer API V1 with
 `contractVersion: 1` and `runtimeApi: 1`. Versions in the explicit certified
-set report `certified`; an otherwise unknown Operon release exposing the same
-validated contract is `compatible-provisional` instead of being
-blocked by its product version alone. Missing capabilities fail closed only for
-the affected tools, while known regressions remain explicitly denied.
+set report `certified`; unknown non-denied versions exposing the accessor report
+`compatible-provisional`. Live use still requires `developerApi`, `ok`,
+`index.ready`, and the exact capability. Missing capabilities fail closed only
+for affected tools; known regressions remain denied.
 Operon `3.2.0` remains the earlier certified pilot baseline. Modified-time frontmatter settlement and
 multi-window consent were merged upstream before these releases. Saved-filter execution is available
 through the additive task-workflow Developer API after an exact grant, but the

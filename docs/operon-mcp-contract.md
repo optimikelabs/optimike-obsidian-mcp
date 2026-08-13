@@ -62,9 +62,9 @@ capabilities, response shapes, live health, catalog, complete task pagination,
 and index diagnostics. Status distinguishes:
 
 - `certified`: a product version in the Bridge's explicit certified set whose
-  Developer API boundary is admitted;
+  Developer API accessor is present;
 - `compatible-provisional`: a non-denied release outside that set whose
-  Developer API V1 boundary is admitted;
+  Developer API V1 accessor is present;
 - `incompatible`: an absent, denied, or invalid contract boundary.
 
 This compatibility state is independent from live index readiness. Callers
