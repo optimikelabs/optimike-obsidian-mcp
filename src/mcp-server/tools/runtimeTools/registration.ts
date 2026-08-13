@@ -4,8 +4,12 @@ import {
   MAINTENANCE_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
-import { collectRuntimeStatus, runRuntimeMaintenance } from "../../../services/runtimeState.js";
+import {
+  collectRuntimeStatus,
+  runRuntimeMaintenance,
+} from "../../../services/runtimeState.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
+import { registerGovernedNoteReplaceTools } from "../governedNoteReplaceTools/index.js";
 import { registerOperonTools } from "../operonTools/index.js";
 
 const MaintenanceInputSchema = z.object({
@@ -65,5 +69,6 @@ export async function registerRuntimeTools(
     }),
   );
 
+  await registerGovernedNoteReplaceTools(server);
   await registerOperonTools(server);
 }
