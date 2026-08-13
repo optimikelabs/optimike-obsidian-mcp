@@ -27,7 +27,12 @@ Saved-filter execution requires an exact grant and exact `filterSetId`; the
 official API does not expose the saved-filter catalog. Adoption, unmanaged
 properties, and arbitrary `targetFolder` destinations remain unsupported and
 are rejected explicitly. The complete live pilot used the local 3.2.0 build.
-The equivalent Settings UI fix for 3.2.1 is tracked in upstream
+Operon `3.3.0` is admitted as `compatible-provisional` because the non-denied
+version exposes the Developer API V1 accessor. Its complete live pilot passed
+the separate developer-API, schema, index, capability, and readiness gates;
+Bridge `0.7.0` deliberately preserves the contract-first provisional path
+instead of making a product-version allowlist authoritative again.
+The Settings UI fix is tracked in upstream
 [#145](https://github.com/hasanyilmaz/operon/issues/145) and
 [#146](https://github.com/hasanyilmaz/operon/pull/146). Uncertain outcomes remain fail-closed;
 the Bridge never retries blindly or falls back to Markdown/private APIs. File
@@ -37,10 +42,16 @@ and [#101](https://github.com/hasanyilmaz/operon/pull/101).
 
 Compatibility is reported explicitly:
 
-- `certified`: the release completed the Bridge acceptance path;
-- `compatible-provisional`: the product version is new, but the Developer API
-  V1 negotiation, capabilities, schemas, and live index checks pass;
+- `certified`: the product version belongs to the Bridge's explicit certified
+  set and its Developer API boundary is admitted;
+- `compatible-provisional`: the product version is outside that set but is not
+  denied and its Developer API V1 boundary is admitted;
 - `incompatible`: the contract boundary is absent, denied, or fails validation.
+
+Compatibility is admission, not live readiness. Check top-level `ok`,
+`index.ready`, and the advertised `capabilities` before using a route; an
+admitted runtime can still be temporarily unready while its index settles or
+recovers.
 
 The product version remains diagnostic metadata and may select a narrowly
 documented denylist entry. It is not the primary admission key for Operon 3.x.

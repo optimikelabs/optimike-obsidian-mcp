@@ -2,13 +2,13 @@
 
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
-Date: 2026-08-09
-Reference: official Operon `3.2.1`, Operon CLI `1.1.0`, Developer API V1 and `cli-manifest-v1.json`.
+Date: 2026-08-13
+Reference: official Operon `3.3.0` provisionally admitted by contract, certified Operon `3.2.1`, Operon CLI `1.1.0`, Developer API V1 and `cli-manifest-v1.json`.
 
 The original 2026-08-01 CLI observations were made against Operon `3.0.1` and
-remain historical evidence. The current MCP adapter targets `3.2.1` while the
-complete live acceptance evidence remains on the contract-compatible local
-`3.2.0` build. The missing 3.2.1 settings renderer is tracked in
+remain historical evidence. The current MCP adapter certifies `3.2.1` and
+admits `3.3.0` provisionally after contract negotiation. The complete `3.3.0`
+live acceptance run is green; the missing settings renderer is tracked in
 [#145](https://github.com/hasanyilmaz/operon/issues/145) and
 [#146](https://github.com/hasanyilmaz/operon/pull/146). Fixes #135 and #137 are already merged. File Task rename safety
 remains tracked in [#139](https://github.com/hasanyilmaz/operon/pull/139), and
@@ -31,7 +31,8 @@ Do not expose a generic CLI passthrough through MCP.
 ## Surface comparison
 
 The MCP registers twenty-three governed tools, including six bounded Developer
-API reasoning reads. Saved-filter execution is available on Operon `3.2.x`
+API reasoning reads. Saved-filter execution is available when the negotiated
+task-workflow contract advertises it
 after an exact `tasks.filter-query` grant, but the official API does not expose
 the saved-filter catalog. Adoption remains an unavailable compatibility tool:
 

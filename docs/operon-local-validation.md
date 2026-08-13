@@ -7,13 +7,16 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `3.2.1` enabled for current compatibility checks; `3.2.0` remains the complete live-pilot baseline and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Operon `3.3.0` for the completed contract-first live pilot; `3.2.1` remains in the explicit certified set, and `2.4.0` / `2.5.0` remain legacy-read fixtures
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
 
-The adapter targets official Operon `3.2.1`; the complete live acceptance run
-used the contract-compatible local `3.2.0` build. The missing 3.2.1 grant-control
+The adapter certifies through Operon `3.2.1` and gives `3.3.0` provisional
+version/accessor admission. The `3.3.0` live acceptance run separately proves
+the Developer API, schema, index, capability, and readiness gates and is
+complete and green; keeping its runtime state provisional preserves the
+contract-first policy. The missing grant-control
 renderer is tracked in upstream #145/#146. Fixes #135 and #137 are already merged. File Task rename safety remains
 tracked by [#139](https://github.com/hasanyilmaz/operon/pull/139), and transition
 settlement by #99/#101. Unsupported or uncertain paths stay fail-closed; this
@@ -245,12 +248,22 @@ FAIL if cached data is presented as live.
 
 ## 11. Incompatibility test
 
-Disable Operon or use any test manifest version outside the explicit allowlist
-(`2.4.0`, `2.5.0`, `3.0.1`, `3.1.0`, `3.1.1`, and official `3.2.0`).
+Use one of these disposable-vault fixtures:
+
+- disable Operon to exercise the unavailable path;
+- set the test manifest to `3.0.0`, which is explicitly denied; or
+- remove, break, or return a malformed `getDeveloperApiV1()` contract to make
+  Developer API V1 negotiation fail.
+
+Do not use a merely unknown product version as the incompatibility fixture. A
+non-denied release exposing the Developer API V1 accessor is admitted as
+`compatible-provisional` by design. It is not usable until `developerApi`,
+top-level `ok`, `index.ready`, and the requested capability also pass.
 
 PASS:
 
-- Bridge status becomes unavailable/incompatible;
+- Bridge status becomes unavailable for the disabled fixture or incompatible
+  for the denied/broken-contract fixture;
 - no exception crashes Obsidian;
 - the MCP either serves a stale prior snapshot or returns a structured unavailable error.
 
@@ -401,6 +414,41 @@ OPEN BOUNDARIES:
 - #99/#101 and #139 remain fail-closed paths;
 - no deletion tool, generic CLI passthrough, raw Markdown or private API exists
   in the MCP.
+
+## 19. Official Operon 3.3.0 contract-first acceptance — 2026-08-13
+
+Inputs:
+
+- official Operon `3.3.0`;
+- Optimike Operon Bridge `0.7.0`;
+- Local REST API and both mutation opt-ins enabled;
+- pre-cutover backup and rollback path verified;
+- existing ÉLYSIA task corpus, plus one bounded smoke task `1dbefy1` restored
+  after the run.
+
+PASS:
+
+- two complete Obsidian restarts retained the active
+  `optimike-operon-bridge` Developer API consumer at grant revision 6, with no
+  pending capability and no manual re-exposure;
+- the first live status recovered through the bounded `cache-ready` startup
+  retry and then reported `compatible-provisional`, a valid Developer API V1
+  channel, `index.ready=true`, and 30 tasks;
+- `operon_validate` returned `P0/P1/P2 = 0/0/0`;
+- saved-filter execution for exact ID `fs_elysia_now` succeeded;
+- smoke task `1dbefy1` passed sealed preview/apply, idempotent replay
+  (`replayed=true`), stale-revision conflict, semantic restoration, and
+  postflight re-read;
+- `operon_list_pending_recoveries` returned an empty list after restoration.
+
+NOT RUN LIVE:
+
+- forced response loss after apply. This remains covered by the disposable
+  operation fixtures; it was not induced against the production vault.
+
+The `compatible-provisional` label records version/accessor admission only.
+The successful Developer API status, schema, index, capability, and readiness
+checks above are the independent evidence that authorized this pilot.
 
 ## Executed pilot result — 2026-07-21
 
