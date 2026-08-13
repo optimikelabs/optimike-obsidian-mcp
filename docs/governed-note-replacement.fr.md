@@ -110,6 +110,12 @@ scellé entre trois sessions MCP indépendantes. Elle prouve que les factories d
 serveur par session partagent un seul runtime applicatif et un seul journal,
 commitent un unique CAS backend et ferment proprement cette autorité au shutdown.
 
+Chaque ligne `applying` enregistre aussi le runtime qui l'exécute. Un autre
+processus MCP local ouvrant le même journal durable laisse intacte la ligne d'un
+propriétaire encore vivant ; seul un propriétaire mort ou son arrêt explicite
+autorise le recovery du plan exact. Un client lancé séparément ne peut donc pas
+fabriquer une interruption pendant que le premier exécute encore le CAS.
+
 `npm run smoke:atomic-note-mcp-live` est un canary opérateur séparé qui échoue
 fermé. Il exige une note jetable existante explicitement nommée et une chaîne de
 confirmation, sauvegarde le contenu initial avant mutation, prouve un vrai

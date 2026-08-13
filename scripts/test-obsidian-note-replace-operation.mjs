@@ -486,7 +486,32 @@ try {
     const interrupted = restartedJournal.get(applying.operationId);
     assert.equal(interrupted.status, "outcome_unknown");
     assert.equal(interrupted.nextContent, "retained exact recovery content");
-    assert.match(interrupted.failure, /process restarted/u);
+    assert.match(
+      interrupted.failure,
+      /process restarted|owning runtime closed/u,
+    );
+  }
+
+  {
+    const sharedPath = path.join(temporaryRoot, "live-owner.sqlite");
+    const ownerJournal = new ObsidianNoteReplaceJournal(sharedPath);
+    const applying = ownerJournal.create({
+      idempotencyKey: "live-owner",
+      requestDigest: sha256("live-owner-request"),
+      path: "Fixture/LiveOwner.md",
+      beforeSha256: sha256("before"),
+      afterSha256: sha256("after"),
+      nextContent: "content owned by the live executor",
+      bindingFingerprint: sha256("fixture-vault-instance"),
+    });
+    ownerJournal.transition(applying.operationId, ["planned"], "applying");
+    const observerJournal = new ObsidianNoteReplaceJournal(sharedPath);
+    assert.equal(observerJournal.get(applying.operationId).status, "applying");
+    ownerJournal.close();
+    const interrupted = observerJournal.get(applying.operationId);
+    assert.equal(interrupted.status, "outcome_unknown");
+    assert.match(interrupted.failure, /owning runtime closed/u);
+    observerJournal.close();
   }
 
   {
@@ -539,7 +564,7 @@ try {
   }
 
   console.log(
-    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, backend binding, atomic conflict, concurrent replay, redacted logging/WAL, and lost-response reconciliation.",
+    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, backend binding, atomic conflict, concurrent replay, live-owner isolation, redacted logging/WAL, and lost-response reconciliation.",
   );
 } finally {
   for (const journal of journals) journal.close();

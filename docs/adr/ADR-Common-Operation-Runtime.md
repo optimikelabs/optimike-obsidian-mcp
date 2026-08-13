@@ -115,7 +115,10 @@ The existing `ObsidianNoteReplaceOperationAdapter`, Atomic Write backend, and
 private journal are owned by one application-lifecycle runtime. The runtime is
 constructed once with the shared REST service, injected into the stdio server
 and every per-session HTTP MCP server, and closed explicitly during process
-shutdown. No session creates a competing journal or REST client.
+shutdown. No session creates a competing journal or REST client. Applying rows
+carry a runtime owner, so another local MCP process sharing the durable journal
+cannot reclassify a live executor as interrupted; dead or explicitly closed
+owners remain recoverable through the exact plan.
 
 The public projection remains domain-specific:
 

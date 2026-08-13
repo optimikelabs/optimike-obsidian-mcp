@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -25,6 +26,11 @@ export type ObsidianNoteReplacePlan = {
   createdAt: string;
   updatedAt: string;
   failure?: string;
+  executionOwner?: {
+    instanceId: string;
+    pid: number;
+    hostname: string;
+  };
 };
 
 export class ObsidianNoteReplaceConcurrencyError extends Error {
@@ -51,8 +57,14 @@ export class ObsidianNoteReplaceJournal {
   private readonly now: () => number;
   private readonly terminalRetentionMs: number;
   private readonly purgeIntervalMs: number;
+  private readonly executionOwner = {
+    instanceId: randomUUID(),
+    pid: process.pid,
+    hostname: hostname(),
+  };
   private nextPurgeAt = 0;
   private walCheckpointRequired = false;
+  private closed = false;
 
   constructor(
     databasePath: string,
@@ -94,6 +106,9 @@ export class ObsidianNoteReplaceJournal {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.markOwnedPlansInterrupted();
     this.db.close();
   }
 
@@ -177,6 +192,9 @@ export class ObsidianNoteReplaceJournal {
       ...current,
       status: next,
       updatedAt: new Date(this.now()).toISOString(),
+      ...(next === "applying"
+        ? { executionOwner: this.executionOwner }
+        : { executionOwner: undefined }),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };
@@ -240,10 +258,12 @@ export class ObsidianNoteReplaceJournal {
     try {
       for (const row of rows) {
         const current = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
+        if (this.executionOwnerIsAlive(current.executionOwner)) continue;
         const interrupted: ObsidianNoteReplacePlan = {
           ...current,
           status: "outcome_unknown",
           updatedAt,
+          executionOwner: undefined,
           failure:
             "The process restarted while apply was in progress; exact-plan recovery is required.",
         };
@@ -253,6 +273,64 @@ export class ObsidianNoteReplaceJournal {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private markOwnedPlansInterrupted(): void {
+    const rows = this.db
+      .prepare(
+        "SELECT operation_id, payload_json FROM obsidian_note_replace_plans WHERE status = 'applying'",
+      )
+      .all() as Array<{ operation_id: string; payload_json: string }>;
+    const owned = rows.filter((row) => {
+      const plan = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
+      return plan.executionOwner?.instanceId === this.executionOwner.instanceId;
+    });
+    if (owned.length === 0) return;
+    const updatedAt = new Date(this.now()).toISOString();
+    const update = this.db.prepare(
+      `UPDATE obsidian_note_replace_plans
+       SET status = 'outcome_unknown', payload_json = ?, updated_at = ?
+       WHERE operation_id = ? AND status = 'applying'`,
+    );
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const row of owned) {
+        const current = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
+        const interrupted: ObsidianNoteReplacePlan = {
+          ...current,
+          status: "outcome_unknown",
+          updatedAt,
+          executionOwner: undefined,
+          failure:
+            "The owning runtime closed while apply was in progress; exact-plan recovery is required.",
+        };
+        update.run(JSON.stringify(interrupted), updatedAt, row.operation_id);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private executionOwnerIsAlive(
+    owner: ObsidianNoteReplacePlan["executionOwner"],
+  ): boolean {
+    if (!owner || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) {
+      return false;
+    }
+    if (owner.hostname !== this.executionOwner.hostname) {
+      // The default journal is machine-local. If an operator deliberately puts
+      // it on shared storage, fail closed instead of declaring a remote owner
+      // interrupted without a distributed lease.
+      return true;
+    }
+    try {
+      process.kill(owner.pid, 0);
+      return true;
+    } catch {
+      return false;
     }
   }
 

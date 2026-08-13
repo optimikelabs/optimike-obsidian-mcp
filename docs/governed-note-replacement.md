@@ -104,6 +104,12 @@ across three independent MCP sessions. It proves that per-session server
 factories share one application runtime and one journal, commit one backend CAS,
 and close that authority cleanly at process shutdown.
 
+Every applying row also records its runtime owner. Opening the same durable
+journal from another local MCP process leaves a live owner's row untouched;
+only a dead owner or an explicit owner shutdown makes exact-plan recovery
+eligible. This prevents an independently launched client from manufacturing an
+interruption while another process is still executing the CAS.
+
 `npm run smoke:atomic-note-mcp-live` is a separate fail-closed operator canary.
 It requires an explicit disposable existing note and confirmation string,
 saves a durable private backup before mutation, proves a real Bridge CAS
