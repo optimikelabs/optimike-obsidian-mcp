@@ -73,8 +73,7 @@ export class ObsidianNoteReplaceJournal {
       options.terminalRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
     this.purgeIntervalMs = options.purgeIntervalMs ?? 60 * 60 * 1000;
     this.executionLeaseMs = options.executionLeaseMs ?? 30_000;
-    this.executionSweepIntervalMs =
-      options.executionSweepIntervalMs ?? 1_000;
+    this.executionSweepIntervalMs = options.executionSweepIntervalMs ?? 1_000;
     mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(databasePath);
     this.db.exec("PRAGMA journal_mode=WAL");
@@ -162,11 +161,12 @@ export class ObsidianNoteReplaceJournal {
       createdAt: now,
       updatedAt: now,
     };
-    this.db
+    const inserted = this.db
       .prepare(
         `INSERT INTO obsidian_note_replace_plans
          (operation_id, idempotency_key, status, payload_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(idempotency_key) DO NOTHING`,
       )
       .run(
         plan.operationId,
@@ -176,7 +176,19 @@ export class ObsidianNoteReplaceJournal {
         plan.createdAt,
         plan.updatedAt,
       );
-    return plan;
+    if (inserted.changes === 1) return plan;
+
+    // Another process won the same-key race after our optimistic lookup.
+    // SQLite serializes the conflicting insert; reload its durable winner
+    // instead of surfacing a UNIQUE constraint as an MCP INTERNAL_ERROR.
+    const winner = this.getByIdempotencyKey(input.idempotencyKey);
+    if (!winner) throw new ObsidianNoteReplaceConcurrencyError();
+    if (winner.requestDigest !== input.requestDigest) {
+      throw new Error(
+        "The idempotency key is already bound to a different note replacement.",
+      );
+    }
+    return winner;
   }
 
   get(operationId: string): ObsidianNoteReplacePlan | undefined {
@@ -341,7 +353,9 @@ export class ObsidianNoteReplaceJournal {
         .all() as Array<{ operation_id: string; payload_json: string }>;
       const owned = rows.filter((row) => {
         const plan = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
-        return plan.executionOwner?.instanceId === this.executionOwner.instanceId;
+        return (
+          plan.executionOwner?.instanceId === this.executionOwner.instanceId
+        );
       });
       for (const row of owned) {
         const current = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;

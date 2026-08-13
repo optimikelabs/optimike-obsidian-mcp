@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ObsidianNoteReplaceOperationAdapter } from "../dist/services/operations/obsidianNoteReplaceOperationAdapter.js";
@@ -13,6 +20,58 @@ import { BaseErrorCode, McpError } from "../dist/types-global/errors.js";
 
 function sha256(content) {
   return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function spawnJournalCreateWorker(config) {
+  const child = spawn(
+    process.execPath,
+    ["scripts/fixtures/obsidian-note-replace-create-worker.mjs"],
+    {
+      env: {
+        ...process.env,
+        OBSIDIAN_NOTE_REPLACE_CREATE_WORKER: JSON.stringify(config),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  return {
+    completion: new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => {
+        if (code !== 0) {
+          reject(
+            new Error(
+              `Journal create worker exited with ${code}: ${stderr || stdout}`,
+            ),
+          );
+          return;
+        }
+        resolve(JSON.parse(stdout));
+      });
+    }),
+  };
+}
+
+async function waitForFiles(paths, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!paths.every((candidate) => existsSync(candidate))) {
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Timed out waiting for worker barriers: ${paths.join(", ")}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 class FakeAtomicWriteBackend {
@@ -404,7 +463,10 @@ try {
     releaseWrite();
     const committed = await winningRecovery;
     assert.equal(committed.outcome, "committed");
-    assert.equal(backend.content, "one write despite concurrent recovery replay");
+    assert.equal(
+      backend.content,
+      "one write despite concurrent recovery replay",
+    );
     assert.equal(backend.replaceCalls, 2);
   }
 
@@ -454,6 +516,40 @@ try {
       }),
       /different note replacement/u,
     );
+  }
+
+  {
+    const databasePath = path.join(
+      temporaryRoot,
+      "multiprocess-idempotent-plan.sqlite",
+    );
+    const initializedJournal = new ObsidianNoteReplaceJournal(databasePath);
+    initializedJournal.close();
+    const startPath = path.join(temporaryRoot, "multiprocess-plan.start");
+    const input = {
+      idempotencyKey: "multiprocess-same-key",
+      requestDigest: sha256("multiprocess-same-request"),
+      path: "Fixture/Multiprocess.md",
+      beforeSha256: sha256("before"),
+      afterSha256: sha256("after"),
+      nextContent: "after",
+      bindingFingerprint: sha256("fixture-vault-instance"),
+    };
+    const readyPaths = [
+      path.join(temporaryRoot, "multiprocess-plan-a.ready"),
+      path.join(temporaryRoot, "multiprocess-plan-b.ready"),
+    ];
+    const workers = readyPaths.map((readyPath) =>
+      spawnJournalCreateWorker({ databasePath, readyPath, startPath, input }),
+    );
+    await waitForFiles(readyPaths);
+    writeFileSync(startPath, "go", "utf8");
+    const [first, second] = await Promise.all(
+      workers.map((worker) => worker.completion),
+    );
+    assert.equal(first.operationId, second.operationId);
+    assert.equal(first.idempotencyKey, input.idempotencyKey);
+    assert.equal(second.requestDigest, input.requestDigest);
   }
 
   {
