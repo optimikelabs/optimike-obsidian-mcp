@@ -126,8 +126,8 @@ The public projection remains domain-specific:
 
 Planning compares protected frontmatter and validates the future Markdown from
 the same Bridge read that seals the before SHA-256. Apply and recover revalidate
-the current MCP write policy before any possible effect. Recovery uses exact-plan
-reconciliation/resumption and is never undo. The guaranteed effect boundary is
+the current MCP write policy before any possible effect. Recovery uses
+exact-plan reconciliation/resumption and is never undo. The guaranteed effect boundary is
 the one target-note transition enforced by `Vault.process` CAS. Sync, watchers,
 plugins, indexers, and external automations remain outside that boundary.
 
