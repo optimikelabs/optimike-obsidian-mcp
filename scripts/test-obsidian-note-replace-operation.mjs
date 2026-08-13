@@ -20,6 +20,7 @@ class FakeAtomicWriteBackend {
   failBeforeWriteOnce = false;
   loseResponseAfterWriteOnce = false;
   afterStatus = undefined;
+  afterRead = undefined;
   beforeWrite = undefined;
   afterWriteBeforeReturn = undefined;
 
@@ -46,7 +47,7 @@ class FakeAtomicWriteBackend {
 
   async read(payload) {
     assert.equal(payload.path, this.path);
-    return {
+    const response = {
       ok: true,
       contractVersion: 1,
       path: this.path,
@@ -55,6 +56,12 @@ class FakeAtomicWriteBackend {
       size: Buffer.byteLength(this.content, "utf8"),
       bindingFingerprint: this.bindingFingerprint,
     };
+    if (this.afterRead) {
+      const afterRead = this.afterRead;
+      this.afterRead = undefined;
+      await afterRead();
+    }
+    return response;
   }
 
   async replace(payload) {
@@ -185,6 +192,29 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture("lost-response-then-drift");
+    backend.loseResponseAfterWriteOnce = true;
+    backend.afterWriteBeforeReturn = async () => {
+      backend.content = "third-party edit after successful hidden write";
+    };
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "written before subsequent drift",
+      idempotencyKey: "lost-response-then-drift",
+    });
+    const result = await adapter.apply(
+      planned.planRef,
+      "lost-response-then-drift",
+    );
+    assert.equal(result.outcome, "outcome_unknown");
+    assert.equal(result.recoveryAllowed, true);
+    assert.equal(
+      backend.content,
+      "third-party edit after successful hidden write",
+    );
+  }
+
+  {
     const { backend, adapter } = fixture("concurrent-status");
     const planned = await adapter.plan({
       path: backend.path,
@@ -251,6 +281,30 @@ try {
     assert.equal(recovered.outcome, "committed");
     assert.equal(backend.content, "recovered");
     assert.equal(backend.replaceCalls, 2);
+  }
+
+  {
+    const { backend, adapter } = fixture("recover-race-to-after");
+    backend.failBeforeWriteOnce = true;
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "appeared between recovery reads",
+      idempotencyKey: "recover-race-to-after",
+    });
+    const unknown = await adapter.apply(
+      planned.planRef,
+      "recover-race-to-after",
+    );
+    assert.equal(unknown.outcome, "outcome_unknown");
+    backend.afterRead = async () => {
+      backend.content = "appeared between recovery reads";
+    };
+    const recovered = await adapter.recover(
+      planned.planRef,
+      "recover-race-to-after",
+    );
+    assert.equal(recovered.outcome, "committed");
+    assert.equal(backend.replaceCalls, 1);
   }
 
   {

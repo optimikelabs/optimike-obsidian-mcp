@@ -299,16 +299,26 @@ export class ObsidianNoteReplaceOperationAdapter
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
-    if (
-      read.bindingFingerprint !== plan.bindingFingerprint ||
-      read.sha256 !== plan.beforeSha256
-    ) {
+    if (read.bindingFingerprint !== plan.bindingFingerprint) {
       return receipt(
         this.transitionOrReload(
           plan.operationId,
           [plan.status],
           "conflict",
-          "Recovery found a different backend instance or note hash.",
+          "Recovery found a different backend instance.",
+        ),
+      );
+    }
+    if (read.sha256 === plan.afterSha256) {
+      return receipt(
+        this.transitionOrReload(plan.operationId, [plan.status], "committed"),
+      );
+    }
+    if (read.sha256 !== plan.beforeSha256) {
+      return receipt(
+        this.uncertain(
+          plan,
+          "Recovery found a hash matching neither sealed proof after the original request may have been sent.",
         ),
       );
     }
@@ -381,19 +391,22 @@ export class ObsidianNoteReplaceOperationAdapter
         "committed",
       );
     } catch (error) {
-      const reconciled = await this.reconcile(plan).catch(() => plan);
-      if (
-        reconciled.status === "committed" ||
-        reconciled.status === "conflict"
-      ) {
-        return reconciled;
-      }
       const conflict =
         error instanceof McpError && error.code === BaseErrorCode.CONFLICT;
-      return this.transitionOrReload(
-        plan.operationId,
-        ["applying"],
-        conflict ? "conflict" : "outcome_unknown",
+      if (conflict) {
+        return this.transitionOrReload(
+          plan.operationId,
+          ["applying"],
+          "conflict",
+          error.message,
+        );
+      }
+      const reconciled = await this.reconcile(plan).catch(() => plan);
+      if (reconciled.status !== "applying") {
+        return reconciled;
+      }
+      return this.uncertain(
+        plan,
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -421,14 +434,25 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 !== plan.beforeSha256) {
-      return this.transitionOrReload(
-        plan.operationId,
-        [plan.status],
-        "conflict",
+      return this.uncertain(
+        plan,
         "The note hash matches neither the sealed before nor after proof.",
       );
     }
     return plan;
+  }
+
+  private uncertain(
+    plan: ObsidianNoteReplacePlan,
+    failure: string,
+  ): ObsidianNoteReplacePlan {
+    if (plan.status === "outcome_unknown") return plan;
+    return this.transitionOrReload(
+      plan.operationId,
+      ["applying"],
+      "outcome_unknown",
+      failure,
+    );
   }
 
   private transitionOrReload(
