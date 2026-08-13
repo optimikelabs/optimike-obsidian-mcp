@@ -1,0 +1,61 @@
+name: Fix Windows governed HTTP test
+
+on:
+  push:
+    branches:
+      - feat/2.6.0-governed-note-replace
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/2.6.0-governed-note-replace
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply bounded listener-race fix
+        shell: bash
+        env:
+          OLD_1: ICBhd2FpdCB0aGlyZC5jbG9zZSgpOwogIHRoaXJkID0gdW5kZWZpbmVkOwogIGJhY2tlbmQua2lsbCgiU0lHVEVSTSIpOwogIGNvbnN0IGV4aXRDb2RlID0gYXdhaXQgbmV3IFByb21pc2UoKHJlc29sdmUpID0+CiAgICBiYWNrZW5kLm9uY2UoImV4aXQiLCAoY29kZSkgPT4gcmVzb2x2ZShjb2RlKSksCiAgKTsKICBhc3NlcnQuZXF1YWwoZXhpdENvZGUsIDApOwo=
+          NEW_1: ICBhd2FpdCB0aGlyZC5jbG9zZSgpOwogIHRoaXJkID0gdW5kZWZpbmVkOwogIGNvbnN0IHByb2Nlc3NFeGl0ID0gbmV3IFByb21pc2UoKHJlc29sdmUsIHJlamVjdCkgPT4gewogICAgYmFja2VuZC5vbmNlKCJlcnJvciIsIHJlamVjdCk7CiAgICBiYWNrZW5kLm9uY2UoImV4aXQiLCAoY29kZSwgc2lnbmFsKSA9PiByZXNvbHZlKHsgY29kZSwgc2lnbmFsIH0pKTsKICB9KTsKICBhc3NlcnQuZXF1YWwoYmFja2VuZC5raWxsKCJTSUdURVJNIiksIHRydWUpOwogIGNvbnN0IGV4aXQgPSBhd2FpdCBQcm9taXNlLnJhY2UoWwogICAgcHJvY2Vzc0V4aXQsCiAgICBuZXcgUHJvbWlzZSgoXywgcmVqZWN0KSA9PgogICAgICBzZXRUaW1lb3V0KAogICAgICAgICgpID0+IHJlamVjdChuZXcgRXJyb3IoIlRpbWVkIG91dCB3YWl0aW5nIGZvciBIVFRQIE1DUCBwcm9jZXNzIGV4aXQuIikpLAogICAgICAgIDEwXzAwMCwKICAgICAgKSwKICAgICksCiAgXSk7CiAgaWYgKHByb2Nlc3MucGxhdGZvcm0gPT09ICJ3aW4zMiIpIHsKICAgIGFzc2VydC5kZWVwRXF1YWwoZXhpdCwgeyBjb2RlOiBudWxsLCBzaWduYWw6ICJTSUdURVJNIiB9KTsKICB9IGVsc2UgewogICAgYXNzZXJ0LmRlZXBFcXVhbChleGl0LCB7IGNvZGU6IDAsIHNpZ25hbDogbnVsbCB9KTsKICB9Cg==
+          OLD_2: ICBjb25zb2xlLmxvZygKICAgICJQQVNTOiBvbmUgcHJvY2Vzcy13aWRlIGdvdmVybmVkIG5vdGUgcnVudGltZSBjYXJyaWVkIGEgc2VhbGVkIHBsYW4gYWNyb3NzIHRocmVlIHJlYWwgSFRUUCBNQ1Agc2Vzc2lvbnMsIGNvbW1pdHRlZCBvbmNlLCByZXBsYXllZCBzYWZlbHksIGFuZCBjbG9zZWQgY2xlYW5seSBvbiBzaHV0ZG93bi4iLAogICk7Cn0gZmluYWxseSB7CiAgYXdhaXQgZmlyc3Q/LmNsb3NlKCk7CiAgYXdhaXQgc2Vjb25kPy5jbG9zZSgpOwogIGF3YWl0IHRoaXJkPy5jbG9zZSgpOwogIGlmIChiYWNrZW5kLmV4aXRDb2RlID09PSBudWxsKSB7CiAgICBiYWNrZW5kLmtpbGwoIlNJR0tJTEwiKTsKICAgIGF3YWl0IG5ldyBQcm9taXNlKChyZXNvbHZlKSA9PiBiYWNrZW5kLm9uY2UoImV4aXQiLCAoKSA9PiByZXNvbHZlKCkpKTsKICB9Cg==
+          NEW_2: ICBjb25zb2xlLmxvZygKICAgIGBQQVNTOiBvbmUgcHJvY2Vzcy13aWRlIGdvdmVybmVkIG5vdGUgcnVudGltZSBjYXJyaWVkIGEgc2VhbGVkIHBsYW4gYWNyb3NzIHRocmVlIHJlYWwgSFRUUCBNQ1Agc2Vzc2lvbnMsIGNvbW1pdHRlZCBvbmNlLCByZXBsYXllZCBzYWZlbHksIGFuZCB0ZXJtaW5hdGVkIGRldGVybWluaXN0aWNhbGx5ICgke3Byb2Nlc3MucGxhdGZvcm19KS5gLAogICk7Cn0gZmluYWxseSB7CiAgYXdhaXQgZmlyc3Q/LmNsb3NlKCk7CiAgYXdhaXQgc2Vjb25kPy5jbG9zZSgpOwogIGF3YWl0IHRoaXJkPy5jbG9zZSgpOwogIGlmIChiYWNrZW5kLmV4aXRDb2RlID09PSBudWxsICYmIGJhY2tlbmQuc2lnbmFsQ29kZSA9PT0gbnVsbCkgewogICAgY29uc3QgZm9yY2VkRXhpdCA9IG5ldyBQcm9taXNlKChyZXNvbHZlKSA9PgogICAgICBiYWNrZW5kLm9uY2UoImV4aXQiLCAoKSA9PiByZXNvbHZlKCkpLAogICAgKTsKICAgIGJhY2tlbmQua2lsbCgiU0lHS0lMTCIpOwogICAgYXdhaXQgZm9yY2VkRXhpdDsKICB9Cg==
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from base64 import b64decode
+          from pathlib import Path
+          import os
+
+          path = Path('scripts/test-governed-note-replace-http.mjs')
+          text = path.read_text()
+          for index in ('1', '2'):
+              old = b64decode(os.environ[f'OLD_{index}']).decode()
+              new = b64decode(os.environ[f'NEW_{index}']).decode()
+              assert text.count(old) == 1, f'expected one bounded replacement for block {index}'
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          node --check scripts/test-governed-note-replace-http.mjs
+          git diff --check
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/test-governed-note-replace-http.mjs
+      - name: Commit test-only fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/test-governed-note-replace-http.mjs
+          git diff --cached --check
+          git commit -m "test(ci): fix Windows process-exit listener race"
+          git push origin HEAD:feat/2.6.0-governed-note-replace
