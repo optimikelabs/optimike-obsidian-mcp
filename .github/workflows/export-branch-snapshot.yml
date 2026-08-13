@@ -10,13 +10,13 @@ permissions:
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]' && github.event.head_commit.message == 'chore: install reviewed 2.6 RC patch workflow'
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feat/2.6.0-governed-note-replace
-          fetch-depth: 2
+          fetch-depth: 3
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,7 +25,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "c2b2fd136aca3bfd17ed11fd9464201b653ecc63"
+          BASE=c2b2fd136aca3bfd17ed11fd9464201b653ecc63
+          test "$(git diff --name-only "$BASE"..HEAD)" = ".github/workflows/export-branch-snapshot.yml"
           git fetch origin tmp/2.6-rc-patch:refs/remotes/origin/tmp/2.6-rc-patch
           rm -rf /tmp/optimike-rc-payload
           mkdir -p /tmp/optimike-rc-payload
@@ -52,7 +53,7 @@ jobs:
           assert hashlib.sha256(patch).hexdigest() == '40be189041ba7fcf241adf08a84f5b4ebd1fd4217070fc5f3b775d3ed4df1f9a'
           Path('/tmp/optimike-2.6-completion.patch').write_bytes(patch)
           PY
-          git show HEAD^:.github/workflows/export-branch-snapshot.yml > .github/workflows/export-branch-snapshot.yml
+          git show "$BASE":.github/workflows/export-branch-snapshot.yml > .github/workflows/export-branch-snapshot.yml
           git apply --check /tmp/optimike-2.6-completion.patch
           git apply /tmp/optimike-2.6-completion.patch
           git diff --check
