@@ -1,7 +1,6 @@
 # Optimike Obsidian MCP
 
 [![Latest release](https://img.shields.io/github/v/release/optimikelabs/optimike-obsidian-mcp?display_name=tag&sort=semver)](https://github.com/optimikelabs/optimike-obsidian-mcp/releases/latest)
-
 French version: [README.fr.md](README.fr.md) · Documentation hub: [docs/README.md](docs/README.md)
 Operations: [OPERATIONS.md](OPERATIONS.md)
 Security: [SECURITY.md](SECURITY.md)
