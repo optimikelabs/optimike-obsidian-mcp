@@ -315,9 +315,7 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 === plan.afterSha256) {
-      return receipt(
-        this.transitionOrReload(plan, [plan.status], "committed"),
-      );
+      return receipt(this.transitionOrReload(plan, [plan.status], "committed"));
     }
     if (read.sha256 !== plan.beforeSha256) {
       return receipt(
@@ -398,15 +396,15 @@ export class ObsidianNoteReplaceOperationAdapter
           "Atomic-write postflight did not match the sealed plan.",
         );
       }
-      return this.transitionOrReload(
-        plan,
-        ["applying"],
-        "committed",
-      );
+      return this.transitionOrReload(plan, ["applying"], "committed");
     } catch (error) {
       const conflict =
         error instanceof McpError && error.code === BaseErrorCode.CONFLICT;
       if (conflict) {
+        const reconciled = await this.reconcileCasConflict(plan).catch(
+          () => plan,
+        );
+        if (reconciled.status !== "applying") return reconciled;
         return this.transitionOrReload(
           plan,
           ["applying"],
@@ -435,6 +433,22 @@ export class ObsidianNoteReplaceOperationAdapter
     }
   }
 
+  private async reconcileCasConflict(
+    plan: ObsidianNoteReplacePlan,
+  ): Promise<ObsidianNoteReplacePlan> {
+    const read = ReadSchema.parse(
+      await this.backend.read({ contractVersion: 1, path: plan.path }),
+    );
+    if (
+      read.bindingFingerprint === plan.bindingFingerprint &&
+      read.path === plan.path &&
+      read.sha256 === plan.afterSha256
+    ) {
+      return this.transitionOrReload(plan, ["applying"], "committed");
+    }
+    return plan;
+  }
+
   private async reconcile(
     plan: ObsidianNoteReplacePlan,
   ): Promise<ObsidianNoteReplacePlan> {
@@ -450,11 +464,7 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 === plan.afterSha256) {
-      return this.transitionOrReload(
-        plan,
-        [plan.status],
-        "committed",
-      );
+      return this.transitionOrReload(plan, [plan.status], "committed");
     }
     if (read.sha256 !== plan.beforeSha256) {
       return this.uncertain(

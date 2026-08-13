@@ -93,9 +93,11 @@ export class ObsidianNoteReplaceJournal {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS obsidian_note_replace_runtime_leases (
         instance_id TEXT PRIMARY KEY,
-        heartbeat_at TEXT NOT NULL
+        heartbeat_at TEXT NOT NULL,
+        expires_at TEXT
       )
     `);
+    this.ensureExecutionLeaseExpiryColumn();
     this.renewExecutionLease();
     this.markInterruptedPlans();
     this.maybePurgeTerminalPlans();
@@ -127,14 +129,19 @@ export class ObsidianNoteReplaceJournal {
 
   renewExecutionLease(): void {
     if (this.closed) return;
-    const heartbeatAt = new Date(this.now()).toISOString();
+    const now = this.now();
+    const heartbeatAt = new Date(now).toISOString();
+    const expiresAt = new Date(now + this.executionLeaseMs).toISOString();
     this.db
       .prepare(
-        `INSERT INTO obsidian_note_replace_runtime_leases (instance_id, heartbeat_at)
-         VALUES (?, ?)
-         ON CONFLICT(instance_id) DO UPDATE SET heartbeat_at = excluded.heartbeat_at`,
+        `INSERT INTO obsidian_note_replace_runtime_leases
+           (instance_id, heartbeat_at, expires_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(instance_id) DO UPDATE SET
+           heartbeat_at = excluded.heartbeat_at,
+           expires_at = excluded.expires_at`,
       )
-      .run(this.executionOwner.instanceId, heartbeatAt);
+      .run(this.executionOwner.instanceId, heartbeatAt, expiresAt);
   }
 
   create(
@@ -387,15 +394,31 @@ export class ObsidianNoteReplaceJournal {
     if (!owner?.instanceId) return false;
     const row = this.db
       .prepare(
-        "SELECT heartbeat_at FROM obsidian_note_replace_runtime_leases WHERE instance_id = ?",
+        "SELECT expires_at FROM obsidian_note_replace_runtime_leases WHERE instance_id = ?",
       )
-      .get(owner.instanceId) as { heartbeat_at: string } | undefined;
+      .get(owner.instanceId) as { expires_at: string | null } | undefined;
     if (!row) return false;
-    const heartbeatAt = Date.parse(row.heartbeat_at);
-    return (
-      Number.isFinite(heartbeatAt) &&
-      heartbeatAt >= this.now() - this.executionLeaseMs
-    );
+    const expiresAt = Date.parse(row.expires_at ?? "");
+    return Number.isFinite(expiresAt) && expiresAt > this.now();
+  }
+
+  private ensureExecutionLeaseExpiryColumn(): void {
+    const hasExpiry = () =>
+      (
+        this.db
+          .prepare("PRAGMA table_info(obsidian_note_replace_runtime_leases)")
+          .all() as Array<{ name: string }>
+      ).some((column) => column.name === "expires_at");
+    if (hasExpiry()) return;
+    try {
+      this.db.exec(
+        "ALTER TABLE obsidian_note_replace_runtime_leases ADD COLUMN expires_at TEXT",
+      );
+    } catch (error) {
+      // Another process may have completed the same additive migration after
+      // our schema read. Only suppress that race when the column now exists.
+      if (!hasExpiry()) throw error;
+    }
   }
 
   private checkpointSensitiveFrames(): void {

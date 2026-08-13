@@ -232,6 +232,25 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture("cas-conflict-after-proof");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "committed by the expired executor",
+      idempotencyKey: "cas-conflict-after-proof",
+    });
+    backend.beforeWrite = async () => {
+      backend.content = "committed by the expired executor";
+    };
+    const result = await adapter.apply(
+      planned.planRef,
+      "cas-conflict-after-proof",
+    );
+    assert.equal(result.outcome, "committed");
+    assert.equal(result.postflight.status, "verified");
+    assert.equal(backend.replaceCalls, 1);
+  }
+
+  {
     const { backend, adapter } = fixture("disabled-between-status-and-cas");
     const planned = await adapter.plan({
       path: backend.path,
@@ -658,6 +677,45 @@ try {
     );
     ownerJournal.close();
     observerJournal.close();
+  }
+
+  {
+    const sharedPath = path.join(temporaryRoot, "owner-lease-policy.sqlite");
+    let leaseNow = Date.parse("2026-08-13T00:00:00.000Z");
+    const ownerJournal = new ObsidianNoteReplaceJournal(sharedPath, {
+      now: () => leaseNow,
+      executionLeaseMs: 30_000,
+      executionSweepIntervalMs: 100,
+    });
+    journals.push(ownerJournal);
+    const applying = ownerJournal.create({
+      idempotencyKey: "owner-lease-policy",
+      requestDigest: sha256("owner-lease-policy-request"),
+      path: "Fixture/OwnerLease.md",
+      beforeSha256: sha256("before"),
+      afterSha256: sha256("after"),
+      nextContent: "owned under the owner's lease policy",
+      bindingFingerprint: sha256("fixture-vault-instance"),
+    });
+    ownerJournal.transition(applying.operationId, ["planned"], "applying");
+    leaseNow += 2_000;
+    const shortLeaseObserver = new ObsidianNoteReplaceJournal(sharedPath, {
+      now: () => leaseNow,
+      executionLeaseMs: 1_000,
+      executionSweepIntervalMs: 100,
+    });
+    journals.push(shortLeaseObserver);
+    assert.equal(
+      shortLeaseObserver.get(applying.operationId).status,
+      "applying",
+    );
+    leaseNow += 29_000;
+    assert.equal(
+      shortLeaseObserver.get(applying.operationId).status,
+      "outcome_unknown",
+    );
+    ownerJournal.close();
+    shortLeaseObserver.close();
   }
 
   {
