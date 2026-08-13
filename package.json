@@ -139,7 +139,9 @@
     "test:external-reference-parser": "node scripts/test-external-reference-parser.mjs",
     "test:obsidian-cas": "node scripts/test-obsidian-cas.mjs && node scripts/test-obsidian-search-replace-cas.mjs",
     "test:external-move": "node scripts/test-external-move-integrity.mjs",
-    "test:operation-runtime": "npm run build && node scripts/test-external-move-integrity.mjs && node scripts/test-obsidian-note-replace-operation.mjs"
+    "test:operation-runtime": "npm run build && node scripts/test-external-move-integrity.mjs && node scripts/test-obsidian-note-replace-operation.mjs",
+    "test:governed-note-replace-mcp": "npm run build && node scripts/test-governed-note-replace-mcp.mjs",
+    "smoke:atomic-note-mcp-live": "npm run build && node scripts/smoke-atomic-note-mcp-live.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
@@ -156,7 +158,7 @@
     "js-yaml": "^4.1.0",
     "json5": "^2.2.3",
     "mdast-util-from-markdown": "^2.0.3",
-    "mdast-util-gfm": "^3.1.0",
+    "mdast-util-gfm": "^3.0.0",
     "micromark-extension-gfm": "^3.0.0",
     "openai": "^5.6.0",
     "partial-json": "^0.1.7",
