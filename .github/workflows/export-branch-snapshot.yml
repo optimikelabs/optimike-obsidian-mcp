@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feat/2.6.0-governed-note-replace
-          fetch-depth: 4
+          fetch-depth: 5
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -81,6 +81,14 @@ jobs:
         run: npm run test:tool-annotations
       - name: Test documentation
         run: npm run test:docs
+      - name: Install Bridge dependencies
+        shell: bash
+        run: |
+          npm --prefix plugins/obsidian-bases-bridge ci
+          npm --prefix plugins/obsidian-operon-bridge ci
+          npm --prefix plugins/obsidian-atomic-write-bridge ci
+      - name: Build installable Bridges
+        run: npm run build:bridges
       - name: Test package contents
         run: npm run test:package
       - name: Commit reviewed RC completion
