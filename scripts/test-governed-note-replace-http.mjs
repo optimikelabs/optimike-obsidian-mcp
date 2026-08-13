@@ -354,11 +354,25 @@ try {
 
   await third.close();
   third = undefined;
-  backend.kill("SIGTERM");
-  const exitCode = await new Promise((resolve) =>
-    backend.once("exit", (code) => resolve(code)),
-  );
-  assert.equal(exitCode, 0);
+  const processExit = new Promise((resolve, reject) => {
+    backend.once("error", reject);
+    backend.once("exit", (code, signal) => resolve({ code, signal }));
+  });
+  assert.equal(backend.kill("SIGTERM"), true);
+  const exit = await Promise.race([
+    processExit,
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Timed out waiting for HTTP MCP process exit.")),
+        10_000,
+      ),
+    ),
+  ]);
+  if (process.platform === "win32") {
+    assert.deepEqual(exit, { code: null, signal: "SIGTERM" });
+  } else {
+    assert.deepEqual(exit, { code: 0, signal: null });
+  }
   assert.equal(stderr.includes(SECRET), false);
   assert.equal(stdout.includes(SECRET), false);
   assert.equal(stderr.includes(journalPath), false);
@@ -370,15 +384,18 @@ try {
   }
 
   console.log(
-    "PASS: one process-wide governed note runtime carried a sealed plan across three real HTTP MCP sessions, committed once, replayed safely, and closed cleanly on shutdown.",
+    `PASS: one process-wide governed note runtime carried a sealed plan across three real HTTP MCP sessions, committed once, replayed safely, and terminated deterministically (${process.platform}).`,
   );
 } finally {
   await first?.close();
   await second?.close();
   await third?.close();
-  if (backend.exitCode === null) {
+  if (backend.exitCode === null && backend.signalCode === null) {
+    const forcedExit = new Promise((resolve) =>
+      backend.once("exit", () => resolve()),
+    );
     backend.kill("SIGKILL");
-    await new Promise((resolve) => backend.once("exit", () => resolve()));
+    await forcedExit;
   }
   await fake.close();
   rmSync(root, { recursive: true, force: true });
