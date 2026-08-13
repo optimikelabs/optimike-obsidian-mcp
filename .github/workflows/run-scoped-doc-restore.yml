@@ -1,0 +1,68 @@
+name: Run scoped 2.6 documentation restoration
+
+on:
+  push:
+    branches:
+      - feat/2.6.0-governed-note-replace
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/2.6.0-governed-note-replace
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Restore authorities and execute reviewed insertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=71bac26594fcba9c6fa6735ebd777b2e2820ad9f
+          git checkout "$BASE" -- \
+            README.md \
+            README.fr.md \
+            docs/README.md \
+            docs/README.fr.md \
+            docs/runtime-capability-matrix.fr.md \
+            docs/adr/ADR-Common-Operation-Runtime.md
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/restore-2.6-doc-scope.yml').read_text()
+          marker = "          python - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY\n", start)
+          script = textwrap.dedent(workflow[start:end])
+          exec(compile(script, 'scoped-doc-restore', 'exec'), {})
+
+          adr_path = Path('docs/adr/ADR-Common-Operation-Runtime.md')
+          adr = adr_path.read_text()
+          old = 'Recovery is exact-plan\nreconciliation/resumption, never undo.'
+          new = 'Recovery uses exact-plan reconciliation/resumption and is never undo.'
+          assert adr.count(old) == 1, 'expected split recovery phrase once'
+          adr_path.write_text(adr.replace(old, new, 1))
+          PY
+          git diff --check
+          git diff --stat
+      - run: npm ci
+      - run: node scripts/test-governed-note-doc-contract.mjs
+      - run: npm run test:docs
+      - name: Commit scoped documentation only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md README.fr.md docs/README.md docs/README.fr.md docs/runtime-capability-matrix.fr.md docs/adr/ADR-Common-Operation-Runtime.md
+          git diff --cached --check
+          git commit -m "docs: preserve 2.5 authorities while documenting governed replacement"
+          git push origin HEAD:feat/2.6.0-governed-note-replace
