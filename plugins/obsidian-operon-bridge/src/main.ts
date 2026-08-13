@@ -940,7 +940,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         pluginId: runtime?.pluginId ?? loadedEngine?.id ?? null,
         pluginName: runtime?.pluginName ?? loadedEngine?.name ?? null,
         version: runtime?.version ?? (loadedVersion || null),
-        compatible: Boolean(runtime?.compatible),
+        compatible: Boolean(runtime?.compatible && !contractInvalid),
         compatibilityState: reportedCompatibilityState,
         compatibilityAdmission: reportedCompatibilityAdmission,
         compatibilityReason: reportedCompatibilityReason,
