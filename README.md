@@ -20,7 +20,7 @@ explicitly governed access to configured documents outside the vault.
 | ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------- |
 | Notes                   | Read, list, search, update, frontmatter and tags                       | Vault; Local REST API for the full live surface    |
 | Bases and Canvas        | Bases query/write tools, format validation and bounded Canvas helpers  | Bases Bridge for live Bases                        |
-| Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools     | Operon 3.2.1 Developer API V1 through the Bridge   |
+| Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools     | Operon Developer API V1 through the Bridge         |
 | Semantic search         | Smart Connections index search with durable metadata cache             | `.smart-env` plus Ollama or OpenAI query embedding |
 | Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions | Local filesystem                                   |
 | External documents      | Governed reads/handoff plus opt-in local move with exact link repair   | Allowlist; local stdio for move                    |
@@ -91,7 +91,7 @@ Enable only the surfaces you use:
   live note, metadata and tag operations;
 - bundled **Bases Bridge (REST)**: live `.base` operations;
 - **Smart Connections**: semantic index under `.smart-env`;
-- **Operon 3.2.1** and the bundled **Optimike Operon Bridge**: governed live
+- **Operon Developer API V1** and the bundled **Optimike Operon Bridge**: governed live
   task operations through the official Developer API V1;
 - Kairélys compatibility remains available as a bounded legacy/rollback path,
   not as the production owner;
@@ -120,9 +120,13 @@ Transition apply is available through the Bridge. Elevated or destructive plans
 still require fresh confirmation in the owning Obsidian vault window and fail
 closed after 45 seconds when no confirmation can be presented.
 
-Compatibility note: the adapter targets official Operon `3.2.1` and Bridge
-`0.6.0`; `3.2.0` remains explicitly compatible and is the version used by the
-complete live acceptance run. Modified-time frontmatter settlement and
+Compatibility note: the adapter negotiates Operon Developer API V1 with
+`contractVersion: 1` and `runtimeApi: 1`. Versions proven by a complete live
+acceptance run are `certified`; an otherwise unknown Operon release exposing
+the same validated contract is `compatible-provisional` instead of being
+blocked by its product version alone. Missing capabilities fail closed only for
+the affected tools, while known regressions remain explicitly denied.
+Operon `3.2.0` is the version used by the complete live acceptance run. Modified-time frontmatter settlement and
 multi-window consent were merged upstream before these releases. Saved-filter execution is available
 through the additive task-workflow Developer API after an exact grant, but the
 official API does not expose the saved-filter catalog: callers must supply an

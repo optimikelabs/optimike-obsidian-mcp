@@ -75,6 +75,25 @@ Un payload invalide, une pagination tronquée, une génération instable, des ID
 dupliqués, une version incompatible, un index non prêt ou une validation P0
 n’écrasent jamais le dernier snapshot sain.
 
+### Compatibilité « vacation-safe »
+
+L’admission d’Operon 3.x dépend du contrat runtime, pas d’une allowlist exacte
+de versions produit. Le Bridge exige l’accesseur officiel
+`getDeveloperApiV1`, négocie `contractVersion: 1` avec `runtimeApi: 1`, puis
+valide les capacités accordées, les schémas de réponse, la santé live, le
+catalogue, la pagination complète des tâches et les diagnostics d’index.
+
+Le statut distingue :
+
+- `certified` : release ayant passé l’acceptation live ;
+- `compatible-provisional` : release inconnue dont la frontière Developer API
+  V1 passe les mêmes contrôles runtime ;
+- `incompatible` : frontière absente, explicitement refusée ou invalide.
+
+Une régression comportementale connue peut rester bloquée par version et par
+opération. Une capacité optionnelle absente désactive seulement les outils qui
+en dépendent. Un futur contrat n’est jamais accepté silencieusement.
+
 `operon_query_saved_filter` est live-only et dépend d’une capacité native. Sur
 Operon officiel `3.2.0`, il utilise la Developer API task-workflow après un grant
 exact `tasks.filter-query`. L’appelant doit fournir un `filterSetId` exact :

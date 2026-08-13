@@ -1,4 +1,5 @@
 import {
+	OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
   type OperonSemanticConfiguration,
   type RuntimeIndexDiagnostics,
   type RuntimeIndexedTask,
@@ -883,6 +884,34 @@ function isDeveloperApiAccessor(value: unknown): value is DeveloperApiAccessor {
   return typeof candidate.getDeveloperApiV1 === "function";
 }
 
+const STARTUP_REFRESH_RETRY_LIMIT = 2;
+const STARTUP_REFRESH_RETRY_MAX_MS = 1_500;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isDeveloperApiV1(value: unknown): value is DeveloperApiV1 {
+  if (!isRecord(value)) return false;
+  const channel = isRecord(value.channel) ? value.channel : null;
+  const system = isRecord(value.system) ? value.system : null;
+  const catalog = isRecord(value.catalog) ? value.catalog : null;
+  const tasks = isRecord(value.tasks) ? value.tasks : null;
+  return Boolean(
+    typeof value.hasCapability === "function" &&
+      channel &&
+      typeof channel.status === "function" &&
+      system &&
+      typeof system.health === "function" &&
+      typeof system.capabilities === "function" &&
+      typeof system.diagnostics === "function" &&
+      catalog &&
+      typeof catalog.snapshot === "function" &&
+      tasks &&
+      typeof tasks.query === "function",
+  );
+}
+
 function isTaskWorkflowDeveloperApiAccessor(
   value: unknown,
 ): value is TaskWorkflowDeveloperApiAccessor {
@@ -945,6 +974,7 @@ export class OperonDeveloperApiRuntimeAdapter {
   private filterQueryApi: TaskWorkflowDeveloperApiV1 | null = null;
   private grantedCapabilities: ReadonlySet<string> | null = null;
   private refreshInFlight: Promise<boolean> | null = null;
+  private contractState: "unverified" | "valid" | "invalid" = "unverified";
 
   constructor(
     private readonly consumerPlugin: DeveloperApiConsumerPlugin,
@@ -964,14 +994,49 @@ export class OperonDeveloperApiRuntimeAdapter {
     return this.channelStatus;
   }
 
+  get negotiatedContractState(): "unverified" | "valid" | "invalid" {
+    return this.contractState;
+  }
+
   async refresh(includeMutationCapabilities = false): Promise<boolean> {
     if (this.refreshInFlight) return this.refreshInFlight;
-    this.refreshInFlight = this.refreshInternal(
+    this.refreshInFlight = this.refreshWithStartupRetry(
       includeMutationCapabilities,
     ).finally(() => {
       this.refreshInFlight = null;
     });
     return this.refreshInFlight;
+  }
+
+  private async refreshWithStartupRetry(
+    includeMutationCapabilities: boolean,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt <= STARTUP_REFRESH_RETRY_LIMIT; attempt += 1) {
+      if (await this.refreshInternal(includeMutationCapabilities)) return true;
+      const retryAfterMs = this.startupRetryDelayMs();
+      if (retryAfterMs === null || attempt === STARTUP_REFRESH_RETRY_LIMIT)
+        return false;
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, retryAfterMs);
+      });
+    }
+    return false;
+  }
+
+  private startupRetryDelayMs(): number | null {
+    if (
+      this.channelStatus.availability !== "degraded" ||
+      this.channelStatus.reason !== "cache-ready" ||
+      this.channelStatus.admission?.reads !== true
+    ) {
+      return null;
+    }
+    const requestedDelay = Number(this.channelStatus.retryAfterMs ?? 500);
+    if (!Number.isFinite(requestedDelay)) return 500;
+    return Math.min(
+      STARTUP_REFRESH_RETRY_MAX_MS,
+      Math.max(0, Math.trunc(requestedDelay)),
+    );
   }
 
   private async refreshInternal(
@@ -1338,8 +1403,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     const access = this.taskWorkflowAccessor.getTaskWorkflowDeveloperApiV1(
       this.consumerPlugin,
       {
-        contractVersion: 1,
-        runtimeApi: { min: 1, max: 1 },
+		...OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
         requestedCapabilities: ["tasks.filter-query"],
       },
     );
@@ -1368,25 +1432,63 @@ export class OperonDeveloperApiRuntimeAdapter {
     updateStatus = true,
   ): DeveloperApiV1 | null {
     if (!this.accessor) return null;
-    const access = this.accessor.getDeveloperApiV1(this.consumerPlugin, {
-      contractVersion: 1,
-      runtimeApi: { min: 1, max: 1 },
-      requestedCapabilities,
-    });
-    if (updateStatus) this.channelStatus = access.status;
-    const grant = grantedCapabilitiesFromStatus(access.status);
-    if (grant) this.grantedCapabilities = grant;
-    if (!access.ok || !access.api) {
+    let rawAccess: unknown;
+    try {
+      rawAccess = this.accessor.getDeveloperApiV1(this.consumerPlugin, {
+        ...OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
+        requestedCapabilities,
+      });
+    } catch (error) {
+      this.contractState = "invalid";
+      this.channelStatus = {
+        error: {
+          reason:
+            error instanceof Error
+              ? error.message
+              : "Operon Developer API V1 negotiation threw an unknown error.",
+        },
+      };
       return null;
     }
+    if (!isRecord(rawAccess)) {
+      this.contractState = "invalid";
+      this.channelStatus = {
+        error: {
+          reason: "Operon Developer API V1 negotiation returned an invalid result.",
+        },
+      };
+      return null;
+    }
+    const status = isRecord(rawAccess.status)
+      ? (rawAccess.status as DeveloperApiChannelStatus)
+      : {};
+    if (updateStatus) this.channelStatus = status;
+    const grant = grantedCapabilitiesFromStatus(status);
+    if (grant) this.grantedCapabilities = grant;
+    if (rawAccess.ok !== true) {
+      return null;
+    }
+    if (!isDeveloperApiV1(rawAccess.api)) {
+      this.contractState = "invalid";
+      this.channelStatus = {
+        ...status,
+        error: {
+          reason:
+            "Operon Developer API V1 negotiation returned an incomplete runtime contract.",
+        },
+      };
+      return null;
+    }
+    const api = rawAccess.api;
+    this.contractState = "valid";
     // Keep the channel status aligned with the strongest successful session.
     // Mutation probes intentionally avoid replacing useful read status when a
     // capability is unavailable, but a granted write session must be visible
     // to diagnostics instead of leaving the baseline reads-only admission.
-    if (!updateStatus && access.status.admission?.writes === true) {
-      this.channelStatus = access.status;
+    if (!updateStatus && status.admission?.writes === true) {
+      this.channelStatus = status;
     }
-    return access.api;
+    return api;
   }
 
   private async readAllTasks(api: DeveloperApiV1): Promise<{

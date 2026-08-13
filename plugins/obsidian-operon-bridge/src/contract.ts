@@ -7,10 +7,46 @@ export const OPERON_BRIDGE_DEVELOPER_API_VERSIONS = [
 	"3.2.0",
 	OPERON_BRIDGE_TESTED_VERSION,
 ] as const;
-export const OPERON_BRIDGE_SUPPORTED_VERSIONS = {
-	operon: ["2.4.0", "2.5.0", ...OPERON_BRIDGE_DEVELOPER_API_VERSIONS],
+export const OPERON_BRIDGE_LEGACY_VERSIONS = {
+	operon: ["2.4.0", "2.5.0"],
 	kairelys: ["2.5.1", "2.5.2", "2.5.3", "2.6.1", "2.6.2", "2.6.3"],
 } as const;
+
+export const OPERON_BRIDGE_SUPPORTED_VERSIONS = {
+	operon: [
+		...OPERON_BRIDGE_LEGACY_VERSIONS.operon,
+		...OPERON_BRIDGE_DEVELOPER_API_VERSIONS,
+	],
+	kairelys: OPERON_BRIDGE_LEGACY_VERSIONS.kairelys,
+} as const;
+
+export const OPERON_BRIDGE_DEVELOPER_API_CONTRACT = {
+	contractVersion: 1,
+	runtimeApi: { min: 1, max: 1 },
+} as const;
+
+export const OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS: Readonly<
+	Record<string, string>
+> = {
+	"3.0.0":
+		"Operon 3.0.0 predates the accepted Developer API V1 integration baseline.",
+};
+
+export type OperonCompatibilityState =
+	| "certified"
+	| "compatible-provisional"
+	| "incompatible";
+
+export type OperonCompatibilityAdmission =
+	| "developer-api-v1"
+	| "legacy-version"
+	| "none";
+
+export interface OperonCompatibilityDecision {
+	state: OperonCompatibilityState;
+	admission: OperonCompatibilityAdmission;
+	reason: string;
+}
 
 // Fail closed only for upstream mutation paths that have not produced a
 // trustworthy terminal or durable recovery result in live acceptance.
@@ -24,8 +60,58 @@ export const OPERON_BRIDGE_BLOCKED_MUTATIONS = {
 	"3.2.1": [],
 } as const;
 
-export function isDeveloperApiVersion(version: string): boolean {
+export function isCertifiedDeveloperApiVersion(version: string): boolean {
 	return (OPERON_BRIDGE_DEVELOPER_API_VERSIONS as readonly string[]).includes(version.trim());
+}
+
+export function resolveOperonCompatibility(options: {
+	pluginId: "kairelys" | "operon";
+	version: string;
+	hasDeveloperApiV1: boolean;
+}): OperonCompatibilityDecision {
+	const version = options.version.trim();
+	if (options.pluginId === "operon" && options.hasDeveloperApiV1) {
+		const deniedReason = OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS[version];
+		if (deniedReason) {
+			return {
+				state: "incompatible",
+				admission: "none",
+				reason: deniedReason,
+			};
+		}
+		if (isCertifiedDeveloperApiVersion(version)) {
+			return {
+				state: "certified",
+				admission: "developer-api-v1",
+				reason: `Operon ${version} is certified against Developer API V1.`,
+			};
+		}
+		return {
+			state: "compatible-provisional",
+			admission: "developer-api-v1",
+			reason:
+				"The loaded Operon version is not yet certified, but it exposes the negotiated Developer API V1 boundary; runtime capability and schema checks remain mandatory.",
+		};
+	}
+
+	if (
+		(OPERON_BRIDGE_LEGACY_VERSIONS[options.pluginId] as readonly string[]).includes(version)
+	) {
+		return {
+			state: "certified",
+			admission: "legacy-version",
+			reason: `${options.pluginId} ${version} is certified on the bounded legacy adapter.`,
+		};
+	}
+
+	return {
+		state: "incompatible",
+		admission: "none",
+		reason:
+			options.pluginId === "operon"
+				? "Operon does not expose the accepted Developer API V1 boundary and is not a certified legacy version."
+				: "The loaded Kairélys version is outside the certified legacy compatibility set.",
+	};
 }
 
 export function isCanonicalVaultRelativePath(value: unknown): value is string {
