@@ -2,7 +2,7 @@
 
 French version: [runtime-capability-matrix.fr.md](runtime-capability-matrix.fr.md)
 
-Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Headless Server Profile](headless-server-profile.md), [MCP Routing Guide](mcp-routing-guide.md), [External Roots Setup](external-roots-setup.md)
+Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Governed note replacement](governed-note-replacement.md), [Headless Server Profile](headless-server-profile.md), [MCP Routing Guide](mcp-routing-guide.md), [External Roots Setup](external-roots-setup.md)
 
 ![Runtime profile chooser for live, hybrid and headless Optimike Obsidian MCP deployments](assets/readme/runtime-profiles.en.svg)
 
@@ -43,6 +43,7 @@ Periodic Notes API extension is outside the core MCP contract.
 | External move apply/rollback     | No                      | No                                      | No                       | No                      | No                               | Local stdio + `full` + move/root opt-ins                                 |
 | Format validation                | Markdown/Base/Canvas    | Markdown/Base/Canvas                    | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                     |
 | Update note                      | REST full tool          | REST full tool                          | No                       | No                      | Append/prepend only              | Append/prepend only                                                      |
+| Governed atomic note replacement | Atomic Write Bridge CAS | Same while API and Bridge are available | No                       | No                      | No                               | No                                                                       |
 | Search/replace                   | REST full tool          | REST full tool                          | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                         |
 | Frontmatter                      | REST full tool          | REST full tool                          | No                       | No                      | Single-key `set` only            | `set`, batch frontmatter dry-run/apply, and Bases rows                   |
 | Tags                             | REST full tool          | REST full tool                          | No                       | No                      | No                               | Frontmatter tags, inline tags, local index/audit, dry-run rename         |
@@ -91,6 +92,14 @@ confirmation in the owning Obsidian vault window; unattended consent fails
 closed after 45 seconds. See the [Operon MCP contract](operon-mcp-contract.md)
 and [CLI/API audit](operon-cli-audit.md).
 
+The four governed note-replacement tools are registered only when a shared live
+Obsidian REST service exists: `live`, or `hybrid` with API credentials. Their
+presence does not open writes. `obsidian_note_replace_plan`,
+`obsidian_note_replace_apply`, `obsidian_note_replace_status`, and
+`obsidian_note_replace_recover` remain bound to MCP write policy, protected
+frontmatter, the default-off Bridge write gate, backend identity, and atomic
+SHA-256 CAS.
+
 Handoff delivery is a transport contract, not a runtime-mode write capability:
 
 - stdio exposes a verified `local_path` owned by the local handoff lifecycle;
@@ -105,13 +114,13 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 - the separate local-stdio move contract is one same-root regular file with an
   absent target, exact ÉLYSIA reference repair and rollback.
 
-| Runtime mode                    | Tools registered                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `headless-readonly`             | `bases_get_schema`, `bases_list`, `bases_query`, `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search`                                                           |
-| `headless-guarded`              | Everything in `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                          |
-| `headless-filesystem`           | Everything in `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                      |
-| `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search`                                                                                                            |
-| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools, `obsidian_validate_format`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+| Runtime mode                    | Tools registered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `headless-readonly`             | `bases_get_schema`, `bases_list`, `bases_query`, `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search`                                                                                                                                                                                                                                                                    |
+| `headless-guarded`              | Everything in `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `headless-filesystem`           | Everything in `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                                                                                                                                                                                                               |
+| `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search`                                                                                                                                                                                                                                                                                                                    |
+| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools, `obsidian_validate_format`, governed `obsidian_note_replace_plan`, `obsidian_note_replace_apply`, `obsidian_note_replace_status`, `obsidian_note_replace_recover`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
 ## Safety Notes
 
@@ -141,4 +150,5 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
   exact-hash note writes in `headless-filesystem` on a copied or dedicated
   vault. Live apply fails closed until Local REST provides atomic conditional
   whole-note writes.
+- Governed whole-note replacement is live-only, preserves protected frontmatter, and treats recovery as exact-plan reconciliation/resumption rather than undo.
 - Headless write validation should create a new draft file in a sandbox folder. It should not edit existing notes in a real vault.
