@@ -2,9 +2,10 @@
 
 ## Status
 
-Accepted for internal adapter pilots. The first implementation binds the existing
-`external_move` transaction to this contract; it does not add a generic public
-write tool or widen any write permission.
+Accepted and implemented for two internal adapter pilots. The implementations
+bind the existing `external_move` transaction and an atomic Markdown note
+replacement to this contract; they do not add a generic public write tool or
+widen any write permission.
 
 ## Context
 
@@ -73,7 +74,7 @@ Domain tools remain the public MCP surface for now. A future generic operation
 surface may be added only after at least two adapters demonstrate the same
 semantics without weakening their domain contracts.
 
-## First adapter
+## First adapter: external move
 
 `ExternalMoveOperationAdapter` reuses the existing `external_move` coordinator
 and journal as the sole durable authority. It maps the existing plan ID to an
@@ -90,19 +91,38 @@ The disposable fixture covers:
 - an interrupted move recovered from the persisted intermediate state;
 - verified compensation back to the original file placement.
 
+## Second adapter: atomic note replacement
+
+`ObsidianNoteReplaceOperationAdapter` uses the bundled Atomic Write Bridge as
+its only effect surface. The bridge binds every response to a hashed
+device/install/vault-root fingerprint and executes SHA-256 compare-and-replace through Obsidian
+`Vault.process`, so the precondition and replacement occur in one atomic
+read-modify-write operation. Its write gate is disabled by default and remains
+independent from Operon's Developer API grant.
+
+The adapter stores the sealed next content in a private SQLite WAL journal so
+the exact plan can be recovered after a lost response. Terminal rows expire
+after 30 days; non-terminal and `outcome_unknown` rows are retained for
+recovery. The disposable fixture covers conflict without write, committed
+replay, idempotency-key binding, lost-response reconciliation, and exact-plan
+recovery after a request failure.
+
 ## Explicit exclusions
 
 - Operon keeps its official Developer API plan and recovery contract; this
   runtime does not wrap or replace it.
-- Local REST note, frontmatter, Bases, and Canvas writes are not upgraded by
-  declaration. They need an atomic expected-hash write surface before claiming
-  the same guarantee.
+- Frontmatter, Bases, and Canvas writes are not upgraded by declaration. The
+  second pilot proves only complete Markdown note replacement through the
+  dedicated atomic bridge.
 - A receipt is evidence of the adapter's checks, not evidence of business
   correctness outside its domain validator.
 
 ## Consequences
 
-The MCP gains one shared operation vocabulary and a tested non-Operon adapter
-without creating a second journal. Future adapters can reuse the contract, but
-admission remains fail-closed whenever the backend cannot prove CAS, durable
-status, or postflight. Public tool expansion is deliberately deferred.
+The MCP now has two tested non-Operon adapters using one shared operation
+vocabulary. Each domain journal remains its sole durable authority; the common
+runtime does not introduce a competing generic journal. Future adapters can
+reuse the contract, but admission remains fail-closed whenever the backend
+cannot prove CAS, durable status, or postflight. A generic public operation
+surface remains deliberately deferred until the live Obsidian pilot confirms
+the second adapter outside the disposable fixture.

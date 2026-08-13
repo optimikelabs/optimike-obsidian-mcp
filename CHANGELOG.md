@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bundled Atomic Write Bridge with a default-off write gate and an Obsidian
+  `Vault.process` SHA-256 compare-and-replace route for existing Markdown notes.
+- Second common-operation-runtime adapter for atomic note replacement, with a
+  private SQLite journal, sealed plan binding, terminal retention, idempotent
+  replay, conflict proof, lost-response reconciliation and exact-plan recovery.
+
 - Operon `3.2.1` / CLI `1.1.0` compatibility through Bridge `0.6.0`, retaining
   explicit `3.2.0` support and including
   native saved-filter execution via the additive `tasks.filter-query` grant and

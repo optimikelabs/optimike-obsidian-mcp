@@ -2,8 +2,7 @@
 
 [![Latest release](https://img.shields.io/github/v/release/optimikelabs/optimike-obsidian-mcp?display_name=tag&sort=semver)](https://github.com/optimikelabs/optimike-obsidian-mcp/releases/latest)
 
-French version: [README.fr.md](README.fr.md)
-Documentation hub: [docs/README.md](docs/README.md)
+French version: [README.fr.md](README.fr.md) · Documentation hub: [docs/README.md](docs/README.md)
 Operations: [OPERATIONS.md](OPERATIONS.md)
 Security: [SECURITY.md](SECURITY.md)
 
@@ -90,6 +89,7 @@ Enable only the surfaces you use:
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api):
   live note, metadata and tag operations;
 - bundled **Bases Bridge (REST)**: live `.base` operations;
+- bundled **Optimike Atomic Write Bridge**: opt-in SHA-256 compare-and-replace for the internal note-operation pilot;
 - **Smart Connections**: semantic index under `.smart-env`;
 - **Operon Developer API V1** and the bundled **Optimike Operon Bridge**: governed live
   task operations through the official Developer API V1;
@@ -104,7 +104,7 @@ Optimike Operon Bridge setting: Allow task mutations
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Stale Operon snapshots remain read-only.
+Stale Operon snapshots remain read-only. Atomic note replacement has a separate default-off bridge setting and does not require Operon's Developer API grant.
 
 The MCP exposes a curated agent surface rather than every Operon CLI function.
 Native diagnostics, finder/resolve, bounded relationships/context and timer
