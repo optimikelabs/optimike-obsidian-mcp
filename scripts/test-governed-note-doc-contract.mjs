@@ -113,6 +113,8 @@ assert.match(contractFr, /reçus terminaux stables restent rejouables/i);
 assert.match(contractFr, /juste avant chaque tentative de/i);
 assert.match(contract, /loser of the conditional `planned → applying`/i);
 assert.match(contractFr, /perdant de la transition conditionnelle/i);
+assert.match(contract, /empty Markdown note as valid content/i);
+assert.match(contractFr, /note Markdown vide comme[\s\S]*contenu valide/i);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");

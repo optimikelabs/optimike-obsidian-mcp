@@ -118,6 +118,11 @@ même opération planifiée. Le perdant de la transition conditionnelle
 `planned → applying` recharge et retourne le reçu durable gagnant, sans exposer
 d’erreur interne ni tenter une seconde écriture.
 
+Le rafraîchissement du cache après commit traite une note Markdown vide comme
+un contenu valide. La gate d’intégration commite un remplacement vide, vérifie
+la ligne SQLite partagée, puis désactive les lectures REST et prouve que le
+fallback cache retourne la note vide plutôt que l’ancien contenu.
+
 Une seconde gate démarre le vrai serveur Streamable HTTP et transporte un plan
 scellé entre trois sessions MCP indépendantes. Elle prouve que les factories de
 serveur par session partagent un seul runtime applicatif et un seul journal,

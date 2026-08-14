@@ -94,6 +94,7 @@ class FakeObsidianAtomicWriteServer {
     this.loseResponseAfterWriteNext = false;
     this.blockedCas = undefined;
     this.hangingCas = undefined;
+    this.vaultReadsUnavailable = false;
   }
 
   async listen() {
@@ -199,6 +200,13 @@ class FakeObsidianAtomicWriteServer {
       decodeURIComponent(url.pathname) === `/vault/${FIXTURE_PATH}`
     ) {
       this.vaultReadRequests += 1;
+      if (this.vaultReadsUnavailable) {
+        json(res, 503, {
+          errorCode: 503,
+          message: "Fixture REST read is temporarily unavailable.",
+        });
+        return;
+      }
       json(res, 200, {
         content: this.content,
         frontmatter: {},
@@ -314,6 +322,7 @@ class FakeObsidianAtomicWriteServer {
   loseResponseAfterWriteNext = false;
   blockedCas = undefined;
   hangingCas = undefined;
+  vaultReadsUnavailable = false;
   baseUrl = "";
 }
 
@@ -381,7 +390,7 @@ assert.notEqual(
 const observed = [];
 const stderrs = [];
 
-function childEnv(writeMode = "full", runtimeMode = "live") {
+function childEnv(writeMode = "full", runtimeMode = "live", overrides = {}) {
   const env = {
     NODE_ENV: "test",
     MCP_TRANSPORT_TYPE: "stdio",
@@ -410,15 +419,19 @@ function childEnv(writeMode = "full", runtimeMode = "live") {
   } else {
     env.OBSIDIAN_VAULT = vaultPath;
   }
-  return env;
+  return { ...env, ...overrides };
 }
 
-async function startClient(writeMode = "full", runtimeMode = "live") {
+async function startClient(
+  writeMode = "full",
+  runtimeMode = "live",
+  overrides = {},
+) {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: ["dist/index.js"],
     cwd: process.cwd(),
-    env: childEnv(writeMode, runtimeMode),
+    env: childEnv(writeMode, runtimeMode, overrides),
     stderr: "pipe",
   });
   let stderr = "";
@@ -700,6 +713,39 @@ try {
     "terminal receipt replay in readonly mode must not attempt a CAS",
   );
   await session.close();
+
+  fake.reset();
+  session = await startClient("full", "live", {
+    MCP_PROTECTED_FRONTMATTER_KEYS: "fixture-key-not-present",
+  });
+  const emptyPlan = await call(session, "obsidian_note_replace_plan", {
+    path: FIXTURE_PATH,
+    nextContent: "",
+    idempotencyKey: "empty-note-cache-refresh",
+  });
+  const emptyCommit = await call(session, "obsidian_note_replace_apply", {
+    planRef: emptyPlan.payload.planRef,
+    idempotencyKey: "empty-note-cache-refresh",
+  });
+  assertTerminal(emptyCommit.payload);
+  assert.equal(fake.content, "");
+  const emptyCacheDb = new DatabaseSync(cachePath, { readOnly: true });
+  try {
+    const cached = emptyCacheDb
+      .prepare("SELECT content FROM file_cache WHERE path = ?")
+      .get(`/${FIXTURE_PATH}`);
+    assert.equal(cached?.content, "");
+  } finally {
+    emptyCacheDb.close();
+  }
+  fake.vaultReadsUnavailable = true;
+  const emptyFallback = await call(session, "obsidian_read_note", {
+    filePath: FIXTURE_PATH,
+    format: "markdown",
+  });
+  assert.equal(emptyFallback.payload.content, "");
+  await session.close();
+
   session = await startClient("full", "live");
 
   fake.reset();

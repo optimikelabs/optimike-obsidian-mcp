@@ -402,7 +402,7 @@ export class VaultCacheService {
         },
       );
 
-      if (!noteJson || !noteJson.content || !noteJson.stat) {
+      if (!noteJson || typeof noteJson.content !== "string" || !noteJson.stat) {
         logger.warning(
           `Proactive cache update for ${filePath} received invalid data, skipping update.`,
           opContext,

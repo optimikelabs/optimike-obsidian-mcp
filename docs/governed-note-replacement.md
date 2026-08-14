@@ -111,6 +111,11 @@ planned operation. The loser of the conditional `planned → applying`
 transition reloads and returns the durable winner instead of exposing an
 internal error or attempting another write.
 
+Post-commit cache refresh treats an empty Markdown note as valid content. The
+integration gate commits an empty replacement, verifies the shared SQLite row,
+then disables REST reads and proves that the cache fallback returns the empty
+note rather than stale pre-replacement content.
+
 A second gate starts the real Streamable HTTP server and carries one sealed plan
 across three independent MCP sessions. It proves that per-session server
 factories share one application runtime and one journal, commit one backend CAS,
