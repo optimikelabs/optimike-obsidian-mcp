@@ -5,6 +5,14 @@ async function text(path) {
   return readFile(path, "utf8");
 }
 
+function markdownReleaseSection(changelog, heading) {
+  const start = changelog.indexOf(heading);
+  assert.ok(start >= 0, `changelog omits ${heading}`);
+  const afterHeading = changelog.slice(start + heading.length);
+  const nextRelease = afterHeading.search(/\n## \[/u);
+  return nextRelease >= 0 ? afterHeading.slice(0, nextRelease) : afterHeading;
+}
+
 const tools = [
   "obsidian_note_replace_plan",
   "obsidian_note_replace_apply",
@@ -37,6 +45,20 @@ assert.match(adr, /exact-plan reconciliation(?:\/| or )resumption/i);
 assert.match(adr, /outside that boundary/i);
 assert.match(contract, /not undo/i);
 assert.match(contractFr, /n[’']est pas `?undo`?/i);
+assert.match(contract, /Optimike Obsidian MCP 2\.6\.0 exposes/i);
+assert.match(contractFr, /Optimike Obsidian MCP 2\.6\.0 expose/i);
+assert.match(
+  contract,
+  /guarantees are released in Optimike Obsidian MCP\s+2\.6\.0/i,
+);
+assert.match(
+  contractFr,
+  /garanties sont\s+publiées dans Optimike Obsidian MCP 2\.6\.0/i,
+);
+assert.doesNotMatch(contract, /The 2\.6 candidate/i);
+assert.doesNotMatch(contractFr, /Le candidat 2\.6/i);
+assert.doesNotMatch(contract, /versioning, and release remain/i);
+assert.doesNotMatch(contractFr, /Merge, version et\s+release restent/i);
 assert.match(readme, /test:governed-note-replace-mcp/);
 assert.match(readmeFr, /test:governed-note-replace-mcp/);
 assert.equal(
@@ -56,7 +78,27 @@ assert.ok(pkg.files.includes("docs/governed-note-replacement.fr.md"));
 const envExample = await text(".env.server.example");
 assert.match(envExample, /MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH=\//);
 const changelog = await text("CHANGELOG.md");
-assert.match(changelog, /## \[Unreleased\][\s\S]*obsidian_note_replace_plan/);
+const releaseSection = markdownReleaseSection(
+  changelog,
+  "## [2.6.0] - 2026-08-14",
+);
+for (const tool of tools) {
+  assert.ok(
+    releaseSection.includes(`\`${tool}\``),
+    `2.6.0 changelog section omits ${tool}`,
+  );
+}
+const unreleasedSection = changelog.slice(
+  changelog.indexOf("## [Unreleased]") + "## [Unreleased]".length,
+  changelog.indexOf("## [2.6.0] - 2026-08-14"),
+);
+for (const tool of tools) {
+  assert.equal(
+    unreleasedSection.includes(`\`${tool}\``),
+    false,
+    `${tool} must belong to 2.6.0, not Unreleased`,
+  );
+}
 assert.match(liveCanary, /os\.tmpdir\(\)/);
 assert.doesNotMatch(
   liveCanary,
