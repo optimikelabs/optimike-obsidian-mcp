@@ -22,6 +22,8 @@ or compiled Markdown.
 Projected child plans are internal authority only. The public P0 status, apply,
 and recovery tools return `NOT_FOUND` for them, so a P1 observer cannot bypass
 the P1 idempotency and current-policy gates by transforming a plan reference.
+Their journal idempotency keys also use a reserved projection namespace that
+direct public P0 planning rejects, keeping P0 and P1 caller keys disjoint.
 
 Public idempotency keys must be non-empty, unpadded, well-formed Unicode strings
 of at most 256 UTF-16 code units. Unknown or retention-expired plan references

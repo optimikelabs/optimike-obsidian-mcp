@@ -23,6 +23,9 @@ Les child plans projetés restent une autorité interne. Les outils P0 publics d
 status, apply et recovery renvoient `NOT_FOUND` pour ces plans : un observateur
 P1 ne peut donc pas contourner les gates d’idempotence et de politique courante
 P1 en transformant une référence de plan.
+Leurs clés d’idempotence de journal utilisent aussi un namespace de projection
+réservé, refusé par le planning P0 public direct, afin de séparer les clés des
+appelants P0 et P1.
 
 Les clés d’idempotence publiques doivent être des chaînes Unicode bien formées,
 non vides, sans espaces périphériques et longues d’au plus 256 unités de code

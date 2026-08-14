@@ -13,9 +13,10 @@ import {
 } from "./operations/contract.js";
 import { assertWriteAllowed } from "./writePolicy.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
-import type {
-  GovernedNoteReplacePlanView,
-  GovernedNoteReplaceRuntime,
+import {
+  PROJECTED_IDEMPOTENCY_KEY_PREFIX,
+  type GovernedNoteReplacePlanView,
+  type GovernedNoteReplaceRuntime,
 } from "../mcp-server/tools/governedNoteReplaceTools/runtime.js";
 
 const OPERATION_KIND = "obsidian.frontmatter.patch" as const;
@@ -105,9 +106,10 @@ function normalizedPublicKey(value: string): string {
 }
 
 function internalIdempotencyKey(publicKey: string): string {
-  return createHash("sha256")
+  const digest = createHash("sha256")
     .update(`${INTERNAL_KEY_DOMAIN}${publicKey}`, "utf8")
     .digest("hex");
+  return `${PROJECTED_IDEMPOTENCY_KEY_PREFIX}${digest}`;
 }
 
 function operationIdFromRef(reference: string, prefix: string): string {

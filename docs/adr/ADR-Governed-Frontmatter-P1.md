@@ -68,6 +68,8 @@ strings from collapsing through UTF-8 replacement. A valid but unknown or
 retention-expired plan reference is terminally absent and returns `NOT_FOUND`.
 Projected child plans are likewise absent from the public P0 status, apply, and
 recovery surfaces; only the owning projection runtime can execute them.
+Their journal idempotency keys use a reserved prefix rejected by public direct
+P0 planning, so a computable digest cannot collide across authority domains.
 
 The compiler fails closed on unsupported or ambiguous source, including:
 

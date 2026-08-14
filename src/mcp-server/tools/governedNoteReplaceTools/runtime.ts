@@ -25,6 +25,7 @@ import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { logger, requestContextService } from "../../../utils/index.js";
 
 const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
+export const PROJECTED_IDEMPOTENCY_KEY_PREFIX = "optimike:projection:v1:";
 
 type CallContext =
   | { kind: "plan"; path: string; nextContent: string }
@@ -324,6 +325,19 @@ export class GovernedNoteReplaceRuntime {
       this.adapter.apply(reference, idempotencyKey),
     );
     return this.refreshCacheAfterCommit(plan, operation);
+  }
+
+  planPublicDirect(
+    input: ObsidianNoteReplacePlanInput,
+  ): Promise<OperationReceipt> {
+    if (input.idempotencyKey.startsWith(PROJECTED_IDEMPOTENCY_KEY_PREFIX)) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        "The idempotency key uses a namespace reserved for internal projections.",
+        { reason: "reserved_projection_idempotency_namespace" },
+      );
+    }
+    return this.plan(input);
   }
 
   async applyPublicDirectPlan(

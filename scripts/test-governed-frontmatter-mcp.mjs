@@ -337,6 +337,53 @@ try {
   );
 
   fake.reset();
+  const namespacePublicKey = "p1-journal-namespace-isolation";
+  const formerlyCollidingDirectKey = createHash("sha256")
+    .update(`obsidian.frontmatter.patch:v1\0${namespacePublicKey}`, "utf8")
+    .digest("hex");
+  const directNamespacePlan = await call(session, "obsidian_note_replace_plan", {
+    path: FRONTMATTER_FIXTURE_PATH,
+    nextContent: FRONTMATTER_INITIAL_CONTENT.replace(
+      "owner: mike",
+      "owner: direct-p0",
+    ),
+    idempotencyKey: formerlyCollidingDirectKey,
+  });
+  const projectedNamespacePlan = await call(
+    session,
+    "obsidian_frontmatter_patch_plan",
+    {
+      path: FRONTMATTER_FIXTURE_PATH,
+      operations: [{ op: "set", key: "rang", value: 7 }],
+      idempotencyKey: namespacePublicKey,
+    },
+  );
+  assert.equal(directNamespacePlan.payload.phase, "planned");
+  assert.equal(projectedNamespacePlan.payload.phase, "planned");
+  assert.notEqual(
+    directNamespacePlan.payload.operationId,
+    projectedNamespacePlan.payload.operationId,
+  );
+  const reservedNamespaceAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FRONTMATTER_FIXTURE_PATH,
+      nextContent: FRONTMATTER_INITIAL_CONTENT.replace(
+        "owner: mike",
+        "owner: reserved-p0",
+      ),
+      idempotencyKey: `optimike:projection:v1:${formerlyCollidingDirectKey}`,
+    },
+    true,
+  );
+  assert.equal(reservedNamespaceAttempt.payload.error.code, "VALIDATION_ERROR");
+  assert.equal(
+    reservedNamespaceAttempt.payload.error.details?.reason,
+    "reserved_projection_idempotency_namespace",
+  );
+
+  fake.reset();
   const nominalOperations = [
     { op: "set", key: "rang", value: 1 },
     { op: "delete", key: "owner" },

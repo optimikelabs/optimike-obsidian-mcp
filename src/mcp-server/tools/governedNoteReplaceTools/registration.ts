@@ -88,7 +88,7 @@ export async function registerGovernedNoteReplaceTools(
     PlanSchema.shape,
     GOVERNED_PLAN_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof PlanSchema>) =>
-      runTool(() => runtime.plan(params)),
+      runTool(() => runtime.planPublicDirect(params)),
   );
 
   server.tool(

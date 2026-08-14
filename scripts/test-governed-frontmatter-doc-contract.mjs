@@ -101,11 +101,14 @@ assert.match(contract, /well-formed Unicode[\s\S]*NOT_FOUND/i);
 assert.match(contractFr, /Unicode bien formées[\s\S]*NOT_FOUND/i);
 assert.match(adr, /well-formed Unicode[\s\S]*NOT_FOUND/i);
 assert.match(contract, /Projected child plans[\s\S]*public P0[\s\S]*NOT_FOUND/i);
+assert.match(contract, /reserved projection namespace[\s\S]*P0 and P1/i);
 assert.match(
   contractFr,
   /child plans projetés[\s\S]*outils P0 publics[\s\S]*NOT_FOUND/i,
 );
+assert.match(contractFr, /namespace de projection[\s\S]*appelants P0 et P1/i);
 assert.match(adr, /Projected child plans[\s\S]*public P0/i);
+assert.match(adr, /reserved prefix[\s\S]*authority domains/i);
 assert.match(adrIndex, /P1 governed frontmatter projection/);
 
 for (const file of [
