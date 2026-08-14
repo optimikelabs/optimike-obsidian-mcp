@@ -31,88 +31,67 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
 
-          def replace_once(path: str, old: str, new: str) -> None:
+          def regex_once(path: str, pattern: str, replacement: str) -> None:
               file = Path(path)
               content = file.read_text(encoding="utf-8")
-              count = content.count(old)
+              updated, count = re.subn(pattern, replacement, content, count=1, flags=re.MULTILINE)
               if count != 1:
-                  raise SystemExit(f"{path}: expected one anchor, found {count}")
-              file.write_text(content.replace(old, new, 1), encoding="utf-8")
+                  raise SystemExit(f"{path}: expected one regex anchor, found {count}: {pattern}")
+              file.write_text(updated, encoding="utf-8")
 
-          replace_once(
-              "src/services/operations/obsidianNoteReplaceOperationAdapter.ts",
-              '''    requestDigest: plan.requestDigest,
-              idempotencyIdentity: plan.idempotencyIdentity ?? null,
-              projectionDigest: plan.projection ? operationDigest(plan.projection) : null,
-            });''',
+          adapter = "src/services/operations/obsidianNoteReplaceOperationAdapter.ts"
+          regex_once(
+              adapter,
+              r'''    requestDigest: plan\.requestDigest,\n    idempotencyIdentity: plan\.idempotencyIdentity \?\? null,\n    projectionDigest: plan\.projection \? operationDigest\(plan\.projection\) : null,''',
               '''    requestDigest: plan.requestDigest,
               ...(plan.idempotencyIdentity
                 ? { idempotencyIdentity: plan.idempotencyIdentity }
                 : {}),
               ...(plan.projection
                 ? { projectionDigest: operationDigest(plan.projection) }
-                : {}),
-            });''',
+                : {}),''',
           )
-          replace_once(
-              "src/services/operations/obsidianNoteReplaceOperationAdapter.ts",
-              '''      bindingFingerprint: read.bindingFingerprint,
-              idempotencyIdentity: input.idempotencyIdentity ?? null,
-              projectionDigest: input.projection
-                ? operationDigest(input.projection)
-                : null,
-            });''',
+          regex_once(
+              adapter,
+              r'''      bindingFingerprint: read\.bindingFingerprint,\n      idempotencyIdentity: input\.idempotencyIdentity \?\? null,\n      projectionDigest: input\.projection\n        \? operationDigest\(input\.projection\)\n        : null,''',
               '''      bindingFingerprint: read.bindingFingerprint,
               ...(input.idempotencyIdentity
                 ? { idempotencyIdentity: input.idempotencyIdentity }
                 : {}),
               ...(input.projection
                 ? { projectionDigest: operationDigest(input.projection) }
-                : {}),
-            });''',
+                : {}),''',
           )
 
           runtime = Path("src/services/frontmatterProjectionRuntime.ts")
-          text = runtime.read_text(encoding="utf-8")
-          policy = '''    assertWriteAllowed({
-              operation: "obsidian_frontmatter_patch_plan",
-              action: "plan",
-              target: input.path,
-              targetType: "filePath",
-              batchCount: operations.length,
-              frontmatterKeys: operations.map((operation) => operation.key),
-            });
-
+          content = runtime.read_text(encoding="utf-8")
+          policy_pattern = re.compile(
+              r'''\n    assertWriteAllowed\(\{\n      operation: "obsidian_frontmatter_patch_plan",\n      action: "plan",\n      target: input\.path,\n      targetType: "filePath",\n      batchCount: operations\.length,\n      frontmatterKeys: operations\.map\(\(operation\) => operation\.key\),\n    \}\);\n'''
+          )
+          if len(policy_pattern.findall(content)) != 1:
+              raise SystemExit("frontmatter runtime: expected one plan policy block")
+          content = policy_pattern.sub("\n", content, count=1)
+          anchor = "    const internalKey = internalIdempotencyKey(publicKey);\n"
+          if content.count(anchor) != 1:
+              raise SystemExit("frontmatter runtime: expected one internal-key anchor")
+          policy = '''    const internalKey = internalIdempotencyKey(publicKey);
+              assertWriteAllowed({
+                operation: "obsidian_frontmatter_patch_plan",
+                action: "plan",
+                target: input.path,
+                targetType: "filePath",
+                batchCount: operations.length,
+                frontmatterKeys: operations.map((operation) => operation.key),
+              });
           '''
-          if text.count(policy) != 1:
-              raise SystemExit(f"frontmatter runtime: expected one policy block, found {text.count(policy)}")
-          text = text.replace(policy, "", 1)
-          anchor = '''    const internalKey = internalIdempotencyKey(publicKey);
-            const existing = this.noteRuntime.findPlanByIdempotencyKey(internalKey);'''
-          replacement = '''    const internalKey = internalIdempotencyKey(publicKey);
-            assertWriteAllowed({
-              operation: "obsidian_frontmatter_patch_plan",
-              action: "plan",
-              target: input.path,
-              targetType: "filePath",
-              batchCount: operations.length,
-              frontmatterKeys: operations.map((operation) => operation.key),
-            });
-            const existing = this.noteRuntime.findPlanByIdempotencyKey(internalKey);'''
-          if text.count(anchor) != 1:
-              raise SystemExit(f"frontmatter runtime: expected one idempotency anchor, found {text.count(anchor)}")
-          runtime.write_text(text.replace(anchor, replacement, 1), encoding="utf-8")
+          runtime.write_text(content.replace(anchor, policy, 1), encoding="utf-8")
 
           compiler = Path("src/services/frontmatterPatchCompiler.ts")
-          text = compiler.read_text(encoding="utf-8")
-          text = text.replace(
-              '''type SourceEntry = {
-              key: string;
-              normalizedKey: string;
-              start: number;
-              end: number;
-            };''',
+          content = compiler.read_text(encoding="utf-8")
+          content, count = re.subn(
+              r'''type SourceEntry = \{\n  key: string;\n  normalizedKey: string;\n  start: number;\n  end: number;\n\};''',
               '''type SourceEntry = {
               key: string;
               normalizedKey: string;
@@ -120,16 +99,23 @@ jobs:
               end: number;
               trailingCommentIsAmbiguous: boolean;
             };''',
-              1,
+              content,
+              count=1,
           )
-          old_entry = '''    const end = lines[lastOwnedLineIndex]?.endWithEol ?? startLine.endWithEol;
+          if count != 1:
+              raise SystemExit("compiler: expected SourceEntry anchor")
+          old = '''    const end = lines[lastOwnedLineIndex]?.endWithEol ?? startLine.endWithEol;
               entries.set(start.normalizedKey, {
                 key: start.key,
                 normalizedKey: start.normalizedKey,
                 start: startLine.start,
                 end,
               });'''
-          new_entry = '''    const end = lines[lastOwnedLineIndex]?.endWithEol ?? startLine.endWithEol;
+          if content.count(old) != 1:
+              raise SystemExit("compiler: expected entry range anchor")
+          content = content.replace(
+              old,
+              '''    const end = lines[lastOwnedLineIndex]?.endWithEol ?? startLine.endWithEol;
               const trailingCommentIsAmbiguous = lines
                 .slice(lastOwnedLineIndex + 1, nextStartLineIndex)
                 .some((line) => line.text.startsWith("#"));
@@ -139,18 +125,21 @@ jobs:
                 start: startLine.start,
                 end,
                 trailingCommentIsAmbiguous,
-              });'''
-          if text.count(old_entry) != 1:
-              raise SystemExit(f"compiler: expected one entry range anchor, found {text.count(old_entry)}")
-          text = text.replace(old_entry, new_entry, 1)
-          old_delete = '''      edits.push({
+              });''',
+              1,
+          )
+          old = '''      edits.push({
                 key: entry.key,
                 operation: "delete",
                 start: entry.start,
                 end: entry.end,
                 replacement: "",
               });'''
-          new_delete = '''      if (entry.trailingCommentIsAmbiguous) {
+          if content.count(old) != 1:
+              raise SystemExit("compiler: expected delete anchor")
+          content = content.replace(
+              old,
+              '''      if (entry.trailingCommentIsAmbiguous) {
                 fail(
                   "Cannot delete a key followed by comments with ambiguous ownership.",
                   { reason: "ambiguous_delete_comment", key: operation.key },
@@ -162,13 +151,13 @@ jobs:
                 start: entry.start,
                 end: entry.end,
                 replacement: "",
-              });'''
-          if text.count(old_delete) != 1:
-              raise SystemExit(f"compiler: expected one delete anchor, found {text.count(old_delete)}")
-          compiler.write_text(text.replace(old_delete, new_delete, 1), encoding="utf-8")
+              });''',
+              1,
+          )
+          compiler.write_text(content, encoding="utf-8")
 
           test = Path("scripts/test-frontmatter-p1-compiler.mjs")
-          text = test.read_text(encoding="utf-8")
+          content = test.read_text(encoding="utf-8")
           anchor = '''  [
               "frontmatter_key_missing",
               () =>
@@ -176,7 +165,11 @@ jobs:
                   { op: "delete", key: "missing" },
                 ]),
             ],'''
-          addition = '''  [
+          if content.count(anchor) != 1:
+              raise SystemExit("compiler test: expected missing-key anchor")
+          content = content.replace(
+              anchor,
+              '''  [
               "ambiguous_delete_comment",
               () =>
                 compileFrontmatterPatch(
@@ -184,10 +177,10 @@ jobs:
                   [{ op: "delete", key: "a" }],
                 ),
             ],
-          ''' + anchor
-          if text.count(anchor) != 1:
-              raise SystemExit(f"compiler test: expected one missing-key anchor, found {text.count(anchor)}")
-          test.write_text(text.replace(anchor, addition, 1), encoding="utf-8")
+          ''' + anchor,
+              1,
+          )
+          test.write_text(content, encoding="utf-8")
 
       - name: Format and verify
         run: |
