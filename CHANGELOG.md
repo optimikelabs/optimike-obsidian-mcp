@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Public governed atomic replacement for one existing Markdown note through
+  `obsidian_note_replace_plan`, `obsidian_note_replace_apply`,
+  `obsidian_note_replace_status`, and `obsidian_note_replace_recover`.
+- Real MCP integration coverage using the compiled server, the SDK stdio client,
+  and a controlled Atomic Write boundary, including idempotent replay,
+  lost-response reconciliation, process restart, concurrent apply/recover,
+  stale CAS, protected frontmatter, current-policy revalidation, and sealed
+  content redaction.
+- Real Streamable HTTP coverage proving that one sealed plan remains authoritative
+  across three independently created MCP sessions while producing exactly one
+  backend CAS and closing the shared journal cleanly at process shutdown.
+- Fail-closed live Obsidian canary with an explicit disposable note, durable
+  pre-mutation backup, direct Bridge CAS-conflict proof, replay, status,
+  deterministic conflict, restoration, and a redacted evidence record.
+
+### Changed
+
+- The existing 2.5 note-replacement adapter and journal now live in one
+  process-wide application service shared by stdio and every HTTP MCP session;
+  no session opens a competing SQLite authority or a second REST client.
+- Planning validates protected frontmatter and conservative Obsidian Markdown
+  against the same Bridge read that seals the before hash. Apply and recover
+  revalidate the current MCP write policy before any possible effect.
+- The live operator canary passed on 2026-08-14 with exact restoration of the
+  disposable note. The branch remains versioned as `2.5.0`; version bump, tag,
+  release, and merge stay separate repository-authority actions. No generic
+  public `operation_*` surface is part of this candidate.
+
 ## [2.5.0] - 2026-08-13
 
 ### Added

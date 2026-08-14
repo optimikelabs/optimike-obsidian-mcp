@@ -2,7 +2,7 @@
 
 Version anglaise : [runtime-capability-matrix.md](runtime-capability-matrix.md)
 
-Docs liées : [README](../README.fr.md), [Guide d’exploitation](../OPERATIONS.fr.md), [Profil serveur headless](headless-server-profile.fr.md), [Guide de routage MCP](mcp-routing-guide.fr.md), [Configuration des racines externes](external-roots-setup.fr.md)
+Docs liées : [README](../README.fr.md), [Guide d’exploitation](../OPERATIONS.fr.md), [Remplacement gouverné](governed-note-replacement.fr.md), [Profil serveur headless](headless-server-profile.fr.md), [Guide de routage MCP](mcp-routing-guide.fr.md), [Configuration des racines externes](external-roots-setup.fr.md)
 
 ![Aide au choix entre les profils live, hybrid et headless d’Optimike Obsidian MCP](assets/readme/runtime-profiles.fr.svg)
 
@@ -36,6 +36,7 @@ Optimike Obsidian MCP possède cinq contrats runtime. Les modes headless tournen
 | Apply/rollback de move externe         | Non                       | Non                                      | Non                       | Non                             | Non                                 | Stdio local + `full` + opt-ins move/racine                                 |
 | Validation de format                   | Markdown/Base/Canvas      | Markdown/Base/Canvas                     | Markdown/Base/Canvas      | Markdown/Base/Canvas            | Markdown/Base/Canvas                | Markdown/Base/Canvas                                                       |
 | Update note                            | Outil REST complet        | Outil REST complet                       | Non                       | Non                             | Append/prepend seulement            | Append/prepend seulement                                                   |
+| Remplacement atomique gouverné         | CAS Atomic Write Bridge   | Idem tant que l’API et le Bridge répondent | Non                     | Non                             | Non                                 | Non                                                                        |
 | Search/replace                         | Outil REST complet        | Outil REST complet                       | Non                       | Non                             | Remplacements exacts par `filePath` | Remplacements exacts par `filePath`                                        |
 | Frontmatter                            | Outil REST complet        | Outil REST complet                       | Non                       | Non                             | `set` d’une clé unique              | `set`, batch frontmatter dry-run/apply, et rows Bases                      |
 | Tags                                   | Outil REST complet        | Outil REST complet                       | Non                       | Non                             | Non                                 | Tags frontmatter, tags inline, index/audit local, rename avec dry-run      |
@@ -81,6 +82,13 @@ ont passé le pilote live dédié 3.2.0. Les limites bornées #99/#101 et #139
 restent ouvertes. Le renderer Settings manquant en 3.2.1 est suivi dans #145/#146.
 Voir le [contrat MCP Operon](operon-mcp-contract.fr.md) et
 l’[audit CLI/API](operon-cli-audit.fr.md).
+
+Les quatre outils `obsidian_note_replace_plan`,
+`obsidian_note_replace_apply`, `obsidian_note_replace_status` et
+`obsidian_note_replace_recover` sont enregistrés uniquement en `live`, ou en
+`hybrid` avec API disponible. Leur présence n’ouvre aucune écriture : politique
+MCP courante, frontmatter protégé, write gate du Bridge, identité backend et CAS
+SHA-256 restent effectifs.
 
 La livraison du handoff est un contrat de transport, pas une capacité d’écriture
 du mode runtime :
@@ -136,4 +144,5 @@ du mode runtime :
   `headless-filesystem`, sur une copie ou un coffre dédié. L’apply live échoue
   fermé tant que Local REST ne fournit pas d’écriture atomique conditionnelle
   de note complète.
+- Le remplacement gouverné de note complète est live-only ; `recover` est une réconciliation ou reprise du plan exact, jamais un undo.
 - Une validation d’écriture headless doit créer un nouveau brouillon dans un dossier sandbox. Elle ne doit pas modifier des notes existantes d’un vrai vault.

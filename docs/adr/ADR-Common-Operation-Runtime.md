@@ -109,6 +109,70 @@ replay, backend-binding rejection, concurrent status reconciliation, idempotency
 lost-response reconciliation, active-daemon retention, and exact-plan recovery
 after a request failure.
 
+## Public 2.6 projection: governed note replacement
+
+The existing `ObsidianNoteReplaceOperationAdapter`, Atomic Write backend, and
+private journal are owned by one application-lifecycle runtime. The runtime is
+constructed once with the shared REST service, injected into the stdio server
+and every per-session HTTP MCP server, and closed explicitly during process
+shutdown. No session creates a competing journal or REST client. Applying rows
+carry a runtime-instance owner backed by a durable heartbeat lease, so another
+MCP process sharing the journal cannot mistake PID reuse for the original live
+executor; an expired or explicitly closed owner remains recoverable through the
+exact plan.
+Transitions leaving `applying` are fenced by both the observed runtime-instance
+owner, a fresh per-attempt identifier, and the exact durable payload version. A
+stale executor returning after lease expiry cannot terminalize a plan that
+recovery reassigned, even when the same runtime instance performs both attempts.
+The default journal path is also namespaced by a stable non-secret digest of
+the configured runtime mode, REST base URL, and vault path, with an explicit
+profile-ID override for deployment topologies that need one. Backend-specific
+plans and idempotency keys do not share an implicit machine-global namespace.
+
+SQLite contention is part of the reusable operation contract, not an adapter
+detail. Every connection that negotiates WAL must install its busy policy
+immediately after opening and before WAL, schema creation, migrations, leases,
+or journal writes. The note journal retries idempotent startup initialization
+through bounded transient contention, closes the connection if that bound is
+exhausted, and never lets a later heartbeat timeout escape the runtime timer.
+Fixtures prove simultaneous fresh opens, an existing journal locked longer than
+one busy timeout, a clean failed-startup close, and reuse of an already-active
+connection after contention. Future SQLite-backed adapters inherit this order
+and must add the same discriminating proofs.
+
+Idempotent admission is also a concurrent contract. If multiple runtimes act on
+the same sealed plan, exactly one conditional state transition may win. A
+caller that loses because it observed stale durable state must reload and
+return the winning receipt; expected transition contention must never escape as
+an internal tool error or authorize a second effect. Future adapters must prove
+both the ordinary in-flight replay and the stale-read transition race.
+
+Recovery also preserves epistemic state across attempts. Once an earlier
+attempt is uncertain, a later CAS conflict can become terminal only when the
+follow-up proof identifies a sealed state. If the same backend instead reports
+a hash matching neither the sealed before nor after proof, the receipt remains
+`outcome_unknown`: an expired executor may have committed before a third-party
+edit. A conflict response from the recovery attempt proves only that attempt
+did not write; it does not disprove an earlier commit of the same plan.
+
+The public projection remains domain-specific:
+
+- `obsidian_note_replace_plan`
+- `obsidian_note_replace_apply`
+- `obsidian_note_replace_status`
+- `obsidian_note_replace_recover`
+
+Planning compares protected frontmatter and validates the future Markdown from
+the same Bridge read that seals the before SHA-256. Apply and recover revalidate
+the current MCP write policy before any possible effect. Recovery uses
+exact-plan reconciliation/resumption and is never undo. The guaranteed effect boundary is
+the one target-note transition enforced by `Vault.process` CAS. Sync, watchers,
+plugins, indexers, and external automations remain outside that boundary.
+
+No generic public `operation_*` surface is introduced. The real Obsidian
+Desktop operator canary passed on 2026-08-14 with exact fixture restoration;
+merge, versioning, and release remain repository-authority decisions.
+
 ## Explicit exclusions
 
 - Operon keeps its official Developer API plan and recovery contract; this

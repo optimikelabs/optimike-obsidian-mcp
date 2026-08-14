@@ -8,6 +8,7 @@ Related docs:
 
 - Runtime modes: [runtime-capability-matrix.md](runtime-capability-matrix.md)
 - Operations: [../OPERATIONS.md](../OPERATIONS.md)
+- Governed atomic note replacement: [governed-note-replacement.md](governed-note-replacement.md)
 - Agent routing: [mcp-routing-guide.md](mcp-routing-guide.md)
 - External roots: [external-roots-setup.md](external-roots-setup.md)
 - Operon contract: [operon-mcp-contract.md](operon-mcp-contract.md)
@@ -60,6 +61,30 @@ dependency of this MCP.
   search/replace in headless write modes.
 - `obsidian_delete_note`: live REST delete; in `headless-filesystem`, explicit
   filesystem delete requires `expectedHash` or `expectedMtime`.
+
+## Governed Atomic Note Replacement
+
+Available only in `live` or `hybrid` with the Local REST API and bundled Atomic
+Write Bridge available. The Bridge write gate is disabled by default, and the
+current MCP write policy is revalidated before planning and before each effect.
+
+- `obsidian_note_replace_plan`: read one existing `.md` note, validate the
+  complete next Markdown and protected frontmatter, then persist an opaque
+  sealed plan with before/after proofs. It does not write the note.
+- `obsidian_note_replace_apply`: apply only that `planRef` with its matching
+  `idempotencyKey`; target, content, and hashes cannot be replaced by the
+  caller.
+- `obsidian_note_replace_status`: read and reconcile durable plan authority
+  without executing a new mutation. Use it first after a timeout or lost
+  response.
+- `obsidian_note_replace_recover`: reconcile or safely resume the exact same
+  uncertain plan. Recovery is not undo and accepts no new mutation payload.
+
+Receipts never expose sealed next content or the physical journal path. Stable
+terminal plans cannot be reactivated. The atomic guarantee covers the target
+note transition enforced by Obsidian `Vault.process` CAS; it does not reverse
+emissions to sync, watchers, third-party plugins, indexers, or external
+automations. No generic public `operation_*` surface is introduced.
 
 ## Metadata And Tags
 

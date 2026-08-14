@@ -195,9 +195,9 @@ function computeParserSignature(
 function openSharedCacheDb(readOnly: boolean): DatabaseSync {
   const db = new DatabaseSync(config.obsidianSharedCacheDbPath, { readOnly });
   if (!readOnly) {
+    db.exec("PRAGMA busy_timeout = 5000;");
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA synchronous = NORMAL;");
-    db.exec("PRAGMA busy_timeout = 5000;");
     db.exec(SHARED_TASK_CACHE_SCHEMA_SQL);
   }
   return db;

@@ -302,9 +302,9 @@ export class OperonService {
   private openDb(): DatabaseSync {
     mkdirSync(path.dirname(this.dbPath), { recursive: true });
     const db = new DatabaseSync(this.dbPath);
+    db.exec("PRAGMA busy_timeout = 5000;");
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA synchronous = NORMAL;");
-    db.exec("PRAGMA busy_timeout = 5000;");
     db.exec(SNAPSHOT_TABLE_SQL);
     return db;
   }

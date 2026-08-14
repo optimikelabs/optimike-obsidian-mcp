@@ -82,6 +82,22 @@ by default.
 - Test `headless-guarded` and `headless-filesystem` on a copied or dedicated
   vault before production use.
 - Keep `MCP_WRITE_MODE=readonly` unless the intended writes are understood.
+- Governed whole-note replacement is exposed only with a shared live Obsidian
+  REST service. Planning is rejected in `readonly`; apply and recover recheck
+  the current write policy before any possible effect.
+- Protected frontmatter is parsed structurally and compared against the same
+  Bridge read that seals the before hash. A whole-file replacement cannot be
+  used to bypass `MCP_PROTECTED_FRONTMATTER_KEYS`.
+- The Atomic Write Bridge remains disabled by default and enforces target path,
+  backend binding and SHA-256 CAS through `Vault.process`. A lost response is
+  followed by `status`, never by a blind new mutation; `recover` resumes only
+  the exact sealed plan and is not undo.
+- `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` contains non-terminal sealed content.
+  Keep it machine-local, access-restricted and outside the vault, repositories,
+  synchronized folders, backups published as artifacts and public diagnostics.
+- Atomicity covers only the controlled target-note transition. Sync, watchers,
+  third-party plugins, indexers and external automations are not rolled back by
+  note-plan recovery.
 - Operon apply requires both the Bridge mutation setting and
   `OPERON_MUTATIONS_ENABLED=true`.
 - Use dry-run, expected revisions/hashes and post-write proof where supported.

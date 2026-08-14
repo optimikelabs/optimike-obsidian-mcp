@@ -33,6 +33,7 @@ question.
 | Quelle frontière de sécurité HTTP est supportée ?                             | [Sécurité](../SECURITY.fr.md) et [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md) |
 | Quel profil de gateway OSS a été prouvé de bout en bout ?                     | [Compatibilité gateways OSS](gateway-compatibility.fr.md)                               |
 | Comment les lectures et mutations Operon sont-elles gouvernées ?              | [Contrat MCP Operon](operon-mcp-contract.fr.md)                                         |
+| Comment fonctionne le remplacement atomique gouverné ?                        | [Contrat de remplacement gouverné](governed-note-replacement.fr.md)                     |
 | Pourquoi le MCP expose-t-il des fonctions Operon au lieu d’appeler la CLI ?   | [Audit CLI / Developer API](operon-cli-audit.fr.md)                                     |
 | Pourquoi une décision d’architecture a-t-elle été prise ?                     | [Index des ADR](adr/README.md)                                                          |
 | Qu’est-ce qui a changé ?                                                      | [Changelog](../CHANGELOG.md)                                                            |
@@ -52,7 +53,7 @@ question.
 - frontière MCP et CLI : [Audit CLI / Developer API](operon-cli-audit.fr.md) ;
 - bridge Operon inclus : [README Operon Bridge](../plugins/obsidian-operon-bridge/README.md) ;
 - bridge Bases inclus : [README Bases Bridge](../plugins/obsidian-bases-bridge/README.md).
-- pilote compare-and-replace Markdown : [README Atomic Write Bridge](../plugins/obsidian-atomic-write-bridge/README.md).
+- remplacement atomique gouverné : [contrat](governed-note-replacement.fr.md) et [README Atomic Write Bridge](../plugins/obsidian-atomic-write-bridge/README.md).
 
 ### Recherche et runtime
 

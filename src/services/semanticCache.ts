@@ -147,9 +147,9 @@ export class SemanticCacheService {
     ttlMs: number,
   ) {
     this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA synchronous = NORMAL;");
-    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA_SQL);
     this.ttlMs = Number.isFinite(ttlMs) ? Math.max(ttlMs, 0) : 60000;
   }

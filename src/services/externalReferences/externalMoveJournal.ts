@@ -63,6 +63,7 @@ export class ExternalMoveJournal {
   constructor(databasePath: string) {
     mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(databasePath);
+    this.db.exec("PRAGMA busy_timeout=5000");
     this.db.exec("PRAGMA journal_mode=WAL");
     this.db.exec("PRAGMA synchronous=FULL");
     this.db.exec(`

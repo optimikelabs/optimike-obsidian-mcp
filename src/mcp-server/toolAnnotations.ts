@@ -19,6 +19,20 @@ export const DESTRUCTIVE_TOOL_ANNOTATIONS = {
   openWorldHint: false,
 } as const;
 
+export const GOVERNED_PLAN_TOOL_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+export const GOVERNED_MUTATION_TOOL_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
 export const MAINTENANCE_TOOL_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: false,

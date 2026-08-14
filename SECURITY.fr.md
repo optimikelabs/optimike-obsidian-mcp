@@ -83,6 +83,23 @@ par défaut.
   dédié.
 - Conserver `MCP_WRITE_MODE=readonly` tant que les écritures voulues ne sont pas
   comprises.
+- Le remplacement gouverné d’une note complète n’est exposé qu’avec un service
+  Obsidian REST live partagé. Le planning est refusé en `readonly` ; apply et
+  recover revalident la politique d’écriture courante avant tout effet possible.
+- Le frontmatter protégé est parsé structurellement et comparé depuis la même
+  lecture Bridge qui scelle le hash initial. Un remplacement de fichier complet
+  ne peut pas contourner `MCP_PROTECTED_FRONTMATTER_KEYS`.
+- L’Atomic Write Bridge reste désactivé par défaut et impose chemin cible,
+  binding backend et CAS SHA-256 via `Vault.process`. Après une réponse perdue,
+  appeler `status`, jamais une nouvelle mutation aveugle ; `recover` reprend
+  uniquement le plan exact scellé et n’est pas un undo.
+- `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` contient le contenu scellé des plans
+  non terminaux. Le conserver local à la machine, à accès restreint, hors du
+  coffre, des dépôts, dossiers synchronisés, artefacts publiés et diagnostics
+  publics.
+- L’atomicité couvre uniquement la transition contrôlée de la note cible. Sync,
+  watchers, plugins tiers, indexeurs et automatisations externes ne sont pas
+  annulés par la récupération du plan.
 - L’apply Operon exige le réglage Bridge et
   `OPERON_MUTATIONS_ENABLED=true`.
 - Utiliser dry-run, révisions/hashes attendus et preuve après écriture.

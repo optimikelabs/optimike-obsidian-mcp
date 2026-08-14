@@ -88,7 +88,7 @@ Enable only the surfaces you use:
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api):
   live note, metadata and tag operations;
 - bundled **Bases Bridge (REST)**: live `.base` operations;
-- bundled **Optimike Atomic Write Bridge**: opt-in SHA-256 compare-and-replace for the internal note-operation pilot;
+- bundled **Optimike Atomic Write Bridge**: opt-in SHA-256 compare-and-replace backing governed whole-note `plan → apply → status → recover`; opaque `planRef`, lost response → `status`, exact-plan recovery ≠ undo ([contract](docs/governed-note-replacement.md));
 - **Smart Connections**: semantic index under `.smart-env`;
 - **Operon Developer API V1** and the bundled **Optimike Operon Bridge**: governed live
   task operations through the official Developer API V1;
@@ -181,7 +181,7 @@ See [Operations](OPERATIONS.md) for provider configuration and cache behavior.
 
 ```bash
 npm run build
-npm run test:runtime
+npm run test:runtime && npm run test:governed-note-replace-mcp && npm run test:governed-note-replace-http
 npm run check:operon
 npm run test:external-roots
 npm run test:docs

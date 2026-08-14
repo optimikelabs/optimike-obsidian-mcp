@@ -33,6 +33,7 @@ French operator guides are linked alongside their English equivalents.
 | What is the supported HTTP security boundary?              | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
 | Which OSS gateway profile has been proven end to end?      | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
 | How are Operon reads and mutations governed?               | [Operon MCP Contract](operon-mcp-contract.md)                                         |
+| How does governed atomic note replacement work?            | [Governed Note Replacement](governed-note-replacement.md)                             |
 | Why does MCP expose Operon functions instead of calling the CLI? | [Operon CLI / Developer API audit](operon-cli-audit.md)                           |
 | Why was an architecture decision made?                     | [ADR Index](adr/README.md)                                                            |
 | What changed?                                              | [Changelog](../CHANGELOG.md)                                                          |
@@ -52,7 +53,7 @@ French operator guides are linked alongside their English equivalents.
 - MCP versus CLI boundary: [Operon CLI / Developer API audit](operon-cli-audit.md);
 - bundled bridge implementation: [Operon Bridge README](../plugins/obsidian-operon-bridge/README.md);
 - bundled Bases implementation: [Bases Bridge README](../plugins/obsidian-bases-bridge/README.md).
-- atomic Markdown compare-and-replace pilot: [Atomic Write Bridge README](../plugins/obsidian-atomic-write-bridge/README.md).
+- governed atomic note replacement: [contract](governed-note-replacement.md) and [Atomic Write Bridge README](../plugins/obsidian-atomic-write-bridge/README.md).
 
 ### Search and runtime
 
