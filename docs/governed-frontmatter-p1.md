@@ -54,6 +54,8 @@ When not targeted, the following remain byte-identical:
 
 The durable projection proof contains only digests, operation names, keys, line
 ending, and authorized ranges. It never contains the next Markdown or values.
+When several keys are inserted at one offset, their single authorized range
+uses a fixed bounded marker; the individual names remain in `changedKeys`.
 
 ## Authority and concurrency
 

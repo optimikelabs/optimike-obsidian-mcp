@@ -56,6 +56,7 @@ type SourceEntry = {
   normalizedKey: string;
   start: number;
   end: number;
+  leadingCommentIsAmbiguous: boolean;
   trailingCommentIsAmbiguous: boolean;
 };
 
@@ -84,6 +85,7 @@ const TOP_LEVEL_ENTRY = /^([\p{L}\p{N}_][\p{L}\p{N}_.-]*):(.*)$/u;
 const MAX_OPERATIONS = 64;
 const MAX_VALUE_DEPTH = 24;
 const MAX_RENDERED_VALUE_BYTES = 256 * 1024;
+const ADDITIONS_RANGE_MARKER = "[frontmatter-additions]";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -116,8 +118,12 @@ function splitLines(content: string, start: number, end: number): SourceLine[] {
   return lines;
 }
 
+function isCommentLine(line: SourceLine): boolean {
+  return line.text.trimStart().startsWith("#");
+}
+
 function isTopLevelSeparator(line: SourceLine): boolean {
-  return line.text.trim() === "" || line.text.startsWith("#");
+  return line.text.trim() === "" || isCommentLine(line);
 }
 
 function stripQuotedAndComment(text: string): string {
@@ -232,10 +238,9 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
   let parsed: unknown;
   try {
     parsed = load(source);
-  } catch (error) {
+  } catch {
     fail("Frontmatter YAML is not safe to patch structurally.", {
       reason: "frontmatter_yaml_invalid",
-      parserMessage: error instanceof Error ? error.message : String(error),
     });
   }
   if (
@@ -290,6 +295,16 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
   const entries = new Map<string, SourceEntry>();
   for (const [index, start] of starts.entries()) {
     const startLine = lines[start.lineIndex];
+    let firstPrecedingSeparatorLineIndex = start.lineIndex - 1;
+    while (
+      firstPrecedingSeparatorLineIndex >= 0 &&
+      isTopLevelSeparator(lines[firstPrecedingSeparatorLineIndex])
+    ) {
+      firstPrecedingSeparatorLineIndex -= 1;
+    }
+    const leadingCommentIsAmbiguous = lines
+      .slice(firstPrecedingSeparatorLineIndex + 1, start.lineIndex)
+      .some(isCommentLine);
     const nextStartLineIndex = starts[index + 1]?.lineIndex ?? lines.length;
     let lastOwnedLineIndex = nextStartLineIndex - 1;
     while (
@@ -301,12 +316,13 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
     const end = lines[lastOwnedLineIndex]?.endWithEol ?? startLine.endWithEol;
     const trailingCommentIsAmbiguous = lines
       .slice(lastOwnedLineIndex + 1, nextStartLineIndex)
-      .some((line) => line.text.startsWith("#"));
+      .some(isCommentLine);
     entries.set(start.normalizedKey, {
       key: start.key,
       normalizedKey: start.normalizedKey,
       start: startLine.start,
       end,
+      leadingCommentIsAmbiguous,
       trailingCommentIsAmbiguous,
     });
   }
@@ -315,7 +331,7 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
   let trailing = lines.length - 1;
   let trailingCommentIsAmbiguous = false;
   while (trailing >= 0 && isTopLevelSeparator(lines[trailing])) {
-    if (lines[trailing].text.startsWith("#")) {
+    if (isCommentLine(lines[trailing])) {
       trailingCommentIsAmbiguous = true;
     }
     appendOffset = lines[trailing].start;
@@ -478,9 +494,9 @@ export function compileFrontmatterPatch(
           key: operation.key,
         });
       }
-      if (entry.trailingCommentIsAmbiguous) {
+      if (entry.leadingCommentIsAmbiguous || entry.trailingCommentIsAmbiguous) {
         fail(
-          "Cannot delete a key followed by comments with ambiguous ownership.",
+          "Cannot delete a key adjacent to comments with ambiguous ownership.",
           { reason: "ambiguous_delete_comment", key: operation.key },
         );
       }
@@ -516,14 +532,7 @@ export function compileFrontmatterPatch(
       );
     }
     edits.push({
-      key: canonicalOperations
-        .filter(
-          (operation) =>
-            operation.op === "set" &&
-            !source.entries.has(normalizeKey(operation.key)),
-        )
-        .map((operation) => operation.key)
-        .join(","),
+      key: ADDITIONS_RANGE_MARKER,
       operation: "set",
       start: source.appendOffset,
       end: source.appendOffset,

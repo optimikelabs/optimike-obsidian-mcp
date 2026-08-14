@@ -61,6 +61,9 @@ Lorsqu’ils ne sont pas ciblés, restent byte-identical :
 La preuve durable de projection ne contient que des digests, opérations, clés,
 fins de ligne et plages autorisées. Elle ne contient jamais les valeurs ni le
 Markdown suivant.
+Lorsque plusieurs clés sont ajoutées au même offset, leur unique plage autorisée
+utilise un marqueur fixe et borné ; les noms individuels restent dans
+`changedKeys`.
 
 ## Autorité et concurrence
 

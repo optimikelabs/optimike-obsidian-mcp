@@ -123,7 +123,11 @@ async function call(session, name, args, expectedError = false) {
 
 function assertNoPrivateData(value, label) {
   const serialized = typeof value === "string" ? value : JSON.stringify(value);
-  assert.equal(serialized.includes(SECRET), false, `${label} leaked sealed value`);
+  assert.equal(
+    serialized.includes(SECRET),
+    false,
+    `${label} leaked sealed value`,
+  );
   assert.equal(
     serialized.includes(journalPath),
     false,
@@ -137,9 +141,9 @@ function expectedNominalContent() {
     "# keep header",
     "création: 2026-08-14",
     `statut: "${SECRET}"`,
+    "# keep separator",
     "meta:",
     "  nested: true",
-    "# keep separator",
     "rang: 1",
     "",
     "---",
@@ -176,12 +180,15 @@ try {
     idempotentHint: true,
     openWorldHint: false,
   });
-  assert.deepEqual(byName.get("obsidian_frontmatter_patch_status")?.annotations, {
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false,
-  });
+  assert.deepEqual(
+    byName.get("obsidian_frontmatter_patch_status")?.annotations,
+    {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  );
   for (const name of [
     "obsidian_frontmatter_patch_apply",
     "obsidian_frontmatter_patch_recover",
@@ -205,7 +212,10 @@ try {
     },
     true,
   );
-  assert.match(protectedAttempt.payload.error.message, /protected frontmatter/i);
+  assert.match(
+    protectedAttempt.payload.error.message,
+    /protected frontmatter/i,
+  );
   assert.equal(fake.casRequests, 0);
 
   fake.reset();
@@ -252,10 +262,7 @@ try {
   assert.equal(nominalPlan.payload.phase, "planned");
   assert.equal(nominalPlan.payload.operationKind, "obsidian.frontmatter.patch");
   assert.equal(nominalPlan.payload.idempotencyKey, "p1-nominal");
-  assert.match(
-    nominalPlan.payload.planRef,
-    /^obsidian-frontmatter-patch:v1:/u,
-  );
+  assert.match(nominalPlan.payload.planRef, /^obsidian-frontmatter-patch:v1:/u);
   assert.equal(
     nominalPlan.payload.projection.sourcePreservation,
     "byte-identical-outside-authorized-frontmatter-ranges",
@@ -272,8 +279,14 @@ try {
       idempotencyKey: "p1-nominal",
     },
   );
-  assert.equal(canonicalReplay.payload.operationId, nominalPlan.payload.operationId);
-  assert.equal(canonicalReplay.payload.planDigest, nominalPlan.payload.planDigest);
+  assert.equal(
+    canonicalReplay.payload.operationId,
+    nominalPlan.payload.operationId,
+  );
+  assert.equal(
+    canonicalReplay.payload.planDigest,
+    nominalPlan.payload.planDigest,
+  );
 
   const rebound = await call(
     session,
@@ -297,15 +310,26 @@ try {
   assert.equal(fake.content, expectedNominalContent());
   assert.equal(fake.successfulWrites - writesBeforeNominal, 1);
   assert.equal(fake.casRequests - casBeforeNominal, 1);
-  const nominalStatus = await call(session, "obsidian_frontmatter_patch_status", {
-    planRef: nominalPlan.payload.planRef,
-  });
+  const nominalStatus = await call(
+    session,
+    "obsidian_frontmatter_patch_status",
+    {
+      planRef: nominalPlan.payload.planRef,
+    },
+  );
   assert.equal(nominalStatus.payload.outcome, "committed");
-  assert.equal(nominalStatus.payload.planDigest, nominalApply.payload.planDigest);
-  const nominalReplay = await call(session, "obsidian_frontmatter_patch_apply", {
-    planRef: nominalPlan.payload.planRef,
-    idempotencyKey: "p1-nominal",
-  });
+  assert.equal(
+    nominalStatus.payload.planDigest,
+    nominalApply.payload.planDigest,
+  );
+  const nominalReplay = await call(
+    session,
+    "obsidian_frontmatter_patch_apply",
+    {
+      planRef: nominalPlan.payload.planRef,
+      idempotencyKey: "p1-nominal",
+    },
+  );
   assert.equal(nominalReplay.payload.outcome, "committed");
   assert.equal(fake.casRequests - casBeforeNominal, 1);
 
@@ -326,7 +350,10 @@ try {
     "obsidian_frontmatter_patch_plan",
     stablePlanInput,
   );
-  assert.equal(stableReplay.payload.operationId, stablePlan.payload.operationId);
+  assert.equal(
+    stableReplay.payload.operationId,
+    stablePlan.payload.operationId,
+  );
   const stableConflict = await call(
     session,
     "obsidian_frontmatter_patch_apply",
@@ -348,7 +375,10 @@ try {
     call(session, "obsidian_frontmatter_patch_plan", concurrentInput),
     call(session, "obsidian_frontmatter_patch_plan", concurrentInput),
   ]);
-  assert.equal(concurrentA.payload.operationId, concurrentB.payload.operationId);
+  assert.equal(
+    concurrentA.payload.operationId,
+    concurrentB.payload.operationId,
+  );
   assert.equal(concurrentA.payload.planDigest, concurrentB.payload.planDigest);
 
   const blocked = fake.blockNextCas();
@@ -446,7 +476,8 @@ try {
   );
   assert.equal(policyCommitted.payload.outcome, "committed");
 
-  for (const response of observed) assertNoPrivateData(response, "MCP response");
+  for (const response of observed)
+    assertNoPrivateData(response, "MCP response");
   for (const stderr of [...stderrStreams, session.stderr()]) {
     assertNoPrivateData(stderr, "MCP stderr");
   }

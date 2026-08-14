@@ -78,6 +78,10 @@ assert.match(adr, /Observer/);
 assert.match(adr, /Failure matrix/);
 assert.match(adr, /Linearization points/);
 assert.match(adr, /actualDiff\(before, after\)/);
+assert.match(adr, /Candidate implemented/);
+assert.match(adr, /Live admission remains blocked/i);
+assert.match(contract, /fixed bounded marker/i);
+assert.match(contractFr, /marqueur fixe et borné/i);
 assert.match(adrIndex, /P1 governed frontmatter projection/);
 
 for (const file of [

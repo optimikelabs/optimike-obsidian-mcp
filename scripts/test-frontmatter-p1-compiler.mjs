@@ -17,9 +17,9 @@ const crlf = [
   "# header remains",
   "création: 2026-08-13",
   "statut: actif # targeted inline comment",
+  "# separator remains",
   "meta:",
   "  nested: true",
-  "# separator remains",
   'owner: "Mike"',
   "",
   "---",
@@ -39,9 +39,9 @@ const expected = [
   "# header remains",
   "création: 2026-08-13",
   'statut: "pause"',
+  "# separator remains",
   "meta:",
   "  nested: true",
-  "# separator remains",
   "rang: 1",
   "",
   "---",
@@ -125,6 +125,20 @@ assert.equal(
   sameIntentOrderB.proof.patchDigest,
 );
 
+const groupedAdditions = compileFrontmatterPatch(
+  "---\nexisting: true\n---\nbody\n",
+  [
+    { op: "set", key: "first_added_key", value: 1 },
+    { op: "set", key: "second_added_key", value: 2 },
+  ],
+);
+assert.equal(groupedAdditions.proof.authorizedRanges.length, 1);
+assert.equal(
+  groupedAdditions.proof.authorizedRanges[0].key,
+  "[frontmatter-additions]",
+  "a grouped insertion range must use a fixed non-secret marker instead of concatenating key names",
+);
+
 const failures = [
   [
     "frontmatter_missing",
@@ -192,6 +206,22 @@ const failures = [
       ),
   ],
   [
+    "ambiguous_delete_comment",
+    () =>
+      compileFrontmatterPatch(
+        "---\na: 1\n# could belong to a or b\nb: 2\n---\n",
+        [{ op: "delete", key: "b" }],
+      ),
+  ],
+  [
+    "ambiguous_delete_comment",
+    () =>
+      compileFrontmatterPatch(
+        "---\na: 1\n  # indented but still ambiguous\nb: 2\n---\n",
+        [{ op: "delete", key: "b" }],
+      ),
+  ],
+  [
     "frontmatter_key_missing",
     () =>
       compileFrontmatterPatch("---\na: 1\n---\n", [
@@ -217,6 +247,22 @@ const failures = [
 
 for (const [expectedReason, operation] of failures) {
   assert.equal(errorReason(operation), expectedReason);
+}
+
+const invalidYamlSecret = "TOP_SECRET_VALUE_MUST_NOT_LEAK";
+try {
+  compileFrontmatterPatch(
+    `---\nsecret: ${invalidYamlSecret}\nbroken: [\n---\n`,
+    [{ op: "set", key: "a", value: 1 }],
+  );
+  assert.fail("Expected invalid YAML to fail closed.");
+} catch (error) {
+  assert.equal(error?.details?.reason, "frontmatter_yaml_invalid");
+  assert.equal(
+    JSON.stringify(error?.details).includes(invalidYamlSecret),
+    false,
+    "parser diagnostics must not disclose source frontmatter values",
+  );
 }
 
 console.log(

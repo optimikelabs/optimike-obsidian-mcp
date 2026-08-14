@@ -2,8 +2,10 @@
 
 ## Status
 
-Proposed — model and executable failure-contract gate. Production code is not
-admitted until the pure model and the failure matrix below pass.
+Candidate implemented — the pure model, compiler, multi-process identity,
+stdio/HTTP MCP, runtime, Operon, documentation, package, and production-audit
+gates pass. Live admission remains blocked until the disposable Obsidian canary
+passes and the exact reviewed head is green.
 
 ## Authority
 
@@ -62,7 +64,8 @@ The compiler fails closed on unsupported or ambiguous source, including:
 - duplicate or case-colliding keys;
 - anchors, aliases, merge keys, explicit YAML tags, or multi-document syntax;
 - quoted/complex keys or unsupported top-level continuations;
-- ambiguous trailing-comment ownership for insertion;
+- ambiguous neighboring-comment ownership for deletion or trailing-comment
+  ownership for insertion;
 - an absent or unclosed frontmatter block;
 - non-finite numbers, excessive operation count, or oversized values.
 
@@ -95,6 +98,10 @@ The compiler returns a non-secret proof containing at least:
 - before/after frontmatter SHA-256;
 - digest of untouched source segments;
 - preserved line-ending convention.
+
+A grouped insertion is represented by one fixed, bounded range marker. Its key
+names remain in `changedKeys`; they are never concatenated into an unbounded
+range label.
 
 The proof and public idempotency binding are stored as optional projection
 metadata in the existing P0 plan row. Status and recovery therefore reproduce
@@ -159,14 +166,14 @@ after SHA-256. `idempotencyIdentity` does not weaken the effect precondition.
 
 ## Linearization points
 
-| Operation | Linearization point |
-| --- | --- |
-| P1 plan | Atomic insertion or durable same-key winner read in the P0 journal after exact source SHA and binding revalidation |
-| P1 apply | Existing P0 `planned -> applying` conditional transition with a fresh attempt fence |
-| Physical effect | Existing Atomic Write Bridge `Vault.process` SHA-256 CAS |
-| Terminal commit | Existing fenced P0 terminal transition after sealed-after postflight |
-| Status reconciliation | Existing P0 conditional transition based on live backend proof |
-| Recovery | Existing P0 `outcome_unknown -> applying` claim with a new attempt fence |
+| Operation             | Linearization point                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| P1 plan               | Atomic insertion or durable same-key winner read in the P0 journal after exact source SHA and binding revalidation |
+| P1 apply              | Existing P0 `planned -> applying` conditional transition with a fresh attempt fence                                |
+| Physical effect       | Existing Atomic Write Bridge `Vault.process` SHA-256 CAS                                                           |
+| Terminal commit       | Existing fenced P0 terminal transition after sealed-after postflight                                               |
+| Status reconciliation | Existing P0 conditional transition based on live backend proof                                                     |
+| Recovery              | Existing P0 `outcome_unknown -> applying` claim with a new attempt fence                                           |
 
 ## State projection
 
@@ -186,24 +193,24 @@ be determined.
 
 ## Failure matrix
 
-| ID | Interleaving or failure | Durable proof | Expected authority/result |
-| --- | --- | --- | --- |
-| P1-M01 | Source A read and compiled; source becomes B before admission | Re-read SHA differs from compiler SHA | Planner rejects; no row and no effect |
-| P1-M02 | Backend binding changes between compiler read and admission | Re-read binding differs | Planner rejects; no row and no effect |
-| P1-M03 | Two plans, same public key and same intent, same source | Unique internal key + same intent identity | One durable operation; both return winner |
-| P1-M04 | Two plans, same public key and same intent, different sources | Unique internal key + same intent identity | One durable winner; loser returns winner proof, never a second plan |
-| P1-M05 | Same public key, different canonical intent | Different intent identity | Conflict; original plan unchanged |
-| P1-M06 | Compiler changes a non-target byte | Source-range proof fails | Compilation rejected before P0 plan |
-| P1-M07 | Target contains protected key | Current write policy + P0 protected-frontmatter comparison | Rejected before effect |
-| P1-M08 | Policy becomes readonly after planning | Current policy at P0 apply/recover | Effect refused; plan remains safely replayable |
-| P1-M09 | Two applies or two recoveries | P0 fenced claim and CAS | Exactly one backend effect; projected receipts converge |
-| P1-M10 | Status during apply | P0 durable phase and live proof | Observer cannot steal authority; may only reconcile sealed after |
-| P1-M11 | Lease expires during backend call; recovery claims new attempt; old response returns | P0 attempt fence and current row payload | Old executor cannot terminalize; reconciliation decides from physical proof |
-| P1-M12 | Response lost after effect | Sealed after SHA on live target | P1 status/recover projects `committed`; no second effect |
-| P1-M13 | Effect may have occurred; target is neither sealed before nor after | Insufficient proof | `outcome_unknown`, never false conflict/failed |
-| P1-M14 | SQLite contention exceeds busy timeout | No durable admission/transition proof | Structured retryable error or conservative existing receipt; no INTERNAL_ERROR that invents state |
-| P1-M15 | Cache available while live backend is unavailable | Cache is non-authoritative | Fail closed; cache cannot admit, commit, or recover |
-| P1-M16 | Canary interrupted after first mutation | Durable backup + P0 journal/receipt | Recovery path remains explicit; no success claim without verified restoration |
+| ID     | Interleaving or failure                                                              | Durable proof                                              | Expected authority/result                                                                         |
+| ------ | ------------------------------------------------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| P1-M01 | Source A read and compiled; source becomes B before admission                        | Re-read SHA differs from compiler SHA                      | Planner rejects; no row and no effect                                                             |
+| P1-M02 | Backend binding changes between compiler read and admission                          | Re-read binding differs                                    | Planner rejects; no row and no effect                                                             |
+| P1-M03 | Two plans, same public key and same intent, same source                              | Unique internal key + same intent identity                 | One durable operation; both return winner                                                         |
+| P1-M04 | Two plans, same public key and same intent, different sources                        | Unique internal key + same intent identity                 | One durable winner; loser returns winner proof, never a second plan                               |
+| P1-M05 | Same public key, different canonical intent                                          | Different intent identity                                  | Conflict; original plan unchanged                                                                 |
+| P1-M06 | Compiler changes a non-target byte                                                   | Source-range proof fails                                   | Compilation rejected before P0 plan                                                               |
+| P1-M07 | Target contains protected key                                                        | Current write policy + P0 protected-frontmatter comparison | Rejected before effect                                                                            |
+| P1-M08 | Policy becomes readonly after planning                                               | Current policy at P0 apply/recover                         | Effect refused; plan remains safely replayable                                                    |
+| P1-M09 | Two applies or two recoveries                                                        | P0 fenced claim and CAS                                    | Exactly one backend effect; projected receipts converge                                           |
+| P1-M10 | Status during apply                                                                  | P0 durable phase and live proof                            | Observer cannot steal authority; may only reconcile sealed after                                  |
+| P1-M11 | Lease expires during backend call; recovery claims new attempt; old response returns | P0 attempt fence and current row payload                   | Old executor cannot terminalize; reconciliation decides from physical proof                       |
+| P1-M12 | Response lost after effect                                                           | Sealed after SHA on live target                            | P1 status/recover projects `committed`; no second effect                                          |
+| P1-M13 | Effect may have occurred; target is neither sealed before nor after                  | Insufficient proof                                         | `outcome_unknown`, never false conflict/failed                                                    |
+| P1-M14 | SQLite contention exceeds busy timeout                                               | No durable admission/transition proof                      | Structured retryable error or conservative existing receipt; no INTERNAL_ERROR that invents state |
+| P1-M15 | Cache available while live backend is unavailable                                    | Cache is non-authoritative                                 | Fail closed; cache cannot admit, commit, or recover                                               |
+| P1-M16 | Canary interrupted after first mutation                                              | Durable backup + P0 journal/receipt                        | Recovery path remains explicit; no success claim without verified restoration                     |
 
 P1-M09 through P1-M15 inherit the released P0 concurrency suite and must also
 be exercised through the projected P1 MCP surface where the projection can
