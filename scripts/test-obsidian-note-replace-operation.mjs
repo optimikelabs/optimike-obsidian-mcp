@@ -4,8 +4,10 @@ import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -100,6 +102,86 @@ function spawnJournalOpenWorker(config) {
       });
     }),
   };
+}
+
+function spawnJournalLockWorker(config) {
+  const child = spawn(
+    process.execPath,
+    ["scripts/fixtures/obsidian-note-replace-lock-worker.mjs"],
+    {
+      env: {
+        ...process.env,
+        OBSIDIAN_NOTE_REPLACE_LOCK_WORKER: JSON.stringify(config),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  return {
+    completion: new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => {
+        if (code !== 0) {
+          reject(
+            new Error(
+              `Journal lock worker exited with ${code}: ${stderr || stdout}`,
+            ),
+          );
+          return;
+        }
+        resolve(JSON.parse(stdout));
+      });
+    }),
+  };
+}
+
+function sourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(absolute);
+    if (
+      entry.isFile() &&
+      statSync(absolute).isFile() &&
+      entry.name.endsWith(".ts")
+    ) {
+      return [absolute];
+    }
+    return [];
+  });
+}
+
+function assertSqliteContentionPolicyPrecedesWal() {
+  for (const file of sourceFiles(path.join(process.cwd(), "src"))) {
+    const source = readFileSync(file, "utf8");
+    let journalModeIndex = source.indexOf("PRAGMA journal_mode");
+    while (journalModeIndex >= 0) {
+      const connectionIndex = source.lastIndexOf(
+        "new DatabaseSync",
+        journalModeIndex,
+      );
+      const timeoutIndex = source.lastIndexOf(
+        "PRAGMA busy_timeout",
+        journalModeIndex,
+      );
+      assert.ok(
+        connectionIndex >= 0 && timeoutIndex > connectionIndex,
+        `${path.relative(process.cwd(), file)} must install busy_timeout immediately after opening SQLite and before WAL negotiation`,
+      );
+      journalModeIndex = source.indexOf(
+        "PRAGMA journal_mode",
+        journalModeIndex + 1,
+      );
+    }
+  }
 }
 
 async function waitForFiles(paths, timeoutMs = 5_000) {
@@ -237,6 +319,8 @@ function fixture(name) {
 }
 
 try {
+  assertSqliteContentionPolicyPrecedesWal();
+
   {
     process.env.OBSIDIAN_API_KEY ||= "fixture-api-key";
     const { GovernedNoteReplaceRuntime } = await import(
@@ -473,6 +557,131 @@ try {
       observerJournal.get(committed.operationId).status,
       "committed",
     );
+  }
+
+  {
+    const databasePath = path.join(
+      temporaryRoot,
+      "multiprocess-existing-locked-open.sqlite",
+    );
+    const initializedJournal = new ObsidianNoteReplaceJournal(databasePath);
+    initializedJournal.close();
+    const lockReadyPath = path.join(temporaryRoot, "locked-open.lock-ready");
+    const releasePath = path.join(temporaryRoot, "locked-open.release");
+    const lockWorker = spawnJournalLockWorker({
+      databasePath,
+      readyPath: lockReadyPath,
+      releasePath,
+    });
+    await waitForFiles([lockReadyPath]);
+
+    const openReadyPath = path.join(temporaryRoot, "locked-open.open-ready");
+    const startPath = path.join(temporaryRoot, "locked-open.start");
+    const openWorker = spawnJournalOpenWorker({
+      databasePath,
+      readyPath: openReadyPath,
+      startPath,
+      options: {
+        sqliteBusyTimeoutMs: 100,
+        startupRetryWindowMs: 1_000,
+        startupRetryDelayMs: 10,
+      },
+    });
+    await waitForFiles([openReadyPath]);
+    writeFileSync(startPath, "go", "utf8");
+    const releaseTimer = setTimeout(
+      () => writeFileSync(releasePath, "release", "utf8"),
+      250,
+    );
+    try {
+      assert.equal((await openWorker.completion).ok, true);
+      assert.equal((await lockWorker.completion).ok, true);
+    } finally {
+      clearTimeout(releaseTimer);
+      if (!existsSync(releasePath)) {
+        writeFileSync(releasePath, "release", "utf8");
+      }
+      await lockWorker.completion.catch(() => undefined);
+    }
+  }
+
+  {
+    const databasePath = path.join(
+      temporaryRoot,
+      "active-journal-lock-recovery.sqlite",
+    );
+    const activeJournal = new ObsidianNoteReplaceJournal(databasePath, {
+      sqliteBusyTimeoutMs: 100,
+    });
+    journals.push(activeJournal);
+    const lockReadyPath = path.join(temporaryRoot, "active.lock-ready");
+    const releasePath = path.join(temporaryRoot, "active.release");
+    const lockWorker = spawnJournalLockWorker({
+      databasePath,
+      readyPath: lockReadyPath,
+      releasePath,
+    });
+    await waitForFiles([lockReadyPath]);
+    const releaseTimer = setTimeout(
+      () => writeFileSync(releasePath, "release", "utf8"),
+      250,
+    );
+    try {
+      assert.throws(() => activeJournal.renewExecutionLease(), /locked|busy/iu);
+      assert.equal((await lockWorker.completion).ok, true);
+      activeJournal.renewExecutionLease();
+      const afterContention = activeJournal.create({
+        idempotencyKey: "active-after-contention",
+        requestDigest: sha256("active-after-contention-request"),
+        path: "Fixture/ActiveAfterContention.md",
+        beforeSha256: sha256("before"),
+        afterSha256: sha256("after"),
+        nextContent: "after",
+        bindingFingerprint: sha256("fixture-vault-instance"),
+      });
+      assert.equal(afterContention.status, "planned");
+    } finally {
+      clearTimeout(releaseTimer);
+      if (!existsSync(releasePath)) {
+        writeFileSync(releasePath, "release", "utf8");
+      }
+      await lockWorker.completion.catch(() => undefined);
+    }
+  }
+
+  {
+    const databasePath = path.join(
+      temporaryRoot,
+      "failed-startup-closes-connection.sqlite",
+    );
+    const initializedJournal = new ObsidianNoteReplaceJournal(databasePath);
+    initializedJournal.close();
+    const lockReadyPath = path.join(temporaryRoot, "failed-start.lock-ready");
+    const releasePath = path.join(temporaryRoot, "failed-start.release");
+    const lockWorker = spawnJournalLockWorker({
+      databasePath,
+      readyPath: lockReadyPath,
+      releasePath,
+    });
+    await waitForFiles([lockReadyPath]);
+    try {
+      assert.throws(
+        () =>
+          new ObsidianNoteReplaceJournal(databasePath, {
+            sqliteBusyTimeoutMs: 50,
+            startupRetryWindowMs: 150,
+            startupRetryDelayMs: 10,
+          }),
+        /locked|busy/iu,
+      );
+    } finally {
+      writeFileSync(releasePath, "release", "utf8");
+      await lockWorker.completion.catch(() => undefined);
+    }
+    const reopened = new ObsidianNoteReplaceJournal(databasePath, {
+      sqliteBusyTimeoutMs: 100,
+    });
+    reopened.close();
   }
 
   {
@@ -952,7 +1161,7 @@ try {
   }
 
   console.log(
-    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, backend binding, atomic conflict, concurrent replay, live-owner isolation, redacted logging/WAL, and lost-response reconciliation.",
+    "Obsidian note replacement operation fixture passed: plan/apply/status/recover, backend binding, atomic conflict, concurrent replay, SQLite startup/contention recovery, live-owner isolation, redacted logging/WAL, and lost-response reconciliation.",
   );
 } finally {
   for (const journal of journals) journal.close();

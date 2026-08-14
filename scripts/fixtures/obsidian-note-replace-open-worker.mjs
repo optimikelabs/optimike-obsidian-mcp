@@ -10,6 +10,9 @@ while (!existsSync(config.startPath)) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
 }
 
-const journal = new ObsidianNoteReplaceJournal(config.databasePath);
+const journal = new ObsidianNoteReplaceJournal(
+  config.databasePath,
+  config.options,
+);
 journal.close();
 process.stdout.write('{"ok":true}\n');

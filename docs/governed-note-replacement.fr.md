@@ -126,10 +126,21 @@ l’opérateur peut fournir un identifiant de profil stable explicite. Plans et
 clés d’idempotence ne peuvent donc pas traverser deux profils backend, sauf si
 l’opérateur impose volontairement le même chemin de journal.
 
+La politique de contention SQLite est installée avant la négociation WAL, la
+création du schéma, une migration, un bail ou une écriture de journal. Le
+démarrage ne réessaie que les contentions transitoires dans une durée bornée et
+ferme sa connexion si l’initialisation échoue définitivement. Un timeout du
+heartbeat d’un processus déjà actif est contenu puis réessayé ; il n’arrête pas
+le serveur MCP.
+
 `npm run smoke:atomic-note-mcp-live` est un canary opérateur séparé qui échoue
 fermé. Il exige une note jetable existante explicitement nommée et une chaîne de
 confirmation, sauvegarde le contenu initial avant mutation, prouve un vrai
 refus CAS du Bridge et les quatre outils MCP publics, restaure la fixture et
-écrit une preuve expurgée. Cette gate Desktop live a réussi le 2026-08-14,
+écrit une preuve expurgée directement sous la racine temporaire du système. Le
+`evidenceFile` exact est affiché. Un succès ou un échec géré sans mutation
+supprime le dossier privé journal/logs/sauvegarde ; une interruption brutale ou
+une restauration non vérifiée le conserve au chemin de récupération affiché
+avant le démarrage du MCP. Cette gate Desktop live a réussi le 2026-08-14,
 avec un SHA-256 final identique au SHA-256 avant mutation. Merge, version et
 release restent des décisions séparées de l’autorité du dépôt.

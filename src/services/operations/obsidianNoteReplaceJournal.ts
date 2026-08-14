@@ -42,6 +42,9 @@ export type ObsidianNoteReplaceJournalOptions = {
   purgeIntervalMs?: number;
   executionLeaseMs?: number;
   executionSweepIntervalMs?: number;
+  sqliteBusyTimeoutMs?: number;
+  startupRetryWindowMs?: number;
+  startupRetryDelayMs?: number;
 };
 
 const STABLE_TERMINAL = new Set<ObsidianNoteReplaceStatus>([
@@ -50,6 +53,34 @@ const STABLE_TERMINAL = new Set<ObsidianNoteReplaceStatus>([
   "rejected",
   "failed",
 ]);
+
+const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+const SQLITE_STARTUP_RETRY_WINDOW_MS = 15_000;
+const SQLITE_STARTUP_RETRY_DELAY_MS = 50;
+
+function isTransientSqliteContention(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const sqliteError = error as Error & {
+    code?: string;
+    errcode?: number;
+  };
+  return (
+    sqliteError.errcode === 5 ||
+    sqliteError.errcode === 6 ||
+    /SQLITE_(?:BUSY|LOCKED)|database(?: table| schema)? is locked/iu.test(
+      `${sqliteError.code ?? ""} ${sqliteError.message}`,
+    )
+  );
+}
+
+function waitSynchronously(milliseconds: number): void {
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)),
+    0,
+    0,
+    milliseconds,
+  );
+}
 
 function sameRequestInput(
   existing: ObsidianNoteReplacePlan,
@@ -67,6 +98,9 @@ export class ObsidianNoteReplaceJournal {
   private readonly purgeIntervalMs: number;
   private readonly executionLeaseMs: number;
   private readonly executionSweepIntervalMs: number;
+  private readonly sqliteBusyTimeoutMs: number;
+  private readonly startupRetryWindowMs: number;
+  private readonly startupRetryDelayMs: number;
   private readonly executionOwner = { instanceId: randomUUID() };
   private nextPurgeAt = 0;
   private nextExecutionSweepAt = 0;
@@ -83,33 +117,31 @@ export class ObsidianNoteReplaceJournal {
     this.purgeIntervalMs = options.purgeIntervalMs ?? 60 * 60 * 1000;
     this.executionLeaseMs = options.executionLeaseMs ?? 30_000;
     this.executionSweepIntervalMs = options.executionSweepIntervalMs ?? 1_000;
+    this.sqliteBusyTimeoutMs = Math.max(
+      1,
+      Math.floor(options.sqliteBusyTimeoutMs ?? SQLITE_BUSY_TIMEOUT_MS),
+    );
+    this.startupRetryWindowMs = Math.max(
+      this.sqliteBusyTimeoutMs,
+      Math.floor(
+        options.startupRetryWindowMs ?? SQLITE_STARTUP_RETRY_WINDOW_MS,
+      ),
+    );
+    this.startupRetryDelayMs = Math.max(
+      1,
+      Math.floor(options.startupRetryDelayMs ?? SQLITE_STARTUP_RETRY_DELAY_MS),
+    );
     mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(databasePath);
-    this.db.exec("PRAGMA busy_timeout=5000");
-    this.db.exec("PRAGMA journal_mode=WAL");
-    this.db.exec("PRAGMA synchronous=FULL");
-    this.db.exec("PRAGMA secure_delete=ON");
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS obsidian_note_replace_plans (
-        operation_id TEXT PRIMARY KEY,
-        idempotency_key TEXT NOT NULL UNIQUE,
-        status TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS obsidian_note_replace_runtime_leases (
-        instance_id TEXT PRIMARY KEY,
-        heartbeat_at TEXT NOT NULL,
-        expires_at TEXT
-      )
-    `);
-    this.ensureExecutionLeaseExpiryColumn();
-    this.renewExecutionLease();
-    this.markInterruptedPlans();
-    this.maybePurgeTerminalPlans();
+    try {
+      // This policy must exist before WAL negotiation, schema creation, lease
+      // writes, or any other statement that can encounter another MCP process.
+      this.db.exec(`PRAGMA busy_timeout=${this.sqliteBusyTimeoutMs}`);
+      this.initializeWithContentionRetry();
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
     for (const privatePath of [
       databasePath,
       `${databasePath}-wal`,
@@ -120,6 +152,49 @@ export class ObsidianNoteReplaceJournal {
         chmodSync(privatePath, 0o600);
       } catch {
         // Windows ACLs remain authoritative when POSIX modes are unavailable.
+      }
+    }
+  }
+
+  private initializeWithContentionRetry(): void {
+    const deadline = Date.now() + this.startupRetryWindowMs;
+    for (;;) {
+      try {
+        this.db.exec("PRAGMA journal_mode=WAL");
+        this.db.exec("PRAGMA synchronous=FULL");
+        this.db.exec("PRAGMA secure_delete=ON");
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS obsidian_note_replace_plans (
+            operation_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        `);
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS obsidian_note_replace_runtime_leases (
+            instance_id TEXT PRIMARY KEY,
+            heartbeat_at TEXT NOT NULL,
+            expires_at TEXT
+          )
+        `);
+        this.ensureExecutionLeaseExpiryColumn();
+        this.renewExecutionLease();
+        this.markInterruptedPlans();
+        this.maybePurgeTerminalPlans();
+        return;
+      } catch (error) {
+        if (!isTransientSqliteContention(error) || Date.now() >= deadline) {
+          throw error;
+        }
+        waitSynchronously(
+          Math.min(
+            this.startupRetryDelayMs,
+            Math.max(1, deadline - Date.now()),
+          ),
+        );
       }
     }
   }

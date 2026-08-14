@@ -128,6 +128,17 @@ the configured runtime mode, REST base URL, and vault path, with an explicit
 profile-ID override for deployment topologies that need one. Backend-specific
 plans and idempotency keys do not share an implicit machine-global namespace.
 
+SQLite contention is part of the reusable operation contract, not an adapter
+detail. Every connection that negotiates WAL must install its busy policy
+immediately after opening and before WAL, schema creation, migrations, leases,
+or journal writes. The note journal retries idempotent startup initialization
+through bounded transient contention, closes the connection if that bound is
+exhausted, and never lets a later heartbeat timeout escape the runtime timer.
+Fixtures prove simultaneous fresh opens, an existing journal locked longer than
+one busy timeout, a clean failed-startup close, and reuse of an already-active
+connection after contention. Future SQLite-backed adapters inherit this order
+and must add the same discriminating proofs.
+
 The public projection remains domain-specific:
 
 - `obsidian_note_replace_plan`

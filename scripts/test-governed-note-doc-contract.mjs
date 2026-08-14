@@ -63,10 +63,42 @@ assert.doesNotMatch(
   /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
 );
 assert.match(liveCanary, /Canary recovery directory:/);
-assert.match(operations, /printed OS-temporary `evidenceFile`/);
-assert.match(operationsFr, /temporaire système `evidenceFile` affiché/);
+assert.match(operations, /operating system temporary root/);
+assert.match(operations, /deletes the private run directory/);
+assert.match(operations, /abrupt interruption or an unverified\s+restoration/i);
+assert.match(operationsFr, /racine temporaire du système/);
+assert.match(operationsFr, /supprime le dossier privé/);
+assert.match(
+  operationsFr,
+  /interruption brutale ou une\s+restauration non vérifiée/i,
+);
 assert.doesNotMatch(operations, /proof under `\.tmp\/`/);
 assert.doesNotMatch(operationsFr, /preuve JSON expurgée sous `\.tmp\/`/);
+
+const recoveryAnnouncement = liveCanary.indexOf("Canary recovery directory:");
+const backupWrite = liveCanary.indexOf("writeFileSync(backupPath");
+const directCas = liveCanary.indexOf("await proveDirectBridgeCasConflict()");
+const firstMutation = liveCanary.indexOf(
+  "const nominal = await planApplyStatus",
+);
+const restorationVerified = liveCanary.indexOf("restored = true;");
+const evidenceWrite = liveCanary.indexOf("writeFileSync(evidenceFile");
+assert.ok(recoveryAnnouncement >= 0 && recoveryAnnouncement < backupWrite);
+assert.ok(backupWrite >= 0 && backupWrite < directCas);
+assert.ok(directCas >= 0 && directCas < firstMutation);
+assert.ok(restorationVerified >= 0 && restorationVerified < evidenceWrite);
+assert.match(liveCanary, /if \(restored\) \{[\s\S]*rmSync\(tempRoot/);
+assert.match(liveCanary, /else if \(backupWritten\) \{[\s\S]*retained at/);
+assert.match(
+  liveCanary,
+  /failed before the first mutation; no note recovery is required/,
+);
+assert.match(
+  adr,
+  /Every connection that negotiates WAL must install its busy policy/,
+);
+assert.match(contract, /busy policy is installed before WAL negotiation/);
+assert.match(contractFr, /politique de contention SQLite est installée avant/);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");

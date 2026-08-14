@@ -640,9 +640,9 @@ export class VaultCacheService {
       mkdirSync(dirPath, { recursive: true });
     }
     const db = new DatabaseSync(dbPath);
+    db.exec("PRAGMA busy_timeout = 5000;");
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA synchronous = NORMAL;");
-    db.exec("PRAGMA busy_timeout = 5000;");
     db.exec(CREATE_SCHEMA_SQL);
     return db;
   }

@@ -120,10 +120,20 @@ operator may provide an explicit stable profile ID. Plans and idempotency keys
 therefore cannot cross backend profiles unless an operator deliberately forces
 the same journal path.
 
+The SQLite busy policy is installed before WAL negotiation, schema creation,
+migration, lease, or journal writes. Startup retries only bounded transient
+contention and closes its connection on a terminal initialization failure. A
+heartbeat timeout in an already-running process is contained and retried; it
+does not terminate the MCP server.
+
 `npm run smoke:atomic-note-mcp-live` is a separate fail-closed operator canary.
 It requires an explicit disposable existing note and confirmation string,
 saves a durable private backup before mutation, proves a real Bridge CAS
 rejection and the four public MCP tools, restores the fixture, and writes a
-redacted evidence record. This live Desktop gate passed on 2026-08-14 with the
-final SHA-256 equal to the pre-mutation SHA-256. Merge, versioning, and release
-remain separate repository-authority decisions.
+redacted evidence record directly under the OS temporary root. The exact
+`evidenceFile` is printed. Successful or safely handled pre-mutation runs delete
+the private journal/log/backup directory; abrupt interruption or unverified
+restoration retains it at the recovery path printed before the MCP starts. This
+live Desktop gate passed on 2026-08-14 with the final SHA-256 equal to the
+pre-mutation SHA-256. Merge, versioning, and release remain separate
+repository-authority decisions.

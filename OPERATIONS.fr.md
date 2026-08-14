@@ -230,11 +230,14 @@ npm run smoke:atomic-note-mcp-live
 
 Le canary sauvegarde le contenu initial avant sa première mutation, prouve les
 quatre outils MCP, le refus d’un CAS Bridge périmé, l’apply nominal, le replay,
-status, un conflit déterministe et la restauration. Un succès conserve une
-preuve JSON expurgée au chemin temporaire système `evidenceFile` affiché ; une
-interruption garde son dossier privé sous la racine temporaire du système et
-affiche l’unique chemin de récupération. Ne jamais viser une note utilisateur
-ordinaire.
+status, un conflit déterministe et la restauration. Un succès écrit la preuve
+JSON expurgée directement sous la racine temporaire du système, affiche son
+`evidenceFile` exact, puis supprime le dossier privé qui contenait journal, logs
+et sauvegarde. Un échec géré avant mutation supprime aussi ce dossier après
+avoir vérifié que la note est inchangée. Une interruption brutale ou une
+restauration non vérifiée conserve le dossier privé au chemin de récupération
+affiché au démarrage ; ne restaurer qu’à partir des métadonnées explicites de sa
+sauvegarde. Ne jamais viser une note utilisateur ordinaire.
 
 ## Tasks : comment ça marche maintenant
 

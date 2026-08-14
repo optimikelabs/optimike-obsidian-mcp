@@ -223,10 +223,14 @@ npm run smoke:atomic-note-mcp-live
 
 The canary saves the original content before its first mutation, proves the four
 MCP tools, a direct Bridge CAS rejection, nominal apply, replay, status,
-deterministic conflict and restoration. A successful run leaves a redacted JSON
-proof at the printed OS-temporary `evidenceFile`; an interrupted run retains its
-private directory under the OS temporary root and prints the one explicit
-recovery path. Never point it at an ordinary user note.
+deterministic conflict and restoration. A successful run writes the redacted
+JSON proof directly under the operating system temporary root, prints its exact
+`evidenceFile`, and deletes the private run directory that held the journal,
+logs, and backup. A handled failure before mutation also removes that directory
+after verifying the note is unchanged. An abrupt interruption or an unverified
+restoration retains the private directory at the recovery path printed when the
+script starts; restore only from its explicit backup metadata. Never point the
+canary at an ordinary user note.
 
 ## Tasks: How It Works Now
 
