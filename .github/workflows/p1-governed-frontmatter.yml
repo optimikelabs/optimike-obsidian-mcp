@@ -11,9 +11,10 @@ on:
       - "src/services/operations/obsidianNoteReplace*.ts"
       - "src/services/writePolicy.ts"
       - "scripts/fixtures/governed-frontmatter-atomic-server.mjs"
+      - "scripts/fixtures/obsidian-note-replace-create-worker.mjs"
       - "scripts/models/governed-single-resource-model.mjs"
       - "scripts/test-governed-frontmatter-*.mjs"
-      - "scripts/test-frontmatter-p1-compiler.mjs"
+      - "scripts/test-frontmatter-p1-*.mjs"
       - "scripts/smoke-governed-frontmatter-live.mjs"
       - "docs/adr/ADR-Governed-Frontmatter-P1.md"
   workflow_dispatch:
@@ -36,5 +37,7 @@ jobs:
       - run: node scripts/test-governed-frontmatter-model.mjs
       - run: npm run build
       - run: node scripts/test-frontmatter-p1-compiler.mjs
+      - run: node scripts/test-frontmatter-p1-idempotency.mjs
       - run: node scripts/test-governed-frontmatter-mcp.mjs
       - run: node scripts/test-governed-frontmatter-http.mjs
+      - run: node scripts/test-governed-frontmatter-doc-contract.mjs
