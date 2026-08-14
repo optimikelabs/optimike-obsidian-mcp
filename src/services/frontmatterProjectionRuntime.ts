@@ -66,7 +66,11 @@ export type GovernedFrontmatterPlanInput = {
   idempotencyKey: string;
 };
 
-export type FrontmatterProjectionReceipt = OperationReceipt & {
+export type FrontmatterProjectionReceipt = Omit<
+  OperationReceipt,
+  "idempotencyKey"
+> & {
+  idempotencyKey?: string;
   projection: {
     kind: typeof OPERATION_KIND;
     intentDigest: string;
@@ -206,11 +210,16 @@ function assertDomainWritePolicy(
 function projectedReceipt(
   child: OperationReceipt,
   view: GovernedNoteReplacePlanView,
+  exposePublicIdempotencyKey: boolean,
 ): FrontmatterProjectionReceipt {
   const projection = storedProjection(view);
+  const { idempotencyKey: childIdempotencyKey, ...redactedChild } = child;
+  void childIdempotencyKey;
   return {
-    ...child,
-    idempotencyKey: projection.publicIdempotencyKey,
+    ...redactedChild,
+    ...(exposePublicIdempotencyKey
+      ? { idempotencyKey: projection.publicIdempotencyKey }
+      : {}),
     operationKind: OPERATION_KIND,
     planRef: publicReference(child.planRef),
     planDigest: operationDigest({
@@ -262,7 +271,11 @@ export class GovernedFrontmatterRuntime {
       const child = await this.noteRuntime.status(
         `${CHILD_PLAN_REF_PREFIX}${existing.operationId}`,
       );
-      return projectedReceipt(child, this.noteRuntime.inspect(child.planRef));
+      return projectedReceipt(
+        child,
+        this.noteRuntime.inspect(child.planRef),
+        true,
+      );
     }
 
     const source = await this.noteRuntime.readForProjection(input.path);
@@ -285,7 +298,7 @@ export class GovernedFrontmatterRuntime {
     });
     const view = this.noteRuntime.inspect(child.planRef);
     storedProjection(view, publicKey, intentDigest);
-    return projectedReceipt(child, view);
+    return projectedReceipt(child, view, true);
   }
 
   async apply(
@@ -301,14 +314,22 @@ export class GovernedFrontmatterRuntime {
       childPlanRef,
       before.idempotencyKey,
     );
-    return projectedReceipt(child, this.noteRuntime.inspect(child.planRef));
+    return projectedReceipt(
+      child,
+      this.noteRuntime.inspect(child.planRef),
+      true,
+    );
   }
 
   async status(reference: string): Promise<FrontmatterProjectionReceipt> {
     const childPlanRef = childReference(reference);
     storedProjection(this.noteRuntime.inspect(childPlanRef));
     const child = await this.noteRuntime.status(childPlanRef);
-    return projectedReceipt(child, this.noteRuntime.inspect(child.planRef));
+    return projectedReceipt(
+      child,
+      this.noteRuntime.inspect(child.planRef),
+      false,
+    );
   }
 
   async recover(
@@ -324,6 +345,10 @@ export class GovernedFrontmatterRuntime {
       childPlanRef,
       before.idempotencyKey,
     );
-    return projectedReceipt(child, this.noteRuntime.inspect(child.planRef));
+    return projectedReceipt(
+      child,
+      this.noteRuntime.inspect(child.planRef),
+      true,
+    );
   }
 }

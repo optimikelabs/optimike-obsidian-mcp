@@ -182,6 +182,7 @@ try {
   );
   assert.equal(secondStatus.operationId, planned.operationId);
   assert.equal(secondStatus.phase, "planned");
+  assert.equal(Object.hasOwn(secondStatus, "idempotencyKey"), false);
   assert.deepEqual(secondStatus.projection, planned.projection);
   const committed = await call(second, "obsidian_frontmatter_patch_apply", {
     planRef: planned.planRef,
@@ -198,6 +199,7 @@ try {
     { planRef: planned.planRef },
   );
   assert.equal(thirdStatus.outcome, "committed");
+  assert.equal(Object.hasOwn(thirdStatus, "idempotencyKey"), false);
   assert.equal(thirdStatus.planDigest, committed.planDigest);
   assert.deepEqual(thirdStatus.projection, planned.projection);
   const replay = await call(third, "obsidian_frontmatter_patch_apply", {

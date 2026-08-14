@@ -153,13 +153,16 @@ executor's authority.
 ### Observer
 
 A caller of P1 status. It can trigger P0 reconciliation but never becomes an
-executor.
+executor. Status receipts omit both the public idempotency key and the internal
+projected-child key, so possession of a `planRef` alone cannot provide apply
+authority.
 
 ## Durable identities
 
 P1 has two distinct identities:
 
-- public idempotency key: caller-facing and returned in projected receipts;
+- public idempotency key: caller-facing and returned only when the caller
+  already supplied it to plan, apply, or recover;
 - internal P0 idempotency key: domain-prefixed digest of the public key.
 
 A separate `idempotencyIdentity` binds the canonical P1 intent digest, not the
@@ -255,7 +258,8 @@ proofs, postflight, timestamps, and recovery/apply permissions. It replaces:
 - operation kind with `obsidian.frontmatter.patch`;
 - target kind with `vault-markdown-frontmatter`;
 - plan and recovery references with the P1 opaque prefix;
-- internal idempotency key with the public key;
+- internal idempotency key with the public key for plan, apply, and recover;
+- both idempotency keys with no credential for status;
 - plan digest with a stable digest over the child P0 plan digest, intent digest,
   and stored projection proof.
 

@@ -116,6 +116,12 @@ exécuteur ne peut pas terminaliser une tentative de recovery plus récente.
 Après une réponse perdue, appeler status plutôt qu’une nouvelle mutation.
 Recover réconcilie ou reprend le même child plan scellé ; ce n’est pas un undo.
 
+Les reçus de status n’exposent ni la clé d’idempotence publique ni la clé
+interne du child plan projeté. Un appelant qui possède seulement un `planRef`
+peut observer l’état durable, mais ne peut pas transformer cette observation en
+autorité d’apply. Plan, apply et recover peuvent retourner la clé publique, car
+leurs appelants l’ont déjà fournie ; la clé interne n’est jamais publique.
+
 ## Politique d’écriture
 
 Plan n’est pas read-only : il crée une intention durable. Plan, apply et recover

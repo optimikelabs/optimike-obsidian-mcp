@@ -100,6 +100,12 @@ newer recovery attempt. A lost response is followed by status, not a blind new
 mutation. Recovery resumes or reconciles the exact sealed child plan; it is not
 undo.
 
+Status receipts never expose either the public idempotency key or the internal
+projected child key. A caller that only holds a `planRef` can observe durable
+state but cannot turn that observation into apply authority. Plan, apply, and
+recover may return the public key because those callers already supplied it;
+the internal key is never public.
+
 ## Write policy
 
 Planning is not read-only because it creates durable mutation intent. P1 plan,

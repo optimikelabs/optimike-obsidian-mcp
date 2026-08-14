@@ -423,6 +423,17 @@ try {
     nominalPlan.payload.planDigest,
   );
 
+  const plannedObserverStatus = await call(
+    session,
+    "obsidian_frontmatter_patch_status",
+    { planRef: nominalPlan.payload.planRef },
+  );
+  assert.equal(plannedObserverStatus.payload.phase, "planned");
+  assert.equal(
+    Object.hasOwn(plannedObserverStatus.payload, "idempotencyKey"),
+    false,
+  );
+
   const rebound = await call(
     session,
     "obsidian_frontmatter_patch_plan",
@@ -468,6 +479,7 @@ try {
     idempotencyKey: "p1-nominal",
   });
   assert.equal(nominalApply.payload.outcome, "committed");
+  assert.equal(nominalApply.payload.idempotencyKey, "p1-nominal");
   assert.equal(fake.content, expectedNominalContent());
   assert.equal(fake.successfulWrites - writesBeforeNominal, 1);
   assert.equal(fake.casRequests - casBeforeNominal, 1);
@@ -479,6 +491,7 @@ try {
     },
   );
   assert.equal(nominalStatus.payload.outcome, "committed");
+  assert.equal(Object.hasOwn(nominalStatus.payload, "idempotencyKey"), false);
   const blockedCommittedChildStatus = await call(
     session,
     "obsidian_note_replace_status",
