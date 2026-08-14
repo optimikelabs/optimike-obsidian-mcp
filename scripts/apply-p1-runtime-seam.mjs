@@ -120,7 +120,7 @@ replaceOnce(
     ["idempotencyIdentity", input.idempotencyIdentity],
   ] as const) {
     if (value !== undefined && !SHA256.test(value)) {
-      throw new Error(\`${name} must be a lowercase SHA-256 digest.\`);
+      throw new Error(name + " must be a lowercase SHA-256 digest.");
     }
   }
   if (input.projection) {
