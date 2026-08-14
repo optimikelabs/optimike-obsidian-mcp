@@ -99,6 +99,11 @@ function normalizeKey(key: string): string {
   return key.trim().toLowerCase();
 }
 
+function compareCodeUnits(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
 function splitLines(content: string, start: number, end: number): SourceLine[] {
   const lines: SourceLine[] = [];
   let cursor = start;
@@ -371,7 +376,7 @@ function canonicalizeValue(
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareCodeUnits(left, right))
         .map(([key, item]) => [key, canonicalizeValue(item, depth + 1)]),
     );
   }
@@ -439,10 +444,11 @@ export function canonicalizeFrontmatterPatchOperations(
       : { op: "delete" as const, key: operation.key };
   });
   return canonical.sort((left, right) => {
-    const normalized = normalizeKey(left.key).localeCompare(
+    const normalized = compareCodeUnits(
+      normalizeKey(left.key),
       normalizeKey(right.key),
     );
-    return normalized || left.key.localeCompare(right.key);
+    return normalized || compareCodeUnits(left.key, right.key);
   });
 }
 

@@ -125,6 +125,35 @@ assert.equal(
   sameIntentOrderB.proof.patchDigest,
 );
 
+const composedKey = "é";
+const decomposedKey = "e\u0301";
+const unicodeObjectOrderA = Object.fromEntries([
+  [composedKey, "composed"],
+  [decomposedKey, "decomposed"],
+]);
+const unicodeObjectOrderB = Object.fromEntries([
+  [decomposedKey, "decomposed"],
+  [composedKey, "composed"],
+]);
+const sameUnicodeIntentOrderA = compileFrontmatterPatch(
+  "---\nmeta: {}\n---\nbody\n",
+  [{ op: "set", key: "meta", value: unicodeObjectOrderA }],
+);
+const sameUnicodeIntentOrderB = compileFrontmatterPatch(
+  "---\nmeta: {}\n---\nbody\n",
+  [{ op: "set", key: "meta", value: unicodeObjectOrderB }],
+);
+assert.equal(
+  sameUnicodeIntentOrderA.nextContent,
+  sameUnicodeIntentOrderB.nextContent,
+  "distinct Unicode object keys must have a total canonical order independent of insertion order",
+);
+assert.equal(
+  sameUnicodeIntentOrderA.proof.patchDigest,
+  sameUnicodeIntentOrderB.proof.patchDigest,
+  "equivalent Unicode-keyed object intents must produce the same digest",
+);
+
 const groupedAdditions = compileFrontmatterPatch(
   "---\nexisting: true\n---\nbody\n",
   [
