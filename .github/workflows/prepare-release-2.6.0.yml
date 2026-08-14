@@ -1,0 +1,84 @@
+name: Prepare release 2.6.0 once
+
+on:
+  push:
+    branches: [release/2.6.0]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prepare-release-2.6.0
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.actor == 'optimikelabs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/2.6.0
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Bump package metadata
+        run: npm version 2.6.0 --no-git-tag-version
+
+      - name: Finalize release authority and documentation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              content = file.read_text(encoding="utf-8")
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one release anchor, found {count}")
+              file.write_text(content.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "CHANGELOG.md",
+              "## [Unreleased]\n\n### Added",
+              "## [Unreleased]\n\n## [2.6.0] - 2026-08-14\n\n### Added",
+          )
+          replace_once(
+              "CHANGELOG.md",
+              "- The live operator canary passed on 2026-08-14 with exact restoration of the\n  disposable note. The branch remains versioned as `2.5.0`; version bump, tag,\n  release, and merge stay separate repository-authority actions. No generic\n  public `operation_*` surface is part of this candidate.",
+              "- The live operator canary passed on 2026-08-14 with exact restoration of the\n  disposable note. Package and lockfile now identify the stabilized `2.6.0`\n  release. No generic public `operation_*` surface is part of this release.",
+          )
+          replace_once(
+              "docs/adr/README.md",
+              "Accepted; public atomic-note projection implemented, live canary pending",
+              "Accepted and released in 2.6.0; public atomic-note projection and live canary complete",
+          )
+          replace_once(
+              "scripts/test-doc-contract.mjs",
+              "  packageJson.version,\n  \"2.5.0\",\n  \"2.6 candidate must not bump the stable package before the live canary\",",
+              "  packageJson.version,\n  \"2.6.0\",\n  \"released package metadata must match the stabilized 2.6.0 authority\",",
+          )
+
+      - name: Verify release metadata and package
+        run: |
+          npm ci
+          npm run build
+          npm run test:docs
+          npm run test:package
+          npm run audit:production
+
+      - name: Remove one-shot release workflow
+        run: rm .github/workflows/prepare-release-2.6.0.yml
+
+      - name: Commit release preparation
+        run: |
+          git config user.name "optimikelabs-release"
+          git config user.email "31423109+optimikelabs@users.noreply.github.com"
+          git add package.json package-lock.json CHANGELOG.md docs/adr/README.md scripts/test-doc-contract.mjs .github/workflows/prepare-release-2.6.0.yml
+          git commit -m "chore: prepare Optimike Obsidian MCP v2.6.0"
+          git push origin HEAD:release/2.6.0
