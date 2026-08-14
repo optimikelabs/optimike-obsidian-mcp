@@ -86,6 +86,18 @@ const nullFormulaDeleted = compileBaseFormulaPatch(
 );
 assert.doesNotMatch(nullFormulaDeleted.nextYaml, /nullable/u);
 
+for (const eol of ["\n", "\r\n"]) {
+  const withoutFinalEol = ["formulas:", "  existing: value"].join(eol);
+  const appended = compileBaseFormulaPatch(withoutFinalEol, [
+    { op: "set_formula", name: "added", expression: "next" },
+  ]);
+  assert.equal(
+    appended.nextYaml,
+    `${withoutFinalEol}${eol}  added: "next"${eol}`,
+    `formula additions must be line-separated for ${JSON.stringify(eol)} files without a final EOL`,
+  );
+}
+
 function reason(operation) {
   try {
     operation();

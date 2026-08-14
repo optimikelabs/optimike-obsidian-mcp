@@ -30,7 +30,23 @@ for (const invariant of [
   "Operon Bridge pilot vault",
   "coffre pilote Operon Bridge",
 ]) {
-  assert.equal(joined.includes(invariant), true, `P2 documentation invariant missing: ${invariant}`);
+  assert.equal(
+    joined.includes(invariant),
+    true,
+    `P2 documentation invariant missing: ${invariant}`,
+  );
+}
+for (const invariant of [
+  /complete\s+sealed next YAML/u,
+  /YAML\s+suivant complet et scellé/u,
+  /no final line\s+ending/u,
+  /sans saut de ligne final/u,
+]) {
+  assert.match(
+    joined,
+    invariant,
+    `P2 documentation invariant missing: ${invariant}`,
+  );
 }
 assert.match(joined, /legacy whole-file config writes are default-off/u);
 assert.match(joined, /ne peuvent plus contourner silencieusement/u);
@@ -40,4 +56,6 @@ assert.doesNotMatch(
   "P2 must not claim a generic public operation surface",
 );
 
-console.log("PASS: governed Base P2 documentation matches the bounded CAS and pilot-vault contract");
+console.log(
+  "PASS: governed Base P2 documentation matches the bounded CAS and pilot-vault contract",
+);

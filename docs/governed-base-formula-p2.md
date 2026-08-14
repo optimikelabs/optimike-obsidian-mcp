@@ -27,7 +27,9 @@ top-level `formulas` mapping, LF or CRLF, and at most 32 operations. It rejects
 anchors, aliases, tags, merge keys, duplicate/case-colliding formula names,
 mixed line endings, ambiguous YAML layout, and deletion of the final formula.
 Existing key spelling is preserved. Every byte outside the authorized formula
-ranges is identical before and after compilation.
+ranges is identical before and after compilation. Files with no final line
+ending remain supported; an added formula receives exactly one detected line
+separator before its new mapping entry.
 
 Bases Bridge Atomic V1 supports existing `.base` files only. Its compare-and-
 replace is bound to a stable device/install/vault fingerprint and executes
@@ -48,6 +50,10 @@ Validation-only legacy requests remain available. With the compatibility
 switch off, the old `bases_upsert_config` and `bases_create` effects fail
 closed at the Bridge, so they cannot silently bypass the governed formula
 surface. Note-property upserts are a separate frontmatter domain.
+
+In `guarded` mode, the configured write-size limit applies to the complete
+sealed next YAML at initial plan, idempotent plan replay, apply, and recover.
+No phase may rely only on the smaller formula expression or operation count.
 
 ## Deterministic gate
 

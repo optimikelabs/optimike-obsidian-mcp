@@ -28,7 +28,9 @@ top-level `formulas` en style bloc, LF ou CRLF, et 32 opérations au maximum. Il
 refuse ancres, alias, tags, merge keys, doublons ou collisions de casse, fins de
 ligne mélangées, layout YAML ambigu et suppression de la dernière formule. La
 casse exacte d’une clé existante est conservée. Tous les bytes hors des plages
-de formules autorisées restent identiques.
+de formules autorisées restent identiques. Un fichier sans saut de ligne final
+reste supporté : une formule ajoutée reçoit exactement un séparateur de ligne
+détecté avant sa nouvelle entrée de mapping.
 
 Bases Bridge Atomic V1 ne cible que les `.base` existantes. Son CAS est lié à
 une empreinte stable appareil/installation/coffre et s’exécute via
@@ -50,6 +52,11 @@ La validation seule du legacy reste disponible. Sans le toggle de
 compatibilité, les effets `bases_upsert_config` et `bases_create` échouent au
 Bridge : ils ne peuvent plus contourner silencieusement la surface gouvernée.
 Les upserts de propriétés de notes relèvent d’un autre domaine frontmatter.
+
+En mode `guarded`, la limite configurée de taille d’écriture s’applique au YAML
+suivant complet et scellé lors du plan initial, du replay idempotent du plan,
+de l’apply et du recover. Aucune phase ne se limite à la taille de l’expression
+ou au nombre d’opérations.
 
 ## Gate déterministe
 

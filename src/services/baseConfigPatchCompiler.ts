@@ -326,12 +326,16 @@ export function compileBaseFormulaPatch(
     }
   }
   if (additions.length > 0) {
+    const separator =
+      source.appendOffset > 0 && yaml[source.appendOffset - 1] !== "\n"
+        ? source.eol
+        : "";
     edits.push({
       name: "[formula-additions]",
       operation: "set_formula",
       start: source.appendOffset,
       end: source.appendOffset,
-      replacement: additions.join(""),
+      replacement: separator + additions.join(""),
     });
   }
   const orderedEdits = [...edits].sort((a, b) => b.start - a.start);

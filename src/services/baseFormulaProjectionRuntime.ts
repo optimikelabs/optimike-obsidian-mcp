@@ -215,6 +215,7 @@ function assertPolicy(
   action: "plan" | "apply" | "recover",
   path: string,
   count: number,
+  contentLength?: number,
 ): void {
   assertWriteAllowed({
     operation:
@@ -227,6 +228,7 @@ function assertPolicy(
     target: path,
     targetType: "filePath",
     batchCount: count,
+    contentLength,
   });
 }
 
@@ -261,10 +263,18 @@ export class GovernedBaseFormulaRuntime {
     const key = publicKey(input.idempotencyKey);
     const canonical = intent(input.path, input.operations);
     const durableKey = internalKey(key);
+    // Reject readonly mode before touching the backend. The sealed size is
+    // enforced below once a durable replay or compiled projection is known.
     assertPolicy("plan", input.path, canonical.operations.length);
     const existing = this.journal.getByIdempotencyKey(durableKey);
     if (existing) {
       projection(existing, key, canonical.digest);
+      assertPolicy(
+        "plan",
+        existing.path,
+        canonical.operations.length,
+        existing.nextContent.length,
+      );
       return exposed(
         await this.adapter.status(`${PLAN_REF_PREFIX}${existing.operationId}`),
         existing,
@@ -278,6 +288,12 @@ export class GovernedBaseFormulaRuntime {
     const compiled = compileBaseFormulaPatch(
       source.content,
       canonical.operations,
+    );
+    assertPolicy(
+      "plan",
+      input.path,
+      canonical.operations.length,
+      compiled.nextYaml.length,
     );
     const storedProjection: ObsidianNoteReplaceProjection = {
       contractVersion: 1,
@@ -303,7 +319,12 @@ export class GovernedBaseFormulaRuntime {
   async apply(reference: string, idempotencyKey: string) {
     const plan = this.required(reference);
     const stored = projection(plan, publicKey(idempotencyKey));
-    assertPolicy("apply", plan.path, stored.proof.changedFormulas.length);
+    assertPolicy(
+      "apply",
+      plan.path,
+      stored.proof.changedFormulas.length,
+      plan.nextContent.length,
+    );
     const result = await this.adapter.apply(reference, plan.idempotencyKey);
     return exposed(result, this.required(reference), true);
   }
@@ -318,7 +339,12 @@ export class GovernedBaseFormulaRuntime {
   async recover(reference: string, idempotencyKey: string) {
     const plan = this.required(reference);
     const stored = projection(plan, publicKey(idempotencyKey));
-    assertPolicy("recover", plan.path, stored.proof.changedFormulas.length);
+    assertPolicy(
+      "recover",
+      plan.path,
+      stored.proof.changedFormulas.length,
+      plan.nextContent.length,
+    );
     const result = await this.adapter.recover(reference, plan.idempotencyKey);
     return exposed(result, this.required(reference), true);
   }

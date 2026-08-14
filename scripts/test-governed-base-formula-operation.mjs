@@ -15,6 +15,7 @@ process.env.OBSIDIAN_API_KEY ||= "governed-base-test-only";
 process.env.MCP_WRITE_MODE ||= "full";
 const { BASE_FORMULA_ATOMIC_PROFILE, GovernedBaseFormulaRuntime } =
   await import("../dist/services/baseFormulaProjectionRuntime.js");
+const { config } = await import("../dist/config/index.js");
 const root = mkdtempSync(path.join(os.tmpdir(), "optimike-base-p2-"));
 const bindingFingerprint = "b".repeat(64);
 let yaml =
@@ -127,6 +128,47 @@ try {
     (error) =>
       error instanceof McpError && error.code === BaseErrorCode.CONFLICT,
   );
+
+  const oversized = await runtime.plan({
+    path: "Canary/Project.base",
+    operations: [
+      { op: "set_formula", name: "score", expression: "x".repeat(256) },
+    ],
+    idempotencyKey: "base-p2-guarded-size",
+  });
+  const previousMode = config.mcpWriteMode;
+  const previousLimit = config.mcpGuardedMaxWriteChars;
+  config.mcpWriteMode = "guarded";
+  config.mcpGuardedMaxWriteChars = 80;
+  try {
+    for (const operation of [
+      () =>
+        runtime.plan({
+          path: "Canary/Project.base",
+          operations: [
+            {
+              op: "set_formula",
+              name: "score",
+              expression: "x".repeat(256),
+            },
+          ],
+          idempotencyKey: "base-p2-guarded-size",
+        }),
+      () => runtime.apply(oversized.planRef, "base-p2-guarded-size"),
+      () => runtime.recover(oversized.planRef, "base-p2-guarded-size"),
+    ]) {
+      await assert.rejects(
+        operation(),
+        (error) =>
+          error instanceof McpError &&
+          error.code === BaseErrorCode.FORBIDDEN &&
+          /MCP_GUARDED_MAX_WRITE_CHARS/u.test(error.message),
+      );
+    }
+  } finally {
+    config.mcpWriteMode = previousMode;
+    config.mcpGuardedMaxWriteChars = previousLimit;
+  }
 } finally {
   runtime.close();
   rmSync(root, { recursive: true, force: true });

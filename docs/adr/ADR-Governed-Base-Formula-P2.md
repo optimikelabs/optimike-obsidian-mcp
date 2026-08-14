@@ -48,8 +48,9 @@ operations:
 - `delete_formula(name)`.
 
 The compiler accepts one block-style top-level formulas mapping. It preserves
-line endings and every byte outside authorized formula ranges. It preserves
-the exact spelling of existing keys and orders new operations by code units.
+line endings, including the absence of a final line ending, and every byte
+outside authorized formula ranges. It preserves the exact spelling of
+existing keys and orders new operations by code units.
 It fails closed on ambiguous layout, mixed line endings, anchors, aliases,
 tags, merge keys, duplicate/case-colliding names and deletion of the final
 formula. It never round-trips the complete YAML through a serializer.
@@ -75,17 +76,18 @@ domain.
 
 ## Failure matrix
 
-| Failure | Required result |
-| --- | --- |
-| Base changes after plan | CAS conflict, no P2 write |
-| Backend/vault binding changes | Conflict/rejection, no write |
-| Response lost after CAS | Status reconciles sealed after hash |
-| Executor lease expires | Only the new fenced attempt may terminalize |
-| Current hash matches neither sealed hash | `outcome_unknown`, never invented conflict/commit |
-| Duplicate public idempotency key with another intent | Conflict |
-| Ambiguous YAML or unsupported source | Planning fails before journal/effect |
-| Legacy compatibility enabled | Governed plan/apply fails closed |
-| Canary interruption | Private backup retained until exact SHA restoration |
+| Failure                                              | Required result                                     |
+| ---------------------------------------------------- | --------------------------------------------------- |
+| Base changes after plan                              | CAS conflict, no P2 write                           |
+| Backend/vault binding changes                        | Conflict/rejection, no write                        |
+| Response lost after CAS                              | Status reconciles sealed after hash                 |
+| Executor lease expires                               | Only the new fenced attempt may terminalize         |
+| Current hash matches neither sealed hash             | `outcome_unknown`, never invented conflict/commit   |
+| Duplicate public idempotency key with another intent | Conflict                                            |
+| Ambiguous YAML or unsupported source                 | Planning fails before journal/effect                |
+| Sealed next YAML exceeds the guarded content limit   | Plan replay, apply and recover fail before effect   |
+| Legacy compatibility enabled                         | Governed plan/apply fails closed                    |
+| Canary interruption                                  | Private backup retained until exact SHA restoration |
 
 ## Live evidence
 
