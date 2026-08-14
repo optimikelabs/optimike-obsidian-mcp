@@ -5,6 +5,7 @@ import { z } from "zod";
 import { config } from "../../../config/index.js";
 import { validateObsidianMarkdown } from "../../../services/obsidianFormatService.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
+import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import {
   type AtomicWriteBackend,
   ObsidianNoteReplaceOperationAdapter,
@@ -21,6 +22,7 @@ import {
   type WriteOperation,
 } from "../../../services/writePolicy.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { logger, requestContextService } from "../../../utils/index.js";
 
 const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
 
@@ -118,14 +120,18 @@ function validateReplacement(
     validation = validateObsidianMarkdown(nextContent);
   } catch {
     throw new McpError(
-      phase === "plan" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.FORBIDDEN,
+      phase === "plan"
+        ? BaseErrorCode.VALIDATION_ERROR
+        : BaseErrorCode.FORBIDDEN,
       "The sealed next content is not valid conservative Obsidian Markdown.",
       { reason: "markdown_validation_failed" },
     );
   }
   if (!validation.ok) {
     throw new McpError(
-      phase === "plan" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.FORBIDDEN,
+      phase === "plan"
+        ? BaseErrorCode.VALIDATION_ERROR
+        : BaseErrorCode.FORBIDDEN,
       "The sealed next content is not valid conservative Obsidian Markdown.",
       {
         validationErrors: validation.errors.map(({ code, path }) => ({
@@ -141,7 +147,9 @@ function validateReplacement(
     changed = changedProtectedKeys(currentContent, nextContent);
   } catch (error) {
     throw new McpError(
-      phase === "plan" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.FORBIDDEN,
+      phase === "plan"
+        ? BaseErrorCode.VALIDATION_ERROR
+        : BaseErrorCode.FORBIDDEN,
       "Protected frontmatter cannot be compared safely because the YAML structure is invalid.",
       {
         reason:
@@ -165,7 +173,10 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
 
   constructor(private readonly delegate: AtomicWriteBackend) {}
 
-  withContext<T>(context: CallContext, operation: () => Promise<T>): Promise<T> {
+  withContext<T>(
+    context: CallContext,
+    operation: () => Promise<T>,
+  ): Promise<T> {
     return this.callContext.run(context, operation);
   }
 
@@ -225,7 +236,9 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
 
 function operationIdFromRef(reference: string): string {
   if (!reference.startsWith(PLAN_REF_PREFIX)) {
-    throw new Error("The plan reference is not an obsidian.note.replace V1 plan.");
+    throw new Error(
+      "The plan reference is not an obsidian.note.replace V1 plan.",
+    );
   }
   const operationId = reference.slice(PLAN_REF_PREFIX.length);
   if (!z.string().uuid().safeParse(operationId).success) {
@@ -243,6 +256,7 @@ export class GovernedNoteReplaceRuntime {
     private readonly journal: ObsidianNoteReplaceJournal,
     private readonly adapter: ObsidianNoteReplaceOperationAdapter,
     leaseHeartbeatMs = 5_000,
+    private readonly vaultCacheService?: VaultCacheService,
   ) {
     this.leaseHeartbeat = setInterval(
       () => this.journal.renewExecutionLease(),
@@ -259,24 +273,33 @@ export class GovernedNoteReplaceRuntime {
     );
   }
 
-  apply(reference: string, idempotencyKey: string): Promise<OperationReceipt> {
+  async apply(
+    reference: string,
+    idempotencyKey: string,
+  ): Promise<OperationReceipt> {
     const plan = this.required(reference);
     assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
-    return this.backend.withContext({ kind: "apply" }, () =>
+    const operation = this.backend.withContext({ kind: "apply" }, () =>
       this.adapter.apply(reference, idempotencyKey),
     );
+    return this.refreshCacheAfterCommit(plan, operation);
   }
 
-  status(reference: string): Promise<OperationReceipt> {
-    return this.adapter.status(reference);
+  async status(reference: string): Promise<OperationReceipt> {
+    const plan = this.required(reference);
+    return this.refreshCacheAfterCommit(plan, this.adapter.status(reference));
   }
 
-  recover(reference: string, idempotencyKey: string): Promise<OperationReceipt> {
+  async recover(
+    reference: string,
+    idempotencyKey: string,
+  ): Promise<OperationReceipt> {
     const plan = this.required(reference);
     assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
-    return this.backend.withContext({ kind: "recover" }, () =>
+    const operation = this.backend.withContext({ kind: "recover" }, () =>
       this.adapter.recover(reference, idempotencyKey),
     );
+    return this.refreshCacheAfterCommit(plan, operation);
   }
 
   close(): void {
@@ -291,13 +314,37 @@ export class GovernedNoteReplaceRuntime {
     if (!plan) throw new Error("Unknown note-replacement operation plan.");
     return plan;
   }
+
+  private async refreshCacheAfterCommit(
+    plan: ObsidianNoteReplacePlan,
+    operation: Promise<OperationReceipt>,
+  ): Promise<OperationReceipt> {
+    const result = await operation;
+    if (result.outcome !== "committed" || !this.vaultCacheService) {
+      return result;
+    }
+
+    const context = requestContextService.createRequestContext({
+      operation: "governedNoteReplaceCacheRefresh",
+      operationId: result.operationId,
+      filePath: plan.path,
+    });
+    try {
+      await this.vaultCacheService.updateCacheForFile(plan.path, context);
+    } catch (error) {
+      logger.warning(
+        `Background cache refresh failed for '${plan.path}': ${error instanceof Error ? error.message : String(error)}`,
+        context,
+      );
+    }
+    return result;
+  }
 }
 
 export function createGovernedNoteReplaceRuntime(
   obsidianService: ObsidianRestApiService | undefined,
-):
-  | GovernedNoteReplaceRuntime
-  | undefined {
+  vaultCacheService?: VaultCacheService,
+): GovernedNoteReplaceRuntime | undefined {
   if (!obsidianService) return undefined;
 
   const journal = new ObsidianNoteReplaceJournal(
@@ -314,8 +361,12 @@ export function createGovernedNoteReplaceRuntime(
     adapter,
     Math.max(
       250,
-      Math.min(5_000, Math.floor(config.obsidianNoteReplaceExecutionLeaseMs / 4)),
+      Math.min(
+        5_000,
+        Math.floor(config.obsidianNoteReplaceExecutionLeaseMs / 4),
+      ),
     ),
+    vaultCacheService,
   );
 
   // The application lifecycle closes the runtime explicitly. This synchronous

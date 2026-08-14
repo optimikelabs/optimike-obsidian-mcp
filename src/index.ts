@@ -313,8 +313,10 @@ const start = async () => {
     } else {
       logger.info("Vault cache is disabled by configuration.", startupContext);
     }
-    governedNoteReplaceRuntime =
-      createGovernedNoteReplaceRuntime(obsidianService);
+    governedNoteReplaceRuntime = createGovernedNoteReplaceRuntime(
+      obsidianService,
+      vaultCacheService,
+    );
     logger.info(
       governedNoteReplaceRuntime
         ? "Governed note-replacement runtime is enabled and process-shared."

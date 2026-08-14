@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -194,6 +195,24 @@ class FakeObsidianAtomicWriteServer {
       return;
     }
     if (
+      req.method === "GET" &&
+      decodeURIComponent(url.pathname) === `/vault/${FIXTURE_PATH}`
+    ) {
+      this.vaultReadRequests += 1;
+      json(res, 200, {
+        content: this.content,
+        frontmatter: {},
+        path: FIXTURE_PATH,
+        stat: {
+          ctime: 1,
+          mtime: Date.now(),
+          size: Buffer.byteLength(this.content, "utf8"),
+        },
+        tags: [],
+      });
+      return;
+    }
+    if (
       req.method === "POST" &&
       url.pathname === "/extensions/obsidian-atomic-write-bridge/notes/cas"
     ) {
@@ -290,6 +309,7 @@ class FakeObsidianAtomicWriteServer {
   readRequests = 0;
   casRequests = 0;
   successfulWrites = 0;
+  vaultReadRequests = 0;
   failBeforeWriteNext = false;
   loseResponseAfterWriteNext = false;
   blockedCas = undefined;
@@ -322,8 +342,7 @@ function listFiles(directory) {
 }
 
 function assertNoSecret(value, label) {
-  const serialized =
-    typeof value === "string" ? value : JSON.stringify(value);
+  const serialized = typeof value === "string" ? value : JSON.stringify(value);
   assert.equal(
     serialized.includes(SECRET),
     false,
@@ -332,8 +351,7 @@ function assertNoSecret(value, label) {
 }
 
 function assertNoJournalPath(value, label) {
-  const serialized =
-    typeof value === "string" ? value : JSON.stringify(value);
+  const serialized = typeof value === "string" ? value : JSON.stringify(value);
   assert.equal(
     serialized.includes(journalPath),
     false,
@@ -349,6 +367,7 @@ const testRoot = mkdtempSync(
 const vaultPath = path.join(testRoot, "vault");
 const logsPath = path.join(testRoot, "logs");
 const journalPath = path.join(testRoot, "note-replace.sqlite");
+const cachePath = path.join(testRoot, "shared-cache.sqlite");
 mkdirSync(vaultPath, { recursive: true });
 mkdirSync(logsPath, { recursive: true });
 
@@ -376,7 +395,8 @@ function childEnv(writeMode = "full", runtimeMode = "live") {
     OBSIDIAN_RUNTIME_MODE: runtimeMode,
     OBSIDIAN_BASE_URL: fake.baseUrl,
     OBSIDIAN_VERIFY_SSL: "false",
-    OBSIDIAN_ENABLE_CACHE: "false",
+    OBSIDIAN_ENABLE_CACHE: "true",
+    OBSIDIAN_SHARED_CACHE_DB_PATH: cachePath,
     OBSIDIAN_STARTUP_BLOCKING: "true",
     OBSIDIAN_STARTUP_MAX_RETRIES: "1",
     OBSIDIAN_STARTUP_RETRY_DELAY_MS: "10",
@@ -507,19 +527,30 @@ try {
     });
   }
   assert.deepEqual(
-    [...(byName.get("obsidian_note_replace_plan")?.inputSchema.required ?? [])].sort(),
+    [
+      ...(byName.get("obsidian_note_replace_plan")?.inputSchema.required ?? []),
+    ].sort(),
     ["idempotencyKey", "nextContent", "path"],
   );
   assert.deepEqual(
-    [...(byName.get("obsidian_note_replace_apply")?.inputSchema.required ?? [])].sort(),
+    [
+      ...(byName.get("obsidian_note_replace_apply")?.inputSchema.required ??
+        []),
+    ].sort(),
     ["idempotencyKey", "planRef"],
   );
   assert.deepEqual(
-    [...(byName.get("obsidian_note_replace_status")?.inputSchema.required ?? [])].sort(),
+    [
+      ...(byName.get("obsidian_note_replace_status")?.inputSchema.required ??
+        []),
+    ].sort(),
     ["planRef"],
   );
   assert.deepEqual(
-    [...(byName.get("obsidian_note_replace_recover")?.inputSchema.required ?? [])].sort(),
+    [
+      ...(byName.get("obsidian_note_replace_recover")?.inputSchema.required ??
+        []),
+    ].sort(),
     ["idempotencyKey", "planRef"],
   );
   assert.deepEqual(
@@ -541,13 +572,15 @@ try {
     "obsidian_note_replace_plan",
     {
       path: FIXTURE_PATH,
-      nextContent:
-        "---\ncréation: 2099-01-01\nstatut: actif\n---\nforbidden\n",
+      nextContent: "---\ncréation: 2099-01-01\nstatut: actif\n---\nforbidden\n",
       idempotencyKey: "protected-frontmatter",
     },
     true,
   );
-  assert.match(protectedAttempt.payload.error.message, /protected frontmatter/u);
+  assert.match(
+    protectedAttempt.payload.error.message,
+    /protected frontmatter/u,
+  );
   assert.equal(fake.casRequests, 0);
 
   const invalidMarkdown = await call(
@@ -613,6 +646,19 @@ try {
   });
   assertTerminal(nominal.payload);
   assert.equal(fake.content, secretContent);
+  assert.ok(
+    fake.vaultReadRequests >= 1,
+    "a committed replacement must proactively refresh the shared cache",
+  );
+  const cacheDb = new DatabaseSync(cachePath, { readOnly: true });
+  try {
+    const cached = cacheDb
+      .prepare("SELECT content FROM file_cache WHERE path = ?")
+      .get(`/${FIXTURE_PATH}`);
+    assert.equal(cached?.content, secretContent);
+  } finally {
+    cacheDb.close();
+  }
   assert.equal(fake.casRequests - casBeforeNominal, 1);
   assert.equal(fake.successfulWrites - writesBeforeNominal, 1);
   const nominalStatus = await call(session, "obsidian_note_replace_status", {
@@ -800,14 +846,10 @@ try {
     idempotencyKey: "concurrent-recover-mcp",
   });
   await blockRecover.entered;
-  const secondRecover = await call(
-    session,
-    "obsidian_note_replace_recover",
-    {
-      planRef: recoverPlan.payload.planRef,
-      idempotencyKey: "concurrent-recover-mcp",
-    },
-  );
+  const secondRecover = await call(session, "obsidian_note_replace_recover", {
+    planRef: recoverPlan.payload.planRef,
+    idempotencyKey: "concurrent-recover-mcp",
+  });
   assert.equal(secondRecover.payload.phase, "applying");
   assert.equal(secondRecover.payload.outcome, null);
   blockRecover.release();

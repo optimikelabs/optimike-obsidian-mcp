@@ -3,13 +3,13 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const canaryPath = process.env.OBSIDIAN_ATOMIC_NOTE_CANARY_PATH?.trim();
-const confirmation =
-  process.env.OBSIDIAN_ATOMIC_NOTE_CANARY_CONFIRM?.trim();
+const confirmation = process.env.OBSIDIAN_ATOMIC_NOTE_CANARY_CONFIRM?.trim();
 const apiKey = process.env.OBSIDIAN_API_KEY?.trim();
 const writeMode = process.env.MCP_WRITE_MODE?.trim() ?? "readonly";
 
@@ -21,10 +21,7 @@ if (!canaryPath) {
 if (!canaryPath.toLowerCase().endsWith(".md")) {
   throw new Error("The canary path must identify an existing .md note.");
 }
-if (
-  confirmation !==
-  "I_UNDERSTAND_THIS_NOTE_WILL_BE_TEMPORARILY_REPLACED"
-) {
+if (confirmation !== "I_UNDERSTAND_THIS_NOTE_WILL_BE_TEMPORARILY_REPLACED") {
   throw new Error(
     "Set OBSIDIAN_ATOMIC_NOTE_CANARY_CONFIRM=I_UNDERSTAND_THIS_NOTE_WILL_BE_TEMPORARILY_REPLACED.",
   );
@@ -38,14 +35,16 @@ if (!new Set(["guarded", "full"]).has(writeMode)) {
   );
 }
 
-const tempParent = path.join(process.cwd(), ".tmp");
-mkdirSync(tempParent, { recursive: true });
-const tempRoot = mkdtempSync(path.join(tempParent, "atomic-note-mcp-live-"));
+const tempParent = os.tmpdir();
+const tempRoot = mkdtempSync(
+  path.join(tempParent, "optimike-atomic-note-mcp-live-"),
+);
 const journalPath = path.join(tempRoot, "note-replace.sqlite");
 const logsPath = path.join(tempRoot, "logs");
 const backupPath = path.join(tempRoot, "original-content.md");
 const backupMetadataPath = path.join(tempRoot, "original-content.json");
 mkdirSync(logsPath, { recursive: true });
+console.error(`Canary recovery directory: ${tempRoot}`);
 
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -318,13 +317,16 @@ try {
   await client.close().catch(() => undefined);
   if (restored) {
     rmSync(tempRoot, { recursive: true, force: true });
-    if (evidenceFile) console.error(`Canary evidence written to ${evidenceFile}`);
+    if (evidenceFile)
+      console.error(`Canary evidence written to ${evidenceFile}`);
   } else if (backupWritten) {
     console.error(
       `Canary recovery evidence retained at ${tempRoot}; restore only the explicit canary note from ${backupPath}.`,
     );
   } else {
     rmSync(tempRoot, { recursive: true, force: true });
-    console.error("Canary failed before the first mutation; no note recovery is required.");
+    console.error(
+      "Canary failed before the first mutation; no note recovery is required.",
+    );
   }
 }

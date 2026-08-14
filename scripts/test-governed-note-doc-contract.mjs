@@ -20,6 +20,7 @@ const readmeFr = await text("README.fr.md");
 const adr = await text("docs/adr/ADR-Common-Operation-Runtime.md");
 const contract = await text("docs/governed-note-replacement.md");
 const contractFr = await text("docs/governed-note-replacement.fr.md");
+const liveCanary = await text("scripts/smoke-atomic-note-mcp-live.mjs");
 const pkg = JSON.parse(await text("package.json"));
 
 for (const tool of tools) {
@@ -54,6 +55,12 @@ const envExample = await text(".env.server.example");
 assert.match(envExample, /MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH=\//);
 const changelog = await text("CHANGELOG.md");
 assert.match(changelog, /## \[Unreleased\][\s\S]*obsidian_note_replace_plan/);
+assert.match(liveCanary, /os\.tmpdir\(\)/);
+assert.doesNotMatch(
+  liveCanary,
+  /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
+);
+assert.match(liveCanary, /Canary recovery directory:/);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
