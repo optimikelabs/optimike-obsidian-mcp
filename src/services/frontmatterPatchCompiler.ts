@@ -149,12 +149,6 @@ function isTopLevelSeparator(line: SourceLine): boolean {
   return line.text.trim() === "" || isCommentLine(line);
 }
 
-function isBlockScalarHeader(valueSource: string): boolean {
-  return /^\s*[|>](?:[+-][1-9]?|[1-9][+-]?)?\s*(?:#.*)?$/u.test(
-    valueSource,
-  );
-}
-
 function stripQuotedAndComment(text: string): string {
   let result = "";
   let quote: "'" | '"' | undefined;
@@ -201,7 +195,8 @@ function blockScalarHeaderIndent(text: string): number | undefined {
   return code.match(/^[ \t]*/u)?.[0].length ?? 0;
 }
 
-function rejectUnsupportedYamlFeatures(lines: SourceLine[]): void {
+function rejectUnsupportedYamlFeatures(lines: SourceLine[]): Set<number> {
+  const blockScalarHeaderLines = new Set<number>();
   let blockScalarIndent: number | undefined;
   for (const [index, line] of lines.entries()) {
     const indentation = line.text.match(/^[ \t]*/u)?.[0].length ?? 0;
@@ -243,7 +238,11 @@ function rejectUnsupportedYamlFeatures(lines: SourceLine[]): void {
       });
     }
     blockScalarIndent = blockScalarHeaderIndent(line.text);
+    if (blockScalarIndent !== undefined) {
+      blockScalarHeaderLines.add(index);
+    }
   }
+  return blockScalarHeaderLines;
 }
 
 function parseFrontmatterSource(content: string): FrontmatterSource {
@@ -281,7 +280,7 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
 
   const source = content.slice(contentStart, closingStart);
   const lines = splitLines(content, contentStart, closingStart);
-  rejectUnsupportedYamlFeatures(lines);
+  const blockScalarHeaderLines = rejectUnsupportedYamlFeatures(lines);
 
   let parsed: unknown;
   try {
@@ -305,7 +304,6 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
     key: string;
     normalizedKey: string;
     lineIndex: number;
-    blockScalarIsUnsupported: boolean;
   }> = [];
   const seen = new Set<string>();
   let activeEntry = false;
@@ -341,7 +339,6 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       key,
       normalizedKey,
       lineIndex,
-      blockScalarIsUnsupported: isBlockScalarHeader(match[2]),
     });
     activeEntry = true;
   }
@@ -360,6 +357,17 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       .slice(firstPrecedingSeparatorLineIndex + 1, start.lineIndex)
       .some(isCommentLine);
     const nextStartLineIndex = starts[index + 1]?.lineIndex ?? lines.length;
+    let blockScalarIsUnsupported = false;
+    for (
+      let lineIndex = start.lineIndex;
+      lineIndex < nextStartLineIndex;
+      lineIndex += 1
+    ) {
+      if (blockScalarHeaderLines.has(lineIndex)) {
+        blockScalarIsUnsupported = true;
+        break;
+      }
+    }
     let lastOwnedLineIndex = nextStartLineIndex - 1;
     while (
       lastOwnedLineIndex > start.lineIndex &&
@@ -376,7 +384,7 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       normalizedKey: start.normalizedKey,
       start: startLine.start,
       end,
-      blockScalarIsUnsupported: start.blockScalarIsUnsupported,
+      blockScalarIsUnsupported,
       leadingCommentIsAmbiguous,
       trailingCommentIsAmbiguous,
     });

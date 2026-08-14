@@ -38,7 +38,8 @@ block. It may contain up to 64 unique top-level operations:
 
 The compiler fails closed on unsupported source, including duplicate or
 case-colliding keys, anchors, aliases, merge keys, explicit YAML tags, complex
-or quoted keys, multi-document syntax, targeted block scalars, ambiguous comment
+or quoted keys, multi-document syntax, targeted entries containing direct or
+nested block scalars, ambiguous comment
 ownership, excessive nesting, non-finite numbers, and oversized values.
 
 ## Source-preservation guarantee

@@ -82,9 +82,18 @@ assert.match(adr, /Candidate implemented/);
 assert.match(adr, /Live admission remains blocked/i);
 assert.match(contract, /fixed bounded marker/i);
 assert.match(contractFr, /marqueur fixe et borné/i);
-assert.match(contract, /targeted block scalars/i);
-assert.match(contractFr, /scalaires multilignes ciblés/i);
-assert.match(adr, /targeted YAML block scalars/i);
+assert.match(
+  contract,
+  /targeted entries containing direct or[\s\S]*nested block scalars/i,
+);
+assert.match(
+  contractFr,
+  /entrées ciblées contenant des[\s\S]*scalaires multilignes directs ou imbriqués/i,
+);
+assert.match(
+  adr,
+  /targeted entries containing direct or nested YAML block scalars/i,
+);
 assert.match(contract, /total code-unit order[\s\S]*intent[\s\S]*proof/i);
 assert.match(contractFr, /ordre total des unités de code/i);
 assert.match(adr, /intent and patch-proof digests[\s\S]*code-unit ordering/i);

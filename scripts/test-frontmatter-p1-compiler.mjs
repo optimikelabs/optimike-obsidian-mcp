@@ -198,6 +198,27 @@ assert.equal(
   "literal anchor, alias, tag, and document-marker text inside an untargeted block scalar must remain byte-identical",
 );
 
+const untargetedNestedBlockScalar = [
+  "---",
+  "meta:",
+  "  secret: |",
+  "    value",
+  "    # retained scalar text",
+  "statut: actif",
+  "---",
+  "body",
+  "",
+].join("\n");
+const untargetedNestedBlockScalarCompiled = compileFrontmatterPatch(
+  untargetedNestedBlockScalar,
+  [{ op: "set", key: "statut", value: "pause" }],
+);
+assert.equal(
+  untargetedNestedBlockScalarCompiled.nextContent,
+  untargetedNestedBlockScalar.replace("statut: actif", 'statut: "pause"'),
+  "a nested block scalar in an untargeted entry must remain byte-identical",
+);
+
 const groupedAdditions = compileFrontmatterPatch(
   "---\nexisting: true\n---\nbody\n",
   [
@@ -300,6 +321,14 @@ const failures = [
       compileFrontmatterPatch(
         "---\nsecret: |-\n  first line\n  # retained scalar text\nnext: true\n---\nbody\n",
         [{ op: "set", key: "secret", value: "replacement" }],
+      ),
+  ],
+  [
+    "target_block_scalar_unsupported",
+    () =>
+      compileFrontmatterPatch(
+        "---\nmeta:\n  secret: |\n    value\n    # retained scalar text\nnext: true\n---\nbody\n",
+        [{ op: "set", key: "meta", value: { replacement: true } }],
       ),
   ],
   [
