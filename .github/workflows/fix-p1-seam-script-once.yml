@@ -1,0 +1,42 @@
+name: Fix P1 seam applicator once
+
+on:
+  push:
+    branches: [feat/governed-frontmatter-p1]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-p1-seam-applicator-once
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: github.actor == 'optimikelabs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/governed-frontmatter-p1
+          fetch-depth: 0
+      - name: Repair generated TypeScript string
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("scripts/apply-p1-runtime-seam.mjs")
+          text = path.read_text(encoding="utf-8")
+          old = '      throw new Error(\\`${name} must be a lowercase SHA-256 digest.\\`);'
+          new = '      throw new Error(name + " must be a lowercase SHA-256 digest.");'
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one interpolation anchor, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+      - name: Remove one-shot workflow and commit
+        run: |
+          rm .github/workflows/fix-p1-seam-script-once.yml
+          git config user.name "optimikelabs-p1"
+          git config user.email "31423109+optimikelabs@users.noreply.github.com"
+          git add scripts/apply-p1-runtime-seam.mjs .github/workflows/fix-p1-seam-script-once.yml
+          git commit -m "fix(p1): repair seam applicator interpolation"
+          git push origin HEAD:feat/governed-frontmatter-p1
