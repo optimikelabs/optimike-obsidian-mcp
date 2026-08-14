@@ -29,7 +29,8 @@ export class GovernedSingleResourceModel {
     this.epoch = 0;
     this.physical = "before";
     this.effectCount = 0;
-    this.emittedAttempts = new Set();
+    this.sentAttempts = new Set();
+    this.completedEffects = new Set();
     this.history = [];
   }
 
@@ -40,7 +41,8 @@ export class GovernedSingleResourceModel {
       epoch: this.epoch,
       physical: this.physical,
       effectCount: this.effectCount,
-      emittedAttempts: [...this.emittedAttempts],
+      sentAttempts: [...this.sentAttempts],
+      completedEffects: [...this.completedEffects],
       history: clone(this.history),
     };
   }
@@ -59,6 +61,18 @@ export class GovernedSingleResourceModel {
     return clone(token);
   }
 
+  backendSend(token) {
+    this.#requireCurrent(token);
+    const key = tokenKey(token);
+    assert.equal(
+      this.sentAttempts.has(key),
+      false,
+      "one attempt cannot send the backend request twice",
+    );
+    this.sentAttempts.add(key);
+    this.history.push({ event: "backendSend", token: clone(token) });
+  }
+
   expire(token) {
     this.#requireCurrent(token);
     this.status = "outcome_unknown";
@@ -67,18 +81,23 @@ export class GovernedSingleResourceModel {
   }
 
   /**
-   * An already-issued backend call may still produce the physical effect after
+   * An already-sent backend call may still produce the physical effect after
    * its durable authority expires. Fencing prevents a stale terminal write; it
    * cannot recall an external request already in flight.
    */
   backendEffect(token) {
     const key = tokenKey(token);
     assert.equal(
-      this.emittedAttempts.has(key),
-      false,
-      "one attempt cannot emit the effect twice",
+      this.sentAttempts.has(key),
+      true,
+      "a backend effect requires a previously sent request",
     );
-    this.emittedAttempts.add(key);
+    assert.equal(
+      this.completedEffects.has(key),
+      false,
+      "one attempt cannot complete the effect twice",
+    );
+    this.completedEffects.add(key);
     this.effectCount += 1;
     this.physical = "after";
     this.history.push({ event: "backendEffect", token: clone(token) });
@@ -104,6 +123,11 @@ export class GovernedSingleResourceModel {
         `${outcome} requires proof excluding the intended effect`,
       );
       assert.equal(this.physical, "before");
+      assert.equal(
+        this.sentAttempts.has(tokenKey(token)),
+        false,
+        `${outcome} cannot exclude an already-sent backend request`,
+      );
     }
 
     this.status = outcome;
@@ -141,7 +165,12 @@ export class GovernedSingleResourceModel {
 
   observerCannotTerminalize(outcome) {
     assert.throws(
-      () => this.terminalize({ owner: "observer", epoch: -1 }, outcome, "effect-excluded"),
+      () =>
+        this.terminalize(
+          { owner: "observer", epoch: -1 },
+          outcome,
+          "effect-excluded",
+        ),
       /stale or unauthorized attempt/,
     );
   }
