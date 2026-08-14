@@ -12,10 +12,20 @@ export type ObsidianNoteReplaceStatus =
   | "failed"
   | "outcome_unknown";
 
+export type ObsidianNoteReplaceProjection = {
+  contractVersion: 1;
+  kind: string;
+  publicIdempotencyKey: string;
+  intentDigest: string;
+  proof: Record<string, unknown>;
+};
+
 export type ObsidianNoteReplacePlan = {
   operationId: string;
   idempotencyKey: string;
   requestDigest: string;
+  idempotencyIdentity?: string;
+  projection?: ObsidianNoteReplaceProjection;
   path: string;
   beforeSha256: string;
   afterSha256: string;
@@ -85,8 +95,21 @@ function waitSynchronously(milliseconds: number): void {
 
 function sameRequestInput(
   existing: ObsidianNoteReplacePlan,
-  input: Pick<ObsidianNoteReplacePlan, "path" | "afterSha256">,
+  input: Pick<
+    ObsidianNoteReplacePlan,
+    "path" | "afterSha256" | "idempotencyIdentity"
+  >,
 ): boolean {
+  if (
+    existing.idempotencyIdentity !== undefined ||
+    input.idempotencyIdentity !== undefined
+  ) {
+    return (
+      existing.path === input.path &&
+      existing.idempotencyIdentity !== undefined &&
+      existing.idempotencyIdentity === input.idempotencyIdentity
+    );
+  }
   return (
     existing.path === input.path && existing.afterSha256 === input.afterSha256
   );

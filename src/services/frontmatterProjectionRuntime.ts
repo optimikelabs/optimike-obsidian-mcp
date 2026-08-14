@@ -118,7 +118,8 @@ function canonicalIntent(
   path: string,
   operations: FrontmatterPatchOperation[],
 ): { operations: FrontmatterPatchOperation[]; intentDigest: string } {
-  const canonicalOperations = canonicalizeFrontmatterPatchOperations(operations);
+  const canonicalOperations =
+    canonicalizeFrontmatterPatchOperations(operations);
   return {
     operations: canonicalOperations,
     intentDigest: operationDigest({

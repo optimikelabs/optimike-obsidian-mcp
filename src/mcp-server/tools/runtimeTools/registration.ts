@@ -13,6 +13,7 @@ import {
   registerGovernedNoteReplaceTools,
   type GovernedNoteReplaceRuntime,
 } from "../governedNoteReplaceTools/index.js";
+import { registerGovernedFrontmatterTools } from "../governedFrontmatterTools/index.js";
 import { registerOperonTools } from "../operonTools/index.js";
 
 const MaintenanceInputSchema = z.object({
@@ -74,5 +75,6 @@ export async function registerRuntimeTools(
   );
 
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
+  await registerGovernedFrontmatterTools(server, governedNoteReplaceRuntime);
   await registerOperonTools(server);
 }

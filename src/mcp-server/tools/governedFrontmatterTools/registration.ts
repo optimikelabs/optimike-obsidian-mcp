@@ -20,10 +20,12 @@ const JsonValueSchema: z.ZodType<FrontmatterJsonValue> = z.lazy(() =>
     z.number().finite(),
     z.string().max(262_144),
     z.array(JsonValueSchema).max(256),
-    z.record(JsonValueSchema).refine(
-      (value) => Object.keys(value).length <= 256,
-      "Frontmatter objects support at most 256 keys.",
-    ),
+    z
+      .record(JsonValueSchema)
+      .refine(
+        (value) => Object.keys(value).length <= 256,
+        "Frontmatter objects support at most 256 keys.",
+      ),
   ]),
 );
 

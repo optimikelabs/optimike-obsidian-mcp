@@ -359,10 +359,17 @@ function canonicalizeValue(
 
 function renderJsonValue(value: FrontmatterJsonValue): string {
   const rendered = JSON.stringify(canonicalizeValue(value));
-  if (rendered === undefined || rendered.includes("\n") || rendered.includes("\r")) {
-    fail("Frontmatter values must be JSON-compatible and render on one YAML line.", {
-      reason: "unsupported_frontmatter_value",
-    });
+  if (
+    rendered === undefined ||
+    rendered.includes("\n") ||
+    rendered.includes("\r")
+  ) {
+    fail(
+      "Frontmatter values must be JSON-compatible and render on one YAML line.",
+      {
+        reason: "unsupported_frontmatter_value",
+      },
+    );
   }
   if (Buffer.byteLength(rendered, "utf8") > MAX_RENDERED_VALUE_BYTES) {
     fail("Frontmatter value exceeds the P1 compiler size limit.", {
@@ -411,7 +418,9 @@ export function canonicalizeFrontmatterPatchOperations(
       : { op: "delete" as const, key: operation.key };
   });
   return canonical.sort((left, right) => {
-    const normalized = normalizeKey(left.key).localeCompare(normalizeKey(right.key));
+    const normalized = normalizeKey(left.key).localeCompare(
+      normalizeKey(right.key),
+    );
     return normalized || left.key.localeCompare(right.key);
   });
 }
@@ -448,7 +457,8 @@ export function compileFrontmatterPatch(
   content: string,
   operations: FrontmatterPatchOperation[],
 ): CompiledFrontmatterPatch {
-  const canonicalOperations = canonicalizeFrontmatterPatchOperations(operations);
+  const canonicalOperations =
+    canonicalizeFrontmatterPatchOperations(operations);
   const source = parseFrontmatterSource(content);
   const edits: Edit[] = [];
   const additions: string[] = [];
@@ -496,8 +506,10 @@ export function compileFrontmatterPatch(
     }
     edits.push({
       key: canonicalOperations
-        .filter((operation) =>
-          operation.op === "set" && !source.entries.has(normalizeKey(operation.key)),
+        .filter(
+          (operation) =>
+            operation.op === "set" &&
+            !source.entries.has(normalizeKey(operation.key)),
         )
         .map((operation) => operation.key)
         .join(","),

@@ -20,7 +20,7 @@ const crlf = [
   "meta:",
   "  nested: true",
   "# separator remains",
-  "owner: \"Mike\"",
+  'owner: "Mike"',
   "",
   "---",
   "Body line 1",
@@ -128,7 +128,10 @@ assert.equal(
 const failures = [
   [
     "frontmatter_missing",
-    () => compileFrontmatterPatch("body only\n", [{ op: "set", key: "a", value: 1 }]),
+    () =>
+      compileFrontmatterPatch("body only\n", [
+        { op: "set", key: "a", value: 1 },
+      ]),
   ],
   [
     "duplicate_frontmatter_key",
@@ -175,9 +178,10 @@ const failures = [
   [
     "ambiguous_trailing_comment",
     () =>
-      compileFrontmatterPatch("---\na: 1\n# footer ownership is ambiguous\n---\n", [
-        { op: "set", key: "b", value: 2 },
-      ]),
+      compileFrontmatterPatch(
+        "---\na: 1\n# footer ownership is ambiguous\n---\n",
+        [{ op: "set", key: "b", value: 2 }],
+      ),
   ],
   [
     "frontmatter_key_missing",

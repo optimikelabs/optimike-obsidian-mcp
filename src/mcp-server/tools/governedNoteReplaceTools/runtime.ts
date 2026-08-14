@@ -247,6 +247,18 @@ function operationIdFromRef(reference: string): string {
   return operationId;
 }
 
+export type GovernedNoteReplacePlanView = {
+  operationId: string;
+  idempotencyKey: string;
+  idempotencyIdentity?: string;
+  path: string;
+  beforeSha256: string;
+  afterSha256: string;
+  bindingFingerprint: string;
+  status: ObsidianNoteReplacePlan["status"];
+  projection?: ObsidianNoteReplacePlan["projection"];
+};
+
 export class GovernedNoteReplaceRuntime {
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
@@ -275,6 +287,21 @@ export class GovernedNoteReplaceRuntime {
       }
     }, leaseHeartbeatMs);
     this.leaseHeartbeat.unref();
+  }
+
+  readForProjection(path: string) {
+    return this.backend.read({ contractVersion: 1, path });
+  }
+
+  findPlanByIdempotencyKey(
+    idempotencyKey: string,
+  ): GovernedNoteReplacePlanView | undefined {
+    const plan = this.journal.getByIdempotencyKey(idempotencyKey);
+    return plan ? this.view(plan) : undefined;
+  }
+
+  inspect(reference: string): GovernedNoteReplacePlanView {
+    return this.view(this.required(reference));
   }
 
   plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
@@ -329,6 +356,24 @@ export class GovernedNoteReplaceRuntime {
     const plan = this.journal.get(operationIdFromRef(reference));
     if (!plan) throw new Error("Unknown note-replacement operation plan.");
     return plan;
+  }
+
+  private view(plan: ObsidianNoteReplacePlan): GovernedNoteReplacePlanView {
+    return {
+      operationId: plan.operationId,
+      idempotencyKey: plan.idempotencyKey,
+      ...(plan.idempotencyIdentity
+        ? { idempotencyIdentity: plan.idempotencyIdentity }
+        : {}),
+      path: plan.path,
+      beforeSha256: plan.beforeSha256,
+      afterSha256: plan.afterSha256,
+      bindingFingerprint: plan.bindingFingerprint,
+      status: plan.status,
+      ...(plan.projection
+        ? { projection: structuredClone(plan.projection) }
+        : {}),
+    };
   }
 
   private async refreshCacheAfterCommit(
