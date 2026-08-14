@@ -250,6 +250,7 @@ function operationIdFromRef(reference: string): string {
 export class GovernedNoteReplaceRuntime {
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
+  private leaseRenewalFailureReported = false;
 
   constructor(
     private readonly backend: GovernedAtomicWriteBackend,
@@ -258,10 +259,21 @@ export class GovernedNoteReplaceRuntime {
     leaseHeartbeatMs = 5_000,
     private readonly vaultCacheService?: VaultCacheService,
   ) {
-    this.leaseHeartbeat = setInterval(
-      () => this.journal.renewExecutionLease(),
-      leaseHeartbeatMs,
-    );
+    this.leaseHeartbeat = setInterval(() => {
+      try {
+        this.journal.renewExecutionLease();
+        this.leaseRenewalFailureReported = false;
+      } catch (error) {
+        if (this.leaseRenewalFailureReported) return;
+        this.leaseRenewalFailureReported = true;
+        logger.warning(
+          `Governed note-replacement lease renewal failed; the runtime will retry: ${error instanceof Error ? error.message : String(error)}`,
+          requestContextService.createRequestContext({
+            operation: "governedNoteReplaceLeaseRenewal",
+          }),
+        );
+      }
+    }, leaseHeartbeatMs);
     this.leaseHeartbeat.unref();
   }
 

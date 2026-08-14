@@ -198,6 +198,33 @@ function fixture(name) {
 
 try {
   {
+    process.env.OBSIDIAN_API_KEY ||= "fixture-api-key";
+    const { GovernedNoteReplaceRuntime } = await import(
+      "../dist/mcp-server/tools/governedNoteReplaceTools/runtime.js"
+    );
+    let renewalCalls = 0;
+    let journalClosed = false;
+    const runtime = new GovernedNoteReplaceRuntime(
+      {},
+      {
+        renewExecutionLease() {
+          renewalCalls += 1;
+          throw new Error("fixture SQLite busy timeout");
+        },
+        close() {
+          journalClosed = true;
+        },
+      },
+      {},
+      5,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.ok(renewalCalls >= 1);
+    runtime.close();
+    assert.equal(journalClosed, true);
+  }
+
+  {
     const { backend, adapter } = fixture("commit-replay");
     const planned = await adapter.plan({
       path: backend.path,
