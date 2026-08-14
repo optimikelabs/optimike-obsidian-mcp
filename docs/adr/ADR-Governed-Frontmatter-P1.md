@@ -59,6 +59,10 @@ frontmatter block and one or more unique top-level operations:
 - `set`: add or replace one top-level bare key with a JSON-compatible value;
 - `delete`: remove one unambiguous existing top-level bare key.
 
+The P1 intent digest uses a total code-unit ordering recursively. It is
+independent of host locale/ICU collation and does not alter the legacy P0 digest
+helper or any direct P0 digest.
+
 The compiler fails closed on unsupported or ambiguous source, including:
 
 - duplicate or case-colliding keys;

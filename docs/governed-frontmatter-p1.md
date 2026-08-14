@@ -19,6 +19,10 @@ One public P1 plan maps to one P0 `obsidian.note.replace` operation. The P1 plan
 reference is opaque. Apply and recovery accept no new path, patch, value, hash,
 or compiled Markdown.
 
+P1 canonicalizes intent keys with a total code-unit order before hashing. Its
+public idempotency identity therefore does not depend on the host locale or ICU
+configuration; legacy P0 digest semantics remain unchanged.
+
 ## Supported V1 intent
 
 One request targets one existing Markdown note with a standard frontmatter

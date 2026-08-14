@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -247,6 +248,48 @@ try {
     },
   );
   assert.equal(afterRejectedDrift.payload.phase, "planned");
+
+  fake.reset();
+  const localeIndependentPlan = await call(
+    session,
+    "obsidian_frontmatter_patch_plan",
+    {
+      path: FRONTMATTER_FIXTURE_PATH,
+      operations: [
+        {
+          op: "set",
+          key: "unicode_map",
+          value: Object.fromEntries([
+            ["ä", "umlaut"],
+            ["z", "latin"],
+          ]),
+        },
+      ],
+      idempotencyKey: "p1-locale-independent-intent",
+    },
+  );
+  const expectedLocaleIndependentDigest = createHash("sha256")
+    .update(
+      JSON.stringify({
+        contractVersion: 1,
+        operationKind: "obsidian.frontmatter.patch",
+        operations: [
+          {
+            key: "unicode_map",
+            op: "set",
+            value: { z: "latin", ä: "umlaut" },
+          },
+        ],
+        path: FRONTMATTER_FIXTURE_PATH,
+      }),
+      "utf8",
+    )
+    .digest("hex");
+  assert.equal(
+    localeIndependentPlan.payload.projection.intentDigest,
+    expectedLocaleIndependentDigest,
+    "P1 intent hashing must use code-unit order instead of the process locale",
+  );
 
   fake.reset();
   const nominalOperations = [

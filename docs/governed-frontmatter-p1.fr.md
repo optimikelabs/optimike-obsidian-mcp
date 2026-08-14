@@ -19,6 +19,11 @@ Un plan P1 public correspond à une seule opération P0
 `obsidian.note.replace`. Le `planRef` P1 est opaque. Apply et recover n’acceptent
 aucun nouveau chemin, patch, valeur, hash ou Markdown compilé.
 
+P1 canonise les clés de l’intention selon un ordre total des unités de code
+avant de calculer son hash. Son identité d’idempotence publique ne dépend donc
+ni de la locale hôte ni de la configuration ICU ; les digests P0 historiques
+restent inchangés.
+
 ## Intention V1 supportée
 
 Une requête cible une note Markdown existante possédant un bloc Frontmatter

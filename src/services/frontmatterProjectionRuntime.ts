@@ -89,6 +89,28 @@ function internalIdempotencyKey(publicKey: string): string {
     .digest("hex");
 }
 
+function canonicalizeIntentValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeIntentValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) =>
+          left === right ? 0 : left < right ? -1 : 1,
+        )
+        .map(([key, item]) => [key, canonicalizeIntentValue(item)]),
+    );
+  }
+  return value;
+}
+
+function frontmatterIntentDigest(value: unknown): string {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalizeIntentValue(value)), "utf8")
+    .digest("hex");
+}
+
 function operationIdFromRef(reference: string, prefix: string): string {
   if (!reference.startsWith(prefix)) {
     throw new McpError(
@@ -122,7 +144,7 @@ function canonicalIntent(
     canonicalizeFrontmatterPatchOperations(operations);
   return {
     operations: canonicalOperations,
-    intentDigest: operationDigest({
+    intentDigest: frontmatterIntentDigest({
       contractVersion: 1,
       operationKind: OPERATION_KIND,
       path,
