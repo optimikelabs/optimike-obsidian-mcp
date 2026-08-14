@@ -180,3 +180,10 @@ récupération si la restauration ne peut pas être vérifiée.
 
 Aucun PASS live ne doit être annoncé sans une exécution réelle dans Obsidian
 Desktop avec l’Atomic Write Bridge.
+
+L’admission live a réussi le 2026-08-14 dans le coffre pilote jetable sous le
+run `445a4ebc-fce6-4199-b0e8-5f93dcfeac9d`. Le canary a prouvé add, update,
+delete, replay, l’expurgation de la clé d’exécution dans status, le conflit d’un
+plan périmé et la restauration exacte ; les SHA-256 initial et final étaient
+tous deux
+`5492f80849812193137d8ef66b4349982d8a443503e555f8cd188efe99980912`.

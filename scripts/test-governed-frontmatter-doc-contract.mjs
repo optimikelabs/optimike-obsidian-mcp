@@ -78,8 +78,14 @@ assert.match(adr, /Observer/);
 assert.match(adr, /Failure matrix/);
 assert.match(adr, /Linearization points/);
 assert.match(adr, /actualDiff\(before, after\)/);
-assert.match(adr, /Candidate implemented/);
-assert.match(adr, /Live admission remains blocked/i);
+assert.match(adr, /Candidate admitted for merge/);
+assert.match(adr, /Live admission passed[\s\S]*2026-08-14/i);
+assert.match(
+  adr,
+  /445a4ebc-fce6-4199-b0e8-5f93dcfeac9d[\s\S]*original and final SHA-256 were both[\s\S]*5492f80849812193137d8ef66b4349982d8a443503e555f8cd188efe99980912/i,
+);
+assert.match(contract, /Live admission passed[\s\S]*status-credential redaction/i);
+assert.match(contractFr, /admission live a réussi[\s\S]*expurgation de la clé d.exécution dans status/i);
 assert.match(contract, /fixed bounded marker/i);
 assert.match(contractFr, /marqueur fixe et borné/i);
 assert.match(
@@ -160,6 +166,15 @@ assert.match(liveCanary, /writeFileSync\(backupPath/);
 assert.match(liveCanary, /emergency-restore/);
 assert.match(liveCanary, /restored = true/);
 assert.match(liveCanary, /rmSync\(tempRoot/);
+assert.match(
+  liveCanary,
+  /transientLogsParent[\s\S]*process\.cwd\(\)[\s\S]*["']logs["'][\s\S]*mkdtempSync/,
+);
+assert.match(liveCanary, /renameSync\(logsPath, retainedLogsPath\)/);
+assert.doesNotMatch(
+  liveCanary,
+  /const logsPath = path\.join\(tempRoot, ["']logs["']\)/,
+);
 assert.doesNotMatch(
   liveCanary,
   /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,

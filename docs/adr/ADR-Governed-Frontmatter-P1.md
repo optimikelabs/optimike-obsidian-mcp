@@ -2,10 +2,11 @@
 
 ## Status
 
-Candidate implemented — the pure model, compiler, multi-process identity,
-stdio/HTTP MCP, runtime, Operon, documentation, package, and production-audit
-gates pass. Live admission remains blocked until the disposable Obsidian canary
-passes and the exact reviewed head is green.
+Candidate admitted for merge — the pure model, compiler, multi-process
+identity, stdio/HTTP MCP, runtime, Operon, documentation, package, and
+production-audit gates pass. Live admission passed in the disposable Obsidian
+pilot vault on 2026-08-14. Merge remains repository-authority work and requires
+the exact post-canary head to remain green and externally reviewed.
 
 ## Authority
 
@@ -273,7 +274,11 @@ initial backup before mutation, exercise add/set/delete through the public P1
 surface, prove body and non-target bytes unchanged, prove stale-source conflict,
 replay/status, and restore the exact initial SHA-256.
 
-No live PASS is claimed without a real Obsidian Desktop and Atomic Write Bridge.
+The real Obsidian Desktop and Atomic Write Bridge canary passed on 2026-08-14
+under run `445a4ebc-fce6-4199-b0e8-5f93dcfeac9d`. Add, update, delete, replay,
+status-credential redaction, stale-plan conflict, and exact restoration passed.
+The original and final SHA-256 were both
+`5492f80849812193137d8ef66b4349982d8a443503e555f8cd188efe99980912`.
 
 ## Stop rule
 

@@ -162,3 +162,9 @@ directory if restoration cannot be verified.
 
 A live PASS must never be claimed without a real Obsidian Desktop and Atomic
 Write Bridge run.
+
+Live admission passed on 2026-08-14 in the disposable pilot vault under run
+`445a4ebc-fce6-4199-b0e8-5f93dcfeac9d`. The canary proved add, update, delete,
+replay, status-credential redaction, stale-plan conflict, and exact restoration;
+the original and final SHA-256 were both
+`5492f80849812193137d8ef66b4349982d8a443503e555f8cd188efe99980912`.
