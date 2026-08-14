@@ -1,0 +1,47 @@
+name: Fix P1 package-doc closure once
+
+on:
+  push:
+    branches: [feat/governed-frontmatter-p1]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-p1-package-doc-closure-once
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    if: github.actor == 'optimikelabs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/governed-frontmatter-p1
+          fetch-depth: 0
+      - name: Include documentation linked by the packaged hub
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path(".github/workflows/integrate-p1-docs-once.yml")
+          source = path.read_text(encoding="utf-8")
+          anchor = '''              "docs/adr/ADR-Governed-Frontmatter-P1.md",
+          '''
+          replacement = '''              "docs/adr/ADR-Governed-Frontmatter-P1.md",
+              "docs/operon-cli-audit.md",
+              "docs/operon-cli-audit.fr.md",
+              "docs/tree.md",
+          '''
+          if source.count(anchor) != 1:
+              raise SystemExit(f"expected one package list anchor, found {source.count(anchor)}")
+          path.write_text(source.replace(anchor, replacement, 1), encoding="utf-8")
+      - name: Remove one-shot workflow and commit
+        run: |
+          rm .github/workflows/fix-p1-doc-integration-package-once.yml
+          git config user.name "optimikelabs-p1"
+          git config user.email "31423109+optimikelabs@users.noreply.github.com"
+          git add .github/workflows
+          git commit -m "fix(p1): close packaged documentation links"
+          git push origin HEAD:feat/governed-frontmatter-p1
