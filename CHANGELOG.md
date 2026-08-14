@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-08-14
+
 ### Added
 
 - Public governed atomic replacement for one existing Markdown note through
@@ -33,9 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the same Bridge read that seals the before hash. Apply and recover
   revalidate the current MCP write policy before any possible effect.
 - The live operator canary passed on 2026-08-14 with exact restoration of the
-  disposable note. The branch remains versioned as `2.5.0`; version bump, tag,
-  release, and merge stay separate repository-authority actions. No generic
-  public `operation_*` surface is part of this candidate.
+  disposable note. Package and lockfile now identify the stabilized `2.6.0`
+  release. No generic public `operation_*` surface is part of this release.
 
 ## [2.5.0] - 2026-08-13
 

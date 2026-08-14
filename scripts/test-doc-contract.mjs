@@ -102,8 +102,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "2.5.0",
-  "2.6 candidate must not bump the stable package before the live canary",
+  "2.6.0",
+  "released package metadata must match the stabilized 2.6.0 authority",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
