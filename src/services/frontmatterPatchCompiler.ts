@@ -56,6 +56,7 @@ type SourceEntry = {
   normalizedKey: string;
   start: number;
   end: number;
+  trailingCommentIsAmbiguous: boolean;
 };
 
 type FrontmatterSource = {
@@ -298,11 +299,15 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       lastOwnedLineIndex -= 1;
     }
     const end = lines[lastOwnedLineIndex]?.endWithEol ?? startLine.endWithEol;
+    const trailingCommentIsAmbiguous = lines
+      .slice(lastOwnedLineIndex + 1, nextStartLineIndex)
+      .some((line) => line.text.startsWith("#"));
     entries.set(start.normalizedKey, {
       key: start.key,
       normalizedKey: start.normalizedKey,
       start: startLine.start,
       end,
+      trailingCommentIsAmbiguous,
     });
   }
 
@@ -472,6 +477,12 @@ export function compileFrontmatterPatch(
           reason: "frontmatter_key_missing",
           key: operation.key,
         });
+      }
+      if (entry.trailingCommentIsAmbiguous) {
+        fail(
+          "Cannot delete a key followed by comments with ambiguous ownership.",
+          { reason: "ambiguous_delete_comment", key: operation.key },
+        );
       }
       edits.push({
         key: entry.key,

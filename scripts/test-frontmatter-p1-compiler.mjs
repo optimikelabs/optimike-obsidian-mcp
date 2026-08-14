@@ -184,6 +184,14 @@ const failures = [
       ),
   ],
   [
+    "ambiguous_delete_comment",
+    () =>
+      compileFrontmatterPatch(
+        "---\na: 1\n# could belong to a or b\nb: 2\n---\n",
+        [{ op: "delete", key: "a" }],
+      ),
+  ],
+  [
     "frontmatter_key_missing",
     () =>
       compileFrontmatterPatch("---\na: 1\n---\n", [

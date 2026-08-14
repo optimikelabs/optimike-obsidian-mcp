@@ -225,15 +225,6 @@ export class GovernedFrontmatterRuntime {
       input.operations,
     );
     const internalKey = internalIdempotencyKey(publicKey);
-    const existing = this.noteRuntime.findPlanByIdempotencyKey(internalKey);
-    if (existing) {
-      storedProjection(existing, publicKey, intentDigest);
-      const child = await this.noteRuntime.status(
-        `${CHILD_PLAN_REF_PREFIX}${existing.operationId}`,
-      );
-      return projectedReceipt(child, this.noteRuntime.inspect(child.planRef));
-    }
-
     assertWriteAllowed({
       operation: "obsidian_frontmatter_patch_plan",
       action: "plan",
@@ -242,6 +233,14 @@ export class GovernedFrontmatterRuntime {
       batchCount: operations.length,
       frontmatterKeys: operations.map((operation) => operation.key),
     });
+    const existing = this.noteRuntime.findPlanByIdempotencyKey(internalKey);
+    if (existing) {
+      storedProjection(existing, publicKey, intentDigest);
+      const child = await this.noteRuntime.status(
+        `${CHILD_PLAN_REF_PREFIX}${existing.operationId}`,
+      );
+      return projectedReceipt(child, this.noteRuntime.inspect(child.planRef));
+    }
 
     const source = await this.noteRuntime.readForProjection(input.path);
     const compiled = compileFrontmatterPatch(source.content, operations);

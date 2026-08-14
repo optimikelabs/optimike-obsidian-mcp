@@ -118,8 +118,12 @@ function planDigest(plan: ObsidianNoteReplacePlan): string {
     beforeSha256: plan.beforeSha256,
     afterSha256: plan.afterSha256,
     requestDigest: plan.requestDigest,
-    idempotencyIdentity: plan.idempotencyIdentity ?? null,
-    projectionDigest: plan.projection ? operationDigest(plan.projection) : null,
+    ...(plan.idempotencyIdentity
+      ? { idempotencyIdentity: plan.idempotencyIdentity }
+      : {}),
+    ...(plan.projection
+      ? { projectionDigest: operationDigest(plan.projection) }
+      : {}),
   });
 }
 
@@ -299,10 +303,12 @@ export class ObsidianNoteReplaceOperationAdapter
       beforeSha256: read.sha256,
       afterSha256,
       bindingFingerprint: read.bindingFingerprint,
-      idempotencyIdentity: input.idempotencyIdentity ?? null,
-      projectionDigest: input.projection
-        ? operationDigest(input.projection)
-        : null,
+      ...(input.idempotencyIdentity
+        ? { idempotencyIdentity: input.idempotencyIdentity }
+        : {}),
+      ...(input.projection
+        ? { projectionDigest: operationDigest(input.projection) }
+        : {}),
     });
     return receipt(
       this.journal.create({
