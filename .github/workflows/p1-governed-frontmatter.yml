@@ -37,3 +37,4 @@ jobs:
       - run: npm run build
       - run: node scripts/test-frontmatter-p1-compiler.mjs
       - run: node scripts/test-governed-frontmatter-mcp.mjs
+      - run: node scripts/test-governed-frontmatter-http.mjs
