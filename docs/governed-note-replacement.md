@@ -2,7 +2,7 @@
 
 French version: [governed-note-replacement.fr.md](governed-note-replacement.fr.md)
 
-The 2.6 candidate exposes the first public non-Operon mutation backed by the
+Optimike Obsidian MCP 2.6.0 exposes the first public non-Operon mutation backed by the
 common operation-runtime vocabulary. It replaces the complete content of one
 existing Markdown note without exposing a generic `operation_*` API.
 
@@ -158,5 +158,5 @@ redacted evidence record directly under the OS temporary root. The exact
 the private journal/log/backup directory; abrupt interruption or unverified
 restoration retains it at the recovery path printed before the MCP starts. This
 live Desktop gate passed on 2026-08-14 with the final SHA-256 equal to the
-pre-mutation SHA-256. Merge, versioning, and release remain separate
-repository-authority decisions.
+pre-mutation SHA-256. These guarantees are released in Optimike Obsidian MCP
+2.6.0; later capability paliers remain separate repository-authority decisions.

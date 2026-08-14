@@ -2,7 +2,7 @@
 
 Version anglaise : [governed-note-replacement.md](governed-note-replacement.md)
 
-Le candidat 2.6 expose la première mutation publique non-Operon appuyée sur le
+Optimike Obsidian MCP 2.6.0 expose la première mutation publique non-Operon appuyée sur le
 vocabulaire du runtime commun. Elle remplace le contenu complet d’une note
 Markdown existante sans publier d’API générique `operation_*`.
 
@@ -167,5 +167,6 @@ refus CAS du Bridge et les quatre outils MCP publics, restaure la fixture et
 supprime le dossier privé journal/logs/sauvegarde ; une interruption brutale ou
 une restauration non vérifiée le conserve au chemin de récupération affiché
 avant le démarrage du MCP. Cette gate Desktop live a réussi le 2026-08-14,
-avec un SHA-256 final identique au SHA-256 avant mutation. Merge, version et
-release restent des décisions séparées de l’autorité du dépôt.
+avec un SHA-256 final identique au SHA-256 avant mutation. Ces garanties sont
+publiées dans Optimike Obsidian MCP 2.6.0 ; les paliers de capacités suivants
+restent des décisions séparées de l’autorité du dépôt.
