@@ -673,6 +673,35 @@ try {
   assertTerminal(nominalReplay.payload);
   assert.equal(fake.casRequests - casBeforeNominal, 1);
 
+  await session.close();
+  session = await startClient("readonly", "live");
+  const terminalReplayCas = fake.casRequests;
+  const readonlyApplyReplay = await call(
+    session,
+    "obsidian_note_replace_apply",
+    {
+      planRef: firstPlan.payload.planRef,
+      idempotencyKey: "nominal-secret",
+    },
+  );
+  assertTerminal(readonlyApplyReplay.payload);
+  const readonlyRecoverReplay = await call(
+    session,
+    "obsidian_note_replace_recover",
+    {
+      planRef: firstPlan.payload.planRef,
+      idempotencyKey: "nominal-secret",
+    },
+  );
+  assertTerminal(readonlyRecoverReplay.payload);
+  assert.equal(
+    fake.casRequests,
+    terminalReplayCas,
+    "terminal receipt replay in readonly mode must not attempt a CAS",
+  );
+  await session.close();
+  session = await startClient("full", "live");
+
   fake.reset();
   const stalePlan = await call(session, "obsidian_note_replace_plan", {
     path: FIXTURE_PATH,

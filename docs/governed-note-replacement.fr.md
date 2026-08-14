@@ -52,6 +52,12 @@ contrôle le binding et le write gate du Bridge, puis délègue le plan exact au
 compare-and-replace SHA-256 `Vault.process` d’Obsidian. Rejouer le même plan ne
 peut pas produire une seconde écriture commitée.
 
+Les reçus terminaux stables restent rejouables après un redémarrage même si le
+MCP est désormais en lecture seule, car ce rejeu ne peut produire aucun effet.
+Un plan encore exécutable doit respecter la politique d’écriture courante ; le
+backend la revalide de nouveau juste avant chaque tentative de
+compare-and-replace.
+
 ### `obsidian_note_replace_status`
 
 Entrée : `planRef` uniquement. Status lit et réconcilie l’autorité durable. Il
@@ -71,6 +77,8 @@ réactiver un plan terminal stable.
 
 `recover` n’est pas `undo`. Il ne promet jamais de remettre automatiquement la
 note dans son état précédent.
+La même règle vaut pour le rejeu terminal : le mode lecture seule ne masque pas
+un reçu terminal existant, mais bloque toute récupération susceptible d’écrire.
 
 ## Sécurité et autorité durable
 
@@ -104,6 +112,11 @@ Elle prouve schémas et annotations, convergence nominale, replay, réponse
 perdue, redémarrage processus, récupération exacte, apply/recover concurrents,
 compétition CAS entre deux plans, binding backend, changement de policy,
 frontmatter protégé et absence de fuite du contenu scellé.
+
+La fixture de concurrence force aussi deux connexions au journal à observer la
+même opération planifiée. Le perdant de la transition conditionnelle
+`planned → applying` recharge et retourne le reçu durable gagnant, sans exposer
+d’erreur interne ni tenter une seconde écriture.
 
 Une seconde gate démarre le vrai serveur Streamable HTTP et transporte un plan
 scellé entre trois sessions MCP indépendantes. Elle prouve que les factories de

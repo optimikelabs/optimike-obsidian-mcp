@@ -51,6 +51,11 @@ Bridge binding and write gate, then delegates the exact plan to Obsidian
 `Vault.process` SHA-256 compare-and-replace. Replay of the same plan cannot
 produce a second committed write.
 
+Stable terminal receipts remain replayable after a restart even if the MCP is
+now read-only, because that replay cannot produce an effect. A plan that is
+still eligible to execute must pass the current write policy; the backend
+revalidates it again immediately before every compare-and-replace attempt.
+
 ### `obsidian_note_replace_status`
 
 Input: `planRef` only. Status reads and reconciles durable authority. It may
@@ -67,6 +72,8 @@ when proof shows it is safe, resumes the exact same sealed plan. It accepts no
 replacement payload and cannot reactivate a stable terminal plan.
 
 `recover` is not undo. It never promises to restore the note’s previous state.
+The same terminal-replay rule applies: read-only mode does not hide an existing
+terminal receipt, but it still blocks every recovery that could write.
 
 ## Security and durable authority
 
@@ -98,6 +105,11 @@ proves schemas and annotations, nominal convergence, replay, lost response,
 process restart, exact recovery, concurrent apply/recover, two-plan CAS
 competition, backend binding, policy changes, protected frontmatter, and sealed
 content non-disclosure.
+
+The concurrency fixture also forces two journal connections to observe the same
+planned operation. The loser of the conditional `planned → applying`
+transition reloads and returns the durable winner instead of exposing an
+internal error or attempting another write.
 
 A second gate starts the real Streamable HTTP server and carries one sealed plan
 across three independent MCP sessions. It proves that per-session server

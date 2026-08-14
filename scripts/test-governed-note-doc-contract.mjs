@@ -98,13 +98,21 @@ assert.match(
   /Every connection that negotiates WAL must install its busy policy/,
 );
 assert.match(adr, /fresh per-attempt identifier/);
+assert.match(adr, /loses because it observed stale durable state/);
+assert.match(adr, /must never escape as[\s\S]*internal tool error/);
 assert.match(contract, /busy policy is installed before WAL negotiation/);
 assert.match(contract, /each recovery gets a new attempt fence/);
+assert.match(contract, /terminal receipts remain replayable[\s\S]*read-only/i);
+assert.match(contract, /revalidates it again immediately before every/i);
 assert.match(contractFr, /politique de contention SQLite est installée avant/);
 assert.match(
   contractFr,
   /chaque recovery\s+reçoit un nouveau fence de tentative/,
 );
+assert.match(contractFr, /reçus terminaux stables restent rejouables/i);
+assert.match(contractFr, /juste avant chaque tentative de/i);
+assert.match(contract, /loser of the conditional `planned → applying`/i);
+assert.match(contractFr, /perdant de la transition conditionnelle/i);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");

@@ -717,6 +717,72 @@ try {
   }
 
   {
+    const databasePath = path.join(
+      temporaryRoot,
+      "concurrent-stale-planned-apply.sqlite",
+    );
+    const backend = new FakeAtomicWriteBackend();
+    const winnerJournal = new ObsidianNoteReplaceJournal(databasePath);
+    const loserJournal = new ObsidianNoteReplaceJournal(databasePath);
+    journals.push(winnerJournal, loserJournal);
+    const winnerAdapter = new ObsidianNoteReplaceOperationAdapter(
+      backend,
+      winnerJournal,
+    );
+    const loserAdapter = new ObsidianNoteReplaceOperationAdapter(
+      backend,
+      loserJournal,
+    );
+    const planned = await winnerAdapter.plan({
+      path: backend.path,
+      nextContent: "one write after stale planned read",
+      idempotencyKey: "concurrent-stale-planned-apply",
+    });
+    const stalePlanned = loserJournal.get(planned.operationId);
+    assert.equal(stalePlanned.status, "planned");
+
+    let releaseWrite;
+    let markWriteEntered;
+    const writeEntered = new Promise((resolve) => {
+      markWriteEntered = resolve;
+    });
+    const writeReleased = new Promise((resolve) => {
+      releaseWrite = resolve;
+    });
+    backend.beforeWrite = async () => {
+      markWriteEntered();
+      await writeReleased;
+    };
+
+    const winnerApply = winnerAdapter.apply(
+      planned.planRef,
+      "concurrent-stale-planned-apply",
+    );
+    await writeEntered;
+    const liveGet = loserJournal.get.bind(loserJournal);
+    let serveStalePlan = true;
+    loserJournal.get = (operationId) => {
+      if (serveStalePlan && operationId === planned.operationId) {
+        serveStalePlan = false;
+        return stalePlanned;
+      }
+      return liveGet(operationId);
+    };
+    const losingReplay = await loserAdapter.apply(
+      planned.planRef,
+      "concurrent-stale-planned-apply",
+    );
+    assert.equal(losingReplay.phase, "applying");
+    assert.equal(losingReplay.outcome, null);
+    assert.equal(backend.replaceCalls, 1);
+    releaseWrite();
+    const committed = await winnerApply;
+    assert.equal(committed.outcome, "committed");
+    assert.equal(backend.content, "one write after stale planned read");
+    assert.equal(backend.replaceCalls, 1);
+  }
+
+  {
     const { backend, adapter } = fixture("concurrent-recover");
     let releaseWrite;
     let markWriteEntered;

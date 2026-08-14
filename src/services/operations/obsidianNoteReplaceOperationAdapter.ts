@@ -267,11 +267,19 @@ export class ObsidianNoteReplaceOperationAdapter
       }
       return receipt(plan);
     }
-    const applying = this.journal.transition(
-      plan.operationId,
-      ["planned"],
-      "applying",
-    );
+    let applying: ObsidianNoteReplacePlan;
+    try {
+      applying = this.journal.transition(
+        plan.operationId,
+        ["planned"],
+        "applying",
+      );
+    } catch (error) {
+      if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+      const current = this.journal.get(plan.operationId);
+      if (!current) throw error;
+      return receipt(current);
+    }
     return receipt(await this.execute(applying));
   }
 

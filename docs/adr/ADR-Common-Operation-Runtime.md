@@ -140,6 +140,13 @@ one busy timeout, a clean failed-startup close, and reuse of an already-active
 connection after contention. Future SQLite-backed adapters inherit this order
 and must add the same discriminating proofs.
 
+Idempotent admission is also a concurrent contract. If multiple runtimes act on
+the same sealed plan, exactly one conditional state transition may win. A
+caller that loses because it observed stale durable state must reload and
+return the winning receipt; expected transition contention must never escape as
+an internal tool error or authorize a second effect. Future adapters must prove
+both the ordinary in-flight replay and the stale-read transition race.
+
 The public projection remains domain-specific:
 
 - `obsidian_note_replace_plan`

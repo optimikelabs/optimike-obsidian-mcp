@@ -290,7 +290,9 @@ export class GovernedNoteReplaceRuntime {
     idempotencyKey: string,
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
-    assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
+    if (plan.status === "planned") {
+      assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
+    }
     const operation = this.backend.withContext({ kind: "apply" }, () =>
       this.adapter.apply(reference, idempotencyKey),
     );
@@ -307,7 +309,9 @@ export class GovernedNoteReplaceRuntime {
     idempotencyKey: string,
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
-    assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
+    if (plan.status === "outcome_unknown") {
+      assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
+    }
     const operation = this.backend.withContext({ kind: "recover" }, () =>
       this.adapter.recover(reference, idempotencyKey),
     );
