@@ -9,34 +9,36 @@ French operator guides are linked alongside their English equivalents.
 
 ## Start by role
 
-| I am…                           | Start here                                            | Then use                                                                                                                     |
-| ------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| A new local user                | [Product overview](../README.md)                      | [Operations](../OPERATIONS.md)                                                                                               |
-| A Codex or local-agent operator | [Operations](../OPERATIONS.md)                        | [Agent routing](mcp-routing-guide.md)                                                                                        |
-| A headless/server operator      | [Headless Server Profile](headless-server-profile.md) | [Runtime Matrix](runtime-capability-matrix.md), [Security](../SECURITY.md)                                                   |
-| A gateway integrator            | [OSS Gateway Compatibility](gateway-compatibility.md) | [HTTP Security](http-multiclient-security.md), [Backpressure](http-concurrency-backpressure.md)                              |
-| An MCP client integrator        | [Tool Surface](obsidian_mcp_tools_spec.md)            | [Runtime Matrix](runtime-capability-matrix.md)                                                                               |
-| An external-document operator   | [External Roots Setup](external-roots-setup.md)       | [External Roots ADR](adr/ADR-External-Document-Roots.md), [Reference Integrity ADR](adr/ADR-External-Reference-Integrity.md) |
+| I am…                           | Start here                                            | Then use                                                                                                                                             |
+| ------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A new local user                | [Product overview](../README.md)                      | [Operations](../OPERATIONS.md)                                                                                                                       |
+| A Codex or local-agent operator | [Operations](../OPERATIONS.md)                        | [Agent routing](mcp-routing-guide.md)                                                                                                                |
+| A headless/server operator      | [Headless Server Profile](headless-server-profile.md) | [Runtime Matrix](runtime-capability-matrix.md), [Security](../SECURITY.md)                                                                           |
+| A gateway integrator            | [OSS Gateway Compatibility](gateway-compatibility.md) | [HTTP Security](http-multiclient-security.md), [Backpressure](http-concurrency-backpressure.md)                                                      |
+| An MCP client integrator        | [Tool Surface](obsidian_mcp_tools_spec.md)            | [Runtime Matrix](runtime-capability-matrix.md)                                                                                                       |
+| An external-document operator   | [External Roots Setup](external-roots-setup.md)       | [External Roots ADR](adr/ADR-External-Document-Roots.md), [Reference Integrity ADR](adr/ADR-External-Reference-Integrity.md)                         |
 | A Tasks/Operon operator         | [Operon MCP Contract](operon-mcp-contract.md)         | [CLI/API audit](operon-cli-audit.md), [Local Validation](operon-local-validation.md), [public ÉLYSIA profile](../profiles/elysia-tasks/README.fr.md) |
-| A contributor or reviewer       | [Architecture decisions](adr/README.md)               | [Repository tree](tree.md), plugin READMEs                                                                                   |
+| A contributor or reviewer       | [Architecture decisions](adr/README.md)               | [Repository tree](tree.md), plugin READMEs                                                                                                           |
 
 ## Find the authoritative page
 
-| Question                                                   | Authority                                                                             |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Which tools exist?                                         | [Tool Surface](obsidian_mcp_tools_spec.md)                                            |
-| Which tools are available in each runtime?                 | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
-| How do I run and maintain the service?                     | [Operations](../OPERATIONS.md)                                                        |
-| Which surface should an agent use?                         | [MCP Routing Guide](mcp-routing-guide.md)                                             |
-| How do I run without Obsidian Desktop?                     | [Headless Server Profile](headless-server-profile.md)                                 |
-| How do external reads, handoff, move and link repair work? | [External Roots Setup](external-roots-setup.md)                                       |
-| What is the supported HTTP security boundary?              | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
-| Which OSS gateway profile has been proven end to end?      | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
-| How are Operon reads and mutations governed?               | [Operon MCP Contract](operon-mcp-contract.md)                                         |
-| How does governed atomic note replacement work?            | [Governed Note Replacement](governed-note-replacement.md)                             |
-| Why does MCP expose Operon functions instead of calling the CLI? | [Operon CLI / Developer API audit](operon-cli-audit.md)                           |
-| Why was an architecture decision made?                     | [ADR Index](adr/README.md)                                                            |
-| What changed?                                              | [Changelog](../CHANGELOG.md)                                                          |
+| Question                                                         | Authority                                                                             |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Which tools exist?                                               | [Tool Surface](obsidian_mcp_tools_spec.md)                                            |
+| Which tools are available in each runtime?                       | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
+| How do I run and maintain the service?                           | [Operations](../OPERATIONS.md)                                                        |
+| Which surface should an agent use?                               | [MCP Routing Guide](mcp-routing-guide.md)                                             |
+| How do I run without Obsidian Desktop?                           | [Headless Server Profile](headless-server-profile.md)                                 |
+| How do external reads, handoff, move and link repair work?       | [External Roots Setup](external-roots-setup.md)                                       |
+| What is the supported HTTP security boundary?                    | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
+| Which OSS gateway profile has been proven end to end?            | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
+| How are Operon reads and mutations governed?                     | [Operon MCP Contract](operon-mcp-contract.md)                                         |
+| How does governed atomic note replacement work?                  | [Governed Note Replacement](governed-note-replacement.md)                             |
+| Why does MCP expose Operon functions instead of calling the CLI? | [Operon CLI / Developer API audit](operon-cli-audit.md)                               |
+| Why was an architecture decision made?                           | [ADR Index](adr/README.md)                                                            |
+| What changed?                                                    | [Changelog](../CHANGELOG.md)                                                          |
+
+Governed source-preserving Frontmatter: [P1 contract](governed-frontmatter-p1.md).
 
 ## Capability families
 

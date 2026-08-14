@@ -239,6 +239,35 @@ restauration non vérifiée conserve le dossier privé au chemin de récupérati
 affiché au démarrage ; ne restaurer qu’à partir des métadonnées explicites de sa
 sauvegarde. Ne jamais viser une note utilisateur ordinaire.
 
+## Frontmatter gouvernée P1
+
+P1 accepte des intentions top-level `set`/`delete` bornées et les compile sans
+resérialiser globalement le YAML. Tous les bytes hors cible restent identiques.
+La séquence sûre est `obsidian_frontmatter_patch_plan → apply → status →
+recover` ; après une réponse incertaine, appeler d’abord status. Le reçu P1
+projette le même child plan et le même journal P0.
+
+Gates déterministes :
+
+```bash
+npm run test:governed-frontmatter
+```
+
+Canary live sur une note explicitement jetable :
+
+```powershell
+$env:OBSIDIAN_FRONTMATTER_CANARY_PATH = "Canary/Frontmatter P1.md"
+$env:OBSIDIAN_FRONTMATTER_CANARY_CONFIRM = "I_UNDERSTAND_THIS_NOTE_WILL_BE_TEMPORARILY_PATCHED"
+$env:OBSIDIAN_API_KEY = "<cle-local-rest-api>"
+$env:MCP_WRITE_MODE = "guarded"
+npm run smoke:governed-frontmatter-live
+```
+
+Le script annonce un dossier temporaire système de récupération, écrit un
+backup privé avant mutation, prouve add/set/delete, replay/status/conflit périmé
+et la restauration exacte du SHA, puis ne supprime le dossier privé qu’après
+vérification de la restauration.
+
 ## Tasks : comment ça marche maintenant
 
 Tasks n’est plus un MCP séparé requis pour Codex.

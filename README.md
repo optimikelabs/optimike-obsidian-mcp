@@ -14,15 +14,15 @@ explicitly governed access to configured documents outside the vault.
 
 ## Capability map
 
-| Area                    | What the MCP provides                                                  | Main dependency                                    |
-| ----------------------- | ---------------------------------------------------------------------- | -------------------------------------------------- |
-| Notes                   | Read, list, search, update, frontmatter and tags                       | Vault; Local REST API for the full live surface    |
-| Bases and Canvas        | Bases query/write tools, format validation and bounded Canvas helpers  | Bases Bridge for live Bases                        |
-| Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools     | Operon Developer API V1 through the Bridge         |
-| Semantic search         | Smart Connections index search with durable metadata cache             | `.smart-env` plus Ollama or OpenAI query embedding |
-| Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions | Local filesystem                                   |
-| External documents      | Governed reads/handoff plus opt-in local move with exact link repair   | Allowlist; local stdio for move                    |
-| Headless administration | Guarded note, metadata and vault-filesystem operations                 | Guarded/filesystem mode on a copied vault          |
+| Area                    | What the MCP provides                                                                | Main dependency                                              |
+| ----------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| Notes                   | Read/search/update plus governed atomic note and source-preserving Frontmatter plans | Vault; Local REST API + Atomic Write Bridge for governed CAS |
+| Bases and Canvas        | Bases query/write tools, format validation and bounded Canvas helpers                | Bases Bridge for live Bases                                  |
+| Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools                   | Operon Developer API V1 through the Bridge                   |
+| Semantic search         | Smart Connections index search with durable metadata cache                           | `.smart-env` plus Ollama or OpenAI query embedding           |
+| Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions               | Local filesystem                                             |
+| External documents      | Governed reads/handoff plus opt-in local move with exact link repair                 | Allowlist; local stdio for move                              |
+| Headless administration | Guarded note, metadata and vault-filesystem operations                               | Guarded/filesystem mode on a copied vault                    |
 
 The current tool registry is documented in
 [Tool Surface](docs/obsidian_mcp_tools_spec.md). Availability varies by runtime
@@ -88,7 +88,7 @@ Enable only the surfaces you use:
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api):
   live note, metadata and tag operations;
 - bundled **Bases Bridge (REST)**: live `.base` operations;
-- bundled **Optimike Atomic Write Bridge**: opt-in SHA-256 compare-and-replace backing governed whole-note `plan → apply → status → recover`; opaque `planRef`, lost response → `status`, exact-plan recovery ≠ undo ([contract](docs/governed-note-replacement.md));
+- bundled **Optimike Atomic Write Bridge**: opt-in SHA-256 compare-and-replace backing governed whole-note and source-preserving Frontmatter `plan → apply → status → recover`; opaque `planRef`, lost response → `status`, exact-plan recovery ≠ undo ([note contract](docs/governed-note-replacement.md), [P1 contract](docs/governed-frontmatter-p1.md));
 - **Smart Connections**: semantic index under `.smart-env`;
 - **Operon Developer API V1** and the bundled **Optimike Operon Bridge**: governed live
   task operations through the official Developer API V1;

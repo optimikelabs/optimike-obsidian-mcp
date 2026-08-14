@@ -86,6 +86,27 @@ note transition enforced by Obsidian `Vault.process` CAS; it does not reverse
 emissions to sync, watchers, third-party plugins, indexers, or external
 automations. No generic public `operation_*` surface is introduced.
 
+## Governed Frontmatter Projection (P1)
+
+Available only in `live`, or `hybrid` with a reachable Local REST API and
+Atomic Write Bridge. P1 compiles bounded top-level Frontmatter intentions into
+complete Markdown and delegates one sealed child plan to the existing P0
+operation runtime.
+
+- `obsidian_frontmatter_patch_plan`: compile source-preserving `set` and
+  `delete` operations, prove the authorized ranges, revalidate source
+  SHA-256/backend binding, and persist no effect.
+- `obsidian_frontmatter_patch_apply`: apply only the exact sealed child plan
+  with the matching public idempotency key.
+- `obsidian_frontmatter_patch_status`: read/reconcile the projected P0 receipt
+  without obtaining executor authority.
+- `obsidian_frontmatter_patch_recover`: recover the exact child plan; recovery
+  is not undo and accepts no new patch.
+
+Unsupported or ambiguous YAML fails closed. The Markdown body, line endings,
+comments, ordering, quoting, indentation, and all non-target source ranges
+remain byte-identical. See [the P1 contract](governed-frontmatter-p1.md).
+
 ## Metadata And Tags
 
 - `obsidian_manage_frontmatter`: live frontmatter operations using Local REST

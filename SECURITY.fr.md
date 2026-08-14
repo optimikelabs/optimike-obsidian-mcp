@@ -121,6 +121,18 @@ par défaut.
 - Aucun upload, create, replace, move de dossier/cross-root, overwrite, delete,
   corbeille ou sync externe n’est activé.
 
+## Frontière Frontmatter gouvernée
+
+P1 ne modifie que les plages source top-level explicitement autorisées. Tout
+YAML non supporté ou commentaire d’appartenance ambiguë échoue fermé. Le cache
+ne devient jamais une autorité d’admission, de CAS, de commit ou de recovery. P1
+réutilise le journal et le fencing P0 ; aucun observateur ne peut emprunter
+l’autorité d’un exécuteur et aucun second moteur de récupération n’est créé.
+
+La projection durable conserve hashes et plages, jamais les valeurs patchées ni
+le Markdown compilé. Les clés protégées et le write mode courant sont contrôlés
+au planning puis avant chaque effet P0 possible.
+
 ## Contrôles dépendances et release
 
 ```bash
