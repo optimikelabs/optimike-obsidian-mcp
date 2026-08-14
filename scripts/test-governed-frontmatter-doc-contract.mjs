@@ -187,11 +187,20 @@ const previousReleaseStart = changelog.indexOf(previousReleaseHeading);
 assert.ok(releaseStart > changelog.indexOf("## [Unreleased]"));
 assert.ok(previousReleaseStart > releaseStart);
 const releaseSection = changelog.slice(releaseStart, previousReleaseStart);
-assert.match(releaseSection, /obsidian_frontmatter_patch_plan/);
-assert.doesNotMatch(
-  changelog.slice(changelog.indexOf("## [Unreleased]"), releaseStart),
-  /obsidian_frontmatter_patch_plan/,
+const unreleasedSection = changelog.slice(
+  changelog.indexOf("## [Unreleased]"),
+  releaseStart,
 );
+for (const tool of tools) {
+  assert.ok(
+    releaseSection.includes(`\`${tool}\``),
+    `2.7.0 changelog section omits ${tool}`,
+  );
+  assert.ok(
+    !unreleasedSection.includes(`\`${tool}\``),
+    `${tool} must belong to 2.7.0, not Unreleased`,
+  );
+}
 
 console.log(
   "PASS: governed frontmatter P1 docs, package surface, authority model, live-canary boundary, and bilingual contracts are coherent",
