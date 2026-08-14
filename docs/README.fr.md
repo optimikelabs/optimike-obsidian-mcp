@@ -9,16 +9,16 @@ question.
 
 ## Commencer selon son rôle
 
-| Je suis…                        | Commencer ici                                             | Puis utiliser                                                                                                                          |
-| ------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Nouvel utilisateur local        | [Présentation](../README.fr.md)                           | [Exploitation](../OPERATIONS.fr.md)                                                                                                    |
-| Opérateur Codex ou agent local  | [Exploitation](../OPERATIONS.fr.md)                       | [Routage agentique](mcp-routing-guide.fr.md)                                                                                           |
-| Opérateur headless/serveur      | [Profil serveur headless](headless-server-profile.fr.md)  | [Matrice runtime](runtime-capability-matrix.fr.md), [Sécurité](../SECURITY.fr.md)                                                      |
-| Intégrateur d’une gateway       | [Compatibilité gateways OSS](gateway-compatibility.fr.md) | [Sécurité HTTP](http-multiclient-security.fr.md), [Backpressure](http-concurrency-backpressure.fr.md)                                  |
-| Intégrateur d’un client MCP     | [Surface des outils](obsidian_mcp_tools_spec.md)          | [Contrat Operon](operon-mcp-contract.fr.md), [Matrice runtime](runtime-capability-matrix.fr.md)                                        |
-| Opérateur de documents externes | [Configuration des racines](external-roots-setup.fr.md)   | [ADR racines externes](adr/ADR-External-Document-Roots.md), [ADR intégrité des références](adr/ADR-External-Reference-Integrity.fr.md) |
+| Je suis…                        | Commencer ici                                             | Puis utiliser                                                                                                                                           |
+| ------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nouvel utilisateur local        | [Présentation](../README.fr.md)                           | [Exploitation](../OPERATIONS.fr.md)                                                                                                                     |
+| Opérateur Codex ou agent local  | [Exploitation](../OPERATIONS.fr.md)                       | [Routage agentique](mcp-routing-guide.fr.md)                                                                                                            |
+| Opérateur headless/serveur      | [Profil serveur headless](headless-server-profile.fr.md)  | [Matrice runtime](runtime-capability-matrix.fr.md), [Sécurité](../SECURITY.fr.md)                                                                       |
+| Intégrateur d’une gateway       | [Compatibilité gateways OSS](gateway-compatibility.fr.md) | [Sécurité HTTP](http-multiclient-security.fr.md), [Backpressure](http-concurrency-backpressure.fr.md)                                                   |
+| Intégrateur d’un client MCP     | [Surface des outils](obsidian_mcp_tools_spec.md)          | [Contrat Operon](operon-mcp-contract.fr.md), [Matrice runtime](runtime-capability-matrix.fr.md)                                                         |
+| Opérateur de documents externes | [Configuration des racines](external-roots-setup.fr.md)   | [ADR racines externes](adr/ADR-External-Document-Roots.md), [ADR intégrité des références](adr/ADR-External-Reference-Integrity.fr.md)                  |
 | Opérateur Tasks/Operon          | [Contrat MCP Operon](operon-mcp-contract.fr.md)           | [Audit CLI/API](operon-cli-audit.fr.md), [Validation locale](operon-local-validation.md), [profil public ÉLYSIA](../profiles/elysia-tasks/README.fr.md) |
-| Contributeur ou relecteur       | [Décisions d’architecture](adr/README.md)                 | [Arbre du dépôt](tree.md), README des plugins                                                                                          |
+| Contributeur ou relecteur       | [Décisions d’architecture](adr/README.md)                 | [Arbre du dépôt](tree.md), README des plugins                                                                                                           |
 
 ## Trouver la page qui fait foi
 
@@ -37,6 +37,8 @@ question.
 | Pourquoi le MCP expose-t-il des fonctions Operon au lieu d’appeler la CLI ?   | [Audit CLI / Developer API](operon-cli-audit.fr.md)                                     |
 | Pourquoi une décision d’architecture a-t-elle été prise ?                     | [Index des ADR](adr/README.md)                                                          |
 | Qu’est-ce qui a changé ?                                                      | [Changelog](../CHANGELOG.md)                                                            |
+
+Frontmatter gouvernée source-preserving : [contrat P1](governed-frontmatter-p1.fr.md).
 
 ## Familles de capacités
 

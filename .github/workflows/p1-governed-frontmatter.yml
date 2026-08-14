@@ -1,0 +1,43 @@
+name: P1 Governed Frontmatter
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/p1-governed-frontmatter.yml"
+      - "src/services/frontmatterPatchCompiler.ts"
+      - "src/services/frontmatterProjectionRuntime.ts"
+      - "src/mcp-server/tools/governedFrontmatterTools/**"
+      - "src/mcp-server/tools/governedNoteReplaceTools/**"
+      - "src/services/operations/obsidianNoteReplace*.ts"
+      - "src/services/writePolicy.ts"
+      - "scripts/fixtures/governed-frontmatter-atomic-server.mjs"
+      - "scripts/fixtures/obsidian-note-replace-create-worker.mjs"
+      - "scripts/models/governed-single-resource-model.mjs"
+      - "scripts/test-governed-frontmatter-*.mjs"
+      - "scripts/test-frontmatter-p1-*.mjs"
+      - "scripts/smoke-governed-frontmatter-live.mjs"
+      - "docs/adr/ADR-Governed-Frontmatter-P1.md"
+  workflow_dispatch:
+
+jobs:
+  p1-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: node scripts/test-governed-frontmatter-model.mjs
+      - run: npm run build
+      - run: node scripts/test-frontmatter-p1-compiler.mjs
+      - run: node scripts/test-frontmatter-p1-idempotency.mjs
+      - run: node scripts/test-governed-frontmatter-mcp.mjs
+      - run: node scripts/test-governed-frontmatter-http.mjs
+      - run: node scripts/test-governed-frontmatter-doc-contract.mjs

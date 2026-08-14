@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 
 export type ObsidianNoteReplaceStatus =
   | "planned"
@@ -12,10 +13,20 @@ export type ObsidianNoteReplaceStatus =
   | "failed"
   | "outcome_unknown";
 
+export type ObsidianNoteReplaceProjection = {
+  contractVersion: 1;
+  kind: string;
+  publicIdempotencyKey: string;
+  intentDigest: string;
+  proof: Record<string, unknown>;
+};
+
 export type ObsidianNoteReplacePlan = {
   operationId: string;
   idempotencyKey: string;
   requestDigest: string;
+  idempotencyIdentity?: string;
+  projection?: ObsidianNoteReplaceProjection;
   path: string;
   beforeSha256: string;
   afterSha256: string;
@@ -35,6 +46,14 @@ export class ObsidianNoteReplaceConcurrencyError extends Error {
   constructor() {
     super("The note replacement state changed concurrently.");
   }
+}
+
+export function noteReplaceIdempotencyConflict(): McpError {
+  return new McpError(
+    BaseErrorCode.CONFLICT,
+    "The idempotency key is already bound to a different note replacement.",
+    { reason: "note_replace_idempotency_conflict" },
+  );
 }
 
 export type ObsidianNoteReplaceJournalOptions = {
@@ -85,8 +104,21 @@ function waitSynchronously(milliseconds: number): void {
 
 function sameRequestInput(
   existing: ObsidianNoteReplacePlan,
-  input: Pick<ObsidianNoteReplacePlan, "path" | "afterSha256">,
+  input: Pick<
+    ObsidianNoteReplacePlan,
+    "path" | "afterSha256" | "idempotencyIdentity"
+  >,
 ): boolean {
+  if (
+    existing.idempotencyIdentity !== undefined ||
+    input.idempotencyIdentity !== undefined
+  ) {
+    return (
+      existing.path === input.path &&
+      existing.idempotencyIdentity !== undefined &&
+      existing.idempotencyIdentity === input.idempotencyIdentity
+    );
+  }
   return (
     existing.path === input.path && existing.afterSha256 === input.afterSha256
   );
@@ -239,9 +271,7 @@ export class ObsidianNoteReplaceJournal {
     const existing = this.getByIdempotencyKey(input.idempotencyKey);
     if (existing) {
       if (!sameRequestInput(existing, input)) {
-        throw new Error(
-          "The idempotency key is already bound to a different note replacement.",
-        );
+        throw noteReplaceIdempotencyConflict();
       }
       return existing;
     }
@@ -276,9 +306,7 @@ export class ObsidianNoteReplaceJournal {
     const winner = this.getByIdempotencyKey(input.idempotencyKey);
     if (!winner) throw new ObsidianNoteReplaceConcurrencyError();
     if (!sameRequestInput(winner, input)) {
-      throw new Error(
-        "The idempotency key is already bound to a different note replacement.",
-      );
+      throw noteReplaceIdempotencyConflict();
     }
     return winner;
   }

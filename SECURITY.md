@@ -118,6 +118,18 @@ by default.
 - No external upload, create, replace, directory/cross-root move, overwrite,
   delete, trash or sync capability is enabled.
 
+## Governed frontmatter boundary
+
+P1 changes only explicitly authorized top-level Frontmatter source ranges.
+Unsupported YAML or ambiguous comment ownership fails closed. It never treats
+cache content as admission, CAS, commit, or recovery authority. P1 uses the P0
+journal and attempt fencing; no observer can borrow executor authority and no
+second recovery engine exists.
+
+The durable projection stores hashes and ranges, not patched values or compiled
+Markdown. Protected keys and the current write mode are checked at planning and
+before every possible P0 effect.
+
 ## Dependency and release checks
 
 Run:

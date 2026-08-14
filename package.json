@@ -64,7 +64,13 @@
     "scripts",
     "docs/assets",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/governed-frontmatter-p1.md",
+    "docs/governed-frontmatter-p1.fr.md",
+    "docs/adr/ADR-Governed-Frontmatter-P1.md",
+    "docs/operon-cli-audit.md",
+    "docs/operon-cli-audit.fr.md",
+    "docs/tree.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
@@ -136,7 +142,7 @@
     "test:package": "node scripts/test-package-contents.mjs",
     "visuals:generate": "node scripts/generate-readme-visuals.mjs",
     "test:visuals": "node scripts/test-readme-visuals.mjs",
-    "test:docs": "npm run test:visuals && node scripts/test-doc-contract.mjs",
+    "test:docs": "npm run test:visuals && node scripts/test-doc-contract.mjs && node scripts/test-governed-frontmatter-doc-contract.mjs",
     "test:launchers": "npm run build && node scripts/test-launchers.mjs",
     "test:external-reference-parser": "node scripts/test-external-reference-parser.mjs",
     "test:obsidian-cas": "node scripts/test-obsidian-cas.mjs && node scripts/test-obsidian-search-replace-cas.mjs",
@@ -144,7 +150,9 @@
     "test:operation-runtime": "npm run build && node scripts/test-external-move-integrity.mjs && node scripts/test-obsidian-note-replace-operation.mjs",
     "test:governed-note-replace-mcp": "npm run build && node scripts/test-governed-note-replace-mcp.mjs",
     "test:governed-note-replace-http": "npm run build && node scripts/test-governed-note-replace-http.mjs",
-    "smoke:atomic-note-mcp-live": "npm run build && node scripts/smoke-atomic-note-mcp-live.mjs"
+    "smoke:atomic-note-mcp-live": "npm run build && node scripts/smoke-atomic-note-mcp-live.mjs",
+    "test:governed-frontmatter": "npm run build && node scripts/test-governed-frontmatter-model.mjs && node scripts/test-frontmatter-p1-compiler.mjs && node scripts/test-frontmatter-p1-idempotency.mjs && node scripts/test-governed-frontmatter-mcp.mjs && node scripts/test-governed-frontmatter-http.mjs",
+    "smoke:governed-frontmatter-live": "npm run build && node scripts/smoke-governed-frontmatter-live.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Governed source-preserving Frontmatter P1 surface:
+  `obsidian_frontmatter_patch_plan`, `obsidian_frontmatter_patch_apply`,
+  `obsidian_frontmatter_patch_status`, and
+  `obsidian_frontmatter_patch_recover`.
+- Executable authority/admission model, conservative top-level YAML compiler,
+  real stdio and HTTP multi-session gates, and a fail-closed live Obsidian
+  canary with exact backup/restoration.
+
+### Changed
+
+- Frontmatter intentions compile into complete Markdown candidates and reuse the
+  released P0 journal, leases, attempt fencing, CAS, receipts, status, and
+  exact-plan recovery. No second transaction engine or generic public
+  `operation_*` surface is introduced.
+- P0 accepts optional internal projection metadata and expected source proof
+  while preserving direct note-replacement digest semantics.
+
+### Security
+
+- Every byte outside explicitly authorized top-level Frontmatter entry ranges
+  remains unchanged. Ambiguous YAML and comment ownership fail closed; cache
+  state is never an admission or mutation authority.
+
 ## [2.6.0] - 2026-08-14
 
 ### Added

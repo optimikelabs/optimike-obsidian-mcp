@@ -232,6 +232,35 @@ restoration retains the private directory at the recovery path printed when the
 script starts; restore only from its explicit backup metadata. Never point the
 canary at an ordinary user note.
 
+## Governed frontmatter P1
+
+P1 accepts bounded top-level `set`/`delete` intentions and compiles them without
+globally serializing YAML. All non-target source bytes remain identical. The
+safe client sequence is `obsidian_frontmatter_patch_plan → apply → status →
+recover`; after an uncertain response, call status first. The P1 receipt is a
+projection of the same P0 child operation and journal.
+
+Run deterministic gates with:
+
+```bash
+npm run test:governed-frontmatter
+```
+
+The live gate requires an explicitly disposable note and reserved canary keys
+that are absent before the run:
+
+```bash
+OBSIDIAN_FRONTMATTER_CANARY_PATH="Canary/Frontmatter P1.md" \
+OBSIDIAN_FRONTMATTER_CANARY_CONFIRM=I_UNDERSTAND_THIS_NOTE_WILL_BE_TEMPORARILY_PATCHED \
+OBSIDIAN_API_KEY="<local-rest-api-key>" MCP_WRITE_MODE=guarded \
+npm run smoke:governed-frontmatter-live
+```
+
+The script announces an operating-system temporary recovery directory, writes
+a private backup before mutation, proves add/set/delete, replay/status/stale
+conflict and exact SHA restoration, then deletes the private run directory only
+after restoration is verified.
+
 ## Tasks: How It Works Now
 
 Tasks are no longer a separate MCP requirement for Codex.

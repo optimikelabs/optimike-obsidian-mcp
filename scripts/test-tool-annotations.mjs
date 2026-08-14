@@ -30,7 +30,8 @@ for (const file of listTypeScriptFiles(sourceRoot)) {
       ts.isPropertyAccessExpression(node.expression) &&
       node.expression.name.text === "tool"
     ) {
-      const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
       const registration = {
         file: path.relative(process.cwd(), file),
         line,
@@ -62,6 +63,10 @@ const governedToolNames = [
   "obsidian_note_replace_apply",
   "obsidian_note_replace_status",
   "obsidian_note_replace_recover",
+  "obsidian_frontmatter_patch_plan",
+  "obsidian_frontmatter_patch_apply",
+  "obsidian_frontmatter_patch_status",
+  "obsidian_frontmatter_patch_recover",
 ];
 for (const name of governedToolNames) {
   const matches = registrations.filter((item) => item.name === name);
@@ -83,5 +88,5 @@ for (const name of [
 }
 
 console.log(
-  `PASS: ${registrations.length} MCP tool registrations include annotations; governed note tools are unique and generic operation tools remain internal`,
+  `PASS: ${registrations.length} MCP tool registrations include annotations; governed note/frontmatter tools are unique and generic operation tools remain internal`,
 );

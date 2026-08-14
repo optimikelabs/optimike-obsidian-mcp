@@ -25,6 +25,7 @@ import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { logger, requestContextService } from "../../../utils/index.js";
 
 const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
+export const PROJECTED_IDEMPOTENCY_KEY_PREFIX = "optimike:projection:v1:";
 
 type CallContext =
   | { kind: "plan"; path: string; nextContent: string }
@@ -247,6 +248,18 @@ function operationIdFromRef(reference: string): string {
   return operationId;
 }
 
+export type GovernedNoteReplacePlanView = {
+  operationId: string;
+  idempotencyKey: string;
+  idempotencyIdentity?: string;
+  path: string;
+  beforeSha256: string;
+  afterSha256: string;
+  bindingFingerprint: string;
+  status: ObsidianNoteReplacePlan["status"];
+  projection?: ObsidianNoteReplacePlan["projection"];
+};
+
 export class GovernedNoteReplaceRuntime {
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
@@ -277,6 +290,21 @@ export class GovernedNoteReplaceRuntime {
     this.leaseHeartbeat.unref();
   }
 
+  readForProjection(path: string) {
+    return this.backend.read({ contractVersion: 1, path });
+  }
+
+  findPlanByIdempotencyKey(
+    idempotencyKey: string,
+  ): GovernedNoteReplacePlanView | undefined {
+    const plan = this.journal.getByIdempotencyKey(idempotencyKey);
+    return plan ? this.view(plan) : undefined;
+  }
+
+  inspect(reference: string): GovernedNoteReplacePlanView {
+    return this.view(this.required(reference));
+  }
+
   plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
     assertCurrentWritePolicy("plan", input.path, input.nextContent);
     return this.backend.withContext(
@@ -299,9 +327,35 @@ export class GovernedNoteReplaceRuntime {
     return this.refreshCacheAfterCommit(plan, operation);
   }
 
+  planPublicDirect(
+    input: ObsidianNoteReplacePlanInput,
+  ): Promise<OperationReceipt> {
+    if (input.idempotencyKey.startsWith(PROJECTED_IDEMPOTENCY_KEY_PREFIX)) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        "The idempotency key uses a namespace reserved for internal projections.",
+        { reason: "reserved_projection_idempotency_namespace" },
+      );
+    }
+    return this.plan(input);
+  }
+
+  async applyPublicDirectPlan(
+    reference: string,
+    idempotencyKey: string,
+  ): Promise<OperationReceipt> {
+    this.requiredPublicDirectPlan(reference);
+    return this.apply(reference, idempotencyKey);
+  }
+
   async status(reference: string): Promise<OperationReceipt> {
     const plan = this.required(reference);
     return this.refreshCacheAfterCommit(plan, this.adapter.status(reference));
+  }
+
+  async statusPublicDirectPlan(reference: string): Promise<OperationReceipt> {
+    this.requiredPublicDirectPlan(reference);
+    return this.status(reference);
   }
 
   async recover(
@@ -318,6 +372,14 @@ export class GovernedNoteReplaceRuntime {
     return this.refreshCacheAfterCommit(plan, operation);
   }
 
+  async recoverPublicDirectPlan(
+    reference: string,
+    idempotencyKey: string,
+  ): Promise<OperationReceipt> {
+    this.requiredPublicDirectPlan(reference);
+    return this.recover(reference, idempotencyKey);
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -327,8 +389,46 @@ export class GovernedNoteReplaceRuntime {
 
   private required(reference: string): ObsidianNoteReplacePlan {
     const plan = this.journal.get(operationIdFromRef(reference));
-    if (!plan) throw new Error("Unknown note-replacement operation plan.");
+    if (!plan) {
+      throw new McpError(
+        BaseErrorCode.NOT_FOUND,
+        "The note-replacement operation plan is unknown or has expired.",
+        { reason: "note_replace_plan_not_found" },
+      );
+    }
     return plan;
+  }
+
+  private requiredPublicDirectPlan(
+    reference: string,
+  ): ObsidianNoteReplacePlan {
+    const plan = this.required(reference);
+    if (plan.projection) {
+      throw new McpError(
+        BaseErrorCode.NOT_FOUND,
+        "The note-replacement operation plan is unknown or has expired.",
+        { reason: "note_replace_plan_not_found" },
+      );
+    }
+    return plan;
+  }
+
+  private view(plan: ObsidianNoteReplacePlan): GovernedNoteReplacePlanView {
+    return {
+      operationId: plan.operationId,
+      idempotencyKey: plan.idempotencyKey,
+      ...(plan.idempotencyIdentity
+        ? { idempotencyIdentity: plan.idempotencyIdentity }
+        : {}),
+      path: plan.path,
+      beforeSha256: plan.beforeSha256,
+      afterSha256: plan.afterSha256,
+      bindingFingerprint: plan.bindingFingerprint,
+      status: plan.status,
+      ...(plan.projection
+        ? { projection: structuredClone(plan.projection) }
+        : {}),
+    };
   }
 
   private async refreshCacheAfterCommit(

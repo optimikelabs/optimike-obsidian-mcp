@@ -19,7 +19,9 @@ import {
 import {
   ObsidianNoteReplaceConcurrencyError,
   ObsidianNoteReplaceJournal,
+  noteReplaceIdempotencyConflict,
   type ObsidianNoteReplacePlan,
+  type ObsidianNoteReplaceProjection,
 } from "./obsidianNoteReplaceJournal.js";
 
 const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
@@ -74,6 +76,10 @@ export type ObsidianNoteReplacePlanInput = {
   path: string;
   nextContent: string;
   idempotencyKey: string;
+  expectedBeforeSha256?: string;
+  expectedBindingFingerprint?: string;
+  idempotencyIdentity?: string;
+  projection?: ObsidianNoteReplaceProjection;
 };
 
 function planRef(operationId: string): string {
@@ -113,6 +119,12 @@ function planDigest(plan: ObsidianNoteReplacePlan): string {
     beforeSha256: plan.beforeSha256,
     afterSha256: plan.afterSha256,
     requestDigest: plan.requestDigest,
+    ...(plan.idempotencyIdentity
+      ? { idempotencyIdentity: plan.idempotencyIdentity }
+      : {}),
+    ...(plan.projection
+      ? { projectionDigest: operationDigest(plan.projection) }
+      : {}),
   });
 }
 
@@ -187,6 +199,36 @@ function validateInput(input: ObsidianNoteReplacePlanInput): void {
   if (Buffer.byteLength(input.nextContent, "utf8") > 5 * 1024 * 1024) {
     throw new Error("nextContent exceeds the bridge limit.");
   }
+  for (const [name, value] of [
+    ["expectedBeforeSha256", input.expectedBeforeSha256],
+    ["expectedBindingFingerprint", input.expectedBindingFingerprint],
+    ["idempotencyIdentity", input.idempotencyIdentity],
+  ] as const) {
+    if (value !== undefined && !SHA256.test(value)) {
+      throw new Error(name + " must be a lowercase SHA-256 digest.");
+    }
+  }
+  if (input.projection) {
+    if (
+      input.projection.contractVersion !== 1 ||
+      !input.projection.kind ||
+      input.projection.kind.length > 128 ||
+      !input.projection.publicIdempotencyKey ||
+      input.projection.publicIdempotencyKey.length > 256 ||
+      !SHA256.test(input.projection.intentDigest) ||
+      input.projection.intentDigest !== input.idempotencyIdentity
+    ) {
+      throw new Error(
+        "projection metadata is malformed or not bound to the idempotency identity.",
+      );
+    }
+    if (
+      Buffer.byteLength(JSON.stringify(input.projection), "utf8") >
+      128 * 1024
+    ) {
+      throw new Error("projection metadata exceeds the private journal limit.");
+    }
+  }
 }
 
 export class ObsidianNoteReplaceOperationAdapter
@@ -199,38 +241,90 @@ export class ObsidianNoteReplaceOperationAdapter
     private readonly journal: ObsidianNoteReplaceJournal,
   ) {}
 
+  private replayIfDurableWinner(
+    input: ObsidianNoteReplacePlanInput,
+    afterSha256: string,
+  ): OperationReceipt | undefined {
+    const existing = this.journal.getByIdempotencyKey(input.idempotencyKey);
+    if (!existing) return undefined;
+    const identityBound =
+      existing.idempotencyIdentity !== undefined ||
+      input.idempotencyIdentity !== undefined;
+    const matches = identityBound
+      ? existing.path === input.path &&
+        existing.idempotencyIdentity !== undefined &&
+        existing.idempotencyIdentity === input.idempotencyIdentity
+      : existing.path === input.path && existing.afterSha256 === afterSha256;
+    if (!matches) throw noteReplaceIdempotencyConflict();
+    return receipt(existing);
+  }
+
   async plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
     validateInput(input);
     const afterSha256 = createHash("sha256")
       .update(input.nextContent, "utf8")
       .digest("hex");
-    const existing = this.journal.getByIdempotencyKey(input.idempotencyKey);
-    if (existing) {
-      if (
-        existing.path !== input.path ||
-        existing.afterSha256 !== afterSha256
-      ) {
-        throw new Error(
-          "The idempotency key is already bound to a different note replacement.",
-        );
-      }
-      return receipt(existing);
+    const initialReplay = this.replayIfDurableWinner(input, afterSha256);
+    if (initialReplay) return initialReplay;
+    let status;
+    try {
+      status = StatusSchema.parse(await this.backend.status());
+    } catch (error) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
+      throw error;
     }
-    const status = StatusSchema.parse(await this.backend.status());
+    const statusReplay = this.replayIfDurableWinner(input, afterSha256);
+    if (statusReplay) return statusReplay;
     if (!status.backend.writeEnabled) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
       throw new Error(
         "Atomic note writes are disabled in the bridge settings.",
       );
     }
-    const read = ReadSchema.parse(
-      await this.backend.read({ contractVersion: 1, path: input.path }),
-    );
+    let read;
+    try {
+      read = ReadSchema.parse(
+        await this.backend.read({ contractVersion: 1, path: input.path }),
+      );
+    } catch (error) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
+      throw error;
+    }
+    const readReplay = this.replayIfDurableWinner(input, afterSha256);
+    if (readReplay) return readReplay;
     if (
       read.bindingFingerprint !== status.backend.bindingFingerprint ||
       read.path !== input.path
     ) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
       throw new Error(
         "Atomic-write backend identity or target changed during planning.",
+      );
+    }
+    if (
+      input.expectedBeforeSha256 !== undefined &&
+      read.sha256 !== input.expectedBeforeSha256
+    ) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "The note changed after the domain projection was compiled.",
+      );
+    }
+    if (
+      input.expectedBindingFingerprint !== undefined &&
+      read.bindingFingerprint !== input.expectedBindingFingerprint
+    ) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "The atomic-write backend changed after the domain projection was compiled.",
       );
     }
     const requestDigest = operationDigest({
@@ -239,11 +333,21 @@ export class ObsidianNoteReplaceOperationAdapter
       beforeSha256: read.sha256,
       afterSha256,
       bindingFingerprint: read.bindingFingerprint,
+      ...(input.idempotencyIdentity
+        ? { idempotencyIdentity: input.idempotencyIdentity }
+        : {}),
+      ...(input.projection
+        ? { projectionDigest: operationDigest(input.projection) }
+        : {}),
     });
     return receipt(
       this.journal.create({
         idempotencyKey: input.idempotencyKey,
         requestDigest,
+        ...(input.idempotencyIdentity
+          ? { idempotencyIdentity: input.idempotencyIdentity }
+          : {}),
+        ...(input.projection ? { projection: input.projection } : {}),
         path: input.path,
         beforeSha256: read.sha256,
         afterSha256,
