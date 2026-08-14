@@ -143,7 +143,7 @@ export class GovernedSingleResourceModel {
   /**
    * Status is an observer call. The reconciler acts under protocol authority:
    * it may prove the sealed after state, but cannot borrow executor authority
-   * to invent a negative terminal result.
+   * to invent a negative terminal result or clear a live owner.
    */
   reconcile() {
     if (STABLE_TERMINAL.has(this.status)) return this.status;
@@ -153,12 +153,15 @@ export class GovernedSingleResourceModel {
       this.history.push({ event: "reconcile", proof: "sealed-after" });
       return this.status;
     }
-    if (this.status === "outcome_unknown" || this.physical === "third") {
-      this.status = "outcome_unknown";
+    if (this.status === "outcome_unknown") {
       this.owner = undefined;
       this.history.push({ event: "reconcile", proof: "insufficient" });
       return this.status;
     }
+    // A planned or actively applying operation remains under its current
+    // authority when the observer cannot prove the sealed after state. Seeing a
+    // third-party state is not permission to steal the executor's fence or to
+    // invent a negative terminal outcome.
     this.history.push({ event: "reconcile", proof: "none" });
     return this.status;
   }
