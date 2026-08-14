@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { load } from "js-yaml";
-import { operationDigest } from "./operations/contract.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 
 export type FrontmatterJsonValue =
@@ -105,6 +104,24 @@ function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : 1;
 }
 
+function canonicalizeDigestValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeDigestValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => compareCodeUnits(left, right))
+        .map(([key, item]) => [key, canonicalizeDigestValue(item)]),
+    );
+  }
+  return value;
+}
+
+export function frontmatterCanonicalDigest(value: unknown): string {
+  return sha256(JSON.stringify(canonicalizeDigestValue(value)));
+}
+
 function splitLines(content: string, start: number, end: number): SourceLine[] {
   const lines: SourceLine[] = [];
   let cursor = start;
@@ -174,8 +191,26 @@ function stripQuotedAndComment(text: string): string {
   return result;
 }
 
+function blockScalarHeaderIndent(text: string): number | undefined {
+  const code = stripQuotedAndComment(text);
+  if (
+    !/(?:^|:\s*|-\s*)[|>](?:[+-][1-9]?|[1-9][+-]?)?\s*$/u.test(code)
+  ) {
+    return undefined;
+  }
+  return code.match(/^[ \t]*/u)?.[0].length ?? 0;
+}
+
 function rejectUnsupportedYamlFeatures(lines: SourceLine[]): void {
+  let blockScalarIndent: number | undefined;
   for (const [index, line] of lines.entries()) {
+    const indentation = line.text.match(/^[ \t]*/u)?.[0].length ?? 0;
+    if (blockScalarIndent !== undefined) {
+      if (line.text.trim() === "" || indentation > blockScalarIndent) {
+        continue;
+      }
+      blockScalarIndent = undefined;
+    }
     const code = stripQuotedAndComment(line.text);
     if (/^\s*<<\s*:/u.test(code)) {
       fail("YAML merge keys are outside the P1 source-preserving subset.", {
@@ -207,6 +242,7 @@ function rejectUnsupportedYamlFeatures(lines: SourceLine[]): void {
         line: index + 2,
       });
     }
+    blockScalarIndent = blockScalarHeaderIndent(line.text);
   }
 }
 
@@ -594,7 +630,9 @@ export function compileFrontmatterPatch(
       sourcePreservation:
         "byte-identical-outside-authorized-frontmatter-ranges",
       lineEnding: source.eol === "\r\n" ? "crlf" : "lf",
-      patchDigest: operationDigest({ operations: canonicalOperations }),
+      patchDigest: frontmatterCanonicalDigest({
+        operations: canonicalOperations,
+      }),
       changedKeys: canonicalOperations.map((operation) => operation.key),
       authorizedRanges,
       bodySha256: sha256(source.body),

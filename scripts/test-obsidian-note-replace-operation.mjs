@@ -308,12 +308,13 @@ const journals = [];
 
 function fixture(name) {
   const backend = new FakeAtomicWriteBackend();
-  const journal = new ObsidianNoteReplaceJournal(
-    path.join(temporaryRoot, `${name}.sqlite`),
-  );
+  const databasePath = path.join(temporaryRoot, `${name}.sqlite`);
+  const journal = new ObsidianNoteReplaceJournal(databasePath);
   journals.push(journal);
   return {
     backend,
+    databasePath,
+    journal,
     adapter: new ObsidianNoteReplaceOperationAdapter(backend, journal),
   };
 }
@@ -955,6 +956,51 @@ try {
     );
     assert.equal(recovered.outcome, "committed");
     assert.equal(backend.replaceCalls, 1);
+  }
+
+  {
+    const { backend, databasePath, journal, adapter } = fixture(
+      "same-intent-winner-before-drift",
+    );
+    const winnerJournal = new ObsidianNoteReplaceJournal(databasePath);
+    journals.push(winnerJournal);
+    const idempotencyKey = "same-intent-winner-before-drift";
+    const idempotencyIdentity = sha256("same canonical P1 intent");
+    const originalLookup = journal.getByIdempotencyKey.bind(journal);
+    let lookupCount = 0;
+    journal.getByIdempotencyKey = (key) => {
+      lookupCount += 1;
+      if (lookupCount <= 2) return undefined;
+      return originalLookup(key);
+    };
+    let winner;
+    backend.afterStatus = async () => {
+      winner = winnerJournal.create({
+        idempotencyKey,
+        requestDigest: sha256("winning compiled request"),
+        idempotencyIdentity,
+        path: backend.path,
+        beforeSha256: sha256("before"),
+        afterSha256: sha256("after"),
+        nextContent: "after",
+        bindingFingerprint: backend.bindingFingerprint,
+      });
+      backend.content = "drifted after the durable winner was admitted";
+    };
+    const replay = await adapter.plan({
+      path: backend.path,
+      nextContent: "after",
+      idempotencyKey,
+      idempotencyIdentity,
+      expectedBeforeSha256: sha256("before"),
+      expectedBindingFingerprint: backend.bindingFingerprint,
+    });
+    assert.equal(replay.operationId, winner.operationId);
+    assert.equal(replay.idempotencyKey, idempotencyKey);
+    assert.ok(
+      lookupCount >= 3,
+      "the planner must reload the durable winner after backend observation",
+    );
   }
 
   {

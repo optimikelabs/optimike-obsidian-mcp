@@ -241,39 +241,66 @@ export class ObsidianNoteReplaceOperationAdapter
     private readonly journal: ObsidianNoteReplaceJournal,
   ) {}
 
+  private replayIfDurableWinner(
+    input: ObsidianNoteReplacePlanInput,
+    afterSha256: string,
+  ): OperationReceipt | undefined {
+    const existing = this.journal.getByIdempotencyKey(input.idempotencyKey);
+    if (!existing) return undefined;
+    const identityBound =
+      existing.idempotencyIdentity !== undefined ||
+      input.idempotencyIdentity !== undefined;
+    const matches = identityBound
+      ? existing.path === input.path &&
+        existing.idempotencyIdentity !== undefined &&
+        existing.idempotencyIdentity === input.idempotencyIdentity
+      : existing.path === input.path && existing.afterSha256 === afterSha256;
+    if (!matches) throw noteReplaceIdempotencyConflict();
+    return receipt(existing);
+  }
+
   async plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
     validateInput(input);
     const afterSha256 = createHash("sha256")
       .update(input.nextContent, "utf8")
       .digest("hex");
-    const existing = this.journal.getByIdempotencyKey(input.idempotencyKey);
-    if (existing) {
-      const identityBound =
-        existing.idempotencyIdentity !== undefined ||
-        input.idempotencyIdentity !== undefined;
-      const matches = identityBound
-        ? existing.path === input.path &&
-          existing.idempotencyIdentity !== undefined &&
-          existing.idempotencyIdentity === input.idempotencyIdentity
-        : existing.path === input.path && existing.afterSha256 === afterSha256;
-      if (!matches) {
-        throw noteReplaceIdempotencyConflict();
-      }
-      return receipt(existing);
+    const initialReplay = this.replayIfDurableWinner(input, afterSha256);
+    if (initialReplay) return initialReplay;
+    let status;
+    try {
+      status = StatusSchema.parse(await this.backend.status());
+    } catch (error) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
+      throw error;
     }
-    const status = StatusSchema.parse(await this.backend.status());
+    const statusReplay = this.replayIfDurableWinner(input, afterSha256);
+    if (statusReplay) return statusReplay;
     if (!status.backend.writeEnabled) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
       throw new Error(
         "Atomic note writes are disabled in the bridge settings.",
       );
     }
-    const read = ReadSchema.parse(
-      await this.backend.read({ contractVersion: 1, path: input.path }),
-    );
+    let read;
+    try {
+      read = ReadSchema.parse(
+        await this.backend.read({ contractVersion: 1, path: input.path }),
+      );
+    } catch (error) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
+      throw error;
+    }
+    const readReplay = this.replayIfDurableWinner(input, afterSha256);
+    if (readReplay) return readReplay;
     if (
       read.bindingFingerprint !== status.backend.bindingFingerprint ||
       read.path !== input.path
     ) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
       throw new Error(
         "Atomic-write backend identity or target changed during planning.",
       );
@@ -282,6 +309,8 @@ export class ObsidianNoteReplaceOperationAdapter
       input.expectedBeforeSha256 !== undefined &&
       read.sha256 !== input.expectedBeforeSha256
     ) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
       throw new McpError(
         BaseErrorCode.CONFLICT,
         "The note changed after the domain projection was compiled.",
@@ -291,6 +320,8 @@ export class ObsidianNoteReplaceOperationAdapter
       input.expectedBindingFingerprint !== undefined &&
       read.bindingFingerprint !== input.expectedBindingFingerprint
     ) {
+      const replay = this.replayIfDurableWinner(input, afterSha256);
+      if (replay) return replay;
       throw new McpError(
         BaseErrorCode.CONFLICT,
         "The atomic-write backend changed after the domain projection was compiled.",

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { compileFrontmatterPatch } from "../dist/services/frontmatterPatchCompiler.js";
 
 function errorReason(operation) {
@@ -152,6 +153,49 @@ assert.equal(
   sameUnicodeIntentOrderA.proof.patchDigest,
   sameUnicodeIntentOrderB.proof.patchDigest,
   "equivalent Unicode-keyed object intents must produce the same digest",
+);
+const expectedUnicodePatchDigest = createHash("sha256")
+  .update(
+    JSON.stringify({
+      operations: [
+        {
+          key: "meta",
+          op: "set",
+          value: Object.fromEntries([
+            [decomposedKey, "decomposed"],
+            [composedKey, "composed"],
+          ]),
+        },
+      ],
+    }),
+    "utf8",
+  )
+  .digest("hex");
+assert.equal(
+  sameUnicodeIntentOrderA.proof.patchDigest,
+  expectedUnicodePatchDigest,
+  "patch proof hashing must preserve P1 code-unit ordering",
+);
+
+const untargetedBlockScalar = [
+  "---",
+  "description: |-",
+  "  use &name literally",
+  "  use *alias and !tag literally",
+  "  ...",
+  "statut: actif",
+  "---",
+  "body",
+  "",
+].join("\n");
+const untargetedBlockScalarCompiled = compileFrontmatterPatch(
+  untargetedBlockScalar,
+  [{ op: "set", key: "statut", value: "pause" }],
+);
+assert.equal(
+  untargetedBlockScalarCompiled.nextContent,
+  untargetedBlockScalar.replace("statut: actif", 'statut: "pause"'),
+  "literal anchor, alias, tag, and document-marker text inside an untargeted block scalar must remain byte-identical",
 );
 
 const groupedAdditions = compileFrontmatterPatch(
