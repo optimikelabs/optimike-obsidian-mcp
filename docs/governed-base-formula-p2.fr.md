@@ -37,6 +37,9 @@ pas par simple recherche de caractères. Les mêmes indicateurs restent du
 contenu ordinaire dans les scalaires quotés, les scalaires bloc et les
 commentaires. Les scalaires de formule multilignes hors style bloc échouent
 fermés, car leurs frontières source ne font pas partie de la V1.
+Les ranges des nœuds parsés définissent aussi les fins d’entrées et le point
+d’ajout : une ligne de scalar bloc qui ressemble à une ligne vide ou à un
+commentaire reste attachée à sa formule d’origine.
 
 Bases Bridge Atomic V1 ne cible que les `.base` existantes. Son CAS est lié à
 une empreinte stable appareil/installation/coffre et s’exécute via

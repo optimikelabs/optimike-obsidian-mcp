@@ -98,6 +98,21 @@ for (const eol of ["\n", "\r\n"]) {
   );
 }
 
+for (const { header, blockTail } of [
+  { header: "|", blockTail: "     # literal formula text\n" },
+  { header: "|+", blockTail: "    value\n\n" },
+]) {
+  const blockSource = `formulas:\n  a: ${header}\n${blockTail}views: []\n`;
+  const blockAppend = compileBaseFormulaPatch(blockSource, [
+    { op: "set_formula", name: "b", expression: "next" },
+  ]);
+  assert.equal(
+    blockAppend.nextYaml,
+    `formulas:\n  a: ${header}\n${blockTail}  b: "next"\nviews: []\n`,
+    "formula additions must append after every parser-owned block-scalar byte",
+  );
+}
+
 const scalarIndicators = compileBaseFormulaPatch(
   [
     "formulas:",

@@ -45,6 +45,12 @@ type FormulaEntry = {
   end: number;
 };
 
+type ParsedFormulaEntryRange = {
+  normalizedName: string;
+  keyStart: number;
+  end: number;
+};
+
 type Edit = {
   name: string;
   operation: BaseFormulaPatchOperation["op"];
@@ -95,7 +101,7 @@ function splitLines(content: string): SourceLine[] {
   return lines;
 }
 
-function assertSupportedYamlSyntax(yaml: string): void {
+function assertSupportedYamlSyntax(yaml: string): ParsedFormulaEntryRange[] {
   const document = parseDocument(yaml, {
     keepSourceTokens: false,
     merge: false,
@@ -129,16 +135,17 @@ function assertSupportedYamlSyntax(yaml: string): void {
   if (document.errors.length > 0) {
     fail("Base YAML is invalid.", { reason: "base_yaml_invalid" });
   }
-  if (!isMap(document.contents)) return;
+  if (!isMap(document.contents)) return [];
   const formulas = document.contents.items.find(
     (pair) =>
       isScalar(pair.key) &&
       normalizeName(String(pair.key.value)) === "formulas",
   )?.value;
-  if (!isMap(formulas)) return;
+  if (!isMap(formulas)) return [];
+  const ranges: ParsedFormulaEntryRange[] = [];
   for (const pair of formulas.items) {
     const value = pair.value;
-    if (!value?.range) continue;
+    if (!value?.range || !isScalar(pair.key) || !pair.key.range) continue;
     const source = yaml.slice(value.range[0], value.range[1]);
     const supportedBlockScalar =
       isScalar(value) &&
@@ -152,7 +159,13 @@ function assertSupportedYamlSyntax(yaml: string): void {
         },
       );
     }
+    ranges.push({
+      normalizedName: normalizeName(String(pair.key.value)),
+      keyStart: pair.key.range[0],
+      end: value.range[2] ?? value.range[1],
+    });
   }
+  return ranges;
 }
 
 function isSeparator(line: SourceLine): boolean {
@@ -228,6 +241,10 @@ function sourceModel(yaml: string): {
   entries: Map<string, FormulaEntry>;
   appendOffset: number;
 } {
+  const parsedRanges = assertSupportedYamlSyntax(yaml);
+  const parsedByName = new Map(
+    parsedRanges.map((range) => [range.normalizedName, range]),
+  );
   const eol: "\n" | "\r\n" = yaml.includes("\r\n") ? "\r\n" : "\n";
   if (eol === "\r\n" && /(^|[^\r])\n/u.test(yaml)) {
     fail("Mixed line endings are outside the governed Base subset.", {
@@ -283,24 +300,33 @@ function sourceModel(yaml: string): {
     }
   }
   const entries = new Map<string, FormulaEntry>();
-  for (const [position, start] of starts.entries()) {
-    const nextIndex = starts[position + 1]?.index ?? sectionEndIndex;
-    let lastOwned = nextIndex - 1;
-    while (lastOwned > start.index && isSeparator(lines[lastOwned]))
-      lastOwned -= 1;
+  for (const start of starts) {
+    const parsedRange = parsedByName.get(start.normalizedName);
+    if (!parsedRange || parsedRange.keyStart !== lines[start.index].start + 2) {
+      fail(
+        "The formulas mapping source does not match its parsed YAML nodes.",
+        {
+          reason: "base_formula_layout_unsupported",
+          name: start.name,
+        },
+      );
+    }
     entries.set(start.normalizedName, {
       name: start.name,
       normalizedName: start.normalizedName,
       start: lines[start.index].start,
-      end: lines[lastOwned].endWithEol,
+      end: parsedRange.end,
     });
   }
-  let appendOffset =
-    nextTopLevel?.line.start ?? lines.at(-1)?.endWithEol ?? yaml.length;
-  for (let index = sectionEndIndex - 1; index > section.index; index -= 1) {
-    if (!isSeparator(lines[index])) break;
-    appendOffset = lines[index].start;
+  if (entries.size !== parsedRanges.length) {
+    fail("The formulas mapping source does not match its parsed YAML nodes.", {
+      reason: "base_formula_layout_unsupported",
+    });
   }
+  const appendOffset =
+    entries.size > 0
+      ? Math.max(...[...entries.values()].map(({ end }) => end))
+      : lines[section.index].endWithEol;
   return { eol, entries, appendOffset };
 }
 

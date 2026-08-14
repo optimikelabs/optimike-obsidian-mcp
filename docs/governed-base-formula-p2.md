@@ -35,6 +35,8 @@ Anchors, aliases, tags, and merge keys are identified from parsed YAML nodes,
 not raw character matches. The same indicator text remains ordinary content in
 quoted scalars, block scalars, and comments. Multiline non-block formula
 scalars fail closed because their source boundaries are outside V1.
+Parsed node ranges also define existing-entry and append boundaries, preserving
+block-scalar content even when a content line resembles blank/comment trivia.
 
 Bases Bridge Atomic V1 supports existing `.base` files only. Its compare-and-
 replace is bound to a stable device/install/vault fingerprint and executes

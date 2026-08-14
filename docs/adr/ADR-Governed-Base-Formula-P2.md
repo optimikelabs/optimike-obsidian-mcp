@@ -57,7 +57,9 @@ formula. Extension refusal is based on parsed YAML nodes, so indicator text in
 quoted scalars, block scalars and comments is not mistaken for syntax.
 Multiline non-block formula scalars fail closed because their physical entry
 boundaries are not part of V1. The compiler never round-trips the complete YAML
-through a serializer.
+through a serializer. Existing entry ends and the append boundary come from the
+parsed node ranges, so block-scalar lines that resemble blank/comment trivia
+remain owned by their original formula.
 
 The receipt proves raw before/after hashes, backend binding, intent digest,
 authorized ranges and the untouched-source digest. It does not certify Base UI
