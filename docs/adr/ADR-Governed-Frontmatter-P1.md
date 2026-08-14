@@ -72,7 +72,8 @@ The compiler fails closed on unsupported or ambiguous source, including:
 - duplicate or case-colliding keys;
 - anchors, aliases, merge keys, explicit YAML tags, or multi-document syntax;
 - quoted/complex keys or unsupported top-level continuations;
-- targeted entries containing direct or nested YAML block scalars;
+- targeted entries containing direct or nested YAML block scalars or multiline
+  quoted scalars;
 - ambiguous neighboring-comment ownership for deletion or trailing-comment
   ownership for insertion;
 - an absent or unclosed frontmatter block;

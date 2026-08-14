@@ -219,6 +219,24 @@ assert.equal(
   "a nested block scalar in an untargeted entry must remain byte-identical",
 );
 
+for (const untargetedMultilineQuotedScalar of [
+  '---\ndescription: "use\n  &name and # text literally"\nstatut: actif\n---\nbody\n',
+  "---\ndescription: 'use\n  *alias and !tag literally'\nstatut: actif\n---\nbody\n",
+  '---\nmeta: {description: "use\n  &name literally"}\nstatut: actif\n---\nbody\n',
+]) {
+  const compiled = compileFrontmatterPatch(untargetedMultilineQuotedScalar, [
+    { op: "set", key: "statut", value: "pause" },
+  ]);
+  assert.equal(
+    compiled.nextContent,
+    untargetedMultilineQuotedScalar.replace(
+      "statut: actif",
+      'statut: "pause"',
+    ),
+    "literal YAML feature syntax inside an untargeted multiline quoted scalar must remain byte-identical",
+  );
+}
+
 const groupedAdditions = compileFrontmatterPatch(
   "---\nexisting: true\n---\nbody\n",
   [
@@ -254,6 +272,14 @@ const failures = [
       compileFrontmatterPatch("---\na: &base 1\n---\n", [
         { op: "set", key: "a", value: 2 },
       ]),
+  ],
+  [
+    "yaml_anchor_unsupported",
+    () =>
+      compileFrontmatterPatch(
+        "---\ntitle: Mike's note\na: &base 1\n---\n",
+        [{ op: "set", key: "title", value: "replacement" }],
+      ),
   ],
   [
     "yaml_alias_unsupported",
@@ -321,6 +347,30 @@ const failures = [
       compileFrontmatterPatch(
         "---\nsecret: |-\n  first line\n  # retained scalar text\nnext: true\n---\nbody\n",
         [{ op: "set", key: "secret", value: "replacement" }],
+      ),
+  ],
+  [
+    "target_multiline_quoted_scalar_unsupported",
+    () =>
+      compileFrontmatterPatch(
+        '---\nsecret: "first\n  # retained"\nnext: true\n---\nbody\n',
+        [{ op: "set", key: "secret", value: "replacement" }],
+      ),
+  ],
+  [
+    "target_multiline_quoted_scalar_unsupported",
+    () =>
+      compileFrontmatterPatch(
+        "---\nmeta:\n  secret: 'first\n    # retained'\nnext: true\n---\nbody\n",
+        [{ op: "delete", key: "meta" }],
+      ),
+  ],
+  [
+    "target_multiline_quoted_scalar_unsupported",
+    () =>
+      compileFrontmatterPatch(
+        '---\nmeta: {secret: "first\n  # retained"}\nnext: true\n---\nbody\n',
+        [{ op: "set", key: "meta", value: { replacement: true } }],
       ),
   ],
   [

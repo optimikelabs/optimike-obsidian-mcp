@@ -84,15 +84,15 @@ assert.match(contract, /fixed bounded marker/i);
 assert.match(contractFr, /marqueur fixe et borné/i);
 assert.match(
   contract,
-  /targeted entries containing direct or[\s\S]*nested block scalars/i,
+  /targeted entries containing direct or[\s\S]*nested block scalars or multiline quoted scalars/i,
 );
 assert.match(
   contractFr,
-  /entrées ciblées contenant des[\s\S]*scalaires multilignes directs ou imbriqués/i,
+  /entrées ciblées contenant des[\s\S]*scalaires de bloc directs ou imbriqués ou des scalaires quotés multilignes/i,
 );
 assert.match(
   adr,
-  /targeted entries containing direct or nested YAML block scalars/i,
+  /targeted entries containing direct or nested YAML block scalars or multiline[\s\S]*quoted scalars/i,
 );
 assert.match(contract, /total code-unit order[\s\S]*intent[\s\S]*proof/i);
 assert.match(contractFr, /ordre total des unités de code/i);

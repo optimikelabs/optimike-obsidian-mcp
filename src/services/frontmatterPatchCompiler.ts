@@ -56,6 +56,7 @@ type SourceEntry = {
   start: number;
   end: number;
   blockScalarIsUnsupported: boolean;
+  multilineQuotedScalarIsUnsupported: boolean;
   leadingCommentIsAmbiguous: boolean;
   trailingCommentIsAmbiguous: boolean;
 };
@@ -149,20 +150,43 @@ function isTopLevelSeparator(line: SourceLine): boolean {
   return line.text.trim() === "" || isCommentLine(line);
 }
 
-function stripQuotedAndComment(text: string): string {
+function quotedScalarMayStart(
+  text: string,
+  quoteIndex: number,
+  flowDepth: number,
+): boolean {
+  let previousIndex = quoteIndex - 1;
+  while (previousIndex >= 0 && /[ \t]/u.test(text[previousIndex])) {
+    previousIndex -= 1;
+  }
+  if (previousIndex < 0) return false;
+  const previous = text[previousIndex];
+  if (previous === ":") {
+    return flowDepth > 0 || previousIndex + 1 < quoteIndex;
+  }
+  if (previous === "-") {
+    return flowDepth > 0 || text.slice(0, previousIndex).trim() === "";
+  }
+  return flowDepth > 0 && /[\[,{]/u.test(previous);
+}
+
+function stripQuotedAndComment(
+  text: string,
+  initialQuote?: "'" | '"',
+  initialFlowDepth = 0,
+): { code: string; quote?: "'" | '"'; flowDepth: number } {
   let result = "";
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
-  for (const character of text) {
+  let quote = initialQuote;
+  let flowDepth = initialFlowDepth;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
     if (quote === '"') {
-      if (escaped) {
-        escaped = false;
-        result += " ";
-        continue;
-      }
       if (character === "\\") {
-        escaped = true;
         result += " ";
+        if (index + 1 < text.length) {
+          result += " ";
+          index += 1;
+        }
         continue;
       }
       if (character === '"') quote = undefined;
@@ -170,23 +194,35 @@ function stripQuotedAndComment(text: string): string {
       continue;
     }
     if (quote === "'") {
+      if (character === "'" && text[index + 1] === "'") {
+        result += "  ";
+        index += 1;
+        continue;
+      }
       if (character === "'") quote = undefined;
       result += " ";
       continue;
     }
     if (character === '"' || character === "'") {
-      quote = character;
-      result += " ";
+      if (quotedScalarMayStart(text, index, flowDepth)) {
+        quote = character;
+        result += " ";
+      } else {
+        result += character;
+      }
       continue;
     }
     if (character === "#") break;
+    if (character === "[" || character === "{") flowDepth += 1;
+    if (character === "]" || character === "}") {
+      flowDepth = Math.max(0, flowDepth - 1);
+    }
     result += character;
   }
-  return result;
+  return { code: result, quote, flowDepth };
 }
 
-function blockScalarHeaderIndent(text: string): number | undefined {
-  const code = stripQuotedAndComment(text);
+function blockScalarHeaderIndent(code: string): number | undefined {
   if (
     !/(?:^|:\s*|-\s*)[|>](?:[+-][1-9]?|[1-9][+-]?)?\s*$/u.test(code)
   ) {
@@ -195,9 +231,15 @@ function blockScalarHeaderIndent(text: string): number | undefined {
   return code.match(/^[ \t]*/u)?.[0].length ?? 0;
 }
 
-function rejectUnsupportedYamlFeatures(lines: SourceLine[]): Set<number> {
+function scanYamlFeatures(lines: SourceLine[]): {
+  blockScalarHeaderLines: Set<number>;
+  multilineQuotedScalarLines: Set<number>;
+} {
   const blockScalarHeaderLines = new Set<number>();
+  const multilineQuotedScalarLines = new Set<number>();
   let blockScalarIndent: number | undefined;
+  let quote: "'" | '"' | undefined;
+  let flowDepth = 0;
   for (const [index, line] of lines.entries()) {
     const indentation = line.text.match(/^[ \t]*/u)?.[0].length ?? 0;
     if (blockScalarIndent !== undefined) {
@@ -206,7 +248,14 @@ function rejectUnsupportedYamlFeatures(lines: SourceLine[]): Set<number> {
       }
       blockScalarIndent = undefined;
     }
-    const code = stripQuotedAndComment(line.text);
+    const initialQuote = quote;
+    const scanned = stripQuotedAndComment(line.text, initialQuote, flowDepth);
+    const code = scanned.code;
+    quote = scanned.quote;
+    flowDepth = scanned.flowDepth;
+    if (initialQuote !== undefined || quote !== undefined) {
+      multilineQuotedScalarLines.add(index);
+    }
     if (/^\s*<<\s*:/u.test(code)) {
       fail("YAML merge keys are outside the P1 source-preserving subset.", {
         reason: "yaml_merge_key_unsupported",
@@ -237,12 +286,12 @@ function rejectUnsupportedYamlFeatures(lines: SourceLine[]): Set<number> {
         line: index + 2,
       });
     }
-    blockScalarIndent = blockScalarHeaderIndent(line.text);
+    blockScalarIndent = blockScalarHeaderIndent(code);
     if (blockScalarIndent !== undefined) {
       blockScalarHeaderLines.add(index);
     }
   }
-  return blockScalarHeaderLines;
+  return { blockScalarHeaderLines, multilineQuotedScalarLines };
 }
 
 function parseFrontmatterSource(content: string): FrontmatterSource {
@@ -280,7 +329,8 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
 
   const source = content.slice(contentStart, closingStart);
   const lines = splitLines(content, contentStart, closingStart);
-  const blockScalarHeaderLines = rejectUnsupportedYamlFeatures(lines);
+  const { blockScalarHeaderLines, multilineQuotedScalarLines } =
+    scanYamlFeatures(lines);
 
   let parsed: unknown;
   try {
@@ -358,6 +408,7 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       .some(isCommentLine);
     const nextStartLineIndex = starts[index + 1]?.lineIndex ?? lines.length;
     let blockScalarIsUnsupported = false;
+    let multilineQuotedScalarIsUnsupported = false;
     for (
       let lineIndex = start.lineIndex;
       lineIndex < nextStartLineIndex;
@@ -365,7 +416,9 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
     ) {
       if (blockScalarHeaderLines.has(lineIndex)) {
         blockScalarIsUnsupported = true;
-        break;
+      }
+      if (multilineQuotedScalarLines.has(lineIndex)) {
+        multilineQuotedScalarIsUnsupported = true;
       }
     }
     let lastOwnedLineIndex = nextStartLineIndex - 1;
@@ -385,6 +438,7 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       start: startLine.start,
       end,
       blockScalarIsUnsupported,
+      multilineQuotedScalarIsUnsupported,
       leadingCommentIsAmbiguous,
       trailingCommentIsAmbiguous,
     });
@@ -555,6 +609,15 @@ export function compileFrontmatterPatch(
       fail(
         "P1 cannot prove a complete source range for a targeted YAML block scalar.",
         { reason: "target_block_scalar_unsupported", key: operation.key },
+      );
+    }
+    if (entry?.multilineQuotedScalarIsUnsupported) {
+      fail(
+        "P1 cannot prove a complete source range for a targeted multiline quoted YAML scalar.",
+        {
+          reason: "target_multiline_quoted_scalar_unsupported",
+          key: operation.key,
+        },
       );
     }
     if (operation.op === "delete") {
