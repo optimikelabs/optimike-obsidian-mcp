@@ -1,0 +1,36 @@
+name: P1 Governed Frontmatter
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/p1-governed-frontmatter.yml"
+      - "src/services/frontmatterPatchCompiler.ts"
+      - "src/services/frontmatterProjectionRuntime.ts"
+      - "src/mcp-server/tools/governedFrontmatterTools/**"
+      - "src/mcp-server/tools/governedNoteReplaceTools/**"
+      - "src/services/operations/obsidianNoteReplace*.ts"
+      - "src/services/writePolicy.ts"
+      - "scripts/models/governed-single-resource-model.mjs"
+      - "scripts/test-governed-frontmatter-*.mjs"
+      - "scripts/smoke-governed-frontmatter-live.mjs"
+      - "docs/adr/ADR-Governed-Frontmatter-P1.md"
+  workflow_dispatch:
+
+jobs:
+  model-and-compiler:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: node scripts/test-governed-frontmatter-model.mjs
+      - run: npm run build
+      - run: node scripts/test-frontmatter-p1-compiler.mjs
