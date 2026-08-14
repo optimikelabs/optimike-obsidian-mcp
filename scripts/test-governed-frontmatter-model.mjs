@@ -23,6 +23,7 @@ function staleExecutorCannotTerminalizeNewAttempt() {
 function delayedOldEffectIsReconciledNotMisclassified() {
   const model = new GovernedSingleResourceModel();
   const oldAttempt = model.claim("executor-a");
+  model.backendSend(oldAttempt);
   model.expire(oldAttempt);
   const recoveryAttempt = model.claim("executor-b", ["outcome_unknown"]);
 
@@ -56,15 +57,30 @@ function observerCannotBorrowExecutorAuthority() {
 function unknownStaysUnknownWithoutProof() {
   const model = new GovernedSingleResourceModel();
   const attempt = model.claim("executor-a");
+  model.backendSend(attempt);
   model.expire(attempt);
   model.thirdPartyEdit();
   assert.equal(model.reconcile(), "outcome_unknown");
   assert.equal(model.status, "outcome_unknown");
 }
 
+function sentRequestCannotBecomeProvenFailure() {
+  const model = new GovernedSingleResourceModel();
+  const attempt = model.claim("executor-a");
+  model.backendSend(attempt);
+  assert.throws(
+    () => model.terminalize(attempt, "failed", "effect-excluded"),
+    /cannot exclude an already-sent backend request/,
+  );
+  assert.equal(model.status, "applying");
+  model.expire(attempt);
+  assert.equal(model.reconcile(), "outcome_unknown");
+}
+
 function terminalReceiptsAreMonotone() {
   const model = new GovernedSingleResourceModel();
   const attempt = model.claim("executor-a");
+  model.backendSend(attempt);
   model.backendEffect(attempt);
   model.terminalize(attempt, "committed", "sealed-after");
   assert.equal(model.reconcile(), "committed");
@@ -75,6 +91,7 @@ function terminalReceiptsAreMonotone() {
 function negativeTerminalNeedsEffectExclusion() {
   const model = new GovernedSingleResourceModel();
   const attempt = model.claim("executor-a");
+  model.backendSend(attempt);
   model.backendEffect(attempt);
   assert.throws(
     () => model.terminalize(attempt, "failed", "effect-excluded"),
@@ -201,6 +218,7 @@ for (const test of [
   delayedOldEffectIsReconciledNotMisclassified,
   observerCannotBorrowExecutorAuthority,
   unknownStaysUnknownWithoutProof,
+  sentRequestCannotBecomeProvenFailure,
   terminalReceiptsAreMonotone,
   negativeTerminalNeedsEffectExclusion,
   sameKeySameIntentConverges,
@@ -212,5 +230,5 @@ for (const test of [
 }
 
 console.log(
-  "PASS: executable P1 model proves authority separation, stale-attempt fencing, conservative reconciliation, terminal monotonicity, source/binding admission gates, and same-key intent convergence.",
+  "PASS: executable P1 model proves authority separation, stale-attempt fencing, send/effect uncertainty, conservative reconciliation, terminal monotonicity, source/binding admission gates, and same-key intent convergence.",
 );
