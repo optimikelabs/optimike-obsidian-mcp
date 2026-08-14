@@ -19,6 +19,11 @@ Un plan P1 public correspond à une seule opération P0
 `obsidian.note.replace`. Le `planRef` P1 est opaque. Apply et recover n’acceptent
 aucun nouveau chemin, patch, valeur, hash ou Markdown compilé.
 
+Les clés d’idempotence publiques doivent être des chaînes Unicode bien formées,
+non vides, sans espaces périphériques et longues d’au plus 256 unités de code
+UTF-16. Un plan inconnu ou expiré par la rétention renvoie `NOT_FOUND`, et non
+une erreur interne présentée comme transitoire.
+
 P1 canonise les clés selon un ordre total des unités de code avant de calculer
 les digests de l’intention et de la preuve de préservation de source. Ces
 digests ne dépendent donc ni de la locale hôte ni de la configuration ICU ; les

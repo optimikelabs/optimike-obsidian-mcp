@@ -202,6 +202,51 @@ try {
     });
   }
 
+  const malformedUnicodeKey = await call(
+    session,
+    "obsidian_frontmatter_patch_plan",
+    {
+      path: FRONTMATTER_FIXTURE_PATH,
+      operations: [{ op: "set", key: "statut", value: "planned" }],
+      idempotencyKey: "\ud800",
+    },
+    true,
+  );
+  assert.equal(malformedUnicodeKey.payload.error.code, "VALIDATION_ERROR");
+  assert.match(malformedUnicodeKey.payload.error.message, /well-formed Unicode/i);
+
+  const replacementCharacterKey = await call(
+    session,
+    "obsidian_frontmatter_patch_plan",
+    {
+      path: FRONTMATTER_FIXTURE_PATH,
+      operations: [{ op: "set", key: "statut", value: "planned" }],
+      idempotencyKey: "�",
+    },
+  );
+  assert.equal(replacementCharacterKey.payload.phase, "planned");
+
+  const unknownPlanRef =
+    "obsidian-frontmatter-patch:v1:00000000-0000-4000-8000-000000000000";
+  for (const [name, args] of [
+    ["obsidian_frontmatter_patch_status", { planRef: unknownPlanRef }],
+    [
+      "obsidian_frontmatter_patch_apply",
+      { planRef: unknownPlanRef, idempotencyKey: "unknown-plan" },
+    ],
+    [
+      "obsidian_frontmatter_patch_recover",
+      { planRef: unknownPlanRef, idempotencyKey: "unknown-plan" },
+    ],
+  ]) {
+    const missing = await call(session, name, args, true);
+    assert.equal(missing.payload.error.code, "NOT_FOUND");
+    assert.equal(
+      missing.payload.error.details?.reason,
+      "note_replace_plan_not_found",
+    );
+  }
+
   fake.reset();
   const protectedAttempt = await call(
     session,

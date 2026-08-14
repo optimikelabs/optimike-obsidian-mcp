@@ -63,6 +63,10 @@ The P1 intent and patch-proof digests use a total code-unit ordering
 recursively. They are independent of host locale/ICU collation and do not alter
 the legacy P0 digest helper or any direct P0 digest.
 
+Public idempotency keys admit only well-formed Unicode, preventing distinct JSON
+strings from collapsing through UTF-8 replacement. A valid but unknown or
+retention-expired plan reference is terminally absent and returns `NOT_FOUND`.
+
 The compiler fails closed on unsupported or ambiguous source, including:
 
 - duplicate or case-colliding keys;

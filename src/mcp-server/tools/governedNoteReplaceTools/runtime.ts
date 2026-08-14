@@ -354,7 +354,13 @@ export class GovernedNoteReplaceRuntime {
 
   private required(reference: string): ObsidianNoteReplacePlan {
     const plan = this.journal.get(operationIdFromRef(reference));
-    if (!plan) throw new Error("Unknown note-replacement operation plan.");
+    if (!plan) {
+      throw new McpError(
+        BaseErrorCode.NOT_FOUND,
+        "The note-replacement operation plan is unknown or has expired.",
+        { reason: "note_replace_plan_not_found" },
+      );
+    }
     return plan;
   }
 

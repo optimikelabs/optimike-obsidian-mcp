@@ -75,10 +75,30 @@ export type FrontmatterProjectionReceipt = OperationReceipt & {
 };
 
 function normalizedPublicKey(value: string): string {
-  if (!value || value.trim() !== value || value.length > 256) {
+  let wellFormed = true;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        wellFormed = false;
+        break;
+      }
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      wellFormed = false;
+      break;
+    }
+  }
+  if (
+    !value ||
+    value.trim() !== value ||
+    value.length > 256 ||
+    !wellFormed
+  ) {
     throw new McpError(
       BaseErrorCode.VALIDATION_ERROR,
-      "idempotencyKey must be a non-empty, unpadded string of at most 256 characters.",
+      "idempotencyKey must be a non-empty, unpadded, well-formed Unicode string of at most 256 characters.",
     );
   }
   return value;

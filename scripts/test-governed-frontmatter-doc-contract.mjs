@@ -88,6 +88,9 @@ assert.match(adr, /targeted YAML block scalars/i);
 assert.match(contract, /total code-unit order[\s\S]*intent[\s\S]*proof/i);
 assert.match(contractFr, /ordre total des unités de code/i);
 assert.match(adr, /intent and patch-proof digests[\s\S]*code-unit ordering/i);
+assert.match(contract, /well-formed Unicode[\s\S]*NOT_FOUND/i);
+assert.match(contractFr, /Unicode bien formées[\s\S]*NOT_FOUND/i);
+assert.match(adr, /well-formed Unicode[\s\S]*NOT_FOUND/i);
 assert.match(adrIndex, /P1 governed frontmatter projection/);
 
 for (const file of [

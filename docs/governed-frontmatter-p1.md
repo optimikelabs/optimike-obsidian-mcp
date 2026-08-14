@@ -19,6 +19,10 @@ One public P1 plan maps to one P0 `obsidian.note.replace` operation. The P1 plan
 reference is opaque. Apply and recovery accept no new path, patch, value, hash,
 or compiled Markdown.
 
+Public idempotency keys must be non-empty, unpadded, well-formed Unicode strings
+of at most 256 UTF-16 code units. Unknown or retention-expired plan references
+return `NOT_FOUND`; they are not reported as transient internal failures.
+
 P1 canonicalizes keys with a total code-unit order before hashing its intent
 and source-preservation proof. These digests therefore do not depend on the
 host locale or ICU configuration; legacy P0 digest semantics remain unchanged.
