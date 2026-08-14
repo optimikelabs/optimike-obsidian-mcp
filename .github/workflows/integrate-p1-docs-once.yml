@@ -31,7 +31,6 @@ jobs:
         run: |
           from pathlib import Path
           import json
-          import re
 
           def read(path):
               return Path(path).read_text(encoding="utf-8")
@@ -169,7 +168,7 @@ jobs:
           )
           replace_once(
               "README.fr.md",
-              "| Notes                   | Lecture, liste, recherche, mise à jour, frontmatter et tags                       | Coffre ; Local REST API pour la surface live complète    |",
+              "| Notes                   | Lecture, liste, recherche, mise à jour, frontmatter et tags          | Coffre ; Local REST API pour la surface live complète |",
               "| Notes                   | Lecture/recherche/update plus plans gouvernés de note atomique et Frontmatter source-preserving | Coffre ; Local REST API + Atomic Write Bridge pour le CAS gouverné |",
           )
           replace_once(
