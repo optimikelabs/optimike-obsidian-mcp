@@ -68,6 +68,9 @@
     "docs/governed-frontmatter-p1.md",
     "docs/governed-frontmatter-p1.fr.md",
     "docs/adr/ADR-Governed-Frontmatter-P1.md",
+    "docs/governed-base-formula-p2.md",
+    "docs/governed-base-formula-p2.fr.md",
+    "docs/adr/ADR-Governed-Base-Formula-P2.md",
     "docs/operon-cli-audit.md",
     "docs/operon-cli-audit.fr.md",
     "docs/tree.md"

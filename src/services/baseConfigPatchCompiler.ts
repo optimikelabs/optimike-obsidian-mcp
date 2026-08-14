@@ -94,25 +94,107 @@ function splitLines(content: string): SourceLine[] {
   return lines;
 }
 
+function yamlStructureWithoutScalarText(yaml: string): string {
+  const output: string[] = [];
+  let inSingle = false;
+  let inDouble = false;
+  let blockHeaderIndent: number | undefined;
+
+  for (const rawLine of yaml.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    const indentation = line.match(/^ */u)?.[0].length ?? 0;
+    if (blockHeaderIndent !== undefined) {
+      if (line.trim() === "" || indentation > blockHeaderIndent) {
+        output.push("");
+        continue;
+      }
+      blockHeaderIndent = undefined;
+    }
+
+    let structural = "";
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+      if (inSingle) {
+        structural += " ";
+        if (character === "'" && line[index + 1] === "'") {
+          structural += " ";
+          index += 1;
+        } else if (character === "'") {
+          inSingle = false;
+        }
+        continue;
+      }
+      if (inDouble) {
+        structural += " ";
+        if (character === "\\" && index + 1 < line.length) {
+          structural += " ";
+          index += 1;
+        } else if (character === '"') {
+          inDouble = false;
+        }
+        continue;
+      }
+      if (character === "#" && (index === 0 || /\s/u.test(line[index - 1]))) {
+        structural += " ".repeat(line.length - index);
+        break;
+      }
+      if (character === "'") {
+        inSingle = true;
+        structural += " ";
+        continue;
+      }
+      if (character === '"') {
+        inDouble = true;
+        structural += " ";
+        continue;
+      }
+      structural += character;
+    }
+    output.push(structural);
+    if (
+      !inSingle &&
+      !inDouble &&
+      /(?:^|[:\-]\s*)[>|](?:[+-]?\d*|\d*[+-]?)\s*$/u.test(structural.trimEnd())
+    ) {
+      blockHeaderIndent = indentation;
+    }
+  }
+  return output.join("\n");
+}
+
+function assertNoYamlExtensions(yaml: string): void {
+  const structural = yamlStructureWithoutScalarText(yaml);
+  const boundary = String.raw`(?:^|[\s\[\]{},:?\-])`;
+  const endBoundary = String.raw`(?=$|[\s\[\]{},])`;
+  if (
+    new RegExp(`${boundary}[&*][^\\s\\[\\]{},]+${endBoundary}`, "mu").test(
+      structural,
+    )
+  ) {
+    fail("YAML anchors and aliases are outside the governed Base subset.", {
+      reason: "base_yaml_reference_unsupported",
+    });
+  }
+  if (
+    new RegExp(
+      `${boundary}!(?:<[^>\\n]+>|[^\\s\\[\\]{},]*)${endBoundary}`,
+      "mu",
+    ).test(structural) ||
+    /(?:^|[\s{,])<<\s*:/mu.test(structural)
+  ) {
+    fail("YAML tags and merge keys are outside the governed Base subset.", {
+      reason: "base_yaml_extension_unsupported",
+    });
+  }
+}
+
 function isSeparator(line: SourceLine): boolean {
   const trimmed = line.text.trim();
   return trimmed === "" || trimmed.startsWith("#");
 }
 
 function parseRoot(yaml: string): Record<string, unknown> {
-  if (/(^|[\s[{:,-])(?:&|\*)[\p{L}\p{N}_-]+/mu.test(yaml)) {
-    fail("YAML anchors and aliases are outside the governed Base subset.", {
-      reason: "base_yaml_reference_unsupported",
-    });
-  }
-  if (
-    /(^|[\s[{:,-])!(?!=)[^\s,[\]{}]+/mu.test(yaml) ||
-    /^\s*<<\s*:/mu.test(yaml)
-  ) {
-    fail("YAML tags and merge keys are outside the governed Base subset.", {
-      reason: "base_yaml_extension_unsupported",
-    });
-  }
+  assertNoYamlExtensions(yaml);
   let parsed: unknown;
   try {
     parsed = load(yaml);

@@ -98,6 +98,36 @@ for (const eol of ["\n", "\r\n"]) {
   );
 }
 
+const scalarIndicators = compileBaseFormulaPatch(
+  [
+    "formulas:",
+    '  quoted: "text &anchor *alias !tag <<: and # content"',
+    "  block: |",
+    "    text &anchor *alias !tag <<: and # content",
+    "# comment &anchor *alias !tag <<:",
+    "views: []",
+    "",
+  ].join("\n"),
+  [{ op: "set_formula", name: "quoted", expression: "a && !done" }],
+);
+assert.match(scalarIndicators.nextYaml, /a && !done/u);
+assert.match(
+  scalarIndicators.nextYaml,
+  /text &anchor \*alias !tag <<: and # content/u,
+  "block scalar and comment indicators must remain ordinary source text",
+);
+const multilineQuotedIndicators = compileBaseFormulaPatch(
+  [
+    "formulas:",
+    '  quoted: "first &anchor',
+    '    second *alias !tag <<: # text"',
+    "  keep: value",
+    "",
+  ].join("\n"),
+  [{ op: "set_formula", name: "keep", expression: "next" }],
+);
+assert.match(multilineQuotedIndicators.nextYaml, /first &anchor/u);
+
 function reason(operation) {
   try {
     operation();
@@ -120,6 +150,41 @@ assert.equal(
     compileBaseFormulaPatch("formulas: &shared\n  a: 1\n", [
       { op: "set_formula", name: "a", expression: "2" },
     ]),
+  ),
+  "base_yaml_reference_unsupported",
+);
+assert.equal(
+  reason(() =>
+    compileBaseFormulaPatch(
+      "shared: &shared value\nformulas:\n  a: *shared\n",
+      [{ op: "set_formula", name: "a", expression: "2" }],
+    ),
+  ),
+  "base_yaml_reference_unsupported",
+);
+assert.equal(
+  reason(() =>
+    compileBaseFormulaPatch("formulas:\n  a: !!str value\n", [
+      { op: "set_formula", name: "a", expression: "2" },
+    ]),
+  ),
+  "base_yaml_extension_unsupported",
+);
+assert.equal(
+  reason(() =>
+    compileBaseFormulaPatch(
+      "formulas:\n  <<: { inherited: value }\n  keep: 2\n",
+      [{ op: "set_formula", name: "keep", expression: "3" }],
+    ),
+  ),
+  "base_yaml_extension_unsupported",
+);
+assert.equal(
+  reason(() =>
+    compileBaseFormulaPatch(
+      "defaults: &defaults\n  a: 1\nformulas:\n  <<: *defaults\n  keep: 2\n",
+      [{ op: "set_formula", name: "keep", expression: "3" }],
+    ),
   ),
   "base_yaml_reference_unsupported",
 );
