@@ -180,17 +180,22 @@ assert.doesNotMatch(
   liveCanary,
   /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
 );
-const releaseHeading = "## [2.7.0] - 2026-08-14";
-const previousReleaseHeading = "## [2.6.0] - 2026-08-14";
-const releaseStart = changelog.indexOf(releaseHeading);
-const previousReleaseStart = changelog.indexOf(previousReleaseHeading);
-assert.ok(releaseStart > changelog.indexOf("## [Unreleased]"));
-assert.ok(previousReleaseStart > releaseStart);
-const releaseSection = changelog.slice(releaseStart, previousReleaseStart);
-const unreleasedSection = changelog.slice(
-  changelog.indexOf("## [Unreleased]"),
-  releaseStart,
-);
+const changelogHeadings = [
+  ...changelog.matchAll(/^## \[([^\]]+)\](?: - .*?)?$/gm),
+];
+function changelogSection(version) {
+  const headingIndex = changelogHeadings.findIndex(
+    (heading) => heading[1] === version,
+  );
+  assert.notEqual(headingIndex, -1, `missing changelog section ${version}`);
+  const start = changelogHeadings[headingIndex].index;
+  const end = changelogHeadings[headingIndex + 1]?.index ?? changelog.length;
+  return changelog.slice(start, end);
+}
+
+assert.match(changelog, /^## \[2\.7\.0\] - 2026-08-14$/m);
+const releaseSection = changelogSection("2.7.0");
+const unreleasedSection = changelogSection("Unreleased");
 for (const tool of tools) {
   assert.ok(
     releaseSection.includes(`\`${tool}\``),
