@@ -47,8 +47,14 @@ assert.match(contract, /not undo/i);
 assert.match(contractFr, /n[’']est pas `?undo`?/i);
 assert.match(contract, /Optimike Obsidian MCP 2\.6\.0 exposes/i);
 assert.match(contractFr, /Optimike Obsidian MCP 2\.6\.0 expose/i);
-assert.match(contract, /guarantees are released in Optimike Obsidian MCP\s+2\.6\.0/i);
-assert.match(contractFr, /garanties sont\s+publiées dans Optimike Obsidian MCP 2\.6\.0/i);
+assert.match(
+  contract,
+  /guarantees are released in Optimike Obsidian MCP\s+2\.6\.0/i,
+);
+assert.match(
+  contractFr,
+  /garanties sont\s+publiées dans Optimike Obsidian MCP 2\.6\.0/i,
+);
 assert.doesNotMatch(contract, /The 2\.6 candidate/i);
 assert.doesNotMatch(contractFr, /Le candidat 2\.6/i);
 assert.doesNotMatch(contract, /versioning, and release remain/i);
@@ -144,6 +150,19 @@ assert.match(contract, /busy policy is installed before WAL negotiation/);
 assert.match(contract, /each recovery gets a new attempt fence/);
 assert.match(contract, /terminal receipts remain replayable[\s\S]*read-only/i);
 assert.match(contract, /revalidates it again immediately before every/i);
+assert.match(contractFr, /politique de contention SQLite est installée avant/);
+assert.match(
+  contractFr,
+  /chaque recovery\s+reçoit un nouveau fence de tentative/,
+);
+assert.match(contractFr, /reçus terminaux stables restent rejouables/i);
+assert.match(contractFr, /juste avant chaque tentative de/i);
+assert.match(contract, /loser of the conditional `planned → applying`/i);
+assert.match(contractFr, /perdant de la transition conditionnelle/i);
+assert.match(contract, /empty Markdown note as valid content/i);
+assert.match(contractFr, /note Markdown vide comme[\s\S]*contenu valide/i);
+assert.match(contract, /subsequent CAS[\s\S]*remains `outcome_unknown`/i);
+assert.match(contractFr, /conflit CAS suivant reste `outcome_unknown`/i);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
