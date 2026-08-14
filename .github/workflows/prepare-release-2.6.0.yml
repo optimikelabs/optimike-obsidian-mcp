@@ -64,10 +64,17 @@ jobs:
               "  packageJson.version,\n  \"2.6.0\",\n  \"released package metadata must match the stabilized 2.6.0 authority\",",
           )
 
-      - name: Verify release metadata and package
+      - name: Install dependencies
         run: |
           npm ci
+          npm --prefix plugins/obsidian-bases-bridge ci
+          npm --prefix plugins/obsidian-operon-bridge ci
+          npm --prefix plugins/obsidian-atomic-write-bridge ci
+
+      - name: Verify release metadata and installable package
+        run: |
           npm run build
+          npm run build:bridges
           npm run test:docs
           npm run test:package
           npm run audit:production
