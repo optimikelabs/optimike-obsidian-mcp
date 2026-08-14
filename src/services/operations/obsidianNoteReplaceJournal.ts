@@ -27,6 +27,7 @@ export type ObsidianNoteReplacePlan = {
   failure?: string;
   executionOwner?: {
     instanceId: string;
+    attemptId: string;
   };
 };
 
@@ -313,14 +314,14 @@ export class ObsidianNoteReplaceJournal {
     expected: ObsidianNoteReplaceStatus[],
     next: ObsidianNoteReplaceStatus,
     failure?: string,
-    expectedExecutionOwnerId?: string,
+    expectedExecutionAttemptId?: string,
   ): ObsidianNoteReplacePlan {
     return this.transitionInternal(
       operationId,
       expected,
       next,
       failure,
-      expectedExecutionOwnerId,
+      expectedExecutionAttemptId,
       false,
     );
   }
@@ -344,7 +345,7 @@ export class ObsidianNoteReplaceJournal {
     expected: ObsidianNoteReplaceStatus[],
     next: ObsidianNoteReplaceStatus,
     failure: string | undefined,
-    expectedExecutionOwnerId: string | undefined,
+    expectedExecutionAttemptId: string | undefined,
     verifiedCommitWithoutOwner: boolean,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
@@ -355,8 +356,8 @@ export class ObsidianNoteReplaceJournal {
     if (
       current.status === "applying" &&
       !verifiedCommitWithoutOwner &&
-      (!expectedExecutionOwnerId ||
-        current.executionOwner?.instanceId !== expectedExecutionOwnerId)
+      (!expectedExecutionAttemptId ||
+        current.executionOwner?.attemptId !== expectedExecutionAttemptId)
     ) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
@@ -365,7 +366,12 @@ export class ObsidianNoteReplaceJournal {
       status: next,
       updatedAt: new Date(this.now()).toISOString(),
       ...(next === "applying"
-        ? { executionOwner: this.executionOwner }
+        ? {
+            executionOwner: {
+              ...this.executionOwner,
+              attemptId: randomUUID(),
+            },
+          }
         : { executionOwner: undefined }),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),

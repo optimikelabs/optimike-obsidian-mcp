@@ -359,7 +359,7 @@ export class ObsidianNoteReplaceOperationAdapter
   private async execute(
     plan: ObsidianNoteReplacePlan,
   ): Promise<ObsidianNoteReplacePlan> {
-    const executionOwnerId = this.requiredExecutionOwnerId(plan);
+    const executionAttemptId = this.requiredExecutionAttemptId(plan);
     try {
       const status = StatusSchema.parse(await this.backend.status());
       if (status.backend.bindingFingerprint !== plan.bindingFingerprint) {
@@ -368,7 +368,7 @@ export class ObsidianNoteReplaceOperationAdapter
           ["applying"],
           "rejected",
           "The atomic-write backend instance no longer matches the sealed plan.",
-          executionOwnerId,
+          executionAttemptId,
         );
       }
       if (!status.backend.writeEnabled) {
@@ -377,7 +377,7 @@ export class ObsidianNoteReplaceOperationAdapter
           ["applying"],
           "rejected",
           "Atomic note writes were disabled before apply.",
-          executionOwnerId,
+          executionAttemptId,
         );
       }
       const result = CasSchema.parse(
@@ -404,7 +404,7 @@ export class ObsidianNoteReplaceOperationAdapter
         ["applying"],
         "committed",
         undefined,
-        executionOwnerId,
+        executionAttemptId,
       );
     } catch (error) {
       const conflict =
@@ -412,12 +412,15 @@ export class ObsidianNoteReplaceOperationAdapter
       if (conflict) {
         let reconciled: ObsidianNoteReplacePlan;
         try {
-          reconciled = await this.reconcileCasConflict(plan, executionOwnerId);
+          reconciled = await this.reconcileCasConflict(
+            plan,
+            executionAttemptId,
+          );
         } catch (reconciliationError) {
           return this.uncertain(
             plan,
             `CAS conflict reconciliation failed: ${reconciliationError instanceof Error ? reconciliationError.message : String(reconciliationError)}`,
-            executionOwnerId,
+            executionAttemptId,
           );
         }
         if (reconciled.status !== "applying") return reconciled;
@@ -426,7 +429,7 @@ export class ObsidianNoteReplaceOperationAdapter
           ["applying"],
           "conflict",
           error.message,
-          executionOwnerId,
+          executionAttemptId,
         );
       }
       const rejected =
@@ -437,10 +440,10 @@ export class ObsidianNoteReplaceOperationAdapter
           ["applying"],
           "rejected",
           error.message,
-          executionOwnerId,
+          executionAttemptId,
         );
       }
-      const reconciled = await this.reconcile(plan, executionOwnerId).catch(
+      const reconciled = await this.reconcile(plan, executionAttemptId).catch(
         () => plan,
       );
       if (reconciled.status !== "applying") {
@@ -449,14 +452,14 @@ export class ObsidianNoteReplaceOperationAdapter
       return this.uncertain(
         plan,
         error instanceof Error ? error.message : String(error),
-        executionOwnerId,
+        executionAttemptId,
       );
     }
   }
 
   private async reconcileCasConflict(
     plan: ObsidianNoteReplacePlan,
-    executionOwnerId: string,
+    executionAttemptId: string,
   ): Promise<ObsidianNoteReplacePlan> {
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
@@ -471,7 +474,7 @@ export class ObsidianNoteReplaceOperationAdapter
         ["applying"],
         "committed",
         undefined,
-        executionOwnerId,
+        executionAttemptId,
       );
     }
     return plan;
@@ -479,13 +482,13 @@ export class ObsidianNoteReplaceOperationAdapter
 
   private async reconcile(
     plan: ObsidianNoteReplacePlan,
-    executionOwnerId?: string,
+    executionAttemptId?: string,
   ): Promise<ObsidianNoteReplacePlan> {
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
     const observesLiveExecutor =
-      plan.status === "applying" && executionOwnerId === undefined;
+      plan.status === "applying" && executionAttemptId === undefined;
     if (read.bindingFingerprint !== plan.bindingFingerprint) {
       if (observesLiveExecutor) return plan;
       return this.transitionOrReload(
@@ -493,7 +496,7 @@ export class ObsidianNoteReplaceOperationAdapter
         [plan.status],
         "conflict",
         "The atomic-write backend instance changed.",
-        executionOwnerId,
+        executionAttemptId,
       );
     }
     if (read.sha256 === plan.afterSha256) {
@@ -505,7 +508,7 @@ export class ObsidianNoteReplaceOperationAdapter
         [plan.status],
         "committed",
         undefined,
-        executionOwnerId,
+        executionAttemptId,
       );
     }
     if (read.sha256 !== plan.beforeSha256) {
@@ -513,7 +516,7 @@ export class ObsidianNoteReplaceOperationAdapter
       return this.uncertain(
         plan,
         "The note hash matches neither the sealed before nor after proof.",
-        executionOwnerId,
+        executionAttemptId,
       );
     }
     return plan;
@@ -522,10 +525,10 @@ export class ObsidianNoteReplaceOperationAdapter
   private uncertain(
     plan: ObsidianNoteReplacePlan,
     failure: string,
-    executionOwnerId?: string,
+    executionAttemptId?: string,
   ): ObsidianNoteReplacePlan {
     if (plan.status === "outcome_unknown") return plan;
-    if (plan.status === "applying" && executionOwnerId === undefined) {
+    if (plan.status === "applying" && executionAttemptId === undefined) {
       return plan;
     }
     return this.transitionOrReload(
@@ -533,7 +536,7 @@ export class ObsidianNoteReplaceOperationAdapter
       ["applying"],
       "outcome_unknown",
       failure,
-      executionOwnerId,
+      executionAttemptId,
     );
   }
 
@@ -542,7 +545,7 @@ export class ObsidianNoteReplaceOperationAdapter
     expected: ObsidianNoteReplacePlan["status"][],
     next: ObsidianNoteReplacePlan["status"],
     failure?: string,
-    expectedExecutionOwnerId?: string,
+    expectedExecutionAttemptId?: string,
   ): ObsidianNoteReplacePlan {
     try {
       return this.journal.transition(
@@ -550,7 +553,7 @@ export class ObsidianNoteReplaceOperationAdapter
         expected,
         next,
         failure,
-        expectedExecutionOwnerId,
+        expectedExecutionAttemptId,
       );
     } catch (error) {
       if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
@@ -576,11 +579,11 @@ export class ObsidianNoteReplaceOperationAdapter
     }
   }
 
-  private requiredExecutionOwnerId(plan: ObsidianNoteReplacePlan): string {
-    const executionOwnerId = plan.executionOwner?.instanceId;
-    if (plan.status !== "applying" || !executionOwnerId) {
+  private requiredExecutionAttemptId(plan: ObsidianNoteReplacePlan): string {
+    const executionAttemptId = plan.executionOwner?.attemptId;
+    if (plan.status !== "applying" || !executionAttemptId) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
-    return executionOwnerId;
+    return executionAttemptId;
   }
 }

@@ -116,10 +116,12 @@ sans faire confiance à un PID réutilisable. Un autre processus MCP laisse
 intact un bail frais ; son expiration ou l'arrêt explicite du propriétaire
 autorise le recovery du plan exact. Un client lancé séparément ne peut donc pas
 fabriquer une interruption pendant que le premier exécute encore le CAS.
-Toute transition quittant `applying` doit aussi présenter le propriétaire
-d’instance observé par cet exécuteur et correspondre au payload durable courant.
-Un exécuteur qui reprend après expiration de son bail ne peut donc pas terminer
-un plan déjà récupéré sous un nouveau propriétaire.
+Toute transition quittant `applying` doit aussi présenter l’identifiant de
+tentative distinct observé par cet exécuteur et correspondre au payload durable
+courant. L’instance runtime reste propriétaire du bail, mais chaque recovery
+reçoit un nouveau fence de tentative. Un exécuteur qui reprend après expiration
+de son bail ne peut donc pas terminer un plan déjà récupéré, même dans le même
+processus.
 Le nom du journal par défaut est en plus séparé par une empreinte stable et non
 secrète du mode runtime, de l’URL REST et du chemin de coffre configurés ;
 l’opérateur peut fournir un identifiant de profil stable explicite. Plans et

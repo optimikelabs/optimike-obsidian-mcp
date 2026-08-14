@@ -110,10 +110,11 @@ PID. Opening the same journal from another MCP process leaves a fresh lease
 untouched; lease expiry or explicit owner shutdown makes exact-plan recovery
 eligible. This prevents an independently launched client from manufacturing an
 interruption while another process is still executing the CAS.
-Every transition leaving `applying` must also present the instance owner
-observed by that executor and match the current durable payload. An executor
-resuming after its lease expired therefore cannot terminalize a plan already
-recovered under a new owner.
+Every transition leaving `applying` must also present the distinct attempt ID
+observed by that executor and match the current durable payload. The runtime
+instance remains the lease owner, but each recovery gets a new attempt fence.
+An executor resuming after its lease expired therefore cannot terminalize a
+plan already recovered, even inside the same process.
 The default journal filename is separately namespaced by a stable non-secret
 digest of the configured runtime mode, REST base URL, and vault path; an
 operator may provide an explicit stable profile ID. Plans and idempotency keys

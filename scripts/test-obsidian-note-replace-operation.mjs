@@ -1047,6 +1047,10 @@ try {
       recoveredExecution.executionOwner.instanceId,
       originalExecution.executionOwner.instanceId,
     );
+    assert.notEqual(
+      recoveredExecution.executionOwner.attemptId,
+      originalExecution.executionOwner.attemptId,
+    );
     assert.throws(
       () =>
         ownerJournal.transition(
@@ -1054,7 +1058,7 @@ try {
           ["applying"],
           "conflict",
           "stale executor must not terminalize the recovered owner",
-          originalExecution.executionOwner.instanceId,
+          originalExecution.executionOwner.attemptId,
         ),
       ObsidianNoteReplaceConcurrencyError,
     );
@@ -1064,6 +1068,65 @@ try {
     );
     ownerJournal.close();
     observerJournal.close();
+  }
+
+  {
+    const sharedPath = path.join(
+      temporaryRoot,
+      "same-runtime-attempt-fence.sqlite",
+    );
+    let leaseNow = Date.parse("2026-08-13T00:00:00.000Z");
+    const journal = new ObsidianNoteReplaceJournal(sharedPath, {
+      now: () => leaseNow,
+      executionLeaseMs: 1_000,
+      executionSweepIntervalMs: 100,
+    });
+    journals.push(journal);
+    const planned = journal.create({
+      idempotencyKey: "same-runtime-attempt-fence",
+      requestDigest: sha256("same-runtime-attempt-fence-request"),
+      path: "Fixture/SameRuntimeAttempt.md",
+      beforeSha256: sha256("before"),
+      afterSha256: sha256("after"),
+      nextContent: "content protected by an attempt fence",
+      bindingFingerprint: sha256("fixture-vault-instance"),
+    });
+    const originalAttempt = journal.transition(
+      planned.operationId,
+      ["planned"],
+      "applying",
+    );
+    leaseNow += 2_000;
+    assert.equal(journal.get(planned.operationId).status, "outcome_unknown");
+    journal.renewExecutionLease();
+    const recoveredAttempt = journal.transition(
+      planned.operationId,
+      ["outcome_unknown"],
+      "applying",
+    );
+    assert.equal(
+      recoveredAttempt.executionOwner.instanceId,
+      originalAttempt.executionOwner.instanceId,
+    );
+    assert.notEqual(
+      recoveredAttempt.executionOwner.attemptId,
+      originalAttempt.executionOwner.attemptId,
+    );
+    assert.throws(
+      () =>
+        journal.transition(
+          planned.operationId,
+          ["applying"],
+          "conflict",
+          "a delayed callback from the expired attempt must be fenced",
+          originalAttempt.executionOwner.attemptId,
+        ),
+      ObsidianNoteReplaceConcurrencyError,
+    );
+    assert.equal(
+      journal.get(planned.operationId).executionOwner.attemptId,
+      recoveredAttempt.executionOwner.attemptId,
+    );
   }
 
   {
@@ -1135,7 +1198,7 @@ try {
       ["applying"],
       "committed",
       undefined,
-      terminalApplying.executionOwner.instanceId,
+      terminalApplying.executionOwner.attemptId,
     );
     assert.equal(committed.nextContent, "");
     for (const persistedPath of [retentionPath, `${retentionPath}-wal`]) {

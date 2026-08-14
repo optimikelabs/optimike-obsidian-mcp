@@ -97,8 +97,14 @@ assert.match(
   adr,
   /Every connection that negotiates WAL must install its busy policy/,
 );
+assert.match(adr, /fresh per-attempt identifier/);
 assert.match(contract, /busy policy is installed before WAL negotiation/);
+assert.match(contract, /each recovery gets a new attempt fence/);
 assert.match(contractFr, /politique de contention SQLite est installée avant/);
+assert.match(
+  contractFr,
+  /chaque recovery\s+reçoit un nouveau fence de tentative/,
+);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
