@@ -21,6 +21,8 @@ const adr = await text("docs/adr/ADR-Common-Operation-Runtime.md");
 const contract = await text("docs/governed-note-replacement.md");
 const contractFr = await text("docs/governed-note-replacement.fr.md");
 const liveCanary = await text("scripts/smoke-atomic-note-mcp-live.mjs");
+const operations = await text("OPERATIONS.md");
+const operationsFr = await text("OPERATIONS.fr.md");
 const pkg = JSON.parse(await text("package.json"));
 
 for (const tool of tools) {
@@ -61,6 +63,10 @@ assert.doesNotMatch(
   /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
 );
 assert.match(liveCanary, /Canary recovery directory:/);
+assert.match(operations, /printed OS-temporary `evidenceFile`/);
+assert.match(operationsFr, /temporaire système `evidenceFile` affiché/);
+assert.doesNotMatch(operations, /proof under `\.tmp\/`/);
+assert.doesNotMatch(operationsFr, /preuve JSON expurgée sous `\.tmp\/`/);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");

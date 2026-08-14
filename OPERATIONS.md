@@ -224,8 +224,9 @@ npm run smoke:atomic-note-mcp-live
 The canary saves the original content before its first mutation, proves the four
 MCP tools, a direct Bridge CAS rejection, nominal apply, replay, status,
 deterministic conflict and restoration. A successful run leaves a redacted JSON
-proof under `.tmp/`; an interrupted run retains the private backup directory and
-prints the one explicit recovery path. Never point it at an ordinary user note.
+proof at the printed OS-temporary `evidenceFile`; an interrupted run retains its
+private directory under the OS temporary root and prints the one explicit
+recovery path. Never point it at an ordinary user note.
 
 ## Tasks: How It Works Now
 

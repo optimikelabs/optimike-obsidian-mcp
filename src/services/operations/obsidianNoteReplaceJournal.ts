@@ -85,10 +85,10 @@ export class ObsidianNoteReplaceJournal {
     this.executionSweepIntervalMs = options.executionSweepIntervalMs ?? 1_000;
     mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(databasePath);
+    this.db.exec("PRAGMA busy_timeout=5000");
     this.db.exec("PRAGMA journal_mode=WAL");
     this.db.exec("PRAGMA synchronous=FULL");
     this.db.exec("PRAGMA secure_delete=ON");
-    this.db.exec("PRAGMA busy_timeout=5000");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS obsidian_note_replace_plans (
         operation_id TEXT PRIMARY KEY,

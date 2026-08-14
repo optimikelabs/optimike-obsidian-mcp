@@ -62,6 +62,46 @@ function spawnJournalCreateWorker(config) {
   };
 }
 
+function spawnJournalOpenWorker(config) {
+  const child = spawn(
+    process.execPath,
+    ["scripts/fixtures/obsidian-note-replace-open-worker.mjs"],
+    {
+      env: {
+        ...process.env,
+        OBSIDIAN_NOTE_REPLACE_OPEN_WORKER: JSON.stringify(config),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  return {
+    completion: new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => {
+        if (code !== 0) {
+          reject(
+            new Error(
+              `Journal open worker exited with ${code}: ${stderr || stdout}`,
+            ),
+          );
+          return;
+        }
+        resolve(JSON.parse(stdout));
+      });
+    }),
+  };
+}
+
 async function waitForFiles(paths, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (!paths.every((candidate) => existsSync(candidate))) {
@@ -632,6 +672,29 @@ try {
         idempotencyKey: "same-key",
       }),
       /different note replacement/u,
+    );
+  }
+
+  {
+    const databasePath = path.join(
+      temporaryRoot,
+      "multiprocess-fresh-open.sqlite",
+    );
+    const startPath = path.join(temporaryRoot, "multiprocess-open.start");
+    const readyPaths = Array.from({ length: 8 }, (_, index) =>
+      path.join(temporaryRoot, `multiprocess-open-${index}.ready`),
+    );
+    const workers = readyPaths.map((readyPath) =>
+      spawnJournalOpenWorker({ databasePath, readyPath, startPath }),
+    );
+    await waitForFiles(readyPaths);
+    writeFileSync(startPath, "go", "utf8");
+    const opened = await Promise.all(
+      workers.map((worker) => worker.completion),
+    );
+    assert.equal(
+      opened.every((result) => result.ok === true),
+      true,
     );
   }
 
