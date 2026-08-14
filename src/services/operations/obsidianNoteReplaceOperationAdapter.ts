@@ -410,10 +410,16 @@ export class ObsidianNoteReplaceOperationAdapter
       const conflict =
         error instanceof McpError && error.code === BaseErrorCode.CONFLICT;
       if (conflict) {
-        const reconciled = await this.reconcileCasConflict(
-          plan,
-          executionOwnerId,
-        ).catch(() => plan);
+        let reconciled: ObsidianNoteReplacePlan;
+        try {
+          reconciled = await this.reconcileCasConflict(plan, executionOwnerId);
+        } catch (reconciliationError) {
+          return this.uncertain(
+            plan,
+            `CAS conflict reconciliation failed: ${reconciliationError instanceof Error ? reconciliationError.message : String(reconciliationError)}`,
+            executionOwnerId,
+          );
+        }
         if (reconciled.status !== "applying") return reconciled;
         return this.transitionOrReload(
           plan,

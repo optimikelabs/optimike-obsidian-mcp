@@ -280,6 +280,35 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture(
+      "cas-conflict-reconciliation-unavailable",
+    );
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "committed while reconciliation was unavailable",
+      idempotencyKey: "cas-conflict-reconciliation-unavailable",
+    });
+    backend.beforeWrite = async () => {
+      backend.content = "committed while reconciliation was unavailable";
+    };
+    backend.afterRead = async () => {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Fixture follow-up read unavailable.",
+      );
+    };
+    const uncertain = await adapter.apply(
+      planned.planRef,
+      "cas-conflict-reconciliation-unavailable",
+    );
+    assert.equal(uncertain.outcome, "outcome_unknown");
+    assert.equal(uncertain.recoveryAllowed, true);
+    const reconciled = await adapter.status(planned.planRef);
+    assert.equal(reconciled.outcome, "committed");
+    assert.equal(reconciled.postflight.status, "verified");
+  }
+
+  {
     const { backend, adapter } = fixture("disabled-between-status-and-cas");
     const planned = await adapter.plan({
       path: backend.path,
