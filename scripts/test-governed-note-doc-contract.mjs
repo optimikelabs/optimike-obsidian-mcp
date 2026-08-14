@@ -100,6 +100,10 @@ assert.match(
 assert.match(adr, /fresh per-attempt identifier/);
 assert.match(adr, /loses because it observed stale durable state/);
 assert.match(adr, /must never escape as[\s\S]*internal tool error/);
+assert.match(
+  adr,
+  /earlier\s+attempt is uncertain[\s\S]*neither the sealed before nor after/,
+);
 assert.match(contract, /busy policy is installed before WAL negotiation/);
 assert.match(contract, /each recovery gets a new attempt fence/);
 assert.match(contract, /terminal receipts remain replayable[\s\S]*read-only/i);
@@ -115,6 +119,8 @@ assert.match(contract, /loser of the conditional `planned → applying`/i);
 assert.match(contractFr, /perdant de la transition conditionnelle/i);
 assert.match(contract, /empty Markdown note as valid content/i);
 assert.match(contractFr, /note Markdown vide comme[\s\S]*contenu valide/i);
+assert.match(contract, /subsequent CAS[\s\S]*remains `outcome_unknown`/i);
+assert.match(contractFr, /conflit CAS suivant reste `outcome_unknown`/i);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");

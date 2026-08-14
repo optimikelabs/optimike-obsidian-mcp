@@ -147,6 +147,14 @@ return the winning receipt; expected transition contention must never escape as
 an internal tool error or authorize a second effect. Future adapters must prove
 both the ordinary in-flight replay and the stale-read transition race.
 
+Recovery also preserves epistemic state across attempts. Once an earlier
+attempt is uncertain, a later CAS conflict can become terminal only when the
+follow-up proof identifies a sealed state. If the same backend instead reports
+a hash matching neither the sealed before nor after proof, the receipt remains
+`outcome_unknown`: an expired executor may have committed before a third-party
+edit. A conflict response from the recovery attempt proves only that attempt
+did not write; it does not disprove an earlier commit of the same plan.
+
 The public projection remains domain-specific:
 
 - `obsidian_note_replace_plan`

@@ -116,6 +116,11 @@ integration gate commits an empty replacement, verifies the shared SQLite row,
 then disables REST reads and proves that the cache fallback returns the empty
 note rather than stale pre-replacement content.
 
+The recovery fixture also covers a delayed original executor committing before
+a third-party edit makes the note match neither sealed hash. A subsequent CAS
+conflict remains `outcome_unknown`; it is not collapsed into a terminal
+conflict merely because the recovery attempt itself did not write.
+
 A second gate starts the real Streamable HTTP server and carries one sealed plan
 across three independent MCP sessions. It proves that per-session server
 factories share one application runtime and one journal, commit one backend CAS,

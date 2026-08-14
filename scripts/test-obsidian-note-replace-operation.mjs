@@ -433,6 +433,37 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture(
+      "recovery-cas-conflict-after-commit-and-drift",
+    );
+    backend.failBeforeWriteOnce = true;
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "committed by the expired executor before later drift",
+      idempotencyKey: "recovery-cas-conflict-after-commit-and-drift",
+    });
+    const interrupted = await adapter.apply(
+      planned.planRef,
+      "recovery-cas-conflict-after-commit-and-drift",
+    );
+    assert.equal(interrupted.outcome, "outcome_unknown");
+    backend.beforeWrite = async () => {
+      backend.content = "committed by the expired executor before later drift";
+      backend.content = "third-party edit after the expired executor committed";
+    };
+    const uncertain = await adapter.recover(
+      planned.planRef,
+      "recovery-cas-conflict-after-commit-and-drift",
+    );
+    assert.equal(uncertain.outcome, "outcome_unknown");
+    assert.equal(uncertain.recoveryAllowed, true);
+    assert.equal(
+      backend.content,
+      "third-party edit after the expired executor committed",
+    );
+  }
+
+  {
     const { backend, adapter } = fixture("disabled-between-status-and-cas");
     const planned = await adapter.plan({
       path: backend.path,

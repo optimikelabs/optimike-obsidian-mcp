@@ -280,7 +280,7 @@ export class ObsidianNoteReplaceOperationAdapter
       if (!current) throw error;
       return receipt(current);
     }
-    return receipt(await this.execute(applying));
+    return receipt(await this.execute(applying, false));
   }
 
   async status(reference: string): Promise<OperationReceipt> {
@@ -346,7 +346,7 @@ export class ObsidianNoteReplaceOperationAdapter
       if (!current) throw error;
       return receipt(current);
     }
-    return receipt(await this.execute(applying));
+    return receipt(await this.execute(applying, true));
   }
 
   private required(
@@ -366,6 +366,7 @@ export class ObsidianNoteReplaceOperationAdapter
 
   private async execute(
     plan: ObsidianNoteReplacePlan,
+    recoveredFromUnknown: boolean,
   ): Promise<ObsidianNoteReplacePlan> {
     const executionAttemptId = this.requiredExecutionAttemptId(plan);
     try {
@@ -423,6 +424,7 @@ export class ObsidianNoteReplaceOperationAdapter
           reconciled = await this.reconcileCasConflict(
             plan,
             executionAttemptId,
+            recoveredFromUnknown,
           );
         } catch (reconciliationError) {
           return this.uncertain(
@@ -468,6 +470,7 @@ export class ObsidianNoteReplaceOperationAdapter
   private async reconcileCasConflict(
     plan: ObsidianNoteReplacePlan,
     executionAttemptId: string,
+    recoveredFromUnknown: boolean,
   ): Promise<ObsidianNoteReplacePlan> {
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
@@ -482,6 +485,18 @@ export class ObsidianNoteReplaceOperationAdapter
         ["applying"],
         "committed",
         undefined,
+        executionAttemptId,
+      );
+    }
+    if (
+      recoveredFromUnknown &&
+      read.bindingFingerprint === plan.bindingFingerprint &&
+      read.path === plan.path &&
+      read.sha256 !== plan.beforeSha256
+    ) {
+      return this.uncertain(
+        plan,
+        "CAS conflict reconciliation found neither sealed hash after an earlier uncertain attempt.",
         executionAttemptId,
       );
     }

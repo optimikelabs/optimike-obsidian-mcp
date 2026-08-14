@@ -123,6 +123,11 @@ un contenu valide. La gate d’intégration commite un remplacement vide, vérif
 la ligne SQLite partagée, puis désactive les lectures REST et prouve que le
 fallback cache retourne la note vide plutôt que l’ancien contenu.
 
+La fixture de recovery couvre aussi un ancien exécuteur qui commite avant
+qu’une édition tierce fasse correspondre la note à aucun des deux hash scellés.
+Le conflit CAS suivant reste `outcome_unknown` ; il ne devient pas un conflit
+terminal au seul motif que la tentative de recovery n’a elle-même rien écrit.
+
 Une seconde gate démarre le vrai serveur Streamable HTTP et transporte un plan
 scellé entre trois sessions MCP indépendantes. Elle prouve que les factories de
 serveur par session partagent un seul runtime applicatif et un seul journal,
