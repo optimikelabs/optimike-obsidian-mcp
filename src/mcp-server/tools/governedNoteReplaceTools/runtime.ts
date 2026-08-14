@@ -326,9 +326,22 @@ export class GovernedNoteReplaceRuntime {
     return this.refreshCacheAfterCommit(plan, operation);
   }
 
+  async applyPublicDirectPlan(
+    reference: string,
+    idempotencyKey: string,
+  ): Promise<OperationReceipt> {
+    this.requiredPublicDirectPlan(reference);
+    return this.apply(reference, idempotencyKey);
+  }
+
   async status(reference: string): Promise<OperationReceipt> {
     const plan = this.required(reference);
     return this.refreshCacheAfterCommit(plan, this.adapter.status(reference));
+  }
+
+  async statusPublicDirectPlan(reference: string): Promise<OperationReceipt> {
+    this.requiredPublicDirectPlan(reference);
+    return this.status(reference);
   }
 
   async recover(
@@ -345,6 +358,14 @@ export class GovernedNoteReplaceRuntime {
     return this.refreshCacheAfterCommit(plan, operation);
   }
 
+  async recoverPublicDirectPlan(
+    reference: string,
+    idempotencyKey: string,
+  ): Promise<OperationReceipt> {
+    this.requiredPublicDirectPlan(reference);
+    return this.recover(reference, idempotencyKey);
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -355,6 +376,20 @@ export class GovernedNoteReplaceRuntime {
   private required(reference: string): ObsidianNoteReplacePlan {
     const plan = this.journal.get(operationIdFromRef(reference));
     if (!plan) {
+      throw new McpError(
+        BaseErrorCode.NOT_FOUND,
+        "The note-replacement operation plan is unknown or has expired.",
+        { reason: "note_replace_plan_not_found" },
+      );
+    }
+    return plan;
+  }
+
+  private requiredPublicDirectPlan(
+    reference: string,
+  ): ObsidianNoteReplacePlan {
+    const plan = this.required(reference);
+    if (plan.projection) {
       throw new McpError(
         BaseErrorCode.NOT_FOUND,
         "The note-replacement operation plan is unknown or has expired.",

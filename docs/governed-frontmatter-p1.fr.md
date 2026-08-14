@@ -19,6 +19,11 @@ Un plan P1 public correspond à une seule opération P0
 `obsidian.note.replace`. Le `planRef` P1 est opaque. Apply et recover n’acceptent
 aucun nouveau chemin, patch, valeur, hash ou Markdown compilé.
 
+Les child plans projetés restent une autorité interne. Les outils P0 publics de
+status, apply et recovery renvoient `NOT_FOUND` pour ces plans : un observateur
+P1 ne peut donc pas contourner les gates d’idempotence et de politique courante
+P1 en transformant une référence de plan.
+
 Les clés d’idempotence publiques doivent être des chaînes Unicode bien formées,
 non vides, sans espaces périphériques et longues d’au plus 256 unités de code
 UTF-16. Un plan inconnu ou expiré par la rétention renvoie `NOT_FOUND`, et non

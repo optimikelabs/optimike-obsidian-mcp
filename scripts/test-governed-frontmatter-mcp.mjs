@@ -389,6 +389,31 @@ try {
   assert.match(rebound.payload.error.message, /different frontmatter intent/i);
   assert.equal(rebound.payload.error.code, "CONFLICT");
 
+  const forgedChildPlanRef = nominalPlan.payload.planRef.replace(
+    /^obsidian-frontmatter-patch:v1:/u,
+    "obsidian-note-replace:v1:",
+  );
+  for (const [name, args] of [
+    ["obsidian_note_replace_status", { planRef: forgedChildPlanRef }],
+    [
+      "obsidian_note_replace_apply",
+      { planRef: forgedChildPlanRef, idempotencyKey: "p1-nominal" },
+    ],
+    [
+      "obsidian_note_replace_recover",
+      { planRef: forgedChildPlanRef, idempotencyKey: "p1-nominal" },
+    ],
+  ]) {
+    const blockedChildReplay = await call(session, name, args, true);
+    assert.equal(blockedChildReplay.payload.error.code, "NOT_FOUND");
+    assert.equal(
+      blockedChildReplay.payload.error.details?.reason,
+      "note_replace_plan_not_found",
+    );
+  }
+  assert.equal(fake.successfulWrites, 0);
+  assert.equal(fake.content, FRONTMATTER_INITIAL_CONTENT);
+
   const writesBeforeNominal = fake.successfulWrites;
   const casBeforeNominal = fake.casRequests;
   const nominalApply = await call(session, "obsidian_frontmatter_patch_apply", {
@@ -407,6 +432,13 @@ try {
     },
   );
   assert.equal(nominalStatus.payload.outcome, "committed");
+  const blockedCommittedChildStatus = await call(
+    session,
+    "obsidian_note_replace_status",
+    { planRef: forgedChildPlanRef },
+    true,
+  );
+  assert.equal(blockedCommittedChildStatus.payload.error.code, "NOT_FOUND");
   assert.equal(
     nominalStatus.payload.planDigest,
     nominalApply.payload.planDigest,

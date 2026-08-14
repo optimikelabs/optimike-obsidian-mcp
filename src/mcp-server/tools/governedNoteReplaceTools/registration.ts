@@ -97,7 +97,9 @@ export async function registerGovernedNoteReplaceTools(
     ApplySchema.shape,
     GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ApplySchema>) =>
-      runTool(() => runtime.apply(params.planRef, params.idempotencyKey)),
+      runTool(() =>
+        runtime.applyPublicDirectPlan(params.planRef, params.idempotencyKey),
+      ),
   );
 
   server.tool(
@@ -106,7 +108,7 @@ export async function registerGovernedNoteReplaceTools(
     StatusSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof StatusSchema>) =>
-      runTool(() => runtime.status(params.planRef)),
+      runTool(() => runtime.statusPublicDirectPlan(params.planRef)),
   );
 
   server.tool(
@@ -115,6 +117,8 @@ export async function registerGovernedNoteReplaceTools(
     ApplySchema.shape,
     GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ApplySchema>) =>
-      runTool(() => runtime.recover(params.planRef, params.idempotencyKey)),
+      runTool(() =>
+        runtime.recoverPublicDirectPlan(params.planRef, params.idempotencyKey),
+      ),
   );
 }

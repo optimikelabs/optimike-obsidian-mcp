@@ -19,6 +19,10 @@ One public P1 plan maps to one P0 `obsidian.note.replace` operation. The P1 plan
 reference is opaque. Apply and recovery accept no new path, patch, value, hash,
 or compiled Markdown.
 
+Projected child plans are internal authority only. The public P0 status, apply,
+and recovery tools return `NOT_FOUND` for them, so a P1 observer cannot bypass
+the P1 idempotency and current-policy gates by transforming a plan reference.
+
 Public idempotency keys must be non-empty, unpadded, well-formed Unicode strings
 of at most 256 UTF-16 code units. Unknown or retention-expired plan references
 return `NOT_FOUND`; they are not reported as transient internal failures.

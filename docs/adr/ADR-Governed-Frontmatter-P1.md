@@ -66,6 +66,8 @@ the legacy P0 digest helper or any direct P0 digest.
 Public idempotency keys admit only well-formed Unicode, preventing distinct JSON
 strings from collapsing through UTF-8 replacement. A valid but unknown or
 retention-expired plan reference is terminally absent and returns `NOT_FOUND`.
+Projected child plans are likewise absent from the public P0 status, apply, and
+recovery surfaces; only the owning projection runtime can execute them.
 
 The compiler fails closed on unsupported or ambiguous source, including:
 
