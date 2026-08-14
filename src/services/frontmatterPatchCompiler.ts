@@ -56,6 +56,7 @@ type SourceEntry = {
   normalizedKey: string;
   start: number;
   end: number;
+  blockScalarIsUnsupported: boolean;
   leadingCommentIsAmbiguous: boolean;
   trailingCommentIsAmbiguous: boolean;
 };
@@ -129,6 +130,12 @@ function isCommentLine(line: SourceLine): boolean {
 
 function isTopLevelSeparator(line: SourceLine): boolean {
   return line.text.trim() === "" || isCommentLine(line);
+}
+
+function isBlockScalarHeader(valueSource: string): boolean {
+  return /^\s*[|>](?:[+-][1-9]?|[1-9][+-]?)?\s*(?:#.*)?$/u.test(
+    valueSource,
+  );
 }
 
 function stripQuotedAndComment(text: string): string {
@@ -262,6 +269,7 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
     key: string;
     normalizedKey: string;
     lineIndex: number;
+    blockScalarIsUnsupported: boolean;
   }> = [];
   const seen = new Set<string>();
   let activeEntry = false;
@@ -293,7 +301,12 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       });
     }
     seen.add(normalizedKey);
-    starts.push({ key, normalizedKey, lineIndex });
+    starts.push({
+      key,
+      normalizedKey,
+      lineIndex,
+      blockScalarIsUnsupported: isBlockScalarHeader(match[2]),
+    });
     activeEntry = true;
   }
 
@@ -327,6 +340,7 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       normalizedKey: start.normalizedKey,
       start: startLine.start,
       end,
+      blockScalarIsUnsupported: start.blockScalarIsUnsupported,
       leadingCommentIsAmbiguous,
       trailingCommentIsAmbiguous,
     });
@@ -493,6 +507,12 @@ export function compileFrontmatterPatch(
   for (const operation of canonicalOperations) {
     const normalized = normalizeKey(operation.key);
     const entry = source.entries.get(normalized);
+    if (entry?.blockScalarIsUnsupported) {
+      fail(
+        "P1 cannot prove a complete source range for a targeted YAML block scalar.",
+        { reason: "target_block_scalar_unsupported", key: operation.key },
+      );
+    }
     if (operation.op === "delete") {
       if (!entry) {
         fail("Cannot delete a frontmatter key that does not exist.", {

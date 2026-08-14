@@ -19,6 +19,7 @@ import {
 import {
   ObsidianNoteReplaceConcurrencyError,
   ObsidianNoteReplaceJournal,
+  noteReplaceIdempotencyConflict,
   type ObsidianNoteReplacePlan,
   type ObsidianNoteReplaceProjection,
 } from "./obsidianNoteReplaceJournal.js";
@@ -256,9 +257,7 @@ export class ObsidianNoteReplaceOperationAdapter
           existing.idempotencyIdentity === input.idempotencyIdentity
         : existing.path === input.path && existing.afterSha256 === afterSha256;
       if (!matches) {
-        throw new Error(
-          "The idempotency key is already bound to a different note replacement.",
-        );
+        throw noteReplaceIdempotencyConflict();
       }
       return receipt(existing);
     }

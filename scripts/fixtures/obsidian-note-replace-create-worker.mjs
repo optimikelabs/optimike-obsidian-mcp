@@ -23,6 +23,18 @@ journal.getByIdempotencyKey = (key) => {
 try {
   const plan = journal.create(config.input);
   process.stdout.write(`${JSON.stringify(plan)}\n`);
+} catch (error) {
+  if (!config.captureError) throw error;
+  process.stdout.write(
+    `${JSON.stringify({
+      error: {
+        name: error?.name,
+        code: error?.code,
+        message: error?.message,
+        details: error?.details,
+      },
+    })}\n`,
+  );
 } finally {
   journal.close();
 }

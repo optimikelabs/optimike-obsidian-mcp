@@ -82,6 +82,9 @@ assert.match(adr, /Candidate implemented/);
 assert.match(adr, /Live admission remains blocked/i);
 assert.match(contract, /fixed bounded marker/i);
 assert.match(contractFr, /marqueur fixe et borné/i);
+assert.match(contract, /targeted block scalars/i);
+assert.match(contractFr, /scalaires multilignes ciblés/i);
+assert.match(adr, /targeted YAML block scalars/i);
 assert.match(adrIndex, /P1 governed frontmatter projection/);
 
 for (const file of [

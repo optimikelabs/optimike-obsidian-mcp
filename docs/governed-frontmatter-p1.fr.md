@@ -31,8 +31,9 @@ standard. Elle contient au maximum 64 opérations top-level uniques :
 
 Le compilateur échoue fermé sur toute source non supportée : clés dupliquées ou
 collisionnant par casse, ancres, alias, merge keys, tags YAML explicites, clés
-complexes ou quotées, syntaxe multi-document, propriété ambiguë des
-commentaires, profondeur excessive, nombres non finis ou valeurs trop grandes.
+complexes ou quotées, syntaxe multi-document, scalaires multilignes ciblés,
+propriété ambiguë des commentaires, profondeur excessive, nombres non finis ou
+valeurs trop grandes.
 
 ## Garantie de préservation de la source
 

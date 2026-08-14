@@ -299,6 +299,7 @@ try {
     true,
   );
   assert.match(rebound.payload.error.message, /different frontmatter intent/i);
+  assert.equal(rebound.payload.error.code, "CONFLICT");
 
   const writesBeforeNominal = fake.successfulWrites;
   const casBeforeNominal = fake.casRequests;

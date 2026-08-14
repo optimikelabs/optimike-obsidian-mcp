@@ -977,7 +977,15 @@ try {
         nextContent: "different",
         idempotencyKey: "same-key",
       }),
-      /different note replacement/u,
+      (error) => {
+        assert.ok(error instanceof McpError);
+        assert.equal(error.code, BaseErrorCode.CONFLICT);
+        assert.equal(
+          error.details?.reason,
+          "note_replace_idempotency_conflict",
+        );
+        return true;
+      },
     );
   }
 

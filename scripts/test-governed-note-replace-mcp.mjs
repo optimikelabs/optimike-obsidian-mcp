@@ -650,6 +650,7 @@ try {
     true,
   );
   assert.match(rebound.payload.error.message, /different note replacement/u);
+  assert.equal(rebound.payload.error.code, "CONFLICT");
 
   const casBeforeNominal = fake.casRequests;
   const writesBeforeNominal = fake.successfulWrites;

@@ -251,6 +251,14 @@ const failures = [
       ),
   ],
   [
+    "target_block_scalar_unsupported",
+    () =>
+      compileFrontmatterPatch(
+        "---\nsecret: |-\n  first line\n  # retained scalar text\nnext: true\n---\nbody\n",
+        [{ op: "set", key: "secret", value: "replacement" }],
+      ),
+  ],
+  [
     "frontmatter_key_missing",
     () =>
       compileFrontmatterPatch("---\na: 1\n---\n", [

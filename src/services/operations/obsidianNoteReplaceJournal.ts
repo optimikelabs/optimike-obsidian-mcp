@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 
 export type ObsidianNoteReplaceStatus =
   | "planned"
@@ -45,6 +46,14 @@ export class ObsidianNoteReplaceConcurrencyError extends Error {
   constructor() {
     super("The note replacement state changed concurrently.");
   }
+}
+
+export function noteReplaceIdempotencyConflict(): McpError {
+  return new McpError(
+    BaseErrorCode.CONFLICT,
+    "The idempotency key is already bound to a different note replacement.",
+    { reason: "note_replace_idempotency_conflict" },
+  );
 }
 
 export type ObsidianNoteReplaceJournalOptions = {
@@ -262,9 +271,7 @@ export class ObsidianNoteReplaceJournal {
     const existing = this.getByIdempotencyKey(input.idempotencyKey);
     if (existing) {
       if (!sameRequestInput(existing, input)) {
-        throw new Error(
-          "The idempotency key is already bound to a different note replacement.",
-        );
+        throw noteReplaceIdempotencyConflict();
       }
       return existing;
     }
@@ -299,9 +306,7 @@ export class ObsidianNoteReplaceJournal {
     const winner = this.getByIdempotencyKey(input.idempotencyKey);
     if (!winner) throw new ObsidianNoteReplaceConcurrencyError();
     if (!sameRequestInput(winner, input)) {
-      throw new Error(
-        "The idempotency key is already bound to a different note replacement.",
-      );
+      throw noteReplaceIdempotencyConflict();
     }
     return winner;
   }

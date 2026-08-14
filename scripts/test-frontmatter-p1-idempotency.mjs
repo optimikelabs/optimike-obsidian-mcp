@@ -12,6 +12,7 @@ import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
   operationDigest,
 } from "../dist/services/operations/contract.js";
+import { BaseErrorCode } from "../dist/types-global/errors.js";
 
 function sha256(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -142,6 +143,57 @@ try {
   }
 
   {
+    const databasePath = path.join(
+      temporaryRoot,
+      "concurrent-different-intent.sqlite",
+    );
+    new ObsidianNoteReplaceJournal(databasePath).close();
+    const startPath = path.join(
+      temporaryRoot,
+      "concurrent-different-intent.start",
+    );
+    const readyPaths = [
+      path.join(temporaryRoot, "concurrent-different-intent-a.ready"),
+      path.join(temporaryRoot, "concurrent-different-intent-b.ready"),
+    ];
+    const key = sha256("p1-concurrent-different-intent-key");
+    const identities = [sha256("intent A"), sha256("intent B")];
+    const workers = identities.map((identity, index) =>
+      spawnCreateWorker({
+        databasePath,
+        readyPath: readyPaths[index],
+        startPath,
+        captureError: true,
+        input: {
+          idempotencyKey: key,
+          requestDigest: sha256(`request ${index}`),
+          idempotencyIdentity: identity,
+          projection: projection("public-race-key", identity, `intent-${index}`),
+          path: "Fixture/Concurrent Different Intent.md",
+          beforeSha256: sha256("before"),
+          afterSha256: sha256(`after ${index}`),
+          nextContent: `after ${index}`,
+          bindingFingerprint: sha256("fixture-binding"),
+        },
+      }),
+    );
+    await waitForFiles(readyPaths);
+    writeFileSync(startPath, "go", "utf8");
+    const results = await Promise.all(
+      workers.map((worker) => worker.completion),
+    );
+    const conflicts = results.filter((result) => result.error);
+    const winners = results.filter((result) => !result.error);
+    assert.equal(winners.length, 1);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].error.code, BaseErrorCode.CONFLICT);
+    assert.equal(
+      conflicts[0].error.details?.reason,
+      "note_replace_idempotency_conflict",
+    );
+  }
+
+  {
     const databasePath = path.join(temporaryRoot, "different-intent.sqlite");
     const journal = new ObsidianNoteReplaceJournal(databasePath);
     const key = sha256("p1-different-intent-key");
@@ -171,7 +223,14 @@ try {
           nextContent: "after two",
           bindingFingerprint: sha256("fixture-binding"),
         }),
-      /different note replacement/u,
+      (error) => {
+        assert.equal(error.code, BaseErrorCode.CONFLICT);
+        assert.equal(
+          error.details?.reason,
+          "note_replace_idempotency_conflict",
+        );
+        return true;
+      },
     );
     assert.equal(
       journal.getByIdempotencyKey(key).idempotencyIdentity,
@@ -204,7 +263,14 @@ try {
           nextContent: "after two",
           bindingFingerprint: sha256("fixture-binding"),
         }),
-      /different note replacement/u,
+      (error) => {
+        assert.equal(error.code, BaseErrorCode.CONFLICT);
+        assert.equal(
+          error.details?.reason,
+          "note_replace_idempotency_conflict",
+        );
+        return true;
+      },
     );
     journal.close();
   }
