@@ -45,6 +45,14 @@ assert.match(adr, /exact-plan reconciliation(?:\/| or )resumption/i);
 assert.match(adr, /outside that boundary/i);
 assert.match(contract, /not undo/i);
 assert.match(contractFr, /n[’']est pas `?undo`?/i);
+assert.match(contract, /Optimike Obsidian MCP 2\.6\.0 exposes/i);
+assert.match(contractFr, /Optimike Obsidian MCP 2\.6\.0 expose/i);
+assert.match(contract, /guarantees are released in Optimike Obsidian MCP\s+2\.6\.0/i);
+assert.match(contractFr, /garanties sont\s+publiées dans Optimike Obsidian MCP 2\.6\.0/i);
+assert.doesNotMatch(contract, /The 2\.6 candidate/i);
+assert.doesNotMatch(contractFr, /Le candidat 2\.6/i);
+assert.doesNotMatch(contract, /versioning, and release remain/i);
+assert.doesNotMatch(contractFr, /Merge, version et\s+release restent/i);
 assert.match(readme, /test:governed-note-replace-mcp/);
 assert.match(readmeFr, /test:governed-note-replace-mcp/);
 assert.equal(
