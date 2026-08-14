@@ -48,10 +48,29 @@ function delayedOldEffectIsReconciledNotMisclassified() {
 
 function observerCannotBorrowExecutorAuthority() {
   const model = new GovernedSingleResourceModel();
-  model.claim("executor-a");
+  const owner = model.claim("executor-a");
   model.observerCannotTerminalize("failed");
   assert.equal(model.status, "applying");
+  assert.deepEqual(model.owner, owner);
   assert.equal(model.reconcile(), "applying");
+  assert.deepEqual(model.owner, owner);
+}
+
+function observerSeeingThirdPartyStateKeepsExecutorAuthority() {
+  const model = new GovernedSingleResourceModel();
+  const owner = model.claim("executor-a");
+  model.backendSend(owner);
+  model.thirdPartyEdit();
+
+  assert.equal(model.reconcile(), "applying");
+  assert.deepEqual(model.owner, owner);
+  assert.equal(model.effectCount, 0);
+
+  // Only an executor transition or lease-expiry protocol may relinquish the
+  // owner; the status observer cannot turn this interleaving into unknown.
+  model.expire(owner);
+  assert.equal(model.reconcile(), "outcome_unknown");
+  assert.equal(model.owner, undefined);
 }
 
 function unknownStaysUnknownWithoutProof() {
@@ -217,6 +236,7 @@ for (const test of [
   staleExecutorCannotTerminalizeNewAttempt,
   delayedOldEffectIsReconciledNotMisclassified,
   observerCannotBorrowExecutorAuthority,
+  observerSeeingThirdPartyStateKeepsExecutorAuthority,
   unknownStaysUnknownWithoutProof,
   sentRequestCannotBecomeProvenFailure,
   terminalReceiptsAreMonotone,
@@ -230,5 +250,5 @@ for (const test of [
 }
 
 console.log(
-  "PASS: executable P1 model proves authority separation, stale-attempt fencing, send/effect uncertainty, conservative reconciliation, terminal monotonicity, source/binding admission gates, and same-key intent convergence.",
+  "PASS: executable P1 model proves authority separation, observer non-interference, stale-attempt fencing, send/effect uncertainty, conservative reconciliation, terminal monotonicity, source/binding admission gates, and same-key intent convergence.",
 );
