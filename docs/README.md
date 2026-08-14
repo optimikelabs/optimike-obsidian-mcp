@@ -34,11 +34,13 @@ French operator guides are linked alongside their English equivalents.
 | Which OSS gateway profile has been proven end to end?            | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
 | How are Operon reads and mutations governed?                     | [Operon MCP Contract](operon-mcp-contract.md)                                         |
 | How does governed atomic note replacement work?                  | [Governed Note Replacement](governed-note-replacement.md)                             |
+| How are named Obsidian Base formulas mutated safely?             | [Governed Base Formula P2](governed-base-formula-p2.md)                               |
 | Why does MCP expose Operon functions instead of calling the CLI? | [Operon CLI / Developer API audit](operon-cli-audit.md)                               |
 | Why was an architecture decision made?                           | [ADR Index](adr/README.md)                                                            |
 | What changed?                                                    | [Changelog](../CHANGELOG.md)                                                          |
 
 Governed source-preserving Frontmatter: [P1 contract](governed-frontmatter-p1.md).
+Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2.md).
 
 ## Capability families
 

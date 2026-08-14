@@ -268,6 +268,26 @@ backup privé avant mutation, prouve add/set/delete, replay/status/conflit péri
 et la restauration exacte du SHA, puis ne supprime le dossier privé qu’après
 vérification de la restauration.
 
+## Formules Base gouvernées P2
+
+P2 expose `bases_formula_patch_plan → apply → status → recover` pour les
+formules top-level nommées d’un seul `.base` existant. Tous les bytes hors des
+plages autorisées restent identiques et l’effet passe par Bases Bridge Atomic
+V1. Dans les réglages du Bridge, activer **Autoriser le CAS atomique des
+Bases** pour le pilote et laisser la compatibilité legacy désactivée afin que
+`bases_upsert_config` ne contourne pas le chemin gouverné.
+
+Gates déterministes :
+
+```bash
+npm run test:governed-base
+```
+
+Le canary de release doit utiliser le coffre pilote Operon Bridge et une copie
+jetable exacte de `PROJETS.base`. Ne jamais viser la Base canonique. Conserver
+le dossier temporaire système de récupération jusqu’à preuve du conflit de
+plan périmé, de la restauration exacte du backup et de l’égalité finale du SHA.
+
 ## Tasks : comment ça marche maintenant
 
 Tasks n’est plus un MCP séparé requis pour Codex.

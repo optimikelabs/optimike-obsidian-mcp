@@ -17,7 +17,7 @@ explicitly governed access to configured documents outside the vault.
 | Area                    | What the MCP provides                                                                | Main dependency                                              |
 | ----------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
 | Notes                   | Read/search/update plus governed atomic note and source-preserving Frontmatter plans | Vault; Local REST API + Atomic Write Bridge for governed CAS |
-| Bases and Canvas        | Bases query/write tools, format validation and bounded Canvas helpers                | Bases Bridge for live Bases                                  |
+| Bases and Canvas        | Bases query tools, governed source-preserving formula plans, format validation and bounded Canvas helpers | Bases Bridge for live Bases and typed Base CAS |
 | Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools                   | Operon Developer API V1 through the Bridge                   |
 | Semantic search         | Smart Connections index search with durable metadata cache                           | `.smart-env` plus Ollama or OpenAI query embedding           |
 | Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions               | Local filesystem                                             |
@@ -87,7 +87,7 @@ Enable only the surfaces you use:
 
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api):
   live note, metadata and tag operations;
-- bundled **Bases Bridge (REST)**: live `.base` operations;
+- bundled **Bases Bridge (REST)**: live `.base` queries plus opt-in typed CAS for governed source-preserving formula `plan → apply → status → recover`; legacy whole-file config writes are default-off compatibility paths ([P2 contract](docs/governed-base-formula-p2.md));
 - bundled **Optimike Atomic Write Bridge**: opt-in SHA-256 compare-and-replace backing governed whole-note and source-preserving Frontmatter `plan → apply → status → recover`; opaque `planRef`, lost response → `status`, exact-plan recovery ≠ undo ([note contract](docs/governed-note-replacement.md), [P1 contract](docs/governed-frontmatter-p1.md));
 - **Smart Connections**: semantic index under `.smart-env`;
 - **Operon Developer API V1** and the bundled **Optimike Operon Bridge**: governed live

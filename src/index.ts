@@ -15,6 +15,10 @@ import {
   createGovernedNoteReplaceRuntime,
   type GovernedNoteReplaceRuntime,
 } from "./mcp-server/tools/governedNoteReplaceTools/index.js";
+import {
+  createGovernedBaseFormulaRuntime,
+  type GovernedBaseFormulaRuntime,
+} from "./services/baseFormulaProjectionRuntime.js";
 
 /**
  * The main MCP server instance (only stored globally for stdio shutdown).
@@ -41,6 +45,7 @@ let vaultCacheService: VaultCacheService | undefined;
  * Streamable HTTP MCP session.
  */
 let governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined;
+let governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined;
 
 /**
  * Gracefully shuts down the main MCP server.
@@ -110,6 +115,11 @@ const shutdown = async (signal: string) => {
         "Governed note-replacement runtime closed successfully",
         shutdownContext,
       );
+    }
+    if (governedBaseFormulaRuntime) {
+      logger.info("Closing governed Base formula runtime...", shutdownContext);
+      governedBaseFormulaRuntime.close();
+      governedBaseFormulaRuntime = undefined;
     }
 
     logger.info("Graceful shutdown completed successfully", shutdownContext);
@@ -317,6 +327,7 @@ const start = async () => {
       obsidianService,
       vaultCacheService,
     );
+    governedBaseFormulaRuntime = createGovernedBaseFormulaRuntime(obsidianService);
     logger.info(
       governedNoteReplaceRuntime
         ? "Governed note-replacement runtime is enabled and process-shared."
@@ -339,6 +350,7 @@ const start = async () => {
       obsidianService,
       vaultCacheService,
       governedNoteReplaceRuntime,
+      governedBaseFormulaRuntime,
     );
 
     if (
@@ -490,6 +502,8 @@ const start = async () => {
     });
     governedNoteReplaceRuntime?.close();
     governedNoteReplaceRuntime = undefined;
+    governedBaseFormulaRuntime?.close();
+    governedBaseFormulaRuntime = undefined;
     process.exit(1);
   }
 };

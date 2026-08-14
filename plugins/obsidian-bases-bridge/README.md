@@ -1,6 +1,6 @@
 # Obsidian Bases Bridge
 
-Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « Bridge (Headless) » et étend le plugin **Obsidian Local REST API** avec des routes spécialisées pour les fichiers `.base`. Les agents MCP peuvent ainsi interroger les Bases via REST, éditer les propriétés des notes (frontmatter) et créer/mettre à jour les fichiers `.base` (YAML).
+Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « Bridge (Headless) » et étend **Obsidian Local REST API** avec des routes spécialisées pour les fichiers `.base`. Depuis 1.1.0, il fournit aussi un CAS typé lié au coffre pour la surface gouvernée de formules.
 
 ## Installation rapide
 
@@ -23,6 +23,9 @@ Préfixe officiel (recommandé) :
 - `POST /extensions/obsidian-bases-bridge/bases`
 - `GET /extensions/obsidian-bases-bridge/bases/:id/config`
 - `PUT /extensions/obsidian-bases-bridge/bases/:id/config`
+- `GET /extensions/obsidian-bases-bridge/atomic/status`
+- `POST /extensions/obsidian-bases-bridge/atomic/bases/read`
+- `POST /extensions/obsidian-bases-bridge/atomic/bases/cas`
 
 Alias legacy (compat MCP) :
 
@@ -35,6 +38,16 @@ Alias legacy (compat MCP) :
 - `PUT /bases/:id/config`
 
 Les routes héritent de l’authentification Bearer + TLS local du plugin REST.
+
+## Écritures de configuration
+
+Les écritures sont désactivées par défaut. Le réglage **Autoriser le CAS
+atomique des Bases** active uniquement le contrat Atomic V1 : fichier `.base`
+existant, empreinte exacte du backend, précondition SHA-256 et remplacement via
+`Vault.process`. Le réglage de compatibilité legacy réactive explicitement les
+remplacements complets via `PUT /config` et `POST /bases`; sans lui, ces routes
+n’acceptent que la validation et refusent l’effet. La surface MCP recommandée
+est `bases_formula_patch_*`, pas l’envoi de YAML arbitraire.
 
 ## Upsert robuste
 

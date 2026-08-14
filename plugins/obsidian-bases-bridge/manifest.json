@@ -1,10 +1,10 @@
 {
   "id": "obsidian-bases-bridge",
   "name": "Bases Bridge (REST)",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "minAppVersion": "1.6.0",
   "author": "Optimike",
   "authorUrl": "https://github.com/mickahouan",
   "description": "Expose les Bases (.base) d'Obsidian via un bridge REST/Local REST API et une vue headless pour les agents MCP.",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }

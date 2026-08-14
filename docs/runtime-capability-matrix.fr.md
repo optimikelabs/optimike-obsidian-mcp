@@ -2,7 +2,7 @@
 
 Version anglaise : [runtime-capability-matrix.md](runtime-capability-matrix.md)
 
-Docs liées : [README](../README.fr.md), [Guide d’exploitation](../OPERATIONS.fr.md), [Remplacement gouverné](governed-note-replacement.fr.md), [Profil serveur headless](headless-server-profile.fr.md), [Guide de routage MCP](mcp-routing-guide.fr.md), [Configuration des racines externes](external-roots-setup.fr.md)
+Docs liées : [README](../README.fr.md), [Guide d’exploitation](../OPERATIONS.fr.md), [Remplacement gouverné](governed-note-replacement.fr.md), [Formules Base gouvernées P2](governed-base-formula-p2.fr.md), [Profil serveur headless](headless-server-profile.fr.md), [Guide de routage MCP](mcp-routing-guide.fr.md), [Configuration des racines externes](external-roots-setup.fr.md)
 
 ![Aide au choix entre les profils live, hybrid et headless d’Optimike Obsidian MCP](assets/readme/runtime-profiles.fr.svg)
 
@@ -113,7 +113,7 @@ du mode runtime :
 | `headless-guarded`               | Tout `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                     |
 | `headless-filesystem`            | Tout `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                 |
 | `hybrid` API indisponible        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search`                                                                                                              |
-| `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique, `obsidian_validate_format`, plus outils REST d’écriture et Bases Bridge : `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+| `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique, plans gouvernés note, Frontmatter et formules Base, plus outils REST d’écriture et Bases Bridge : `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
 ## Frontmatter gouvernée P1
 
@@ -123,6 +123,13 @@ du mode runtime :
 `hybrid` avec identifiants API. Ils réutilisent l’Atomic Write Bridge désactivé
 par défaut et l’autorité durable P0. Ils sont absents des modes headless et du
 mode hybrid dégradé.
+
+## Formules Base gouvernées P2
+
+`bases_formula_patch_plan`, `bases_formula_patch_apply`,
+`bases_formula_patch_status` et `bases_formula_patch_recover` suivent la même
+frontière live/hybrid. Ils exigent en plus Bases Bridge 1.1.0 Atomic V1, avec le
+CAS atomique Base activé et les remplacements complets historiques désactivés.
 
 ## Notes de sécurité
 

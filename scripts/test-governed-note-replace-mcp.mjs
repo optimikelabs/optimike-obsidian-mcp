@@ -400,6 +400,7 @@ function childEnv(writeMode = "full", runtimeMode = "live", overrides = {}) {
     MCP_GUARDED_MAX_WRITE_CHARS: "100000",
     MCP_PROTECTED_FRONTMATTER_KEYS: "création,modification",
     MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: journalPath,
+    MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH: path.join(testRoot, "base-formula.sqlite"),
     MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: "1000",
     OBSIDIAN_RUNTIME_MODE: runtimeMode,
     OBSIDIAN_BASE_URL: fake.baseUrl,

@@ -17,7 +17,7 @@ const buildOptions = {
   platform: "browser",
   outfile,
   banner: { js: banner },
-  external: ["obsidian", "node:http", "node:url"],
+  external: ["obsidian", "node:crypto", "node:http", "node:url"],
   minify: false,
   logLevel: "info",
 };

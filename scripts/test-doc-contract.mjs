@@ -91,6 +91,10 @@ const commonTools = [
   "obsidian_note_replace_apply",
   "obsidian_note_replace_status",
   "obsidian_note_replace_recover",
+  "bases_formula_patch_plan",
+  "bases_formula_patch_apply",
+  "bases_formula_patch_status",
+  "bases_formula_patch_recover",
 ];
 for (const tool of commonTools) {
   assert.ok(matrix.includes(`\`${tool}\``), `Matrix omits ${tool}`);
@@ -102,8 +106,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "2.7.0",
-  "release-candidate package metadata must match the bounded 2.7.0 P1 authority",
+  "2.8.0",
+  "release-candidate package metadata must match the bounded 2.8.0 P2 authority",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");

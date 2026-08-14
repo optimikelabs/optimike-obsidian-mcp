@@ -171,15 +171,30 @@ plugins, indexers, and external automations remain outside that boundary.
 
 No generic public `operation_*` surface is introduced. The real Obsidian
 Desktop operator canary passed on 2026-08-14 with exact fixture restoration;
-merge, versioning, and release remain repository-authority decisions.
+P0 and P1 shipped in v2.7.0.
+
+## P2 decision: second backend through governed Base formulas
+
+The next adapter is not another projection over Atomic Note Write. It uses
+Bases Bridge Atomic V1 as a second typed backend and reuses the proven durable
+lease, fencing, idempotency, reconciliation, retention, and exact-plan recovery
+implementation through a bounded atomic-resource profile. The public intent is
+limited to set/delete of named top-level formulas. The compiler preserves all
+source bytes outside authorized formula ranges and refuses ambiguous YAML.
+
+This second backend justifies the internal profile seam; it does not justify a
+generic public operation API. Backend binding, target/proof vocabulary and
+plan references remain domain-specific. Whole-file legacy Base configuration
+writes are disabled by default at the Bridge and require an explicit temporary
+compatibility toggle, preventing the old MCP route from becoming a silent
+bypass.
 
 ## Explicit exclusions
 
 - Operon keeps its official Developer API plan and recovery contract; this
   runtime does not wrap or replace it.
-- Frontmatter, Bases, and Canvas writes are not upgraded by declaration. The
-  second pilot proves only complete Markdown note replacement through the
-  dedicated atomic bridge.
+- Frontmatter and Base formulas are upgraded only through their bounded public
+  projections. Other Base sections and Canvas remain outside the guarantee.
 - A receipt is evidence of the adapter's checks, not evidence of business
   correctness outside its domain validator.
 
