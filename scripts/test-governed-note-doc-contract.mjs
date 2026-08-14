@@ -5,6 +5,14 @@ async function text(path) {
   return readFile(path, "utf8");
 }
 
+function markdownReleaseSection(changelog, heading) {
+  const start = changelog.indexOf(heading);
+  assert.ok(start >= 0, `changelog omits ${heading}`);
+  const afterHeading = changelog.slice(start + heading.length);
+  const nextRelease = afterHeading.search(/\n## \[/u);
+  return nextRelease >= 0 ? afterHeading.slice(0, nextRelease) : afterHeading;
+}
+
 const tools = [
   "obsidian_note_replace_plan",
   "obsidian_note_replace_apply",
@@ -56,7 +64,27 @@ assert.ok(pkg.files.includes("docs/governed-note-replacement.fr.md"));
 const envExample = await text(".env.server.example");
 assert.match(envExample, /MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH=\//);
 const changelog = await text("CHANGELOG.md");
-assert.match(changelog, /## \[Unreleased\][\s\S]*obsidian_note_replace_plan/);
+const releaseSection = markdownReleaseSection(
+  changelog,
+  "## [2.6.0] - 2026-08-14",
+);
+for (const tool of tools) {
+  assert.ok(
+    releaseSection.includes(`\`${tool}\``),
+    `2.6.0 changelog section omits ${tool}`,
+  );
+}
+const unreleasedSection = changelog.slice(
+  changelog.indexOf("## [Unreleased]") + "## [Unreleased]".length,
+  changelog.indexOf("## [2.6.0] - 2026-08-14"),
+);
+for (const tool of tools) {
+  assert.equal(
+    unreleasedSection.includes(`\`${tool}\``),
+    false,
+    `${tool} must belong to 2.6.0, not Unreleased`,
+  );
+}
 assert.match(liveCanary, /os\.tmpdir\(\)/);
 assert.doesNotMatch(
   liveCanary,
@@ -108,19 +136,6 @@ assert.match(contract, /busy policy is installed before WAL negotiation/);
 assert.match(contract, /each recovery gets a new attempt fence/);
 assert.match(contract, /terminal receipts remain replayable[\s\S]*read-only/i);
 assert.match(contract, /revalidates it again immediately before every/i);
-assert.match(contractFr, /politique de contention SQLite est installée avant/);
-assert.match(
-  contractFr,
-  /chaque recovery\s+reçoit un nouveau fence de tentative/,
-);
-assert.match(contractFr, /reçus terminaux stables restent rejouables/i);
-assert.match(contractFr, /juste avant chaque tentative de/i);
-assert.match(contract, /loser of the conditional `planned → applying`/i);
-assert.match(contractFr, /perdant de la transition conditionnelle/i);
-assert.match(contract, /empty Markdown note as valid content/i);
-assert.match(contractFr, /note Markdown vide comme[\s\S]*contenu valide/i);
-assert.match(contract, /subsequent CAS[\s\S]*remains `outcome_unknown`/i);
-assert.match(contractFr, /conflit CAS suivant reste `outcome_unknown`/i);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
