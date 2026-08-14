@@ -41,6 +41,7 @@ const [
   read("scripts/smoke-governed-frontmatter-live.mjs"),
 ]);
 const pkg = JSON.parse(await read("package.json"));
+assert.equal(pkg.version, "2.7.0");
 
 for (const tool of tools) {
   for (const [name, content] of [
@@ -78,7 +79,7 @@ assert.match(adr, /Observer/);
 assert.match(adr, /Failure matrix/);
 assert.match(adr, /Linearization points/);
 assert.match(adr, /actualDiff\(before, after\)/);
-assert.match(adr, /Candidate admitted for merge/);
+assert.match(adr, /Accepted, implemented, and prepared for release in `2\.7\.0`/);
 assert.match(adr, /Live admission passed[\s\S]*2026-08-14/i);
 assert.match(
   adr,
@@ -179,10 +180,32 @@ assert.doesNotMatch(
   liveCanary,
   /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
 );
-assert.match(
-  changelog,
-  /## \[Unreleased\][\s\S]*obsidian_frontmatter_patch_plan/,
-);
+const changelogHeadings = [
+  ...changelog.matchAll(/^## \[([^\]]+)\](?: - .*?)?$/gm),
+];
+function changelogSection(version) {
+  const headingIndex = changelogHeadings.findIndex(
+    (heading) => heading[1] === version,
+  );
+  assert.notEqual(headingIndex, -1, `missing changelog section ${version}`);
+  const start = changelogHeadings[headingIndex].index;
+  const end = changelogHeadings[headingIndex + 1]?.index ?? changelog.length;
+  return changelog.slice(start, end);
+}
+
+assert.match(changelog, /^## \[2\.7\.0\] - 2026-08-14$/m);
+const releaseSection = changelogSection("2.7.0");
+const unreleasedSection = changelogSection("Unreleased");
+for (const tool of tools) {
+  assert.ok(
+    releaseSection.includes(`\`${tool}\``),
+    `2.7.0 changelog section omits ${tool}`,
+  );
+  assert.ok(
+    !unreleasedSection.includes(`\`${tool}\``),
+    `${tool} must belong to 2.7.0, not Unreleased`,
+  );
+}
 
 console.log(
   "PASS: governed frontmatter P1 docs, package surface, authority model, live-canary boundary, and bilingual contracts are coherent",
