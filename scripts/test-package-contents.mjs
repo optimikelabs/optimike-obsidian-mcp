@@ -33,6 +33,7 @@ const requiredFiles = [
   "scripts/test-governed-note-replace-mcp.mjs",
   "scripts/test-governed-note-replace-http.mjs",
   "scripts/smoke-atomic-note-mcp-live.mjs",
+  "scripts/test-frontmatter-p1-idempotency.mjs",
   "scripts/test-governed-frontmatter-mcp.mjs",
   "scripts/test-governed-frontmatter-http.mjs",
   "scripts/smoke-governed-frontmatter-live.mjs",

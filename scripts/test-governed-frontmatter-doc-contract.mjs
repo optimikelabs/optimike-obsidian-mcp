@@ -63,7 +63,10 @@ assert.match(contract, /cache is never an authority/i);
 assert.match(contractFr, /cache n[’']est jamais une autorité/i);
 assert.match(contract, /byte-identical/i);
 assert.match(contractFr, /byte-identical/i);
-assert.match(contract, /P1 canary recovery directory|OBSIDIAN_FRONTMATTER_CANARY_PATH/i);
+assert.match(
+  contract,
+  /P1 canary recovery directory|OBSIDIAN_FRONTMATTER_CANARY_PATH/i,
+);
 assert.match(contractFr, /OBSIDIAN_FRONTMATTER_CANARY_PATH/i);
 assert.match(security, /governed frontmatter/i);
 assert.match(securityFr, /Frontmatter gouvernée|frontmatter gouvernée/i);
@@ -86,17 +89,21 @@ for (const file of [
 }
 assert.equal(
   pkg.scripts["test:governed-frontmatter"],
-  "npm run build && node scripts/test-governed-frontmatter-model.mjs && node scripts/test-frontmatter-p1-compiler.mjs && node scripts/test-governed-frontmatter-mcp.mjs && node scripts/test-governed-frontmatter-http.mjs",
+  "npm run build && node scripts/test-governed-frontmatter-model.mjs && node scripts/test-frontmatter-p1-compiler.mjs && node scripts/test-frontmatter-p1-idempotency.mjs && node scripts/test-governed-frontmatter-mcp.mjs && node scripts/test-governed-frontmatter-http.mjs",
 );
 assert.equal(
   pkg.scripts["smoke:governed-frontmatter-live"],
   "npm run build && node scripts/smoke-governed-frontmatter-live.mjs",
 );
-assert.match(pkg.scripts["test:docs"], /test-governed-frontmatter-doc-contract/);
+assert.match(
+  pkg.scripts["test:docs"],
+  /test-governed-frontmatter-doc-contract/,
+);
 
 for (const file of [
   "scripts/test-governed-frontmatter-model.mjs",
   "scripts/test-frontmatter-p1-compiler.mjs",
+  "scripts/test-frontmatter-p1-idempotency.mjs",
   "scripts/test-governed-frontmatter-mcp.mjs",
   "scripts/test-governed-frontmatter-http.mjs",
   "scripts/smoke-governed-frontmatter-live.mjs",
@@ -110,7 +117,10 @@ assert.match(liveCanary, /writeFileSync\(backupPath/);
 assert.match(liveCanary, /emergency-restore/);
 assert.match(liveCanary, /restored = true/);
 assert.match(liveCanary, /rmSync\(tempRoot/);
-assert.doesNotMatch(liveCanary, /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/);
+assert.doesNotMatch(
+  liveCanary,
+  /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
+);
 assert.match(
   changelog,
   /## \[Unreleased\][\s\S]*obsidian_frontmatter_patch_plan/,
