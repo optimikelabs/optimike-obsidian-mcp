@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { load } from "js-yaml";
+import { isAlias, isMap, isScalar, parseDocument, Scalar, visit } from "yaml";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 
 export type BaseFormulaPatchOperation =
@@ -94,100 +95,63 @@ function splitLines(content: string): SourceLine[] {
   return lines;
 }
 
-function yamlStructureWithoutScalarText(yaml: string): string {
-  const output: string[] = [];
-  let inSingle = false;
-  let inDouble = false;
-  let blockHeaderIndent: number | undefined;
-
-  for (const rawLine of yaml.split("\n")) {
-    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-    const indentation = line.match(/^ */u)?.[0].length ?? 0;
-    if (blockHeaderIndent !== undefined) {
-      if (line.trim() === "" || indentation > blockHeaderIndent) {
-        output.push("");
-        continue;
+function assertSupportedYamlSyntax(yaml: string): void {
+  const document = parseDocument(yaml, {
+    keepSourceTokens: false,
+    merge: false,
+    strict: true,
+    uniqueKeys: false,
+  });
+  let hasReference = false;
+  let hasExtension = false;
+  visit(document, {
+    Node(_key, node) {
+      if (isAlias(node) || node.anchor) hasReference = true;
+      if (node.tag) hasExtension = true;
+      if (
+        isMap(node) &&
+        node.items.some((pair) => isScalar(pair.key) && pair.key.value === "<<")
+      ) {
+        hasExtension = true;
       }
-      blockHeaderIndent = undefined;
-    }
-
-    let structural = "";
-    for (let index = 0; index < line.length; index += 1) {
-      const character = line[index];
-      if (inSingle) {
-        structural += " ";
-        if (character === "'" && line[index + 1] === "'") {
-          structural += " ";
-          index += 1;
-        } else if (character === "'") {
-          inSingle = false;
-        }
-        continue;
-      }
-      if (inDouble) {
-        structural += " ";
-        if (character === "\\" && index + 1 < line.length) {
-          structural += " ";
-          index += 1;
-        } else if (character === '"') {
-          inDouble = false;
-        }
-        continue;
-      }
-      if (character === "#" && (index === 0 || /\s/u.test(line[index - 1]))) {
-        structural += " ".repeat(line.length - index);
-        break;
-      }
-      if (character === "'") {
-        inSingle = true;
-        structural += " ";
-        continue;
-      }
-      if (character === '"') {
-        inDouble = true;
-        structural += " ";
-        continue;
-      }
-      structural += character;
-    }
-    output.push(structural);
-    if (
-      !inSingle &&
-      !inDouble &&
-      /(?:^|[:\-]\s*)[>|](?:[+-]?\d*|\d*[+-]?)\s*$/u.test(structural.trimEnd())
-    ) {
-      blockHeaderIndent = indentation;
-    }
-  }
-  return output.join("\n");
-}
-
-function assertNoYamlExtensions(yaml: string): void {
-  const structural = yamlStructureWithoutScalarText(yaml);
-  // YAML node properties can start a node at the beginning of a line, after
-  // a block mapping/sequence indicator, or after flow punctuation. Ordinary
-  // whitespace inside a plain scalar is not a token boundary (`statut != x`).
-  const boundary = String.raw`(?:^\s*|[:?\-]\s+|[\[\]{},]\s*)`;
-  const endBoundary = String.raw`(?=$|[\s\[\]{},])`;
-  if (
-    new RegExp(`${boundary}[&*][^\\s\\[\\]{},]+${endBoundary}`, "mu").test(
-      structural,
-    )
-  ) {
+    },
+  });
+  if (hasReference) {
     fail("YAML anchors and aliases are outside the governed Base subset.", {
       reason: "base_yaml_reference_unsupported",
     });
   }
-  if (
-    new RegExp(
-      `${boundary}!(?:<[^>\\n]+>|[^\\s\\[\\]{},]*)${endBoundary}`,
-      "mu",
-    ).test(structural) ||
-    /(?:^|[\s{,])<<\s*:/mu.test(structural)
-  ) {
+  if (hasExtension) {
     fail("YAML tags and merge keys are outside the governed Base subset.", {
       reason: "base_yaml_extension_unsupported",
     });
+  }
+  if (document.errors.length > 0) {
+    fail("Base YAML is invalid.", { reason: "base_yaml_invalid" });
+  }
+  if (!isMap(document.contents)) return;
+  const formulas = document.contents.items.find(
+    (pair) =>
+      isScalar(pair.key) &&
+      normalizeName(String(pair.key.value)) === "formulas",
+  )?.value;
+  if (!isMap(formulas)) return;
+  for (const pair of formulas.items) {
+    const value = pair.value;
+    if (!value?.range) continue;
+    const source = yaml.slice(value.range[0], value.range[1]);
+    const supportedBlockScalar =
+      isScalar(value) &&
+      (value.type === Scalar.BLOCK_LITERAL ||
+        value.type === Scalar.BLOCK_FOLDED);
+    if (source.includes("\n") && !supportedBlockScalar) {
+      fail(
+        "Multiline non-block formula scalars are outside the governed Base subset.",
+        {
+          reason: "base_formula_layout_unsupported",
+        },
+      );
+    }
   }
 }
 
@@ -197,7 +161,7 @@ function isSeparator(line: SourceLine): boolean {
 }
 
 function parseRoot(yaml: string): Record<string, unknown> {
-  assertNoYamlExtensions(yaml);
+  assertSupportedYamlSyntax(yaml);
   let parsed: unknown;
   try {
     parsed = load(yaml);

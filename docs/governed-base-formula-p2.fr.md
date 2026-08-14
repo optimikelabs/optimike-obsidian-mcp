@@ -32,6 +32,12 @@ de formules autorisées restent identiques. Un fichier sans saut de ligne final
 reste supporté : une formule ajoutée reçoit exactement un séparateur de ligne
 détecté avant sa nouvelle entrée de mapping.
 
+Ancres, alias, tags et merge keys sont identifiés depuis les nœuds YAML parsés,
+pas par simple recherche de caractères. Les mêmes indicateurs restent du
+contenu ordinaire dans les scalaires quotés, les scalaires bloc et les
+commentaires. Les scalaires de formule multilignes hors style bloc échouent
+fermés, car leurs frontières source ne font pas partie de la V1.
+
 Bases Bridge Atomic V1 ne cible que les `.base` existantes. Son CAS est lié à
 une empreinte stable appareil/installation/coffre et s’exécute via
 `Vault.process` avec précondition SHA-256 exacte. Le reçu prouve les hashes

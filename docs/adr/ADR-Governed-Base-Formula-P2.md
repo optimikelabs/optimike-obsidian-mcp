@@ -53,7 +53,11 @@ outside authorized formula ranges. It preserves the exact spelling of
 existing keys and orders new operations by code units.
 It fails closed on ambiguous layout, mixed line endings, anchors, aliases,
 tags, merge keys, duplicate/case-colliding names and deletion of the final
-formula. It never round-trips the complete YAML through a serializer.
+formula. Extension refusal is based on parsed YAML nodes, so indicator text in
+quoted scalars, block scalars and comments is not mistaken for syntax.
+Multiline non-block formula scalars fail closed because their physical entry
+boundaries are not part of V1. The compiler never round-trips the complete YAML
+through a serializer.
 
 The receipt proves raw before/after hashes, backend binding, intent digest,
 authorized ranges and the untouched-source digest. It does not certify Base UI

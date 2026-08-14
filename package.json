@@ -183,6 +183,7 @@
     "validator": "^13.15.35",
     "winston": "^3.17.0",
     "winston-transport": "^4.9.0",
+    "yaml": "^2.9.0",
     "zod": "^3.25.67"
   },
   "keywords": [

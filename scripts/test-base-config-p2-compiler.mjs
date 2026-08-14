@@ -117,18 +117,6 @@ assert.match(
   /text &anchor \*alias !tag <<: and # content/u,
   "block scalar and comment indicators must remain ordinary source text",
 );
-const multilineQuotedIndicators = compileBaseFormulaPatch(
-  [
-    "formulas:",
-    '  quoted: "first &anchor',
-    '    second *alias !tag <<: # text"',
-    "  keep: value",
-    "",
-  ].join("\n"),
-  [{ op: "set_formula", name: "keep", expression: "next" }],
-);
-assert.match(multilineQuotedIndicators.nextYaml, /first &anchor/u);
-
 function reason(operation) {
   try {
     operation();
@@ -137,6 +125,31 @@ function reason(operation) {
     return error?.details?.reason ?? error?.message;
   }
 }
+
+assert.equal(
+  reason(() =>
+    compileBaseFormulaPatch(
+      [
+        "formulas:",
+        '  quoted: "first',
+        '    b: bar"',
+        "  keep: value",
+        "",
+      ].join("\n"),
+      [{ op: "set_formula", name: "keep", expression: "next" }],
+    ),
+  ),
+  "base_formula_layout_unsupported",
+);
+assert.equal(
+  reason(() =>
+    compileBaseFormulaPatch(
+      'metadata: unmatched"\nreal: &anchor value\nformulas:\n  keep: value\n',
+      [{ op: "set_formula", name: "keep", expression: "next" }],
+    ),
+  ),
+  "base_yaml_reference_unsupported",
+);
 
 assert.equal(
   reason(() =>
