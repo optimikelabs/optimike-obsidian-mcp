@@ -10,7 +10,7 @@ setup or operations guides, not in this index.
 | [External reference integrity](ADR-External-Reference-Integrity.md) / [FR](ADR-External-Reference-Integrity.fr.md) | Accepted and implemented for a local stdio pilot                                        | Same-root file move, exact ÉLYSIA reference repair, journal and rollback |
 | [Operon Bridge](ADR-Operon-Bridge.md)                                                                              | Accepted for bounded pilot                                                              | Versioned task-domain bridge and guarded mutation contract               |
 | [Common governed operation runtime](ADR-Common-Operation-Runtime.md)                                               | Accepted and released in 2.6.0; public atomic-note projection and live canary complete | Shared plan, apply, status, receipt and exact-plan recovery vocabulary   |
-| [P1 governed frontmatter projection](ADR-Governed-Frontmatter-P1.md)                                               | Proposed; model and executable failure-contract gate                                    | Source-preserving domain compiler projected over the released P0 runtime |
+| [P1 governed frontmatter projection](ADR-Governed-Frontmatter-P1.md)                                               | Accepted and implemented; prepared for release in 2.7.0                                 | Source-preserving domain compiler projected over the released P0 runtime |
 
 ## Status vocabulary
 
@@ -25,6 +25,7 @@ The external-roots ADR remains authoritative for root authorization,
 confinement, provenance, reads and handoff. The HTTP ADR amends its stdio-only
 delivery restriction. The external-reference-integrity ADR adds one opt-in
 local stdio mutation without opening upload, replace, delete, sync or HTTP
-mutation. The P1 ADR remains proposed until its source-preservation proof,
-projected concurrency tests, Linux/Windows CI, Codex Review, and live Obsidian
-canary all pass.
+mutation. The P1 ADR is accepted and implemented after its
+source-preservation proof, projected concurrency tests, Linux/Windows CI,
+exact-head Codex Review, live Obsidian canary, merge, and post-merge `main`
+workflow all passed.

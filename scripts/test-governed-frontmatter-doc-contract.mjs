@@ -41,6 +41,7 @@ const [
   read("scripts/smoke-governed-frontmatter-live.mjs"),
 ]);
 const pkg = JSON.parse(await read("package.json"));
+assert.equal(pkg.version, "2.7.0");
 
 for (const tool of tools) {
   for (const [name, content] of [
@@ -78,7 +79,7 @@ assert.match(adr, /Observer/);
 assert.match(adr, /Failure matrix/);
 assert.match(adr, /Linearization points/);
 assert.match(adr, /actualDiff\(before, after\)/);
-assert.match(adr, /Candidate admitted for merge/);
+assert.match(adr, /Accepted, implemented, and prepared for release in `2\.7\.0`/);
 assert.match(adr, /Live admission passed[\s\S]*2026-08-14/i);
 assert.match(
   adr,
@@ -179,9 +180,17 @@ assert.doesNotMatch(
   liveCanary,
   /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
 );
-assert.match(
-  changelog,
-  /## \[Unreleased\][\s\S]*obsidian_frontmatter_patch_plan/,
+const releaseHeading = "## [2.7.0] - 2026-08-14";
+const previousReleaseHeading = "## [2.6.0] - 2026-08-14";
+const releaseStart = changelog.indexOf(releaseHeading);
+const previousReleaseStart = changelog.indexOf(previousReleaseHeading);
+assert.ok(releaseStart > changelog.indexOf("## [Unreleased]"));
+assert.ok(previousReleaseStart > releaseStart);
+const releaseSection = changelog.slice(releaseStart, previousReleaseStart);
+assert.match(releaseSection, /obsidian_frontmatter_patch_plan/);
+assert.doesNotMatch(
+  changelog.slice(changelog.indexOf("## [Unreleased]"), releaseStart),
+  /obsidian_frontmatter_patch_plan/,
 );
 
 console.log(
