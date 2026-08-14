@@ -51,6 +51,15 @@ const STABLE_TERMINAL = new Set<ObsidianNoteReplaceStatus>([
   "failed",
 ]);
 
+function sameRequestInput(
+  existing: ObsidianNoteReplacePlan,
+  input: Pick<ObsidianNoteReplacePlan, "path" | "afterSha256">,
+): boolean {
+  return (
+    existing.path === input.path && existing.afterSha256 === input.afterSha256
+  );
+}
+
 export class ObsidianNoteReplaceJournal {
   private readonly db: DatabaseSync;
   private readonly now: () => number;
@@ -153,7 +162,7 @@ export class ObsidianNoteReplaceJournal {
     this.maybePurgeTerminalPlans();
     const existing = this.getByIdempotencyKey(input.idempotencyKey);
     if (existing) {
-      if (existing.requestDigest !== input.requestDigest) {
+      if (!sameRequestInput(existing, input)) {
         throw new Error(
           "The idempotency key is already bound to a different note replacement.",
         );
@@ -190,7 +199,7 @@ export class ObsidianNoteReplaceJournal {
     // instead of surfacing a UNIQUE constraint as an MCP INTERNAL_ERROR.
     const winner = this.getByIdempotencyKey(input.idempotencyKey);
     if (!winner) throw new ObsidianNoteReplaceConcurrencyError();
-    if (winner.requestDigest !== input.requestDigest) {
+    if (!sameRequestInput(winner, input)) {
       throw new Error(
         "The idempotency key is already bound to a different note replacement.",
       );

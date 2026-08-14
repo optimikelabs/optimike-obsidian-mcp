@@ -545,21 +545,36 @@ try {
     const initializedJournal = new ObsidianNoteReplaceJournal(databasePath);
     initializedJournal.close();
     const startPath = path.join(temporaryRoot, "multiprocess-plan.start");
-    const input = {
+    const commonInput = {
       idempotencyKey: "multiprocess-same-key",
-      requestDigest: sha256("multiprocess-same-request"),
       path: "Fixture/Multiprocess.md",
-      beforeSha256: sha256("before"),
       afterSha256: sha256("after"),
       nextContent: "after",
       bindingFingerprint: sha256("fixture-vault-instance"),
     };
+    const inputs = [
+      {
+        ...commonInput,
+        beforeSha256: sha256("before observed by process a"),
+        requestDigest: sha256("request sealed by process a"),
+      },
+      {
+        ...commonInput,
+        beforeSha256: sha256("before observed by process b"),
+        requestDigest: sha256("request sealed by process b"),
+      },
+    ];
     const readyPaths = [
       path.join(temporaryRoot, "multiprocess-plan-a.ready"),
       path.join(temporaryRoot, "multiprocess-plan-b.ready"),
     ];
-    const workers = readyPaths.map((readyPath) =>
-      spawnJournalCreateWorker({ databasePath, readyPath, startPath, input }),
+    const workers = readyPaths.map((readyPath, index) =>
+      spawnJournalCreateWorker({
+        databasePath,
+        readyPath,
+        startPath,
+        input: inputs[index],
+      }),
     );
     await waitForFiles(readyPaths);
     writeFileSync(startPath, "go", "utf8");
@@ -567,8 +582,10 @@ try {
       workers.map((worker) => worker.completion),
     );
     assert.equal(first.operationId, second.operationId);
-    assert.equal(first.idempotencyKey, input.idempotencyKey);
-    assert.equal(second.requestDigest, input.requestDigest);
+    assert.equal(first.idempotencyKey, commonInput.idempotencyKey);
+    assert.equal(first.path, commonInput.path);
+    assert.equal(second.afterSha256, commonInput.afterSha256);
+    assert.equal(first.requestDigest, second.requestDigest);
   }
 
   {
