@@ -20,6 +20,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: node scripts/test-governed-frontmatter-model.mjs
       - run: npm run test:runtime
       - run: npm run test:external-roots
       - run: npm run test:operation-runtime
