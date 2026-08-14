@@ -1,0 +1,57 @@
+name: Apply P1 runtime seam once
+
+on:
+  push:
+    branches: [feat/governed-frontmatter-p1]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-p1-runtime-seam-once
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor == 'optimikelabs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/governed-frontmatter-p1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply bounded P0 projection seam
+        run: node scripts/apply-p1-runtime-seam.mjs
+      - name: Format and verify model, compiler, and TypeScript
+        run: |
+          npx prettier --write \
+            src/services/operations/obsidianNoteReplaceJournal.ts \
+            src/services/operations/obsidianNoteReplaceOperationAdapter.ts \
+            src/mcp-server/tools/governedNoteReplaceTools/runtime.ts \
+            src/services/writePolicy.ts \
+            src/mcp-server/tools/runtimeTools/registration.ts \
+            src/services/frontmatterPatchCompiler.ts \
+            src/services/frontmatterProjectionRuntime.ts \
+            src/mcp-server/tools/governedFrontmatterTools/registration.ts \
+            src/mcp-server/tools/governedFrontmatterTools/index.ts \
+            scripts/test-frontmatter-p1-compiler.mjs \
+            scripts/test-governed-frontmatter-model.mjs \
+            scripts/models/governed-single-resource-model.mjs
+          node scripts/test-governed-frontmatter-model.mjs
+          npm run build
+          node scripts/test-frontmatter-p1-compiler.mjs
+      - name: Remove one-shot applicator
+        run: rm .github/workflows/apply-p1-runtime-seam-once.yml scripts/apply-p1-runtime-seam.mjs
+      - name: Commit production seam
+        run: |
+          git config user.name "optimikelabs-p1"
+          git config user.email "31423109+optimikelabs@users.noreply.github.com"
+          git add src scripts .github/workflows/apply-p1-runtime-seam-once.yml
+          git commit -m "feat(p1): compose governed frontmatter over P0"
+          git push origin HEAD:feat/governed-frontmatter-p1
