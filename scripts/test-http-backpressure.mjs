@@ -29,6 +29,29 @@ function controller(overrides = {}) {
   });
 }
 
+function testGovernedStateChangesUseMutationBackpressureByDefault() {
+  const governedStateChanges = [
+    "external_move_apply",
+    "external_move_rollback",
+    "obsidian_note_replace_plan",
+    "obsidian_note_replace_apply",
+    "obsidian_note_replace_recover",
+    "obsidian_frontmatter_patch_plan",
+    "obsidian_frontmatter_patch_apply",
+    "obsidian_frontmatter_patch_recover",
+    "bases_formula_patch_plan",
+    "bases_formula_patch_apply",
+    "bases_formula_patch_recover",
+  ];
+  for (const toolName of governedStateChanges) {
+    assert.equal(
+      httpBackpressureConfig.mutationTools.has(toolName),
+      true,
+      `${toolName} must use mutation backpressure by default`,
+    );
+  }
+}
+
 async function expectReason(promise, reason) {
   await assert.rejects(promise, (error) => {
     assert.ok(error instanceof AdmissionRejectedError);
@@ -863,6 +886,7 @@ async function testStreamingResponseRetainsLease() {
 }
 
 await testGlobalAndPerIdentityLimits();
+testGovernedStateChangesUseMutationBackpressureByDefault();
 await testExpensiveAndMutationLimits();
 await testQueueBoundsTimeoutAndCancellation();
 await testRemovalRedispatchesSameIdentityQueue();
