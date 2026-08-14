@@ -164,7 +164,10 @@ function yamlStructureWithoutScalarText(yaml: string): string {
 
 function assertNoYamlExtensions(yaml: string): void {
   const structural = yamlStructureWithoutScalarText(yaml);
-  const boundary = String.raw`(?:^|[\s\[\]{},:?\-])`;
+  // YAML node properties can start a node at the beginning of a line, after
+  // a block mapping/sequence indicator, or after flow punctuation. Ordinary
+  // whitespace inside a plain scalar is not a token boundary (`statut != x`).
+  const boundary = String.raw`(?:^\s*|[:?\-]\s+|[\[\]{},]\s*)`;
   const endBoundary = String.raw`(?=$|[\s\[\]{},])`;
   if (
     new RegExp(`${boundary}[&*][^\\s\\[\\]{},]+${endBoundary}`, "mu").test(

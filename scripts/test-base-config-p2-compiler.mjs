@@ -104,6 +104,7 @@ const scalarIndicators = compileBaseFormulaPatch(
     '  quoted: "text &anchor *alias !tag <<: and # content"',
     "  block: |",
     "    text &anchor *alias !tag <<: and # content",
+    '  plain_comparison: statut != "actif"',
     "# comment &anchor *alias !tag <<:",
     "views: []",
     "",
