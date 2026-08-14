@@ -156,6 +156,8 @@ class FakeAtomicWriteBackend {
       throw new McpError(BaseErrorCode.CONFLICT, "Fixture hash conflict.");
     }
     this.content = payload.nextContent;
+    const afterSha256 = sha256(this.content);
+    const size = Buffer.byteLength(this.content, "utf8");
     if (this.afterWriteBeforeReturn) {
       await this.afterWriteBeforeReturn();
       this.afterWriteBeforeReturn = undefined;
@@ -172,8 +174,8 @@ class FakeAtomicWriteBackend {
       contractVersion: 1,
       path: this.path,
       beforeSha256,
-      afterSha256: sha256(this.content),
-      size: Buffer.byteLength(this.content, "utf8"),
+      afterSha256,
+      size,
       bindingFingerprint: this.bindingFingerprint,
     };
   }
@@ -335,6 +337,46 @@ try {
     const committed = await adapter.apply(planned.planRef, "concurrent-status");
     assert.equal(committed.outcome, "committed");
     assert.equal(backend.replaceCalls, 1);
+  }
+
+  {
+    const databasePath = path.join(
+      temporaryRoot,
+      "observer-cannot-steal-owner.sqlite",
+    );
+    const backend = new FakeAtomicWriteBackend();
+    const ownerJournal = new ObsidianNoteReplaceJournal(databasePath);
+    const observerJournal = new ObsidianNoteReplaceJournal(databasePath);
+    journals.push(ownerJournal, observerJournal);
+    const owner = new ObsidianNoteReplaceOperationAdapter(
+      backend,
+      ownerJournal,
+    );
+    const observer = new ObsidianNoteReplaceOperationAdapter(
+      backend,
+      observerJournal,
+    );
+    const planned = await owner.plan({
+      path: backend.path,
+      nextContent: "committed before later third-party drift",
+      idempotencyKey: "observer-cannot-steal-owner",
+    });
+    backend.afterWriteBeforeReturn = async () => {
+      backend.content = "third-party edit after the successful CAS";
+      const observed = await observer.status(planned.planRef);
+      assert.equal(observed.phase, "applying");
+      assert.equal(observed.outcome, null);
+    };
+    const committed = await owner.apply(
+      planned.planRef,
+      "observer-cannot-steal-owner",
+    );
+    assert.equal(committed.outcome, "committed");
+    assert.equal(backend.content, "third-party edit after the successful CAS");
+    assert.equal(
+      observerJournal.get(committed.operationId).status,
+      "committed",
+    );
   }
 
   {

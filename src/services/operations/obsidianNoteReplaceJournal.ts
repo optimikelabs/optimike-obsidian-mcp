@@ -240,6 +240,38 @@ export class ObsidianNoteReplaceJournal {
     failure?: string,
     expectedExecutionOwnerId?: string,
   ): ObsidianNoteReplacePlan {
+    return this.transitionInternal(
+      operationId,
+      expected,
+      next,
+      failure,
+      expectedExecutionOwnerId,
+      false,
+    );
+  }
+
+  commitAfterVerifiedProof(
+    operationId: string,
+    expected: Array<"applying" | "outcome_unknown">,
+  ): ObsidianNoteReplacePlan {
+    return this.transitionInternal(
+      operationId,
+      expected,
+      "committed",
+      undefined,
+      undefined,
+      true,
+    );
+  }
+
+  private transitionInternal(
+    operationId: string,
+    expected: ObsidianNoteReplaceStatus[],
+    next: ObsidianNoteReplaceStatus,
+    failure: string | undefined,
+    expectedExecutionOwnerId: string | undefined,
+    verifiedCommitWithoutOwner: boolean,
+  ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
     if (!current || !expected.includes(current.status)) {
@@ -247,6 +279,7 @@ export class ObsidianNoteReplaceJournal {
     }
     if (
       current.status === "applying" &&
+      !verifiedCommitWithoutOwner &&
       (!expectedExecutionOwnerId ||
         current.executionOwner?.instanceId !== expectedExecutionOwnerId)
     ) {
