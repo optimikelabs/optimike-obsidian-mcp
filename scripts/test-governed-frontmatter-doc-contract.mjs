@@ -57,8 +57,8 @@ for (const tool of tools) {
 
 assert.match(contract, /actualDiff\(before, after\)/);
 assert.match(contractFr, /actualDiff\(before, after\)/);
-assert.match(contract, /not undo/i);
-assert.match(contractFr, /pas un undo|ce n[’']est pas un undo/i);
+assert.match(contract, /not\s+undo/i);
+assert.match(contractFr, /pas\s+un\s+undo|ce\s+n[’']est\s+pas\s+un\s+undo/i);
 assert.match(contract, /cache is never an authority/i);
 assert.match(contractFr, /cache n[’']est jamais une autorité/i);
 assert.match(contract, /byte-identical/i);
