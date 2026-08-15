@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-08-14
+
+### Added
+
+- Governed source-preserving Base formula P2 surface:
+  `bases_formula_patch_plan`, `bases_formula_patch_apply`,
+  `bases_formula_patch_status`, and `bases_formula_patch_recover`.
+- Bases Bridge Atomic V1 with vault binding, exact SHA-256 CAS through
+  `Vault.process`, an independent default-off write gate, deterministic
+  Windows/Linux gates, and a live pilot-vault canary on a disposable exact copy
+  of `PROJETS.base`.
+
+### Changed
+
+- The proven durable operation journal and concurrency fencing now serve a
+  second typed backend through an internal atomic-resource profile. No generic
+  public `operation_*` surface is introduced.
+- Legacy whole-file Base config/create effects are disabled by default and
+  require an explicit compatibility toggle; validation-only requests remain
+  available.
+
+### Security
+
+- Named formula set/delete preserves every byte outside authorized source
+  ranges and fails closed on ambiguous YAML, aliases, tags, merge keys,
+  duplicate/case-colliding names, mixed line endings and final-formula delete.
+- The live pilot proved no-write planning, apply/status, replay, stale-plan
+  conflict and exact final SHA restoration in the dedicated Operon Bridge test
+  vault.
+
 ## [2.7.0] - 2026-08-14
 
 ### Added

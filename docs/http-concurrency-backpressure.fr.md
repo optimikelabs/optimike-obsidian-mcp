@@ -65,7 +65,12 @@ contrat de concurrence. Le client doit envoyer chaque membre séparément.
 
 La liste coûteuse par défaut contient les alias de recherche sémantique, la maintenance runtime, la recherche globale, les requêtes Bases, les scans et requêtes Tasks, certaines opérations de reconstruction ou validation Operon, les lectures externes et le handoff externe.
 
-La liste de mutations contient les outils enregistrés de notes, frontmatter, tags, canvas, filesystem, Bases et Operon. Ces listes sont explicites et configurables :
+La liste de mutations contient les outils enregistrés de notes, frontmatter,
+tags, canvas, filesystem, Bases, Operon, déplacements externes et opérations
+gouvernées qui changent un état. Les appels gouvernés `plan`, `apply` et
+`recover` y figurent parce qu’ils écrivent un état durable ou peuvent
+exécuter/réconcilier une mutation backend. Ces listes sont explicites et
+configurables :
 
 ```dotenv
 MCP_HTTP_EXPENSIVE_TOOLS=smart_semantic_search,obsidian_global_search,bases_query,query_tasks,external_handoff

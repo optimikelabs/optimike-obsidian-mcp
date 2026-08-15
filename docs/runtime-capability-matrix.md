@@ -2,7 +2,7 @@
 
 French version: [runtime-capability-matrix.fr.md](runtime-capability-matrix.fr.md)
 
-Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Governed note replacement](governed-note-replacement.md), [Headless Server Profile](headless-server-profile.md), [MCP Routing Guide](mcp-routing-guide.md), [External Roots Setup](external-roots-setup.md)
+Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Governed note replacement](governed-note-replacement.md), [Governed Base Formula P2](governed-base-formula-p2.md), [Headless Server Profile](headless-server-profile.md), [MCP Routing Guide](mcp-routing-guide.md), [External Roots Setup](external-roots-setup.md)
 
 ![Runtime profile chooser for live, hybrid and headless Optimike Obsidian MCP deployments](assets/readme/runtime-profiles.en.svg)
 
@@ -120,7 +120,7 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 | `headless-guarded`              | Everything in `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                                                                                                                                                 |
 | `headless-filesystem`           | Everything in `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                                                                                                                                             |
 | `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search`                                                                                                                                                                                                                                                   |
-| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools, `obsidian_validate_format`, governed `obsidian_note_replace_plan`, `obsidian_note_replace_apply`, `obsidian_note_replace_status`, `obsidian_note_replace_recover`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools, governed note, Frontmatter and Base formula `plan/apply/status/recover`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
 ## Governed Frontmatter P1
 
@@ -130,6 +130,14 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 `hybrid` with API credentials. They reuse the default-off Atomic Write Bridge
 and P0 durable authority. They are absent from every headless mode and degraded
 hybrid operation.
+
+## Governed Base formula P2
+
+`bases_formula_patch_plan`, `bases_formula_patch_apply`,
+`bases_formula_patch_status`, and `bases_formula_patch_recover` follow the same
+live/hybrid registration boundary. They additionally require Bases Bridge
+1.1.0 Atomic V1 with atomic Base CAS enabled and legacy whole-file config
+writes disabled.
 
 ## Safety Notes
 

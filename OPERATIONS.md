@@ -261,6 +261,26 @@ a private backup before mutation, proves add/set/delete, replay/status/stale
 conflict and exact SHA restoration, then deletes the private run directory only
 after restoration is verified.
 
+## Governed Base formulas P2
+
+P2 exposes `bases_formula_patch_plan → apply → status → recover` for named
+top-level formulas in one existing `.base`. It preserves every byte outside
+the authorized formula ranges and applies through Bases Bridge Atomic V1. In
+the Bridge settings, enable **Allow atomic Base CAS** for the pilot; keep
+**Legacy config writes** disabled so `bases_upsert_config` cannot bypass the
+governed path.
+
+Deterministic gates:
+
+```bash
+npm run test:governed-base
+```
+
+The release canary must use the dedicated Operon Bridge pilot vault and an
+exact disposable copy of `PROJETS.base`. Never target the canonical Base. Keep
+the OS-temporary recovery directory until stale-plan conflict, exact backup
+restoration, and final SHA equality are proven.
+
 ## Tasks: How It Works Now
 
 Tasks are no longer a separate MCP requirement for Codex.

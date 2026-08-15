@@ -18,7 +18,7 @@ documents autorisés hors du coffre.
 | Domaine                 | Ce que fournit le MCP                                                                           | Dépendance principale                                              |
 | ----------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Notes                   | Lecture/recherche/update plus plans gouvernés de note atomique et Frontmatter source-preserving | Coffre ; Local REST API + Atomic Write Bridge pour le CAS gouverné |
-| Bases et Canvas         | Requêtes/écritures Bases, validation et helpers Canvas bornés                                   | Bases Bridge pour Bases en live                                    |
+| Bases et Canvas         | Requêtes Bases, plans de formules gouvernés et source-preserving, validation et helpers Canvas bornés | Bases Bridge live et CAS Base typé |
 | Tâches                  | Lecture/requête Tasks + 23 outils Operon gouvernés                                              | Operon Developer API V1 via le Bridge                              |
 | Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable                                   | `.smart-env` + embedding Ollama ou OpenAI                          |
 | Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions                            | Filesystem local                                                   |
@@ -89,7 +89,7 @@ Activer seulement les surfaces utilisées :
 
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) :
   notes, métadonnées et tags en live ;
-- **Bases Bridge (REST)** inclus : opérations `.base` en live ;
+- **Bases Bridge (REST)** inclus : requêtes `.base` live et CAS typé opt-in pour les formules source-preserving gouvernées `plan → apply → status → recover` ; les remplacements complets historiques sont désactivés par défaut ([contrat P2](docs/governed-base-formula-p2.fr.md)) ;
 - **Optimike Atomic Write Bridge** inclus : compare-and-replace SHA-256 opt-in pour les plans gouvernés de note complète et Frontmatter source-preserving `plan → apply → status → recover` ; `planRef` opaque, réponse perdue → `status`, recovery exact ≠ undo ([note](docs/governed-note-replacement.fr.md), [P1](docs/governed-frontmatter-p1.fr.md)) ;
 - **Smart Connections** : index sémantique `.smart-env` ;
 - **Operon Developer API V1** et **Optimike Operon Bridge** inclus : tâches live

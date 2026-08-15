@@ -44,6 +44,17 @@ const DEFAULT_MUTATION_TOOLS = [
   "operon_set_relationships",
   "operon_update_recurrence",
   "operon_recover_mutation",
+  "external_move_apply",
+  "external_move_rollback",
+  "obsidian_note_replace_plan",
+  "obsidian_note_replace_apply",
+  "obsidian_note_replace_recover",
+  "obsidian_frontmatter_patch_plan",
+  "obsidian_frontmatter_patch_apply",
+  "obsidian_frontmatter_patch_recover",
+  "bases_formula_patch_plan",
+  "bases_formula_patch_apply",
+  "bases_formula_patch_recover",
 ].join(",");
 
 function envInteger(defaultValue: number, min: number, max: number) {

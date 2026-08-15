@@ -63,7 +63,11 @@ contract. Clients must send batch members as separate requests.
 
 The default expensive set contains semantic search aliases, runtime maintenance, global search, Bases queries, Tasks scans and queries, selected Operon rebuild/validation operations, external reads and external handoff.
 
-The mutation set contains the registered note, frontmatter, tag, canvas, filesystem, Bases and Operon mutation tools. The sets are explicit and configurable through:
+The mutation set contains the registered note, frontmatter, tag, canvas,
+filesystem, Bases, Operon, external-move and governed-operation state-changing
+tools. Governed `plan`, `apply` and `recover` calls are included because they
+write durable state or can execute/reconcile a backend mutation. The sets are
+explicit and configurable through:
 
 ```dotenv
 MCP_HTTP_EXPENSIVE_TOOLS=smart_semantic_search,obsidian_global_search,bases_query,query_tasks,external_handoff

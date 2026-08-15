@@ -1,0 +1,36 @@
+name: P2 Governed Base
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/p2-governed-base.yml"
+      - "plugins/obsidian-bases-bridge/**"
+      - "src/services/baseConfigPatchCompiler.ts"
+      - "src/services/baseFormulaProjectionRuntime.ts"
+      - "src/services/operations/obsidianNoteReplace*.ts"
+      - "src/services/operations/restBaseAtomicWriteBackend.ts"
+      - "src/services/obsidianRestAPI/**"
+      - "src/mcp-server/tools/governedBaseFormulaTools/**"
+      - "scripts/test-base-config-p2-compiler.mjs"
+      - "scripts/test-governed-base-*.mjs"
+      - "docs/governed-base-formula-p2*"
+  workflow_dispatch:
+
+jobs:
+  p2-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix plugins/obsidian-bases-bridge ci
+      - run: npm run test:governed-base
+      - run: node scripts/test-governed-base-doc-contract.mjs

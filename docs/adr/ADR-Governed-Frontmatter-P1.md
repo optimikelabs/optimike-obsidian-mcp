@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, implemented, and prepared for release in `2.7.0`. The pure model,
+Accepted, implemented, and released in `2.7.0`. The pure model,
 compiler, multi-process identity, stdio/HTTP MCP, runtime, Operon,
 documentation, package, and production-audit gates pass. Live admission passed
 in the disposable Obsidian pilot vault on 2026-08-14. PR #51 merged the exact

@@ -41,7 +41,12 @@ const [
   read("scripts/smoke-governed-frontmatter-live.mjs"),
 ]);
 const pkg = JSON.parse(await read("package.json"));
-assert.equal(pkg.version, "2.7.0");
+const [major, minor] = pkg.version.split(".").map(Number);
+assert.equal(
+  major > 2 || (major === 2 && minor >= 7),
+  true,
+  "P1 requires package version 2.7.0 or later.",
+);
 
 for (const tool of tools) {
   for (const [name, content] of [
@@ -79,7 +84,7 @@ assert.match(adr, /Observer/);
 assert.match(adr, /Failure matrix/);
 assert.match(adr, /Linearization points/);
 assert.match(adr, /actualDiff\(before, after\)/);
-assert.match(adr, /Accepted, implemented, and prepared for release in `2\.7\.0`/);
+assert.match(adr, /Accepted, implemented, and released in `2\.7\.0`/);
 assert.match(adr, /Live admission passed[\s\S]*2026-08-14/i);
 assert.match(
   adr,

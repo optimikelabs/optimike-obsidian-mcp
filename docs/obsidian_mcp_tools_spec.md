@@ -9,6 +9,7 @@ Related docs:
 - Runtime modes: [runtime-capability-matrix.md](runtime-capability-matrix.md)
 - Operations: [../OPERATIONS.md](../OPERATIONS.md)
 - Governed atomic note replacement: [governed-note-replacement.md](governed-note-replacement.md)
+- Governed Base formulas P2: [governed-base-formula-p2.md](governed-base-formula-p2.md)
 - Agent routing: [mcp-routing-guide.md](mcp-routing-guide.md)
 - External roots: [external-roots-setup.md](external-roots-setup.md)
 - Operon contract: [operon-mcp-contract.md](operon-mcp-contract.md)
@@ -106,6 +107,20 @@ operation runtime.
 Unsupported or ambiguous YAML fails closed. The Markdown body, line endings,
 comments, ordering, quoting, indentation, and all non-target source ranges
 remain byte-identical. See [the P1 contract](governed-frontmatter-p1.md).
+
+### Governed Base formula P2
+
+- `bases_formula_patch_plan`: compile bounded named formula set/delete intent
+  while sealing exact Base bytes, backend binding and source proof;
+- `bases_formula_patch_apply`: execute only that sealed plan through Bases
+  Bridge Atomic V1;
+- `bases_formula_patch_status`: reconcile the durable receipt without a new
+  mutation;
+- `bases_formula_patch_recover`: resume only the same sealed uncertain plan.
+
+The legacy `bases_upsert_config` and `bases_create` effects are blocked by
+default at Bases Bridge. Their explicit compatibility toggle must remain off
+while using P2. See [the P2 contract](governed-base-formula-p2.md).
 
 ## Metadata And Tags
 

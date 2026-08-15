@@ -24,8 +24,29 @@ import {
   type ObsidianNoteReplaceProjection,
 } from "./obsidianNoteReplaceJournal.js";
 
-const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
 const SHA256 = /^[a-f0-9]{64}$/u;
+
+export type AtomicResourceProfile = {
+  operationKind: string;
+  planRefPrefix: string;
+  targetKind: string;
+  beforeProofKind: string;
+  afterProofKind: string;
+  backendKind: string;
+  requiredExtension: string;
+  targetLabel: string;
+};
+
+const NOTE_PROFILE: AtomicResourceProfile = {
+  operationKind: "obsidian.note.replace",
+  planRefPrefix: "obsidian-note-replace:v1:",
+  targetKind: "vault-markdown-note",
+  beforeProofKind: "note-sha256",
+  afterProofKind: "atomic-note-replacement-verified",
+  backendKind: "obsidian-vault-process",
+  requiredExtension: ".md",
+  targetLabel: "Markdown note",
+};
 
 const StatusSchema = z
   .object({
@@ -82,17 +103,20 @@ export type ObsidianNoteReplacePlanInput = {
   projection?: ObsidianNoteReplaceProjection;
 };
 
-function planRef(operationId: string): string {
-  return `${PLAN_REF_PREFIX}${operationId}`;
+function planRef(profile: AtomicResourceProfile, operationId: string): string {
+  return `${profile.planRefPrefix}${operationId}`;
 }
 
-function operationIdFromRef(reference: string): string {
-  if (!reference.startsWith(PLAN_REF_PREFIX)) {
+function operationIdFromRef(
+  profile: AtomicResourceProfile,
+  reference: string,
+): string {
+  if (!reference.startsWith(profile.planRefPrefix)) {
     throw new Error(
-      "The operation plan reference is not a note-replace V1 plan.",
+      `The operation plan reference is not a ${profile.operationKind} plan.`,
     );
   }
-  const operationId = reference.slice(PLAN_REF_PREFIX.length);
+  const operationId = reference.slice(profile.planRefPrefix.length);
   if (!z.string().uuid().safeParse(operationId).success) {
     throw new Error("The note-replace operation plan reference is malformed.");
   }
@@ -108,10 +132,13 @@ function state(plan: ObsidianNoteReplacePlan): {
   return { phase: "terminal", outcome: plan.status };
 }
 
-function planDigest(plan: ObsidianNoteReplacePlan): string {
+function planDigest(
+  profile: AtomicResourceProfile,
+  plan: ObsidianNoteReplacePlan,
+): string {
   return operationDigest({
     contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
-    operationKind: "obsidian.note.replace",
+    operationKind: profile.operationKind,
     operationId: plan.operationId,
     idempotencyKey: plan.idempotencyKey,
     backendBinding: plan.bindingFingerprint,
@@ -128,28 +155,31 @@ function planDigest(plan: ObsidianNoteReplacePlan): string {
   });
 }
 
-function receipt(plan: ObsidianNoteReplacePlan): OperationReceipt {
+function receipt(
+  profile: AtomicResourceProfile,
+  plan: ObsidianNoteReplacePlan,
+): OperationReceipt {
   const current = state(plan);
   const terminal = current.phase === "terminal";
   const recoverable =
     plan.status === "applying" || plan.status === "outcome_unknown";
-  const digest = planDigest(plan);
+  const digest = planDigest(profile, plan);
   return {
     contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
     operationId: plan.operationId,
     idempotencyKey: plan.idempotencyKey,
-    operationKind: "obsidian.note.replace",
-    planRef: planRef(plan.operationId),
+    operationKind: profile.operationKind,
+    planRef: planRef(profile, plan.operationId),
     planDigest: digest,
     phase: current.phase,
     outcome: current.outcome,
     backend: {
-      kind: "obsidian-vault-process",
+      kind: profile.backendKind,
       bindingFingerprint: plan.bindingFingerprint,
     },
-    target: { kind: "vault-markdown-note", logicalRef: plan.path },
+    target: { kind: profile.targetKind, logicalRef: plan.path },
     beforeProof: {
-      kind: "note-sha256",
+      kind: profile.beforeProofKind,
       digest: operationDigest({
         path: plan.path,
         sha256: plan.beforeSha256,
@@ -160,7 +190,7 @@ function receipt(plan: ObsidianNoteReplacePlan): OperationReceipt {
     ...(plan.status === "committed"
       ? {
           afterProof: {
-            kind: "atomic-note-replacement-verified",
+            kind: profile.afterProofKind,
             digest: operationDigest({
               path: plan.path,
               sha256: plan.afterSha256,
@@ -183,15 +213,21 @@ function receipt(plan: ObsidianNoteReplacePlan): OperationReceipt {
     admittedAt: plan.createdAt,
     updatedAt: plan.updatedAt,
     ...(terminal ? { terminalAt: plan.updatedAt } : {}),
-    ...(recoverable ? { recoveryRef: planRef(plan.operationId) } : {}),
+    ...(recoverable ? { recoveryRef: planRef(profile, plan.operationId) } : {}),
     recoveryAllowed: recoverable,
     applyAllowed: plan.status === "planned",
   };
 }
 
-function validateInput(input: ObsidianNoteReplacePlanInput): void {
-  if (!input.path || !input.path.toLowerCase().endsWith(".md")) {
-    throw new Error("path must identify a Markdown note.");
+function validateInput(
+  profile: AtomicResourceProfile,
+  input: ObsidianNoteReplacePlanInput,
+): void {
+  if (
+    !input.path ||
+    !input.path.toLowerCase().endsWith(profile.requiredExtension)
+  ) {
+    throw new Error(`path must identify a ${profile.targetLabel}.`);
   }
   if (!input.idempotencyKey.trim()) {
     throw new Error("idempotencyKey is required.");
@@ -234,12 +270,15 @@ function validateInput(input: ObsidianNoteReplacePlanInput): void {
 export class ObsidianNoteReplaceOperationAdapter
   implements OperationAdapter<ObsidianNoteReplacePlanInput>
 {
-  readonly operationKind = "obsidian.note.replace";
+  readonly operationKind: string;
 
   constructor(
     private readonly backend: AtomicWriteBackend,
     private readonly journal: ObsidianNoteReplaceJournal,
-  ) {}
+    private readonly profile: AtomicResourceProfile = NOTE_PROFILE,
+  ) {
+    this.operationKind = profile.operationKind;
+  }
 
   private replayIfDurableWinner(
     input: ObsidianNoteReplacePlanInput,
@@ -256,11 +295,11 @@ export class ObsidianNoteReplaceOperationAdapter
         existing.idempotencyIdentity === input.idempotencyIdentity
       : existing.path === input.path && existing.afterSha256 === afterSha256;
     if (!matches) throw noteReplaceIdempotencyConflict();
-    return receipt(existing);
+    return receipt(this.profile, existing);
   }
 
   async plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
-    validateInput(input);
+    validateInput(this.profile, input);
     const afterSha256 = createHash("sha256")
       .update(input.nextContent, "utf8")
       .digest("hex");
@@ -341,6 +380,7 @@ export class ObsidianNoteReplaceOperationAdapter
         : {}),
     });
     return receipt(
+      this.profile,
       this.journal.create({
         idempotencyKey: input.idempotencyKey,
         requestDigest,
@@ -362,14 +402,14 @@ export class ObsidianNoteReplaceOperationAdapter
     idempotencyKey: string,
   ): Promise<OperationReceipt> {
     const plan = this.required(reference, idempotencyKey);
-    if (plan.status === "committed") return receipt(plan);
+    if (plan.status === "committed") return receipt(this.profile, plan);
     if (plan.status !== "planned") {
       if (plan.status === "applying") {
         // A second caller may be observing a live executor. Reconcile only
         // terminal proof; never classify an in-flight apply as interrupted.
-        return receipt(await this.reconcile(plan));
+        return receipt(this.profile, await this.reconcile(plan));
       }
-      return receipt(plan);
+      return receipt(this.profile, plan);
     }
     let applying: ObsidianNoteReplacePlan;
     try {
@@ -382,17 +422,17 @@ export class ObsidianNoteReplaceOperationAdapter
       if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
       const current = this.journal.get(plan.operationId);
       if (!current) throw error;
-      return receipt(current);
+      return receipt(this.profile, current);
     }
-    return receipt(await this.execute(applying, false));
+    return receipt(this.profile, await this.execute(applying, false));
   }
 
   async status(reference: string): Promise<OperationReceipt> {
     const plan = this.required(reference);
     if (plan.status === "applying" || plan.status === "outcome_unknown") {
-      return receipt(await this.reconcile(plan));
+      return receipt(this.profile, await this.reconcile(plan));
     }
-    return receipt(plan);
+    return receipt(this.profile, plan);
   }
 
   async recover(
@@ -400,24 +440,25 @@ export class ObsidianNoteReplaceOperationAdapter
     idempotencyKey: string,
   ): Promise<OperationReceipt> {
     let plan = this.required(reference, idempotencyKey);
-    if (plan.status === "committed") return receipt(plan);
+    if (plan.status === "committed") return receipt(this.profile, plan);
     if (plan.status !== "applying" && plan.status !== "outcome_unknown") {
-      return receipt(plan);
+      return receipt(this.profile, plan);
     }
     plan = await this.reconcile(plan);
     if (plan.status === "applying") {
       // A live executor still owns this plan. Only a persisted interruption
       // marker (outcome_unknown) authorizes exact-plan re-execution.
-      return receipt(plan);
+      return receipt(this.profile, plan);
     }
     if (plan.status !== "outcome_unknown") {
-      return receipt(plan);
+      return receipt(this.profile, plan);
     }
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
     if (read.bindingFingerprint !== plan.bindingFingerprint) {
       return receipt(
+        this.profile,
         this.transitionOrReload(
           plan,
           [plan.status],
@@ -427,10 +468,14 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 === plan.afterSha256) {
-      return receipt(this.transitionOrReload(plan, [plan.status], "committed"));
+      return receipt(
+        this.profile,
+        this.transitionOrReload(plan, [plan.status], "committed"),
+      );
     }
     if (read.sha256 !== plan.beforeSha256) {
       return receipt(
+        this.profile,
         this.uncertain(
           plan,
           "Recovery found a hash matching neither sealed proof after the original request may have been sent.",
@@ -448,16 +493,16 @@ export class ObsidianNoteReplaceOperationAdapter
       if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
       const current = this.journal.get(plan.operationId);
       if (!current) throw error;
-      return receipt(current);
+      return receipt(this.profile, current);
     }
-    return receipt(await this.execute(applying, true));
+    return receipt(this.profile, await this.execute(applying, true));
   }
 
   private required(
     reference: string,
     idempotencyKey?: string,
   ): ObsidianNoteReplacePlan {
-    const plan = this.journal.get(operationIdFromRef(reference));
+    const plan = this.journal.get(operationIdFromRef(this.profile, reference));
     if (!plan) throw new Error("Unknown note-replace operation plan.");
     if (
       idempotencyKey !== undefined &&

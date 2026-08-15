@@ -37,6 +37,7 @@ import {
 } from "../services/vaultFileService.js";
 import { assertWriteAllowed } from "../services/writePolicy.js";
 import { ExternalRootsService } from "../services/externalRootsService.js";
+import type { GovernedBaseFormulaRuntime } from "../services/baseFormulaProjectionRuntime.js";
 import {
   validateJsonCanvas,
   validateObsidianFormat,
@@ -1618,6 +1619,7 @@ async function createMcpServerInstance(
   obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
+  governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
 ): Promise<McpServer> {
   const context = requestContextService.createRequestContext({
     operation: "createMcpServerInstance",
@@ -1702,6 +1704,7 @@ async function createMcpServerInstance(
       server,
       vaultCacheService,
       governedNoteReplaceRuntime,
+      governedBaseFormulaRuntime,
     );
     const externalRootsService = config.externalRootsFile
       ? await ExternalRootsService.fromConfigFile(config.externalRootsFile)
@@ -1822,6 +1825,7 @@ async function startTransport(
   obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
+  governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
 ): Promise<McpServer | ServerType | void> {
   const transportType = config.mcpTransportType;
   const context = requestContextService.createRequestContext({
@@ -1842,6 +1846,7 @@ async function startTransport(
         obsidianService,
         vaultCacheService,
         governedNoteReplaceRuntime,
+        governedBaseFormulaRuntime,
       );
     const httpServerInstance = await startHttpTransport(
       mcpServerFactory,
@@ -1861,6 +1866,7 @@ async function startTransport(
       obsidianService,
       vaultCacheService,
       governedNoteReplaceRuntime,
+      governedBaseFormulaRuntime,
     );
     logger.debug("Delegating to connectStdioTransport...", context);
     await connectStdioTransport(server, context);
@@ -1895,6 +1901,7 @@ export async function initializeAndStartServer(
   obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
+  governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
 ): Promise<void | McpServer | ServerType> {
   const context = requestContextService.createRequestContext({
     operation: "initializeAndStartServer",
@@ -1916,6 +1923,7 @@ export async function initializeAndStartServer(
       obsidianService,
       vaultCacheService,
       governedNoteReplaceRuntime,
+      governedBaseFormulaRuntime,
     );
     logger.info(
       "MCP Server initialization sequence completed successfully.",

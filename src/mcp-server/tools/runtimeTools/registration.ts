@@ -14,6 +14,8 @@ import {
   type GovernedNoteReplaceRuntime,
 } from "../governedNoteReplaceTools/index.js";
 import { registerGovernedFrontmatterTools } from "../governedFrontmatterTools/index.js";
+import { registerGovernedBaseFormulaTools } from "../governedBaseFormulaTools/index.js";
+import type { GovernedBaseFormulaRuntime } from "../../../services/baseFormulaProjectionRuntime.js";
 import { registerOperonTools } from "../operonTools/index.js";
 
 const MaintenanceInputSchema = z.object({
@@ -33,6 +35,7 @@ export async function registerRuntimeTools(
   server: McpServer,
   vaultCacheService: VaultCacheService | undefined,
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
+  governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
 ): Promise<void> {
   server.tool(
     "obsidian_runtime_status",
@@ -76,5 +79,6 @@ export async function registerRuntimeTools(
 
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
   await registerGovernedFrontmatterTools(server, governedNoteReplaceRuntime);
+  await registerGovernedBaseFormulaTools(server, governedBaseFormulaRuntime);
   await registerOperonTools(server);
 }

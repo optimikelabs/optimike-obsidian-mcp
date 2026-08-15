@@ -69,6 +69,51 @@ export type AtomicWriteCasResponse = {
   bindingFingerprint: string;
 };
 
+export type BaseAtomicReadRequest = {
+  contractVersion: 1;
+  path: string;
+};
+
+export type BaseAtomicCasRequest = BaseAtomicReadRequest & {
+  bindingFingerprint: string;
+  expectedSha256: string;
+  nextYaml: string;
+};
+
+export type BaseAtomicStatusResponse = {
+  ok: true;
+  contractVersion: 1;
+  plugin: { id: string; version: string };
+  backend: {
+    kind: "obsidian-vault-process-base";
+    bindingFingerprint: string;
+    atomicCas: true;
+    writeEnabled: boolean;
+  };
+  limits: { baseOnly: true; sourcePreservingCompilerRequired: true };
+  migration: { legacyConfigWritesEnabled: boolean };
+};
+
+export type BaseAtomicReadResponse = {
+  ok: true;
+  contractVersion: 1;
+  path: string;
+  yaml: string;
+  sha256: string;
+  size: number;
+  bindingFingerprint: string;
+};
+
+export type BaseAtomicCasResponse = {
+  ok: true;
+  contractVersion: 1;
+  path: string;
+  beforeSha256: string;
+  afterSha256: string;
+  size: number;
+  bindingFingerprint: string;
+};
+
 /**
  * Filesystem metadata for a note.
  */

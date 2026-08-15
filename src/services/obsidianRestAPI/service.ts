@@ -17,6 +17,7 @@ import {
 } from "../../utils/index.js"; // Added requestContextService
 import * as activeFileMethods from "./methods/activeFileMethods.js";
 import * as atomicWriteMethods from "./methods/atomicWriteMethods.js";
+import * as baseAtomicWriteMethods from "./methods/baseAtomicWriteMethods.js";
 import * as basesMethods from "./methods/basesMethods.js";
 import * as commandMethods from "./methods/commandMethods.js";
 import * as openMethods from "./methods/openMethods.js";
@@ -31,6 +32,11 @@ import {
   AtomicWriteReadRequest,
   AtomicWriteReadResponse,
   AtomicWriteStatusResponse,
+  BaseAtomicCasRequest,
+  BaseAtomicCasResponse,
+  BaseAtomicReadRequest,
+  BaseAtomicReadResponse,
+  BaseAtomicStatusResponse,
   BaseConfigResponse,
   BaseConfigUpsertRequest,
   BaseConfigUpsertResponse,
@@ -269,6 +275,37 @@ export class ObsidianRestApiService {
     context: RequestContext,
   ): Promise<AtomicWriteCasResponse> {
     return atomicWriteMethods.replaceAtomicWriteNote(
+      this._request.bind(this),
+      payload,
+      context,
+    );
+  }
+
+  async getBaseAtomicStatus(
+    context: RequestContext,
+  ): Promise<BaseAtomicStatusResponse> {
+    return baseAtomicWriteMethods.getBaseAtomicStatus(
+      this._request.bind(this),
+      context,
+    );
+  }
+
+  async readAtomicBase(
+    payload: BaseAtomicReadRequest,
+    context: RequestContext,
+  ): Promise<BaseAtomicReadResponse> {
+    return baseAtomicWriteMethods.readAtomicBase(
+      this._request.bind(this),
+      payload,
+      context,
+    );
+  }
+
+  async replaceAtomicBase(
+    payload: BaseAtomicCasRequest,
+    context: RequestContext,
+  ): Promise<BaseAtomicCasResponse> {
+    return baseAtomicWriteMethods.replaceAtomicBase(
       this._request.bind(this),
       payload,
       context,
