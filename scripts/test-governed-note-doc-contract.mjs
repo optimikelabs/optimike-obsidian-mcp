@@ -174,6 +174,10 @@ assert.match(
 assert.match(liveCanary, /renameSync\(logsPath, retainedLogsPath\)/);
 assert.match(liveCanary, /Canary transient runtime logs:/);
 assert.match(liveCanary, /runtimeLogsPath: logsPath/);
+assert.match(
+  liveCanary,
+  /backupMetadata\.runtimeLogsPath = retainedLogsPath[\s\S]*writeFileSync\([\s\S]*backupMetadataPath/,
+);
 assert.ok(
   liveCanary.indexOf("Canary transient runtime logs:") <
     liveCanary.indexOf("new StdioClientTransport"),

@@ -194,6 +194,7 @@ let runId;
 let evidenceFile;
 let backupWritten = false;
 let retainedLogsPath;
+let backupMetadata;
 try {
   await client.connect(transport);
   const { tools } = await client.listTools();
@@ -210,21 +211,18 @@ try {
   originalContent = await readNote();
   runId = randomUUID();
   writeFileSync(backupPath, originalContent, { encoding: "utf8", mode: 0o600 });
+  backupMetadata = {
+    canaryPath,
+    createdAt: new Date().toISOString(),
+    sha256: sha256(originalContent),
+    backupPath,
+    runtimeLogsPath: logsPath,
+    recoveryInstruction:
+      "If the canary process terminates before restoration, restore original-content.md only to the explicit canary note.",
+  };
   writeFileSync(
     backupMetadataPath,
-    `${JSON.stringify(
-      {
-        canaryPath,
-        createdAt: new Date().toISOString(),
-        sha256: sha256(originalContent),
-        backupPath,
-        runtimeLogsPath: logsPath,
-        recoveryInstruction:
-          "If the canary process terminates before restoration, restore original-content.md only to the explicit canary note.",
-      },
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify(backupMetadata, null, 2)}\n`,
     { encoding: "utf8", mode: 0o600 },
   );
   backupWritten = true;
@@ -345,6 +343,12 @@ try {
     } catch {
       retainedLogsPath = logsPath;
     }
+    backupMetadata.runtimeLogsPath = retainedLogsPath;
+    writeFileSync(
+      backupMetadataPath,
+      `${JSON.stringify(backupMetadata, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
     console.error(
       `Canary recovery evidence retained at ${tempRoot}; runtime logs retained at ${retainedLogsPath}; restore only the explicit canary note from ${backupPath}.`,
     );
