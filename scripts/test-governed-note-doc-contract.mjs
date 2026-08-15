@@ -172,6 +172,13 @@ assert.match(
   /transientLogsParent[\s\S]*process\.cwd\(\)[\s\S]*["']logs["'][\s\S]*mkdtempSync/,
 );
 assert.match(liveCanary, /renameSync\(logsPath, retainedLogsPath\)/);
+assert.match(liveCanary, /Canary transient runtime logs:/);
+assert.match(liveCanary, /runtimeLogsPath: logsPath/);
+assert.ok(
+  liveCanary.indexOf("Canary transient runtime logs:") <
+    liveCanary.indexOf("new StdioClientTransport"),
+  "the transient log path must be observable before the canary connects",
+);
 assert.doesNotMatch(
   liveCanary,
   /const logsPath = path\.join\(tempRoot, ["']logs["']\)/,

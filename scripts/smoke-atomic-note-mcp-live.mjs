@@ -60,6 +60,7 @@ const logsPath = mkdtempSync(path.join(transientLogsParent, "run-"));
 const backupPath = path.join(tempRoot, "original-content.md");
 const backupMetadataPath = path.join(tempRoot, "original-content.json");
 console.error(`Canary recovery directory: ${tempRoot}`);
+console.error(`Canary transient runtime logs: ${logsPath}`);
 
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -217,6 +218,7 @@ try {
         createdAt: new Date().toISOString(),
         sha256: sha256(originalContent),
         backupPath,
+        runtimeLogsPath: logsPath,
         recoveryInstruction:
           "If the canary process terminates before restoration, restore original-content.md only to the explicit canary note.",
       },
