@@ -167,5 +167,25 @@ assert.match(contractFr, /conflit CAS suivant reste `outcome_unknown`/i);
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
 await access("scripts/smoke-atomic-note-mcp-live.mjs");
+assert.match(
+  liveCanary,
+  /transientLogsParent[\s\S]*process\.cwd\(\)[\s\S]*["']logs["'][\s\S]*mkdtempSync/,
+);
+assert.match(liveCanary, /renameSync\(logsPath, retainedLogsPath\)/);
+assert.match(liveCanary, /Canary transient runtime logs:/);
+assert.match(liveCanary, /runtimeLogsPath: logsPath/);
+assert.match(
+  liveCanary,
+  /backupMetadata\.runtimeLogsPath = retainedLogsPath[\s\S]*writeFileSync\([\s\S]*backupMetadataPath/,
+);
+assert.ok(
+  liveCanary.indexOf("Canary transient runtime logs:") <
+    liveCanary.indexOf("new StdioClientTransport"),
+  "the transient log path must be observable before the canary connects",
+);
+assert.doesNotMatch(
+  liveCanary,
+  /const logsPath = path\.join\(tempRoot, ["']logs["']\)/,
+);
 
 console.log("PASS: governed atomic note replacement documentation is coherent");

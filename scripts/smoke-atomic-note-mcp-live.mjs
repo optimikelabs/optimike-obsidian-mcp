@@ -2,7 +2,13 @@
 
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -40,11 +46,21 @@ const tempRoot = mkdtempSync(
   path.join(tempParent, "optimike-atomic-note-mcp-live-"),
 );
 const journalPath = path.join(tempRoot, "note-replace.sqlite");
-const logsPath = path.join(tempRoot, "logs");
+// Runtime logging is intentionally constrained to the project boundary. Keep
+// the private backup and journal in the OS temporary directory, while staging
+// transient logs under the gitignored logs/ tree. If manual recovery is ever
+// required, move those logs beside the private recovery artifacts.
+const transientLogsParent = path.join(
+  process.cwd(),
+  "logs",
+  "atomic-note-live",
+);
+mkdirSync(transientLogsParent, { recursive: true });
+const logsPath = mkdtempSync(path.join(transientLogsParent, "run-"));
 const backupPath = path.join(tempRoot, "original-content.md");
 const backupMetadataPath = path.join(tempRoot, "original-content.json");
-mkdirSync(logsPath, { recursive: true });
 console.error(`Canary recovery directory: ${tempRoot}`);
+console.error(`Canary transient runtime logs: ${logsPath}`);
 
 const transport = new StdioClientTransport({
   command: process.execPath,
@@ -177,6 +193,8 @@ let restored = false;
 let runId;
 let evidenceFile;
 let backupWritten = false;
+let retainedLogsPath;
+let backupMetadata;
 try {
   await client.connect(transport);
   const { tools } = await client.listTools();
@@ -193,20 +211,18 @@ try {
   originalContent = await readNote();
   runId = randomUUID();
   writeFileSync(backupPath, originalContent, { encoding: "utf8", mode: 0o600 });
+  backupMetadata = {
+    canaryPath,
+    createdAt: new Date().toISOString(),
+    sha256: sha256(originalContent),
+    backupPath,
+    runtimeLogsPath: logsPath,
+    recoveryInstruction:
+      "If the canary process terminates before restoration, restore original-content.md only to the explicit canary note.",
+  };
   writeFileSync(
     backupMetadataPath,
-    `${JSON.stringify(
-      {
-        canaryPath,
-        createdAt: new Date().toISOString(),
-        sha256: sha256(originalContent),
-        backupPath,
-        recoveryInstruction:
-          "If the canary process terminates before restoration, restore original-content.md only to the explicit canary note.",
-      },
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify(backupMetadata, null, 2)}\n`,
     { encoding: "utf8", mode: 0o600 },
   );
   backupWritten = true;
@@ -316,14 +332,28 @@ try {
   }
   await client.close().catch(() => undefined);
   if (restored) {
+    rmSync(logsPath, { recursive: true, force: true });
     rmSync(tempRoot, { recursive: true, force: true });
     if (evidenceFile)
       console.error(`Canary evidence written to ${evidenceFile}`);
   } else if (backupWritten) {
+    retainedLogsPath = path.join(tempRoot, "runtime-logs");
+    try {
+      renameSync(logsPath, retainedLogsPath);
+    } catch {
+      retainedLogsPath = logsPath;
+    }
+    backupMetadata.runtimeLogsPath = retainedLogsPath;
+    writeFileSync(
+      backupMetadataPath,
+      `${JSON.stringify(backupMetadata, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
     console.error(
-      `Canary recovery evidence retained at ${tempRoot}; restore only the explicit canary note from ${backupPath}.`,
+      `Canary recovery evidence retained at ${tempRoot}; runtime logs retained at ${retainedLogsPath}; restore only the explicit canary note from ${backupPath}.`,
     );
   } else {
+    rmSync(logsPath, { recursive: true, force: true });
     rmSync(tempRoot, { recursive: true, force: true });
     console.error(
       "Canary failed before the first mutation; no note recovery is required.",
