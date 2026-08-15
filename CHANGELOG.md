@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-08-15
+
+### Fixed
+
+- The Atomic Note live canary now respects the runtime log-directory boundary,
+  announces its transient log path before connecting, and keeps retained
+  recovery metadata aligned if those logs are moved after a failed restore.
+
 ## [2.8.0] - 2026-08-15
 
 ### Added

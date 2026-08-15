@@ -286,7 +286,7 @@ try {
         originalSha256: original.sha256,
         finalSha256: final.sha256,
         bridgeVersion: status.plugin.version,
-        mcpVersion: process.env.MCP_SERVER_VERSION ?? "2.8.0",
+        mcpVersion: process.env.MCP_SERVER_VERSION ?? "2.8.1",
         checks: [
           "typed_base_binding",
           "plan_without_write",

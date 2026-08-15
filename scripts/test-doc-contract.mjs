@@ -106,8 +106,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "2.8.0",
-  "released package metadata must match the bounded 2.8.0 P2 authority",
+  "2.8.1",
+  "released package metadata must match the 2.8.1 canary-boundary patch",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
