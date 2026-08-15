@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.8.0] - 2026-08-14
+## [2.8.0] - 2026-08-15
 
 ### Added
 
@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Named formula set/delete preserves every byte outside authorized source
   ranges and fails closed on ambiguous YAML, aliases, tags, merge keys,
   duplicate/case-colliding names, mixed line endings and final-formula delete.
+- Parsed YAML node ranges fence formula ownership, including block-scalar
+  content that resembles comments or blank trivia. Governed state-changing
+  HTTP calls use mutation backpressure by default.
 - The live pilot proved no-write planning, apply/status, replay, stale-plan
   conflict and exact final SHA restoration in the dedicated Operon Bridge test
   vault.

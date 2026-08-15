@@ -12,6 +12,11 @@ const files = [
   "plugins/obsidian-bases-bridge/README.md",
 ].map((path) => [path, readFileSync(path, "utf8")]);
 const joined = files.map(([path, content]) => `${path}\n${content}`).join("\n");
+const releaseAdr = readFileSync(
+  "docs/adr/ADR-Governed-Base-Formula-P2.md",
+  "utf8",
+);
+const changelog = readFileSync("CHANGELOG.md", "utf8");
 
 for (const tool of [
   "bases_formula_patch_plan",
@@ -54,6 +59,13 @@ assert.doesNotMatch(
   joined,
   /generic public operation API is (?:available|exposed)/iu,
   "P2 must not claim a generic public operation surface",
+);
+assert.match(releaseAdr, /Accepted, implemented and released in `2\.8\.0`/u);
+assert.match(releaseAdr, /post-merge Windows\/Linux Runtime workflow passed/u);
+assert.match(changelog, /## \[2\.8\.0\] - 2026-08-15/u);
+assert.match(
+  changelog,
+  /Governed state-changing\s+HTTP calls use mutation backpressure/u,
 );
 
 console.log(

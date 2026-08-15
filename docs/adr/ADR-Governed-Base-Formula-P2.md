@@ -2,10 +2,10 @@
 
 ## Status
 
-Accepted and implemented as the `2.8.0` release candidate. Compiler, typed
-Bridge CAS, durable runtime, stdio MCP, documentation and pilot-vault canary
-gates pass. Merge, exact-head external review, post-merge CI and publication
-remain repository-authority decisions.
+Accepted, implemented and released in `2.8.0`. Compiler, typed Bridge CAS,
+durable runtime, stdio/HTTP MCP, documentation and pilot-vault canary gates
+passed. PR #53 merged at `cd43c53f`; its exact-head external review and the
+post-merge Windows/Linux Runtime workflow passed before publication.
 
 ## Authority and fixture
 

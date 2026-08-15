@@ -3,15 +3,15 @@
 ADRs record decisions and their boundaries. Operational commands belong in
 setup or operations guides, not in this index.
 
-| ADR                                                                                                                | Current status                                                                          | Relationship                                                             |
-| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| [External document roots](ADR-External-Document-Roots.md)                                                          | Accepted and implemented; handoff and local move contracts later amended                | Base authorization, confinement and read/handoff contract                |
-| [Governed HTTP delivery](ADR-HTTP-External-Artifact-Delivery.md)                                                   | Accepted and implemented on `main` for authenticated loopback; remote remains pilot     | Adds `http_ticket`; HTTP mutation remains denied                         |
-| [External reference integrity](ADR-External-Reference-Integrity.md) / [FR](ADR-External-Reference-Integrity.fr.md) | Accepted and implemented for a local stdio pilot                                        | Same-root file move, exact ÉLYSIA reference repair, journal and rollback |
-| [Operon Bridge](ADR-Operon-Bridge.md)                                                                              | Accepted for bounded pilot                                                              | Versioned task-domain bridge and guarded mutation contract               |
-| [Common governed operation runtime](ADR-Common-Operation-Runtime.md)                                               | Accepted and released in 2.6.0; public atomic-note projection and live canary complete | Shared plan, apply, status, receipt and exact-plan recovery vocabulary   |
-| [P1 governed frontmatter projection](ADR-Governed-Frontmatter-P1.md)                                               | Accepted, implemented and released in 2.7.0                                             | Source-preserving domain compiler projected over the released P0 runtime |
-| [P2 governed Base formula operation](ADR-Governed-Base-Formula-P2.md)                                              | Accepted and implemented as a 2.8.0 release candidate; live pilot passed                | Second typed backend, source-preserving formula intent and legacy migration |
+| ADR                                                                                                                | Current status                                                                         | Relationship                                                                |
+| ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [External document roots](ADR-External-Document-Roots.md)                                                          | Accepted and implemented; handoff and local move contracts later amended               | Base authorization, confinement and read/handoff contract                   |
+| [Governed HTTP delivery](ADR-HTTP-External-Artifact-Delivery.md)                                                   | Accepted and implemented on `main` for authenticated loopback; remote remains pilot    | Adds `http_ticket`; HTTP mutation remains denied                            |
+| [External reference integrity](ADR-External-Reference-Integrity.md) / [FR](ADR-External-Reference-Integrity.fr.md) | Accepted and implemented for a local stdio pilot                                       | Same-root file move, exact ÉLYSIA reference repair, journal and rollback    |
+| [Operon Bridge](ADR-Operon-Bridge.md)                                                                              | Accepted for bounded pilot                                                             | Versioned task-domain bridge and guarded mutation contract                  |
+| [Common governed operation runtime](ADR-Common-Operation-Runtime.md)                                               | Accepted and released in 2.6.0; public atomic-note projection and live canary complete | Shared plan, apply, status, receipt and exact-plan recovery vocabulary      |
+| [P1 governed frontmatter projection](ADR-Governed-Frontmatter-P1.md)                                               | Accepted, implemented and released in 2.7.0                                            | Source-preserving domain compiler projected over the released P0 runtime    |
+| [P2 governed Base formula operation](ADR-Governed-Base-Formula-P2.md)                                              | Accepted, implemented and released in 2.8.0; live pilot passed                         | Second typed backend, source-preserving formula intent and legacy migration |
 
 ## Status vocabulary
 
@@ -30,3 +30,7 @@ mutation. The P1 ADR is accepted and implemented after its
 source-preservation proof, projected concurrency tests, Linux/Windows CI,
 exact-head Codex Review, live Obsidian canary, merge, and post-merge `main`
 workflow all passed.
+The P2 ADR is accepted and implemented after its parsed-node
+source-preservation proof, second typed Bridge CAS, HTTP mutation backpressure,
+Linux/Windows CI, exact-head Codex Review, live Base canary, merge, and
+post-merge `main` workflow all passed. It is released in `2.8.0`.

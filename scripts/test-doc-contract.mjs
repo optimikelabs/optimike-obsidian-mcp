@@ -107,7 +107,7 @@ const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
   "2.8.0",
-  "release-candidate package metadata must match the bounded 2.8.0 P2 authority",
+  "released package metadata must match the bounded 2.8.0 P2 authority",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
