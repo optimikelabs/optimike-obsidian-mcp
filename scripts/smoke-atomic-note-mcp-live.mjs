@@ -2,7 +2,13 @@
 
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -40,10 +46,19 @@ const tempRoot = mkdtempSync(
   path.join(tempParent, "optimike-atomic-note-mcp-live-"),
 );
 const journalPath = path.join(tempRoot, "note-replace.sqlite");
-const logsPath = path.join(tempRoot, "logs");
+// Runtime logging is intentionally constrained to the project boundary. Keep
+// the private backup and journal in the OS temporary directory, while staging
+// transient logs under the gitignored logs/ tree. If manual recovery is ever
+// required, move those logs beside the private recovery artifacts.
+const transientLogsParent = path.join(
+  process.cwd(),
+  "logs",
+  "atomic-note-live",
+);
+mkdirSync(transientLogsParent, { recursive: true });
+const logsPath = mkdtempSync(path.join(transientLogsParent, "run-"));
 const backupPath = path.join(tempRoot, "original-content.md");
 const backupMetadataPath = path.join(tempRoot, "original-content.json");
-mkdirSync(logsPath, { recursive: true });
 console.error(`Canary recovery directory: ${tempRoot}`);
 
 const transport = new StdioClientTransport({
@@ -177,6 +192,7 @@ let restored = false;
 let runId;
 let evidenceFile;
 let backupWritten = false;
+let retainedLogsPath;
 try {
   await client.connect(transport);
   const { tools } = await client.listTools();
@@ -316,14 +332,22 @@ try {
   }
   await client.close().catch(() => undefined);
   if (restored) {
+    rmSync(logsPath, { recursive: true, force: true });
     rmSync(tempRoot, { recursive: true, force: true });
     if (evidenceFile)
       console.error(`Canary evidence written to ${evidenceFile}`);
   } else if (backupWritten) {
+    retainedLogsPath = path.join(tempRoot, "runtime-logs");
+    try {
+      renameSync(logsPath, retainedLogsPath);
+    } catch {
+      retainedLogsPath = logsPath;
+    }
     console.error(
-      `Canary recovery evidence retained at ${tempRoot}; restore only the explicit canary note from ${backupPath}.`,
+      `Canary recovery evidence retained at ${tempRoot}; runtime logs retained at ${retainedLogsPath}; restore only the explicit canary note from ${backupPath}.`,
     );
   } else {
+    rmSync(logsPath, { recursive: true, force: true });
     rmSync(tempRoot, { recursive: true, force: true });
     console.error(
       "Canary failed before the first mutation; no note recovery is required.",
