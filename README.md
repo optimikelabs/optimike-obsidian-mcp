@@ -126,20 +126,20 @@ set report `certified`; unknown non-denied versions exposing the accessor report
 `index.ready`, and the exact capability. Missing capabilities fail closed only
 for affected tools; known regressions remain denied.
 Operon `3.2.0` remains the earlier certified pilot baseline. Modified-time frontmatter settlement and
-multi-window consent were merged upstream before these releases. Saved-filter execution is available
+multi-window consent were merged upstream before the current release. Saved-filter execution is available
 through the additive task-workflow Developer API after an exact grant, but the
 official API does not expose the saved-filter catalog: callers must supply an
 exact `filterSetId` obtained from Operon's UI/configuration or an operator
 workflow. Adoption remains unavailable on the official Developer API. Operon
-`3.3.0` passed the complete live pilot and remains admitted as
-`compatible-provisional` by the contract-first policy rather than a product-version allowlist. Operon still omits the declarative Settings renderer for Developer API grant
-controls; the fix is tracked in [#145](https://github.com/hasanyilmaz/operon/issues/145)
-and [#146](https://github.com/hasanyilmaz/operon/pull/146).
-No MCP route falls back to Markdown or private APIs. Implicit File Task renames
-remain tracked in [#139](https://github.com/hasanyilmaz/operon/pull/139), and the
-unscoped transition edge case remains tracked in
-[#99](https://github.com/hasanyilmaz/operon/issues/99) and
-[#101](https://github.com/hasanyilmaz/operon/pull/101).
+`3.3.2` with Operon CLI `1.1.2` is the current complete live-pilot baseline and
+remains admitted as `compatible-provisional` by the contract-first policy
+rather than a product-version allowlist. Operon `3.3.2` restores the Developer
+API Settings controls, rejects implicit File Task renames, and fixes unscoped
+Project Serial transition settlement. The production acceptance proved a
+non-terminal transition and exact restoration with 30 tasks, no pending
+recovery, and `P0/P1/P2 = 0/0/0`. Adoption is the only tracked official API gap
+([Operon #140](https://github.com/hasanyilmaz/operon/issues/140)). No MCP route
+falls back to Markdown or private APIs.
 
 ## External document roots
 

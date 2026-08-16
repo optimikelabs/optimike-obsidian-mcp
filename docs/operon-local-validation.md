@@ -7,19 +7,19 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `3.3.0` for the completed contract-first live pilot; `3.2.1` remains in the explicit certified set, and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Operon `3.3.2` with Operon CLI `1.1.2` for the completed contract-first live pilot; `3.2.1` remains in the explicit certified set, and `2.4.0` / `2.5.0` remain legacy-read fixtures
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
 
-The adapter certifies through Operon `3.2.1` and gives `3.3.0` provisional
-version/accessor admission. The `3.3.0` live acceptance run separately proves
+The adapter certifies through Operon `3.2.1` and gives `3.3.2` provisional
+version/accessor admission. The `3.3.2` live acceptance run separately proves
 the Developer API, schema, index, capability, and readiness gates and is
 complete and green; keeping its runtime state provisional preserves the
-contract-first policy. The missing grant-control
-renderer is tracked in upstream #145/#146. Fixes #135 and #137 are already merged. File Task rename safety remains
-tracked by [#139](https://github.com/hasanyilmaz/operon/pull/139), and transition
-settlement by #99/#101. Unsupported or uncertain paths stay fail-closed; this
+contract-first policy. Settings grant controls, implicit File Task rename
+refusal, and unscoped transition settlement are fixed in `3.3.2`. Adoption
+remains unavailable through the official Developer API and is tracked in
+[#140](https://github.com/hasanyilmaz/operon/issues/140). Unsupported or uncertain paths stay fail-closed; this
 recipe never authorizes a Markdown/private-API fallback or a blind retry.
 
 ## 1. Automated checks
@@ -406,12 +406,12 @@ PASS:
 - Obsidian and MCP backend restart, no pending recovery, no residual relation or
   recurrence, and final `P0/P1/P2 = 0/0/0`.
 
-OPEN BOUNDARIES:
+BOUNDARIES AT THE TIME OF THIS 3.2.0 PILOT:
 
 - adoption is not exposed by the official Developer API;
 - saved-filter IDs must come from Operon's UI/configuration or an operator
   workflow because the official API does not list the catalog;
-- #99/#101 and #139 remain fail-closed paths;
+- #99/#101 and #139 were fail-closed paths; Operon `3.3.2` later fixed them;
 - no deletion tool, generic CLI passthrough, raw Markdown or private API exists
   in the MCP.
 
@@ -449,6 +449,39 @@ NOT RUN LIVE:
 The `compatible-provisional` label records version/accessor admission only.
 The successful Developer API status, schema, index, capability, and readiness
 checks above are the independent evidence that authorized this pilot.
+
+## 20. Official Operon 3.3.2 / CLI 1.1.2 paired acceptance — 2026-08-17
+
+Inputs:
+
+- official Operon `3.3.2` and Operon CLI `1.1.2`;
+- Optimike Operon Bridge `0.7.0` and the 23-tool MCP surface;
+- Local REST API, exact Developer API grants, and both mutation opt-ins;
+- paired pre-cutover backup and rollback to Operon `3.3.1` / CLI `1.1.1`.
+
+PASS:
+
+- Windows bootstrap progressed through `starting`, `cache-ready`, and `ready`;
+- the live source exposed 30 tasks, saved filter `fs_elysia_now`, and no pending
+  recovery;
+- a temporary task passed a sealed `Planifié → En cours` apply and exact
+  `En cours → Planifié` restoration with fresh host consent;
+- both transition applies returned terminal `applied` results with matching
+  postflight state;
+- the fixture was backed up, deleted through the official operator CLI, and
+  confirmed absent from the live index;
+- the final snapshot returned to 30 tasks, two historical Operon Pilot tasks,
+  zero recovery, and `P0/P1/P2 = 0/0/0`.
+
+CURRENT BOUNDARIES:
+
+- adoption remains unavailable through the official Developer API (#140);
+- saved-filter execution requires an exact known ID because catalog discovery
+  is not exposed;
+- delete, reminders, pin state, and timer control/session remain CLI operator
+  actions rather than MCP tools;
+- no generic CLI passthrough, raw Markdown mutation, or private API fallback is
+  permitted.
 
 ## Executed pilot result — 2026-07-21
 

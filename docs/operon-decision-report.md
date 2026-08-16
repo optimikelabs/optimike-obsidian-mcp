@@ -1,24 +1,21 @@
 # Operon integration decision report
 
-## Current status — 2026-08-13
+## Current status — 2026-08-17
 
 Optimike Obsidian MCP Bridge `0.7.0` certifies Operon through `3.2.1` and admits
-the non-denied Operon `3.3.0` version with its Developer API V1 accessor as
+the non-denied Operon `3.3.2` version with its Developer API V1 accessor as
 `compatible-provisional`. Developer API status, schema, index readiness, and
 capabilities remain separate live-use gates. The canonical server registers
 twenty-three governed Operon tools. Kairélys remains disabled and retained only
 for bounded rollback compatibility.
 
-The complete local acceptance run is green on Operon `3.3.0` with Bridge
-`0.7.0`: persisted grants, governed apply/replay/conflict/postflight, thirty
-tasks, zero validation violations and zero recovery. The Settings fix remains
-tracked in upstream #145/#146. Remaining fail-closed
-limitations are tracked in:
-
-- transition settlement: [#99](https://github.com/hasanyilmaz/operon/issues/99)
-  and [#101](https://github.com/hasanyilmaz/operon/pull/101);
-- implicit File Task description/rename behavior:
-  [#139](https://github.com/hasanyilmaz/operon/pull/139).
+The complete local acceptance run is green on Operon `3.3.2`, Operon CLI
+`1.1.2`, and Bridge `0.7.0`: persisted grants, governed
+apply/replay/conflict/postflight, saved-filter execution, a non-terminal
+transition and exact restoration, thirty tasks, zero validation violations and
+zero recovery. Settings grant controls, implicit File Task rename refusal, and
+unscoped transition settlement are fixed upstream. Adoption remains the only
+tracked official API gap ([#140](https://github.com/hasanyilmaz/operon/issues/140)).
 
 No MCP or Bridge route falls back to raw Markdown, private Operon methods or UI
 commands when a capability is missing or an outcome is uncertain.
@@ -81,11 +78,12 @@ properties, hierarchy/dependencies, blocked/released transitions, conversion,
 idempotency, stale-revision conflict, reindex/restart, stale cache and duplicate
 ID refusal. It is not presented as Developer API V1 evidence.
 
-## Operon 3.3.0 acceptance evidence
+## Operon 3.3.2 acceptance evidence
 
-The 2026-08-13 production-shaped ÉLYSIA run used official Operon `3.3.0`,
-Bridge `0.7.0`, both mutation opt-ins, and Developer API V1. A pre-cutover
-backup and rollback path were verified before installation.
+The production-shaped ÉLYSIA baseline was upgraded through official Operon
+`3.3.2` with Operon CLI `1.1.2`, Bridge `0.7.0`, both mutation opt-ins, and
+Developer API V1. Pre-cutover backups and paired rollback paths were verified
+before installation.
 
 Observed results:
 
@@ -98,14 +96,18 @@ Observed results:
 - smoke task `1dbefy1` passed sealed preview/apply, idempotent replay,
   stale-revision conflict, semantic restoration, and postflight re-read;
 - final pending recovery inventory was empty after restoration.
+- a temporary task passed `Planifié → En cours → Planifié` with two terminal
+  applies and fresh host consent; it was then removed through the operator CLI
+  after backup;
+- the final live snapshot returned to 30 tasks and `P0/P1/P2 = 0/0/0`.
 
 The lost-response path was not forced against the live vault. Its exact-plan
 reconciliation remains fixture evidence, not part of this live acceptance
 claim.
 
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
-remain historical. The current runtime target is Operon `3.3.0` with Bridge
-`0.7.0`; CLI `1.1.0` remains the documented operator-reference target.
+remain historical. The current runtime target is Operon `3.3.2` with Bridge
+`0.7.0`; CLI `1.1.2` is the paired operator-reference target.
 
 ## Deliberately excluded or unavailable
 
@@ -124,6 +126,5 @@ Keep the current Operon integration active. Use MCP/Bridge for governed agent
 workflows and CLI for broad operator work. Keep Kairélys disabled but available
 for rollback until a separate non-dependency proof authorizes removal.
 
-The code and local acceptance work are complete. Remaining work is reviewing
-and publishing the prepared MCP and Operon settings patches under separate
-authorization, plus the separate real Sync/non-dependency decision.
+The code, publication, and local acceptance work are complete. The separate
+real Sync/non-dependency decision remains outside this integration scope.
