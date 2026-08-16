@@ -2,18 +2,16 @@
 
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
-Date: 2026-08-13
-Reference: official Operon `3.3.0` provisionally admitted by contract, certified Operon `3.2.1`, Operon CLI `1.1.0`, Developer API V1 and `cli-manifest-v1.json`.
+Date: 2026-08-17
+Reference: official Operon `3.3.2` provisionally admitted by contract, certified Operon `3.2.1`, Operon CLI `1.1.2`, Developer API V1 and `cli-manifest-v1.json`.
 
 The original 2026-08-01 CLI observations were made against Operon `3.0.1` and
 remain historical evidence. The current MCP adapter certifies `3.2.1` and
-admits `3.3.0` provisionally after contract negotiation. The complete `3.3.0`
-live acceptance run is green; the missing settings renderer is tracked in
-[#145](https://github.com/hasanyilmaz/operon/issues/145) and
-[#146](https://github.com/hasanyilmaz/operon/pull/146). Fixes #135 and #137 are already merged. File Task rename safety
-remains tracked in [#139](https://github.com/hasanyilmaz/operon/pull/139), and
-uncertain transition settlement in [#99](https://github.com/hasanyilmaz/operon/issues/99)
-and [#101](https://github.com/hasanyilmaz/operon/pull/101). The MCP remains
+admits `3.3.2` provisionally after contract negotiation. The complete `3.3.2`
+live acceptance run is green with CLI `1.1.2`: Settings grant controls, File
+Task rename refusal, and unscoped transition settlement are fixed upstream.
+Adoption remains unavailable through the official Developer API and is tracked
+in [#140](https://github.com/hasanyilmaz/operon/issues/140). The MCP remains
 fail-closed and does not fall back to Markdown or private APIs.
 
 ## Decision
@@ -90,11 +88,11 @@ recurrence add/scope-change/clear, restart/recovery stability, saved-filter
 execution with opaque pagination, live source, 25 tasks after fixture cleanup,
 no residual relationship/recurrence state, and `P0/P1/P2 = 0/0/0`.
 
-The remaining official transition edge may still return the bounded `outcome-unknown` result
-tracked by [Operon #99](https://github.com/hasanyilmaz/operon/issues/99) and
-[#101](https://github.com/hasanyilmaz/operon/pull/101). When the runtime cannot
-prove its result, the Bridge reports the uncertainty and does not retry or fall
-back to Markdown/private APIs. This remains a capability gate, not a hidden bypass.
+Operon `3.3.2` live acceptance additionally proved a non-terminal transition
+from planned to in-progress and exact restoration to planned through the
+official Developer API. Both applies returned terminal results; the fixture was
+removed through the operator CLI after backup. The vault returned to 30 tasks,
+no recovery remained, and validation returned `P0/P1/P2 = 0/0/0`.
 
 The read audit, implementation and live acceptance of the two useful advanced
 writes are complete. Other advanced writes remain outside MCP until each has a
@@ -122,7 +120,8 @@ datetime metadata, omitting those fields rather than failing the whole query.
 
 Conclusion: the CLI is a broader operator surface, but it was not a dependable
 transport layer for MCP on that historical Windows installation. The current
-package version is `1.1.0`, but this update does not claim every former handler
-failure was requalified through the CLI. Keep the MCP/Bridge contract independent
-and bounded; keep the CLI for operator diagnostics, native acceptance and
-recovery investigation. No real mutation was applied during the historical audit.
+paired package is `1.1.2`; its Windows bootstrap/health path and exact operator
+deletion were validated during the `3.3.2` acceptance. This does not reclassify
+every historical `1.0.0` handler observation. Keep the MCP/Bridge contract
+independent and bounded; keep the CLI for operator diagnostics, native
+acceptance and recovery investigation.

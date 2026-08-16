@@ -2,21 +2,21 @@
 
 English version: [operon-cli-audit.md](operon-cli-audit.md)
 
-Date : 2026-08-13
+Date : 2026-08-17
 
-Référence : Operon officiel `3.3.0` admis provisoirement par contrat, Operon
-`3.2.1` certifié, Operon CLI `1.1.0`, Developer API V1 et
+Référence : Operon officiel `3.3.2` admis provisoirement par contrat, Operon
+`3.2.1` certifié, Operon CLI `1.1.2`, Developer API V1 et
 `cli-manifest-v1.json`.
 
 Les observations CLI initiales du 1er août 2026 utilisaient Operon `3.0.1` et
 restent des preuves historiques. L’adaptateur MCP certifie `3.2.1` et admet
-`3.3.0` provisoirement après négociation du contrat. Le pilote live complet
-`3.3.0` est vert ; le renderer manquant est suivi dans
-[#145](https://github.com/hasanyilmaz/operon/issues/145) et
-[#146](https://github.com/hasanyilmaz/operon/pull/146). Les correctifs #135 et #137 sont déjà fusionnés. La sécurité
-de renommage File Task reste suivie dans #139 et le cas de transition incertain
-dans #99/#101. Le MCP échoue fermé et ne bascule jamais vers Markdown ou une API
-privée.
+`3.3.2` provisoirement après négociation du contrat. Le pilote live complet
+`3.3.2` avec CLI `1.1.2` est vert : les contrôles de grant dans les réglages,
+le refus des renommages implicites de File Tasks et le règlement des
+transitions sans portée Project Serial sont corrigés upstream. L’adoption reste
+indisponible dans l’API développeur officielle et est suivie dans
+[#140](https://github.com/hasanyilmaz/operon/issues/140). Le MCP échoue fermé et
+ne bascule jamais vers Markdown ou une API privée.
 
 ## Décision
 
@@ -87,9 +87,11 @@ transition terminale, restauration exacte, ajout/changement de portée/retrait d
 récurrence, redémarrage stable, exécution d’un filtre avec pagination opaque,
 source live, 25 tâches après nettoyage, aucun résidu et `P0/P1/P2 = 0/0/0`.
 
-Le chemin #99/#101 peut encore produire un résultat borné `outcome-unknown`.
-La limite File Task reste suivie dans #139. Le Bridge expose l’incertitude et ne
-rejoue pas la mutation.
+L’acceptation live `3.3.2` a aussi prouvé une transition non terminale de
+Planifié vers En cours, puis sa restauration exacte vers Planifié via l’API
+officielle. Les deux applies ont rendu un résultat terminal ; la fixture a été
+supprimée par la CLI opérateur après sauvegarde. Le coffre est revenu à 30
+tâches, sans recovery, avec `P0/P1/P2 = 0/0/0`.
 
 Les autres écritures avancées restent hors MCP jusqu’à disposer chacune d’un
 contrat preview/apply, révision, postflight, récupération et confirmation
@@ -104,8 +106,9 @@ setup, profil, doctor offline, `health`, `task.get`, `tasks.query` et
 Sur cette version, plusieurs handlers pourtant annoncés par `health` échouaient
 avant leur exécution avec `obsidian-cli-exit-failed` ou
 `persistent-write-failed`. Cette preuve reste historique et ne doit pas être
-présentée comme l’état de la CLI `1.1.0`, dont la version installable a seulement
-été vérifiée dans cette mise à jour.
+présentée comme l’état de la CLI `1.1.2`. Son bootstrap/health Windows et la
+suppression opérateur exacte ont été validés pendant l’acceptation `3.3.2`, sans
+requalifier pour autant chaque observation historique de la `1.0.0`.
 
 La conclusion d’architecture ne change pas : la CLI est la surface opérateur
 large. Le MCP/Bridge reste le contrat agentique indépendant, borné et vérifiable.

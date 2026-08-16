@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with non-denied `3.3.0` when its Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use the official preview/apply/recovery surface; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
+The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with non-denied `3.3.2` when its Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use the official preview/apply/recovery surface; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
 
 Prefix:
 
@@ -15,18 +15,18 @@ All routes inherit Local REST API authentication and TLS behavior.
 ## Compatibility and capabilities
 
 - Bridge contract: `1`
-- Certified compatibility through official Operon `3.2.1`; provisional contract admission and complete live read/write pilot: `3.3.0`
+- Certified compatibility through official Operon `3.2.1`; provisional contract admission and complete live read/write pilot: `3.3.2` with Operon CLI `1.1.2`
 - Official Operon legacy read allowlist: `2.4.0`, `2.5.0`
 - Official Operon Developer API V1 allowlist: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, `3.2.1`
 - Kairélys read allowlist: `2.5.1`, `2.5.2`, `2.5.3`, `2.6.1`, `2.6.2`, `2.6.3`
 - Legacy mutation contract: Operon Public API `1`
 - Official Operon `2.5.0`: read-only
-- Official Operon `3.2.x`: typed create/update/transition/relationship/recurrence/convert/relocate through Developer API V1, plus saved-filter execution through the additive task-workflow API, when the exact grants are active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
+- Official Operon `3.x` with the negotiated V1 boundary: typed create/update/transition/relationship/recurrence/convert/relocate through Developer API V1, plus saved-filter execution through the additive task-workflow API, when the exact grants are active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
 - Kairélys `2.5.1` through `2.5.3` and `2.6.1` through `2.6.3` with Public API v1: read-write
 
 `GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future non-denied Operon version is admitted provisionally when its Developer API V1 accessor is present; Markdown similarity is irrelevant. Live use remains independently gated by successful negotiation, `developerApi`, top-level `ok`, `index.ready`, and the exact advertised capability.
 
-The adapter certifies official `3.2.1` and provisionally admits `3.3.0`; the complete `3.3.0` live acceptance run is green. The missing Settings renderer is tracked by [#145](https://github.com/hasanyilmaz/operon/issues/145) and [#146](https://github.com/hasanyilmaz/operon/pull/146). Modified-time settlement and multi-window consent fixes from #135 and #137 are already merged. File Task rename safety remains tracked by [#139](https://github.com/hasanyilmaz/operon/pull/139), and the transition investigation by [#99](https://github.com/hasanyilmaz/operon/issues/99) and [#101](https://github.com/hasanyilmaz/operon/pull/101). Those paths stay fail-closed. No Markdown or private-API fallback is introduced.
+The adapter certifies official `3.2.1` and provisionally admits `3.3.2`; the complete `3.3.2` live acceptance run is green with Bridge `0.7.0` and CLI `1.1.2`. The release restores the Settings grant controls, rejects implicit File Task renames, and fixes transition settlement without Project Serial scopes. The live acceptance applied and restored a non-terminal transition, returned to 30 tasks, left no pending recovery, and validated `P0/P1/P2 = 0/0/0`. Adoption remains unavailable through the official Developer API and is tracked in [#140](https://github.com/hasanyilmaz/operon/issues/140). No Markdown or private-API fallback is introduced.
 
 Readiness requires a compatible plugin, positive generation, healthy idle V8 index, zero dirty sources, and a task count matching diagnostics. A duplicate-ID conflict is reported separately and causes MCP snapshot refresh refusal.
 
