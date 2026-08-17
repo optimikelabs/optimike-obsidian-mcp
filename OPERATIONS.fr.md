@@ -274,9 +274,11 @@ la restauration exacte ne peut pas être vérifiée.
 `Ctrl-C` et `SIGTERM` exécutent cette même restauration protégée avant la sortie
 du processus. Les mainteneurs peuvent prouver ce chemin d’interruption de façon
 déterministe avec
-`OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL=SIGTERM_AFTER_POSITIVE_APPLY` : le
-code de sortie attendu est `143`, tandis que le hash de la note et l’état activé
-du plugin doivent tous deux être identiques à leurs valeurs initiales.
+`OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL=SIGTERM_DURING_POSITIVE_APPLY` : le
+signal est injecté après l’acceptation du CAS par le Bridge mais avant la fin de
+l’apply MCP. Le code de sortie attendu est `143`, tandis que le hash de la note
+et l’état activé du plugin doivent tous deux être identiques à leurs valeurs
+initiales.
 
 ## Frontmatter gouvernée P1
 

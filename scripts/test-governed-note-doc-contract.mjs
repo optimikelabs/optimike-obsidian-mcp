@@ -256,6 +256,16 @@ assert.doesNotMatch(
 assert.match(modifiedTimeLiveCanary, /process\.on\("SIGINT", handleSigint\)/);
 assert.match(modifiedTimeLiveCanary, /process\.on\("SIGTERM", handleSigterm\)/);
 assert.match(modifiedTimeLiveCanary, /function cleanupOnce\(\)/);
+assert.match(modifiedTimeLiveCanary, /function trackMutation\(promise/);
+assert.match(modifiedTimeLiveCanary, /quiesceActiveMutation/);
+assert.match(
+  modifiedTimeLiveCanary,
+  /mutationQuiesced = await quiesceActiveMutation\(\);[\s\S]*await client\.close/,
+);
+assert.match(
+  modifiedTimeLiveCanary,
+  /mutationQuiesced &&[\s\S]*originalContent !== undefined/,
+);
 assert.match(
   modifiedTimeLiveCanary,
   /status\.backend\.bindingFingerprint !== originalBindingFingerprint/,
@@ -268,8 +278,12 @@ assert.match(
   modifiedTimeLiveCanary,
   /finally \{[\s\S]*await cleanupOnce\(\);[\s\S]*process\.off\("SIGINT"/,
 );
-assert.match(operations, /SELF_SIGNAL=SIGTERM_AFTER_POSITIVE_APPLY/);
-assert.match(operationsFr, /SELF_SIGNAL=SIGTERM_AFTER_POSITIVE_APPLY/);
+assert.match(operations, /SELF_SIGNAL=SIGTERM_DURING_POSITIVE_APPLY/);
+assert.match(operationsFr, /SELF_SIGNAL=SIGTERM_DURING_POSITIVE_APPLY/);
+assert.match(
+  modifiedTimeLiveCanary,
+  /signalDuringPositiveApply[\s\S]*request\.socket\.destroy\(\);[\s\S]*process\.emit\("SIGTERM"/,
+);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");

@@ -265,9 +265,10 @@ exact restoration cannot be verified.
 
 `Ctrl-C` and `SIGTERM` run that same guarded restoration before the process
 exits. Maintainers can prove this interruption path deterministically by setting
-`OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL=SIGTERM_AFTER_POSITIVE_APPLY`; the
-expected process exit code is `143`, while the note hash and plugin enabled
-state must both match their initial values.
+`OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL=SIGTERM_DURING_POSITIVE_APPLY`; the
+signal is injected after the Bridge accepts the CAS but before the MCP apply
+settles. The expected process exit code is `143`, while the note hash and plugin
+enabled state must both match their initial values.
 
 ## Governed frontmatter P1
 

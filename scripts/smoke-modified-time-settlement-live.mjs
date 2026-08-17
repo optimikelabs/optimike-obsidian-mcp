@@ -68,9 +68,15 @@ if (!apiKey) throw new Error("OBSIDIAN_API_KEY is required.");
 if (!new Set(["guarded", "full"]).has(writeMode)) {
   throw new Error("The live canary requires MCP_WRITE_MODE=guarded or full.");
 }
-if (!new Set(["", "SIGTERM_AFTER_POSITIVE_APPLY"]).has(selfSignal)) {
+if (
+  !new Set([
+    "",
+    "SIGTERM_AFTER_POSITIVE_APPLY",
+    "SIGTERM_DURING_POSITIVE_APPLY",
+  ]).has(selfSignal)
+) {
   throw new Error(
-    "OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL must be empty or SIGTERM_AFTER_POSITIVE_APPLY.",
+    "OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL must be empty, SIGTERM_AFTER_POSITIVE_APPLY, or SIGTERM_DURING_POSITIVE_APPLY.",
   );
 }
 
@@ -164,11 +170,23 @@ async function directRequest(route, { method = "GET", payload } = {}) {
   return JSON.parse(text);
 }
 
-async function atomicStatus() {
-  return directRequest("/extensions/obsidian-atomic-write-bridge/status");
+function assertMainFlowActive() {
+  if (shutdownRequested) {
+    throw new Error("The modified-time canary is shutting down.");
+  }
 }
 
-async function atomicRead() {
+async function atomicStatus({ cleanup = false } = {}) {
+  if (!cleanup) assertMainFlowActive();
+  const response = await directRequest(
+    "/extensions/obsidian-atomic-write-bridge/status",
+  );
+  if (!cleanup) assertMainFlowActive();
+  return response;
+}
+
+async function atomicRead({ cleanup = false } = {}) {
+  if (!cleanup) assertMainFlowActive();
   const response = await directRequest(
     "/extensions/obsidian-atomic-write-bridge/notes/read",
     {
@@ -176,6 +194,7 @@ async function atomicRead() {
       payload: { contractVersion: 1, path: canaryPath },
     },
   );
+  if (!cleanup) assertMainFlowActive();
   if (
     originalBindingFingerprint !== undefined &&
     response.bindingFingerprint !== originalBindingFingerprint
@@ -187,10 +206,15 @@ async function atomicRead() {
   return response;
 }
 
-async function atomicReplace(expectedSha256, nextContent, bindingFingerprint) {
-  const response = await directRequest(
-    "/extensions/obsidian-atomic-write-bridge/notes/cas",
-    {
+async function atomicReplace(
+  expectedSha256,
+  nextContent,
+  bindingFingerprint,
+  { cleanup = false } = {},
+) {
+  if (!cleanup) assertMainFlowActive();
+  const response = await trackMutation(
+    directRequest("/extensions/obsidian-atomic-write-bridge/notes/cas", {
       method: "POST",
       payload: {
         contractVersion: 1,
@@ -199,8 +223,10 @@ async function atomicReplace(expectedSha256, nextContent, bindingFingerprint) {
         expectedSha256,
         nextContent,
       },
-    },
+    }),
+    { cleanup },
   );
+  if (!cleanup) assertMainFlowActive();
   if (response.bindingFingerprint !== bindingFingerprint) {
     throw new Error(
       "The Atomic Write backend binding changed while applying a CAS.",
@@ -256,10 +282,17 @@ const proxy = createServer(async (request, response) => {
       dropNextCasResponse &&
       target.pathname === "/extensions/obsidian-atomic-write-bridge/notes/cas"
     ) {
+      const signalDuringPositiveApply =
+        selfSignal === "SIGTERM_DURING_POSITIVE_APPLY" &&
+        droppedCasResponses === 0;
       dropNextCasResponse = false;
       dropNextReconciliationRead = true;
       droppedCasResponses += 1;
       request.socket.destroy();
+      if (signalDuringPositiveApply) {
+        process.emit("SIGTERM", "SIGTERM");
+        process.emit("SIGTERM", "SIGTERM");
+      }
       return;
     }
     response.statusCode = upstream.status;
@@ -333,7 +366,10 @@ function parse(result) {
 }
 
 async function call(name, args) {
-  return parse(await client.callTool({ name, arguments: args }));
+  assertMainFlowActive();
+  const result = parse(await client.callTool({ name, arguments: args }));
+  assertMainFlowActive();
+  return result;
 }
 
 async function plan(nextContent, idempotencyKey) {
@@ -348,10 +384,12 @@ async function plan(nextContent, idempotencyKey) {
 
 async function applyWithLostResponse(receipt, idempotencyKey) {
   dropNextCasResponse = true;
-  const result = await call("obsidian_note_replace_apply", {
-    planRef: receipt.planRef,
-    idempotencyKey,
-  });
+  const result = await trackMutation(
+    call("obsidian_note_replace_apply", {
+      planRef: receipt.planRef,
+      idempotencyKey,
+    }),
+  );
   assert.equal(result.outcome, "outcome_unknown");
   assert.equal(dropNextCasResponse, false);
   assert.equal(dropNextReconciliationRead, false);
@@ -371,11 +409,40 @@ let retainedLogsPath;
 let backupMetadata;
 let cleanupPromise;
 let signalExitInProgress = false;
+let shutdownRequested = false;
+let activeMutationPromise;
+let mutationQuiesced = true;
+
+async function trackMutation(promise, { cleanup = false } = {}) {
+  activeMutationPromise = promise;
+  try {
+    const result = await promise;
+    if (!cleanup) assertMainFlowActive();
+    return result;
+  } finally {
+    if (activeMutationPromise === promise) activeMutationPromise = undefined;
+  }
+}
+
+async function quiesceActiveMutation(timeoutMs = 20_000) {
+  const pending = activeMutationPromise;
+  if (!pending) return true;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    const settled = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    pending.then(settled, settled);
+  });
+}
 
 async function cleanup() {
+  mutationQuiesced = await quiesceActiveMutation();
   await client.close().catch(() => undefined);
   await new Promise((resolve) => proxy.close(resolve));
   if (
+    mutationQuiesced &&
     originalContent !== undefined &&
     originalBindingFingerprint !== undefined &&
     !restored
@@ -385,8 +452,8 @@ async function cleanup() {
         setPluginEnabled(false);
         pluginStateRestored = false;
       }
-      const current = await atomicRead();
-      const status = await atomicStatus();
+      const current = await atomicRead({ cleanup: true });
+      const status = await atomicStatus({ cleanup: true });
       if (status.backend.bindingFingerprint !== originalBindingFingerprint) {
         throw new Error(
           "The Atomic Write backend binding changed during cleanup; refusing cross-vault recovery.",
@@ -397,9 +464,10 @@ async function cleanup() {
           current.sha256,
           originalContent,
           originalBindingFingerprint,
+          { cleanup: true },
         );
       }
-      const finalRead = await atomicRead();
+      const finalRead = await atomicRead({ cleanup: true });
       restored =
         finalRead.sha256 === originalSha256 &&
         finalRead.content === originalContent;
@@ -431,7 +499,7 @@ async function cleanup() {
       pluginStateRestored = true;
       if (restored && originalContent !== undefined) {
         await new Promise((resolve) => setTimeout(resolve, 1_500));
-        const finalRead = await atomicRead();
+        const finalRead = await atomicRead({ cleanup: true });
         restored =
           finalRead.sha256 === originalSha256 &&
           finalRead.content === originalContent;
@@ -460,6 +528,7 @@ async function cleanup() {
       retainedLogsPath = logsPath;
     }
     backupMetadata.runtimeLogsPath = retainedLogsPath;
+    backupMetadata.mutationQuiesced = mutationQuiesced;
     writeFileSync(
       backupMetadataPath,
       `${JSON.stringify(backupMetadata, null, 2)}\n`,
@@ -485,6 +554,7 @@ function cleanupOnce() {
 function handleSignal(signal) {
   if (signalExitInProgress) return;
   signalExitInProgress = true;
+  shutdownRequested = true;
   const exitCode = signal === "SIGINT" ? 130 : 143;
   void cleanupOnce()
     .then(() => {
@@ -494,6 +564,7 @@ function handleSignal(signal) {
           interruptedBy: signal,
           restored,
           pluginStateRestored,
+          mutationQuiesced,
         }),
       );
     })
