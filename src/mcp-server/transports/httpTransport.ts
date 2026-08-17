@@ -7,8 +7,9 @@
  * 2. a bounded functional limiter keyed by verified authentication claims.
  *
  * Proxy headers are ignored unless the immediate peer belongs to the explicit
- * `MCP_TRUSTED_PROXIES` allowlist. MCP sessions are bound to the verified identity
- * that initialized them. Raw bearer tokens are never used as keys or log fields.
+ * `MCP_TRUSTED_PROXIES` allowlist. MCP sessions are bound to both the verified
+ * identity and the public tool profile that initialized them. Raw bearer tokens
+ * are never used as keys or log fields.
  *
  * @module src/mcp-server/transports/httpTransport
  */
@@ -37,6 +38,12 @@ import {
   RequestContext,
   requestContextService,
 } from "../../utils/index.js";
+import { withToolProfileContext } from "../toolProfileContext.js";
+import type { ToolProfileId } from "../toolProfiles.js";
+import {
+  rewriteProfiledMcpRequest,
+  toolProfileFromInternalRequest,
+} from "./httpToolProfileRouting.js";
 import {
   jwtAuthMiddleware,
   oauthMiddleware,
@@ -81,6 +88,7 @@ type HttpSession = {
   transport: WebStandardStreamableHTTPServerTransport;
   identityKey: string;
   identityPseudonym: string;
+  toolProfile: ToolProfileId;
   createdAt: number;
   lastSeenAt: number;
   activeRequests: number;
@@ -164,6 +172,10 @@ function originAllowed(origin: string): boolean {
   return (config.mcpAllowedOrigins ?? []).includes(origin);
 }
 
+function requestToolProfile(c: Context): ToolProfileId {
+  return toolProfileFromInternalRequest(c.req.raw);
+}
+
 async function authMiddleware(
   c: Context<{ Bindings: HttpBindings }>,
   next: Next,
@@ -200,8 +212,6 @@ async function rateLimitResponse(
   const requestState = getHttpRequestState(c.req.raw);
   const preAuthRejection = scope !== "client-identity";
   if (preAuthRejection && c.req.method === "POST") {
-    // Source limiting runs before the request-body guard. Never clone or parse
-    // an untrusted body on this rejection path; cancel it instead.
     void c.req.raw.body
       ?.cancel("pre-authentication source rate limit")
       .catch(() => undefined);
@@ -238,8 +248,6 @@ async function rateLimitResponse(
             ? "Rate-limit state capacity is temporarily exhausted."
             : "Rate limit exceeded.",
       },
-      // Quota rejection happens before request-body admission. Do not clone or
-      // parse an attacker-controlled body merely to recover its JSON-RPC id.
       id: null,
     },
     429,
@@ -412,6 +420,7 @@ function sessionForRequest(
   const session = transports.get(sessionId);
   if (!session) return undefined;
   const identity = requireIdentity(c);
+  const requestedProfile = requestToolProfile(c);
   if (session.identityKey !== identity.key) {
     logger.warning(
       "HTTP session identity mismatch rejected.",
@@ -419,6 +428,22 @@ function sessionForRequest(
         requestId: getHttpRequestState(c.req.raw).requestId,
         operation: "httpSessionIdentityMismatch",
         clientIdentity: identity.pseudonym,
+      }),
+    );
+    throw new McpError(
+      BaseErrorCode.NOT_FOUND,
+      "Invalid or expired session ID.",
+    );
+  }
+  if (session.toolProfile !== requestedProfile) {
+    logger.warning(
+      "HTTP session tool-profile mismatch rejected.",
+      requestContextService.createRequestContext({
+        requestId: getHttpRequestState(c.req.raw).requestId,
+        operation: "httpSessionToolProfileMismatch",
+        clientIdentity: identity.pseudonym,
+        sessionToolProfile: session.toolProfile,
+        requestedToolProfile: requestedProfile,
       }),
     );
     throw new McpError(
@@ -567,13 +592,18 @@ function startHttpServerWithRetry(
       }
 
       try {
+        const fetch = async (request: Request) => {
+          const routed = rewriteProfiledMcpRequest(request);
+          return routed instanceof Response ? routed : app.fetch(routed);
+        };
         const serverInstance = serve(
-          { fetch: app.fetch, port: currentPort, hostname: host },
+          { fetch, port: currentPort, hostname: host },
           (info: { address: string; port: number }) => {
             const serverAddress = `http://${info.address}:${info.port}${MCP_ENDPOINT_PATH}`;
             logger.info(`HTTP transport listening at ${serverAddress}`, {
               ...attemptContext,
               address: serverAddress,
+              toolProfiles: ["standard", "authoring", "tasks", "full"],
             });
             if (process.stdout.isTTY) {
               console.log(`\n🚀 MCP Server running at: ${serverAddress}\n`);
@@ -687,8 +717,6 @@ export async function startHttpTransport(
 
   app.use(MCP_ENDPOINT_PATH, preAuthRateLimitMiddleware);
   app.use(externalHandoffEndpoint, preAuthRateLimitMiddleware);
-  // Source limiting must happen before buffering. Its 429 path never reads the
-  // body; this guard then protects authentication and identity-quota errors.
   app.use(MCP_ENDPOINT_PATH, httpRequestBodyGuardMiddleware);
   app.use(MCP_ENDPOINT_PATH, authMiddleware);
   app.use(externalHandoffEndpoint, authMiddleware);
@@ -748,11 +776,13 @@ export async function startHttpTransport(
   app.post(MCP_ENDPOINT_PATH, async (c: Context) => {
     const state = getHttpRequestState(c.req.raw);
     const identity = requireIdentity(c);
+    const toolProfile = requestToolProfile(c);
     const postContext = requestContextService.createRequestContext({
       ...transportContext,
       requestId: state.requestId,
       operation: "handlePost",
       clientIdentity: identity.pseudonym,
+      toolProfile,
     });
     const body = await c.req.raw.clone().json();
     const sessionId = c.req.header("mcp-session-id");
@@ -787,6 +817,7 @@ export async function startHttpTransport(
             transport: newTransport,
             identityKey: identity.key,
             identityPseudonym: identity.pseudonym,
+            toolProfile,
             createdAt: now,
             lastSeenAt: now,
             activeRequests: 1,
@@ -800,6 +831,7 @@ export async function startHttpTransport(
                 requestContextService.createRequestContext({
                   operation: "expireHttpSessionMaxLifetime",
                   clientIdentity: identity.pseudonym,
+                  toolProfile,
                   sessionCount: transports.size,
                 }),
               );
@@ -835,7 +867,9 @@ export async function startHttpTransport(
       };
 
       try {
-        const server = await createServerInstanceFn();
+        const server = await withToolProfileContext(toolProfile, () =>
+          createServerInstanceFn(),
+        );
         await server.connect(newTransport);
         transport = newTransport;
       } catch (error) {
