@@ -313,11 +313,11 @@ export class GovernedCanvasRuntime {
     assertPolicy("plan", path, canonical.operations.length);
     const existing = this.journal.getByIdempotencyKey(durableKey);
     if (existing) {
-      projection(existing, key, canonical.digest);
+      const stored = projection(existing, key, canonical.digest);
       assertPolicy(
         "plan",
         existing.path,
-        canonical.operations.length,
+        stored.proof.changedNodes.length + stored.proof.changedEdgeCount,
         existing.nextContent.length,
       );
       return exposed(

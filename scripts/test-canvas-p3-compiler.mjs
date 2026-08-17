@@ -103,6 +103,34 @@ assert.deepEqual(
   JSON.parse(exactNumericLiteral.nextContent).edges.map((edge) => edge.id),
   ["bc"],
 );
+
+const largeSeparator = " ".repeat(20_000);
+const nonuniformSeparators = `{
+  "nodes": [
+    {"id":"root","type":"text","x":0,"y":0,"width":100,"height":100,"text":"R"},
+    {"id":"a","type":"text","x":200,"y":0,"width":100,"height":100,"text":"A"},
+    {"id":"b","type":"text","x":400,"y":0,"width":100,"height":100,"text":"B"},
+    {"id":"c","type":"text","x":600,"y":0,"width":100,"height":100,"text":"C"}
+  ],
+  "edges": [
+    {"id":"keep-1","fromNode":"a","toNode":"b"},${largeSeparator}
+    {"id":"remove","fromNode":"root","toNode":"a"},
+  {"id":"keep-2","fromNode":"b","toNode":"c"},
+      {"id":"keep-3","fromNode":"c","toNode":"a"}
+  ]
+}\n`;
+const preservedSeparators = compileCanvasPatch(nonuniformSeparators, [
+  { op: "delete_node", id: "root" },
+]);
+assert.equal(
+  preservedSeparators.nextContent.split(largeSeparator).length - 1,
+  1,
+  "each surviving edge must retain only its own original adjacent separator",
+);
+assert.deepEqual(
+  JSON.parse(preservedSeparators.nextContent).edges.map((edge) => edge.id),
+  ["keep-1", "keep-2", "keep-3"],
+);
 assert.throws(
   () =>
     compileCanvasPatch(source, [

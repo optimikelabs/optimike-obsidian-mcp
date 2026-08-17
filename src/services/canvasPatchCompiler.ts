@@ -193,10 +193,12 @@ function removeEdgesById(source: string, edgeIds: Set<string>): string {
   if (edges.length !== arrayNode.children.length) {
     fail("Canvas edge syntax is inconsistent.", "canvas_edges_syntax");
   }
-  const kept = arrayNode.children.filter(
-    (_, index) => !edgeIds.has(entityId(edges[index]!, "Canvas edge")),
-  );
-  if (kept.length === 0) {
+  const keptIndices = arrayNode.children
+    .map((_, index) => index)
+    .filter(
+      (index) => !edgeIds.has(entityId(edges[index]!, "Canvas edge")),
+    );
+  if (keptIndices.length === 0) {
     return applyEdits(source, [
       { offset: arrayNode.offset, length: arrayNode.length, content: "[]" },
     ]);
@@ -208,18 +210,30 @@ function removeEdgesById(source: string, edgeIds: Set<string>): string {
     lastOriginal.offset + lastOriginal.length,
     arrayNode.offset + arrayNode.length - 1,
   );
-  const separator =
-    arrayNode.children.length > 1
-      ? source.slice(
-          arrayNode.children[0]!.offset + arrayNode.children[0]!.length,
-          arrayNode.children[1]!.offset,
-        )
-      : `,${source.includes("\r\n") ? "\r\n" : "\n"}`;
-  const safeSeparator = separator.includes(",") ? separator : `,${separator}`;
-  const rawKept = kept.map((node) =>
-    source.slice(node.offset, node.offset + node.length),
-  );
-  const content = `[${prefix}${rawKept.join(safeSeparator)}${suffix}]`;
+  const rawKept = keptIndices.map((index, keptIndex) => {
+    const node = arrayNode.children![index]!;
+    const raw = source.slice(node.offset, node.offset + node.length);
+    if (keptIndex === keptIndices.length - 1) return raw;
+    const nextOriginal = arrayNode.children![index + 1];
+    if (!nextOriginal) {
+      fail(
+        "Canvas edge separators could not be preserved.",
+        "canvas_edges_syntax",
+      );
+    }
+    const separator = source.slice(
+      node.offset + node.length,
+      nextOriginal.offset,
+    );
+    if (!separator.includes(",")) {
+      fail(
+        "Canvas edge separator is invalid.",
+        "canvas_edges_syntax",
+      );
+    }
+    return `${raw}${separator}`;
+  });
+  const content = `[${prefix}${rawKept.join("")}${suffix}]`;
   return applyEdits(source, [
     { offset: arrayNode.offset, length: arrayNode.length, content },
   ]);

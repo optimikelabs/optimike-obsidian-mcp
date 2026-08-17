@@ -17,6 +17,7 @@ process.env.MCP_GUARDED_MAX_BATCH_OPERATIONS ||= "200";
 const { CANVAS_ATOMIC_PROFILE, GovernedCanvasRuntime } = await import(
   "../dist/services/canvasProjectionRuntime.js"
 );
+const { config } = await import("../dist/config/index.js");
 const root = mkdtempSync(path.join(os.tmpdir(), "optimike-canvas-p3-"));
 const bindingFingerprint = "c".repeat(64);
 let content = `${JSON.stringify(
@@ -255,13 +256,22 @@ try {
     )}\n`;
 
   content = graphWithIncidentEdges(129);
-  const wideProjection = await runtime.plan({
+  const wideIntent = {
     path: "Canary/Wide.canvas",
     operations: [{ op: "delete_node", id: "root" }],
     idempotencyKey: "canvas-p3-wide-proof",
-  });
+  };
+  const wideProjection = await runtime.plan(wideIntent);
   assert.equal(wideProjection.phase, "planned");
   assert.equal(wideProjection.projection.proof.removedIncidentEdgeCount, 129);
+  const originalBatchLimit = config.mcpGuardedMaxBatchOperations;
+  config.mcpGuardedMaxBatchOperations = 128;
+  await assert.rejects(
+    runtime.plan(wideIntent),
+    (error) =>
+      error instanceof McpError && error.code === BaseErrorCode.FORBIDDEN,
+  );
+  config.mcpGuardedMaxBatchOperations = originalBatchLimit;
 
   content = graphWithIncidentEdges(200);
   const rejectedKey = "canvas-p3-too-many-effects";
