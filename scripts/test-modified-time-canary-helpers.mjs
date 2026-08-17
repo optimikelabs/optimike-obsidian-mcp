@@ -10,6 +10,7 @@ assert.equal(isSafeModifiedTimePropertyName("modified.at"), true);
 assert.equal(isSafeModifiedTimePropertyName(" modified"), false);
 assert.equal(isSafeModifiedTimePropertyName("modified "), false);
 assert.equal(isSafeModifiedTimePropertyName("modified:at"), false);
+assert.equal(isSafeModifiedTimePropertyName("modified,time"), false);
 assert.equal(isSafeModifiedTimePropertyName("modified\nat"), false);
 assert.equal(isSafeModifiedTimePropertyName("x".repeat(129)), false);
 

@@ -199,6 +199,9 @@ assert.match(adr, /never\s+ignores a field\s+globally/i);
 assert.match(bridgeReadme, /Version 0\.2\.0/i);
 assert.match(bridgeReadme, /Frontmatter Date Manager/i);
 assert.match(bridgeReadme, /Update Time/i);
+assert.match(bridgeReadme, /comma-delimited fail-closed list/i);
+assert.match(contract, /never advertises[\s\S]*contains a comma/i);
+assert.match(contractFr, /n.annonce[\s\S]*contient une virgule/i);
 assert.match(
   security,
   /Supported modified-time plugins do not weaken that CAS/i,
@@ -220,7 +223,7 @@ assert.match(modifiedTimeLiveCanary, /os\.tmpdir\(\)/);
 assert.match(modifiedTimeLiveCanary, /dropNextCasResponse/);
 assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);
 assert.match(modifiedTimeLiveCanary, /waitForNextRepresentableTimestamp/);
-assert.match(modifiedTimeCanaryHelpers, /\[\\r\\n:\]/);
+assert.match(modifiedTimeCanaryHelpers, /\[,\\r\\n:\]/);
 assert.doesNotMatch(modifiedTimeCanaryHelpers, /\\p\{L\}.*\\p\{N\}/);
 assert.match(modifiedTimeCanaryHelpers, /representableTickMs/);
 assert.match(modifiedTimeCanaryHelpers, /60_000/);

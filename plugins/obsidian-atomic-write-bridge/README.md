@@ -36,6 +36,9 @@ The Bridge never relaxes CAS and never decides that a changed note is
 equivalent. Optimike MCP may use this metadata only after an effect, within a
 bounded attempt window, and only when the configured property is protected and
 the rest of the observed note is byte-identical to the sealed result.
+Property names containing a colon, comma, newline, surrounding whitespace, or
+more than 128 characters are not advertised. The comma boundary is required
+because `MCP_PROTECTED_FRONTMATTER_KEYS` is a comma-delimited fail-closed list.
 
 ## Install from source
 

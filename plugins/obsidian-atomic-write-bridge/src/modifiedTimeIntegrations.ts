@@ -27,7 +27,7 @@ function safePropertyName(value: unknown): string | undefined {
     value.length === 0 ||
     value.length > 128 ||
     value.trim() !== value ||
-    /[\r\n:]/u.test(value)
+    /[,\r\n:]/u.test(value)
   ) {
     return undefined;
   }

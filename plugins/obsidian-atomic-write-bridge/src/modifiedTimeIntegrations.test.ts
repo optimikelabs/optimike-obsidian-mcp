@@ -64,6 +64,14 @@ test("rejects inactive, numeric, timezone and unsafe configurations", () => {
     ),
     [],
   );
+  assert.deepEqual(
+    getModifiedTimeIntegrations(
+      app({
+        "update-time": { settings: { updatedPropertyName: "modified,time" } },
+      }),
+    ),
+    [],
+  );
 });
 
 test("deduplicates properties exposed by more than one supported plugin", () => {
