@@ -232,13 +232,15 @@ restoration retains the private directory at the recovery path printed when the
 script starts; restore only from its explicit backup metadata. Never point the
 canary at an ordinary user note.
 
-Atomic Write Bridge `0.2.0` also reports supported active modified-time
-integrations. When the disposable vault uses one, include its configured
-property in `MCP_PROTECTED_FRONTMATTER_KEYS` and add a lost-response canary in
-which the plugin advances only that timestamp. The gate passes only when the
-receipt is `committed`, records both the sealed target hash and the actual
-settled hash, and an additional body or frontmatter change still remains
-`outcome_unknown`.
+Atomic Write Bridge `0.3.0` reports supported active creation, modification and
+last-viewed properties. The MCP derives their structural protection without a
+duplicate `MCP_PROTECTED_FRONTMATTER_KEYS` entry; that variable remains
+additive for custom fields. The live gate deliberately uses a static sentinel
+key so it proves the Bridge-derived property. It passes only when the receipt
+is `committed`, records both the sealed target hash and the actual settled hash,
+and an additional body or frontmatter change remains `outcome_unknown`.
+This lost-response canary therefore verifies the derived contract rather than a
+duplicate environment allowlist.
 
 The repository provides that discriminating live gate for supported plugins:
 
@@ -262,6 +264,12 @@ for exact restoration,
 restores the original enabled state, writes a redacted JSON proof under the
 operating-system temporary root, and retains private recovery material only if
 exact restoration cannot be verified.
+
+The deterministic operation fixture separately proves the normal-response
+path: after CAS success, the MCP waits the Bridge-advertised plugin delay,
+re-reads the note and commits the observed settled hash. It also proves custom
+creation/modification/last-viewed names, missing-creation refusal and
+apply-time settings revalidation.
 
 `Ctrl-C` and `SIGTERM` run that same guarded restoration before the process
 exits. Maintainers can prove this interruption path deterministically by setting

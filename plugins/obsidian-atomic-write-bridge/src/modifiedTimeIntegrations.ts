@@ -1,6 +1,14 @@
 export type ModifiedTimeIntegration = {
   pluginId: "update-time-on-edit" | "frontmatter-date-manager" | "update-time";
   propertyName: string;
+  settlementObservationDelayMs: number;
+};
+
+export type FrontmatterDateIntegration = {
+  pluginId: ModifiedTimeIntegration["pluginId"];
+  createdPropertyName?: string;
+  modifiedPropertyName?: string;
+  viewedPropertyName?: string;
 };
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -44,40 +52,176 @@ function canonicalStringDatetime(settings: Record<string, unknown>): boolean {
   );
 }
 
+type IntegrationDefinition = {
+  pluginId: ModifiedTimeIntegration["pluginId"];
+  createdSettingName: string;
+  modifiedSettingName: string;
+  viewedSettingName?: string;
+  createdFallback?: string;
+  modifiedFallback?: string;
+  viewedFallback?: string;
+  createdActive: (settings: Record<string, unknown>) => boolean;
+  modifiedActive: (settings: Record<string, unknown>) => boolean;
+  viewedActive?: (settings: Record<string, unknown>) => boolean;
+  settlementActive: (settings: Record<string, unknown>) => boolean;
+  settlementObservationDelayMs: (
+    settings: Record<string, unknown>,
+  ) => number | undefined;
+};
+
+const MAX_SUPPORTED_SETTLEMENT_DELAY_MS = 4 * 60 * 1000;
+
+function boundedDelay(value: unknown, fallback: number): number | undefined {
+  const delay = typeof value === "number" ? value : fallback;
+  if (!Number.isFinite(delay) || delay < 0) return undefined;
+  const rounded = Math.ceil(delay);
+  return rounded <= MAX_SUPPORTED_SETTLEMENT_DELAY_MS ? rounded : undefined;
+}
+
+const DEFINITIONS: readonly IntegrationDefinition[] = [
+  {
+    pluginId: "update-time-on-edit",
+    createdSettingName: "headerCreated",
+    modifiedSettingName: "headerUpdated",
+    createdActive: (settings) => settings.enableCreateTime !== false,
+    modifiedActive: () => true,
+    settlementActive: canonicalStringDatetime,
+    settlementObservationDelayMs: () => 250,
+  },
+  {
+    pluginId: "frontmatter-date-manager",
+    createdSettingName: "headerCreated",
+    modifiedSettingName: "headerUpdated",
+    viewedSettingName: "headerLastViewed",
+    viewedFallback: "viewed",
+    createdActive: (settings) =>
+      settings.enableAutoUpdate === true && settings.enableCreateTime === true,
+    modifiedActive: (settings) =>
+      settings.enableAutoUpdate === true &&
+      settings.enableModifiedTime !== false,
+    viewedActive: (settings) =>
+      settings.enableAutoUpdate === true && settings.enableLastViewed === true,
+    settlementActive: (settings) =>
+      canonicalStringDatetime(settings) &&
+      (settings.timezone === undefined || settings.timezone === "") &&
+      settings.countUpdatesEnabled !== true &&
+      (settings.postUpdateCommand === undefined ||
+        settings.postUpdateCommand === "") &&
+      (settings.inversionFixStrategy === undefined ||
+        settings.inversionFixStrategy === "disabled"),
+    settlementObservationDelayMs: (settings) => {
+      const minimumSeconds = boundedDelay(settings.minSecondsBetweenSaves, 30);
+      return minimumSeconds === undefined
+        ? undefined
+        : boundedDelay(2_250 + minimumSeconds * 1_000, 32_250);
+    },
+  },
+  {
+    pluginId: "update-time",
+    createdSettingName: "createdPropertyName",
+    modifiedSettingName: "updatedPropertyName",
+    createdFallback: "created",
+    modifiedFallback: "updated",
+    createdActive: () => true,
+    modifiedActive: () => true,
+    // Update Time 1.2.1 fixes its format to yyyy-MM-dd'T'HH:mm and writes
+    // string properties. There is no format or numeric-type setting to admit.
+    settlementActive: () => true,
+    settlementObservationDelayMs: (settings) => {
+      const saveDelaySeconds = boundedDelay(settings.saveDelayInSeconds, 2);
+      return saveDelaySeconds === undefined
+        ? undefined
+        : boundedDelay(250 + saveDelaySeconds * 1_000, 2_250);
+    },
+  },
+];
+
+function configuredPropertyName(
+  settings: Record<string, unknown>,
+  settingName: string,
+  fallback?: string,
+): string | undefined {
+  const value = settings[settingName];
+  if (fallback !== undefined) {
+    if (typeof value !== "string") return safePropertyName(fallback);
+    const trimmed = value.trim();
+    return safePropertyName(trimmed.length === 0 ? fallback : trimmed);
+  }
+  return safePropertyName(value);
+}
+
+export function getFrontmatterDateIntegrations(
+  app: unknown,
+): FrontmatterDateIntegration[] {
+  const integrations: FrontmatterDateIntegration[] = [];
+  for (const definition of DEFINITIONS) {
+    const plugin = record(loadedPlugin(app, definition.pluginId));
+    const settings = record(plugin?.settings);
+    if (!settings) continue;
+    const createdPropertyName = definition.createdActive(settings)
+      ? configuredPropertyName(
+          settings,
+          definition.createdSettingName,
+          definition.createdFallback,
+        )
+      : undefined;
+    const modifiedPropertyName = definition.modifiedActive(settings)
+      ? configuredPropertyName(
+          settings,
+          definition.modifiedSettingName,
+          definition.modifiedFallback,
+        )
+      : undefined;
+    const viewedPropertyName =
+      definition.viewedSettingName && definition.viewedActive?.(settings)
+        ? configuredPropertyName(
+            settings,
+            definition.viewedSettingName,
+            definition.viewedFallback,
+          )
+        : undefined;
+    if (!createdPropertyName && !modifiedPropertyName && !viewedPropertyName) {
+      continue;
+    }
+    integrations.push({
+      pluginId: definition.pluginId,
+      ...(createdPropertyName ? { createdPropertyName } : {}),
+      ...(modifiedPropertyName ? { modifiedPropertyName } : {}),
+      ...(viewedPropertyName ? { viewedPropertyName } : {}),
+    });
+  }
+  return integrations;
+}
+
 export function getModifiedTimeIntegrations(
   app: unknown,
 ): ModifiedTimeIntegration[] {
-  const definitions = [
-    {
-      pluginId: "update-time-on-edit" as const,
-      settingName: "headerUpdated",
-      active: canonicalStringDatetime,
-    },
-    {
-      pluginId: "frontmatter-date-manager" as const,
-      settingName: "headerUpdated",
-      active: (settings: Record<string, unknown>) =>
-        settings.enableAutoUpdate === true &&
-        settings.enableModifiedTime !== false &&
-        canonicalStringDatetime(settings) &&
-        (settings.timezone === undefined || settings.timezone === ""),
-    },
-    {
-      pluginId: "update-time" as const,
-      settingName: "updatedPropertyName",
-      active: () => true,
-    },
-  ];
-  const seen = new Set<string>();
   const integrations: ModifiedTimeIntegration[] = [];
-  for (const definition of definitions) {
+  for (const definition of DEFINITIONS) {
     const plugin = record(loadedPlugin(app, definition.pluginId));
     const settings = record(plugin?.settings);
-    if (!settings || !definition.active(settings)) continue;
-    const propertyName = safePropertyName(settings[definition.settingName]);
-    if (!propertyName || seen.has(propertyName)) continue;
-    seen.add(propertyName);
-    integrations.push({ pluginId: definition.pluginId, propertyName });
+    if (
+      !settings ||
+      !definition.modifiedActive(settings) ||
+      !definition.settlementActive(settings)
+    ) {
+      continue;
+    }
+    const propertyName = configuredPropertyName(
+      settings,
+      definition.modifiedSettingName,
+      definition.modifiedFallback,
+    );
+    const settlementObservationDelayMs =
+      definition.settlementObservationDelayMs(settings);
+    if (!propertyName || settlementObservationDelayMs === undefined) {
+      continue;
+    }
+    integrations.push({
+      pluginId: definition.pluginId,
+      propertyName,
+      settlementObservationDelayMs,
+    });
   }
   return integrations;
 }

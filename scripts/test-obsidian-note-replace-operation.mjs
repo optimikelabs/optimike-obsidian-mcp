@@ -326,6 +326,7 @@ function fixture(name, options = {}) {
       undefined,
       {
         ...(options.now ? { now: options.now } : {}),
+        ...(options.sleep ? { sleep: options.sleep } : {}),
         modifiedTimeProtectedKeys: options.modifiedTimeProtectedKeys ?? [],
       },
     ),
@@ -585,6 +586,118 @@ try {
 
   {
     let now = Date.parse("2026-08-17T10:00:00.000Z");
+    let sleepCalls = 0;
+    let backend;
+    const clock = () => now;
+    const sleep = async (milliseconds) => {
+      sleepCalls += 1;
+      assert.equal(milliseconds, 2_250);
+      now += milliseconds;
+      backend.content = backend.content.replace(
+        "changedAt: 2026-08-17T09:59",
+        "changedAt: 2026-08-17T10:00",
+      );
+    };
+    const fixtureResult = fixture("successful-response-delayed-settlement", {
+      now: clock,
+      sleep,
+    });
+    backend = fixtureResult.backend;
+    const { adapter } = fixtureResult;
+    backend.content =
+      "---\nchangedAt: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "update-time",
+            propertyName: "changedAt",
+            settlementObservationDelayMs: 2_250,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "successful-response-delayed-settlement",
+    });
+    const result = await adapter.apply(
+      planned.planRef,
+      "successful-response-delayed-settlement",
+    );
+    assert.equal(sleepCalls, 1);
+    assert.equal(result.outcome, "committed");
+    assert.equal(result.postflight.status, "verified");
+    assert.equal(result.afterProof.details.sha256, sha256(backend.content));
+    assert.equal(result.afterProof.details.sealedSha256, sha256(expected));
+    assert.equal(result.afterProof.details.settlementPropertyName, "changedAt");
+  }
+
+  {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    let releaseSleep;
+    let sleepEnteredResolve;
+    const sleepEntered = new Promise((resolve) => {
+      sleepEnteredResolve = resolve;
+    });
+    const sleepReleased = new Promise((resolve) => {
+      releaseSleep = resolve;
+    });
+    let backend;
+    const fixtureResult = fixture("status-cannot-preempt-settlement-wait", {
+      now: () => now,
+      sleep: async () => {
+        sleepEnteredResolve();
+        await sleepReleased;
+        now += 2_250;
+        backend.content = backend.content.replace(
+          "changedAt: 2026-08-17T09:59",
+          "changedAt: 2026-08-17T10:00",
+        );
+      },
+    });
+    backend = fixtureResult.backend;
+    const { adapter } = fixtureResult;
+    backend.content =
+      "---\nchangedAt: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "update-time",
+            propertyName: "changedAt",
+            settlementObservationDelayMs: 2_250,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: backend.content.replace("avant", "après"),
+      idempotencyKey: "status-cannot-preempt-settlement-wait",
+    });
+    const applyPromise = adapter.apply(
+      planned.planRef,
+      "status-cannot-preempt-settlement-wait",
+    );
+    await sleepEntered;
+    const observedWhileWaiting = await adapter.status(planned.planRef);
+    assert.equal(observedWhileWaiting.phase, "applying");
+    assert.equal(observedWhileWaiting.outcome, null);
+    releaseSleep();
+    const committed = await applyPromise;
+    assert.equal(committed.outcome, "committed");
+    assert.equal(committed.afterProof.details.sha256, sha256(backend.content));
+  }
+
+  {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
     const clock = () => now;
     const { backend, adapter } = fixture("modified-time-plus-real-drift", {
       now: clock,
@@ -631,7 +744,7 @@ try {
   {
     let now = Date.parse("2026-08-17T10:00:00.000Z");
     const clock = () => now;
-    const { backend, adapter } = fixture("unprotected-modified-time-key", {
+    const { backend, adapter } = fixture("plugin-derived-modified-time-key", {
       now: clock,
       modifiedTimeProtectedKeys: ["création", "modification"],
     });
@@ -648,7 +761,7 @@ try {
     const planned = await adapter.plan({
       path: backend.path,
       nextContent: expected,
-      idempotencyKey: "unprotected-modified-time-key",
+      idempotencyKey: "plugin-derived-modified-time-key",
     });
     backend.loseResponseAfterWriteOnce = true;
     backend.afterWriteBeforeReturn = async () => {
@@ -660,12 +773,12 @@ try {
     };
     const result = await adapter.apply(
       planned.planRef,
-      "unprotected-modified-time-key",
+      "plugin-derived-modified-time-key",
     );
     assert.equal(
       result.outcome,
-      "outcome_unknown",
-      "a plugin key outside MCP_PROTECTED_FRONTMATTER_KEYS must not be admitted",
+      "committed",
+      "a supported Bridge-advertised plugin key must be admitted without a duplicate MCP allowlist entry",
     );
   }
 
@@ -852,6 +965,39 @@ try {
     const result = await adapter.apply(
       planned.planRef,
       "settlement-policy-changed",
+    );
+    assert.equal(result.outcome, "rejected");
+    assert.equal(backend.replaceCalls, 0);
+    assert.equal(backend.content.endsWith("avant\n"), true);
+  }
+
+  {
+    const { backend, adapter } = fixture(
+      "settlement-policy-enabled-after-plan",
+    );
+    backend.content =
+      "---\nmodification: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: backend.content.replace("avant", "après"),
+      idempotencyKey: "settlement-policy-enabled-after-plan",
+    });
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "modification",
+            settlementObservationDelayMs: 2_250,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const result = await adapter.apply(
+      planned.planRef,
+      "settlement-policy-enabled-after-plan",
     );
     assert.equal(result.outcome, "rejected");
     assert.equal(backend.replaceCalls, 0);

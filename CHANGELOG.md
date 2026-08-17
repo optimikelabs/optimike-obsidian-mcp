@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.3] - 2026-08-17
+
+### Fixed
+
+- Governed note and Frontmatter writes now derive the configured creation,
+  modification and last-viewed property names from supported active Obsidian
+  date plugins instead of assuming `création` and `modification`.
+- A successful CAS now waits for the plugin-advertised bounded observation
+  delay and re-reads the note before committing its receipt, covering deferred
+  timestamp writes even when the original CAS response was received normally.
+
+### Security
+
+- Creation and last-viewed properties are protected but never ignored during
+  reconciliation. An active creation property must already exist before a plan
+  is admitted.
+- Unsupported multi-effect date-plugin configurations fail closed. In
+  particular, Frontmatter Date Manager update counters, post-update commands,
+  inversion repair, numeric values, forced timezones and excessive delays are
+  never treated as a one-line timestamp settlement.
+
+### Changed
+
+- Atomic Write Bridge `0.3.0` exposes additive date-property protection and a
+  bounded settlement observation delay. Static
+  `MCP_PROTECTED_FRONTMATTER_KEYS` remains an additive policy for custom or
+  unsupported fields, not a duplicate configuration requirement.
+
+### Validation
+
+- Deterministic Bridge and real stdio MCP tests cover custom property names,
+  last-viewed protection, missing creation fields, apply-time configuration
+  changes, shared-property plugins, unsafe FDM options and delayed settlement
+  after a successful CAS response. A concurrent `status` observer is also
+  proven unable to terminalize the sealed hash before that delay expires.
+
 ## [2.8.2] - 2026-08-17
 
 ### Fixed

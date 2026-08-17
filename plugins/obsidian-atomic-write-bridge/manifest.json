@@ -1,7 +1,7 @@
 {
   "id": "obsidian-atomic-write-bridge",
   "name": "Optimike Atomic Write Bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minAppVersion": "1.1.0",
   "author": "Optimike",
   "authorUrl": "https://github.com/optimikelabs",

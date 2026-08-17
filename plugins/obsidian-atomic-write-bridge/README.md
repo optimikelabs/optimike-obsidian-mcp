@@ -23,25 +23,44 @@ available while the write gate is closed.
 The bridge depends on the public extension API of **Local REST API**. It does
 not depend on Operon or on Operon's Developer API grant UI.
 
-Version 0.2.0 adds an optional status-only settlement contract. When one of the
-following enabled plugins exposes a supported string-datetime configuration,
-the status route reports its exact modified-time property and the Obsidian host
-UTC offset:
+Version 0.3.0 adds protection and settlement status contracts for these enabled
+plugins:
 
-- Frontmatter Date Manager;
-- Update Time;
-- Update time on edit.
+- [Frontmatter Date Manager](https://github.com/SmetDenis/obsidian-frontmatter-date-manager);
+- [Update Time](https://github.com/dsebastien/obsidian-update-time);
+- [Update time on edit](https://github.com/beaussan/update-time-on-edit-obsidian).
 
-The Bridge never relaxes CAS and never decides that a changed note is
-equivalent. Optimike MCP may use this metadata only after an effect, within a
-bounded attempt window, and only when the configured property is protected and
-the rest of the observed note is byte-identical to the sealed result.
+The protection contract reports each configured active creation, modification
+and last-viewed property. Optimike MCP automatically adds those names to its
+structural frontmatter protection; `MCP_PROTECTED_FRONTMATTER_KEYS` remains an
+additive fail-closed list for custom fields. Creation must already exist before
+planning because a plugin may otherwise insert it after the CAS. Last-viewed is
+protected only: opening a note is a user event, so its timestamp is never
+treated as part of write settlement.
+
+The settlement contract reports only a supported modification property, the
+Obsidian host UTC offset and a bounded observation delay derived from the
+plugin's debounce/rate-limit settings. The MCP waits that delay and re-reads the
+note after a successful CAS response as well as during uncertain
+reconciliation. The Bridge never relaxes CAS and never decides that a changed
+note is equivalent. Optimike MCP may accept this metadata only after an effect,
+inside the durable attempt window, when the rest of the observed note is
+byte-identical to the sealed result.
+
+Configurations with additional managed effects are protection-only and make a
+governed write fail closed rather than pretending one timestamp explains the
+result. For Frontmatter Date Manager this includes an enabled update counter, a
+post-update command or inversion repair. Numeric properties, forced timezones,
+unsupported formats and delays beyond four minutes are also not
+settlement-compatible. Folder/filter settings and minimum-update thresholds
+can suppress an update but do not authorize any additional drift.
 Only source-stable plain YAML property names are advertised: Unicode
 letters/marks/numbers, `_`, `.`, `-`, and internal spaces, starting with a letter
 or `_`. YAML boolean/null words, purely numeric starts, colon, comma, newline,
 surrounding whitespace, quoting indicators such as `#`, and names longer than
-128 JavaScript string code units are rejected. The comma boundary is also required because
-`MCP_PROTECTED_FRONTMATTER_KEYS` is a comma-delimited fail-closed list.
+128 JavaScript string code units are rejected. The comma boundary also
+preserves compatibility with the additive comma-delimited
+`MCP_PROTECTED_FRONTMATTER_KEYS` policy.
 
 ## Install from source
 

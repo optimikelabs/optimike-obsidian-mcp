@@ -99,6 +99,12 @@ byte-identical au résultat P1 compilé. Frontmatter Date Manager, Update Time e
 Update time on edit sont ainsi couverts sans autoriser une autre dérive du
 frontmatter ou du corps.
 
+Le Bridge `0.3.0` dérive les noms actifs de création, modification et dernière
+vue depuis ces plugins. Tous sont protégés structurellement ; seule la
+modification peut être admise en settlement. La création doit déjà exister, la
+dernière vue ne reçoit jamais de tolérance et une configuration à effets
+multiples non supportée rejette le plan avant toute écriture P1.
+
 Le planning possède deux phases :
 
 1. P1 lit la note live et compile le candidat source-preserving ;

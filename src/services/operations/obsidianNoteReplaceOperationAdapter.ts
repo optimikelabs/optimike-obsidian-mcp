@@ -30,6 +30,19 @@ import {
 } from "./modifiedTimeSettlement.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
+const DatePluginIdSchema = z.enum([
+  "update-time-on-edit",
+  "frontmatter-date-manager",
+  "update-time",
+]);
+const FrontmatterPropertyNameSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[\p{L}_](?:[\p{L}\p{M}\p{N}_. -]*[\p{L}\p{M}\p{N}_.-])?$/u)
+  .refine((value) => value.trim() === value)
+  .refine((value) => !/[,:\r\n]/u.test(value))
+  .refine((value) => !/^(?:null|true|false|yes|no|on|off)$/iu.test(value));
 
 export type AtomicResourceProfile = {
   operationKind: string;
@@ -72,17 +85,14 @@ const StatusSchema = z
           integrations: z
             .array(
               z.object({
-                pluginId: z.enum([
-                  "update-time-on-edit",
-                  "frontmatter-date-manager",
-                  "update-time",
-                ]),
-                propertyName: z
-                  .string()
-                  .min(1)
-                  .max(128)
-                  .regex(/^[^:\r\n]+$/u)
-                  .refine((value) => value.trim() === value),
+                pluginId: DatePluginIdSchema,
+                propertyName: FrontmatterPropertyNameSchema,
+                settlementObservationDelayMs: z
+                  .number()
+                  .int()
+                  .min(0)
+                  .max(4 * 60 * 1000)
+                  .optional(),
               }),
             )
             .max(3),
@@ -91,6 +101,31 @@ const StatusSchema = z
             .int()
             .min(-14 * 60)
             .max(14 * 60),
+        }),
+      })
+      .optional(),
+    protection: z
+      .object({
+        contractVersion: z.literal(1),
+        frontmatterDateProperties: z.object({
+          integrations: z
+            .array(
+              z
+                .object({
+                  pluginId: DatePluginIdSchema,
+                  createdPropertyName: FrontmatterPropertyNameSchema.optional(),
+                  modifiedPropertyName:
+                    FrontmatterPropertyNameSchema.optional(),
+                  viewedPropertyName: FrontmatterPropertyNameSchema.optional(),
+                })
+                .refine(
+                  (integration) =>
+                    integration.createdPropertyName !== undefined ||
+                    integration.modifiedPropertyName !== undefined ||
+                    integration.viewedPropertyName !== undefined,
+                ),
+            )
+            .max(3),
         }),
       })
       .optional(),
@@ -140,10 +175,88 @@ export type ObsidianNoteReplacePlanInput = {
 export type ObsidianNoteReplaceAdapterOptions = {
   modifiedTimeProtectedKeys?: readonly string[];
   now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
 };
 
 function normalizedKey(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function effectiveProtectedFrontmatterKeysFromStatus(
+  status: z.infer<typeof StatusSchema>,
+  configuredKeys: readonly string[],
+): string[] {
+  const keys = new Map<string, string>();
+  const add = (value: string | undefined): void => {
+    if (!value) return;
+    const normalized = normalizedKey(value);
+    if (normalized && !keys.has(normalized)) keys.set(normalized, value);
+  };
+  configuredKeys.forEach(add);
+  status.settlement?.modifiedTimeFrontmatter.integrations.forEach(
+    (integration) => add(integration.propertyName),
+  );
+  status.protection?.frontmatterDateProperties.integrations.forEach(
+    (integration) => {
+      add(integration.createdPropertyName);
+      add(integration.modifiedPropertyName);
+      add(integration.viewedPropertyName);
+    },
+  );
+  return [...keys.values()];
+}
+
+export function effectiveAtomicWriteProtectedFrontmatterKeys(
+  status: unknown,
+  configuredKeys: readonly string[],
+): string[] {
+  return effectiveProtectedFrontmatterKeysFromStatus(
+    StatusSchema.parse(status),
+    configuredKeys,
+  );
+}
+
+export type AtomicWriteDateProtection = {
+  createdPropertyNames: string[];
+  unsupportedModifiedPropertyNames: string[];
+};
+
+export function effectiveAtomicWriteDateProtection(
+  status: unknown,
+): AtomicWriteDateProtection {
+  const parsed = StatusSchema.parse(status);
+  const settlementIntegrations = new Set(
+    (parsed.settlement?.modifiedTimeFrontmatter.integrations ?? []).map(
+      (integration) =>
+        `${integration.pluginId}\u0000${normalizedKey(integration.propertyName)}`,
+    ),
+  );
+  const created = new Map<string, string>();
+  const unsupportedModified = new Map<string, string>();
+  for (const integration of parsed.protection?.frontmatterDateProperties
+    .integrations ?? []) {
+    if (integration.createdPropertyName) {
+      created.set(
+        normalizedKey(integration.createdPropertyName),
+        integration.createdPropertyName,
+      );
+    }
+    if (
+      integration.modifiedPropertyName &&
+      !settlementIntegrations.has(
+        `${integration.pluginId}\u0000${normalizedKey(integration.modifiedPropertyName)}`,
+      )
+    ) {
+      unsupportedModified.set(
+        normalizedKey(integration.modifiedPropertyName),
+        integration.modifiedPropertyName,
+      );
+    }
+  }
+  return {
+    createdPropertyNames: [...created.values()],
+    unsupportedModifiedPropertyNames: [...unsupportedModified.values()],
+  };
 }
 
 function settlementPolicy(
@@ -153,7 +266,9 @@ function settlementPolicy(
   const advertised = status.settlement?.modifiedTimeFrontmatter;
   if (!advertised) return undefined;
   const protectedSet = new Set(
-    protectedKeys.map(normalizedKey).filter(Boolean),
+    effectiveProtectedFrontmatterKeysFromStatus(status, protectedKeys)
+      .map(normalizedKey)
+      .filter(Boolean),
   );
   const integrations = advertised.integrations.filter((integration) =>
     protectedSet.has(normalizedKey(integration.propertyName)),
@@ -562,6 +677,7 @@ export class ObsidianNoteReplaceOperationAdapter
     if (plan.status !== "outcome_unknown") {
       return receipt(this.profile, plan);
     }
+    await this.awaitModifiedTimeSettlementObservation(plan);
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
@@ -655,7 +771,6 @@ export class ObsidianNoteReplaceOperationAdapter
         );
       }
       if (
-        plan.modifiedTimeSettlementPolicy &&
         !sameSettlementPolicy(
           plan.modifiedTimeSettlementPolicy,
           settlementPolicy(
@@ -691,6 +806,16 @@ export class ObsidianNoteReplaceOperationAdapter
           "Atomic-write postflight did not match the sealed plan.",
         );
       }
+      if (plan.modifiedTimeSettlementPolicy) {
+        await this.awaitModifiedTimeSettlementObservation(plan);
+        const reconciled = await this.reconcile(plan, executionAttemptId);
+        if (reconciled.status !== "applying") return reconciled;
+        return this.uncertain(
+          plan,
+          "The post-write observation did not reach either sealed proof.",
+          executionAttemptId,
+        );
+      }
       return this.transitionOrReload(
         plan,
         ["applying"],
@@ -704,6 +829,7 @@ export class ObsidianNoteReplaceOperationAdapter
       if (conflict) {
         let reconciled: ObsidianNoteReplacePlan;
         try {
+          await this.awaitModifiedTimeSettlementObservation(plan);
           reconciled = await this.reconcileCasConflict(
             plan,
             executionAttemptId,
@@ -736,6 +862,7 @@ export class ObsidianNoteReplaceOperationAdapter
           executionAttemptId,
         );
       }
+      await this.awaitModifiedTimeSettlementObservation(plan);
       const reconciled = await this.reconcile(plan, executionAttemptId).catch(
         () => plan,
       );
@@ -812,6 +939,9 @@ export class ObsidianNoteReplaceOperationAdapter
       );
     }
     if (read.sha256 === plan.afterSha256) {
+      if (this.modifiedTimeSettlementObservationRemainingMs(plan) > 0) {
+        return plan;
+      }
       if (observesLiveExecutor) {
         return this.commitAfterVerifiedProofOrReload(plan);
       }
@@ -864,6 +994,40 @@ export class ObsidianNoteReplaceOperationAdapter
         applyStartedAtEpochMs: plan.executionStartedAtEpochMs,
         settlementObservedAtEpochMs: (this.options.now ?? Date.now)(),
       },
+    );
+  }
+
+  private async awaitModifiedTimeSettlementObservation(
+    plan: ObsidianNoteReplacePlan,
+  ): Promise<void> {
+    const remainingMs = this.modifiedTimeSettlementObservationRemainingMs(plan);
+    if (remainingMs <= 0) return;
+    const sleep =
+      this.options.sleep ??
+      ((milliseconds: number) =>
+        new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+    await sleep(remainingMs);
+  }
+
+  private modifiedTimeSettlementObservationRemainingMs(
+    plan: ObsidianNoteReplacePlan,
+  ): number {
+    if (
+      !plan.modifiedTimeSettlementPolicy ||
+      plan.executionStartedAtEpochMs === undefined
+    ) {
+      return 0;
+    }
+    const observationDelayMs = Math.max(
+      0,
+      ...plan.modifiedTimeSettlementPolicy.integrations.map(
+        (integration) => integration.settlementObservationDelayMs ?? 0,
+      ),
+    );
+    const now = this.options.now ?? Date.now;
+    return Math.max(
+      0,
+      plan.executionStartedAtEpochMs + observationDelayMs - now(),
     );
   }
 

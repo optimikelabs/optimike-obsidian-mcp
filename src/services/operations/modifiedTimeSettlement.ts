@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 export type ModifiedTimeIntegration = {
   pluginId: "update-time-on-edit" | "frontmatter-date-manager" | "update-time";
   propertyName: string;
+  settlementObservationDelayMs?: number;
 };
 
 export type ModifiedTimeSettlementPolicy = {

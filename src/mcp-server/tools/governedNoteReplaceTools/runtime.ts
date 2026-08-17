@@ -8,6 +8,8 @@ import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/i
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import {
   type AtomicWriteBackend,
+  effectiveAtomicWriteDateProtection,
+  effectiveAtomicWriteProtectedFrontmatterKeys,
   ObsidianNoteReplaceOperationAdapter,
   type ObsidianNoteReplacePlanInput,
 } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
@@ -28,8 +30,13 @@ const PLAN_REF_PREFIX = "obsidian-note-replace:v1:";
 export const PROJECTED_IDEMPOTENCY_KEY_PREFIX = "optimike:projection:v1:";
 
 type CallContext =
-  | { kind: "plan"; path: string; nextContent: string }
-  | { kind: "apply" | "recover" };
+  | {
+      kind: "plan";
+      path: string;
+      nextContent: string;
+      atomicWriteStatus?: unknown;
+    }
+  | { kind: "apply" | "recover"; atomicWriteStatus?: unknown };
 
 type FrontmatterRecord = Record<string, unknown>;
 
@@ -77,9 +84,10 @@ function entriesForKey(
 function changedProtectedKeys(
   currentContent: string,
   nextContent: string,
+  effectiveProtectedKeys: readonly string[] = config.mcpProtectedFrontmatterKeys,
 ): string[] {
   const protectedKeys = [
-    ...new Set(config.mcpProtectedFrontmatterKeys.map(normalizeKey)),
+    ...new Set(effectiveProtectedKeys.map(normalizeKey)),
   ].filter(Boolean);
   if (protectedKeys.length === 0) return [];
 
@@ -115,6 +123,11 @@ function validateReplacement(
   currentContent: string,
   nextContent: string,
   phase: "plan" | "effect",
+  effectiveProtectedKeys: readonly string[] = config.mcpProtectedFrontmatterKeys,
+  dateProtection: ReturnType<typeof effectiveAtomicWriteDateProtection> = {
+    createdPropertyNames: [],
+    unsupportedModifiedPropertyNames: [],
+  },
 ): void {
   let validation: ReturnType<typeof validateObsidianMarkdown>;
   try {
@@ -145,8 +158,35 @@ function validateReplacement(
 
   let changed: string[];
   try {
-    changed = changedProtectedKeys(currentContent, nextContent);
+    const currentFrontmatter = parseFrontmatter(currentContent);
+    const missingCreated = dateProtection.createdPropertyNames.filter(
+      (key) =>
+        entriesForKey(currentFrontmatter, normalizeKey(key)).length !== 1,
+    );
+    if (missingCreated.length > 0) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        `Atomic note replacement requires active creation-date properties to exist before planning: ${missingCreated.join(", ")}`,
+        { missingCreatedProperties: missingCreated },
+      );
+    }
+    if (dateProtection.unsupportedModifiedPropertyNames.length > 0) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        `Atomic note replacement cannot safely settle the active modified-time configuration for: ${dateProtection.unsupportedModifiedPropertyNames.join(", ")}`,
+        {
+          unsupportedModifiedProperties:
+            dateProtection.unsupportedModifiedPropertyNames,
+        },
+      );
+    }
+    changed = changedProtectedKeys(
+      currentContent,
+      nextContent,
+      effectiveProtectedKeys,
+    );
   } catch (error) {
+    if (error instanceof McpError) throw error;
     throw new McpError(
       phase === "plan"
         ? BaseErrorCode.VALIDATION_ERROR
@@ -181,8 +221,11 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     return this.callContext.run(context, operation);
   }
 
-  status() {
-    return this.delegate.status();
+  async status() {
+    const status = await this.delegate.status();
+    const context = this.callContext.getStore();
+    if (context) context.atomicWriteStatus = status;
+    return status;
   }
 
   async read(payload: Parameters<AtomicWriteBackend["read"]>[0]) {
@@ -196,7 +239,23 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
         );
       }
       assertCurrentWritePolicy("plan", payload.path, context.nextContent);
-      validateReplacement(result.content, context.nextContent, "plan");
+      if (!context.atomicWriteStatus) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Atomic-write status was not sealed before validating protected frontmatter.",
+          { reason: "atomic_write_status_not_sealed" },
+        );
+      }
+      validateReplacement(
+        result.content,
+        context.nextContent,
+        "plan",
+        effectiveAtomicWriteProtectedFrontmatterKeys(
+          context.atomicWriteStatus,
+          config.mcpProtectedFrontmatterKeys,
+        ),
+        effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
+      );
     }
     return result;
   }
@@ -230,7 +289,23 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
         "The note changed after the sealed plan was admitted.",
       );
     }
-    validateReplacement(current.content, payload.nextContent, "effect");
+    if (!context.atomicWriteStatus) {
+      throw new McpError(
+        BaseErrorCode.CONFLICT,
+        "Atomic-write status was not sealed before validating protected frontmatter.",
+        { reason: "atomic_write_status_not_sealed" },
+      );
+    }
+    validateReplacement(
+      current.content,
+      payload.nextContent,
+      "effect",
+      effectiveAtomicWriteProtectedFrontmatterKeys(
+        context.atomicWriteStatus,
+        config.mcpProtectedFrontmatterKeys,
+      ),
+      effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
+    );
     return this.delegate.replace(payload);
   }
 }

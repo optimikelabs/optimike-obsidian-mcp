@@ -99,16 +99,34 @@ soumis à la politique de rétention bornée existante. Reçus et logs n’expos
 
 ### Settlement borné de la date de modification
 
-Atomic Write Bridge 0.2.0 annonce la propriété de date de modification
-réellement configurée par une intégration supportée et active : Frontmatter Date
-Manager, Update Time ou Update time on edit. Le planning ne scelle cette policy
-que si la propriété figure aussi dans `MCP_PROTECTED_FRONTMATTER_KEYS`. Cette
-configuration étant une liste séparée par des virgules, le Bridge n’annonce
-jamais une propriété de modification dont le nom contient une virgule ; les
-noms doivent aussi rester des clés YAML plain source-stable, composées de
-lettres, marques ou chiffres Unicode, de `_`, `.`, `-` et d’espaces internes.
-Elles commencent par une lettre ou `_`. Les booléens/null YAML, débuts
-numériques, formes quotées comme `#modified`, deux-points, sauts de ligne,
+Atomic Write Bridge 0.3.0 lit les réglages actifs de Frontmatter Date Manager,
+Update Time et Update time on edit. Son contrat de protection annonce les vrais
+noms configurés des propriétés de création, modification et dernière vue. Le
+MCP ajoute automatiquement ces noms à sa protection structurelle ;
+`MCP_PROTECTED_FRONTMATTER_KEYS` reste additif pour les champs personnalisés et
+les anciens Bridges. Une propriété de création active doit déjà exister dans la
+note cible, sinon le planning échoue fermé car le plugin pourrait insérer une
+seconde ligne après le CAS. La dernière vue est protégée mais jamais admise en
+settlement : ouvrir une note est un événement utilisateur distinct, pas une
+conséquence attendue de l’écriture.
+
+Seule une propriété de modification compatible entre dans le contrat de
+settlement. Le Bridge annonce aussi le délai d’observation borné issu du
+debounce/rate-limit de chaque plugin, et le MCP attend ce délai avant sa
+relecture postflight même lorsque la réponse CAS réussit normalement. Un
+observateur `status` concurrent ne peut pas terminaliser le hash scellé pendant
+cette attente. Valeurs
+numériques, fuseaux forcés, formats non supportés ou délais supérieurs à quatre
+minutes ne sont pas admis. Frontmatter Date Manager reste également en
+protection seule si le compteur d’updates, une commande post-update ou la
+réparation d’inversion est actif, car ces réglages peuvent modifier plus que la
+seule ligne de modification. Une propriété de modification active sans entrée
+de settlement correspondante fait échouer le planning fermé.
+
+Le Bridge exige des clés YAML plain source-stable composées de lettres, marques
+ou chiffres Unicode, de `_`, `.`, `-` et d’espaces internes. Il n’annonce jamais
+une propriété dont le nom contient une virgule. Les formes quotées comme
+`#modified`, booléens/null YAML, débuts numériques, deux-points, sauts de ligne,
 espaces périphériques ou plus de 128 unités de code de chaîne JavaScript sont
 rejetés à la même frontière.
 
@@ -119,7 +137,7 @@ un status après interruption, l’adaptateur peut accepter une seule ligne
 top-level du frontmatter supplémentaire uniquement si toutes ces preuves sont
 réunies :
 
-- il s’agit de l’unique propriété de modification configurée annoncée par le
+- il s’agit d’une propriété de modification configurée annoncée par le
   Bridge ;
 - la preuve provient toujours de l’identité backend et de la cible logique
   scellées ;

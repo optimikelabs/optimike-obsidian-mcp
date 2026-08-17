@@ -84,6 +84,12 @@ line makes the observed note byte-identical to the compiled P1 result. This
 covers Frontmatter Date Manager, Update Time, and Update time on edit without
 authorizing any unrelated frontmatter or body drift.
 
+Bridge `0.3.0` derives the active creation, modification and last-viewed names
+from those plugins. All are structurally protected; only modification may
+settle. Creation must already exist, last-viewed never receives settlement
+tolerance, and an unsupported multi-effect plugin configuration rejects the
+plan before P1 can write.
+
 Planning has two phases:
 
 1. P1 reads the live note and compiles the source-preserving candidate;

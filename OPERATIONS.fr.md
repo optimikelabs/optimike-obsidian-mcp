@@ -239,13 +239,16 @@ restauration non vérifiée conserve le dossier privé au chemin de récupérati
 affiché au démarrage ; ne restaurer qu’à partir des métadonnées explicites de sa
 sauvegarde. Ne jamais viser une note utilisateur ordinaire.
 
-Atomic Write Bridge `0.2.0` expose aussi les intégrations actives de date de
-modification prises en charge. Quand le coffre jetable en utilise une, inclure
-sa propriété configurée dans `MCP_PROTECTED_FRONTMATTER_KEYS` et ajouter un
-canary à réponse perdue où le plugin ne fait avancer que ce timestamp. La gate
-ne passe que si le reçu est `committed`, conserve le hash de la cible scellée et
-le hash réellement observé après settlement, et si une dérive supplémentaire du
+Atomic Write Bridge `0.3.0` expose les propriétés actives de création,
+modification et dernière vue prises en charge. Le MCP dérive leur protection
+structurelle sans doublon dans `MCP_PROTECTED_FRONTMATTER_KEYS`, qui reste
+additif pour les champs personnalisés. La gate live utilise volontairement une
+clé statique sentinelle afin de prouver la propriété dérivée du Bridge. Elle ne
+passe que si le reçu est `committed`, conserve le hash de la cible scellée et le
+hash réellement observé après settlement, et si une dérive supplémentaire du
 corps ou du frontmatter reste `outcome_unknown`.
+Ce canary à réponse perdue vérifie donc le contrat dérivé, pas une allowlist
+d’environnement dupliquée.
 
 Le dépôt fournit cette gate live discriminante pour les plugins pris en charge :
 
@@ -270,6 +273,12 @@ plugin de date que pour la restauration
 exacte, rétablit son état activé, écrit une preuve JSON expurgée sous la racine
 temporaire du système et ne conserve les éléments privés de récupération que si
 la restauration exacte ne peut pas être vérifiée.
+
+La fixture d’opération déterministe prouve séparément le chemin à réponse
+normale : après le succès du CAS, le MCP attend le délai du plugin annoncé par
+le Bridge, relit la note et commit le hash settled observé. Elle prouve aussi
+les noms personnalisés de création/modification/dernière vue, le refus d’une
+création absente et la revalidation des réglages au moment de l’apply.
 
 `Ctrl-C` et `SIGTERM` exécutent cette même restauration protégée avant la sortie
 du processus. Les mainteneurs peuvent prouver ce chemin d’interruption de façon
