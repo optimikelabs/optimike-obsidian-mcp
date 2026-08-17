@@ -103,7 +103,10 @@ Le Bridge `0.3.0` dérive les noms actifs de création, modification et dernièr
 vue depuis ces plugins. Tous sont protégés structurellement ; seule la
 modification peut être admise en settlement. La création doit déjà exister, la
 dernière vue ne reçoit jamais de tolérance et une configuration à effets
-multiples non supportée rejette le plan avant toute écriture P1.
+multiples non supportée rejette le plan avant toute écriture P1. Un nom actif
+qui ne peut pas être représenté comme clé YAML plain source-stable est lui aussi
+signalé par plugin et rôle, puis refusé avant CAS au lieu de disparaître de la
+protection.
 
 Le planning possède deux phases :
 

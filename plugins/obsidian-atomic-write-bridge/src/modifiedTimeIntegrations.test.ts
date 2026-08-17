@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getFrontmatterDateIntegrationContract,
   getFrontmatterDateIntegrations,
   getModifiedTimeIntegrations,
 } from "./modifiedTimeIntegrations.js";
@@ -125,6 +126,85 @@ test("does not advertise inactive or unsafe date properties for protection", () 
         },
       }),
     ),
+    [],
+  );
+});
+
+test("reports every active property whose configured name cannot be represented", () => {
+  assert.deepEqual(
+    getFrontmatterDateIntegrationContract(
+      app({
+        "update-time-on-edit": {
+          settings: {
+            enableCreateTime: true,
+            headerCreated: "bad:key",
+            headerUpdated: "validModified",
+          },
+        },
+        "frontmatter-date-manager": {
+          settings: {
+            enableAutoUpdate: true,
+            enableCreateTime: false,
+            enableModifiedTime: true,
+            enableLastViewed: true,
+            headerUpdated: "#modified",
+            headerLastViewed: "viewed,unsafe",
+          },
+        },
+        "update-time": {
+          settings: {
+            createdPropertyName: "createdAt",
+            updatedPropertyName: "#updated",
+          },
+        },
+      }),
+    ),
+    {
+      protectionIntegrations: [
+        {
+          pluginId: "update-time-on-edit",
+          modifiedPropertyName: "validModified",
+        },
+        {
+          pluginId: "update-time",
+          createdPropertyName: "createdAt",
+        },
+      ],
+      settlementIntegrations: [],
+      unsupportedIntegrations: [
+        {
+          pluginId: "update-time-on-edit",
+          activeRoles: ["created"],
+        },
+        {
+          pluginId: "frontmatter-date-manager",
+          activeRoles: ["modified", "viewed"],
+        },
+        {
+          pluginId: "update-time",
+          activeRoles: ["modified"],
+        },
+      ],
+    },
+  );
+});
+
+test("does not report an invalid last-viewed name while last-viewed is disabled", () => {
+  assert.deepEqual(
+    getFrontmatterDateIntegrationContract(
+      app({
+        "frontmatter-date-manager": {
+          settings: {
+            enableAutoUpdate: true,
+            enableCreateTime: false,
+            enableModifiedTime: true,
+            enableLastViewed: false,
+            headerUpdated: "modification",
+            headerLastViewed: "#viewed",
+          },
+        },
+      }),
+    ).unsupportedIntegrations,
     [],
   );
 });

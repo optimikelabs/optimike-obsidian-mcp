@@ -268,7 +268,10 @@ exact restoration cannot be verified.
 
 The deterministic operation fixture mirrors that normal-response path and also
 proves custom creation/modification/last-viewed names, missing-creation refusal
-and apply-time settings revalidation.
+and apply-time settings revalidation. It also proves that every active
+date-property role whose configured name is not source-stable is surfaced as an
+unsupported configuration and rejected before CAS, including when that setting
+appears between plan and apply.
 
 `Ctrl-C` and `SIGTERM` run that same guarded restoration before the process
 exits. Maintainers can prove this interruption path deterministically by setting

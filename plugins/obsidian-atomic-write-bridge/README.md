@@ -58,7 +58,10 @@ Only source-stable plain YAML property names are advertised: Unicode
 letters/marks/numbers, `_`, `.`, `-`, and internal spaces, starting with a letter
 or `_`. YAML boolean/null words, purely numeric starts, colon, comma, newline,
 surrounding whitespace, quoting indicators such as `#`, and names longer than
-128 JavaScript string code units are rejected. The comma boundary also
+128 JavaScript string code units are rejected. An active property with such a
+name is reported as an unsupported plugin/role configuration (without echoing
+the unsafe raw name), and Optimike MCP refuses the governed write before CAS;
+it is never silently treated as if the plugin were inactive. The comma boundary also
 preserves compatibility with the additive comma-delimited
 `MCP_PROTECTED_FRONTMATTER_KEYS` policy.
 

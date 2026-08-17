@@ -11,10 +11,7 @@ import {
   parseReadRequest,
   sha256,
 } from "./contract.js";
-import {
-  getFrontmatterDateIntegrations,
-  getModifiedTimeIntegrations,
-} from "./modifiedTimeIntegrations.js";
+import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
 
 type PluginData = { instanceId: string; allowWrites: boolean };
 
@@ -111,7 +108,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
 
       api
         .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/status`)
-        .get((_req: any, res: any) =>
+        .get((_req: any, res: any) => {
+          const dateContract = getFrontmatterDateIntegrationContract(this.app);
           sendJson(res, 200, {
             ok: true,
             contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
@@ -129,18 +127,19 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             settlement: {
               contractVersion: 1,
               modifiedTimeFrontmatter: {
-                integrations: getModifiedTimeIntegrations(this.app),
+                integrations: dateContract.settlementIntegrations,
                 utcOffsetMinutes: -new Date().getTimezoneOffset(),
               },
             },
             protection: {
               contractVersion: 1,
               frontmatterDateProperties: {
-                integrations: getFrontmatterDateIntegrations(this.app),
+                integrations: dateContract.protectionIntegrations,
+                unsupportedIntegrations: dateContract.unsupportedIntegrations,
               },
             },
-          }),
-        );
+          });
+        });
 
       api
         .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/notes/read`)

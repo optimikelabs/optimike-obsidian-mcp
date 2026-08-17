@@ -127,6 +127,7 @@ function validateReplacement(
   dateProtection: ReturnType<typeof effectiveAtomicWriteDateProtection> = {
     createdPropertyNames: [],
     unsupportedModifiedPropertyNames: [],
+    unsupportedIntegrations: [],
   },
 ): void {
   let validation: ReturnType<typeof validateObsidianMarkdown>;
@@ -158,6 +159,21 @@ function validateReplacement(
 
   let changed: string[];
   try {
+    if (dateProtection.unsupportedIntegrations.length > 0) {
+      const summaries = dateProtection.unsupportedIntegrations.map(
+        ({ pluginId, activeRoles }) =>
+          `${pluginId} (${activeRoles.join(", ")})`,
+      );
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        `Atomic note replacement cannot safely represent active date-property settings for: ${summaries.join("; ")}`,
+        {
+          reason: "unsupported_date_property_configuration",
+          unsupportedDatePluginConfigurations:
+            dateProtection.unsupportedIntegrations,
+        },
+      );
+    }
     const currentFrontmatter = parseFrontmatter(currentContent);
     const missingCreated = dateProtection.createdPropertyNames.filter(
       (key) =>

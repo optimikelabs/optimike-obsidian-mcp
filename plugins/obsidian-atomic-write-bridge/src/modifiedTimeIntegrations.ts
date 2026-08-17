@@ -11,6 +11,19 @@ export type FrontmatterDateIntegration = {
   viewedPropertyName?: string;
 };
 
+export type FrontmatterDateRole = "created" | "modified" | "viewed";
+
+export type UnsupportedFrontmatterDateIntegration = {
+  pluginId: ModifiedTimeIntegration["pluginId"];
+  activeRoles: FrontmatterDateRole[];
+};
+
+export type FrontmatterDateIntegrationContract = {
+  protectionIntegrations: FrontmatterDateIntegration[];
+  settlementIntegrations: ModifiedTimeIntegration[];
+  unsupportedIntegrations: UnsupportedFrontmatterDateIntegration[];
+};
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -152,22 +165,29 @@ function configuredPropertyName(
   return safePropertyName(value);
 }
 
-export function getFrontmatterDateIntegrations(
+export function getFrontmatterDateIntegrationContract(
   app: unknown,
-): FrontmatterDateIntegration[] {
-  const integrations: FrontmatterDateIntegration[] = [];
+): FrontmatterDateIntegrationContract {
+  const protectionIntegrations: FrontmatterDateIntegration[] = [];
+  const settlementIntegrations: ModifiedTimeIntegration[] = [];
+  const unsupportedIntegrations: UnsupportedFrontmatterDateIntegration[] = [];
   for (const definition of DEFINITIONS) {
     const plugin = record(loadedPlugin(app, definition.pluginId));
     const settings = record(plugin?.settings);
     if (!settings) continue;
-    const createdPropertyName = definition.createdActive(settings)
+    const createdActive = definition.createdActive(settings);
+    const modifiedActive = definition.modifiedActive(settings);
+    const viewedActive = Boolean(
+      definition.viewedSettingName && definition.viewedActive?.(settings),
+    );
+    const createdPropertyName = createdActive
       ? configuredPropertyName(
           settings,
           definition.createdSettingName,
           definition.createdFallback,
         )
       : undefined;
-    const modifiedPropertyName = definition.modifiedActive(settings)
+    const modifiedPropertyName = modifiedActive
       ? configuredPropertyName(
           settings,
           definition.modifiedSettingName,
@@ -175,55 +195,61 @@ export function getFrontmatterDateIntegrations(
         )
       : undefined;
     const viewedPropertyName =
-      definition.viewedSettingName && definition.viewedActive?.(settings)
+      definition.viewedSettingName && viewedActive
         ? configuredPropertyName(
             settings,
             definition.viewedSettingName,
             definition.viewedFallback,
           )
         : undefined;
-    if (!createdPropertyName && !modifiedPropertyName && !viewedPropertyName) {
-      continue;
+
+    const activeRoles: FrontmatterDateRole[] = [];
+    if (createdActive && !createdPropertyName) activeRoles.push("created");
+    if (modifiedActive && !modifiedPropertyName) activeRoles.push("modified");
+    if (viewedActive && !viewedPropertyName) activeRoles.push("viewed");
+    if (activeRoles.length > 0) {
+      unsupportedIntegrations.push({
+        pluginId: definition.pluginId,
+        activeRoles,
+      });
     }
-    integrations.push({
-      pluginId: definition.pluginId,
-      ...(createdPropertyName ? { createdPropertyName } : {}),
-      ...(modifiedPropertyName ? { modifiedPropertyName } : {}),
-      ...(viewedPropertyName ? { viewedPropertyName } : {}),
-    });
+
+    if (createdPropertyName || modifiedPropertyName || viewedPropertyName) {
+      protectionIntegrations.push({
+        pluginId: definition.pluginId,
+        ...(createdPropertyName ? { createdPropertyName } : {}),
+        ...(modifiedPropertyName ? { modifiedPropertyName } : {}),
+        ...(viewedPropertyName ? { viewedPropertyName } : {}),
+      });
+    }
+
+    if (modifiedPropertyName && definition.settlementActive(settings)) {
+      const settlementObservationDelayMs =
+        definition.settlementObservationDelayMs(settings);
+      if (settlementObservationDelayMs !== undefined) {
+        settlementIntegrations.push({
+          pluginId: definition.pluginId,
+          propertyName: modifiedPropertyName,
+          settlementObservationDelayMs,
+        });
+      }
+    }
   }
-  return integrations;
+  return {
+    protectionIntegrations,
+    settlementIntegrations,
+    unsupportedIntegrations,
+  };
+}
+
+export function getFrontmatterDateIntegrations(
+  app: unknown,
+): FrontmatterDateIntegration[] {
+  return getFrontmatterDateIntegrationContract(app).protectionIntegrations;
 }
 
 export function getModifiedTimeIntegrations(
   app: unknown,
 ): ModifiedTimeIntegration[] {
-  const integrations: ModifiedTimeIntegration[] = [];
-  for (const definition of DEFINITIONS) {
-    const plugin = record(loadedPlugin(app, definition.pluginId));
-    const settings = record(plugin?.settings);
-    if (
-      !settings ||
-      !definition.modifiedActive(settings) ||
-      !definition.settlementActive(settings)
-    ) {
-      continue;
-    }
-    const propertyName = configuredPropertyName(
-      settings,
-      definition.modifiedSettingName,
-      definition.modifiedFallback,
-    );
-    const settlementObservationDelayMs =
-      definition.settlementObservationDelayMs(settings);
-    if (!propertyName || settlementObservationDelayMs === undefined) {
-      continue;
-    }
-    integrations.push({
-      pluginId: definition.pluginId,
-      propertyName,
-      settlementObservationDelayMs,
-    });
-  }
-  return integrations;
+  return getFrontmatterDateIntegrationContract(app).settlementIntegrations;
 }

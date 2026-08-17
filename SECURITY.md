@@ -99,7 +99,10 @@ by default.
   bounded observation delay and accepts one canonical monotonic timestamp
   inside the actual apply window (at most five minutes) when restoring that
   line makes the note byte-identical to the sealed target. Unsupported
-  multi-effect configurations and all other drift remain fail-closed.
+  multi-effect configurations remain fail-closed. An active configured
+  property name that cannot be represented safely is reported by plugin/role
+  and rejects the write before CAS; it is never silently omitted. All other
+  drift remains fail-closed.
 - `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` contains non-terminal sealed content.
   Keep it machine-local, access-restricted and outside the vault, repositories,
   synchronized folders, backups published as artifacts and public diagnostics.

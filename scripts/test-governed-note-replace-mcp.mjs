@@ -96,6 +96,7 @@ class FakeObsidianAtomicWriteServer {
     this.hangingCas = undefined;
     this.vaultReadsUnavailable = false;
     this.dateProtection = undefined;
+    this.unsupportedDateProtection = undefined;
     this.settlement = undefined;
   }
 
@@ -169,12 +170,17 @@ class FakeObsidianAtomicWriteServer {
           writeEnabled: this.writeEnabled,
         },
         limits: { markdownOnly: true },
-        ...(this.dateProtection
+        ...(this.dateProtection || this.unsupportedDateProtection
           ? {
               protection: {
                 contractVersion: 1,
                 frontmatterDateProperties: {
-                  integrations: this.dateProtection,
+                  integrations: this.dateProtection ?? [],
+                  ...(this.unsupportedDateProtection
+                    ? {
+                        unsupportedIntegrations: this.unsupportedDateProtection,
+                      }
+                    : {}),
                 },
               },
             }
@@ -733,6 +739,65 @@ try {
     /cannot safely settle/u,
   );
   assert.equal(fake.casRequests, 0);
+
+  fake.reset("---\nstatut: actif\n---\nbefore\n");
+  fake.unsupportedDateProtection = [
+    {
+      pluginId: "frontmatter-date-manager",
+      activeRoles: ["viewed"],
+    },
+    {
+      pluginId: "update-time",
+      activeRoles: ["created", "modified"],
+    },
+  ];
+  const unrepresentableDateConfigurationAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: "---\nstatut: actif\n---\nafter\n",
+      idempotencyKey: "dynamic-unrepresentable-date-configuration",
+    },
+    true,
+  );
+  assert.match(
+    unrepresentableDateConfigurationAttempt.payload.error.message,
+    /cannot safely represent active date-property settings/u,
+  );
+  assert.match(
+    unrepresentableDateConfigurationAttempt.payload.error.message,
+    /frontmatter-date-manager \(viewed\)/u,
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset("---\nstatut: actif\n---\nbefore\n");
+  const unsupportedConfigurationChangedPlan = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: "---\nstatut: actif\n---\nafter\n",
+      idempotencyKey: "dynamic-unsupported-date-config-before-apply",
+    },
+  );
+  fake.unsupportedDateProtection = [
+    {
+      pluginId: "frontmatter-date-manager",
+      activeRoles: ["viewed"],
+    },
+  ];
+  const casBeforeUnsupportedConfigurationChange = fake.casRequests;
+  const unsupportedConfigurationChangedApply = await call(
+    session,
+    "obsidian_note_replace_apply",
+    {
+      planRef: unsupportedConfigurationChangedPlan.payload.planRef,
+      idempotencyKey: "dynamic-unsupported-date-config-before-apply",
+    },
+  );
+  assertTerminal(unsupportedConfigurationChangedApply.payload, "rejected");
+  assert.equal(fake.casRequests, casBeforeUnsupportedConfigurationChange);
 
   fake.reset("---\ncustomDate: 2026-08-17T10:00\nstatut: actif\n---\nbefore\n");
   const protectionChangedPlan = await call(

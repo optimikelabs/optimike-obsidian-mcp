@@ -124,7 +124,11 @@ marks or numbers plus `_`, `.`, `-` and internal spaces. It never advertises a
 property whose name contains a comma. Quoted forms such as `#modified`, YAML
 boolean/null words, numeric starts, colon, newline, surrounding whitespace and
 names longer than 128 JavaScript string code units are rejected at the same
-boundary.
+boundary. If any active creation, modification or last-viewed property is not
+representable at that boundary, the Bridge reports the affected plugin and
+role without returning the unsafe raw name. The MCP rejects planning before CAS
+instead of silently treating that active property as absent. This signal is
+revalidated at apply/recover like the other date-plugin settings.
 
 The write precondition remains an exact whole-file SHA-256 CAS: settlement does
 not weaken pre-effect CAS. No timestamp is ignored before the effect. During

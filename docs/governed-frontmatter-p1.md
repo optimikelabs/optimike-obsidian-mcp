@@ -88,7 +88,9 @@ Bridge `0.3.0` derives the active creation, modification and last-viewed names
 from those plugins. All are structurally protected; only modification may
 settle. Creation must already exist, last-viewed never receives settlement
 tolerance, and an unsupported multi-effect plugin configuration rejects the
-plan before P1 can write.
+plan before P1 can write. An active configured name that cannot be represented
+as a source-stable plain YAML key is likewise reported by plugin and role and
+fails closed before CAS rather than disappearing from protection.
 
 Planning has two phases:
 

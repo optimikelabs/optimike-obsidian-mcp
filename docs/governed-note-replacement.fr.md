@@ -133,7 +133,12 @@ ou chiffres Unicode, de `_`, `.`, `-` et d’espaces internes. Il n’annonce ja
 une propriété dont le nom contient une virgule. Les formes quotées comme
 `#modified`, booléens/null YAML, débuts numériques, deux-points, sauts de ligne,
 espaces périphériques ou plus de 128 unités de code de chaîne JavaScript sont
-rejetés à la même frontière.
+rejetés à la même frontière. Si une propriété active de création, modification
+ou dernière vue n’est pas représentable à cette frontière, le Bridge annonce
+le plugin et le rôle concernés sans renvoyer le nom brut dangereux. Le MCP
+refuse le planning avant CAS au lieu de traiter silencieusement cette propriété
+active comme absente. Ce signal est revalidé à l’apply/recover comme les autres
+réglages des plugins de date.
 
 La précondition d’écriture reste un CAS SHA-256 exact sur le fichier complet :
 le settlement n’affaiblit pas le CAS pré-effet. Aucun timestamp n’est ignoré

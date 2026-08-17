@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed; active date integrations require Atomic Write Bridge 0.3.0 or later,
   and legacy non-terminal receipts without a sealed delay remain unrecoverable
   rather than guessing a zero wait.
+- Active creation, modification or last-viewed properties whose configured
+  names cannot be represented as source-stable plain YAML keys are now reported
+  explicitly by plugin and role and rejected before CAS instead of disappearing
+  from the protection contract.
 
 ### Changed
 
@@ -46,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Deterministic Bridge and real stdio MCP tests cover custom property names,
   last-viewed protection, missing creation fields, apply-time configuration
-  changes, shared-property plugins, unsafe FDM options and delayed settlement
+  changes, invalid active names, shared-property plugins, unsafe FDM options and delayed settlement
   after a successful CAS response. Concurrent observers are also proven unable
   to terminalize either the sealed hash or an early timestamp settlement before
   that delay expires, even when preflight itself outlasts the delay.

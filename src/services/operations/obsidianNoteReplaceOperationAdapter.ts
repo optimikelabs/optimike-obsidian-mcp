@@ -35,6 +35,7 @@ const DatePluginIdSchema = z.enum([
   "frontmatter-date-manager",
   "update-time",
 ]);
+const DatePropertyRoleSchema = z.enum(["created", "modified", "viewed"]);
 const FrontmatterPropertyNameSchema = z
   .string()
   .min(1)
@@ -126,6 +127,15 @@ const StatusSchema = z
                 ),
             )
             .max(3),
+          unsupportedIntegrations: z
+            .array(
+              z.object({
+                pluginId: DatePluginIdSchema,
+                activeRoles: z.array(DatePropertyRoleSchema).min(1).max(3),
+              }),
+            )
+            .max(3)
+            .optional(),
         }),
       })
       .optional(),
@@ -225,6 +235,10 @@ export function effectiveAtomicWriteProtectedFrontmatterKeys(
 export type AtomicWriteDateProtection = {
   createdPropertyNames: string[];
   unsupportedModifiedPropertyNames: string[];
+  unsupportedIntegrations: Array<{
+    pluginId: z.infer<typeof DatePluginIdSchema>;
+    activeRoles: Array<z.infer<typeof DatePropertyRoleSchema>>;
+  }>;
 };
 
 export function effectiveAtomicWriteDateProtection(
@@ -241,6 +255,18 @@ export function effectiveAtomicWriteDateProtection(
   );
   const created = new Map<string, string>();
   const unsupportedModified = new Map<string, string>();
+  const unsupportedIntegrations = new Map<
+    z.infer<typeof DatePluginIdSchema>,
+    Set<z.infer<typeof DatePropertyRoleSchema>>
+  >();
+  for (const integration of parsed.protection?.frontmatterDateProperties
+    .unsupportedIntegrations ?? []) {
+    const roles =
+      unsupportedIntegrations.get(integration.pluginId) ??
+      new Set<z.infer<typeof DatePropertyRoleSchema>>();
+    integration.activeRoles.forEach((role) => roles.add(role));
+    unsupportedIntegrations.set(integration.pluginId, roles);
+  }
   for (const integration of parsed.protection?.frontmatterDateProperties
     .integrations ?? []) {
     if (integration.createdPropertyName) {
@@ -264,6 +290,12 @@ export function effectiveAtomicWriteDateProtection(
   return {
     createdPropertyNames: [...created.values()],
     unsupportedModifiedPropertyNames: [...unsupportedModified.values()],
+    unsupportedIntegrations: [...unsupportedIntegrations.entries()].map(
+      ([pluginId, activeRoles]) => ({
+        pluginId,
+        activeRoles: [...activeRoles.values()],
+      }),
+    ),
   };
 }
 

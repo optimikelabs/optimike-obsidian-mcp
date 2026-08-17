@@ -278,7 +278,9 @@ exacte ne peut pas être vérifiée.
 La fixture d’opération déterministe reproduit ce chemin à réponse normale. Elle
 prouve aussi les noms personnalisés de création/modification/dernière vue, le
 refus d’une création absente et la revalidation des réglages au moment de
-l’apply.
+l’apply. Elle prouve aussi que chaque rôle de date actif dont le nom configuré
+n’est pas source-stable est exposé comme configuration non supportée et refusé
+avant CAS, y compris si ce réglage apparaît entre plan et apply.
 
 `Ctrl-C` et `SIGTERM` exécutent cette même restauration protégée avant la sortie
 du processus. Les mainteneurs peuvent prouver ce chemin d’interruption de façon

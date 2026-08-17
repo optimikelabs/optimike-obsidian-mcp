@@ -100,8 +100,10 @@ par défaut.
   être admise : le MCP attend le délai d’observation borné annoncé et n’accepte
   qu’un timestamp canonique et monotone dans la fenêtre réelle d’apply (cinq
   minutes au maximum), si restaurer cette ligne rend la note byte-identical à
-  la cible scellée. Les configurations à effets multiples et toute autre dérive
-  restent refusées fermées.
+  la cible scellée. Les configurations à effets multiples restent refusées
+  fermées. Un nom de propriété actif impossible à représenter sûrement est
+  signalé par plugin/rôle et bloque l’écriture avant CAS ; il n’est jamais omis
+  silencieusement. Toute autre dérive reste refusée fermée.
 - `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` contient le contenu scellé des plans
   non terminaux. Le conserver local à la machine, à accès restreint, hors du
   coffre, des dépôts, dossiers synchronisés, artefacts publiés et diagnostics

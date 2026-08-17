@@ -235,8 +235,16 @@ assert.match(contractFr, /n.annonce[\s\S]*contient une virgule/i);
 assert.match(contract, /128 JavaScript string code units/i);
 assert.doesNotMatch(contract, /128-byte/i);
 assert.match(contract, /quoted forms such as `#modified`/i);
+assert.match(
+  contract,
+  /reports the affected plugin and\s+role[\s\S]*rejects planning before CAS/i,
+);
 assert.match(contractFr, /128 unités de code de chaîne JavaScript/i);
 assert.match(contractFr, /formes quotées comme\s+`#modified`/i);
+assert.match(
+  contractFr,
+  /annonce\s+le plugin et le rôle concernés[\s\S]*refuse le planning avant CAS/i,
+);
 assert.match(security, /Supported date plugins do not weaken that CAS/i);
 assert.match(
   securityFr,
@@ -244,10 +252,15 @@ assert.match(
 );
 assert.match(operations, /lost-response canary/i);
 assert.match(operations, /additional body or frontmatter change/i);
+assert.match(operations, /unsupported configuration and rejected before CAS/i);
 assert.match(operationsFr, /canary à réponse perdue/i);
 assert.match(
   operationsFr,
   /dérive supplémentaire du[\s\S]*corps ou du frontmatter/i,
+);
+assert.match(
+  operationsFr,
+  /configuration non supportée et refusé\s+avant CAS/i,
 );
 assert.match(operations, /smoke:modified-time-settlement-live/);
 assert.match(operationsFr, /smoke:modified-time-settlement-live/);
