@@ -202,6 +202,8 @@ assert.match(bridgeReadme, /Update Time/i);
 assert.match(bridgeReadme, /comma-delimited fail-closed list/i);
 assert.match(contract, /never advertises[\s\S]*contains a comma/i);
 assert.match(contractFr, /n.annonce[\s\S]*contient une virgule/i);
+assert.match(contract, /128 JavaScript string code units/i);
+assert.doesNotMatch(contract, /128-byte/i);
 assert.match(
   security,
   /Supported modified-time plugins do not weaken that CAS/i,
