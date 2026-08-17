@@ -129,6 +129,20 @@ The legacy `bases_upsert_config` and `bases_create` effects are blocked by
 default at Bases Bridge. Their explicit compatibility toggle must remain off
 while using P2. See [the P2 contract](governed-base-formula-p2.md).
 
+### Governed Canvas P3
+
+- `obsidian_canvas_patch_plan`: compile bounded node/edge intentions, preserve
+  unknown values, validate the final graph, and seal the exact next JSON;
+- `obsidian_canvas_patch_apply`: execute only the sealed plan through Atomic
+  Write Bridge 0.4.0 Canvas CAS;
+- `obsidian_canvas_patch_status`: reconcile the durable receipt without a new
+  graph mutation;
+- `obsidian_canvas_patch_recover`: resume only the same sealed uncertain plan.
+
+The Canvas write gate is independent and disabled by default. The direct
+`obsidian_manage_canvas` helper remains headless-filesystem only and has no
+durable recovery. See [the P3 contract](governed-canvas-p3.md).
+
 ## Metadata And Tags
 
 - `obsidian_manage_frontmatter`: live frontmatter operations using Local REST
@@ -227,6 +241,8 @@ properties, plugin-specific filters, or exact UI view semantics.
   YAML, and JSON Canvas shape.
 - `obsidian_manage_canvas`: minimal JSON Canvas filesystem helper for validate,
   create, add text node, and connect nodes.
+- `obsidian_canvas_patch_*`: governed live/hybrid lifecycle for one existing
+  Canvas graph; not available as a headless writer fallback.
 
 ## Runtime
 

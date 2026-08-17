@@ -4,6 +4,7 @@ export const ATOMIC_WRITE_CONTRACT_VERSION = 1 as const;
 export const ATOMIC_WRITE_REST_PREFIX =
   "/extensions/obsidian-atomic-write-bridge" as const;
 export const MAX_NOTE_BYTES = 5 * 1024 * 1024;
+export const MAX_CANVAS_BYTES = 5 * 1024 * 1024;
 
 export type NoteReadRequest = {
   contractVersion: typeof ATOMIC_WRITE_CONTRACT_VERSION;
@@ -11,6 +12,17 @@ export type NoteReadRequest = {
 };
 
 export type NoteCasRequest = NoteReadRequest & {
+  bindingFingerprint: string;
+  expectedSha256: string;
+  nextContent: string;
+};
+
+export type CanvasReadRequest = {
+  contractVersion: typeof ATOMIC_WRITE_CONTRACT_VERSION;
+  path: string;
+};
+
+export type CanvasCasRequest = CanvasReadRequest & {
   bindingFingerprint: string;
   expectedSha256: string;
   nextContent: string;
@@ -45,6 +57,22 @@ export function compareAndReplace(
 }
 
 export function validateVaultMarkdownPath(input: unknown): string {
+  return validateVaultPath(input, ".md", "Only Markdown notes are supported.");
+}
+
+export function validateVaultCanvasPath(input: unknown): string {
+  return validateVaultPath(
+    input,
+    ".canvas",
+    "Only JSON Canvas files are supported.",
+  );
+}
+
+function validateVaultPath(
+  input: unknown,
+  extension: string,
+  extensionError: string,
+): string {
   if (typeof input !== "string") throw new Error("path must be a string.");
   const value = input.trim();
   if (!value || value.length > 1024) {
@@ -60,8 +88,8 @@ export function validateVaultMarkdownPath(input: unknown): string {
   if (parts[0]?.toLowerCase() === ".obsidian") {
     throw new Error("Obsidian configuration files are outside this bridge.");
   }
-  if (!value.toLowerCase().endsWith(".md")) {
-    throw new Error("Only Markdown notes are supported.");
+  if (!value.toLowerCase().endsWith(extension)) {
+    throw new Error(extensionError);
   }
   return value;
 }
@@ -142,4 +170,123 @@ export function parseCasRequest(input: unknown): NoteCasRequest {
     expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"),
     nextContent: body.nextContent,
   };
+}
+
+export function parseCanvasReadRequest(input: unknown): CanvasReadRequest {
+  const body = bodyRecord(input);
+  assertExactKeys(body, ["contractVersion", "path"]);
+  return {
+    contractVersion: contractVersion(body.contractVersion),
+    path: validateVaultCanvasPath(body.path),
+  };
+}
+
+export function parseCanvasCasRequest(input: unknown): CanvasCasRequest {
+  const body = bodyRecord(input);
+  assertExactKeys(body, [
+    "bindingFingerprint",
+    "contractVersion",
+    "expectedSha256",
+    "nextContent",
+    "path",
+  ]);
+  if (typeof body.nextContent !== "string") {
+    throw new Error("nextContent must be a string.");
+  }
+  if (Buffer.byteLength(body.nextContent, "utf8") > MAX_CANVAS_BYTES) {
+    throw new Error(`nextContent exceeds ${MAX_CANVAS_BYTES} UTF-8 bytes.`);
+  }
+  validateCanvasGraph(body.nextContent);
+  return {
+    contractVersion: contractVersion(body.contractVersion),
+    path: validateVaultCanvasPath(body.path),
+    bindingFingerprint: sha256Digest(
+      body.bindingFingerprint,
+      "bindingFingerprint",
+    ),
+    expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"),
+    nextContent: body.nextContent,
+  };
+}
+
+export function validateCanvasGraph(content: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("Canvas content must be valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Canvas content must be a JSON object.");
+  }
+  const root = parsed as Record<string, unknown>;
+  if (!Array.isArray(root.nodes) || !Array.isArray(root.edges)) {
+    throw new Error("Canvas content must contain nodes and edges arrays.");
+  }
+  const nodeIds = new Set<string>();
+  for (const node of root.nodes) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      throw new Error("Every Canvas node must be an object.");
+    }
+    const id = (node as Record<string, unknown>).id;
+    if (typeof id !== "string" || id.length === 0 || nodeIds.has(id)) {
+      throw new Error("Canvas node IDs must be non-empty and unique.");
+    }
+    nodeIds.add(id);
+    const value = node as Record<string, unknown>;
+    if (
+      typeof value.type !== "string" ||
+      !["text", "file", "link", "group"].includes(value.type)
+    ) {
+      throw new Error("Canvas node types must be text, file, link, or group.");
+    }
+    for (const field of ["x", "y", "width", "height"] as const) {
+      if (typeof value[field] !== "number" || !Number.isFinite(value[field])) {
+        throw new Error(`Canvas node ${field} must be a finite number.`);
+      }
+    }
+    if ((value.width as number) <= 0 || (value.height as number) <= 0) {
+      throw new Error("Canvas node width and height must be positive.");
+    }
+    if (value.type === "text" && typeof value.text !== "string") {
+      throw new Error("Canvas text nodes must contain text.");
+    }
+    if (value.type === "file" && typeof value.file !== "string") {
+      throw new Error("Canvas file nodes must contain a file path.");
+    }
+    if (value.type === "link" && typeof value.url !== "string") {
+      throw new Error("Canvas link nodes must contain a URL.");
+    }
+  }
+  const edgeIds = new Set<string>();
+  for (const edge of root.edges) {
+    if (!edge || typeof edge !== "object" || Array.isArray(edge)) {
+      throw new Error("Every Canvas edge must be an object.");
+    }
+    const value = edge as Record<string, unknown>;
+    if (
+      typeof value.id !== "string" ||
+      value.id.length === 0 ||
+      edgeIds.has(value.id)
+    ) {
+      throw new Error("Canvas edge IDs must be non-empty and unique.");
+    }
+    if (
+      typeof value.fromNode !== "string" ||
+      typeof value.toNode !== "string" ||
+      !nodeIds.has(value.fromNode) ||
+      !nodeIds.has(value.toNode)
+    ) {
+      throw new Error("Canvas edges must reference existing nodes.");
+    }
+    for (const side of ["fromSide", "toSide"] as const) {
+      if (
+        value[side] !== undefined &&
+        !["top", "right", "bottom", "left"].includes(String(value[side]))
+      ) {
+        throw new Error(`Canvas edge ${side} is invalid.`);
+      }
+    }
+    edgeIds.add(value.id);
+  }
 }

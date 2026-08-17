@@ -35,6 +35,7 @@ question.
 | Comment les lectures et mutations Operon sont-elles gouvernées ?              | [Contrat MCP Operon](operon-mcp-contract.fr.md)                                         |
 | Comment fonctionne le remplacement atomique gouverné ?                        | [Contrat de remplacement gouverné](governed-note-replacement.fr.md)                     |
 | Comment muter sûrement les formules nommées d’une Base Obsidian ?              | [Formules Base gouvernées P2](governed-base-formula-p2.fr.md)                           |
+| Comment muter sûrement le graphe d'un JSON Canvas existant ?                   | [Canvas gouverné P3](governed-canvas-p3.fr.md)                                          |
 | Pourquoi le MCP expose-t-il des fonctions Operon au lieu d’appeler la CLI ?   | [Audit CLI / Developer API](operon-cli-audit.fr.md)                                     |
 | Pourquoi une décision d’architecture a-t-elle été prise ?                     | [Index des ADR](adr/README.md)                                                          |
 | Qu’est-ce qui a changé ?                                                      | [Changelog](../CHANGELOG.md)                                                            |

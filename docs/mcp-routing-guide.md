@@ -51,6 +51,7 @@ this precedence:
 | Complete replacement of an existing Markdown note | `obsidian_note_replace_plan` then its matching apply/status/recover tools | `obsidian_update_note` overwrite has no durable receipt or exact-plan recovery.                                        |
 | Top-level frontmatter set/delete                  | `obsidian_frontmatter_patch_plan` then its matching lifecycle             | `obsidian_manage_frontmatter` remains useful for reads, compatibility, or when the governed live projection is absent. |
 | Named Base formula set/delete                     | `bases_formula_patch_plan` then its matching lifecycle                    | `bases_upsert_config` is a default-off whole-config compatibility path.                                                |
+| Existing JSON Canvas graph mutation               | `obsidian_canvas_patch_plan` then its matching lifecycle                  | `obsidian_manage_canvas` is a direct headless-filesystem helper without durable recovery.                              |
 
 Direct append, prepend, search/replace and tag mutations remain intentionally
 available where the active runtime permits them. They do not produce a durable
@@ -71,7 +72,13 @@ Use `obsidian_validate_format` before risky writes or generated content:
 - `kind: canvas` checks JSON Canvas nodes, edges, IDs, node geometry, and edge references.
 - `kind: auto` infers from `filePath` extension.
 
-Use `obsidian_manage_canvas` only in `headless-filesystem`:
+For an existing Canvas in live/hybrid mode, prefer
+`obsidian_canvas_patch_plan → apply → status/recover`. The governed compiler
+supports bounded text-node, geometry, node-deletion and edge intentions,
+preserves unknown values, validates the final graph, and applies through the
+separate Canvas CAS gate in Atomic Write Bridge 0.4.0.
+
+Use `obsidian_manage_canvas` only as the direct `headless-filesystem` helper:
 
 - `validate` reads and validates an existing `.canvas`.
 - `create` writes a structurally valid `.canvas`.

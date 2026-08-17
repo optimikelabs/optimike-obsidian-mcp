@@ -383,7 +383,7 @@ function operationIdFromRef(
   }
   const operationId = reference.slice(profile.planRefPrefix.length);
   if (!z.string().uuid().safeParse(operationId).success) {
-    throw new Error("The note-replace operation plan reference is malformed.");
+    throw new Error(`The ${profile.operationKind} plan reference is malformed.`);
   }
   return operationId;
 }
@@ -601,7 +601,7 @@ export class ObsidianNoteReplaceOperationAdapter
       const replay = this.replayIfDurableWinner(input, afterSha256);
       if (replay) return replay;
       throw new Error(
-        "Atomic note writes are disabled in the bridge settings.",
+        `Atomic ${this.profile.targetLabel} writes are disabled in the bridge settings.`,
       );
     }
     let read;
@@ -634,7 +634,7 @@ export class ObsidianNoteReplaceOperationAdapter
       if (replay) return replay;
       throw new McpError(
         BaseErrorCode.CONFLICT,
-        "The note changed after the domain projection was compiled.",
+        `The ${this.profile.targetLabel} changed after the domain projection was compiled.`,
       );
     }
     if (
@@ -818,7 +818,7 @@ export class ObsidianNoteReplaceOperationAdapter
     idempotencyKey?: string,
   ): ObsidianNoteReplacePlan {
     const plan = this.journal.get(operationIdFromRef(this.profile, reference));
-    if (!plan) throw new Error("Unknown note-replace operation plan.");
+    if (!plan) throw new Error(`Unknown ${this.profile.operationKind} operation plan.`);
     if (
       idempotencyKey !== undefined &&
       plan.idempotencyKey !== idempotencyKey
@@ -850,7 +850,7 @@ export class ObsidianNoteReplaceOperationAdapter
           plan,
           ["applying"],
           "rejected",
-          "Atomic note writes were disabled before apply.",
+          `Atomic ${this.profile.targetLabel} writes were disabled before apply.`,
           executionAttemptId,
         );
       }
@@ -1098,7 +1098,7 @@ export class ObsidianNoteReplaceOperationAdapter
       if (observesLiveExecutor) return plan;
       return this.uncertain(
         plan,
-        "The note hash matches neither the sealed before nor after proof.",
+        `The ${this.profile.targetLabel} hash matches neither the sealed before nor after proof.`,
         executionAttemptId,
       );
     }

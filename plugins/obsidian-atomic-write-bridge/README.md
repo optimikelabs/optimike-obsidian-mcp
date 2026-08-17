@@ -1,7 +1,7 @@
 # Optimike Atomic Write Bridge
 
 This bundled Obsidian Desktop plugin adds a deliberately narrow Local REST API
-extension for governed note writes. It uses Obsidian `Vault.process` so the
+extension for governed note and JSON Canvas writes. It uses Obsidian `Vault.process` so the
 SHA-256 precondition and replacement happen inside the same atomic
 read-modify-write operation.
 
@@ -10,14 +10,18 @@ read-modify-write operation.
 - `GET /extensions/obsidian-atomic-write-bridge/status`
 - `POST /extensions/obsidian-atomic-write-bridge/notes/read`
 - `POST /extensions/obsidian-atomic-write-bridge/notes/cas`
+- `POST /extensions/obsidian-atomic-write-bridge/canvas/read`
+- `POST /extensions/obsidian-atomic-write-bridge/canvas/cas`
 
 Every request body is strict and versioned with `contractVersion: 1`. The CAS
-route accepts only an existing Markdown note, the sealed backend binding
-fingerprint, its exact lowercase SHA-256, and the complete next content. A
+routes accept only an existing resource of the declared type, the sealed backend binding
+fingerprint, its exact lowercase SHA-256, and the complete next content. Canvas
+CAS also rejects malformed graphs or edges that reference missing nodes. A
 backend or content mismatch returns HTTP `409` before `Vault.process` writes.
 
-Writes are disabled by default. The operator must explicitly enable **Allow
-atomic writes** in this bridge's Obsidian settings. Read and status remain
+Note and Canvas writes have independent gates, both disabled by default. The
+operator must explicitly enable the required capability in this bridge's
+Obsidian settings. Read and status remain
 available while the write gate is closed.
 
 The bridge depends on the public extension API of **Local REST API**. It does
@@ -29,6 +33,10 @@ plugins:
 - [Frontmatter Date Manager](https://github.com/SmetDenis/obsidian-frontmatter-date-manager);
 - [Update Time](https://github.com/dsebastien/obsidian-update-time);
 - [Update time on edit](https://github.com/beaussan/update-time-on-edit-obsidian).
+
+Version 0.4.0 adds the separate Canvas read/CAS capability and write gate. It
+does not make the legacy filesystem Canvas helper durable or governed; the MCP
+must still compile a bounded graph intent and seal it before calling CAS.
 
 The protection contract reports each configured active creation, modification
 and last-viewed property. Optimike MCP automatically adds those names to its

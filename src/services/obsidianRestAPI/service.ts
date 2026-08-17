@@ -281,6 +281,28 @@ export class ObsidianRestApiService {
     );
   }
 
+  async readAtomicWriteCanvas(
+    payload: import("./types.js").CanvasAtomicReadRequest,
+    context: RequestContext,
+  ) {
+    return atomicWriteMethods.readAtomicWriteCanvas(
+      this._request.bind(this),
+      payload,
+      context,
+    );
+  }
+
+  async replaceAtomicWriteCanvas(
+    payload: import("./types.js").CanvasAtomicCasRequest,
+    context: RequestContext,
+  ) {
+    return atomicWriteMethods.replaceAtomicWriteCanvas(
+      this._request.bind(this),
+      payload,
+      context,
+    );
+  }
+
   async getBaseAtomicStatus(
     context: RequestContext,
   ): Promise<BaseAtomicStatusResponse> {

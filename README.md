@@ -17,7 +17,7 @@ explicitly governed access to configured documents outside the vault.
 | Area                    | What the MCP provides                                                                                     | Main dependency                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | Notes                   | Read/search/update plus governed atomic note and source-preserving Frontmatter plans                      | Vault; Local REST API + Atomic Write Bridge for governed CAS |
-| Bases and Canvas        | Bases query tools, governed source-preserving formula plans, format validation and bounded Canvas helpers | Bases Bridge for live Bases and typed Base CAS               |
+| Bases and Canvas        | Bases queries/formula plans plus governed Canvas graph plans and direct headless helpers                  | Bases Bridge; Atomic Write Bridge 0.4.0 for Canvas CAS        |
 | Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools                                        | Operon Developer API V1 through the Bridge                   |
 | Semantic search         | Smart Connections index search with durable metadata cache                                                | `.smart-env` plus Ollama or OpenAI query embedding           |
 | Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions                                    | Local filesystem                                             |
@@ -88,7 +88,7 @@ Enable only the surfaces you use:
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api):
   live note, metadata and tag operations;
 - bundled **Bases Bridge (REST)**: live `.base` queries plus opt-in typed CAS for governed source-preserving formula `plan → apply → status → recover`; legacy whole-file config writes are default-off compatibility paths ([P2 contract](docs/governed-base-formula-p2.md));
-- bundled **Optimike Atomic Write Bridge**: opt-in SHA-256 compare-and-replace backing governed whole-note and source-preserving Frontmatter `plan → apply → status → recover`; Bridge 0.3.0 derives configured creation, modification and last-viewed property names from supported active date plugins, rejects active names it cannot represent safely, and allows only a strictly bounded modification timestamp to settle after CAS; opaque `planRef`, lost response → `status`, exact-plan recovery ≠ undo ([note contract](docs/governed-note-replacement.md), [P1 contract](docs/governed-frontmatter-p1.md));
+- bundled **Optimike Atomic Write Bridge**: independent default-off SHA-256 CAS gates for Markdown and JSON Canvas, backing governed note, Frontmatter and Canvas `plan → apply → status → recover`; Bridge 0.3.0 added bounded date-property protection/settlement and 0.4.0 adds typed Canvas read/CAS with graph validation; opaque `planRef`, lost response → `status`, exact-plan recovery ≠ undo ([note contract](docs/governed-note-replacement.md), [P1 contract](docs/governed-frontmatter-p1.md), [Canvas P3 contract](docs/governed-canvas-p3.md));
 - **Smart Connections**: semantic index under `.smart-env`;
 - **Operon Developer API V1** and the bundled **Optimike Operon Bridge**: governed live
   task operations through the official Developer API V1;
@@ -103,7 +103,7 @@ Optimike Operon Bridge setting: Allow task mutations
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Stale Operon snapshots remain read-only. Atomic note replacement has a separate default-off bridge setting and does not require Operon's Developer API grant.
+Stale Operon snapshots remain read-only. Atomic Markdown and Canvas writes have separate default-off bridge settings and do not require Operon's Developer API grant.
 
 The MCP exposes a curated agent surface rather than every Operon CLI function.
 Native diagnostics, finder/resolve, bounded relationships/context and timer

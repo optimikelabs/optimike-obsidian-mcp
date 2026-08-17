@@ -30,6 +30,10 @@ runtime-dependent; never infer that an absent tool can be emulated safely.
 - Named Base formula set/delete: prefer \`bases_formula_patch_plan\`.
   \`bases_upsert_config\` is a legacy whole-config compatibility path and must not
   bypass the governed formula contract.
+- Existing JSON Canvas graph mutation in live/hybrid mode: prefer
+  \`obsidian_canvas_patch_plan\`, then its matching apply/status/recover tools.
+  \`obsidian_manage_canvas\` is a direct headless-filesystem helper without a
+  durable receipt and must not emulate the governed CAS path.
 - Direct append/prepend/search-replace/tag tools do not provide a durable
   plan/status/recovery receipt. Use them only when that narrower direct contract
   is intentional and allowed by the active runtime policy.

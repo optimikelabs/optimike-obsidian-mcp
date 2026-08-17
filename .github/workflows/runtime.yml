@@ -24,6 +24,8 @@ jobs:
       - run: npm run test:runtime
       - run: npm run test:external-roots
       - run: npm run test:operation-runtime
+      - run: node scripts/test-governed-canvas-mcp.mjs
+      - run: node scripts/test-governed-canvas-http.mjs
       - run: node scripts/test-governed-note-replace-mcp.mjs
       - run: node scripts/test-governed-note-replace-http.mjs
       - run: npm run test:profiles

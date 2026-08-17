@@ -7,9 +7,12 @@ import {
   compareAndReplace,
   HashConflictError,
   parseCasRequest,
+  parseCanvasCasRequest,
+  parseCanvasReadRequest,
   parseReadRequest,
   sha256,
   validateVaultMarkdownPath,
+  validateVaultCanvasPath,
 } from "./contract.js";
 
 test("validates bounded vault-relative Markdown paths", () => {
@@ -22,6 +25,48 @@ test("validates bounded vault-relative Markdown paths", () => {
     ".obsidian/Plugins.md",
   ]) {
     assert.throws(() => validateVaultMarkdownPath(value));
+  }
+});
+
+test("validates Canvas paths and graph-bound CAS bodies", () => {
+  assert.equal(
+    validateVaultCanvasPath("Canvases/Flow.canvas"),
+    "Canvases/Flow.canvas",
+  );
+  assert.deepEqual(
+    parseCanvasReadRequest({ contractVersion: 1, path: "Flow.canvas" }),
+    { contractVersion: 1, path: "Flow.canvas" },
+  );
+  const nextContent = JSON.stringify({
+    nodes: [
+      { id: "a", type: "text", x: 0, y: 0, width: 100, height: 100, text: "A" },
+    ],
+    edges: [],
+  });
+  assert.equal(
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent,
+    }).nextContent,
+    nextContent,
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [{ id: "a" }],
+        edges: [{ id: "e", fromNode: "a", toNode: "missing" }],
+      }),
+    }),
+  );
+  for (const value of ["../Flow.canvas", "Flow.md", ".obsidian/Flow.canvas"]) {
+    assert.throws(() => validateVaultCanvasPath(value));
   }
 });
 

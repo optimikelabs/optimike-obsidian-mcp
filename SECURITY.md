@@ -88,8 +88,10 @@ by default.
 - Protected frontmatter is parsed structurally and compared against the same
   Bridge read that seals the before hash. A whole-file replacement cannot be
   used to bypass `MCP_PROTECTED_FRONTMATTER_KEYS`.
-- The Atomic Write Bridge remains disabled by default and enforces target path,
-  backend binding and SHA-256 CAS through `Vault.process`. A lost response is
+- The Atomic Write Bridge keeps independent Markdown and Canvas write gates,
+  both disabled by default, and enforces typed target path, backend binding and
+  SHA-256 CAS through `Vault.process`. Canvas CAS additionally validates graph
+  identity and references. A lost response is
   followed by `status`, never by a blind new mutation; `recover` resumes only
   the exact sealed plan and is not undo.
 - Supported date plugins do not weaken that CAS. Bridge `0.3.0` dynamically

@@ -334,6 +334,25 @@ exact disposable copy of `PROJETS.base`. Never target the canonical Base. Keep
 the OS-temporary recovery directory until stale-plan conflict, exact backup
 restoration, and final SHA equality are proven.
 
+## Governed Canvas P3
+
+P3 exposes `obsidian_canvas_patch_plan → apply → status → recover` for bounded
+node and edge intentions in one existing `.canvas`. It preserves unknown JSON
+values, validates the before/after graph, and applies through the separate
+Atomic Write Bridge 0.4.0 Canvas CAS gate. Enable **Allow atomic Canvas writes**
+only in the disposable pilot vault; the Markdown write gate is independent.
+
+Deterministic gates:
+
+```bash
+npm run test:governed-canvas
+```
+
+The live release canary must use a disposable Canvas in the Operon Bridge pilot
+vault, retain its OS-temporary private backup after interruption, and delete it
+only after exact SHA-256 restoration. See
+[the P3 contract](docs/governed-canvas-p3.md).
+
 ## Tasks: How It Works Now
 
 Tasks are no longer a separate MCP requirement for Codex.

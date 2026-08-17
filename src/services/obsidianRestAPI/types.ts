@@ -45,6 +45,8 @@ export type AtomicWriteStatusResponse = {
     bindingFingerprint: string;
     atomicCas: true;
     writeEnabled: boolean;
+    canvasAtomicCas?: true;
+    canvasWriteEnabled?: boolean;
   };
   limits: { markdownOnly: true };
   settlement?: {
@@ -103,6 +105,11 @@ export type AtomicWriteCasResponse = {
   size: number;
   bindingFingerprint: string;
 };
+
+export type CanvasAtomicReadRequest = AtomicWriteReadRequest;
+export type CanvasAtomicCasRequest = AtomicWriteCasRequest;
+export type CanvasAtomicReadResponse = AtomicWriteReadResponse;
+export type CanvasAtomicCasResponse = AtomicWriteCasResponse;
 
 export type BaseAtomicReadRequest = {
   contractVersion: 1;

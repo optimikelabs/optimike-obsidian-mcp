@@ -5,6 +5,10 @@ import type {
   AtomicWriteReadRequest,
   AtomicWriteReadResponse,
   AtomicWriteStatusResponse,
+  CanvasAtomicCasRequest,
+  CanvasAtomicCasResponse,
+  CanvasAtomicReadRequest,
+  CanvasAtomicReadResponse,
   RequestFunction,
 } from "../types.js";
 
@@ -42,5 +46,29 @@ export async function replaceAtomicWriteNote(
     { method: "POST", url: `${PREFIX}/notes/cas`, data: payload },
     context,
     "replaceAtomicWriteNote",
+  );
+}
+
+export async function readAtomicWriteCanvas(
+  request: RequestFunction,
+  payload: CanvasAtomicReadRequest,
+  context: RequestContext,
+): Promise<CanvasAtomicReadResponse> {
+  return request<CanvasAtomicReadResponse>(
+    { method: "POST", url: `${PREFIX}/canvas/read`, data: payload },
+    context,
+    "readAtomicWriteCanvas",
+  );
+}
+
+export async function replaceAtomicWriteCanvas(
+  request: RequestFunction,
+  payload: CanvasAtomicCasRequest,
+  context: RequestContext,
+): Promise<CanvasAtomicCasResponse> {
+  return request<CanvasAtomicCasResponse>(
+    { method: "POST", url: `${PREFIX}/canvas/cas`, data: payload },
+    context,
+    "replaceAtomicWriteCanvas",
   );
 }

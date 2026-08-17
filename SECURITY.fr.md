@@ -89,8 +89,10 @@ par défaut.
 - Le frontmatter protégé est parsé structurellement et comparé depuis la même
   lecture Bridge qui scelle le hash initial. Un remplacement de fichier complet
   ne peut pas contourner `MCP_PROTECTED_FRONTMATTER_KEYS`.
-- L’Atomic Write Bridge reste désactivé par défaut et impose chemin cible,
-  binding backend et CAS SHA-256 via `Vault.process`. Après une réponse perdue,
+- L’Atomic Write Bridge conserve deux gates d’écriture indépendants, Markdown
+  et Canvas, désactivés par défaut, et impose type de cible, binding backend et
+  CAS SHA-256 via `Vault.process`. Le CAS Canvas valide aussi les identités et
+  références du graphe. Après une réponse perdue,
   appeler `status`, jamais une nouvelle mutation aveugle ; `recover` reprend
   uniquement le plan exact scellé et n’est pas un undo.
 - Les plugins de date pris en charge n’affaiblissent pas ce CAS. Le Bridge
