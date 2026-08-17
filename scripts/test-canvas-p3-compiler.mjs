@@ -116,7 +116,7 @@ assert.throws(
       }),
       [{ op: "delete_node", id: "root" }],
     ),
-  /current Canvas graph is invalid/u,
+  /Canvas edge must have a non-empty string id of at most 256 characters/u,
 );
 
 console.log(
