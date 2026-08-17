@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +25,13 @@ const upstreamBaseUrl = (
 const writeMode = process.env.MCP_WRITE_MODE?.trim() ?? "readonly";
 const CONFIRMATION =
   "I_UNDERSTAND_THIS_DISPOSABLE_CANVAS_WILL_BE_MUTATED_AND_RESTORED";
+const mcpGitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: process.cwd(),
+  encoding: "utf8",
+}).trim();
+const mcpVersion = JSON.parse(
+  readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+).version;
 
 if (!canaryPath?.toLowerCase().endsWith(".canvas")) {
   throw new Error(
@@ -85,8 +99,10 @@ const replace = (expectedSha256, nextContent, bindingFingerprint) =>
   });
 
 let dropNextCasResponse = false;
+let dropNextCasBeforeUpstream = false;
 let dropNextReadResponse = false;
 let droppedCasResponses = 0;
+let droppedCasBeforeUpstream = 0;
 let droppedReadResponses = 0;
 const proxy = createServer(async (request, response) => {
   try {
@@ -94,6 +110,15 @@ const proxy = createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     const requestBody = Buffer.concat(chunks);
     const target = new URL(request.url ?? "/", `${upstreamBaseUrl}/`);
+    if (
+      dropNextCasBeforeUpstream &&
+      target.pathname === "/extensions/obsidian-atomic-write-bridge/canvas/cas"
+    ) {
+      dropNextCasBeforeUpstream = false;
+      droppedCasBeforeUpstream += 1;
+      request.socket.destroy();
+      return;
+    }
     if (
       dropNextReadResponse &&
       target.pathname === "/extensions/obsidian-atomic-write-bridge/canvas/read"
@@ -234,6 +259,26 @@ try {
     { encoding: "utf8", mode: 0o600 },
   );
 
+  const invalidGraph = JSON.stringify({
+    nodes: originalGraph.nodes,
+    edges: [
+      {
+        id: `invalid-${runId}`,
+        fromNode: "canary-root",
+        toNode: "missing-node",
+      },
+    ],
+  });
+  await assert.rejects(
+    replace(original.sha256, invalidGraph, bindingFingerprint),
+    /400|existing nodes/u,
+  );
+  assert.equal(
+    (await read()).sha256,
+    original.sha256,
+    "invalid Canvas graphs must be rejected without a write",
+  );
+
   await client.connect(transport);
   const suffix = runId.slice(0, 8);
   const key = `canvas-live:${runId}:apply`;
@@ -267,7 +312,7 @@ try {
   assert.equal(plan.phase, "planned");
   assert.equal((await read()).sha256, original.sha256, "plan must not write");
 
-  dropNextCasResponse = true;
+  dropNextCasBeforeUpstream = true;
   const uncertain = parsed(
     await client.callTool({
       name: "obsidian_canvas_patch_apply",
@@ -276,16 +321,23 @@ try {
   );
   assert.equal(uncertain.outcome, "outcome_unknown");
   assert.equal(uncertain.recoveryAllowed, true);
-  assert.equal(droppedCasResponses, 1);
-  assert.equal(droppedReadResponses, 1);
+  assert.equal(droppedCasBeforeUpstream, 1);
 
-  const reconciled = parsed(
+  const recoverableStatus = parsed(
     await client.callTool({
       name: "obsidian_canvas_patch_status",
       arguments: { planRef: plan.planRef },
     }),
   );
-  assert.equal(reconciled.outcome, "committed");
+  assert.equal(recoverableStatus.outcome, "outcome_unknown");
+  assert.equal(recoverableStatus.recoveryAllowed, true);
+  const recovered = parsed(
+    await client.callTool({
+      name: "obsidian_canvas_patch_recover",
+      arguments: { planRef: plan.planRef, idempotencyKey: key },
+    }),
+  );
+  assert.equal(recovered.outcome, "committed");
   const committedRead = await read();
   const committedGraph = JSON.parse(committedRead.content);
   assert.equal(
@@ -294,14 +346,58 @@ try {
   );
   assert.deepEqual(committedGraph.unknownRoot, originalGraph.unknownRoot);
 
-  const replay = parsed(
+  const recoveryReplay = parsed(
     await client.callTool({
-      name: "obsidian_canvas_patch_apply",
+      name: "obsidian_canvas_patch_recover",
       arguments: { planRef: plan.planRef, idempotencyKey: key },
     }),
   );
-  assert.equal(replay.outcome, "committed");
+  assert.equal(recoveryReplay.outcome, "committed");
   assert.equal((await read()).sha256, committedRead.sha256);
+
+  const postWriteKey = `canvas-live:${runId}:post-write`;
+  const postWritePlan = parsed(
+    await client.callTool({
+      name: "obsidian_canvas_patch_plan",
+      arguments: {
+        path: canaryPath,
+        operations: [
+          {
+            op: "set_text",
+            id: "canary-root",
+            text: `Post-write ${suffix}`,
+          },
+        ],
+        idempotencyKey: postWriteKey,
+      },
+    }),
+  );
+  dropNextCasResponse = true;
+  const postWriteUnknown = parsed(
+    await client.callTool({
+      name: "obsidian_canvas_patch_apply",
+      arguments: {
+        planRef: postWritePlan.planRef,
+        idempotencyKey: postWriteKey,
+      },
+    }),
+  );
+  assert.equal(postWriteUnknown.outcome, "outcome_unknown");
+  assert.equal(droppedCasResponses, 1);
+  assert.equal(droppedReadResponses, 1);
+  const postWriteReconciled = parsed(
+    await client.callTool({
+      name: "obsidian_canvas_patch_status",
+      arguments: { planRef: postWritePlan.planRef },
+    }),
+  );
+  assert.equal(postWriteReconciled.outcome, "committed");
+  const postWriteRead = await read();
+  const postWriteGraph = JSON.parse(postWriteRead.content);
+  assert.equal(
+    postWriteGraph.nodes.find((node) => node.id === "canary-root")?.text,
+    `Post-write ${suffix}`,
+  );
 
   const staleKey = `canvas-live:${runId}:stale`;
   const stale = parsed(
@@ -315,12 +411,12 @@ try {
     }),
   );
   const driftContent = `${JSON.stringify(
-    { ...committedGraph, canaryDrift: runId },
+    { ...postWriteGraph, canaryDrift: runId },
     null,
     2,
   )}\n`;
   const drift = await replace(
-    committedRead.sha256,
+    postWriteRead.sha256,
     driftContent,
     bindingFingerprint,
   );
@@ -332,7 +428,7 @@ try {
   );
   assert.equal(conflict.outcome, "conflict");
   assert.equal((await read()).sha256, drift.afterSha256);
-  await replace(drift.afterSha256, committedRead.content, bindingFingerprint);
+  await replace(drift.afterSha256, postWriteRead.content, bindingFingerprint);
 
   const beforeRestore = await read();
   await replace(beforeRestore.sha256, original.content, bindingFingerprint);
@@ -353,12 +449,20 @@ try {
         runId,
         canaryPath,
         bridgeVersion: bridgeStatus.plugin.version,
+        mcpVersion,
+        mcpGitSha,
         originalSha256: original.sha256,
         finalSha256: finalRead.sha256,
+        invalidGraphRejectedWithoutWrite: true,
         uncertainOutcome: uncertain.outcome,
-        reconciledOutcome: reconciled.outcome,
+        recoverableStatusOutcome: recoverableStatus.outcome,
+        recoveredOutcome: recovered.outcome,
+        recoveryReplayOutcome: recoveryReplay.outcome,
+        postWriteUnknownOutcome: postWriteUnknown.outcome,
+        postWriteReconciledOutcome: postWriteReconciled.outcome,
         conflictOutcome: conflict.outcome,
         droppedCasResponses,
+        droppedCasBeforeUpstream,
         droppedReadResponses,
         restored,
       },

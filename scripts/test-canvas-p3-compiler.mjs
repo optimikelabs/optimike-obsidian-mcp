@@ -86,6 +86,32 @@ assert.deepEqual(
   JSON.parse(exactNumericLiteral.nextContent).edges.map((edge) => edge.id),
   ["bc"],
 );
+assert.throws(
+  () =>
+    compileCanvasPatch(source, [
+      { op: "delete_node", id: "a" },
+      {
+        op: "connect_nodes",
+        id: "ab",
+        fromNode: "b",
+        toNode: "b",
+      },
+    ]),
+  /already removed implicitly/u,
+);
+assert.throws(
+  () =>
+    compileCanvasPatch(source, [
+      {
+        op: "connect_nodes",
+        id: "new-ab",
+        fromNode: "a",
+        toNode: "b",
+      },
+      { op: "delete_node", id: "a" },
+    ]),
+  /already changed before its implicit removal/u,
+);
 
 const stressEdgeIds = Array.from(
   { length: 300 },

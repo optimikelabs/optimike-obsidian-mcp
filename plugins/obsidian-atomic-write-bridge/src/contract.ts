@@ -44,6 +44,12 @@ export function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+export function assertCanvasContentSize(content: string): void {
+  if (Buffer.byteLength(content, "utf8") > MAX_CANVAS_BYTES) {
+    throw new Error(`Canvas content exceeds ${MAX_CANVAS_BYTES} UTF-8 bytes.`);
+  }
+}
+
 export function compareAndReplace(
   current: string,
   expectedSha256: string,
@@ -193,9 +199,7 @@ export function parseCanvasCasRequest(input: unknown): CanvasCasRequest {
   if (typeof body.nextContent !== "string") {
     throw new Error("nextContent must be a string.");
   }
-  if (Buffer.byteLength(body.nextContent, "utf8") > MAX_CANVAS_BYTES) {
-    throw new Error(`nextContent exceeds ${MAX_CANVAS_BYTES} UTF-8 bytes.`);
-  }
+  assertCanvasContentSize(body.nextContent);
   validateCanvasGraph(body.nextContent);
   return {
     contractVersion: contractVersion(body.contractVersion),

@@ -31,6 +31,7 @@ const PLAN_REF_PREFIX = "obsidian-canvas-patch:v1:";
 const INTERNAL_KEY_PREFIX = "optimike:canvas-projection:v1:";
 const INTERNAL_KEY_DOMAIN = "obsidian.canvas.patch:v1\0";
 const SHA256 = /^[a-f0-9]{64}$/u;
+const MAX_CANVAS_BYTES = 5 * 1024 * 1024;
 
 const CanvasPatchProofSchema = z
   .object({
@@ -306,6 +307,14 @@ export class GovernedCanvasRuntime {
       contractVersion: 1,
       path: input.path,
     });
+    const sourceBytes = Buffer.byteLength(source.content, "utf8");
+    if (source.size > MAX_CANVAS_BYTES || sourceBytes > MAX_CANVAS_BYTES) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        `Canvas source exceeds ${MAX_CANVAS_BYTES} UTF-8 bytes.`,
+        { reason: "canvas_source_too_large" },
+      );
+    }
     const compiled = compileCanvasPatch(source.content, canonical.operations);
     assertPolicy(
       "plan",

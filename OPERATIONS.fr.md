@@ -365,6 +365,23 @@ Operon Bridge, conserver son backup privé temporaire système après interrupti
 et ne le supprimer qu'après restauration exacte du SHA-256. Voir
 [le contrat P3](docs/governed-canvas-p3.fr.md).
 
+Le lancer depuis le commit candidat exact après avoir activé **Autoriser les
+écritures Canvas atomiques** dans ce coffre pilote. Le script prouve le rejet
+d'un graphe invalide, le recovery après interruption avant envoi, la
+réconciliation après perte de réponse post-écriture, le conflit d'un plan
+périmé et la restauration exacte. Il affiche le chemin du JSON de preuve dans
+le dossier temporaire de l'OS ; une exécution interrompue conserve et affiche
+son dossier privé de récupération.
+
+```powershell
+$env:OBSIDIAN_CANVAS_CANARY_PATH = "Canary/Governed Canvas P3.canvas"
+$env:OBSIDIAN_CANVAS_CANARY_CONFIRM = "I_UNDERSTAND_THIS_DISPOSABLE_CANVAS_WILL_BE_MUTATED_AND_RESTORED"
+$env:OBSIDIAN_API_KEY = "<clé API Local REST du coffre pilote>"
+$env:OBSIDIAN_BASE_URL = "http://127.0.0.1:27123"
+$env:MCP_WRITE_MODE = "guarded"
+npm run smoke:governed-canvas-live
+```
+
 ## Tasks : comment ça marche maintenant
 
 Tasks n’est plus un MCP séparé requis pour Codex.

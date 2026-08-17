@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ATOMIC_WRITE_CONTRACT_VERSION,
+  assertCanvasContentSize,
   assertBindingFingerprint,
   BindingConflictError,
   compareAndReplace,
@@ -13,6 +14,7 @@ import {
   sha256,
   validateVaultMarkdownPath,
   validateVaultCanvasPath,
+  MAX_CANVAS_BYTES,
 } from "./contract.js";
 
 test("validates bounded vault-relative Markdown paths", () => {
@@ -143,6 +145,20 @@ test("validates Canvas paths and graph-bound CAS bodies", () => {
   for (const value of ["../Flow.canvas", "Flow.md", ".obsidian/Flow.canvas"]) {
     assert.throws(() => validateVaultCanvasPath(value));
   }
+});
+
+test("rejects oversized Canvas reads and writes before graph processing", () => {
+  const oversized = "x".repeat(MAX_CANVAS_BYTES + 1);
+  assert.throws(() => assertCanvasContentSize(oversized), /exceeds/u);
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: oversized,
+    }),
+  );
 });
 
 test("read and CAS bodies are strict and versioned", () => {

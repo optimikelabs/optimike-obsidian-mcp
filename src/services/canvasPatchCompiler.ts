@@ -461,6 +461,15 @@ export function compileCanvasPatch(
             edge.fromNode === operation.id || edge.toNode === operation.id,
         )
         .map((edge) => entityId(edge, "Canvas edge"));
+      const previouslyChangedIncident = incidentIds.find((edgeId) =>
+        changedEdges.has(edgeId),
+      );
+      if (previouslyChangedIncident) {
+        fail(
+          `Canvas edge ${previouslyChangedIncident} was already changed before its implicit removal.`,
+          "canvas_edge_changed_before_incident_removal",
+        );
+      }
       expected.edges = expectedEdges.filter(
         (edge) =>
           edge.fromNode !== operation.id && edge.toNode !== operation.id,
@@ -483,6 +492,12 @@ export function compileCanvasPatch(
     }
 
     if (operation.op === "connect_nodes") {
+      if (removedIncidentEdges.has(operation.id)) {
+        fail(
+          `Canvas edge ${operation.id} was already removed implicitly in this patch.`,
+          "canvas_edge_reuse_after_incident_removal",
+        );
+      }
       if (indexById(expectedEdges, operation.id) !== -1) {
         fail(
           `Canvas edge ${operation.id} already exists.`,

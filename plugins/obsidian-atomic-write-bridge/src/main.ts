@@ -3,6 +3,7 @@ import { Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import {
   ATOMIC_WRITE_CONTRACT_VERSION,
   ATOMIC_WRITE_REST_PREFIX,
+  assertCanvasContentSize,
   assertBindingFingerprint,
   BindingConflictError,
   compareAndReplace,
@@ -161,6 +162,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             const content = await this.app.vault.read(
               this.file(request.path, "Canvas"),
             );
+            assertCanvasContentSize(content);
             sendJson(res, 200, {
               ok: true,
               contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,

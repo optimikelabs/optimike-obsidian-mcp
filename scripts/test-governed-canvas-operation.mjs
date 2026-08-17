@@ -39,6 +39,7 @@ let content = `${JSON.stringify(
   null,
   2,
 )}\n`;
+let failNextReplaceBeforeWrite = false;
 
 const backend = {
   async status() {
@@ -72,6 +73,10 @@ const backend = {
       payload.expectedSha256 !== digest(content)
     ) {
       throw new McpError(BaseErrorCode.CONFLICT, "sealed Canvas CAS conflict");
+    }
+    if (failNextReplaceBeforeWrite) {
+      failNextReplaceBeforeWrite = false;
+      throw new Error("synthetic transport interruption before Canvas CAS");
     }
     const beforeSha256 = digest(content);
     content = payload.nextContent;
@@ -239,6 +244,69 @@ try {
     undefined,
     "inadmissible projected effects must be rejected before journaling",
   );
+
+  const oversizedContent = "x".repeat(5 * 1024 * 1024 + 1);
+  content = oversizedContent;
+  const oversizedKey = "canvas-p3-oversized-source";
+  await assert.rejects(
+    runtime.plan({
+      path: "Canary/Oversized.canvas",
+      operations: [{ op: "set_text", id: "a", text: "Never compiled" }],
+      idempotencyKey: oversizedKey,
+    }),
+    (error) =>
+      error instanceof McpError &&
+      error.code === BaseErrorCode.VALIDATION_ERROR &&
+      error.details?.reason === "canvas_source_too_large",
+  );
+  const oversizedDurableKey = `optimike:canvas-projection:v1:${digest(
+    `obsidian.canvas.patch:v1\0${oversizedKey}`,
+  )}`;
+  assert.equal(
+    journal.getByIdempotencyKey(oversizedDurableKey),
+    undefined,
+    "oversized sources must be rejected before compilation and journaling",
+  );
+
+  content = `${JSON.stringify({
+    nodes: [
+      {
+        id: "recover",
+        type: "text",
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 100,
+        text: "Before recovery",
+      },
+    ],
+    edges: [],
+  })}\n`;
+  const recoveryKey = "canvas-p3-public-recovery";
+  const recoveryPlan = await runtime.plan({
+    path: "Canary/Recover.canvas",
+    operations: [
+      { op: "set_text", id: "recover", text: "Recovered exactly once" },
+    ],
+    idempotencyKey: recoveryKey,
+  });
+  failNextReplaceBeforeWrite = true;
+  const unknown = await runtime.apply(recoveryPlan.planRef, recoveryKey);
+  assert.equal(unknown.outcome, "outcome_unknown");
+  assert.equal(unknown.recoveryAllowed, true);
+  const recoverableStatus = await runtime.status(recoveryPlan.planRef);
+  assert.equal(recoverableStatus.outcome, "outcome_unknown");
+  assert.equal(recoverableStatus.recoveryAllowed, true);
+  const recovered = await runtime.recover(recoveryPlan.planRef, recoveryKey);
+  assert.equal(recovered.outcome, "committed");
+  assert.equal(JSON.parse(content).nodes[0].text, "Recovered exactly once");
+  const recoveredSha256 = digest(content);
+  const recoveredReplay = await runtime.recover(
+    recoveryPlan.planRef,
+    recoveryKey,
+  );
+  assert.equal(recoveredReplay.outcome, "committed");
+  assert.equal(digest(content), recoveredSha256);
 } finally {
   runtime.close();
   rmSync(root, { recursive: true, force: true });
