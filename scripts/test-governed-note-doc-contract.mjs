@@ -171,14 +171,20 @@ assert.match(contractFr, /conflit CAS suivant reste `outcome_unknown`/i);
 assert.match(contract, /Bounded modified-time settlement/i);
 assert.match(contract, /does\s+not weaken pre-effect CAS/i);
 assert.match(contract, /exactly one additional top-level frontmatter line/i);
+assert.match(contract, /sealed backend identity and logical target/i);
 assert.match(contract, /byte-identical to the sealed after content/i);
 assert.match(contract, /at-most-five-minute/i);
 assert.match(contractFr, /Settlement borné de la date de modification/i);
 assert.match(contractFr, /n.affaiblit pas le CAS/i);
 assert.match(contractFr, /une seule ligne\s+top-level du frontmatter/i);
+assert.match(
+  contractFr,
+  /identité backend et de la cible logique[\s\S]*scellées/i,
+);
 assert.match(contractFr, /byte-identical au contenu after scellé/i);
 assert.match(contractFr, /cinq minutes maximum/i);
 assert.match(adr, /never weaken the admission or pre-effect CAS/i);
+assert.match(adr, /same sealed backend identity and logical target/i);
 assert.match(adr, /never\s+ignores a field\s+globally/i);
 assert.match(bridgeReadme, /Version 0\.2\.0/i);
 assert.match(bridgeReadme, /Frontmatter Date Manager/i);

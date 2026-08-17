@@ -113,6 +113,8 @@ réunies :
 
 - il s’agit de l’unique propriété de modification configurée annoncée par le
   Bridge ;
+- la preuve provient toujours de l’identité backend et de la cible logique
+  scellées ;
 - les deux valeurs sont des dates locales canoniques et la valeur observée
   avance ;
 - le timestamp observé appartient à la vraie fenêtre apply-settlement, durable

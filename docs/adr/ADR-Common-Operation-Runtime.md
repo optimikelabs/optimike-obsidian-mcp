@@ -74,9 +74,10 @@ Adapter-specific settlement equivalence may refine an after proof, but it must
 never weaken the admission or pre-effect CAS. Such a policy must be sealed in
 the durable plan, bounded to the real execution attempt, prove the observed
 resource byte-identical after restoring only explicitly authorized drift, and
-record the actual observed revision. The common runtime never ignores a field
-globally. Future adapters must provide their own discriminating validator and
-negative concurrent-drift fixtures.
+record the actual observed revision. Settlement evidence is valid only for the
+same sealed backend identity and logical target. The common runtime never
+ignores a field globally. Future adapters must provide their own discriminating
+validator and negative concurrent-drift fixtures.
 
 Domain tools remain the public MCP surface for now. A future generic operation
 surface may be added only after at least two adapters demonstrate the same
@@ -168,9 +169,10 @@ seals the exact property reported by a supported enabled Obsidian integration,
 but only when MCP policy already protects that property. CAS remains exact.
 Postflight or reconciliation may accept one monotonic canonical timestamp in
 the durable five-minute apply window only when replacing that single line makes
-the observed note byte-identical to the sealed after content. The committed
-receipt then proves the actual settled hash and retains the sealed target hash.
-Every other drift remains `outcome_unknown`.
+the observed note byte-identical to the sealed after content and the read still
+comes from the sealed backend and target. The committed receipt then proves the
+actual settled hash and retains the sealed target hash. Every other drift
+remains `outcome_unknown`.
 
 The public projection remains domain-specific:
 

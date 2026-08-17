@@ -669,6 +669,53 @@ try {
   }
 
   {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    const clock = () => now;
+    const { backend, adapter } = fixture("settlement-backend-binding-race", {
+      now: clock,
+      modifiedTimeProtectedKeys: ["modification"],
+    });
+    backend.content =
+      "---\nmodification: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "modification",
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "settlement-backend-binding-race",
+    });
+    backend.afterStatus = async () => {
+      backend.bindingFingerprint = sha256("replacement-vault-instance");
+      backend.content = expected.replace(
+        "modification: 2026-08-17T09:59",
+        "modification: 2026-08-17T10:00",
+      );
+      now = Date.parse("2026-08-17T10:00:02.000Z");
+    };
+    const result = await adapter.apply(
+      planned.planRef,
+      "settlement-backend-binding-race",
+    );
+    assert.equal(
+      result.outcome,
+      "conflict",
+      "settlement proof from a replacement backend must never commit the old plan",
+    );
+    assert.equal(result.afterProof, undefined);
+  }
+
+  {
     const { backend, adapter } = fixture("malformed-settlement-property", {
       modifiedTimeProtectedKeys: ["modification"],
     });

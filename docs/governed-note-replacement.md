@@ -104,6 +104,7 @@ adapter may accept exactly one additional top-level frontmatter line only when
 all of these facts are proven:
 
 - it is the unique configured modified-time property reported by the Bridge;
+- the proof still comes from the sealed backend identity and logical target;
 - both values are canonical local datetimes and the observed value advances;
 - the observed timestamp falls inside the real, at-most-five-minute apply and
   settlement window recorded by the durable attempt;

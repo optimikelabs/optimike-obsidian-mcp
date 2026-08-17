@@ -741,11 +741,10 @@ export class ObsidianNoteReplaceOperationAdapter
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
-    if (
+    const sameBackendTarget =
       read.bindingFingerprint === plan.bindingFingerprint &&
-      read.path === plan.path &&
-      read.sha256 === plan.afterSha256
-    ) {
+      read.path === plan.path;
+    if (sameBackendTarget && read.sha256 === plan.afterSha256) {
       return this.transitionOrReload(
         plan,
         ["applying"],
@@ -754,7 +753,9 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     }
-    const settlement = this.modifiedTimeSettlement(plan, read.content);
+    const settlement = sameBackendTarget
+      ? this.modifiedTimeSettlement(plan, read.content)
+      : undefined;
     if (settlement) {
       return this.commitWithModifiedTimeSettlementOrReload(
         plan,
@@ -764,8 +765,7 @@ export class ObsidianNoteReplaceOperationAdapter
     }
     if (
       recoveredFromUnknown &&
-      read.bindingFingerprint === plan.bindingFingerprint &&
-      read.path === plan.path &&
+      sameBackendTarget &&
       read.sha256 !== plan.beforeSha256
     ) {
       return this.uncertain(
