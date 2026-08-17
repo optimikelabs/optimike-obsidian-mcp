@@ -88,8 +88,15 @@ function entityArray(
 }
 
 function entityId(entity: CanvasObject, label: string): string {
-  if (typeof entity.id !== "string" || entity.id.length === 0) {
-    fail(`${label} must have a non-empty string id.`, "canvas_entity_id");
+  if (
+    typeof entity.id !== "string" ||
+    entity.id.length === 0 ||
+    entity.id.length > 256
+  ) {
+    fail(
+      `${label} must have a non-empty string id of at most 256 characters.`,
+      "canvas_entity_id",
+    );
   }
   return entity.id;
 }

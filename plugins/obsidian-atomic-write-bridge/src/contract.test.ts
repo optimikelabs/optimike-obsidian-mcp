@@ -65,6 +65,28 @@ test("validates Canvas paths and graph-bound CAS bodies", () => {
       }),
     }),
   );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [
+          {
+            id: "a".repeat(257),
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "A",
+          },
+        ],
+        edges: [],
+      }),
+    }),
+  );
   for (const value of ["../Flow.canvas", "Flow.md", ".obsidian/Flow.canvas"]) {
     assert.throws(() => validateVaultCanvasPath(value));
   }

@@ -229,8 +229,15 @@ export function validateCanvasGraph(content: string): void {
       throw new Error("Every Canvas node must be an object.");
     }
     const id = (node as Record<string, unknown>).id;
-    if (typeof id !== "string" || id.length === 0 || nodeIds.has(id)) {
-      throw new Error("Canvas node IDs must be non-empty and unique.");
+    if (
+      typeof id !== "string" ||
+      id.length === 0 ||
+      id.length > 256 ||
+      nodeIds.has(id)
+    ) {
+      throw new Error(
+        "Canvas node IDs must be non-empty, unique, and at most 256 characters.",
+      );
     }
     nodeIds.add(id);
     const value = node as Record<string, unknown>;
@@ -267,9 +274,12 @@ export function validateCanvasGraph(content: string): void {
     if (
       typeof value.id !== "string" ||
       value.id.length === 0 ||
+      value.id.length > 256 ||
       edgeIds.has(value.id)
     ) {
-      throw new Error("Canvas edge IDs must be non-empty and unique.");
+      throw new Error(
+        "Canvas edge IDs must be non-empty, unique, and at most 256 characters.",
+      );
     }
     if (
       typeof value.fromNode !== "string" ||

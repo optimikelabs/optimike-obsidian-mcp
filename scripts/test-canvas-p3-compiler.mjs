@@ -88,6 +88,36 @@ assert.throws(
     ),
   /current Canvas graph is invalid/u,
 );
+assert.throws(
+  () =>
+    compileCanvasPatch(
+      JSON.stringify({
+        nodes: [
+          {
+            id: "root",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "Root",
+          },
+          {
+            id: "leaf",
+            type: "text",
+            x: 200,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "Leaf",
+          },
+        ],
+        edges: [{ id: "e".repeat(257), fromNode: "root", toNode: "leaf" }],
+      }),
+      [{ op: "delete_node", id: "root" }],
+    ),
+  /current Canvas graph is invalid/u,
+);
 
 console.log(
   "PASS: Canvas compiler preserves unknown values, validates graph effects, and fails closed",
