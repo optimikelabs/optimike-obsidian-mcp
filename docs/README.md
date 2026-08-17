@@ -11,11 +11,11 @@ French operator guides are linked alongside their English equivalents.
 
 | I am…                           | Start here                                            | Then use                                                                                                                                             |
 | ------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A new local user                | [Product overview](../README.md)                      | [Operations](../OPERATIONS.md)                                                                                                                       |
-| A Codex or local-agent operator | [Operations](../OPERATIONS.md)                        | [Agent routing](mcp-routing-guide.md)                                                                                                                |
-| A headless/server operator      | [Headless Server Profile](headless-server-profile.md) | [Runtime Matrix](runtime-capability-matrix.md), [Security](../SECURITY.md)                                                                           |
+| A new local user                | [Product overview](../README.md)                      | [Tool Surface Profiles](tool-surface-profiles.md), [Operations](../OPERATIONS.md)                                                                    |
+| A Codex or local-agent operator | [Tool Surface Profiles](tool-surface-profiles.md)     | [Operations](../OPERATIONS.md), [Agent routing](mcp-routing-guide.md)                                                                                 |
+| A headless/server operator      | [Headless Server Profile](headless-server-profile.md) | [Runtime Matrix](runtime-capability-matrix.md), [Tool Surface Profiles](tool-surface-profiles.md), [Security](../SECURITY.md)                          |
 | A gateway integrator            | [OSS Gateway Compatibility](gateway-compatibility.md) | [HTTP Security](http-multiclient-security.md), [Backpressure](http-concurrency-backpressure.md)                                                      |
-| An MCP client integrator        | [Tool Surface](obsidian_mcp_tools_spec.md)            | [Runtime Matrix](runtime-capability-matrix.md)                                                                                                       |
+| An MCP client integrator        | [Tool Surface Profiles](tool-surface-profiles.md)     | [Tool Surface](obsidian_mcp_tools_spec.md), [Runtime Matrix](runtime-capability-matrix.md)                                                            |
 | An external-document operator   | [External Roots Setup](external-roots-setup.md)       | [External Roots ADR](adr/ADR-External-Document-Roots.md), [Reference Integrity ADR](adr/ADR-External-Reference-Integrity.md)                         |
 | A Tasks/Operon operator         | [Operon MCP Contract](operon-mcp-contract.md)         | [CLI/API audit](operon-cli-audit.md), [Local Validation](operon-local-validation.md), [public ÉLYSIA profile](../profiles/elysia-tasks/README.fr.md) |
 | A contributor or reviewer       | [Architecture decisions](adr/README.md)               | [Repository tree](tree.md), plugin READMEs                                                                                                           |
@@ -24,10 +24,11 @@ French operator guides are linked alongside their English equivalents.
 
 | Question                                                         | Authority                                                                             |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Which server tool profile should a client expose?                | [Tool Surface Profiles](tool-surface-profiles.md)                                     |
 | Which tools exist?                                               | [Tool Surface](obsidian_mcp_tools_spec.md)                                            |
 | Which tools are available in each runtime?                       | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
 | How do I run and maintain the service?                           | [Operations](../OPERATIONS.md)                                                        |
-| Which surface should an agent use?                               | [MCP Routing Guide](mcp-routing-guide.md)                                             |
+| Which tool should an agent choose inside its profile?            | [MCP Routing Guide](mcp-routing-guide.md)                                             |
 | How do I run without Obsidian Desktop?                           | [Headless Server Profile](headless-server-profile.md)                                 |
 | How do external reads, handoff, move and link repair work?       | [External Roots Setup](external-roots-setup.md)                                       |
 | What is the supported HTTP security boundary?                    | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
@@ -62,6 +63,7 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 
 ### Search and runtime
 
+- public exposure profiles: [Tool Surface Profiles](tool-surface-profiles.md);
 - semantic search and providers: [Operations](../OPERATIONS.md#semantic-search-what-is-persisted-and-what-is-not);
 - runtime modes: [Runtime Capability Matrix](runtime-capability-matrix.md);
 - cache, health and maintenance: [Operations](../OPERATIONS.md).
@@ -76,10 +78,12 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 
 ## Documentation ownership
 
-- README files explain the product, profiles and first successful run.
+- README files explain the product and first successful run.
+- Tool Surface Profiles owns `standard`, `authoring`, `tasks`, `full`, profile selection and client-facing exposure semantics.
 - Operations guides own local runtime and troubleshooting.
 - The tool surface owns tool names and semantics.
-- The runtime matrix owns mode availability.
+- The runtime matrix owns backend-mode availability.
+- The routing guide owns canonical precedence between overlapping tools.
 - Setup guides own configuration examples.
 - ADRs own decisions, status, boundaries and rejected alternatives.
 - The changelog records releases and unreleased changes.
