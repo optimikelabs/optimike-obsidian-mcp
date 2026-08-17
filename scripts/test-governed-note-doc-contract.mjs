@@ -28,9 +28,14 @@ const readmeFr = await text("README.fr.md");
 const adr = await text("docs/adr/ADR-Common-Operation-Runtime.md");
 const contract = await text("docs/governed-note-replacement.md");
 const contractFr = await text("docs/governed-note-replacement.fr.md");
+const bridgeReadme = await text(
+  "plugins/obsidian-atomic-write-bridge/README.md",
+);
 const liveCanary = await text("scripts/smoke-atomic-note-mcp-live.mjs");
 const operations = await text("OPERATIONS.md");
 const operationsFr = await text("OPERATIONS.fr.md");
+const security = await text("SECURITY.md");
+const securityFr = await text("SECURITY.fr.md");
 const pkg = JSON.parse(await text("package.json"));
 
 for (const tool of tools) {
@@ -163,6 +168,42 @@ assert.match(contract, /empty Markdown note as valid content/i);
 assert.match(contractFr, /note Markdown vide comme[\s\S]*contenu valide/i);
 assert.match(contract, /subsequent CAS[\s\S]*remains `outcome_unknown`/i);
 assert.match(contractFr, /conflit CAS suivant reste `outcome_unknown`/i);
+assert.match(contract, /Bounded modified-time settlement/i);
+assert.match(contract, /does\s+not weaken pre-effect CAS/i);
+assert.match(contract, /exactly one additional top-level frontmatter line/i);
+assert.match(contract, /sealed backend identity and logical target/i);
+assert.match(contract, /byte-identical to the sealed after content/i);
+assert.match(contract, /at-most-five-minute/i);
+assert.match(contractFr, /Settlement borné de la date de modification/i);
+assert.match(contractFr, /n.affaiblit pas le CAS/i);
+assert.match(contractFr, /une seule ligne\s+top-level du frontmatter/i);
+assert.match(
+  contractFr,
+  /identité backend et de la cible logique[\s\S]*scellées/i,
+);
+assert.match(contractFr, /byte-identical au contenu after scellé/i);
+assert.match(contractFr, /cinq minutes maximum/i);
+assert.match(adr, /never weaken the admission or pre-effect CAS/i);
+assert.match(adr, /same sealed backend identity and logical target/i);
+assert.match(adr, /never\s+ignores a field\s+globally/i);
+assert.match(bridgeReadme, /Version 0\.2\.0/i);
+assert.match(bridgeReadme, /Frontmatter Date Manager/i);
+assert.match(bridgeReadme, /Update Time/i);
+assert.match(
+  security,
+  /Supported modified-time plugins do not weaken that CAS/i,
+);
+assert.match(
+  securityFr,
+  /plugins de date de modification[\s\S]*n.affaiblissent pas ce CAS/i,
+);
+assert.match(operations, /lost-response canary/i);
+assert.match(operations, /additional body or frontmatter change/i);
+assert.match(operationsFr, /canary à réponse perdue/i);
+assert.match(
+  operationsFr,
+  /dérive supplémentaire du[\s\S]*corps ou du frontmatter/i,
+);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");

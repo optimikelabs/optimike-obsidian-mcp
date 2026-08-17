@@ -77,6 +77,13 @@ uses a fixed bounded marker; the individual names remain in `changedKeys`.
 P1 reuses the P0 SQLite journal, leases, attempt fencing, Atomic Write Bridge
 CAS, terminal receipts, status reconciliation, and exact-plan recovery.
 
+P1 also inherits P0's bounded modified-time settlement. The CAS still protects
+the complete source. After the effect, one configured protected timestamp line
+may settle only inside the durable apply window and only when restoring that
+line makes the observed note byte-identical to the compiled P1 result. This
+covers Frontmatter Date Manager, Update Time, and Update time on edit without
+authorizing any unrelated frontmatter or body drift.
+
 Planning has two phases:
 
 1. P1 reads the live note and compiles the source-preserving candidate;
@@ -133,6 +140,8 @@ The permanent gates cover:
 - protected keys and write-policy drift;
 - concurrent plan/apply/recover and exactly one backend effect;
 - lost response, process restart, status, and exact-plan recovery;
+- lost response followed by one configured modified-time settlement, while a
+  second changed line remains uncertain;
 - one plan and one projection proof across three independent HTTP MCP sessions;
 - redaction of values, next content, and private journal paths;
 - Linux and Windows.

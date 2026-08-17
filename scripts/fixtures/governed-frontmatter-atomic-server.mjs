@@ -69,6 +69,8 @@ export class GovernedFrontmatterAtomicServer {
     this.mutateAfterReadNumber = undefined;
     this.mutateAfterReadContent = undefined;
     this.blockedCas = undefined;
+    this.settlement = undefined;
+    this.modifiedTimePropertyAfterWrite = undefined;
   }
 
   async listen() {
@@ -128,7 +130,7 @@ export class GovernedFrontmatterAtomicServer {
       json(response, 200, {
         ok: true,
         contractVersion: 1,
-        plugin: { id: "obsidian-atomic-write-bridge", version: "0.1.0" },
+        plugin: { id: "obsidian-atomic-write-bridge", version: "0.2.0" },
         backend: {
           kind: "obsidian-vault-process",
           bindingFingerprint: this.bindingFingerprint,
@@ -136,6 +138,7 @@ export class GovernedFrontmatterAtomicServer {
           writeEnabled: this.writeEnabled,
         },
         limits: { markdownOnly: true },
+        ...(this.settlement ? { settlement: this.settlement } : {}),
       });
       return;
     }
@@ -224,6 +227,14 @@ export class GovernedFrontmatterAtomicServer {
       }
       this.content = payload.nextContent;
       this.successfulWrites += 1;
+      if (this.modifiedTimePropertyAfterWrite) {
+        const propertyName = this.modifiedTimePropertyAfterWrite;
+        const observedMinute = new Date().toISOString().slice(0, 16);
+        this.content = this.content.replace(
+          new RegExp(`^${propertyName}:.*$`, "mu"),
+          `${propertyName}: ${observedMinute}`,
+        );
+      }
       if (this.loseResponseAfterWriteNext) {
         this.loseResponseAfterWriteNext = false;
         request.socket.destroy();
@@ -254,5 +265,7 @@ export class GovernedFrontmatterAtomicServer {
   mutateAfterReadNumber = undefined;
   mutateAfterReadContent = undefined;
   blockedCas = undefined;
+  settlement = undefined;
+  modifiedTimePropertyAfterWrite = undefined;
   baseUrl = "";
 }

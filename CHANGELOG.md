@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Governed Markdown-note and frontmatter reconciliation now accepts the one
+  strictly bounded `modification`-style timestamp update that a supported
+  Obsidian date plugin can apply immediately after the sealed write. Lost
+  responses no longer become false `outcome_unknown` receipts when that is the
+  only observed difference.
+
+### Changed
+
+- Atomic Write Bridge `0.2.0` reports active supported modified-time
+  integrations and the host UTC offset so the MCP can seal an exact settlement
+  policy with each plan.
+
+### Security
+
+- Modified-time settlement does not weaken pre-effect CAS: the permitted key
+  must also be protected by MCP policy, exactly one canonical monotonic YAML
+  line may advance inside the real apply window (at most five minutes), and
+  restoring that line must make the observed note byte-identical to the sealed
+  target. Every other drift remains uncertain or conflicting.
+
 ## [2.8.1] - 2026-08-15
 
 ### Fixed

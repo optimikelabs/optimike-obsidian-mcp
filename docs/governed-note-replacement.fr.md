@@ -97,6 +97,37 @@ contenu et checkpointent les frames WAL sensibles ; les reçus terminaux restent
 soumis à la politique de rétention bornée existante. Reçus et logs n’exposent ni
 `nextContent` ni le chemin physique du journal.
 
+### Settlement borné de la date de modification
+
+Atomic Write Bridge 0.2.0 annonce la propriété de date de modification
+réellement configurée par une intégration supportée et active : Frontmatter Date
+Manager, Update Time ou Update time on edit. Le planning ne scelle cette policy
+que si la propriété figure aussi dans `MCP_PROTECTED_FRONTMATTER_KEYS`.
+
+La précondition d’écriture reste un CAS SHA-256 exact sur le fichier complet :
+le settlement n’affaiblit pas le CAS pré-effet. Aucun timestamp n’est ignoré
+avant l’effet. Pendant le postflight, la réconciliation d’une réponse perdue ou
+un status après interruption, l’adaptateur peut accepter une seule ligne
+top-level du frontmatter supplémentaire uniquement si toutes ces preuves sont
+réunies :
+
+- il s’agit de l’unique propriété de modification configurée annoncée par le
+  Bridge ;
+- la preuve provient toujours de l’identité backend et de la cible logique
+  scellées ;
+- les deux valeurs sont des dates locales canoniques et la valeur observée
+  avance ;
+- le timestamp observé appartient à la vraie fenêtre apply-settlement, durable
+  et bornée à cinq minutes maximum ;
+- remplacer cette seule ligne observée par sa valeur scellée rend la note
+  byte-identical au contenu after scellé.
+
+Le reçu conserve le SHA-256 cible scellé et le SHA-256 réellement observé après
+settlement. Toute dérive du corps, du YAML, d’une seconde ligne, non monotone,
+hors fenêtre, non protégée ou non configurée reste non vérifiée. Un Bridge qui
+n’annonce pas ce contrat additif conserve le comportement historique par hash
+exact.
+
 ## Frontière d’effet
 
 La garantie atomique couvre une ressource contrôlée : le contenu de la note
@@ -111,7 +142,10 @@ client stdio du SDK et ne simule que la frontière HTTP Obsidian/Atomic Write.
 Elle prouve schémas et annotations, convergence nominale, replay, réponse
 perdue, redémarrage processus, récupération exacte, apply/recover concurrents,
 compétition CAS entre deux plans, binding backend, changement de policy,
-frontmatter protégé et absence de fuite du contenu scellé.
+frontmatter protégé et absence de fuite du contenu scellé. Elle couvre aussi une
+réponse perdue suivie d’un timestamp Frontmatter Date Manager borné, la
+réconciliation après redémarrage et le refus d’un timestamp accompagné d’une
+vraie dérive concurrente.
 
 La fixture de concurrence force aussi deux connexions au journal à observer la
 même opération planifiée. Le perdant de la transition conditionnelle

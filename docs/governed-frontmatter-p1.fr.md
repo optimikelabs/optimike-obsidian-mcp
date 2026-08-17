@@ -91,6 +91,14 @@ P1 réutilise le journal SQLite P0, ses leases, son fencing par tentative, le CA
 de l’Atomic Write Bridge, ses reçus terminaux, sa réconciliation par status et
 sa récupération du plan exact.
 
+P1 hérite aussi du settlement borné des dates de modification de P0. Le CAS
+continue de protéger la source complète. Après l’effet, une seule ligne de
+timestamp protégée et réellement configurée peut être admise dans la fenêtre
+durable d’apply, uniquement si restaurer cette ligne rend la note observée
+byte-identical au résultat P1 compilé. Frontmatter Date Manager, Update Time et
+Update time on edit sont ainsi couverts sans autoriser une autre dérive du
+frontmatter ou du corps.
+
 Le planning possède deux phases :
 
 1. P1 lit la note live et compile le candidat source-preserving ;
@@ -150,6 +158,8 @@ Les gates permanentes couvrent :
 - les clés protégées et le changement de politique ;
 - plan/apply/recover concurrents avec un seul effet backend ;
 - réponse perdue, redémarrage, status et recovery exact ;
+- réponse perdue suivie d’un unique settlement de date configuré, tandis qu’une
+  seconde ligne modifiée reste incertaine ;
 - un plan et une preuve de projection partagés par trois sessions HTTP MCP
   indépendantes ;
 - l’expurgation des valeurs, du contenu suivant et des chemins privés ;

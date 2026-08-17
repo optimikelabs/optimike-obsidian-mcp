@@ -90,6 +90,32 @@ Stable terminal transitions redact that content and checkpoint sensitive WAL
 frames; terminal receipts are retained under the existing bounded policy.
 Receipts and logs never expose `nextContent` or the physical journal path.
 
+### Bounded modified-time settlement
+
+Atomic Write Bridge 0.2.0 reports the exact modified-time property configured by
+an enabled supported integration: Frontmatter Date Manager, Update Time, or
+Update time on edit. Planning seals that policy only when the property is also
+listed in `MCP_PROTECTED_FRONTMATTER_KEYS`.
+
+The write precondition remains an exact whole-file SHA-256 CAS: settlement does
+not weaken pre-effect CAS. No timestamp is ignored before the effect. During
+postflight, lost-response reconciliation, or status after interruption, the
+adapter may accept exactly one additional top-level frontmatter line only when
+all of these facts are proven:
+
+- it is the unique configured modified-time property reported by the Bridge;
+- the proof still comes from the sealed backend identity and logical target;
+- both values are canonical local datetimes and the observed value advances;
+- the observed timestamp falls inside the real, at-most-five-minute apply and
+  settlement window recorded by the durable attempt;
+- replacing that one observed line with its sealed value makes the whole note
+  byte-identical to the sealed after content.
+
+The receipt records both the sealed target SHA-256 and the actual settled
+SHA-256. Any body, YAML, second-line, non-monotonic, out-of-window, unprotected,
+or unconfigured drift remains unverified. A Bridge that does not advertise this
+additive contract retains the previous exact-hash behavior.
+
 ## Effect boundary
 
 The atomic guarantee covers one controlled resource: the target note content
@@ -104,7 +130,9 @@ SDK stdio client and mocks only the Obsidian/Atomic Write HTTP boundary. It
 proves schemas and annotations, nominal convergence, replay, lost response,
 process restart, exact recovery, concurrent apply/recover, two-plan CAS
 competition, backend binding, policy changes, protected frontmatter, and sealed
-content non-disclosure.
+content non-disclosure. It also covers a lost response followed by one bounded
+Frontmatter Date Manager timestamp, restart reconciliation, and rejection of a
+timestamp accompanied by any real concurrent drift.
 
 The concurrency fixture also forces two journal connections to observe the same
 planned operation. The loser of the conditional `planned → applying`

@@ -92,6 +92,11 @@ by default.
   backend binding and SHA-256 CAS through `Vault.process`. A lost response is
   followed by `status`, never by a blind new mutation; `recover` resumes only
   the exact sealed plan and is not undo.
+- Supported modified-time plugins do not weaken that CAS. Their active property
+  must also be MCP-protected and sealed in the plan; reconciliation accepts only
+  one canonical monotonic frontmatter timestamp inside the actual apply window
+  (at most five minutes) when restoring that line makes the note byte-identical
+  to the sealed target. All other concurrent drift remains fail-closed.
 - `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` contains non-terminal sealed content.
   Keep it machine-local, access-restricted and outside the vault, repositories,
   synchronized folders, backups published as artifacts and public diagnostics.

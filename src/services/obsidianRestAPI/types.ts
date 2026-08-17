@@ -47,6 +47,19 @@ export type AtomicWriteStatusResponse = {
     writeEnabled: boolean;
   };
   limits: { markdownOnly: true };
+  settlement?: {
+    contractVersion: 1;
+    modifiedTimeFrontmatter: {
+      integrations: Array<{
+        pluginId:
+          | "update-time-on-edit"
+          | "frontmatter-date-manager"
+          | "update-time";
+        propertyName: string;
+      }>;
+      utcOffsetMinutes: number;
+    };
+  };
 };
 
 export type AtomicWriteReadResponse = {
