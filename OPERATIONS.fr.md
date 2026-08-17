@@ -263,7 +263,9 @@ npm run smoke:modified-time-settlement-live
 Le script perd volontairement la réponse CAS réussie et la première relecture
 de réconciliation. Il prouve d’abord le settlement du timestamp seul, puis que
 le même comportement accompagné d’une dérive du corps reste
-`outcome_unknown`. Il ne désactive le plugin de date que pour la restauration
+`outcome_unknown`. Avant chaque mutation, il attend le prochain tick que le
+format configuré, à la minute ou à la seconde, peut réellement représenter. Il
+ne désactive le plugin de date que pour la restauration
 exacte, rétablit son état activé, écrit une preuve JSON expurgée sous la racine
 temporaire du système et ne conserve les éléments privés de récupération que si
 la restauration exacte ne peut pas être vérifiée.

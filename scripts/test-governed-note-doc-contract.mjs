@@ -35,6 +35,9 @@ const liveCanary = await text("scripts/smoke-atomic-note-mcp-live.mjs");
 const modifiedTimeLiveCanary = await text(
   "scripts/smoke-modified-time-settlement-live.mjs",
 );
+const modifiedTimeCanaryHelpers = await text(
+  "scripts/modified-time-canary-helpers.mjs",
+);
 const operations = await text("OPERATIONS.md");
 const operationsFr = await text("OPERATIONS.fr.md");
 const security = await text("SECURITY.md");
@@ -216,6 +219,15 @@ assert.match(operationsFr, /smoke:modified-time-settlement-live/);
 assert.match(modifiedTimeLiveCanary, /os\.tmpdir\(\)/);
 assert.match(modifiedTimeLiveCanary, /dropNextCasResponse/);
 assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);
+assert.match(modifiedTimeLiveCanary, /waitForNextRepresentableTimestamp/);
+assert.match(modifiedTimeCanaryHelpers, /\[\\r\\n:\]/);
+assert.doesNotMatch(modifiedTimeCanaryHelpers, /\\p\{L\}.*\\p\{N\}/);
+assert.match(modifiedTimeCanaryHelpers, /representableTickMs/);
+assert.match(modifiedTimeCanaryHelpers, /60_000/);
+assert.match(
+  pkg.scripts["check:atomic-write"],
+  /test-modified-time-canary-helpers/,
+);
 assert.match(modifiedTimeLiveCanary, /positiveStatus\.outcome, "committed"/);
 assert.match(
   modifiedTimeLiveCanary,
@@ -236,6 +248,8 @@ await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
 await access("scripts/smoke-atomic-note-mcp-live.mjs");
 await access("scripts/smoke-modified-time-settlement-live.mjs");
+await access("scripts/modified-time-canary-helpers.mjs");
+await access("scripts/test-modified-time-canary-helpers.mjs");
 assert.match(
   liveCanary,
   /transientLogsParent[\s\S]*process\.cwd\(\)[\s\S]*["']logs["'][\s\S]*mkdtempSync/,

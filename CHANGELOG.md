@@ -34,10 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Validation
 
 - The dedicated Operon Bridge pilot vault passed the release canary with
-  Frontmatter Date Manager `1.2.1`: two successful CAS responses and their first
-  reconciliation reads were deliberately lost, timestamp-only settlement
-  reconciled to `committed`, additional body drift remained `outcome_unknown`,
-  and the disposable note was restored to its exact original SHA-256.
+  Frontmatter Date Manager `1.2.1` at both supported minute and second
+  resolutions: two successful CAS responses and their first reconciliation
+  reads were deliberately lost, timestamp-only settlement reconciled to
+  `committed`, additional body drift remained `outcome_unknown`, and the
+  disposable note was restored to its exact original SHA-256.
 
 ## [2.8.1] - 2026-08-15
 

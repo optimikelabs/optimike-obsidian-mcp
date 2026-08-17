@@ -15,12 +15,16 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  isSafeModifiedTimePropertyName,
+  nextRepresentableTimestampReadyAt,
+} from "./modified-time-canary-helpers.mjs";
 
 const canaryPath = process.env.OBSIDIAN_MODIFIED_TIME_CANARY_PATH?.trim();
 const confirmation = process.env.OBSIDIAN_MODIFIED_TIME_CANARY_CONFIRM?.trim();
 const vaultName = process.env.OBSIDIAN_MODIFIED_TIME_CANARY_VAULT?.trim();
 const propertyName =
-  process.env.OBSIDIAN_MODIFIED_TIME_CANARY_PROPERTY?.trim() ?? "modification";
+  process.env.OBSIDIAN_MODIFIED_TIME_CANARY_PROPERTY ?? "modification";
 const pluginId =
   process.env.OBSIDIAN_MODIFIED_TIME_CANARY_PLUGIN_ID?.trim() ??
   "frontmatter-date-manager";
@@ -51,7 +55,7 @@ if (!vaultName || /[&|<>\r\n]/u.test(vaultName)) {
     "OBSIDIAN_MODIFIED_TIME_CANARY_VAULT must name the open disposable vault.",
   );
 }
-if (!/^[\p{L}\p{N}_-]+$/u.test(propertyName)) {
+if (!isSafeModifiedTimePropertyName(propertyName)) {
   throw new Error("The modified-time property name is unsafe.");
 }
 if (!SUPPORTED_PLUGINS.has(pluginId)) {
@@ -94,6 +98,25 @@ function propertyValue(content) {
     `The canary note must contain exactly one top-level ${propertyName} property.`,
   );
   return matches[0].slice(prefix.length).trim();
+}
+
+async function waitForNextRepresentableTimestamp(
+  currentValue,
+  utcOffsetMinutes,
+  timeoutMs = 75_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  const readyAt = nextRepresentableTimestampReadyAt(
+    currentValue,
+    utcOffsetMinutes,
+  );
+  while (Date.now() < deadline) {
+    if (Date.now() > readyAt) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `Timed out waiting for the next representable ${propertyName} timestamp tick.`,
+  );
 }
 
 function runCli(command, ...args) {
@@ -385,6 +408,11 @@ try {
     assert.equal(toolNames.has(name), true, `${name} is not registered`);
   }
 
+  await waitForNextRepresentableTimestamp(
+    originalPropertyValue,
+    status.settlement.modifiedTimeFrontmatter.utcOffsetMinutes,
+  );
+
   const positiveMarker = `<!-- modified-time-positive:${runId} -->`;
   const positiveTarget = `${originalContent}${
     originalContent.endsWith("\n") ? "" : "\n"
@@ -420,6 +448,10 @@ try {
   // timestamp for five seconds. Cross that real runtime window before the
   // negative case so it exercises another automatic timestamp update.
   await new Promise((resolve) => setTimeout(resolve, 6_200));
+  await waitForNextRepresentableTimestamp(
+    propertyValue(positiveObserved.content),
+    status.settlement.modifiedTimeFrontmatter.utcOffsetMinutes,
+  );
   const negativeMarker = `<!-- modified-time-negative:${runId} -->`;
   const negativeTarget = `${positiveObserved.content}${
     positiveObserved.content.endsWith("\n") ? "" : "\n"

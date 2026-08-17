@@ -255,7 +255,9 @@ npm run smoke:modified-time-settlement-live
 The script deliberately loses both the successful CAS response and the first
 reconciliation read. It proves timestamp-only settlement, then proves that the
 same timestamp behavior plus an additional body drift remains
-`outcome_unknown`. It disables the date plugin only for exact restoration,
+`outcome_unknown`. Before each mutation it waits for the next timestamp tick
+that the configured minute- or second-resolution format can represent. It
+disables the date plugin only for exact restoration,
 restores the original enabled state, writes a redacted JSON proof under the
 operating-system temporary root, and retains private recovery material only if
 exact restoration cannot be verified.
