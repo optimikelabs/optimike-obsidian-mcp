@@ -40,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Validation
 
-- The exact release candidate passed 19 Windows/Linux PR checks, an independent
-  hostile contract audit, and the live Operon Bridge pilot-vault canary. The
+- The governed Canvas feature head passed 19 Windows/Linux PR checks and an
+  independent hostile contract audit. The exact release candidate passed its
+  15 triggered checks and the live Operon Bridge pilot-vault canary. The
   canary proved no-write planning, invalid-graph rejection, exact-plan recovery
   after a pre-dispatch interruption, post-write lost-response reconciliation,
   idempotent replay, stale-plan conflict, and exact restoration of the original
