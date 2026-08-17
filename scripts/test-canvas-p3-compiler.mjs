@@ -63,6 +63,30 @@ assert.equal(removed.proof.changedEdgeCount, 1);
 assert.deepEqual(removed.proof.changedEdges, []);
 assert.match(removed.proof.removedIncidentEdgesSha256, /^[a-f0-9]{64}$/u);
 
+const exactNumericLiteral = compileCanvasPatch(
+  `{
+  "nodes": [
+    {"id":"a","type":"text","x":0,"y":0,"width":100,"height":100,"text":"A"},
+    {"id":"b","type":"text","x":200,"y":0,"width":100,"height":100,"text":"B"},
+    {"id":"c","type":"text","x":400,"y":0,"width":100,"height":100,"text":"C"}
+  ],
+  "edges": [
+    {"id":"ab","fromNode":"a","toNode":"b"},
+    {"id":"bc","fromNode":"b","toNode":"c","unknownInteger":9007199254740993}
+  ]
+}\n`,
+  [{ op: "delete_node", id: "a" }],
+);
+assert.match(
+  exactNumericLiteral.nextContent,
+  /"unknownInteger":9007199254740993/u,
+  "untouched edge numeric literals must never be parsed and reserialized",
+);
+assert.deepEqual(
+  JSON.parse(exactNumericLiteral.nextContent).edges.map((edge) => edge.id),
+  ["bc"],
+);
+
 const stressEdgeIds = Array.from(
   { length: 300 },
   (_, index) => `edge-${String(index).padStart(3, "0")}-${"x".repeat(247)}`,

@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
+import {
+  applyEdits,
+  findNodeAtLocation,
+  modify,
+  parse,
+  parseTree,
+  type ParseError,
+} from "jsonc-parser";
 import { operationDigest } from "./operations/contract.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 
@@ -155,6 +162,56 @@ function replaceAt(
       },
     }),
   );
+}
+
+function removeEdgesById(source: string, edgeIds: Set<string>): string {
+  if (edgeIds.size === 0) return source;
+  const errors: ParseError[] = [];
+  const tree = parseTree(source, errors, { allowTrailingComma: false });
+  const arrayNode = tree ? findNodeAtLocation(tree, ["edges"]) : undefined;
+  if (
+    errors.length > 0 ||
+    !arrayNode ||
+    arrayNode.type !== "array" ||
+    !arrayNode.children
+  ) {
+    fail("Canvas edges could not be located.", "canvas_edges_required");
+  }
+  const parsed = parseStrict(source);
+  const edges = entityArray(parsed, "edges");
+  if (edges.length !== arrayNode.children.length) {
+    fail("Canvas edge syntax is inconsistent.", "canvas_edges_syntax");
+  }
+  const kept = arrayNode.children.filter(
+    (_, index) => !edgeIds.has(entityId(edges[index]!, "Canvas edge")),
+  );
+  if (kept.length === 0) {
+    return applyEdits(source, [
+      { offset: arrayNode.offset, length: arrayNode.length, content: "[]" },
+    ]);
+  }
+  const firstOriginal = arrayNode.children[0]!;
+  const lastOriginal = arrayNode.children[arrayNode.children.length - 1]!;
+  const prefix = source.slice(arrayNode.offset + 1, firstOriginal.offset);
+  const suffix = source.slice(
+    lastOriginal.offset + lastOriginal.length,
+    arrayNode.offset + arrayNode.length - 1,
+  );
+  const separator =
+    arrayNode.children.length > 1
+      ? source.slice(
+          arrayNode.children[0]!.offset + arrayNode.children[0]!.length,
+          arrayNode.children[1]!.offset,
+        )
+      : `,${source.includes("\r\n") ? "\r\n" : "\n"}`;
+  const safeSeparator = separator.includes(",") ? separator : `,${separator}`;
+  const rawKept = kept.map((node) =>
+    source.slice(node.offset, node.offset + node.length),
+  );
+  const content = `[${prefix}${rawKept.join(safeSeparator)}${suffix}]`;
+  return applyEdits(source, [
+    { offset: arrayNode.offset, length: arrayNode.length, content },
+  ]);
 }
 
 function clone<T>(value: T): T {
@@ -413,12 +470,7 @@ export function compileCanvasPatch(
         removedIncidentEdges.add(edgeId);
       }
       if (incidentIds.length > 0) {
-        const incidentSet = new Set(incidentIds);
-        const fresh = parseStrict(next);
-        const remainingEdges = entityArray(fresh, "edges").filter(
-          (edge) => !incidentSet.has(entityId(edge, "Canvas edge")),
-        );
-        next = replaceAt(next, ["edges"], remainingEdges);
+        next = removeEdgesById(next, new Set(incidentIds));
       }
       const fresh = parseStrict(next);
       next = replaceAt(
