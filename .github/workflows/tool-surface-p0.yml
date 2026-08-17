@@ -1,0 +1,36 @@
+name: Tool Surface P0
+
+on:
+  pull_request:
+    paths:
+      - "src/mcp-server/**"
+      - "scripts/test-tool-surface-registry.mjs"
+      - ".github/workflows/tool-surface-p0.yml"
+  push:
+    branches:
+      - "agent/tool-surface-p0"
+    paths:
+      - "src/mcp-server/**"
+      - "scripts/test-tool-surface-registry.mjs"
+      - ".github/workflows/tool-surface-p0.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  registry:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.7.5"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/test-tool-surface-registry.mjs
