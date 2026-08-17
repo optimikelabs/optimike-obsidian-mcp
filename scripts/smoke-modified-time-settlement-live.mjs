@@ -33,6 +33,8 @@ const upstreamBaseUrl = (
   process.env.OBSIDIAN_BASE_URL?.trim() ?? "http://127.0.0.1:27123"
 ).replace(/\/+$/u, "");
 const writeMode = process.env.MCP_WRITE_MODE?.trim() ?? "readonly";
+const selfSignal =
+  process.env.OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL?.trim() ?? "";
 const cliCommand = process.env.OBSIDIAN_CLI_COMMAND?.trim() ?? "obsidian";
 const CONFIRMATION =
   "I_UNDERSTAND_THIS_DISPOSABLE_NOTE_WILL_BE_MUTATED_AND_RESTORED";
@@ -64,6 +66,11 @@ if (!SUPPORTED_PLUGINS.has(pluginId)) {
 if (!apiKey) throw new Error("OBSIDIAN_API_KEY is required.");
 if (!new Set(["guarded", "full"]).has(writeMode)) {
   throw new Error("The live canary requires MCP_WRITE_MODE=guarded or full.");
+}
+if (!new Set(["", "SIGTERM_AFTER_POSITIVE_APPLY"]).has(selfSignal)) {
+  throw new Error(
+    "OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL must be empty or SIGTERM_AFTER_POSITIVE_APPLY.",
+  );
 }
 
 const tempParent = os.tmpdir();
@@ -348,6 +355,142 @@ let runId;
 let evidenceFile;
 let retainedLogsPath;
 let backupMetadata;
+let cleanupPromise;
+let signalExitInProgress = false;
+
+async function cleanup() {
+  await client.close().catch(() => undefined);
+  await new Promise((resolve) => proxy.close(resolve));
+  if (originalContent !== undefined && !restored) {
+    try {
+      if (pluginEnabled()) {
+        setPluginEnabled(false);
+        pluginStateRestored = false;
+      }
+      const current = await atomicRead();
+      const status = await atomicStatus();
+      if (current.sha256 !== originalSha256) {
+        await atomicReplace(
+          current.sha256,
+          originalContent,
+          status.backend.bindingFingerprint,
+        );
+      }
+      const finalRead = await atomicRead();
+      restored =
+        finalRead.sha256 === originalSha256 &&
+        finalRead.content === originalContent;
+    } catch (restoreError) {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            canaryPath,
+            restored: false,
+            evidenceDirectory: tempRoot,
+            backupPath,
+            backupMetadataPath,
+            recoveryRequired: true,
+            error:
+              restoreError instanceof Error
+                ? restoreError.message
+                : String(restoreError),
+          },
+          null,
+          2,
+        ),
+      );
+    }
+  }
+  if (originalPluginEnabled && !pluginStateRestored) {
+    try {
+      if (!pluginEnabled()) setPluginEnabled(true);
+      pluginStateRestored = true;
+      if (restored && originalContent !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        const finalRead = await atomicRead();
+        restored =
+          finalRead.sha256 === originalSha256 &&
+          finalRead.content === originalContent;
+      }
+    } catch (pluginRestoreError) {
+      console.error(
+        `Failed to restore ${pluginId}: ${
+          pluginRestoreError instanceof Error
+            ? pluginRestoreError.message
+            : String(pluginRestoreError)
+        }`,
+      );
+    }
+  }
+  if (restored && pluginStateRestored) {
+    rmSync(logsPath, { recursive: true, force: true });
+    rmSync(tempRoot, { recursive: true, force: true });
+    if (evidenceFile) {
+      console.error(`Modified-time canary evidence written to ${evidenceFile}`);
+    }
+  } else if (backupWritten) {
+    retainedLogsPath = path.join(tempRoot, "runtime-logs");
+    try {
+      renameSync(logsPath, retainedLogsPath);
+    } catch {
+      retainedLogsPath = logsPath;
+    }
+    backupMetadata.runtimeLogsPath = retainedLogsPath;
+    writeFileSync(
+      backupMetadataPath,
+      `${JSON.stringify(backupMetadata, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    console.error(
+      `Modified-time canary recovery evidence retained at ${tempRoot}; restore only the explicit canary note from ${backupPath}.`,
+    );
+  } else {
+    rmSync(logsPath, { recursive: true, force: true });
+    rmSync(tempRoot, { recursive: true, force: true });
+    console.error(
+      "Modified-time canary failed before backup; no note recovery is required.",
+    );
+  }
+}
+
+function cleanupOnce() {
+  cleanupPromise ??= cleanup();
+  return cleanupPromise;
+}
+
+function handleSignal(signal) {
+  if (signalExitInProgress) return;
+  signalExitInProgress = true;
+  const exitCode = signal === "SIGINT" ? 130 : 143;
+  void cleanupOnce()
+    .then(() => {
+      console.error(
+        JSON.stringify({
+          ok: restored && pluginStateRestored,
+          interruptedBy: signal,
+          restored,
+          pluginStateRestored,
+        }),
+      );
+    })
+    .catch((error) => {
+      console.error(
+        `Modified-time canary cleanup failed after ${signal}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    })
+    .finally(() => process.exit(exitCode));
+}
+
+const handleSigint = () => handleSignal("SIGINT");
+const handleSigterm = () => handleSignal("SIGTERM");
+// Keep both listeners installed until cleanup completes so a repeated signal
+// cannot fall through to Node's default termination and interrupt restoration.
+process.on("SIGINT", handleSigint);
+process.on("SIGTERM", handleSigterm);
+
 try {
   originalPluginEnabled = pluginEnabled();
   assert.equal(
@@ -420,6 +563,11 @@ try {
   const positiveKey = `modified-time-live:${runId}:positive`;
   const positivePlan = await plan(positiveTarget, positiveKey);
   const positiveApply = await applyWithLostResponse(positivePlan, positiveKey);
+  if (selfSignal === "SIGTERM_AFTER_POSITIVE_APPLY") {
+    process.emit("SIGTERM", "SIGTERM");
+    process.emit("SIGTERM", "SIGTERM");
+    await new Promise(() => undefined);
+  }
   const positiveObserved = await waitForRead(
     (read) =>
       read.content.includes(positiveMarker) &&
@@ -537,97 +685,7 @@ try {
   });
   console.log(JSON.stringify({ ...evidence, evidenceFile }, null, 2));
 } finally {
-  await client.close().catch(() => undefined);
-  await new Promise((resolve) => proxy.close(resolve));
-  if (originalContent !== undefined && !restored) {
-    try {
-      if (pluginEnabled()) {
-        setPluginEnabled(false);
-        pluginStateRestored = false;
-      }
-      const current = await atomicRead();
-      const status = await atomicStatus();
-      if (current.sha256 !== originalSha256) {
-        await atomicReplace(
-          current.sha256,
-          originalContent,
-          status.backend.bindingFingerprint,
-        );
-      }
-      const finalRead = await atomicRead();
-      restored =
-        finalRead.sha256 === originalSha256 &&
-        finalRead.content === originalContent;
-    } catch (restoreError) {
-      console.error(
-        JSON.stringify(
-          {
-            ok: false,
-            canaryPath,
-            restored: false,
-            evidenceDirectory: tempRoot,
-            backupPath,
-            backupMetadataPath,
-            recoveryRequired: true,
-            error:
-              restoreError instanceof Error
-                ? restoreError.message
-                : String(restoreError),
-          },
-          null,
-          2,
-        ),
-      );
-    }
-  }
-  if (originalPluginEnabled && !pluginStateRestored) {
-    try {
-      if (!pluginEnabled()) setPluginEnabled(true);
-      pluginStateRestored = true;
-      if (restored && originalContent !== undefined) {
-        await new Promise((resolve) => setTimeout(resolve, 1_500));
-        const finalRead = await atomicRead();
-        restored =
-          finalRead.sha256 === originalSha256 &&
-          finalRead.content === originalContent;
-      }
-    } catch (pluginRestoreError) {
-      console.error(
-        `Failed to restore ${pluginId}: ${
-          pluginRestoreError instanceof Error
-            ? pluginRestoreError.message
-            : String(pluginRestoreError)
-        }`,
-      );
-    }
-  }
-  if (restored && pluginStateRestored) {
-    rmSync(logsPath, { recursive: true, force: true });
-    rmSync(tempRoot, { recursive: true, force: true });
-    if (evidenceFile) {
-      console.error(`Modified-time canary evidence written to ${evidenceFile}`);
-    }
-  } else if (backupWritten) {
-    retainedLogsPath = path.join(tempRoot, "runtime-logs");
-    try {
-      renameSync(logsPath, retainedLogsPath);
-    } catch {
-      retainedLogsPath = logsPath;
-    }
-    backupMetadata.runtimeLogsPath = retainedLogsPath;
-    writeFileSync(
-      backupMetadataPath,
-      `${JSON.stringify(backupMetadata, null, 2)}\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
-    console.error(
-      `Modified-time canary recovery evidence retained at ${tempRoot}; restore only the explicit canary note from ${backupPath}.`,
-    );
-  } else {
-    rmSync(logsPath, { recursive: true, force: true });
-    rmSync(tempRoot, { recursive: true, force: true });
-    console.error(
-      "Modified-time canary failed before backup; no note recovery is required.",
-    );
-  }
+  await cleanupOnce();
+  process.off("SIGINT", handleSigint);
+  process.off("SIGTERM", handleSigterm);
 }

@@ -271,6 +271,13 @@ exacte, rétablit son état activé, écrit une preuve JSON expurgée sous la ra
 temporaire du système et ne conserve les éléments privés de récupération que si
 la restauration exacte ne peut pas être vérifiée.
 
+`Ctrl-C` et `SIGTERM` exécutent cette même restauration protégée avant la sortie
+du processus. Les mainteneurs peuvent prouver ce chemin d’interruption de façon
+déterministe avec
+`OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL=SIGTERM_AFTER_POSITIVE_APPLY` : le
+code de sortie attendu est `143`, tandis que le hash de la note et l’état activé
+du plugin doivent tous deux être identiques à leurs valeurs initiales.
+
 ## Frontmatter gouvernée P1
 
 P1 accepte des intentions top-level `set`/`delete` bornées et les compile sans

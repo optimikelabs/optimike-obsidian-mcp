@@ -263,6 +263,12 @@ restores the original enabled state, writes a redacted JSON proof under the
 operating-system temporary root, and retains private recovery material only if
 exact restoration cannot be verified.
 
+`Ctrl-C` and `SIGTERM` run that same guarded restoration before the process
+exits. Maintainers can prove this interruption path deterministically by setting
+`OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL=SIGTERM_AFTER_POSITIVE_APPLY`; the
+expected process exit code is `143`, while the note hash and plugin enabled
+state must both match their initial values.
+
 ## Governed frontmatter P1
 
 P1 accepts bounded top-level `set`/`delete` intentions and compiles them without

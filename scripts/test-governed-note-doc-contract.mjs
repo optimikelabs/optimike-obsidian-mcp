@@ -253,6 +253,15 @@ assert.doesNotMatch(
   modifiedTimeLiveCanary,
   /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
 );
+assert.match(modifiedTimeLiveCanary, /process\.on\("SIGINT", handleSigint\)/);
+assert.match(modifiedTimeLiveCanary, /process\.on\("SIGTERM", handleSigterm\)/);
+assert.match(modifiedTimeLiveCanary, /function cleanupOnce\(\)/);
+assert.match(
+  modifiedTimeLiveCanary,
+  /finally \{[\s\S]*await cleanupOnce\(\);[\s\S]*process\.off\("SIGINT"/,
+);
+assert.match(operations, /SELF_SIGNAL=SIGTERM_AFTER_POSITIVE_APPLY/);
+assert.match(operationsFr, /SELF_SIGNAL=SIGTERM_AFTER_POSITIVE_APPLY/);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
