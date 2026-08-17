@@ -677,6 +677,10 @@ export class ObsidianNoteReplaceOperationAdapter
     if (plan.status !== "outcome_unknown") {
       return receipt(this.profile, plan);
     }
+    plan = this.beginModifiedTimeSettlementObservationOrReload(plan);
+    if (plan.status !== "outcome_unknown") {
+      return receipt(this.profile, plan);
+    }
     await this.awaitModifiedTimeSettlementObservation(plan);
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
@@ -750,6 +754,7 @@ export class ObsidianNoteReplaceOperationAdapter
     recoveredFromUnknown: boolean,
   ): Promise<ObsidianNoteReplacePlan> {
     const executionAttemptId = this.requiredExecutionAttemptId(plan);
+    let casDispatched = false;
     try {
       const status = StatusSchema.parse(await this.backend.status());
       if (status.backend.bindingFingerprint !== plan.bindingFingerprint) {
@@ -787,15 +792,25 @@ export class ObsidianNoteReplaceOperationAdapter
           executionAttemptId,
         );
       }
-      const result = CasSchema.parse(
-        await this.backend.replace({
-          contractVersion: 1,
-          path: plan.path,
-          bindingFingerprint: plan.bindingFingerprint,
-          expectedSha256: plan.beforeSha256,
-          nextContent: plan.nextContent,
-        }),
+      casDispatched = true;
+      const rawResult = await this.backend.replace({
+        contractVersion: 1,
+        path: plan.path,
+        bindingFingerprint: plan.bindingFingerprint,
+        expectedSha256: plan.beforeSha256,
+        nextContent: plan.nextContent,
+      });
+      plan = this.beginModifiedTimeSettlementObservationOrReload(
+        plan,
+        executionAttemptId,
       );
+      if (
+        plan.status !== "applying" ||
+        plan.executionOwner?.attemptId !== executionAttemptId
+      ) {
+        return plan;
+      }
+      const result = CasSchema.parse(rawResult);
       if (
         result.bindingFingerprint !== plan.bindingFingerprint ||
         result.path !== plan.path ||
@@ -824,9 +839,34 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     } catch (error) {
+      if (
+        casDispatched &&
+        plan.modifiedTimeSettlementPolicy &&
+        plan.settlementObservationStartedAtEpochMs === undefined
+      ) {
+        plan = this.beginModifiedTimeSettlementObservationOrReload(
+          plan,
+          executionAttemptId,
+        );
+        if (
+          plan.status !== "applying" ||
+          plan.executionOwner?.attemptId !== executionAttemptId
+        ) {
+          return plan;
+        }
+      }
       const conflict =
         error instanceof McpError && error.code === BaseErrorCode.CONFLICT;
       if (conflict) {
+        if (!casDispatched) {
+          return this.transitionOrReload(
+            plan,
+            ["applying"],
+            "conflict",
+            error.message,
+            executionAttemptId,
+          );
+        }
         let reconciled: ObsidianNoteReplacePlan;
         try {
           await this.awaitModifiedTimeSettlementObservation(plan);
@@ -862,12 +902,14 @@ export class ObsidianNoteReplaceOperationAdapter
           executionAttemptId,
         );
       }
-      await this.awaitModifiedTimeSettlementObservation(plan);
-      const reconciled = await this.reconcile(plan, executionAttemptId).catch(
-        () => plan,
-      );
-      if (reconciled.status !== "applying") {
-        return reconciled;
+      if (casDispatched) {
+        await this.awaitModifiedTimeSettlementObservation(plan);
+        const reconciled = await this.reconcile(plan, executionAttemptId).catch(
+          () => plan,
+        );
+        if (reconciled.status !== "applying") {
+          return reconciled;
+        }
       }
       return this.uncertain(
         plan,
@@ -886,6 +928,12 @@ export class ObsidianNoteReplaceOperationAdapter
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
     const matchesTarget = sameBackendTarget(plan, read);
+    if (
+      matchesTarget &&
+      this.modifiedTimeSettlementObservationRemainingMs(plan) > 0
+    ) {
+      return plan;
+    }
     if (matchesTarget && read.sha256 === plan.afterSha256) {
       return this.transitionOrReload(
         plan,
@@ -938,10 +986,13 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     }
+    if (
+      plan.modifiedTimeSettlementPolicy &&
+      this.modifiedTimeSettlementObservationRemainingMs(plan) > 0
+    ) {
+      return plan;
+    }
     if (read.sha256 === plan.afterSha256) {
-      if (this.modifiedTimeSettlementObservationRemainingMs(plan) > 0) {
-        return plan;
-      }
       if (observesLiveExecutor) {
         return this.commitAfterVerifiedProofOrReload(plan);
       }
@@ -1001,6 +1052,11 @@ export class ObsidianNoteReplaceOperationAdapter
     plan: ObsidianNoteReplacePlan,
   ): Promise<void> {
     const remainingMs = this.modifiedTimeSettlementObservationRemainingMs(plan);
+    if (!Number.isFinite(remainingMs)) {
+      throw new Error(
+        "Modified-time settlement observation was not started after the CAS attempt.",
+      );
+    }
     if (remainingMs <= 0) return;
     const sleep =
       this.options.sleep ??
@@ -1012,11 +1068,11 @@ export class ObsidianNoteReplaceOperationAdapter
   private modifiedTimeSettlementObservationRemainingMs(
     plan: ObsidianNoteReplacePlan,
   ): number {
-    if (
-      !plan.modifiedTimeSettlementPolicy ||
-      plan.executionStartedAtEpochMs === undefined
-    ) {
+    if (!plan.modifiedTimeSettlementPolicy) {
       return 0;
+    }
+    if (plan.settlementObservationStartedAtEpochMs === undefined) {
+      return Number.POSITIVE_INFINITY;
     }
     const observationDelayMs = Math.max(
       0,
@@ -1027,8 +1083,29 @@ export class ObsidianNoteReplaceOperationAdapter
     const now = this.options.now ?? Date.now;
     return Math.max(
       0,
-      plan.executionStartedAtEpochMs + observationDelayMs - now(),
+      plan.settlementObservationStartedAtEpochMs + observationDelayMs - now(),
     );
+  }
+
+  private beginModifiedTimeSettlementObservationOrReload(
+    plan: ObsidianNoteReplacePlan,
+    expectedExecutionAttemptId?: string,
+  ): ObsidianNoteReplacePlan {
+    if (!plan.modifiedTimeSettlementPolicy) return plan;
+    if (plan.settlementObservationStartedAtEpochMs !== undefined) return plan;
+    if (plan.status !== "applying" && plan.status !== "outcome_unknown") {
+      return this.journal.get(plan.operationId) ?? plan;
+    }
+    try {
+      return this.journal.beginModifiedTimeSettlementObservation(
+        plan.operationId,
+        [plan.status],
+        expectedExecutionAttemptId,
+      );
+    } catch (error) {
+      if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+      return this.journal.get(plan.operationId) ?? plan;
+    }
   }
 
   private commitWithModifiedTimeSettlementOrReload(

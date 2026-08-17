@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A successful CAS now waits for the plugin-advertised bounded observation
   delay and re-reads the note before committing its receipt, covering deferred
   timestamp writes even when the original CAS response was received normally.
+- The observation window now starts at the durable post-CAS boundary rather
+  than at preflight, and concurrent status/recovery cannot commit either a
+  sealed or partial settlement proof before the longest configured delay ends.
 
 ### Security
 
@@ -40,8 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deterministic Bridge and real stdio MCP tests cover custom property names,
   last-viewed protection, missing creation fields, apply-time configuration
   changes, shared-property plugins, unsafe FDM options and delayed settlement
-  after a successful CAS response. A concurrent `status` observer is also
-  proven unable to terminalize the sealed hash before that delay expires.
+  after a successful CAS response. Concurrent observers are also proven unable
+  to terminalize either the sealed hash or an early timestamp settlement before
+  that delay expires, even when preflight itself outlasts the delay.
 
 ## [2.8.2] - 2026-08-17
 

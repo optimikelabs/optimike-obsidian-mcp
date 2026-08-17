@@ -625,6 +625,9 @@ try {
       nextContent: expected,
       idempotencyKey: "successful-response-delayed-settlement",
     });
+    backend.afterStatus = async () => {
+      now += 10_000;
+    };
     const result = await adapter.apply(
       planned.planRef,
       "successful-response-delayed-settlement",
@@ -635,6 +638,42 @@ try {
     assert.equal(result.afterProof.details.sha256, sha256(backend.content));
     assert.equal(result.afterProof.details.sealedSha256, sha256(expected));
     assert.equal(result.afterProof.details.settlementPropertyName, "changedAt");
+  }
+
+  {
+    const { backend, adapter } = fixture("pre-cas-status-failure", {
+      modifiedTimeProtectedKeys: ["changedAt"],
+    });
+    backend.content =
+      "---\nchangedAt: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "update-time",
+            propertyName: "changedAt",
+            settlementObservationDelayMs: 2_250,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: backend.content.replace("avant", "après"),
+      idempotencyKey: "pre-cas-status-failure",
+    });
+    backend.afterStatus = async () => {
+      throw new Error("status unavailable before CAS");
+    };
+    const result = await adapter.apply(
+      planned.planRef,
+      "pre-cas-status-failure",
+    );
+    assert.equal(result.outcome, "outcome_unknown");
+    assert.equal(backend.replaceCalls, 0);
+    assert.equal(backend.content.endsWith("avant\n"), true);
   }
 
   {
@@ -687,9 +726,18 @@ try {
       "status-cannot-preempt-settlement-wait",
     );
     await sleepEntered;
-    const observedWhileWaiting = await adapter.status(planned.planRef);
-    assert.equal(observedWhileWaiting.phase, "applying");
-    assert.equal(observedWhileWaiting.outcome, null);
+    const observedSealedWhileWaiting = await adapter.status(planned.planRef);
+    assert.equal(observedSealedWhileWaiting.phase, "applying");
+    assert.equal(observedSealedWhileWaiting.outcome, null);
+    backend.content = backend.content.replace(
+      "changedAt: 2026-08-17T09:59",
+      "changedAt: 2026-08-17T10:00",
+    );
+    const observedSettlementWhileWaiting = await adapter.status(
+      planned.planRef,
+    );
+    assert.equal(observedSettlementWhileWaiting.phase, "applying");
+    assert.equal(observedSettlementWhileWaiting.outcome, null);
     releaseSleep();
     const committed = await applyPromise;
     assert.equal(committed.outcome, "committed");
@@ -1051,9 +1099,14 @@ try {
       undefined,
       { now: clock, modifiedTimeProtectedKeys: ["modification"] },
     );
-    const result = await restartedAdapter.status(planned.planRef);
-    assert.equal(result.outcome, "committed");
-    assert.equal(result.afterProof.details.sha256, sha256(backend.content));
+    const observed = await restartedAdapter.status(planned.planRef);
+    assert.equal(observed.outcome, "outcome_unknown");
+    const recovered = await restartedAdapter.recover(
+      planned.planRef,
+      "restart-modified-time-settlement",
+    );
+    assert.equal(recovered.outcome, "committed");
+    assert.equal(recovered.afterProof.details.sha256, sha256(backend.content));
   }
 
   {

@@ -112,10 +112,11 @@ conséquence attendue de l’écriture.
 
 Seule une propriété de modification compatible entre dans le contrat de
 settlement. Le Bridge annonce aussi le délai d’observation borné issu du
-debounce/rate-limit de chaque plugin, et le MCP attend ce délai avant sa
-relecture postflight même lorsque la réponse CAS réussit normalement. Un
-observateur `status` concurrent ne peut pas terminaliser le hash scellé pendant
-cette attente. Valeurs
+debounce/rate-limit de chaque plugin. Le MCP ne démarre cette fenêtre durable
+qu’après le retour du CAS — réussi ou en échec après envoi — puis attend avant
+sa relecture postflight même lorsque la réponse CAS réussit normalement. Un
+observateur `status` ou `recover` concurrent ne peut terminaliser ni le hash
+scellé ni un premier settlement de timestamp pendant cette attente. Valeurs
 numériques, fuseaux forcés, formats non supportés ou délais supérieurs à quatre
 minutes ne sont pas admis. Frontmatter Date Manager reste également en
 protection seule si le compteur d’updates, une commande post-update ou la

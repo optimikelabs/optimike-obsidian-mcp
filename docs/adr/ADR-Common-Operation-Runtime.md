@@ -167,6 +167,11 @@ did not write; it does not disprove an earlier commit of the same plan.
 Modified-time frontmatter plugins exercise this distinction. The note adapter
 seals the exact property reported by a supported enabled Obsidian integration,
 but only when MCP policy already protects that property. CAS remains exact.
+Any adapter-specific observation delay starts at the durable post-dispatch
+effect boundary, never at the beginning of preflight. Until its longest sealed
+delay expires, observers must accept neither the original after proof nor an
+early partial settlement proof. If a response is lost before that boundary can
+be stored, explicit recovery starts a fresh conservative observation window.
 Postflight or reconciliation may accept one monotonic canonical timestamp in
 the durable five-minute apply window only when replacing that single line makes
 the observed note byte-identical to the sealed after content and the read still

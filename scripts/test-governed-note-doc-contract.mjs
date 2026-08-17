@@ -214,13 +214,17 @@ assert.match(
 );
 assert.match(contract, /creation property must already exist/i);
 assert.match(contract, /Last-viewed is protected but never settled/i);
-assert.match(contract, /waits for that delay before its\s+postflight read/i);
-assert.match(contract, /`status` observer cannot terminalize the sealed hash/i);
+assert.match(contract, /starts that durable window only after the\s+CAS call/i);
+assert.match(
+  contract,
+  /`status` or\s+`recover` observer cannot terminalize either the sealed hash or an early\s+timestamp settlement/i,
+);
+assert.match(adr, /observation delay starts at the durable post-dispatch/i);
 assert.match(contractFr, /ajoute automatiquement ces noms à sa protection/i);
 assert.match(contractFr, /dernière vue est protégée mais jamais admise/i);
 assert.match(
   contractFr,
-  /observateur `status` concurrent ne peut pas terminaliser/i,
+  /observateur `status` ou `recover` concurrent ne peut terminaliser/i,
 );
 assert.match(contract, /never advertises[\s\S]*contains a comma/i);
 assert.match(contractFr, /n.annonce[\s\S]*contient une virgule/i);

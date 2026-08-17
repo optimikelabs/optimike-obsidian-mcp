@@ -104,9 +104,11 @@ separate user event, not an expected consequence of the write.
 
 Only a compatible modification property enters the settlement contract. The
 Bridge also reports the bounded observation delay implied by each plugin's
-debounce/rate-limit settings, and the MCP waits for that delay before its
-postflight read even when the CAS response succeeds normally. A concurrent
-`status` observer cannot terminalize the sealed hash during that wait. Numeric values,
+debounce/rate-limit settings. The MCP starts that durable window only after the
+CAS call returns (or fails after dispatch), then waits before its postflight
+read even when the CAS response succeeds normally. A concurrent `status` or
+`recover` observer cannot terminalize either the sealed hash or an early
+timestamp settlement during that wait. Numeric values,
 forced timezones, unsupported formats or delays beyond four minutes are not
 admitted. Frontmatter Date Manager is also protection-only when update count,
 a post-update command or inversion repair is enabled, because those settings
