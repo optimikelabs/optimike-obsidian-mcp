@@ -173,6 +173,16 @@ function sameSettlementPolicy(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function sameBackendTarget(
+  plan: ObsidianNoteReplacePlan,
+  read: z.infer<typeof ReadSchema>,
+): boolean {
+  return (
+    read.bindingFingerprint === plan.bindingFingerprint &&
+    read.path === plan.path
+  );
+}
+
 function planRef(profile: AtomicResourceProfile, operationId: string): string {
   return `${profile.planRefPrefix}${operationId}`;
 }
@@ -555,14 +565,14 @@ export class ObsidianNoteReplaceOperationAdapter
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
-    if (read.bindingFingerprint !== plan.bindingFingerprint) {
+    if (!sameBackendTarget(plan, read)) {
       return receipt(
         this.profile,
         this.transitionOrReload(
           plan,
           [plan.status],
           "conflict",
-          "Recovery found a different backend instance.",
+          "Recovery found a different backend instance or logical target.",
         ),
       );
     }
@@ -741,10 +751,8 @@ export class ObsidianNoteReplaceOperationAdapter
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
-    const sameBackendTarget =
-      read.bindingFingerprint === plan.bindingFingerprint &&
-      read.path === plan.path;
-    if (sameBackendTarget && read.sha256 === plan.afterSha256) {
+    const matchesTarget = sameBackendTarget(plan, read);
+    if (matchesTarget && read.sha256 === plan.afterSha256) {
       return this.transitionOrReload(
         plan,
         ["applying"],
@@ -753,7 +761,7 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     }
-    const settlement = sameBackendTarget
+    const settlement = matchesTarget
       ? this.modifiedTimeSettlement(plan, read.content)
       : undefined;
     if (settlement) {
@@ -765,7 +773,7 @@ export class ObsidianNoteReplaceOperationAdapter
     }
     if (
       recoveredFromUnknown &&
-      sameBackendTarget &&
+      matchesTarget &&
       read.sha256 !== plan.beforeSha256
     ) {
       return this.uncertain(
@@ -786,13 +794,13 @@ export class ObsidianNoteReplaceOperationAdapter
     );
     const observesLiveExecutor =
       plan.status === "applying" && executionAttemptId === undefined;
-    if (read.bindingFingerprint !== plan.bindingFingerprint) {
+    if (!sameBackendTarget(plan, read)) {
       if (observesLiveExecutor) return plan;
       return this.transitionOrReload(
         plan,
         [plan.status],
         "conflict",
-        "The atomic-write backend instance changed.",
+        "The atomic-write backend instance or logical target changed.",
         executionAttemptId,
       );
     }

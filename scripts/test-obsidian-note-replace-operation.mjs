@@ -199,6 +199,7 @@ async function waitForFiles(paths, timeoutMs = 5_000) {
 class FakeAtomicWriteBackend {
   bindingFingerprint = sha256("fixture-vault-instance");
   path = "Fixture/Note.md";
+  reportedPath = undefined;
   content = "before";
   replaceCalls = 0;
   failBeforeWriteOnce = false;
@@ -237,7 +238,7 @@ class FakeAtomicWriteBackend {
     const response = {
       ok: true,
       contractVersion: 1,
-      path: this.path,
+      path: this.reportedPath ?? this.path,
       content: this.content,
       sha256: sha256(this.content),
       size: Buffer.byteLength(this.content, "utf8"),
@@ -713,6 +714,86 @@ try {
       "settlement proof from a replacement backend must never commit the old plan",
     );
     assert.equal(result.afterProof, undefined);
+  }
+
+  {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    const clock = () => now;
+    const { backend, adapter } = fixture("settlement-logical-target-race", {
+      now: clock,
+      modifiedTimeProtectedKeys: ["modification"],
+    });
+    backend.content =
+      "---\nmodification: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "modification",
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "settlement-logical-target-race",
+    });
+    backend.failBeforeWriteOnce = true;
+    backend.afterStatus = async () => {
+      backend.reportedPath = "Other/Note.md";
+      backend.content = expected.replace(
+        "modification: 2026-08-17T09:59",
+        "modification: 2026-08-17T10:00",
+      );
+      now = Date.parse("2026-08-17T10:00:02.000Z");
+    };
+    const result = await adapter.apply(
+      planned.planRef,
+      "settlement-logical-target-race",
+    );
+    assert.equal(
+      result.outcome,
+      "conflict",
+      "settlement proof from another logical path must never commit the plan",
+    );
+    assert.equal(result.afterProof, undefined);
+  }
+
+  {
+    const { backend, journal, adapter } = fixture(
+      "recover-logical-target-race",
+    );
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: "after",
+      idempotencyKey: "recover-logical-target-race",
+    });
+    const applying = journal.transition(
+      planned.operationId,
+      ["planned"],
+      "applying",
+    );
+    journal.transition(
+      planned.operationId,
+      ["applying"],
+      "outcome_unknown",
+      "fixture interruption",
+      applying.executionOwner.attemptId,
+    );
+    backend.afterRead = async () => {
+      backend.reportedPath = "Other/Note.md";
+    };
+    const result = await adapter.recover(
+      planned.planRef,
+      "recover-logical-target-race",
+    );
+    assert.equal(result.outcome, "conflict");
+    assert.equal(backend.replaceCalls, 0);
   }
 
   {
