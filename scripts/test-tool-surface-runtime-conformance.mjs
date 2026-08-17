@@ -102,7 +102,6 @@ async function listToolsForMode(registrationMode) {
     return tools.tools.map((tool) => tool.name).sort((a, b) => a.localeCompare(b));
   } finally {
     await client.close().catch(() => undefined);
-    await transport.close().catch(() => undefined);
     if (fakeRest) {
       await new Promise((resolve) => fakeRest.server.close(resolve));
     }
