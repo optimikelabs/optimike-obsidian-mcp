@@ -41,8 +41,8 @@ const CanvasPatchProofSchema = z.object({
   lineEnding: z.enum(["lf", "crlf"]),
   patchDigest: z.string().regex(SHA256),
   changedNodes: z.array(z.string().min(1).max(256)).max(64),
-  changedEdges: z.array(z.string().min(1).max(256)).max(128),
-  removedIncidentEdges: z.array(z.string().min(1).max(256)).max(128),
+  changedEdges: z.array(z.string().min(1).max(256)),
+  removedIncidentEdges: z.array(z.string().min(1).max(256)),
   rootUnknownBeforeSha256: z.string().regex(SHA256),
   rootUnknownAfterSha256: z.string().regex(SHA256),
   untouchedEntitiesBeforeSha256: z.string().regex(SHA256),
@@ -182,6 +182,20 @@ function projection(
   };
 }
 
+function validatedStoredProjection(
+  value: ObsidianNoteReplaceProjection,
+): ObsidianNoteReplaceProjection {
+  const parsed = StoredProjectionSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new McpError(
+      BaseErrorCode.VALIDATION_ERROR,
+      "The compiled Canvas projection is outside the durable contract.",
+      { reason: "canvas_projection_invalid" },
+    );
+  }
+  return parsed.data as ObsidianNoteReplaceProjection;
+}
+
 function exposed(
   receipt: OperationReceipt,
   plan: ObsidianNoteReplacePlan,
@@ -282,16 +296,16 @@ export class GovernedCanvasRuntime {
     assertPolicy(
       "plan",
       input.path,
-      canonical.operations.length,
+      compiled.proof.changedNodes.length + compiled.proof.changedEdges.length,
       compiled.nextContent.length,
     );
-    const storedProjection: ObsidianNoteReplaceProjection = {
+    const storedProjection = validatedStoredProjection({
       contractVersion: 1,
       kind: OPERATION_KIND,
       publicIdempotencyKey: key,
       intentDigest: canonical.digest,
       proof: compiled.proof as unknown as Record<string, unknown>,
-    };
+    });
     const child = await this.adapter.plan({
       path: input.path,
       nextContent: compiled.nextContent,

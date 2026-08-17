@@ -12,7 +12,8 @@ import { BaseErrorCode, McpError } from "../dist/types-global/errors.js";
 const digest = (value) =>
   createHash("sha256").update(value, "utf8").digest("hex");
 process.env.OBSIDIAN_API_KEY ||= "governed-canvas-test-only";
-process.env.MCP_WRITE_MODE ||= "full";
+process.env.MCP_WRITE_MODE ||= "guarded";
+process.env.MCP_GUARDED_MAX_BATCH_OPERATIONS ||= "200";
 const { CANVAS_ATOMIC_PROFILE, GovernedCanvasRuntime } = await import(
   "../dist/services/canvasProjectionRuntime.js"
 );
@@ -176,6 +177,71 @@ try {
   const conflicted = await runtime.apply(stale.planRef, "canvas-p3-stale");
   assert.equal(conflicted.outcome, "conflict");
   assert.equal(JSON.parse(content).thirdParty, true);
+
+  const graphWithIncidentEdges = (edgeCount) =>
+    `${JSON.stringify(
+      {
+        nodes: [
+          {
+            id: "root",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 100,
+            text: "Root",
+          },
+          ...Array.from({ length: edgeCount }, (_, index) => ({
+            id: `leaf-${index}`,
+            type: "text",
+            x: 300,
+            y: index * 120,
+            width: 200,
+            height: 100,
+            text: `Leaf ${index}`,
+          })),
+        ],
+        edges: Array.from({ length: edgeCount }, (_, index) => ({
+          id: `edge-${index}`,
+          fromNode: "root",
+          toNode: `leaf-${index}`,
+        })),
+      },
+      null,
+      2,
+    )}\n`;
+
+  content = graphWithIncidentEdges(129);
+  const wideProjection = await runtime.plan({
+    path: "Canary/Wide.canvas",
+    operations: [{ op: "delete_node", id: "root" }],
+    idempotencyKey: "canvas-p3-wide-proof",
+  });
+  assert.equal(wideProjection.phase, "planned");
+  assert.equal(
+    wideProjection.projection.proof.removedIncidentEdges.length,
+    129,
+  );
+
+  content = graphWithIncidentEdges(200);
+  const rejectedKey = "canvas-p3-too-many-effects";
+  await assert.rejects(
+    runtime.plan({
+      path: "Canary/TooWide.canvas",
+      operations: [{ op: "delete_node", id: "root" }],
+      idempotencyKey: rejectedKey,
+    }),
+    (error) =>
+      error instanceof McpError && error.code === BaseErrorCode.FORBIDDEN,
+  );
+  const rejectedDurableKey = `optimike:canvas-projection:v1:${digest(
+    `obsidian.canvas.patch:v1\0${rejectedKey}`,
+  )}`;
+  assert.equal(
+    journal.getByIdempotencyKey(rejectedDurableKey),
+    undefined,
+    "inadmissible projected effects must be rejected before journaling",
+  );
 } finally {
   runtime.close();
   rmSync(root, { recursive: true, force: true });
