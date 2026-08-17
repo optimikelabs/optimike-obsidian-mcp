@@ -46,7 +46,9 @@ export type CanvasPatchProof = {
   patchDigest: string;
   changedNodes: string[];
   changedEdges: string[];
-  removedIncidentEdges: string[];
+  changedEdgeCount: number;
+  removedIncidentEdgeCount: number;
+  removedIncidentEdgesSha256: string;
   rootUnknownBeforeSha256: string;
   rootUnknownAfterSha256: string;
   untouchedEntitiesBeforeSha256: string;
@@ -523,8 +525,14 @@ export function compileCanvasPatch(
       afterSha256: sha256(next),
     }),
     changedNodes: [...changedNodes].sort(),
-    changedEdges: [...changedEdges].sort(),
-    removedIncidentEdges: [...removedIncidentEdges].sort(),
+    changedEdges: [...changedEdges]
+      .filter((edgeId) => !removedIncidentEdges.has(edgeId))
+      .sort(),
+    changedEdgeCount: changedEdges.size,
+    removedIncidentEdgeCount: removedIncidentEdges.size,
+    removedIncidentEdgesSha256: operationDigest(
+      [...removedIncidentEdges].sort(),
+    ),
     rootUnknownBeforeSha256: beforeRootDigest,
     rootUnknownAfterSha256: afterRootDigest,
     untouchedEntitiesBeforeSha256: untouchedBefore,

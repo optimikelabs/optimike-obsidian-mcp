@@ -58,7 +58,52 @@ assert.deepEqual(
   ["b"],
 );
 assert.deepEqual(removedGraph.edges, []);
-assert.deepEqual(removed.proof.removedIncidentEdges, ["ab"]);
+assert.equal(removed.proof.removedIncidentEdgeCount, 1);
+assert.equal(removed.proof.changedEdgeCount, 1);
+assert.deepEqual(removed.proof.changedEdges, []);
+assert.match(removed.proof.removedIncidentEdgesSha256, /^[a-f0-9]{64}$/u);
+
+const stressEdgeIds = Array.from(
+  { length: 300 },
+  (_, index) => `edge-${String(index).padStart(3, "0")}-${"x".repeat(247)}`,
+);
+const compactProof = compileCanvasPatch(
+  JSON.stringify({
+    nodes: [
+      {
+        id: "stress-root",
+        type: "text",
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        text: "Root",
+      },
+      ...stressEdgeIds.map((_, index) => ({
+        id: `stress-leaf-${index}`,
+        type: "text",
+        x: 200,
+        y: index * 120,
+        width: 100,
+        height: 100,
+        text: "Leaf",
+      })),
+    ],
+    edges: stressEdgeIds.map((id, index) => ({
+      id,
+      fromNode: "stress-root",
+      toNode: `stress-leaf-${index}`,
+    })),
+  }),
+  [{ op: "delete_node", id: "stress-root" }],
+).proof;
+assert.equal(compactProof.removedIncidentEdgeCount, 300);
+assert.equal(compactProof.changedEdgeCount, 300);
+assert.deepEqual(compactProof.changedEdges, []);
+assert.ok(
+  Buffer.byteLength(JSON.stringify(compactProof), "utf8") < 128 * 1024,
+  "compiler-generated proof must fit the durable projection byte contract",
+);
 
 assert.throws(
   () =>

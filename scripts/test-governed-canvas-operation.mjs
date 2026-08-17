@@ -218,10 +218,7 @@ try {
     idempotencyKey: "canvas-p3-wide-proof",
   });
   assert.equal(wideProjection.phase, "planned");
-  assert.equal(
-    wideProjection.projection.proof.removedIncidentEdges.length,
-    129,
-  );
+  assert.equal(wideProjection.projection.proof.removedIncidentEdgeCount, 129);
 
   content = graphWithIncidentEdges(200);
   const rejectedKey = "canvas-p3-too-many-effects";

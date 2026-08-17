@@ -32,30 +32,44 @@ const INTERNAL_KEY_PREFIX = "optimike:canvas-projection:v1:";
 const INTERNAL_KEY_DOMAIN = "obsidian.canvas.patch:v1\0";
 const SHA256 = /^[a-f0-9]{64}$/u;
 
-const CanvasPatchProofSchema = z.object({
-  contractVersion: z.literal(1),
-  compilerVersion: z.literal(1),
-  sourcePreservation: z.literal(
-    "unknown-json-values-preserved-outside-authorized-canvas-entities",
-  ),
-  lineEnding: z.enum(["lf", "crlf"]),
-  patchDigest: z.string().regex(SHA256),
-  changedNodes: z.array(z.string().min(1).max(256)).max(64),
-  changedEdges: z.array(z.string().min(1).max(256)),
-  removedIncidentEdges: z.array(z.string().min(1).max(256)),
-  rootUnknownBeforeSha256: z.string().regex(SHA256),
-  rootUnknownAfterSha256: z.string().regex(SHA256),
-  untouchedEntitiesBeforeSha256: z.string().regex(SHA256),
-  untouchedEntitiesAfterSha256: z.string().regex(SHA256),
-  graphBefore: z.object({
-    nodes: z.number().int().nonnegative(),
-    edges: z.number().int().nonnegative(),
-  }),
-  graphAfter: z.object({
-    nodes: z.number().int().nonnegative(),
-    edges: z.number().int().nonnegative(),
-  }),
-});
+const CanvasPatchProofSchema = z
+  .object({
+    contractVersion: z.literal(1),
+    compilerVersion: z.literal(1),
+    sourcePreservation: z.literal(
+      "unknown-json-values-preserved-outside-authorized-canvas-entities",
+    ),
+    lineEnding: z.enum(["lf", "crlf"]),
+    patchDigest: z.string().regex(SHA256),
+    changedNodes: z.array(z.string().min(1).max(256)).max(64),
+    changedEdges: z.array(z.string().min(1).max(256)).max(64),
+    changedEdgeCount: z.number().int().nonnegative(),
+    removedIncidentEdgeCount: z.number().int().nonnegative(),
+    removedIncidentEdgesSha256: z.string().regex(SHA256),
+    rootUnknownBeforeSha256: z.string().regex(SHA256),
+    rootUnknownAfterSha256: z.string().regex(SHA256),
+    untouchedEntitiesBeforeSha256: z.string().regex(SHA256),
+    untouchedEntitiesAfterSha256: z.string().regex(SHA256),
+    graphBefore: z.object({
+      nodes: z.number().int().nonnegative(),
+      edges: z.number().int().nonnegative(),
+    }),
+    graphAfter: z.object({
+      nodes: z.number().int().nonnegative(),
+      edges: z.number().int().nonnegative(),
+    }),
+  })
+  .superRefine((proof, context) => {
+    if (
+      proof.changedEdgeCount !==
+      proof.changedEdges.length + proof.removedIncidentEdgeCount
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Canvas edge effect counts are inconsistent.",
+      });
+    }
+  });
 
 const StoredProjectionSchema = z.object({
   contractVersion: z.literal(1),
@@ -296,7 +310,7 @@ export class GovernedCanvasRuntime {
     assertPolicy(
       "plan",
       input.path,
-      compiled.proof.changedNodes.length + compiled.proof.changedEdges.length,
+      compiled.proof.changedNodes.length + compiled.proof.changedEdgeCount,
       compiled.nextContent.length,
     );
     const storedProjection = validatedStoredProjection({
@@ -326,7 +340,7 @@ export class GovernedCanvasRuntime {
     assertPolicy(
       "apply",
       plan.path,
-      stored.proof.changedNodes.length + stored.proof.changedEdges.length,
+      stored.proof.changedNodes.length + stored.proof.changedEdgeCount,
       plan.nextContent.length,
     );
     const result = await this.adapter.apply(reference, plan.idempotencyKey);
@@ -346,7 +360,7 @@ export class GovernedCanvasRuntime {
     assertPolicy(
       "recover",
       plan.path,
-      stored.proof.changedNodes.length + stored.proof.changedEdges.length,
+      stored.proof.changedNodes.length + stored.proof.changedEdgeCount,
       plan.nextContent.length,
     );
     const result = await this.adapter.recover(reference, plan.idempotencyKey);
