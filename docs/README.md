@@ -35,6 +35,7 @@ French operator guides are linked alongside their English equivalents.
 | How are Operon reads and mutations governed?                     | [Operon MCP Contract](operon-mcp-contract.md)                                         |
 | How does governed atomic note replacement work?                  | [Governed Note Replacement](governed-note-replacement.md)                             |
 | How are named Obsidian Base formulas mutated safely?             | [Governed Base Formula P2](governed-base-formula-p2.md)                               |
+| How is one existing JSON Canvas graph mutated safely?            | [Governed Canvas P3](governed-canvas-p3.md)                                           |
 | Why does MCP expose Operon functions instead of calling the CLI? | [Operon CLI / Developer API audit](operon-cli-audit.md)                               |
 | Why was an architecture decision made?                           | [ADR Index](adr/README.md)                                                            |
 | What changed?                                                    | [Changelog](../CHANGELOG.md)                                                          |

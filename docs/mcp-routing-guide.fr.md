@@ -38,6 +38,7 @@ interchangeables. Appliquer cette priorité :
 | Remplacement complet d'une note Markdown existante | `obsidian_note_replace_plan`, puis les outils apply/status/recover correspondants | L'overwrite de `obsidian_update_note` ne fournit ni reçu durable ni récupération du plan exact.                                |
 | Set/delete du frontmatter de premier niveau        | `obsidian_frontmatter_patch_plan`, puis son cycle associé                         | `obsidian_manage_frontmatter` reste utile pour la lecture, la compatibilité ou quand la projection gouvernée live est absente. |
 | Set/delete d'une formule Base nommée               | `bases_formula_patch_plan`, puis son cycle associé                                | `bases_upsert_config` est une voie de compatibilité whole-config désactivée par défaut.                                        |
+| Mutation du graphe d'un JSON Canvas existant       | `obsidian_canvas_patch_plan`, puis son cycle associé                              | `obsidian_manage_canvas` est un helper filesystem headless direct, sans recovery durable.                                      |
 
 Les mutations directes append, prepend, search/replace et tags restent exposées
 quand le runtime actif les autorise. Elles ne produisent pas de reçu durable
@@ -58,7 +59,14 @@ Utiliser `obsidian_validate_format` avant les écritures risquées ou le contenu
 - `kind: canvas` vérifie JSON Canvas, nodes, edges, IDs, géométrie et références d'edges.
 - `kind: auto` infère depuis l'extension de `filePath`.
 
-Utiliser `obsidian_manage_canvas` seulement en `headless-filesystem` :
+Pour un Canvas existant en mode live/hybrid, préférer
+`obsidian_canvas_patch_plan → apply → status/recover`. Le compilateur gouverné
+borne les intentions sur les nœuds texte, la géométrie, la suppression de
+nœuds et les edges, préserve les valeurs inconnues, valide le graphe final et
+applique via le gate CAS Canvas séparé d'Atomic Write Bridge 0.4.0.
+
+Utiliser `obsidian_manage_canvas` seulement comme helper direct en
+`headless-filesystem` :
 
 - `validate` lit et valide un `.canvas` existant.
 - `create` écrit un `.canvas` structurellement valide.

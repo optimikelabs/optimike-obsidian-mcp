@@ -12,6 +12,7 @@ setup or operations guides, not in this index.
 | [Common governed operation runtime](ADR-Common-Operation-Runtime.md)                                               | Accepted and released in 2.6.0; public atomic-note projection and live canary complete | Shared plan, apply, status, receipt and exact-plan recovery vocabulary      |
 | [P1 governed frontmatter projection](ADR-Governed-Frontmatter-P1.md)                                               | Accepted, implemented and released in 2.7.0                                            | Source-preserving domain compiler projected over the released P0 runtime    |
 | [P2 governed Base formula operation](ADR-Governed-Base-Formula-P2.md)                                              | Accepted, implemented and released in 2.8.0; live pilot passed                         | Second typed backend, source-preserving formula intent and legacy migration |
+| [P3 governed Canvas graph operation](ADR-Governed-Canvas-P3.md)                                                    | Accepted for implementation; live pilot required before release                        | Typed Canvas CAS, graph intent, unknown-value preservation                  |
 
 ## Status vocabulary
 

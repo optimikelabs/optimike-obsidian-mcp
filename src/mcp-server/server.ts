@@ -38,6 +38,7 @@ import {
 import { assertWriteAllowed } from "../services/writePolicy.js";
 import { ExternalRootsService } from "../services/externalRootsService.js";
 import type { GovernedBaseFormulaRuntime } from "../services/baseFormulaProjectionRuntime.js";
+import type { GovernedCanvasRuntime } from "../services/canvasProjectionRuntime.js";
 import {
   validateJsonCanvas,
   validateObsidianFormat,
@@ -1061,7 +1062,7 @@ function registerHeadlessGuardedWriteTools(
 
   server.tool(
     "obsidian_manage_canvas",
-    "Headless filesystem JSON Canvas helper. Validates, creates, adds text nodes, and connects nodes in .canvas files with dry-run by default.",
+    "Direct headless-filesystem JSON Canvas helper for copied or dedicated vaults. Validates, creates, adds text nodes, and connects nodes with dry-run by default, but has no durable plan/status/recovery receipt. For an existing live Canvas prefer obsidian_canvas_patch_plan and its governed lifecycle.",
     {
       operation: z.enum([
         "validate",
@@ -1621,6 +1622,7 @@ async function createMcpServerInstance(
   vaultCacheService: VaultCacheService | undefined,
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
   governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
+  governedCanvasRuntime: GovernedCanvasRuntime | undefined,
 ): Promise<McpServer> {
   const context = requestContextService.createRequestContext({
     operation: "createMcpServerInstance",
@@ -1708,6 +1710,7 @@ async function createMcpServerInstance(
       vaultCacheService,
       governedNoteReplaceRuntime,
       governedBaseFormulaRuntime,
+      governedCanvasRuntime,
     );
     const externalRootsService = config.externalRootsFile
       ? await ExternalRootsService.fromConfigFile(config.externalRootsFile)
@@ -1829,6 +1832,7 @@ async function startTransport(
   vaultCacheService: VaultCacheService | undefined,
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
   governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
+  governedCanvasRuntime: GovernedCanvasRuntime | undefined,
 ): Promise<McpServer | ServerType | void> {
   const transportType = config.mcpTransportType;
   const context = requestContextService.createRequestContext({
@@ -1850,6 +1854,7 @@ async function startTransport(
         vaultCacheService,
         governedNoteReplaceRuntime,
         governedBaseFormulaRuntime,
+        governedCanvasRuntime,
       );
     const httpServerInstance = await startHttpTransport(
       mcpServerFactory,
@@ -1870,6 +1875,7 @@ async function startTransport(
       vaultCacheService,
       governedNoteReplaceRuntime,
       governedBaseFormulaRuntime,
+      governedCanvasRuntime,
     );
     logger.debug("Delegating to connectStdioTransport...", context);
     await connectStdioTransport(server, context);
@@ -1905,6 +1911,7 @@ export async function initializeAndStartServer(
   vaultCacheService: VaultCacheService | undefined,
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
   governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
+  governedCanvasRuntime: GovernedCanvasRuntime | undefined,
 ): Promise<void | McpServer | ServerType> {
   const context = requestContextService.createRequestContext({
     operation: "initializeAndStartServer",
@@ -1927,6 +1934,7 @@ export async function initializeAndStartServer(
       vaultCacheService,
       governedNoteReplaceRuntime,
       governedBaseFormulaRuntime,
+      governedCanvasRuntime,
     );
     logger.info(
       "MCP Server initialization sequence completed successfully.",

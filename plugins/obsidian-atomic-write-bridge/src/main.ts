@@ -3,17 +3,24 @@ import { Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import {
   ATOMIC_WRITE_CONTRACT_VERSION,
   ATOMIC_WRITE_REST_PREFIX,
+  assertCanvasContentSize,
   assertBindingFingerprint,
   BindingConflictError,
   compareAndReplace,
   HashConflictError,
   parseCasRequest,
+  parseCanvasCasRequest,
+  parseCanvasReadRequest,
   parseReadRequest,
   sha256,
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
 
-type PluginData = { instanceId: string; allowWrites: boolean };
+type PluginData = {
+  instanceId: string;
+  allowWrites: boolean;
+  allowCanvasWrites: boolean;
+};
 
 function responseStatus(res: any, status: number): any {
   if (typeof res?.status === "function") return res.status(status);
@@ -41,6 +48,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   private instanceId = "";
   private bindingFingerprint = "";
   allowWrites = false;
+  allowCanvasWrites = false;
 
   async onload(): Promise<void> {
     const stored = (await this.loadData()) as Partial<PluginData> | null;
@@ -49,6 +57,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
         ? stored.instanceId
         : randomUUID();
     this.allowWrites = stored?.allowWrites === true;
+    this.allowCanvasWrites = stored?.allowCanvasWrites === true;
     const deviceStorageKey = "optimike-atomic-write-bridge:device-id";
     let deviceId = window.localStorage.getItem(deviceStorageKey);
     if (!deviceId) {
@@ -67,7 +76,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       .digest("hex");
     if (
       stored?.instanceId !== this.instanceId ||
-      stored?.allowWrites !== this.allowWrites
+      stored?.allowWrites !== this.allowWrites ||
+      stored?.allowCanvasWrites !== this.allowCanvasWrites
     ) {
       await this.saveSettings();
     }
@@ -79,12 +89,13 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     await this.saveData({
       instanceId: this.instanceId,
       allowWrites: this.allowWrites,
+      allowCanvasWrites: this.allowCanvasWrites,
     } satisfies PluginData);
   }
 
-  private file(path: string): TFile {
+  private file(path: string, label = "Note"): TFile {
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) throw new Error("Note not found.");
+    if (!(file instanceof TFile)) throw new Error(`${label} not found.`);
     return file;
   }
 
@@ -122,6 +133,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               bindingFingerprint: this.bindingFingerprint,
               atomicCas: true,
               writeEnabled: this.allowWrites,
+              canvasAtomicCas: true,
+              canvasWriteEnabled: this.allowCanvasWrites,
             },
             limits: { markdownOnly: true },
             settlement: {
@@ -139,6 +152,112 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               },
             },
           });
+        });
+
+      api
+        .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/canvas/read`)
+        .post(async (req: any, res: any) => {
+          try {
+            const request = parseCanvasReadRequest(req?.body);
+            const content = await this.app.vault.read(
+              this.file(request.path, "Canvas"),
+            );
+            assertCanvasContentSize(content);
+            sendJson(res, 200, {
+              ok: true,
+              contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
+              path: request.path,
+              content,
+              sha256: sha256(content),
+              size: Buffer.byteLength(content, "utf8"),
+              bindingFingerprint: this.bindingFingerprint,
+            });
+          } catch (error) {
+            const notFound =
+              error instanceof Error && error.message === "Canvas not found.";
+            sendJson(
+              res,
+              notFound ? 404 : 400,
+              errorPayload(
+                notFound ? "canvas_not_found" : "invalid_request",
+                error instanceof Error ? error.message : String(error),
+              ),
+            );
+          }
+        });
+
+      api
+        .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/canvas/cas`)
+        .post(async (req: any, res: any) => {
+          try {
+            if (!this.allowCanvasWrites) {
+              sendJson(
+                res,
+                403,
+                errorPayload(
+                  "canvas_writes_disabled",
+                  "Atomic Canvas writes are disabled in the bridge settings.",
+                ),
+              );
+              return;
+            }
+            const request = parseCanvasCasRequest(req?.body);
+            assertBindingFingerprint(
+              request.bindingFingerprint,
+              this.bindingFingerprint,
+            );
+            let beforeSha256 = "";
+            const written = await this.app.vault.process(
+              this.file(request.path, "Canvas"),
+              (current) => {
+                const result = compareAndReplace(
+                  current,
+                  request.expectedSha256,
+                  request.nextContent,
+                );
+                beforeSha256 = result.beforeSha256;
+                return result.content;
+              },
+            );
+            sendJson(res, 200, {
+              ok: true,
+              contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
+              path: request.path,
+              beforeSha256,
+              afterSha256: sha256(written),
+              size: Buffer.byteLength(written, "utf8"),
+              bindingFingerprint: this.bindingFingerprint,
+            });
+          } catch (error) {
+            if (error instanceof BindingConflictError) {
+              sendJson(
+                res,
+                409,
+                errorPayload("binding_conflict", error.message),
+              );
+              return;
+            }
+            if (error instanceof HashConflictError) {
+              sendJson(
+                res,
+                409,
+                errorPayload("hash_conflict", error.message, {
+                  actualSha256: error.actualSha256,
+                }),
+              );
+              return;
+            }
+            const notFound =
+              error instanceof Error && error.message === "Canvas not found.";
+            sendJson(
+              res,
+              notFound ? 404 : 400,
+              errorPayload(
+                notFound ? "canvas_not_found" : "invalid_request",
+                error instanceof Error ? error.message : String(error),
+              ),
+            );
+          }
         });
 
       api
@@ -295,6 +414,19 @@ class AtomicWriteSettingsTab extends PluginSettingTab {
           this.bridge.allowWrites = value;
           await this.bridge.saveSettings();
         }),
+      );
+    new Setting(containerEl)
+      .setName("Autoriser les écritures Canvas atomiques")
+      .setDesc(
+        "Désactivé par défaut. Autorise uniquement les mutations gouvernées de fichiers JSON Canvas avec précondition SHA-256 exacte et validation du graphe.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.bridge.allowCanvasWrites)
+          .onChange(async (value) => {
+            this.bridge.allowCanvasWrites = value;
+            await this.bridge.saveSettings();
+          }),
       );
   }
 }

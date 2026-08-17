@@ -19,6 +19,10 @@ import {
   createGovernedBaseFormulaRuntime,
   type GovernedBaseFormulaRuntime,
 } from "./services/baseFormulaProjectionRuntime.js";
+import {
+  createGovernedCanvasRuntime,
+  type GovernedCanvasRuntime,
+} from "./services/canvasProjectionRuntime.js";
 
 /**
  * The main MCP server instance (only stored globally for stdio shutdown).
@@ -46,6 +50,7 @@ let vaultCacheService: VaultCacheService | undefined;
  */
 let governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined;
 let governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined;
+let governedCanvasRuntime: GovernedCanvasRuntime | undefined;
 
 /**
  * Gracefully shuts down the main MCP server.
@@ -120,6 +125,11 @@ const shutdown = async (signal: string) => {
       logger.info("Closing governed Base formula runtime...", shutdownContext);
       governedBaseFormulaRuntime.close();
       governedBaseFormulaRuntime = undefined;
+    }
+    if (governedCanvasRuntime) {
+      logger.info("Closing governed Canvas runtime...", shutdownContext);
+      governedCanvasRuntime.close();
+      governedCanvasRuntime = undefined;
     }
 
     logger.info("Graceful shutdown completed successfully", shutdownContext);
@@ -328,6 +338,7 @@ const start = async () => {
       vaultCacheService,
     );
     governedBaseFormulaRuntime = createGovernedBaseFormulaRuntime(obsidianService);
+    governedCanvasRuntime = createGovernedCanvasRuntime(obsidianService);
     logger.info(
       governedNoteReplaceRuntime
         ? "Governed note-replacement runtime is enabled and process-shared."
@@ -351,6 +362,7 @@ const start = async () => {
       vaultCacheService,
       governedNoteReplaceRuntime,
       governedBaseFormulaRuntime,
+      governedCanvasRuntime,
     );
 
     if (
@@ -504,6 +516,8 @@ const start = async () => {
     governedNoteReplaceRuntime = undefined;
     governedBaseFormulaRuntime?.close();
     governedBaseFormulaRuntime = undefined;
+    governedCanvasRuntime?.close();
+    governedCanvasRuntime = undefined;
     process.exit(1);
   }
 };

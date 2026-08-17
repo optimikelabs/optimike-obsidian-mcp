@@ -49,6 +49,7 @@ const routingPairs = [
   ["obsidian_search_replace", "obsidian_note_replace_plan"],
   ["obsidian_manage_frontmatter", "obsidian_frontmatter_patch_plan"],
   ["bases_upsert_config", "bases_formula_patch_plan"],
+  ["obsidian_manage_canvas", "obsidian_canvas_patch_plan"],
 ];
 for (const [overlappingTool, preferredTool] of routingPairs) {
   assert.ok(

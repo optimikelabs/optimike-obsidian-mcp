@@ -2,14 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ATOMIC_WRITE_CONTRACT_VERSION,
+  assertCanvasContentSize,
   assertBindingFingerprint,
   BindingConflictError,
   compareAndReplace,
   HashConflictError,
   parseCasRequest,
+  parseCanvasCasRequest,
+  parseCanvasReadRequest,
   parseReadRequest,
   sha256,
   validateVaultMarkdownPath,
+  validateVaultCanvasPath,
+  MAX_CANVAS_BYTES,
 } from "./contract.js";
 
 test("validates bounded vault-relative Markdown paths", () => {
@@ -23,6 +28,172 @@ test("validates bounded vault-relative Markdown paths", () => {
   ]) {
     assert.throws(() => validateVaultMarkdownPath(value));
   }
+});
+
+test("validates Canvas paths and graph-bound CAS bodies", () => {
+  assert.equal(
+    validateVaultCanvasPath("Canvases/Flow.canvas"),
+    "Canvases/Flow.canvas",
+  );
+  assert.deepEqual(
+    parseCanvasReadRequest({ contractVersion: 1, path: "Flow.canvas" }),
+    { contractVersion: 1, path: "Flow.canvas" },
+  );
+  assert.throws(() =>
+    parseCanvasReadRequest({ contractVersion: 1, path: " Flow.canvas " }),
+  );
+  const nextContent = JSON.stringify({
+    nodes: [
+      { id: "a", type: "text", x: 0, y: 0, width: 100, height: 100, text: "A" },
+    ],
+    edges: [],
+  });
+  assert.equal(
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent,
+    }).nextContent,
+    nextContent,
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [{ id: "a" }],
+        edges: [{ id: "e", fromNode: "a", toNode: "missing" }],
+      }),
+    }),
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: " Flow.canvas ",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent,
+    }),
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [
+          {
+            id: "a",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "A",
+            color: [],
+          },
+        ],
+        edges: [],
+      }),
+    }),
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [
+          {
+            id: "a",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "A",
+          },
+          {
+            id: "b",
+            type: "text",
+            x: 200,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "B",
+          },
+        ],
+        edges: [{ id: "ab", fromNode: "a", toNode: "b", fromSide: ["top"] }],
+      }),
+    }),
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [
+          {
+            id: " padded ",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "A",
+          },
+        ],
+        edges: [],
+      }),
+    }),
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [
+          {
+            id: "a".repeat(257),
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "A",
+          },
+        ],
+        edges: [],
+      }),
+    }),
+  );
+  for (const value of ["../Flow.canvas", "Flow.md", ".obsidian/Flow.canvas"]) {
+    assert.throws(() => validateVaultCanvasPath(value));
+  }
+});
+
+test("rejects oversized Canvas reads and writes before graph processing", () => {
+  const oversized = "x".repeat(MAX_CANVAS_BYTES + 1);
+  assert.throws(() => assertCanvasContentSize(oversized), /exceeds/u);
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: oversized,
+    }),
+  );
 });
 
 test("read and CAS bodies are strict and versioned", () => {

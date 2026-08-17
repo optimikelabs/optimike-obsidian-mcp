@@ -4,6 +4,7 @@ export const ATOMIC_WRITE_CONTRACT_VERSION = 1 as const;
 export const ATOMIC_WRITE_REST_PREFIX =
   "/extensions/obsidian-atomic-write-bridge" as const;
 export const MAX_NOTE_BYTES = 5 * 1024 * 1024;
+export const MAX_CANVAS_BYTES = 5 * 1024 * 1024;
 
 export type NoteReadRequest = {
   contractVersion: typeof ATOMIC_WRITE_CONTRACT_VERSION;
@@ -11,6 +12,17 @@ export type NoteReadRequest = {
 };
 
 export type NoteCasRequest = NoteReadRequest & {
+  bindingFingerprint: string;
+  expectedSha256: string;
+  nextContent: string;
+};
+
+export type CanvasReadRequest = {
+  contractVersion: typeof ATOMIC_WRITE_CONTRACT_VERSION;
+  path: string;
+};
+
+export type CanvasCasRequest = CanvasReadRequest & {
   bindingFingerprint: string;
   expectedSha256: string;
   nextContent: string;
@@ -32,6 +44,12 @@ export function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+export function assertCanvasContentSize(content: string): void {
+  if (Buffer.byteLength(content, "utf8") > MAX_CANVAS_BYTES) {
+    throw new Error(`Canvas content exceeds ${MAX_CANVAS_BYTES} UTF-8 bytes.`);
+  }
+}
+
 export function compareAndReplace(
   current: string,
   expectedSha256: string,
@@ -45,8 +63,34 @@ export function compareAndReplace(
 }
 
 export function validateVaultMarkdownPath(input: unknown): string {
+  return validateVaultPath(
+    input,
+    ".md",
+    "Only Markdown notes are supported.",
+    false,
+  );
+}
+
+export function validateVaultCanvasPath(input: unknown): string {
+  return validateVaultPath(
+    input,
+    ".canvas",
+    "Only JSON Canvas files are supported.",
+    true,
+  );
+}
+
+function validateVaultPath(
+  input: unknown,
+  extension: string,
+  extensionError: string,
+  rejectPadding: boolean,
+): string {
   if (typeof input !== "string") throw new Error("path must be a string.");
   const value = input.trim();
+  if (rejectPadding && value !== input) {
+    throw new Error("Canvas path must not contain leading or trailing whitespace.");
+  }
   if (!value || value.length > 1024) {
     throw new Error("path must contain between 1 and 1024 characters.");
   }
@@ -60,8 +104,8 @@ export function validateVaultMarkdownPath(input: unknown): string {
   if (parts[0]?.toLowerCase() === ".obsidian") {
     throw new Error("Obsidian configuration files are outside this bridge.");
   }
-  if (!value.toLowerCase().endsWith(".md")) {
-    throw new Error("Only Markdown notes are supported.");
+  if (!value.toLowerCase().endsWith(extension)) {
+    throw new Error(extensionError);
   }
   return value;
 }
@@ -142,4 +186,204 @@ export function parseCasRequest(input: unknown): NoteCasRequest {
     expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"),
     nextContent: body.nextContent,
   };
+}
+
+export function parseCanvasReadRequest(input: unknown): CanvasReadRequest {
+  const body = bodyRecord(input);
+  assertExactKeys(body, ["contractVersion", "path"]);
+  return {
+    contractVersion: contractVersion(body.contractVersion),
+    path: validateVaultCanvasPath(body.path),
+  };
+}
+
+export function parseCanvasCasRequest(input: unknown): CanvasCasRequest {
+  const body = bodyRecord(input);
+  assertExactKeys(body, [
+    "bindingFingerprint",
+    "contractVersion",
+    "expectedSha256",
+    "nextContent",
+    "path",
+  ]);
+  if (typeof body.nextContent !== "string") {
+    throw new Error("nextContent must be a string.");
+  }
+  assertCanvasContentSize(body.nextContent);
+  validateCanvasGraph(body.nextContent);
+  return {
+    contractVersion: contractVersion(body.contractVersion),
+    path: validateVaultCanvasPath(body.path),
+    bindingFingerprint: sha256Digest(
+      body.bindingFingerprint,
+      "bindingFingerprint",
+    ),
+    expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"),
+    nextContent: body.nextContent,
+  };
+}
+
+export function validateCanvasGraph(content: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("Canvas content must be valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Canvas content must be a JSON object.");
+  }
+  const root = parsed as Record<string, unknown>;
+  if (!Array.isArray(root.nodes) || !Array.isArray(root.edges)) {
+    throw new Error("Canvas content must contain nodes and edges arrays.");
+  }
+  const nodeIds = new Set<string>();
+  const validId = (value: unknown): value is string =>
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    value.trim() === value &&
+    isWellFormedUnicode(value);
+  for (const node of root.nodes) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      throw new Error("Every Canvas node must be an object.");
+    }
+    const id = (node as Record<string, unknown>).id;
+    if (!validId(id) || nodeIds.has(id)) {
+      throw new Error(
+        "Canvas node IDs must be non-empty, unique, unpadded, well-formed, and at most 256 characters.",
+      );
+    }
+    nodeIds.add(id);
+    const value = node as Record<string, unknown>;
+    if (
+      typeof value.type !== "string" ||
+      !["text", "file", "link", "group"].includes(value.type)
+    ) {
+      throw new Error("Canvas node types must be text, file, link, or group.");
+    }
+    for (const field of ["x", "y", "width", "height"] as const) {
+      if (typeof value[field] !== "number" || !Number.isInteger(value[field])) {
+        throw new Error(`Canvas node ${field} must be an integer.`);
+      }
+    }
+    if ((value.width as number) <= 0 || (value.height as number) <= 0) {
+      throw new Error("Canvas node width and height must be positive.");
+    }
+    if (value.color !== undefined && typeof value.color !== "string") {
+      throw new Error("Canvas node color must be a string.");
+    }
+    const allowedTypeFields: Record<string, readonly string[]> = {
+      text: ["text"],
+      file: ["file", "subpath"],
+      link: ["url"],
+      group: ["label", "background", "backgroundStyle"],
+    };
+    for (const field of [
+      "text",
+      "file",
+      "subpath",
+      "url",
+      "label",
+      "background",
+      "backgroundStyle",
+    ]) {
+      if (
+        value[field] !== undefined &&
+        !allowedTypeFields[value.type as string]?.includes(field)
+      ) {
+        throw new Error(
+          `Canvas standard field ${field} is invalid for this node type.`,
+        );
+      }
+    }
+    if (value.type === "text" && typeof value.text !== "string") {
+      throw new Error("Canvas text nodes must contain text.");
+    }
+    if (value.type === "file" && typeof value.file !== "string") {
+      throw new Error("Canvas file nodes must contain a file path.");
+    }
+    if (
+      value.type === "file" &&
+      value.subpath !== undefined &&
+      (typeof value.subpath !== "string" || !value.subpath.startsWith("#"))
+    ) {
+      throw new Error("Canvas file node subpath must be a #-prefixed string.");
+    }
+    if (value.type === "link" && typeof value.url !== "string") {
+      throw new Error("Canvas link nodes must contain a URL.");
+    }
+    if (value.type === "group") {
+      for (const field of ["label", "background"] as const) {
+        if (value[field] !== undefined && typeof value[field] !== "string") {
+          throw new Error(`Canvas group node ${field} must be a string.`);
+        }
+      }
+      if (
+        value.backgroundStyle !== undefined &&
+        (typeof value.backgroundStyle !== "string" ||
+          !["cover", "ratio", "repeat"].includes(value.backgroundStyle))
+      ) {
+        throw new Error("Canvas group node backgroundStyle is invalid.");
+      }
+    }
+  }
+  const edgeIds = new Set<string>();
+  for (const edge of root.edges) {
+    if (!edge || typeof edge !== "object" || Array.isArray(edge)) {
+      throw new Error("Every Canvas edge must be an object.");
+    }
+    const value = edge as Record<string, unknown>;
+    if (!validId(value.id) || edgeIds.has(value.id)) {
+      throw new Error(
+        "Canvas edge IDs must be non-empty, unique, unpadded, well-formed, and at most 256 characters.",
+      );
+    }
+    if (
+      typeof value.fromNode !== "string" ||
+      typeof value.toNode !== "string" ||
+      !nodeIds.has(value.fromNode) ||
+      !nodeIds.has(value.toNode)
+    ) {
+      throw new Error("Canvas edges must reference existing nodes.");
+    }
+    for (const side of ["fromSide", "toSide"] as const) {
+      if (
+        value[side] !== undefined &&
+        (typeof value[side] !== "string" ||
+          !["top", "right", "bottom", "left"].includes(value[side]))
+      ) {
+        throw new Error(`Canvas edge ${side} is invalid.`);
+      }
+    }
+    for (const end of ["fromEnd", "toEnd"] as const) {
+      if (
+        value[end] !== undefined &&
+        (typeof value[end] !== "string" ||
+          !["none", "arrow"].includes(value[end]))
+      ) {
+        throw new Error(`Canvas edge ${end} is invalid.`);
+      }
+    }
+    for (const field of ["color", "label"] as const) {
+      if (value[field] !== undefined && typeof value[field] !== "string") {
+        throw new Error(`Canvas edge ${field} must be a string.`);
+      }
+    }
+    edgeIds.add(value.id);
+  }
+}
+
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
 }

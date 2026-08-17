@@ -42,6 +42,9 @@ function testGovernedStateChangesUseMutationBackpressureByDefault() {
     "bases_formula_patch_plan",
     "bases_formula_patch_apply",
     "bases_formula_patch_recover",
+    "obsidian_canvas_patch_plan",
+    "obsidian_canvas_patch_apply",
+    "obsidian_canvas_patch_recover",
   ];
   for (const toolName of governedStateChanges) {
     assert.equal(
@@ -194,6 +197,10 @@ async function testRemovalRedispatchesSameIdentityQueue() {
     identityKey: "b",
     operationClass: "expensive",
   });
+  // Give the item behind the blocked head a later deadline. If both are
+  // enqueued in the same timer bucket, a fast Linux runner can expire both
+  // before the timeout removal has a chance to redispatch the queue.
+  await sleep(10);
   const standardBehindIt = admission.acquire({
     identityKey: "b",
     operationClass: "standard",

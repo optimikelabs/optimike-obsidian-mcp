@@ -53,7 +53,7 @@ Periodic Notes API extension is outside the core MCP contract.
 | Active file / UI / commands      | Via Desktop/plugin      | Via Desktop/plugins while API available | No                       | No                      | No                               | No                                                                       |
 | Bases list/schema/query          | Bases Bridge REST       | Bases Bridge REST                       | No                       | Local readonly fallback | Local readonly fallback          | Local fallback with simple filters (`eq`, `contains`, `in`, comparisons) |
 | Bases create/upsert              | Bases Bridge REST       | Bases Bridge REST                       | No                       | No                      | No                               | `.base` YAML create/config + rows -> frontmatter `set`                   |
-| JSON Canvas create/edit          | No                      | No                                      | No                       | No                      | No                               | Minimal `.canvas` create, text node, edge, validate                      |
+| JSON Canvas create/edit          | Governed graph CAS      | Same while API/Bridge are available     | No                       | No                      | No                               | Direct minimal `.canvas` create, text node, edge, validate               |
 | Obsidian plugin parity           | Desktop plugins         | Desktop plugins while API available     | No                       | No                      | No                               | No                                                                       |
 
 ## Tool Registry By Mode
@@ -120,7 +120,7 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 | `headless-guarded`              | Everything in `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                                                                                                                                                 |
 | `headless-filesystem`           | Everything in `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                                                                                                                                             |
 | `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search`                                                                                                                                                                                                                                                   |
-| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools, governed note, Frontmatter and Base formula `plan/apply/status/recover`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools, governed note, Frontmatter, Base formula and Canvas `plan/apply/status/recover`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
 ## Governed Frontmatter P1
 
@@ -138,6 +138,14 @@ hybrid operation.
 live/hybrid registration boundary. They additionally require Bases Bridge
 1.1.0 Atomic V1 with atomic Base CAS enabled and legacy whole-file config
 writes disabled.
+
+## Governed Canvas P3
+
+`obsidian_canvas_patch_plan`, `obsidian_canvas_patch_apply`,
+`obsidian_canvas_patch_status`, and `obsidian_canvas_patch_recover` follow the
+same live/hybrid registration boundary. They require Atomic Write Bridge 0.4.0,
+its independent Canvas CAS gate, a valid existing graph, and an exact backend
+binding/SHA-256. They are absent from every headless mode.
 
 ## Safety Notes
 

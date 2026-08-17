@@ -71,6 +71,10 @@ const governedToolNames = [
   "bases_formula_patch_apply",
   "bases_formula_patch_status",
   "bases_formula_patch_recover",
+  "obsidian_canvas_patch_plan",
+  "obsidian_canvas_patch_apply",
+  "obsidian_canvas_patch_status",
+  "obsidian_canvas_patch_recover",
 ];
 for (const name of governedToolNames) {
   const matches = registrations.filter((item) => item.name === name);
@@ -92,5 +96,5 @@ for (const name of [
 }
 
 console.log(
-  `PASS: ${registrations.length} MCP tool registrations include annotations; governed note/frontmatter/Base tools are unique and generic operation tools remain internal`,
+  `PASS: ${registrations.length} MCP tool registrations include annotations; governed note/frontmatter/Base/Canvas tools are unique and generic operation tools remain internal`,
 );

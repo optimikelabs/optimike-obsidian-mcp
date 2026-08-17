@@ -18,7 +18,7 @@ documents autorisés hors du coffre.
 | Domaine                 | Ce que fournit le MCP                                                                                 | Dépendance principale                                              |
 | ----------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Notes                   | Lecture/recherche/update plus plans gouvernés de note atomique et Frontmatter source-preserving       | Coffre ; Local REST API + Atomic Write Bridge pour le CAS gouverné |
-| Bases et Canvas         | Requêtes Bases, plans de formules gouvernés et source-preserving, validation et helpers Canvas bornés | Bases Bridge live et CAS Base typé                                 |
+| Bases et Canvas         | Requêtes/formules Base, plans de graphe Canvas gouvernés et helpers headless directs                   | Bases Bridge ; Atomic Write Bridge 0.4.0 pour le CAS Canvas         |
 | Tâches                  | Lecture/requête Tasks + 23 outils Operon gouvernés                                                    | Operon Developer API V1 via le Bridge                              |
 | Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable                                         | `.smart-env` + embedding Ollama ou OpenAI                          |
 | Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions                                  | Filesystem local                                                   |
@@ -90,7 +90,7 @@ Activer seulement les surfaces utilisées :
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) :
   notes, métadonnées et tags en live ;
 - **Bases Bridge (REST)** inclus : requêtes `.base` live et CAS typé opt-in pour les formules source-preserving gouvernées `plan → apply → status → recover` ; les remplacements complets historiques sont désactivés par défaut ([contrat P2](docs/governed-base-formula-p2.fr.md)) ;
-- **Optimike Atomic Write Bridge** inclus : compare-and-replace SHA-256 opt-in pour les plans gouvernés de note complète et Frontmatter source-preserving `plan → apply → status → recover` ; le Bridge 0.3.0 dérive les noms configurés des propriétés de création, modification et dernière vue depuis les plugins de date actifs supportés, refuse les noms actifs qu’il ne peut pas représenter sûrement, et seul un timestamp de modification strictement borné peut être admis après le CAS ; `planRef` opaque, réponse perdue → `status`, recovery exact ≠ undo ([note](docs/governed-note-replacement.fr.md), [P1](docs/governed-frontmatter-p1.fr.md)) ;
+- **Optimike Atomic Write Bridge** inclus : gates CAS SHA-256 indépendants et désactivés par défaut pour Markdown et JSON Canvas, avec cycles gouvernés note, Frontmatter et Canvas `plan → apply → status → recover` ; la 0.3.0 ajoute la protection/settlement borné des propriétés de date et la 0.4.0 le read/CAS Canvas typé avec validation du graphe ; `planRef` opaque, réponse perdue → `status`, recovery exact ≠ undo ([note](docs/governed-note-replacement.fr.md), [P1](docs/governed-frontmatter-p1.fr.md), [Canvas P3](docs/governed-canvas-p3.fr.md)) ;
 - **Smart Connections** : index sémantique `.smart-env` ;
 - **Operon Developer API V1** et **Optimike Operon Bridge** inclus : tâches live
   gouvernées via la Developer API officielle V1 ;
@@ -105,8 +105,8 @@ Réglage Optimike Operon Bridge : Allow task mutations
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Les snapshots Operon obsolètes restent toujours en lecture seule.
-Le remplacement atomique des notes a son propre réglage, désactivé par défaut, et ne requiert pas le grant Developer API d’Operon.
+Les snapshots Operon obsolètes restent en lecture seule. Les écritures Markdown
+et Canvas ont deux gates atomiques séparés, désactivés par défaut et indépendants d’Operon.
 Le MCP expose une surface agentique gouvernée, pas toutes les fonctions de la
 CLI Operon. Les diagnostics natifs, la recherche/résolution, les relations et
 contextes bornés ainsi que l’état du timer sont disponibles en lecture seule.

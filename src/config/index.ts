@@ -166,6 +166,13 @@ const EnvSchema = z
         "MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH must be absolute.",
       )
       .optional(),
+    MCP_OBSIDIAN_CANVAS_JOURNAL_PATH: z
+      .string()
+      .refine(
+        (value) => path.isAbsolute(value),
+        "MCP_OBSIDIAN_CANVAS_JOURNAL_PATH must be absolute.",
+      )
+      .optional(),
     MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: z.coerce
       .number()
       .int()
@@ -469,6 +476,15 @@ export const config = {
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       `obsidian-base-formula-${noteReplaceProfileId}.sqlite`,
+    ),
+  obsidianCanvasJournalPath:
+    env.MCP_OBSIDIAN_CANVAS_JOURNAL_PATH ||
+    path.join(
+      process.env.LOCALAPPDATA ||
+      process.env.XDG_STATE_HOME ||
+        path.join(os.homedir(), ".local", "state"),
+      "optimike-obsidian-mcp",
+      `obsidian-canvas-${noteReplaceProfileId}.sqlite`,
     ),
   mcpWriteMode:
     env.MCP_WRITE_MODE ||

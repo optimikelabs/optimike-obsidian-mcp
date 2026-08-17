@@ -46,7 +46,7 @@ Optimike Obsidian MCP possède cinq contrats runtime. Les modes headless tournen
 | Active file / UI / commandes           | Via Desktop/plugin        | Via Desktop/plugin tant que l’API répond   | Non                       | Non                             | Non                                 | Non                                                                        |
 | Bases list/schema/query                | Bases Bridge REST         | Bases Bridge REST                          | Non                       | Fallback local en lecture seule | Fallback local en lecture seule     | Fallback local avec filtres simples (`eq`, `contains`, `in`, comparaisons) |
 | Bases create/upsert                    | Bases Bridge REST         | Bases Bridge REST                          | Non                       | Non                             | Non                                 | `.base` YAML create/config + rows -> frontmatter `set`                     |
-| JSON Canvas create/edit                | Non                       | Non                                        | Non                       | Non                             | Non                                 | `.canvas` minimal : create, text node, edge, validate                      |
+| JSON Canvas create/edit                | CAS graphe gouverné        | Idem tant que l’API/Bridge répondent        | Non                       | Non                             | Non                                 | `.canvas` direct minimal : create, text node, edge, validate               |
 | Parité plugins Obsidian                | Plugins Desktop           | Plugins Desktop tant que l’API répond      | Non                       | Non                             | Non                                 | Non                                                                        |
 
 ## Registre des tools par mode
@@ -113,7 +113,7 @@ du mode runtime :
 | `headless-guarded`               | Tout `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                     |
 | `headless-filesystem`            | Tout `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                 |
 | `hybrid` API indisponible        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart-search`, `smart_search`, `smart_semantic_search`                                                                                                              |
-| `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique, plans gouvernés note, Frontmatter et formules Base, plus outils REST d’écriture et Bases Bridge : `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+| `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique, plans gouvernés note, Frontmatter, formules Base et Canvas, plus outils REST d’écriture et Bases Bridge : `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
 ## Frontmatter gouvernée P1
 
@@ -130,6 +130,14 @@ mode hybrid dégradé.
 `bases_formula_patch_status` et `bases_formula_patch_recover` suivent la même
 frontière live/hybrid. Ils exigent en plus Bases Bridge 1.1.0 Atomic V1, avec le
 CAS atomique Base activé et les remplacements complets historiques désactivés.
+
+## Canvas gouverné P3
+
+`obsidian_canvas_patch_plan`, `obsidian_canvas_patch_apply`,
+`obsidian_canvas_patch_status` et `obsidian_canvas_patch_recover` suivent la
+même frontière live/hybrid. Ils exigent Atomic Write Bridge 0.4.0, son gate CAS
+Canvas indépendant, un graphe existant valide et l’identité/SHA-256 exacts du
+backend. Ils sont absents de tous les modes headless.
 
 ## Notes de sécurité
 
