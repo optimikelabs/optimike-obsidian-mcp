@@ -17,6 +17,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
   isSafeModifiedTimePropertyName,
+  modifiedTimeFrontmatterPropertyValue,
   nextRepresentableTimestampReadyAt,
 } from "./modified-time-canary-helpers.mjs";
 
@@ -95,16 +96,7 @@ function sha256(content) {
 }
 
 function propertyValue(content) {
-  const prefix = `${propertyName}:`;
-  const matches = content
-    .split(/\r?\n/u)
-    .filter((line) => line.startsWith(prefix));
-  assert.equal(
-    matches.length,
-    1,
-    `The canary note must contain exactly one top-level ${propertyName} property.`,
-  );
-  return matches[0].slice(prefix.length).trim();
+  return modifiedTimeFrontmatterPropertyValue(content, propertyName);
 }
 
 async function waitForNextRepresentableTimestamp(

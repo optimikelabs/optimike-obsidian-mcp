@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   isSafeModifiedTimePropertyName,
+  modifiedTimeFrontmatterPropertyValue,
   nextRepresentableTimestampReadyAt,
 } from "./modified-time-canary-helpers.mjs";
 
@@ -19,6 +20,31 @@ assert.equal(isSafeModifiedTimePropertyName("123"), false);
 assert.equal(isSafeModifiedTimePropertyName("true"), false);
 assert.equal(isSafeModifiedTimePropertyName("modified\nat"), false);
 assert.equal(isSafeModifiedTimePropertyName("x".repeat(129)), false);
+
+assert.equal(
+  modifiedTimeFrontmatterPropertyValue(
+    "---\r\nmodification: 2026-08-17T12:34:20\r\ntitle: Canary\r\n---\r\n\r\nmodification: ordinary body text\r\n",
+    "modification",
+  ),
+  "2026-08-17T12:34:20",
+  "a body line that resembles the property must not affect frontmatter scope",
+);
+assert.throws(
+  () =>
+    modifiedTimeFrontmatterPropertyValue(
+      "---\nmodification: first\nmodification: second\n---\n",
+      "modification",
+    ),
+  /exactly one top-level modification frontmatter property/u,
+);
+assert.throws(
+  () =>
+    modifiedTimeFrontmatterPropertyValue(
+      "---\ntitle: missing\n---\nmodification: body only\n",
+      "modification",
+    ),
+  /exactly one top-level modification frontmatter property/u,
+);
 
 const offsetMinutes = 120;
 const minuteValue = "2026-08-17T12:34";

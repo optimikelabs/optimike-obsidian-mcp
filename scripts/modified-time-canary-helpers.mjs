@@ -14,6 +14,40 @@ export function isSafeModifiedTimePropertyName(value) {
   );
 }
 
+function lineWithoutCarriageReturn(line) {
+  return line.endsWith("\r") ? line.slice(0, -1) : line;
+}
+
+export function modifiedTimeFrontmatterPropertyValue(content, propertyName) {
+  const lines = content.split("\n");
+  if (lineWithoutCarriageReturn(lines[0] ?? "") !== "---") {
+    throw new Error("The canary note must start with standard frontmatter.");
+  }
+  const closingDelimiter = lines.findIndex(
+    (line, index) => index > 0 && lineWithoutCarriageReturn(line) === "---",
+  );
+  if (closingDelimiter < 0) {
+    throw new Error("The canary note frontmatter is not closed.");
+  }
+  const prefix = `${propertyName}:`;
+  const matches = lines
+    .slice(1, closingDelimiter)
+    .map(lineWithoutCarriageReturn)
+    .filter((line) => line.startsWith(prefix));
+  if (matches.length !== 1) {
+    throw new Error(
+      `The canary note must contain exactly one top-level ${propertyName} frontmatter property.`,
+    );
+  }
+  const value = matches[0].slice(prefix.length).trim();
+  if (!value) {
+    throw new Error(
+      `The canary note ${propertyName} property must be non-empty.`,
+    );
+  }
+  return value;
+}
+
 export function nextRepresentableTimestampReadyAt(
   currentValue,
   utcOffsetMinutes,
