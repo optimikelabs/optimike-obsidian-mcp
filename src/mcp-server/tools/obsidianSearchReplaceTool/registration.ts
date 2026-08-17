@@ -48,7 +48,7 @@ export const registerObsidianSearchReplaceTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_search_replace";
   const toolDescription =
-    "Performs one or more search-and-replace operations within a target Obsidian note (file path or active file). Reads the file, applies replacements sequentially in memory, and writes the modified content back, overwriting the original. Supports string/regex search, case sensitivity toggle, replacing first/all occurrences, flexible whitespace matching (non-regex), and whole word matching. Returns success status, message, replacement count, a formatted timestamp string, file stats (stats), and optionally the final file content.";
+    "Direct Local REST search/replace within one note. Supports string or regex matching and returns the replacement count and optional final content. It overwrites the resulting note without a durable plan/status/recovery receipt; for high-assurance changes, compute the intended complete content and prefer obsidian_note_replace_plan when available.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =

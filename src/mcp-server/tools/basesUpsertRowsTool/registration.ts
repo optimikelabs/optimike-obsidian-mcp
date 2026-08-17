@@ -16,7 +16,7 @@ import {
 
 const TOOL_NAME = "bases_upsert_rows";
 const TOOL_DESCRIPTION =
-  "Met à jour les propriétés de notes issues d'une base via le bridge REST (set/unset + mtime).";
+  "Direct multi-row Base property set/unset through the REST bridge. This compatibility operation is not one atomic batch and may return partial results; it has no durable batch recovery receipt.";
 
 export async function registerBasesUpsertRowsTool(
   server: McpServer,

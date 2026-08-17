@@ -481,6 +481,27 @@ try {
   for (const name of expectedReadTools) {
     assert.ok(toolNames.includes(name), `missing read tool ${name}`);
   }
+  const listedResources = await call(
+    clientA,
+    backend.baseUrl,
+    "resources/list",
+  );
+  const routingResource = (listedResources.result?.resources ?? []).find(
+    (resource) => resource.uri === "optimike://guides/tool-routing",
+  );
+  assert.equal(routingResource?.mimeType, "text/markdown");
+  const readRoutingResource = await call(
+    clientB,
+    backend.baseUrl,
+    "resources/read",
+    { uri: "optimike://guides/tool-routing" },
+  );
+  const routingText = (readRoutingResource.result?.contents ?? [])
+    .map((content) => content.text ?? "")
+    .join("\n");
+  assert.match(routingText, /obsidian_note_replace_plan/u);
+  assert.match(routingText, /obsidian_frontmatter_patch_plan/u);
+  assert.match(routingText, /bases_formula_patch_plan/u);
   const forbiddenWriteTools = [
     "obsidian_update_note",
     "obsidian_search_replace",
@@ -627,7 +648,7 @@ try {
   );
 
   console.log(
-    "PASS: a disposable headless-readonly filesystem vault served two distinct authenticated HTTP clients concurrently; readiness and status reported filesystem provenance without live Obsidian or mutations; notes, search, tasks and Bases reads succeeded; the vault hash stayed unchanged, structured logs disclosed no secrets or content, vault/Bases write tools were absent, and the stable Operon registry denied mutation without its live Desktop Bridge",
+    "PASS: a disposable headless-readonly filesystem vault served two distinct authenticated HTTP clients concurrently; the canonical routing resource was listable/readable across sessions; readiness and status reported filesystem provenance without live Obsidian or mutations; notes, search, tasks and Bases reads succeeded; the vault hash stayed unchanged, structured logs disclosed no secrets or content, vault/Bases write tools were absent, and the stable Operon registry denied mutation without its live Desktop Bridge",
   );
 } finally {
   if (backend) await stopBackend(backend);

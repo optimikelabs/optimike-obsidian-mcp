@@ -14,6 +14,13 @@ Related docs:
 - External roots: [external-roots-setup.md](external-roots-setup.md)
 - Operon contract: [operon-mcp-contract.md](operon-mcp-contract.md)
 
+## MCP Resources
+
+- `optimike://guides/tool-routing`: concise Markdown precedence for canonical,
+  governed, direct and legacy-compatible tool families. Clients can read it
+  when choosing between overlapping domains; it adds no callable mutation
+  capability.
+
 ## Runtime Rules
 
 - `live`: Obsidian Desktop + Local REST API. Full REST-backed note and Bases

@@ -16,7 +16,7 @@ import {
 
 const TOOL_NAME = "bases_upsert_config";
 const TOOL_DESCRIPTION =
-  "Met à jour (ou valide) la configuration YAML/JSON d'une base via le bridge REST.";
+  "Legacy compatibility path for validating or replacing a complete Base YAML/JSON configuration through the REST bridge. Prefer bases_formula_patch_plan for named formula set/delete: it is source-preserving and provides durable status/recovery. Whole-config effects remain default-off at the Bridge.";
 
 export async function registerBasesUpsertConfigTool(
   server: McpServer,

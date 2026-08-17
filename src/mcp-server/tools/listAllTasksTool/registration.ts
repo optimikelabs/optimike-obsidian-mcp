@@ -20,7 +20,7 @@ export const registerListAllTasksTool = async (
 ): Promise<void> => {
   const toolName = "list_all_tasks";
   const toolDescription =
-    "Extract all tasks from markdown files in a directory. Recursively scans all markdown files and extracts tasks based on the Obsidian Tasks format. Returns structured data about each task including status, dates, and tags. Supports include/exclude path filters, optional non-task inclusion, optional file metadata (created/modified), optional meta dates (frontmatter), and optional global filter application. The path parameter is optional; if not specified, it defaults to the vault root directory. The path must be relative to the vault directory and cannot contain directory traversal components (..).";
+    "Legacy Obsidian Tasks-compatible Markdown inventory, not Operon task authority. Recursively scans Markdown and returns structured task status, dates and tags. Supports include/exclude path filters, optional non-task inclusion, file created/modified metadata, frontmatter meta dates, and the configured global Tasks filter. The optional path is vault-relative, defaults to the vault root, and must not contain traversal components (`..`). Use operon_list_tasks for Operon-managed tasks, stable IDs, workflow state and validated snapshots.";
 
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({
@@ -39,13 +39,12 @@ export const registerListAllTasksTool = async (
         ListAllTasksInputSchemaShape,
         READ_ONLY_TOOL_ANNOTATIONS,
         async (params: ListAllTasksInput) => {
-          const handlerContext =
-            requestContextService.createRequestContext({
-              parentContext: registrationContext,
-              operation: "HandleListAllTasksRequest",
-              toolName,
-              params,
-            });
+          const handlerContext = requestContextService.createRequestContext({
+            parentContext: registrationContext,
+            operation: "HandleListAllTasksRequest",
+            toolName,
+            params,
+          });
 
           return await ErrorHandler.tryCatch(
             async () => {
@@ -76,7 +75,10 @@ export const registerListAllTasksTool = async (
         },
       );
 
-      logger.info(`Tool registered successfully: ${toolName}`, registrationContext);
+      logger.info(
+        `Tool registered successfully: ${toolName}`,
+        registrationContext,
+      );
     },
     {
       operation: `registering tool ${toolName}`,

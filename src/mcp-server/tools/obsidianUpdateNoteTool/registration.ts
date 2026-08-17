@@ -48,7 +48,7 @@ export const registerObsidianUpdateNoteTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_update_note";
   const toolDescription =
-    "Tool to modify Obsidian notes (specified by file path or the active file) using whole-file operations: 'append', 'prepend', or 'overwrite'. Options allow creating missing files/targets and controlling overwrite behavior. Returns success status, message, a formatted timestamp string, file stats (stats), and optionally the final file content.";
+    "Direct Local REST note edit for append, prepend, creation, or compatibility overwrite. For complete replacement of an existing Markdown note, prefer obsidian_note_replace_plan when available because direct overwrite has no durable plan/status/recovery receipt. Options allow explicit file path or active-file targets and optional final content.";
 
   // Create a context for the registration process itself for better traceability.
   const registrationContext: RequestContext =

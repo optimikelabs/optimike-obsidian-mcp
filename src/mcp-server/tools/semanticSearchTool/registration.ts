@@ -3,7 +3,7 @@
  * - Lit les embeddings dans `.smart-env`
  * - Encode la requête via un embedder configurable (auto: s'aligne sur le modèle du vault)
  * - Classement cosinus, filtres dossier/tag, snippets optionnels
- * - Expose `smart_semantic_search` + alias `smart_search` et `smart-search`
+ * - Expose `smart_semantic_search` + legacy aliases `smart_search` and `smart-search`
  * Schéma JSON "Codex-friendly" (pas d'integer ni d'unions).
  */
 
@@ -203,7 +203,11 @@ async function detectOllamaBaseUrlFromSmartEnv(
 
     const defaultKey = smartEnv.embedding_models?.default_model_key;
     if (defaultKey) {
-      const modelsPath = path.join(smartEnvDir, "embedding_models", "embedding_models.ajson");
+      const modelsPath = path.join(
+        smartEnvDir,
+        "embedding_models",
+        "embedding_models.ajson",
+      );
       const modelsRaw = await fs.readFile(modelsPath, "utf-8");
       const models = JSON.parse(wrapLooseObjectToJson(modelsRaw)) as Record<
         string,
@@ -222,7 +226,11 @@ async function detectOllamaBaseUrlFromSmartEnv(
   // 2) Fallback: scan embedding_models.ajson for a matching model_key.
   if (preferredModel) {
     try {
-      const modelsPath = path.join(smartEnvDir, "embedding_models", "embedding_models.ajson");
+      const modelsPath = path.join(
+        smartEnvDir,
+        "embedding_models",
+        "embedding_models.ajson",
+      );
       const modelsRaw = await fs.readFile(modelsPath, "utf-8");
       const models = JSON.parse(wrapLooseObjectToJson(modelsRaw)) as Record<
         string,
@@ -373,8 +381,7 @@ async function performSearch(input: InType): Promise<OutType> {
       !input.folders ||
       input.folders.some((folder) => item.notePath.startsWith(folder));
     const tagsOk =
-      !input.tags ||
-      (item.tags ?? []).some((tag) => input.tags?.includes(tag));
+      !input.tags || (item.tags ?? []).some((tag) => input.tags?.includes(tag));
     return folderOk && tagsOk;
   });
   timings.filter = elapsedSince(filterStartedAt);
@@ -402,7 +409,10 @@ async function performSearch(input: InType): Promise<OutType> {
     let snippet: string | undefined;
 
     if (input.with_snippets) {
-      const absolutePath = resolveNoteAbsolutePath(item.notePath, OBSIDIAN_VAULT);
+      const absolutePath = resolveNoteAbsolutePath(
+        item.notePath,
+        OBSIDIAN_VAULT,
+      );
       try {
         const content = await fs.readFile(absolutePath, "utf-8");
         snippet = content.slice(0, 300);
@@ -492,7 +502,8 @@ export async function prewarmSemanticSearch(): Promise<SemanticSearchPrewarmResu
     return skipped(`No embeddings found in ${SMART_ENV_DIR}`);
   }
 
-  const dimension = snapshot.dominantDim ?? pickDominantDimension(snapshot.items);
+  const dimension =
+    snapshot.dominantDim ?? pickDominantDimension(snapshot.items);
   if (!dimension) {
     return skipped("Embeddings are missing vector data");
   }
@@ -575,11 +586,11 @@ export const registerSemanticSearchTool = async (
   );
   register(
     "smart_search",
-    "Alias of smart_semantic_search (same implementation).",
+    "Legacy compatibility alias of smart_semantic_search with the same implementation. Prefer smart_semantic_search for new calls.",
   );
   register(
     "smart-search",
-    "Alias of smart_semantic_search (same implementation).",
+    "Legacy compatibility alias of smart_semantic_search with the same implementation. Prefer smart_semantic_search for new calls.",
   );
 };
 

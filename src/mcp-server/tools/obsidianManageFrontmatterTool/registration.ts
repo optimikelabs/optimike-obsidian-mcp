@@ -28,7 +28,7 @@ export const registerObsidianManageFrontmatterTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_manage_frontmatter";
   const toolDescription =
-    "Atomically manages a note's YAML frontmatter. Supports getting, setting (creating/updating), and deleting specific keys without rewriting the entire file. Ideal for efficient metadata operations on primitive or structured Obsidian frontmatter data.";
+    "Direct Local REST frontmatter get/set/delete for one note. Prefer obsidian_frontmatter_patch_plan for live mutations when available: it preserves authorized source ranges and provides a durable plan/status/recovery receipt. Keep this tool for reads, compatibility, or runtimes without the governed projection.";
 
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({
