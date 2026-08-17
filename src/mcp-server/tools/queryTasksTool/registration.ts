@@ -20,7 +20,7 @@ export const registerQueryTasksTool = async (
 ): Promise<void> => {
   const toolName = "query_tasks";
   const toolDescription =
-    "Legacy Obsidian Tasks-compatible Markdown query, not Operon task authority. Supports Tasks query syntax for status, dates, description, tags, priority and paths. Use operon_query_tasks for Operon-managed tasks, stable workflow IDs and validated snapshots.";
+    "Legacy Obsidian Tasks-compatible Markdown query, not Operon task authority. Each newline-separated query line is a filter and all lines are combined with AND logic. Supported predicates cover status, relative or absolute dates (EN/FR), description, tags, priority and path; examples include `done`, `not done`, `tag include #foo/bar`, `tag do not include #potato`, and `description includes keyword`. Supports include/exclude path filters, optional non-task inclusion, file created/modified metadata, frontmatter meta dates, and the configured global Tasks filter. The optional path is vault-relative, defaults to the vault root, and must not contain traversal components (`..`). Use operon_query_tasks for Operon-managed tasks, stable workflow IDs and validated snapshots.";
 
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({

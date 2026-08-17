@@ -20,7 +20,7 @@ export const registerListAllTasksTool = async (
 ): Promise<void> => {
   const toolName = "list_all_tasks";
   const toolDescription =
-    "Legacy Obsidian Tasks-compatible Markdown inventory, not Operon task authority. Recursively extracts task status, dates and tags with path filters and optional metadata. Use operon_list_tasks for Operon-managed tasks, stable IDs, workflow state and validated snapshots.";
+    "Legacy Obsidian Tasks-compatible Markdown inventory, not Operon task authority. Recursively scans Markdown and returns structured task status, dates and tags. Supports include/exclude path filters, optional non-task inclusion, file created/modified metadata, frontmatter meta dates, and the configured global Tasks filter. The optional path is vault-relative, defaults to the vault root, and must not contain traversal components (`..`). Use operon_list_tasks for Operon-managed tasks, stable IDs, workflow state and validated snapshots.";
 
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({

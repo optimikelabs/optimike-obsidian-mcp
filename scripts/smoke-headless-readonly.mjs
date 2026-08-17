@@ -430,6 +430,39 @@ async function main() {
       }
     }
 
+    const taskDescriptionContracts = [
+      [
+        "list_all_tasks",
+        [
+          "vault-relative",
+          "defaults to the vault root",
+          "traversal components (`..`)",
+          "operon_list_tasks",
+        ],
+      ],
+      [
+        "query_tasks",
+        [
+          "newline-separated query line",
+          "combined with AND logic",
+          "`not done`",
+          "`tag include #foo/bar`",
+          "vault-relative",
+          "operon_query_tasks",
+        ],
+      ],
+    ];
+    for (const [toolName, requiredFragments] of taskDescriptionContracts) {
+      const description = toolsByName.get(toolName)?.description ?? "";
+      for (const fragment of requiredFragments) {
+        if (!description.includes(fragment)) {
+          throw new Error(
+            `${toolName} description lost its client-visible contract fragment: ${fragment}`,
+          );
+        }
+      }
+    }
+
     const resources = await withTimeout(
       client.listResources(),
       "listResources",
