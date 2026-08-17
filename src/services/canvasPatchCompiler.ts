@@ -265,12 +265,37 @@ function graphError(root: CanvasObject): string | undefined {
       return `Canvas node ${id} has an unsupported type.`;
     }
     for (const field of ["x", "y", "width", "height"] as const) {
-      if (typeof node[field] !== "number" || !Number.isFinite(node[field])) {
+      if (typeof node[field] !== "number" || !Number.isInteger(node[field])) {
         return `Canvas node ${id} has invalid ${field}.`;
       }
     }
     if ((node.width as number) <= 0 || (node.height as number) <= 0) {
       return `Canvas node ${id} must have positive width and height.`;
+    }
+    if (node.color !== undefined && typeof node.color !== "string") {
+      return `Canvas node ${id} has an invalid color.`;
+    }
+    const allowedTypeFields: Record<string, readonly string[]> = {
+      text: ["text"],
+      file: ["file", "subpath"],
+      link: ["url"],
+      group: ["label", "background", "backgroundStyle"],
+    };
+    for (const field of [
+      "text",
+      "file",
+      "subpath",
+      "url",
+      "label",
+      "background",
+      "backgroundStyle",
+    ]) {
+      if (
+        node[field] !== undefined &&
+        !allowedTypeFields[node.type as string]?.includes(field)
+      ) {
+        return `Canvas node ${id} uses standard field ${field} on the wrong node type.`;
+      }
     }
     if (node.type === "text" && typeof node.text !== "string") {
       return `Canvas text node ${id} must contain text.`;
@@ -278,8 +303,29 @@ function graphError(root: CanvasObject): string | undefined {
     if (node.type === "file" && typeof node.file !== "string") {
       return `Canvas file node ${id} must contain a file path.`;
     }
+    if (
+      node.type === "file" &&
+      node.subpath !== undefined &&
+      (typeof node.subpath !== "string" || !node.subpath.startsWith("#"))
+    ) {
+      return `Canvas file node ${id} has an invalid subpath.`;
+    }
     if (node.type === "link" && typeof node.url !== "string") {
       return `Canvas link node ${id} must contain a URL.`;
+    }
+    if (node.type === "group") {
+      for (const field of ["label", "background"] as const) {
+        if (node[field] !== undefined && typeof node[field] !== "string") {
+          return `Canvas group node ${id} has an invalid ${field}.`;
+        }
+      }
+      if (
+        node.backgroundStyle !== undefined &&
+        (typeof node.backgroundStyle !== "string" ||
+          !["cover", "ratio", "repeat"].includes(node.backgroundStyle))
+      ) {
+        return `Canvas group node ${id} has an invalid backgroundStyle.`;
+      }
     }
   }
   const edgeIds = new Set<string>();
@@ -302,6 +348,20 @@ function graphError(root: CanvasObject): string | undefined {
           !["top", "right", "bottom", "left"].includes(edge[side]))
       ) {
         return `Canvas edge ${id} has an invalid ${side}.`;
+      }
+    }
+    for (const end of ["fromEnd", "toEnd"] as const) {
+      if (
+        edge[end] !== undefined &&
+        (typeof edge[end] !== "string" ||
+          !["none", "arrow"].includes(edge[end]))
+      ) {
+        return `Canvas edge ${id} has an invalid ${end}.`;
+      }
+    }
+    for (const field of ["color", "label"] as const) {
+      if (edge[field] !== undefined && typeof edge[field] !== "string") {
+        return `Canvas edge ${id} has an invalid ${field}.`;
       }
     }
   }
@@ -338,9 +398,9 @@ export function canonicalizeCanvasPatchOperations(
         operation.width,
         operation.height,
       ].filter((value): value is number => value !== undefined);
-      if (numeric.some((value) => !Number.isFinite(value))) {
+      if (numeric.some((value) => !Number.isInteger(value))) {
         fail(
-          "Canvas geometry must contain finite numbers.",
+          "Canvas geometry must contain integers.",
           "canvas_geometry_invalid",
         );
       }

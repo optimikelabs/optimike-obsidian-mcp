@@ -63,6 +63,23 @@ assert.equal(removed.proof.changedEdgeCount, 1);
 assert.deepEqual(removed.proof.changedEdges, []);
 assert.match(removed.proof.removedIncidentEdgesSha256, /^[a-f0-9]{64}$/u);
 
+assert.throws(
+  () =>
+    compileCanvasPatch(
+      source.replace('"text":"Before"', '"text":"Before","color":[]'),
+      [{ op: "move_node", id: "b", x: 340, y: 40 }],
+    ),
+  /current Canvas graph is invalid/u,
+  "known JSON Canvas fields must be validated even when untouched",
+);
+assert.throws(
+  () =>
+    compileCanvasPatch(source, [
+      { op: "move_node", id: "b", x: 320.5, y: 40 },
+    ]),
+  /geometry must contain integers/u,
+);
+
 const exactNumericLiteral = compileCanvasPatch(
   `{
   "nodes": [

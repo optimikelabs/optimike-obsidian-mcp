@@ -63,7 +63,12 @@ export function compareAndReplace(
 }
 
 export function validateVaultMarkdownPath(input: unknown): string {
-  return validateVaultPath(input, ".md", "Only Markdown notes are supported.");
+  return validateVaultPath(
+    input,
+    ".md",
+    "Only Markdown notes are supported.",
+    false,
+  );
 }
 
 export function validateVaultCanvasPath(input: unknown): string {
@@ -71,6 +76,7 @@ export function validateVaultCanvasPath(input: unknown): string {
     input,
     ".canvas",
     "Only JSON Canvas files are supported.",
+    true,
   );
 }
 
@@ -78,9 +84,13 @@ function validateVaultPath(
   input: unknown,
   extension: string,
   extensionError: string,
+  rejectPadding: boolean,
 ): string {
   if (typeof input !== "string") throw new Error("path must be a string.");
   const value = input.trim();
+  if (rejectPadding && value !== input) {
+    throw new Error("Canvas path must not contain leading or trailing whitespace.");
+  }
   if (!value || value.length > 1024) {
     throw new Error("path must contain between 1 and 1024 characters.");
   }
@@ -253,12 +263,39 @@ export function validateCanvasGraph(content: string): void {
       throw new Error("Canvas node types must be text, file, link, or group.");
     }
     for (const field of ["x", "y", "width", "height"] as const) {
-      if (typeof value[field] !== "number" || !Number.isFinite(value[field])) {
-        throw new Error(`Canvas node ${field} must be a finite number.`);
+      if (typeof value[field] !== "number" || !Number.isInteger(value[field])) {
+        throw new Error(`Canvas node ${field} must be an integer.`);
       }
     }
     if ((value.width as number) <= 0 || (value.height as number) <= 0) {
       throw new Error("Canvas node width and height must be positive.");
+    }
+    if (value.color !== undefined && typeof value.color !== "string") {
+      throw new Error("Canvas node color must be a string.");
+    }
+    const allowedTypeFields: Record<string, readonly string[]> = {
+      text: ["text"],
+      file: ["file", "subpath"],
+      link: ["url"],
+      group: ["label", "background", "backgroundStyle"],
+    };
+    for (const field of [
+      "text",
+      "file",
+      "subpath",
+      "url",
+      "label",
+      "background",
+      "backgroundStyle",
+    ]) {
+      if (
+        value[field] !== undefined &&
+        !allowedTypeFields[value.type as string]?.includes(field)
+      ) {
+        throw new Error(
+          `Canvas standard field ${field} is invalid for this node type.`,
+        );
+      }
     }
     if (value.type === "text" && typeof value.text !== "string") {
       throw new Error("Canvas text nodes must contain text.");
@@ -266,8 +303,29 @@ export function validateCanvasGraph(content: string): void {
     if (value.type === "file" && typeof value.file !== "string") {
       throw new Error("Canvas file nodes must contain a file path.");
     }
+    if (
+      value.type === "file" &&
+      value.subpath !== undefined &&
+      (typeof value.subpath !== "string" || !value.subpath.startsWith("#"))
+    ) {
+      throw new Error("Canvas file node subpath must be a #-prefixed string.");
+    }
     if (value.type === "link" && typeof value.url !== "string") {
       throw new Error("Canvas link nodes must contain a URL.");
+    }
+    if (value.type === "group") {
+      for (const field of ["label", "background"] as const) {
+        if (value[field] !== undefined && typeof value[field] !== "string") {
+          throw new Error(`Canvas group node ${field} must be a string.`);
+        }
+      }
+      if (
+        value.backgroundStyle !== undefined &&
+        (typeof value.backgroundStyle !== "string" ||
+          !["cover", "ratio", "repeat"].includes(value.backgroundStyle))
+      ) {
+        throw new Error("Canvas group node backgroundStyle is invalid.");
+      }
     }
   }
   const edgeIds = new Set<string>();
@@ -296,6 +354,20 @@ export function validateCanvasGraph(content: string): void {
           !["top", "right", "bottom", "left"].includes(value[side]))
       ) {
         throw new Error(`Canvas edge ${side} is invalid.`);
+      }
+    }
+    for (const end of ["fromEnd", "toEnd"] as const) {
+      if (
+        value[end] !== undefined &&
+        (typeof value[end] !== "string" ||
+          !["none", "arrow"].includes(value[end]))
+      ) {
+        throw new Error(`Canvas edge ${end} is invalid.`);
+      }
+    }
+    for (const field of ["color", "label"] as const) {
+      if (value[field] !== undefined && typeof value[field] !== "string") {
+        throw new Error(`Canvas edge ${field} must be a string.`);
       }
     }
     edgeIds.add(value.id);

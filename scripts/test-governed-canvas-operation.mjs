@@ -39,6 +39,7 @@ let content = `${JSON.stringify(
   null,
   2,
 )}\n`;
+const validInitialContent = content;
 let failNextReplaceBeforeWrite = false;
 
 const backend = {
@@ -114,6 +115,31 @@ try {
       error.code === BaseErrorCode.VALIDATION_ERROR &&
       error.details?.reason === "canvas_path_invalid",
   );
+
+  content = validInitialContent.replace(
+    '"text": "Before"',
+    '"text": "Before",\n      "color": []',
+  );
+  const malformedStandardKey = "canvas-p3-malformed-standard-field";
+  await assert.rejects(
+    runtime.plan({
+      path: "Canary/Flow.canvas",
+      operations: [{ op: "move_node", id: "a", x: 10, y: 10 }],
+      idempotencyKey: malformedStandardKey,
+    }),
+    (error) =>
+      error instanceof McpError &&
+      error.code === BaseErrorCode.VALIDATION_ERROR,
+  );
+  const malformedDurableKey = `optimike:canvas-projection:v1:${digest(
+    `obsidian.canvas.patch:v1\0${malformedStandardKey}`,
+  )}`;
+  assert.equal(
+    journal.getByIdempotencyKey(malformedDurableKey),
+    undefined,
+    "malformed standard Canvas fields must be rejected before journaling",
+  );
+  content = validInitialContent;
 
   await assert.rejects(
     runtime.plan({

@@ -39,6 +39,9 @@ test("validates Canvas paths and graph-bound CAS bodies", () => {
     parseCanvasReadRequest({ contractVersion: 1, path: "Flow.canvas" }),
     { contractVersion: 1, path: "Flow.canvas" },
   );
+  assert.throws(() =>
+    parseCanvasReadRequest({ contractVersion: 1, path: " Flow.canvas " }),
+  );
   const nextContent = JSON.stringify({
     nodes: [
       { id: "a", type: "text", x: 0, y: 0, width: 100, height: 100, text: "A" },
@@ -64,6 +67,38 @@ test("validates Canvas paths and graph-bound CAS bodies", () => {
       nextContent: JSON.stringify({
         nodes: [{ id: "a" }],
         edges: [{ id: "e", fromNode: "a", toNode: "missing" }],
+      }),
+    }),
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: " Flow.canvas ",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent,
+    }),
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [
+          {
+            id: "a",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "A",
+            color: [],
+          },
+        ],
+        edges: [],
       }),
     }),
   );
