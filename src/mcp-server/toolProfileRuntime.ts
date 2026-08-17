@@ -2,16 +2,20 @@ import type {
   McpServer,
   RegisteredTool,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { currentToolProfileContext } from "./toolProfileContext.js";
 import {
   parseToolProfileId,
   selectAvailableToolProfileNames,
   type ToolProfileId,
 } from "./toolProfiles.js";
 
-export function resolveToolProfile(
-  raw = process.env.MCP_TOOL_PROFILE?.trim() || "full",
-): ToolProfileId {
-  return parseToolProfileId(raw);
+export function resolveToolProfile(raw?: string): ToolProfileId {
+  const selected =
+    raw?.trim() ||
+    currentToolProfileContext() ||
+    process.env.MCP_TOOL_PROFILE?.trim() ||
+    "full";
+  return parseToolProfileId(selected);
 }
 
 /**
@@ -23,6 +27,9 @@ export function resolveToolProfile(
  * names currently present, and reconcile enabled state after each registration.
  * This makes canonical/direct fallback resolution independent of registration
  * order while preserving `full` as the unfiltered 2.x compatibility surface.
+ *
+ * HTTP session creation may provide a request-scoped profile through
+ * AsyncLocalStorage; stdio falls back to CLI/env selection.
  */
 export function installToolProfileRegistrationGate(
   server: McpServer,
