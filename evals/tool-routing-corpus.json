@@ -1,0 +1,201 @@
+[
+  {
+    "id": "semantic-canonical",
+    "prompt": "Find notes semantically related to antifragility even if they do not contain that exact word.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["smart_semantic_search"],
+    "forbiddenTools": ["smart_search", "smart-search"]
+  },
+  {
+    "id": "read-exact-note",
+    "prompt": "Read Atlas/Antifragility.md and summarize only what is written there.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_read_note"]
+  },
+  {
+    "id": "list-folder",
+    "prompt": "List the notes under Efforts/Projets without modifying anything.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_list_notes"]
+  },
+  {
+    "id": "exact-text-search",
+    "prompt": "Find every note containing the exact phrase North Star.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_global_search"]
+  },
+  {
+    "id": "validate-markdown",
+    "prompt": "Validate this generated Obsidian Markdown before I write it.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_validate_format"]
+  },
+  {
+    "id": "runtime-status",
+    "prompt": "Tell me whether the Optimike MCP runtime is healthy and whether the cache is degraded.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_runtime_status"],
+    "forbiddenTools": ["obsidian_runtime_maintenance"]
+  },
+  {
+    "id": "append-note-direct",
+    "prompt": "Append this one paragraph to an existing note without replacing the rest of the file.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_update_note"],
+    "forbiddenTools": ["obsidian_note_replace_plan"]
+  },
+  {
+    "id": "search-replace-direct",
+    "prompt": "Replace one exact typo occurrence in a note and leave everything else byte-for-byte alone.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_search_replace"]
+  },
+  {
+    "id": "replace-complete-note",
+    "prompt": "Replace the complete contents of an existing Markdown note with this final version using the safest durable path.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_note_replace_plan"],
+    "forbiddenTools": ["obsidian_update_note"]
+  },
+  {
+    "id": "lost-response-note-status",
+    "prompt": "The note replacement apply timed out after dispatch. Check what happened without issuing another mutation.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_note_replace_status"],
+    "forbiddenTools": ["obsidian_note_replace_apply", "obsidian_update_note"]
+  },
+  {
+    "id": "recover-note-plan",
+    "prompt": "The durable receipt says the same note replacement plan is recoverable. Resume that exact plan.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_note_replace_recover"]
+  },
+  {
+    "id": "frontmatter-live-governed",
+    "prompt": "Set statut: actif on this existing note while preserving the original Markdown source as much as possible.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_frontmatter_patch_plan"],
+    "forbiddenTools": ["obsidian_manage_frontmatter"]
+  },
+  {
+    "id": "frontmatter-status",
+    "prompt": "A governed frontmatter apply returned no response. Inspect the durable state first.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["obsidian_frontmatter_patch_status"]
+  },
+  {
+    "id": "bases-list",
+    "prompt": "List the Bases available in this vault.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["bases_list"]
+  },
+  {
+    "id": "bases-schema",
+    "prompt": "Inspect the schema of Projects.base before changing anything.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["bases_get_schema"]
+  },
+  {
+    "id": "bases-query",
+    "prompt": "Query Projects.base for active projects without modifying the Base.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": ["bases_query"]
+  },
+  {
+    "id": "bases-formula-governed",
+    "prompt": "Change the named priority_label formula in an existing Base using the recoverable governed path.",
+    "recommendedProfile": "authoring",
+    "acceptableFirstTools": ["bases_formula_patch_plan"],
+    "forbiddenTools": ["bases_upsert_config"]
+  },
+  {
+    "id": "canvas-existing-governed",
+    "prompt": "Move an existing Canvas node and connect it to another node using the recoverable live path.",
+    "recommendedProfile": "authoring",
+    "acceptableFirstTools": ["obsidian_canvas_patch_plan"],
+    "forbiddenTools": ["obsidian_manage_canvas"]
+  },
+  {
+    "id": "tags-authoring",
+    "prompt": "Add one Obsidian tag to this note using the MCP tag operation.",
+    "recommendedProfile": "authoring",
+    "acceptableFirstTools": ["obsidian_manage_tags"]
+  },
+  {
+    "id": "markdown-tasks-query",
+    "prompt": "Find unchecked legacy Obsidian Tasks-compatible Markdown checkboxes in the daily notes.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["query_tasks", "list_all_tasks"],
+    "forbiddenTools": ["operon_query_tasks"]
+  },
+  {
+    "id": "operon-list",
+    "prompt": "List my Operon-managed tasks with their stable task identities.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["operon_list_tasks", "operon_query_tasks"],
+    "forbiddenTools": ["list_all_tasks"]
+  },
+  {
+    "id": "operon-find-ranked",
+    "prompt": "Find the most relevant Operon project tasks for Nexus, ranked rather than broad text-matched.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["operon_find_tasks"]
+  },
+  {
+    "id": "operon-resolve-before-write",
+    "prompt": "I only know the note name and a fuzzy task phrase. Resolve the exact Operon task before changing it.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["operon_resolve_task"]
+  },
+  {
+    "id": "operon-context",
+    "prompt": "Build the bounded Operon project context for this exact task before planning the work.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["operon_build_context"]
+  },
+  {
+    "id": "operon-create",
+    "prompt": "Create a new Operon task in the target project with dry-run first.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["operon_create_task"]
+  },
+  {
+    "id": "operon-transition",
+    "prompt": "Transition this exact Operon task to the configured done status using its revision guard.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["operon_transition_task"]
+  },
+  {
+    "id": "operon-recovery-status",
+    "prompt": "An Operon mutation outcome is uncertain. List the pending durable recovery references before doing anything else.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["operon_list_pending_recoveries"],
+    "forbiddenTools": ["operon_recover_mutation"]
+  },
+  {
+    "id": "operon-recover",
+    "prompt": "Recover this exact uncertain Operon mutation using the provided recoveryRef and original idempotency key.",
+    "recommendedProfile": "tasks",
+    "acceptableFirstTools": ["operon_recover_mutation"]
+  },
+  {
+    "id": "external-read-full",
+    "prompt": "Read the configured external text file by logical root ID and relative path.",
+    "recommendedProfile": "full",
+    "acceptableFirstTools": ["external_read", "external_stat"]
+  },
+  {
+    "id": "external-move-full",
+    "prompt": "Move this configured external file while preserving exact ElySIA references; inventory and plan before applying.",
+    "recommendedProfile": "full",
+    "acceptableFirstTools": ["external_references_scan", "external_move_plan"],
+    "forbiddenTools": ["external_move_apply"]
+  },
+  {
+    "id": "no-tool-explanation",
+    "prompt": "Explain the difference between a governed plan and a direct write without inspecting my vault.",
+    "recommendedProfile": "standard",
+    "acceptableFirstTools": [],
+    "expectNoTool": true
+  }
+]
