@@ -1,0 +1,45 @@
+name: Tool Surface P4
+
+on:
+  pull_request:
+    paths:
+      - "docs/tool-surface-profiles.md"
+      - "docs/tool-surface-profiles.fr.md"
+      - "docs/mcp-routing-guide.md"
+      - "docs/mcp-routing-guide.fr.md"
+      - "docs/README.md"
+      - "docs/README.fr.md"
+      - "evals/**"
+      - "scripts/test-tool-routing-eval-corpus.mjs"
+      - "scripts/test-tool-routing-scorer.mjs"
+      - "scripts/score-tool-routing-evals.mjs"
+      - "scripts/test-tool-surface-profile-docs.mjs"
+      - ".github/workflows/tool-surface-p4.yml"
+  push:
+    branches:
+      - "agent/tool-surface-p4"
+
+permissions:
+  contents: read
+
+jobs:
+  docs-and-evals:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/test-tool-profiles.mjs
+      - run: node scripts/test-tool-routing-eval-corpus.mjs
+      - run: node scripts/test-tool-routing-scorer.mjs
+      - run: node scripts/test-tool-surface-profile-docs.mjs
+      - run: node scripts/test-tool-routing-contract.mjs
