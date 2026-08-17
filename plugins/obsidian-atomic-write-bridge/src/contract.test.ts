@@ -74,6 +74,37 @@ test("validates Canvas paths and graph-bound CAS bodies", () => {
       nextContent: JSON.stringify({
         nodes: [
           {
+            id: "a",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "A",
+          },
+          {
+            id: "b",
+            type: "text",
+            x: 200,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "B",
+          },
+        ],
+        edges: [{ id: "ab", fromNode: "a", toNode: "b", fromSide: ["top"] }],
+      }),
+    }),
+  );
+  assert.throws(() =>
+    parseCanvasCasRequest({
+      contractVersion: 1,
+      path: "Flow.canvas",
+      bindingFingerprint: sha256("backend"),
+      expectedSha256: sha256("before"),
+      nextContent: JSON.stringify({
+        nodes: [
+          {
             id: " padded ",
             type: "text",
             x: 0,

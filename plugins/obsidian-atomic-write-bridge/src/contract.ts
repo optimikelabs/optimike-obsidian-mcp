@@ -288,7 +288,8 @@ export function validateCanvasGraph(content: string): void {
     for (const side of ["fromSide", "toSide"] as const) {
       if (
         value[side] !== undefined &&
-        !["top", "right", "bottom", "left"].includes(String(value[side]))
+        (typeof value[side] !== "string" ||
+          !["top", "right", "bottom", "left"].includes(value[side]))
       ) {
         throw new Error(`Canvas edge ${side} is invalid.`);
       }

@@ -230,7 +230,8 @@ function graphError(root: CanvasObject): string | undefined {
     for (const side of ["fromSide", "toSide"] as const) {
       if (
         edge[side] !== undefined &&
-        !["top", "right", "bottom", "left"].includes(String(edge[side]))
+        (typeof edge[side] !== "string" ||
+          !["top", "right", "bottom", "left"].includes(edge[side]))
       ) {
         return `Canvas edge ${id} has an invalid ${side}.`;
       }
@@ -408,15 +409,16 @@ export function compileCanvasPatch(
           edge.fromNode !== operation.id && edge.toNode !== operation.id,
       );
       for (const edgeId of incidentIds) {
-        const fresh = parseStrict(next);
-        const freshEdges = entityArray(fresh, "edges");
-        next = replaceAt(
-          next,
-          ["edges", indexById(freshEdges, edgeId)],
-          undefined,
-        );
         changedEdges.add(edgeId);
         removedIncidentEdges.add(edgeId);
+      }
+      if (incidentIds.length > 0) {
+        const incidentSet = new Set(incidentIds);
+        const fresh = parseStrict(next);
+        const remainingEdges = entityArray(fresh, "edges").filter(
+          (edge) => !incidentSet.has(entityId(edge, "Canvas edge")),
+        );
+        next = replaceAt(next, ["edges"], remainingEdges);
       }
       const fresh = parseStrict(next);
       next = replaceAt(

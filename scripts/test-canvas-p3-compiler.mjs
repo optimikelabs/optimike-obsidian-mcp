@@ -194,6 +194,36 @@ assert.throws(
     ),
   /Canvas node must have a non-empty, unpadded, well-formed string id/u,
 );
+assert.throws(
+  () =>
+    compileCanvasPatch(
+      JSON.stringify({
+        nodes: [
+          {
+            id: "a",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "A",
+          },
+          {
+            id: "b",
+            type: "text",
+            x: 200,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "B",
+          },
+        ],
+        edges: [{ id: "ab", fromNode: "a", toNode: "b", fromSide: ["top"] }],
+      }),
+      [{ op: "move_node", id: "a", x: 10, y: 10 }],
+    ),
+  /current Canvas graph is invalid/u,
+);
 
 console.log(
   "PASS: Canvas compiler preserves unknown values, validates graph effects, and fails closed",
