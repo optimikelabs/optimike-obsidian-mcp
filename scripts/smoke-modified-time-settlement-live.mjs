@@ -169,23 +169,44 @@ async function atomicStatus() {
 }
 
 async function atomicRead() {
-  return directRequest("/extensions/obsidian-atomic-write-bridge/notes/read", {
-    method: "POST",
-    payload: { contractVersion: 1, path: canaryPath },
-  });
+  const response = await directRequest(
+    "/extensions/obsidian-atomic-write-bridge/notes/read",
+    {
+      method: "POST",
+      payload: { contractVersion: 1, path: canaryPath },
+    },
+  );
+  if (
+    originalBindingFingerprint !== undefined &&
+    response.bindingFingerprint !== originalBindingFingerprint
+  ) {
+    throw new Error(
+      "The Atomic Write backend binding changed during the canary; refusing cross-vault recovery.",
+    );
+  }
+  return response;
 }
 
 async function atomicReplace(expectedSha256, nextContent, bindingFingerprint) {
-  return directRequest("/extensions/obsidian-atomic-write-bridge/notes/cas", {
-    method: "POST",
-    payload: {
-      contractVersion: 1,
-      path: canaryPath,
-      bindingFingerprint,
-      expectedSha256,
-      nextContent,
+  const response = await directRequest(
+    "/extensions/obsidian-atomic-write-bridge/notes/cas",
+    {
+      method: "POST",
+      payload: {
+        contractVersion: 1,
+        path: canaryPath,
+        bindingFingerprint,
+        expectedSha256,
+        nextContent,
+      },
     },
-  });
+  );
+  if (response.bindingFingerprint !== bindingFingerprint) {
+    throw new Error(
+      "The Atomic Write backend binding changed while applying a CAS.",
+    );
+  }
+  return response;
 }
 
 async function waitForRead(predicate, label, timeoutMs = 15_000) {
@@ -339,6 +360,7 @@ async function applyWithLostResponse(receipt, idempotencyKey) {
 
 let originalContent;
 let originalSha256;
+let originalBindingFingerprint;
 let restored = false;
 let backupWritten = false;
 let originalPluginEnabled = false;
@@ -353,7 +375,11 @@ let signalExitInProgress = false;
 async function cleanup() {
   await client.close().catch(() => undefined);
   await new Promise((resolve) => proxy.close(resolve));
-  if (originalContent !== undefined && !restored) {
+  if (
+    originalContent !== undefined &&
+    originalBindingFingerprint !== undefined &&
+    !restored
+  ) {
     try {
       if (pluginEnabled()) {
         setPluginEnabled(false);
@@ -361,11 +387,16 @@ async function cleanup() {
       }
       const current = await atomicRead();
       const status = await atomicStatus();
+      if (status.backend.bindingFingerprint !== originalBindingFingerprint) {
+        throw new Error(
+          "The Atomic Write backend binding changed during cleanup; refusing cross-vault recovery.",
+        );
+      }
       if (current.sha256 !== originalSha256) {
         await atomicReplace(
           current.sha256,
           originalContent,
-          status.backend.bindingFingerprint,
+          originalBindingFingerprint,
         );
       }
       const finalRead = await atomicRead();
@@ -494,6 +525,8 @@ try {
   assert.equal(status.plugin.id, "obsidian-atomic-write-bridge");
   assert.equal(status.plugin.version, "0.2.0");
   assert.equal(status.backend.writeEnabled, true);
+  assert.match(status.backend.bindingFingerprint, /^[a-f0-9]{64}$/u);
+  originalBindingFingerprint = status.backend.bindingFingerprint;
   const integrations =
     status.settlement?.modifiedTimeFrontmatter?.integrations ?? [];
   assert.equal(
@@ -521,8 +554,9 @@ try {
     backupPath,
     runtimeLogsPath: logsPath,
     modifiedTimePluginId: pluginId,
+    backendBindingFingerprint: originalBindingFingerprint,
     recoveryInstruction:
-      "Disable the configured modified-time plugin, then restore original-content.md only to the explicit canary note and verify SHA-256.",
+      "Verify the recorded backend binding, disable the configured modified-time plugin, then restore original-content.md only to the explicit canary note and verify SHA-256.",
   };
   writeFileSync(
     backupMetadataPath,
@@ -612,7 +646,7 @@ try {
   await atomicReplace(
     negativeSettled.sha256,
     driftedContent,
-    status.backend.bindingFingerprint,
+    originalBindingFingerprint,
   );
   const drifted = await waitForRead(
     (read) => read.content.includes(driftMarker),
@@ -630,7 +664,7 @@ try {
   await atomicReplace(
     beforeRestore.sha256,
     originalContent,
-    status.backend.bindingFingerprint,
+    originalBindingFingerprint,
   );
   const restoredRead = await atomicRead();
   assert.equal(restoredRead.sha256, originalSha256);
@@ -649,6 +683,7 @@ try {
     completedAt: new Date().toISOString(),
     canaryPath,
     bridgeVersion: status.plugin.version,
+    backendBindingFingerprint: originalBindingFingerprint,
     modifiedTimePluginId: pluginId,
     modifiedTimeProperty: propertyName,
     utcOffsetMinutes:
