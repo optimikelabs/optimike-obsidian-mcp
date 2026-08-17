@@ -90,7 +90,7 @@ Activer seulement les surfaces utilisées :
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) :
   notes, métadonnées et tags en live ;
 - **Bases Bridge (REST)** inclus : requêtes `.base` live et CAS typé opt-in pour les formules source-preserving gouvernées `plan → apply → status → recover` ; les remplacements complets historiques sont désactivés par défaut ([contrat P2](docs/governed-base-formula-p2.fr.md)) ;
-- **Optimike Atomic Write Bridge** inclus : compare-and-replace SHA-256 opt-in pour les plans gouvernés de note complète et Frontmatter source-preserving `plan → apply → status → recover` ; `planRef` opaque, réponse perdue → `status`, recovery exact ≠ undo ([note](docs/governed-note-replacement.fr.md), [P1](docs/governed-frontmatter-p1.fr.md)) ;
+- **Optimike Atomic Write Bridge** inclus : compare-and-replace SHA-256 opt-in pour les plans gouvernés de note complète et Frontmatter source-preserving `plan → apply → status → recover` ; le Bridge 0.2.0 annonce aussi les métadonnées strictement bornées de settlement des plugins de date actifs supportés, sans assouplir le CAS ; `planRef` opaque, réponse perdue → `status`, recovery exact ≠ undo ([note](docs/governed-note-replacement.fr.md), [P1](docs/governed-frontmatter-p1.fr.md)) ;
 - **Smart Connections** : index sémantique `.smart-env` ;
 - **Operon Developer API V1** et **Optimike Operon Bridge** inclus : tâches live
   gouvernées via la Developer API officielle V1 ;

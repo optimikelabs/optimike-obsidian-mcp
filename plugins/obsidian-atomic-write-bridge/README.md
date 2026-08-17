@@ -23,6 +23,20 @@ available while the write gate is closed.
 The bridge depends on the public extension API of **Local REST API**. It does
 not depend on Operon or on Operon's Developer API grant UI.
 
+Version 0.2.0 adds an optional status-only settlement contract. When one of the
+following enabled plugins exposes a supported string-datetime configuration,
+the status route reports its exact modified-time property and the Obsidian host
+UTC offset:
+
+- Frontmatter Date Manager;
+- Update Time;
+- Update time on edit.
+
+The Bridge never relaxes CAS and never decides that a changed note is
+equivalent. Optimike MCP may use this metadata only after an effect, within a
+bounded attempt window, and only when the configured property is protected and
+the rest of the observed note is byte-identical to the sealed result.
+
 ## Install from source
 
 ```bash

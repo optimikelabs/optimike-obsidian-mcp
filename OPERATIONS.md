@@ -232,6 +232,14 @@ restoration retains the private directory at the recovery path printed when the
 script starts; restore only from its explicit backup metadata. Never point the
 canary at an ordinary user note.
 
+Atomic Write Bridge `0.2.0` also reports supported active modified-time
+integrations. When the disposable vault uses one, include its configured
+property in `MCP_PROTECTED_FRONTMATTER_KEYS` and add a lost-response canary in
+which the plugin advances only that timestamp. The gate passes only when the
+receipt is `committed`, records both the sealed target hash and the actual
+settled hash, and an additional body or frontmatter change still remains
+`outcome_unknown`.
+
 ## Governed frontmatter P1
 
 P1 accepts bounded top-level `set`/`delete` intentions and compiles them without
@@ -260,6 +268,11 @@ The script announces an operating-system temporary recovery directory, writes
 a private backup before mutation, proves add/set/delete, replay/status/stale
 conflict and exact SHA restoration, then deletes the private run directory only
 after restoration is verified.
+
+If a supported date plugin advances the protected modified-time property after
+the P1 child write, the same bounded P0 settlement applies. The P1 live gate
+must still prove that the timestamp-only case commits and that any second YAML
+or body drift does not.
 
 ## Governed Base formulas P2
 

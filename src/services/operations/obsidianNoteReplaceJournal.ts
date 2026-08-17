@@ -3,6 +3,10 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
+import type {
+  ModifiedTimeSettlementEvidence,
+  ModifiedTimeSettlementPolicy,
+} from "./modifiedTimeSettlement.js";
 
 export type ObsidianNoteReplaceStatus =
   | "planned"
@@ -40,6 +44,9 @@ export type ObsidianNoteReplacePlan = {
     instanceId: string;
     attemptId: string;
   };
+  modifiedTimeSettlementPolicy?: ModifiedTimeSettlementPolicy;
+  executionStartedAtEpochMs?: number;
+  modifiedTimeSettlementEvidence?: ModifiedTimeSettlementEvidence;
 };
 
 export class ObsidianNoteReplaceConcurrencyError extends Error {
@@ -351,6 +358,24 @@ export class ObsidianNoteReplaceJournal {
       failure,
       expectedExecutionAttemptId,
       false,
+      undefined,
+    );
+  }
+
+  commitWithModifiedTimeSettlement(
+    operationId: string,
+    expected: Array<"applying" | "outcome_unknown">,
+    evidence: ModifiedTimeSettlementEvidence,
+    expectedExecutionAttemptId?: string,
+  ): ObsidianNoteReplacePlan {
+    return this.transitionInternal(
+      operationId,
+      expected,
+      "committed",
+      undefined,
+      expectedExecutionAttemptId,
+      expectedExecutionAttemptId === undefined,
+      evidence,
     );
   }
 
@@ -365,6 +390,7 @@ export class ObsidianNoteReplaceJournal {
       undefined,
       undefined,
       true,
+      undefined,
     );
   }
 
@@ -375,6 +401,7 @@ export class ObsidianNoteReplaceJournal {
     failure: string | undefined,
     expectedExecutionAttemptId: string | undefined,
     verifiedCommitWithoutOwner: boolean,
+    settlementEvidence: ModifiedTimeSettlementEvidence | undefined,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
@@ -399,8 +426,12 @@ export class ObsidianNoteReplaceJournal {
               ...this.executionOwner,
               attemptId: randomUUID(),
             },
+            executionStartedAtEpochMs: this.now(),
           }
         : { executionOwner: undefined }),
+      ...(settlementEvidence
+        ? { modifiedTimeSettlementEvidence: settlementEvidence }
+        : {}),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };

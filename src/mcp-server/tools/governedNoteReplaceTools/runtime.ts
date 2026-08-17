@@ -399,9 +399,7 @@ export class GovernedNoteReplaceRuntime {
     return plan;
   }
 
-  private requiredPublicDirectPlan(
-    reference: string,
-  ): ObsidianNoteReplacePlan {
+  private requiredPublicDirectPlan(reference: string): ObsidianNoteReplacePlan {
     const plan = this.required(reference);
     if (plan.projection) {
       throw new McpError(
@@ -470,7 +468,12 @@ export function createGovernedNoteReplaceRuntime(
   const backend = new GovernedAtomicWriteBackend(
     new RestAtomicWriteBackend(obsidianService),
   );
-  const adapter = new ObsidianNoteReplaceOperationAdapter(backend, journal);
+  const adapter = new ObsidianNoteReplaceOperationAdapter(
+    backend,
+    journal,
+    undefined,
+    { modifiedTimeProtectedKeys: config.mcpProtectedFrontmatterKeys },
+  );
   const runtime = new GovernedNoteReplaceRuntime(
     backend,
     journal,

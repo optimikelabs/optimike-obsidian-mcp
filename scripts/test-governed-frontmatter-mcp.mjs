@@ -213,7 +213,10 @@ try {
     true,
   );
   assert.equal(malformedUnicodeKey.payload.error.code, "VALIDATION_ERROR");
-  assert.match(malformedUnicodeKey.payload.error.message, /well-formed Unicode/i);
+  assert.match(
+    malformedUnicodeKey.payload.error.message,
+    /well-formed Unicode/i,
+  );
 
   const replacementCharacterKey = await call(
     session,
@@ -341,14 +344,18 @@ try {
   const formerlyCollidingDirectKey = createHash("sha256")
     .update(`obsidian.frontmatter.patch:v1\0${namespacePublicKey}`, "utf8")
     .digest("hex");
-  const directNamespacePlan = await call(session, "obsidian_note_replace_plan", {
-    path: FRONTMATTER_FIXTURE_PATH,
-    nextContent: FRONTMATTER_INITIAL_CONTENT.replace(
-      "owner: mike",
-      "owner: direct-p0",
-    ),
-    idempotencyKey: formerlyCollidingDirectKey,
-  });
+  const directNamespacePlan = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FRONTMATTER_FIXTURE_PATH,
+      nextContent: FRONTMATTER_INITIAL_CONTENT.replace(
+        "owner: mike",
+        "owner: direct-p0",
+      ),
+      idempotencyKey: formerlyCollidingDirectKey,
+    },
+  );
   const projectedNamespacePlan = await call(
     session,
     "obsidian_frontmatter_patch_plan",
@@ -597,6 +604,46 @@ try {
   assert.equal(lostStatus.payload.outcome, "committed");
   assert.equal(fake.successfulWrites, 1);
 
+  fake.reset(
+    FRONTMATTER_INITIAL_CONTENT.replace(
+      "statut: actif # replace this entry only",
+      "modification: 2000-01-01T00:00\nstatut: actif # replace this entry only",
+    ),
+  );
+  fake.settlement = {
+    contractVersion: 1,
+    modifiedTimeFrontmatter: {
+      integrations: [
+        {
+          pluginId: "frontmatter-date-manager",
+          propertyName: "modification",
+        },
+      ],
+      utcOffsetMinutes: 0,
+    },
+  };
+  fake.modifiedTimePropertyAfterWrite = "modification";
+  fake.loseResponseAfterWriteNext = true;
+  const settledPlan = await call(session, "obsidian_frontmatter_patch_plan", {
+    path: FRONTMATTER_FIXTURE_PATH,
+    operations: [{ op: "set", key: "statut", value: "settled-response" }],
+    idempotencyKey: "p1-lost-response-modified-time",
+  });
+  const settledApply = await call(session, "obsidian_frontmatter_patch_apply", {
+    planRef: settledPlan.payload.planRef,
+    idempotencyKey: "p1-lost-response-modified-time",
+  });
+  assert.equal(settledApply.payload.outcome, "committed");
+  assert.equal(
+    settledApply.payload.afterProof.details.settlementPropertyName,
+    "modification",
+  );
+  assert.equal(
+    settledApply.payload.afterProof.details.settlementPluginId,
+    "frontmatter-date-manager",
+  );
+  assert.match(fake.content, /^modification: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/mu);
+
   fake.reset();
   fake.failBeforeWriteNext = true;
   const recoveryPlan = await call(session, "obsidian_frontmatter_patch_plan", {
@@ -667,7 +714,7 @@ try {
   }
 
   console.log(
-    "PASS: real stdio MCP clients proved the P1 source-preserving projection, exact P0 lifecycle inheritance, idempotent winner semantics, drift rejection, replay, concurrency, lost-response reconciliation, restart recovery, policy revalidation, and redaction.",
+    "PASS: real stdio MCP clients proved the P1 source-preserving projection, exact P0 lifecycle inheritance, idempotent winner semantics, drift rejection, replay, concurrency, bounded modified-time settlement, lost-response reconciliation, restart recovery, policy revalidation, and redaction.",
   );
 } finally {
   if (session) await session.close();

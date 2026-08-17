@@ -69,6 +69,12 @@ assert.match(contract, /cache is never an authority/i);
 assert.match(contractFr, /cache n[’']est jamais une autorité/i);
 assert.match(contract, /byte-identical/i);
 assert.match(contractFr, /byte-identical/i);
+assert.match(contract, /modified-time settlement/i);
+assert.match(contract, /one configured protected timestamp line/i);
+assert.match(contract, /unrelated frontmatter or body drift/i);
+assert.match(contractFr, /settlement borné des dates de modification/i);
+assert.match(contractFr, /une seule ligne de[\s\S]*timestamp protégée/i);
+assert.match(contractFr, /autre dérive du[\s\S]*frontmatter ou du corps/i);
 assert.match(
   contract,
   /P1 canary recovery directory|OBSIDIAN_FRONTMATTER_CANARY_PATH/i,
@@ -78,6 +84,10 @@ assert.match(security, /governed frontmatter/i);
 assert.match(securityFr, /Frontmatter gouvernée|frontmatter gouvernée/i);
 assert.match(operations, /governed frontmatter/i);
 assert.match(operationsFr, /Frontmatter gouvernée|frontmatter gouvernée/i);
+assert.match(operations, /same bounded P0 settlement applies/i);
+assert.match(operations, /second YAML[\s\S]*body drift/i);
+assert.match(operationsFr, /même settlement borné P0 s.applique/i);
+assert.match(operationsFr, /seconde dérive YAML ou du corps/i);
 assert.match(adr, /Executor/);
 assert.match(adr, /Reconciler/);
 assert.match(adr, /Observer/);
@@ -90,8 +100,14 @@ assert.match(
   adr,
   /445a4ebc-fce6-4199-b0e8-5f93dcfeac9d[\s\S]*original and final SHA-256 were both[\s\S]*5492f80849812193137d8ef66b4349982d8a443503e555f8cd188efe99980912/i,
 );
-assert.match(contract, /Live admission passed[\s\S]*status-credential redaction/i);
-assert.match(contractFr, /admission live a réussi[\s\S]*expurgation de la clé d.exécution dans status/i);
+assert.match(
+  contract,
+  /Live admission passed[\s\S]*status-credential redaction/i,
+);
+assert.match(
+  contractFr,
+  /admission live a réussi[\s\S]*expurgation de la clé d.exécution dans status/i,
+);
 assert.match(contract, /fixed bounded marker/i);
 assert.match(contractFr, /marqueur fixe et borné/i);
 assert.match(
@@ -112,7 +128,10 @@ assert.match(adr, /intent and patch-proof digests[\s\S]*code-unit ordering/i);
 assert.match(contract, /well-formed Unicode[\s\S]*NOT_FOUND/i);
 assert.match(contractFr, /Unicode bien formées[\s\S]*NOT_FOUND/i);
 assert.match(adr, /well-formed Unicode[\s\S]*NOT_FOUND/i);
-assert.match(contract, /Projected child plans[\s\S]*public P0[\s\S]*NOT_FOUND/i);
+assert.match(
+  contract,
+  /Projected child plans[\s\S]*public P0[\s\S]*NOT_FOUND/i,
+);
 assert.match(
   contract,
   /Status receipts never expose[\s\S]*public idempotency key[\s\S]*internal[\s\S]*apply authority/i,

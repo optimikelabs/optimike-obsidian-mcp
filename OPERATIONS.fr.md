@@ -239,6 +239,14 @@ restauration non vérifiée conserve le dossier privé au chemin de récupérati
 affiché au démarrage ; ne restaurer qu’à partir des métadonnées explicites de sa
 sauvegarde. Ne jamais viser une note utilisateur ordinaire.
 
+Atomic Write Bridge `0.2.0` expose aussi les intégrations actives de date de
+modification prises en charge. Quand le coffre jetable en utilise une, inclure
+sa propriété configurée dans `MCP_PROTECTED_FRONTMATTER_KEYS` et ajouter un
+canary à réponse perdue où le plugin ne fait avancer que ce timestamp. La gate
+ne passe que si le reçu est `committed`, conserve le hash de la cible scellée et
+le hash réellement observé après settlement, et si une dérive supplémentaire du
+corps ou du frontmatter reste `outcome_unknown`.
+
 ## Frontmatter gouvernée P1
 
 P1 accepte des intentions top-level `set`/`delete` bornées et les compile sans
@@ -267,6 +275,11 @@ Le script annonce un dossier temporaire système de récupération, écrit un
 backup privé avant mutation, prouve add/set/delete, replay/status/conflit périmé
 et la restauration exacte du SHA, puis ne supprime le dossier privé qu’après
 vérification de la restauration.
+
+Si un plugin de date pris en charge fait avancer la propriété de modification
+protégée après l’écriture enfant P1, le même settlement borné P0 s’applique. La
+gate live P1 doit toujours prouver que le cas timestamp seul commit et que toute
+seconde dérive YAML ou du corps ne le fait pas.
 
 ## Formules Base gouvernées P2
 

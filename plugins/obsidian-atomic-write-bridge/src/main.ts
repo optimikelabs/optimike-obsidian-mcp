@@ -11,6 +11,7 @@ import {
   parseReadRequest,
   sha256,
 } from "./contract.js";
+import { getModifiedTimeIntegrations } from "./modifiedTimeIntegrations.js";
 
 type PluginData = { instanceId: string; allowWrites: boolean };
 
@@ -122,6 +123,13 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               writeEnabled: this.allowWrites,
             },
             limits: { markdownOnly: true },
+            settlement: {
+              contractVersion: 1,
+              modifiedTimeFrontmatter: {
+                integrations: getModifiedTimeIntegrations(this.app),
+                utcOffsetMinutes: -new Date().getTimezoneOffset(),
+              },
+            },
           }),
         );
 
