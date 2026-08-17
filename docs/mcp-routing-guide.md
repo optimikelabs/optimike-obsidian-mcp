@@ -39,6 +39,29 @@ explicit vault-relative path first, then use the ordinary note tools. The
 optional upstream Periodic Notes API extension is a separate integration and is
 not assumed by Optimike MCP.
 
+## Direct, legacy and governed tools
+
+When multiple tools touch the same domain, they are not interchangeable. Use
+this precedence:
+
+| Intent                                            | Preferred tool                                                            | Direct or legacy boundary                                                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Semantic similarity                               | `smart_semantic_search`                                                   | `smart_search` and `smart-search` are compatibility aliases of the same implementation.                                |
+| Operon-managed task reads                         | `operon_list_tasks`, `operon_query_tasks`                                 | `list_all_tasks` and `query_tasks` inspect legacy Obsidian Tasks-compatible Markdown.                                  |
+| Complete replacement of an existing Markdown note | `obsidian_note_replace_plan` then its matching apply/status/recover tools | `obsidian_update_note` overwrite has no durable receipt or exact-plan recovery.                                        |
+| Top-level frontmatter set/delete                  | `obsidian_frontmatter_patch_plan` then its matching lifecycle             | `obsidian_manage_frontmatter` remains useful for reads, compatibility, or when the governed live projection is absent. |
+| Named Base formula set/delete                     | `bases_formula_patch_plan` then its matching lifecycle                    | `bases_upsert_config` is a default-off whole-config compatibility path.                                                |
+
+Direct append, prepend, search/replace and tag mutations remain intentionally
+available where the active runtime permits them. They do not produce a durable
+plan/status/recovery receipt. Headless filesystem mutations are bounded fallback
+operations for copied or dedicated vaults and do not claim Desktop/plugin
+semantics.
+
+The server exposes the same concise precedence as the MCP resource
+`optimike://guides/tool-routing`. Clients can list and read that resource without
+adding another callable mutation tool.
+
 ## New In V2.2
 
 Use `obsidian_validate_format` before risky writes or generated content:

@@ -16,7 +16,7 @@ import {
 
 const TOOL_NAME = "bases_create";
 const TOOL_DESCRIPTION =
-  "Crée (ou valide) une nouvelle base .base en générant le YAML via le bridge REST.";
+  "Direct validation or creation of one .base YAML document through the REST bridge. Overwrite is a legacy whole-config compatibility effect and has no durable plan/status/recovery receipt.";
 
 export async function registerBasesCreateTool(
   server: McpServer,

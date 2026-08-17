@@ -339,6 +339,7 @@ async function main() {
 
     const tools = await withTimeout(client.listTools(), "listTools");
     const toolNames = tools.tools.map((tool) => tool.name).sort();
+    const toolsByName = new Map(tools.tools.map((tool) => [tool.name, tool]));
     const unannotatedTools = tools.tools.filter((tool) => {
       const annotations = tool.annotations;
       return (
@@ -398,6 +399,69 @@ async function main() {
           .map((tool) => tool.name)
           .join(", ")}`,
       );
+    }
+    for (const alias of ["smart_search", "smart-search"]) {
+      const description = toolsByName.get(alias)?.description ?? "";
+      if (
+        !description.includes("Legacy compatibility alias") ||
+        !description.includes("Prefer smart_semantic_search")
+      ) {
+        throw new Error(
+          `${alias} must identify itself as a legacy alias and route new calls to smart_semantic_search.`,
+        );
+      }
+    }
+
+    const routingDescriptionContracts = [
+      ["obsidian_update_note", "obsidian_note_replace_plan"],
+      ["obsidian_search_replace", "obsidian_note_replace_plan"],
+      ["obsidian_manage_frontmatter", "obsidian_frontmatter_patch_plan"],
+      ["bases_upsert_config", "bases_formula_patch_plan"],
+      ["list_all_tasks", "operon_list_tasks"],
+      ["query_tasks", "operon_query_tasks"],
+    ];
+    for (const [directName, preferredName] of routingDescriptionContracts) {
+      const direct = toolsByName.get(directName);
+      const preferred = toolsByName.get(preferredName);
+      if (direct && preferred && !direct.description?.includes(preferredName)) {
+        throw new Error(
+          `${directName} overlaps ${preferredName} but its exposed description does not route callers to the governed/canonical tool.`,
+        );
+      }
+    }
+
+    const resources = await withTimeout(
+      client.listResources(),
+      "listResources",
+    );
+    const routingResource = resources.resources.find(
+      (resource) => resource.uri === "optimike://guides/tool-routing",
+    );
+    if (!routingResource || routingResource.mimeType !== "text/markdown") {
+      throw new Error(
+        "Missing canonical optimike://guides/tool-routing MCP resource.",
+      );
+    }
+    const routingGuide = await withTimeout(
+      client.readResource({ uri: routingResource.uri }),
+      "readRoutingResource",
+    );
+    const routingText = routingGuide.contents
+      .map((content) => ("text" in content ? content.text : ""))
+      .join("\n");
+    for (const requiredText of [
+      "smart_semantic_search",
+      "operon_query_tasks",
+      "obsidian_note_replace_plan",
+      "obsidian_frontmatter_patch_plan",
+      "bases_formula_patch_plan",
+      "There is intentionally no generic public `operation_*` surface.",
+    ]) {
+      if (!routingText.includes(requiredText)) {
+        throw new Error(
+          `Tool-routing resource is missing required contract text: ${requiredText}`,
+        );
+      }
     }
     const expected = [
       "obsidian_list_notes",

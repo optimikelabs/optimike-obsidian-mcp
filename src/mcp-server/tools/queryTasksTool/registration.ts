@@ -20,7 +20,7 @@ export const registerQueryTasksTool = async (
 ): Promise<void> => {
   const toolName = "query_tasks";
   const toolDescription =
-    "Search for tasks based on Obsidian Tasks query syntax. Allows filtering tasks by status, dates (including relative, EN/FR), description, tags, priority, and path. Each line in the query is treated as a filter with AND logic between lines. Returns only tasks that match all query conditions. Examples of task filters are `done`, `not done`, `tag include #foo/bar`, `tag do not include #potato`, `description includes keyword`. Supports include/exclude path filters, optional non-task inclusion, optional file metadata (created/modified), optional meta dates (frontmatter), and optional global filter application. The path parameter is optional; if not specified, it defaults to the vault root directory. The path must be relative to the vault directory and cannot contain directory traversal components (..).";
+    "Legacy Obsidian Tasks-compatible Markdown query, not Operon task authority. Supports Tasks query syntax for status, dates, description, tags, priority and paths. Use operon_query_tasks for Operon-managed tasks, stable workflow IDs and validated snapshots.";
 
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({
@@ -39,13 +39,12 @@ export const registerQueryTasksTool = async (
         QueryTasksInputSchemaShape,
         READ_ONLY_TOOL_ANNOTATIONS,
         async (params: QueryTasksInput) => {
-          const handlerContext =
-            requestContextService.createRequestContext({
-              parentContext: registrationContext,
-              operation: "HandleQueryTasksRequest",
-              toolName,
-              params,
-            });
+          const handlerContext = requestContextService.createRequestContext({
+            parentContext: registrationContext,
+            operation: "HandleQueryTasksRequest",
+            toolName,
+            params,
+          });
 
           return await ErrorHandler.tryCatch(
             async () => {
@@ -76,7 +75,10 @@ export const registerQueryTasksTool = async (
         },
       );
 
-      logger.info(`Tool registered successfully: ${toolName}`, registrationContext);
+      logger.info(
+        `Tool registered successfully: ${toolName}`,
+        registrationContext,
+      );
     },
     {
       operation: `registering tool ${toolName}`,

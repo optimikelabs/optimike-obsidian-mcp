@@ -28,7 +28,7 @@ export const registerObsidianManageTagsTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_manage_tags";
   const toolDescription =
-    "Manages tags for a specified note, handling them in both the YAML frontmatter and inline content. Supports adding, removing, and listing tags to provide a comprehensive tag management solution.";
+    "Direct Local REST tag add/remove/list for YAML frontmatter and inline Markdown. It creates no durable plan/status/recovery receipt. For a frontmatter-only mutation, prefer obsidian_frontmatter_patch_plan when available.";
 
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({

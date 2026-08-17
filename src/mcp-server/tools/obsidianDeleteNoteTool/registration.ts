@@ -45,7 +45,7 @@ export const registerObsidianDeleteNoteTool = async (
   const toolName = "obsidian_delete_note";
   // Updated description to accurately reflect the response (no timestamp)
   const toolDescription =
-    "Permanently deletes a specified file from the Obsidian vault. Tries the exact path first, then attempts a case-insensitive fallback if the file is not found. Requires the vault-relative path including the file extension. Returns a success message.";
+    "Direct permanent deletion of one vault file by explicit path. This operation has no governed recovery or undo receipt; use only when irreversible deletion is intentional and allowed by policy. Exact path is tried before a case-insensitive fallback.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =

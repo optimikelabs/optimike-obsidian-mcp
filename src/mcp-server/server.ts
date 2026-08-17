@@ -71,6 +71,7 @@ import {
 // Import transport setup functions.
 import { startHttpTransport } from "./transports/httpTransport.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
+import { registerToolRoutingResource } from "./resources/toolRoutingResource.js";
 
 async function updateCacheAfterGuardedWrite(
   vaultCacheService: VaultCacheService | undefined,
@@ -196,7 +197,7 @@ function registerHeadlessGuardedWriteTools(
 
   server.tool(
     "obsidian_update_note",
-    "Headless-guarded filesystem note update. Supports filePath targets with append or prepend. Uses atomic writes and vault path safety.",
+    "Headless-guarded direct filesystem append/prepend for explicit filePath targets on a copied or dedicated vault. Uses atomic file writes, path safety and optional preconditions, but has no durable plan/status/recovery receipt.",
     {
       targetType: z.literal("filePath"),
       targetIdentifier: z.string().min(1),
@@ -264,7 +265,7 @@ function registerHeadlessGuardedWriteTools(
 
   server.tool(
     "obsidian_search_replace",
-    "Headless-guarded filesystem exact search/replace for filePath targets.",
+    "Headless-guarded direct filesystem exact search/replace for explicit filePath targets on a copied or dedicated vault. Optional hash/mtime preconditions prevent stale writes; no durable plan/status/recovery receipt is created.",
     {
       targetType: z.literal("filePath"),
       targetIdentifier: z.string().min(1),
@@ -333,7 +334,7 @@ function registerHeadlessGuardedWriteTools(
 
   server.tool(
     "obsidian_manage_frontmatter",
-    "Headless-guarded filesystem frontmatter setter for a single key.",
+    "Headless-guarded direct filesystem frontmatter setter for one key on a copied or dedicated vault. This fallback is exposed only when the live governed projection is unavailable and creates no durable receipt.",
     {
       filePath: z.string().min(1),
       operation: z.literal("set"),
@@ -1310,7 +1311,7 @@ function registerHeadlessGuardedWriteTools(
 
   server.tool(
     "bases_create",
-    "Headless-guarded filesystem .base create/validate. Writes YAML directly and does not evaluate Obsidian Bases semantics.",
+    "Headless-filesystem direct .base create/validate for a copied or dedicated vault. It writes YAML without evaluating Obsidian Bases semantics and creates no durable plan/status/recovery receipt.",
     {
       path: z.string().min(1),
       spec: z.record(z.any()),
@@ -1403,7 +1404,7 @@ function registerHeadlessGuardedWriteTools(
 
   server.tool(
     "bases_upsert_config",
-    "Headless-guarded filesystem .base config replacement/validation.",
+    "Headless-filesystem direct .base config replacement/validation for a copied or dedicated vault. It does not provide the live governed formula contract or a durable recovery receipt.",
     {
       base_id: z.string().min(1),
       yaml: z.string().optional(),
@@ -1494,7 +1495,7 @@ function registerHeadlessGuardedWriteTools(
 
   server.tool(
     "bases_upsert_rows",
-    "Headless-guarded filesystem frontmatter set operations for notes referenced by a .base. Unset is not supported.",
+    "Headless-filesystem direct frontmatter set operations for notes referenced by a .base. Unset is unsupported; the multi-note request is not one atomic batch and has no durable batch recovery receipt.",
     {
       base_id: z.string().min(1),
       operations: z
@@ -1668,6 +1669,8 @@ async function createMcpServerInstance(
     const localBasesService = vaultCacheService
       ? new LocalBasesService(vaultCacheService)
       : undefined;
+
+    registerToolRoutingResource(server);
 
     // Register read/cache-friendly tools first. In headless-readonly, the REST
     // service is intentionally absent and these tools must use the shared cache.

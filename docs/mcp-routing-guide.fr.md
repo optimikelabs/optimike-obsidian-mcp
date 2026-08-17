@@ -26,6 +26,29 @@ Ce guide aide les agents à choisir la bonne couche pour travailler avec Obsidia
 | Actions ou diagnostics app-native Obsidian                                 | Obsidian CLI                                                    | Utile comme plan de contrôle Desktop/app, pas comme headless strict.              |
 | Savoir écrire la syntaxe Markdown, Bases ou Canvas Obsidian                | Skills ou docs de format Obsidian                               | Les skills enseignent les conventions ; elles n'exécutent pas les opérations MCP. |
 
+## Outils directs, legacy et gouvernés
+
+Quand plusieurs outils touchent le même domaine, ils ne sont pas
+interchangeables. Appliquer cette priorité :
+
+| Intention                                          | Outil préféré                                                                     | Limite de la voie directe ou legacy                                                                                            |
+| -------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Similarité sémantique                              | `smart_semantic_search`                                                           | `smart_search` et `smart-search` sont des alias de compatibilité de la même implémentation.                                    |
+| Lecture de tâches gérées par Operon                | `operon_list_tasks`, `operon_query_tasks`                                         | `list_all_tasks` et `query_tasks` inspectent le Markdown compatible Obsidian Tasks.                                            |
+| Remplacement complet d'une note Markdown existante | `obsidian_note_replace_plan`, puis les outils apply/status/recover correspondants | L'overwrite de `obsidian_update_note` ne fournit ni reçu durable ni récupération du plan exact.                                |
+| Set/delete du frontmatter de premier niveau        | `obsidian_frontmatter_patch_plan`, puis son cycle associé                         | `obsidian_manage_frontmatter` reste utile pour la lecture, la compatibilité ou quand la projection gouvernée live est absente. |
+| Set/delete d'une formule Base nommée               | `bases_formula_patch_plan`, puis son cycle associé                                | `bases_upsert_config` est une voie de compatibilité whole-config désactivée par défaut.                                        |
+
+Les mutations directes append, prepend, search/replace et tags restent exposées
+quand le runtime actif les autorise. Elles ne produisent pas de reçu durable
+plan/status/recovery. Les mutations filesystem headless sont des fallbacks
+bornés pour une copie ou un coffre dédié ; elles ne garantissent pas la
+sémantique Desktop/plugins.
+
+Le serveur expose la même priorité concise via la ressource MCP
+`optimike://guides/tool-routing`. Un client peut la lister et la lire sans
+ajouter un nouvel outil de mutation appelable.
+
 ## Nouveau en V2.2
 
 Utiliser `obsidian_validate_format` avant les écritures risquées ou le contenu généré :
