@@ -542,6 +542,7 @@ try {
           {
             pluginId: "frontmatter-date-manager",
             propertyName: "modification",
+            settlementObservationDelayMs: 0,
           },
         ],
         utcOffsetMinutes: 0,
@@ -760,6 +761,7 @@ try {
           {
             pluginId: "frontmatter-date-manager",
             propertyName: "modification",
+            settlementObservationDelayMs: 0,
           },
         ],
         utcOffsetMinutes: 0,
@@ -801,7 +803,13 @@ try {
     backend.settlement = {
       contractVersion: 1,
       modifiedTimeFrontmatter: {
-        integrations: [{ pluginId: "update-time", propertyName: "updated" }],
+        integrations: [
+          {
+            pluginId: "update-time",
+            propertyName: "updated",
+            settlementObservationDelayMs: 0,
+          },
+        ],
         utcOffsetMinutes: 0,
       },
     };
@@ -846,6 +854,7 @@ try {
           {
             pluginId: "frontmatter-date-manager",
             propertyName: "modification",
+            settlementObservationDelayMs: 0,
           },
         ],
         utcOffsetMinutes: 0,
@@ -893,6 +902,7 @@ try {
           {
             pluginId: "frontmatter-date-manager",
             propertyName: "modification",
+            settlementObservationDelayMs: 0,
           },
         ],
         utcOffsetMinutes: 0,
@@ -958,6 +968,94 @@ try {
   }
 
   {
+    const { backend, adapter } = fixture("missing-settlement-delay", {
+      modifiedTimeProtectedKeys: ["modification"],
+    });
+    backend.content =
+      "---\nmodification: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "modification",
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    await assert.rejects(
+      adapter.plan({
+        path: backend.path,
+        nextContent: backend.content.replace("avant", "après"),
+        idempotencyKey: "missing-settlement-delay",
+      }),
+      (error) => {
+        assert.ok(error instanceof McpError);
+        assert.equal(error.code, BaseErrorCode.FORBIDDEN);
+        assert.equal(
+          error.details?.reason,
+          "atomic_write_settlement_delay_missing",
+        );
+        return true;
+      },
+    );
+    assert.equal(backend.replaceCalls, 0);
+  }
+
+  {
+    const { backend, journal, adapter } = fixture(
+      "sealed-missing-settlement-delay",
+    );
+    const nextContent = "legacy sealed target";
+    const legacy = journal.create({
+      idempotencyKey: "sealed-missing-settlement-delay",
+      requestDigest: sha256("sealed-missing-settlement-delay"),
+      path: backend.path,
+      beforeSha256: sha256(backend.content),
+      afterSha256: sha256(nextContent),
+      nextContent,
+      bindingFingerprint: backend.bindingFingerprint,
+      modifiedTimeSettlementPolicy: {
+        contractVersion: 1,
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "modification",
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    });
+    const applying = journal.transition(
+      legacy.operationId,
+      ["planned"],
+      "applying",
+    );
+    journal.transition(
+      legacy.operationId,
+      ["applying"],
+      "outcome_unknown",
+      "legacy interrupted attempt",
+      applying.executionOwner.attemptId,
+    );
+    const reference = `obsidian-note-replace:v1:${legacy.operationId}`;
+    const observed = await adapter.status(reference);
+    assert.equal(observed.outcome, "outcome_unknown");
+    await assert.rejects(
+      adapter.recover(reference, "sealed-missing-settlement-delay"),
+      (error) => {
+        assert.ok(error instanceof McpError);
+        assert.equal(error.code, BaseErrorCode.FORBIDDEN);
+        assert.equal(error.details?.reason, "sealed_settlement_delay_missing");
+        return true;
+      },
+    );
+    assert.equal(backend.replaceCalls, 0);
+  }
+
+  {
     const { backend, adapter } = fixture("malformed-settlement-property", {
       modifiedTimeProtectedKeys: ["modification"],
     });
@@ -968,6 +1066,7 @@ try {
           {
             pluginId: "frontmatter-date-manager",
             propertyName: "modification:\nunsafe",
+            settlementObservationDelayMs: 0,
           },
         ],
         utcOffsetMinutes: 0,
@@ -999,6 +1098,7 @@ try {
           {
             pluginId: "frontmatter-date-manager",
             propertyName: "modification",
+            settlementObservationDelayMs: 0,
           },
         ],
         utcOffsetMinutes: 0,
@@ -1071,6 +1171,7 @@ try {
           {
             pluginId: "frontmatter-date-manager",
             propertyName: "modification",
+            settlementObservationDelayMs: 0,
           },
         ],
         utcOffsetMinutes: 0,
@@ -1574,6 +1675,7 @@ try {
           {
             pluginId: "frontmatter-date-manager",
             propertyName: "modification",
+            settlementObservationDelayMs: 0,
           },
         ],
         utcOffsetMinutes: 0,

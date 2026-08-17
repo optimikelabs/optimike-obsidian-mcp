@@ -214,6 +214,8 @@ assert.match(
 );
 assert.match(contract, /creation property must already exist/i);
 assert.match(contract, /Last-viewed is protected but never settled/i);
+assert.match(contract, /delay-less legacy settlement advertisement/i);
+assert.match(contract, /legacy receipt[\s\S]*remains\s+`outcome_unknown`/i);
 assert.match(contract, /starts that durable window only after the\s+CAS call/i);
 assert.match(
   contract,
@@ -222,6 +224,8 @@ assert.match(
 assert.match(adr, /observation delay starts at the durable post-dispatch/i);
 assert.match(contractFr, /ajoute automatiquement ces noms à sa protection/i);
 assert.match(contractFr, /dernière vue est protégée mais jamais admise/i);
+assert.match(contractFr, /annonce legacy sans délai/i);
+assert.match(contractFr, /reçu legacy[\s\S]*reste\s+`outcome_unknown`/i);
 assert.match(
   contractFr,
   /observateur `status` ou `recover` concurrent ne peut terminaliser/i,

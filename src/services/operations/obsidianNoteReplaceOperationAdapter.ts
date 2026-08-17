@@ -182,6 +182,12 @@ function normalizedKey(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function hasSettlementObservationDelay<
+  T extends { settlementObservationDelayMs?: number },
+>(value: T): value is T & { settlementObservationDelayMs: number } {
+  return value.settlementObservationDelayMs !== undefined;
+}
+
 function effectiveProtectedFrontmatterKeysFromStatus(
   status: z.infer<typeof StatusSchema>,
   configuredKeys: readonly string[],
@@ -226,10 +232,12 @@ export function effectiveAtomicWriteDateProtection(
 ): AtomicWriteDateProtection {
   const parsed = StatusSchema.parse(status);
   const settlementIntegrations = new Set(
-    (parsed.settlement?.modifiedTimeFrontmatter.integrations ?? []).map(
-      (integration) =>
-        `${integration.pluginId}\u0000${normalizedKey(integration.propertyName)}`,
-    ),
+    (parsed.settlement?.modifiedTimeFrontmatter.integrations ?? [])
+      .filter(hasSettlementObservationDelay)
+      .map(
+        (integration) =>
+          `${integration.pluginId}\u0000${normalizedKey(integration.propertyName)}`,
+      ),
   );
   const created = new Map<string, string>();
   const unsupportedModified = new Map<string, string>();
@@ -265,14 +273,27 @@ function settlementPolicy(
 ): ModifiedTimeSettlementPolicy | undefined {
   const advertised = status.settlement?.modifiedTimeFrontmatter;
   if (!advertised) return undefined;
+  if (
+    advertised.integrations.some(
+      (integration) => integration.settlementObservationDelayMs === undefined,
+    )
+  ) {
+    throw new McpError(
+      BaseErrorCode.FORBIDDEN,
+      "The Atomic Write Bridge does not advertise a bounded settlement observation delay. Upgrade the Bridge to 0.3.0 or later before governed writes.",
+      { reason: "atomic_write_settlement_delay_missing" },
+    );
+  }
   const protectedSet = new Set(
     effectiveProtectedFrontmatterKeysFromStatus(status, protectedKeys)
       .map(normalizedKey)
       .filter(Boolean),
   );
-  const integrations = advertised.integrations.filter((integration) =>
-    protectedSet.has(normalizedKey(integration.propertyName)),
-  );
+  const integrations = advertised.integrations
+    .filter(hasSettlementObservationDelay)
+    .filter((integration) =>
+      protectedSet.has(normalizedKey(integration.propertyName)),
+    );
   if (integrations.length === 0) return undefined;
   return {
     contractVersion: 1,
@@ -286,6 +307,23 @@ function sameSettlementPolicy(
   right: ModifiedTimeSettlementPolicy | undefined,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function hasBoundedSettlementObservationDelays(
+  policy: ModifiedTimeSettlementPolicy | undefined,
+): boolean {
+  return (
+    policy === undefined ||
+    policy.integrations.every((integration) => {
+      const delay: unknown = integration.settlementObservationDelayMs;
+      return (
+        typeof delay === "number" &&
+        Number.isInteger(delay) &&
+        delay >= 0 &&
+        delay <= 4 * 60 * 1000
+      );
+    })
+  );
 }
 
 function sameBackendTarget(
@@ -668,6 +706,15 @@ export class ObsidianNoteReplaceOperationAdapter
     if (plan.status !== "applying" && plan.status !== "outcome_unknown") {
       return receipt(this.profile, plan);
     }
+    if (
+      !hasBoundedSettlementObservationDelays(plan.modifiedTimeSettlementPolicy)
+    ) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "The sealed plan predates bounded settlement observation delays and cannot be recovered safely. Re-plan with Atomic Write Bridge 0.3.0 or later.",
+        { reason: "sealed_settlement_delay_missing" },
+      );
+    }
     plan = await this.reconcile(plan);
     if (plan.status === "applying") {
       // A live executor still owns this plan. Only a persisted interruption
@@ -1032,6 +1079,9 @@ export class ObsidianNoteReplaceOperationAdapter
   ): ModifiedTimeSettlementEvidence | undefined {
     if (
       !plan.modifiedTimeSettlementPolicy ||
+      !hasBoundedSettlementObservationDelays(
+        plan.modifiedTimeSettlementPolicy,
+      ) ||
       plan.executionStartedAtEpochMs === undefined ||
       !plan.nextContent
     ) {
@@ -1071,13 +1121,18 @@ export class ObsidianNoteReplaceOperationAdapter
     if (!plan.modifiedTimeSettlementPolicy) {
       return 0;
     }
+    if (
+      !hasBoundedSettlementObservationDelays(plan.modifiedTimeSettlementPolicy)
+    ) {
+      return Number.POSITIVE_INFINITY;
+    }
     if (plan.settlementObservationStartedAtEpochMs === undefined) {
       return Number.POSITIVE_INFINITY;
     }
     const observationDelayMs = Math.max(
       0,
       ...plan.modifiedTimeSettlementPolicy.integrations.map(
-        (integration) => integration.settlementObservationDelayMs ?? 0,
+        (integration) => integration.settlementObservationDelayMs,
       ),
     );
     const now = this.options.now ?? Date.now;

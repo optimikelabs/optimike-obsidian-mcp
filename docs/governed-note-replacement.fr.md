@@ -118,7 +118,11 @@ sa relecture postflight même lorsque la réponse CAS réussit normalement. Un
 observateur `status` ou `recover` concurrent ne peut terminaliser ni le hash
 scellé ni un premier settlement de timestamp pendant cette attente. Valeurs
 numériques, fuseaux forcés, formats non supportés ou délais supérieurs à quatre
-minutes ne sont pas admis. Frontmatter Date Manager reste également en
+minutes ne sont pas admis. Une annonce legacy sans délai — notamment Bridge
+0.2.0 avec une intégration de date active — échoue fermé et exige Bridge 0.3.0
+ou ultérieur. Un reçu legacy non terminal déjà scellé sans ce délai reste
+`outcome_unknown` et doit être replanifié ; le recovery ne suppose jamais un
+délai nul. Frontmatter Date Manager reste également en
 protection seule si le compteur d’updates, une commande post-update ou la
 réparation d’inversion est actif, car ces réglages peuvent modifier plus que la
 seule ligne de modification. Une propriété de modification active sans entrée

@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   particular, Frontmatter Date Manager update counters, post-update commands,
   inversion repair, numeric values, forced timezones and excessive delays are
   never treated as a one-line timestamp settlement.
+- Legacy settlement advertisements without an explicit bounded delay fail
+  closed; active date integrations require Atomic Write Bridge 0.3.0 or later,
+  and legacy non-terminal receipts without a sealed delay remain unrecoverable
+  rather than guessing a zero wait.
 
 ### Changed
 

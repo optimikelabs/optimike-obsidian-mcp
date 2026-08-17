@@ -110,7 +110,11 @@ read even when the CAS response succeeds normally. A concurrent `status` or
 `recover` observer cannot terminalize either the sealed hash or an early
 timestamp settlement during that wait. Numeric values,
 forced timezones, unsupported formats or delays beyond four minutes are not
-admitted. Frontmatter Date Manager is also protection-only when update count,
+admitted. A delay-less legacy settlement advertisement, including Bridge 0.2.0
+with an active date integration, fails closed and requires Bridge 0.3.0 or
+later. A non-terminal legacy receipt already sealed without that delay remains
+`outcome_unknown` and must be re-planned; recovery never guesses a zero delay.
+Frontmatter Date Manager is also protection-only when update count,
 a post-update command or inversion repair is enabled, because those settings
 can change more than the single modification line. An active modification
 property without a matching settlement entry makes planning fail closed.
