@@ -19,16 +19,16 @@ const minuteValue = "2026-08-17T12:34";
 const minuteEpoch = Date.UTC(2026, 7, 17, 10, 34, 0);
 assert.equal(
   nextRepresentableTimestampReadyAt(minuteValue, offsetMinutes),
-  minuteEpoch + 60_000,
-  "minute precision must wait for the next minute boundary",
+  minuteEpoch + 60_000 + 5_200,
+  "minute precision must cross the next minute boundary and freshness margin",
 );
 
 const secondValue = "2026-08-17T12:34:20";
 const secondEpoch = Date.UTC(2026, 7, 17, 10, 34, 20);
 assert.equal(
   nextRepresentableTimestampReadyAt(secondValue, offsetMinutes),
-  secondEpoch + 5_200,
-  "second precision must still cross the supported plugin freshness window",
+  secondEpoch + 1_000 + 5_200,
+  "second precision must cross its next tick and the plugin freshness margin",
 );
 
 assert.throws(

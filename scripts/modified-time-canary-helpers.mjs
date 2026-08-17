@@ -54,7 +54,5 @@ export function nextRepresentableTimestampReadyAt(
   }
   const currentEpochMs = localEpochMs - utcOffsetMinutes * 60_000;
   const representableTickMs = second === undefined ? 60_000 : 1_000;
-  return (
-    currentEpochMs + Math.max(representableTickMs, PLUGIN_FRESHNESS_MARGIN_MS)
-  );
+  return currentEpochMs + representableTickMs + PLUGIN_FRESHNESS_MARGIN_MS;
 }
