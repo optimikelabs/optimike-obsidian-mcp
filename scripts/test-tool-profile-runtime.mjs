@@ -83,7 +83,14 @@ try {
 
       let rejected = false;
       try {
-        await client.callTool({ name: "smart_search", arguments: { query: "x" } });
+        const hidden = await client.callTool({
+          name: "smart_search",
+          arguments: { query: "x" },
+        });
+        const text = hidden.content.map((item) => item.text ?? "").join("\n");
+        rejected =
+          hidden.isError === true &&
+          /disabled|not found|not exposed/iu.test(text);
       } catch (error) {
         rejected = /disabled|not found|not exposed/iu.test(
           error instanceof Error ? error.message : String(error),
