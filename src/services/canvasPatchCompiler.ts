@@ -75,6 +75,20 @@ function record(value: unknown, label: string): CanvasObject {
   return value as CanvasObject;
 }
 
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function entityArray(
   root: CanvasObject,
   key: "nodes" | "edges",
@@ -91,10 +105,12 @@ function entityId(entity: CanvasObject, label: string): string {
   if (
     typeof entity.id !== "string" ||
     entity.id.length === 0 ||
-    entity.id.length > 256
+    entity.id.length > 256 ||
+    entity.id.trim() !== entity.id ||
+    !isWellFormedUnicode(entity.id)
   ) {
     fail(
-      `${label} must have a non-empty string id of at most 256 characters.`,
+      `${label} must have a non-empty, unpadded, well-formed string id of at most 256 characters.`,
       "canvas_entity_id",
     );
   }
@@ -236,10 +252,11 @@ export function canonicalizeCanvasPatchOperations(
     if (
       !operation.id ||
       operation.id.trim() !== operation.id ||
-      operation.id.length > 256
+      operation.id.length > 256 ||
+      !isWellFormedUnicode(operation.id)
     ) {
       fail(
-        "Canvas operation IDs must be non-empty, unpadded, and at most 256 characters.",
+        "Canvas operation IDs must be non-empty, unpadded, well-formed, and at most 256 characters.",
         "canvas_operation_id",
       );
     }

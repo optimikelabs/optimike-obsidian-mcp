@@ -116,7 +116,38 @@ assert.throws(
       }),
       [{ op: "delete_node", id: "root" }],
     ),
-  /Canvas edge must have a non-empty string id of at most 256 characters/u,
+  /Canvas edge must have a non-empty, unpadded, well-formed string id/u,
+);
+assert.throws(
+  () =>
+    compileCanvasPatch(
+      JSON.stringify({
+        nodes: [
+          {
+            id: " padded ",
+            type: "text",
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: "Padded",
+          },
+        ],
+        edges: [],
+      }),
+      [
+        {
+          op: "add_text_node",
+          id: "valid",
+          text: "After",
+          x: 200,
+          y: 0,
+          width: 100,
+          height: 100,
+        },
+      ],
+    ),
+  /Canvas node must have a non-empty, unpadded, well-formed string id/u,
 );
 
 console.log(

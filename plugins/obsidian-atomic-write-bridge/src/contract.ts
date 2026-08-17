@@ -224,19 +224,20 @@ export function validateCanvasGraph(content: string): void {
     throw new Error("Canvas content must contain nodes and edges arrays.");
   }
   const nodeIds = new Set<string>();
+  const validId = (value: unknown): value is string =>
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    value.trim() === value &&
+    isWellFormedUnicode(value);
   for (const node of root.nodes) {
     if (!node || typeof node !== "object" || Array.isArray(node)) {
       throw new Error("Every Canvas node must be an object.");
     }
     const id = (node as Record<string, unknown>).id;
-    if (
-      typeof id !== "string" ||
-      id.length === 0 ||
-      id.length > 256 ||
-      nodeIds.has(id)
-    ) {
+    if (!validId(id) || nodeIds.has(id)) {
       throw new Error(
-        "Canvas node IDs must be non-empty, unique, and at most 256 characters.",
+        "Canvas node IDs must be non-empty, unique, unpadded, well-formed, and at most 256 characters.",
       );
     }
     nodeIds.add(id);
@@ -271,14 +272,9 @@ export function validateCanvasGraph(content: string): void {
       throw new Error("Every Canvas edge must be an object.");
     }
     const value = edge as Record<string, unknown>;
-    if (
-      typeof value.id !== "string" ||
-      value.id.length === 0 ||
-      value.id.length > 256 ||
-      edgeIds.has(value.id)
-    ) {
+    if (!validId(value.id) || edgeIds.has(value.id)) {
       throw new Error(
-        "Canvas edge IDs must be non-empty, unique, and at most 256 characters.",
+        "Canvas edge IDs must be non-empty, unique, unpadded, well-formed, and at most 256 characters.",
       );
     }
     if (
@@ -299,4 +295,18 @@ export function validateCanvasGraph(content: string): void {
     }
     edgeIds.add(value.id);
   }
+}
+
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
 }
