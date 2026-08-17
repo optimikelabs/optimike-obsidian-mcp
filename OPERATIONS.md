@@ -240,6 +240,26 @@ receipt is `committed`, records both the sealed target hash and the actual
 settled hash, and an additional body or frontmatter change still remains
 `outcome_unknown`.
 
+The repository provides that discriminating live gate for supported plugins:
+
+```bash
+OBSIDIAN_MODIFIED_TIME_CANARY_PATH="Canary/modified-time-settlement.md" \
+OBSIDIAN_MODIFIED_TIME_CANARY_CONFIRM=I_UNDERSTAND_THIS_DISPOSABLE_NOTE_WILL_BE_MUTATED_AND_RESTORED \
+OBSIDIAN_MODIFIED_TIME_CANARY_VAULT="operon-bridge-pilot-vault" \
+OBSIDIAN_MODIFIED_TIME_CANARY_PLUGIN_ID="frontmatter-date-manager" \
+OBSIDIAN_MODIFIED_TIME_CANARY_PROPERTY="modification" \
+OBSIDIAN_API_KEY="<local-rest-api-key>" MCP_WRITE_MODE=guarded \
+npm run smoke:modified-time-settlement-live
+```
+
+The script deliberately loses both the successful CAS response and the first
+reconciliation read. It proves timestamp-only settlement, then proves that the
+same timestamp behavior plus an additional body drift remains
+`outcome_unknown`. It disables the date plugin only for exact restoration,
+restores the original enabled state, writes a redacted JSON proof under the
+operating-system temporary root, and retains private recovery material only if
+exact restoration cannot be verified.
+
 ## Governed frontmatter P1
 
 P1 accepts bounded top-level `set`/`delete` intentions and compiles them without

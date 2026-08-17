@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-08-17
+
 ### Fixed
 
 - Governed Markdown-note and frontmatter reconciliation now accepts the one
@@ -28,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line may advance inside the real apply window (at most five minutes), and
   restoring that line must make the observed note byte-identical to the sealed
   target. Every other drift remains uncertain or conflicting.
+
+### Validation
+
+- The dedicated Operon Bridge pilot vault passed the release canary with
+  Frontmatter Date Manager `1.2.1`: two successful CAS responses and their first
+  reconciliation reads were deliberately lost, timestamp-only settlement
+  reconciled to `committed`, additional body drift remained `outcome_unknown`,
+  and the disposable note was restored to its exact original SHA-256.
 
 ## [2.8.1] - 2026-08-15
 

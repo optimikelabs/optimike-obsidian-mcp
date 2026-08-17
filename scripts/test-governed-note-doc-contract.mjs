@@ -32,6 +32,9 @@ const bridgeReadme = await text(
   "plugins/obsidian-atomic-write-bridge/README.md",
 );
 const liveCanary = await text("scripts/smoke-atomic-note-mcp-live.mjs");
+const modifiedTimeLiveCanary = await text(
+  "scripts/smoke-modified-time-settlement-live.mjs",
+);
 const operations = await text("OPERATIONS.md");
 const operationsFr = await text("OPERATIONS.fr.md");
 const security = await text("SECURITY.md");
@@ -73,6 +76,10 @@ assert.equal(
 assert.equal(
   pkg.scripts["smoke:atomic-note-mcp-live"],
   "npm run build && node scripts/smoke-atomic-note-mcp-live.mjs",
+);
+assert.equal(
+  pkg.scripts["smoke:modified-time-settlement-live"],
+  "npm run build && node scripts/smoke-modified-time-settlement-live.mjs",
 );
 assert.equal(
   pkg.scripts["test:governed-note-replace-http"],
@@ -204,10 +211,31 @@ assert.match(
   operationsFr,
   /dérive supplémentaire du[\s\S]*corps ou du frontmatter/i,
 );
+assert.match(operations, /smoke:modified-time-settlement-live/);
+assert.match(operationsFr, /smoke:modified-time-settlement-live/);
+assert.match(modifiedTimeLiveCanary, /os\.tmpdir\(\)/);
+assert.match(modifiedTimeLiveCanary, /dropNextCasResponse/);
+assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);
+assert.match(modifiedTimeLiveCanary, /positiveStatus\.outcome, "committed"/);
+assert.match(
+  modifiedTimeLiveCanary,
+  /negativeStatus\.outcome, "outcome_unknown"/,
+);
+assert.match(modifiedTimeLiveCanary, /finalRead\.sha256, originalSha256/);
+assert.ok(
+  modifiedTimeLiveCanary.indexOf("const finalRead = await atomicRead();") <
+    modifiedTimeLiveCanary.indexOf("restored = true;"),
+  "restoration authority must follow the final post-plugin hash read",
+);
+assert.doesNotMatch(
+  modifiedTimeLiveCanary,
+  /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
+);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
 await access("scripts/smoke-atomic-note-mcp-live.mjs");
+await access("scripts/smoke-modified-time-settlement-live.mjs");
 assert.match(
   liveCanary,
   /transientLogsParent[\s\S]*process\.cwd\(\)[\s\S]*["']logs["'][\s\S]*mkdtempSync/,
