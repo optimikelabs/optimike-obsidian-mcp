@@ -1,6 +1,7 @@
 import {
   TOOL_GROUP_IDS,
   compileToolSurface,
+  getToolSurfaceEntry,
   type ToolGroupId,
   type ToolRegistrationMode,
   type ToolStaticRequirement,
@@ -137,28 +138,66 @@ function assertGovernedFamiliesAtomic(entries: readonly ToolSurfaceEntry[]): voi
   }
 }
 
+function finalizeProfileEntries(
+  definition: ToolProfileDefinition,
+  entries: readonly ToolSurfaceEntry[],
+): readonly ToolSurfaceEntry[] {
+  const selected = definition.preferCanonicalAlternatives
+    ? suppressPreferredFallbacks(entries)
+    : entries;
+  assertGovernedFamiliesAtomic(selected);
+  return [...selected].sort((left, right) => left.name.localeCompare(right.name));
+}
+
 export function compileToolProfile({
   profile,
   registrationMode,
   availableStaticRequirements,
 }: CompileToolProfileInput): readonly ToolSurfaceEntry[] {
   const definition = TOOL_PROFILES[profile];
-  let entries = compileToolSurface({
+  const entries = compileToolSurface({
     registrationMode,
     groups: definition.groups,
     availableStaticRequirements,
   });
-
-  if (definition.preferCanonicalAlternatives) {
-    entries = suppressPreferredFallbacks(entries);
-  }
-
-  assertGovernedFamiliesAtomic(entries);
-  return [...entries].sort((left, right) => left.name.localeCompare(right.name));
+  return finalizeProfileEntries(definition, entries);
 }
 
 export function compileToolProfileNames(
   input: CompileToolProfileInput,
 ): readonly string[] {
   return compileToolProfile(input).map((entry) => entry.name);
+}
+
+export interface SelectAvailableToolProfileInput {
+  profile: ToolProfileId;
+  availableNames: readonly string[];
+}
+
+/**
+ * Select a profile from the tools that a concrete server/proxy actually has.
+ * This is the runtime authority used by P2/P3: it intersects the portable
+ * profile contract with real registration rather than predicting availability.
+ *
+ * `full` intentionally preserves unknown future names for 2.x compatibility.
+ * Modern profiles fail closed on unknown names by omitting them until the
+ * canonical registry classifies them.
+ */
+export function selectAvailableToolProfileNames({
+  profile,
+  availableNames,
+}: SelectAvailableToolProfileInput): readonly string[] {
+  const uniqueNames = [...new Set(availableNames)];
+  if (profile === "full") {
+    return uniqueNames.sort((left, right) => left.localeCompare(right));
+  }
+
+  const definition = TOOL_PROFILES[profile];
+  const groups = new Set<ToolGroupId>(definition.groups);
+  const entries = uniqueNames
+    .map((name) => getToolSurfaceEntry(name))
+    .filter((entry): entry is ToolSurfaceEntry => Boolean(entry))
+    .filter((entry) => groups.has(entry.group));
+
+  return finalizeProfileEntries(definition, entries).map((entry) => entry.name);
 }
