@@ -105,6 +105,18 @@ const runtime = new GovernedCanvasRuntime(backend, journal, adapter, 10_000);
 try {
   await assert.rejects(
     runtime.plan({
+      path: " Canary/Flow.canvas ",
+      operations: [{ op: "set_text", id: "a", text: "Never planned" }],
+      idempotencyKey: "canvas-p3-padded-path",
+    }),
+    (error) =>
+      error instanceof McpError &&
+      error.code === BaseErrorCode.VALIDATION_ERROR &&
+      error.details?.reason === "canvas_path_invalid",
+  );
+
+  await assert.rejects(
+    runtime.plan({
       path: "Canary/Flow.canvas",
       operations: [{ op: "set_text", id: "a", text: "invalid key" }],
       idempotencyKey: `canvas-${String.fromCharCode(0xd800)}`,

@@ -77,6 +77,18 @@ try {
       "obsidian_canvas_patch_status",
     ],
   );
+  const paddedPathResult = await client.callTool({
+    name: "obsidian_canvas_patch_plan",
+    arguments: {
+      path: ` ${CANVAS_FIXTURE_PATH} `,
+      operations: [{ op: "set_text", id: "a", text: "Never planned" }],
+      idempotencyKey: "p3-mcp-padded-path",
+    },
+  });
+  assert.equal(paddedPathResult.isError, true);
+  assert.match(JSON.stringify(paddedPathResult.content), /must not be padded/u);
+  assert.equal(fixture.writes, 0);
+
   const plannedResult = await client.callTool({
     name: "obsidian_canvas_patch_plan",
     arguments: {

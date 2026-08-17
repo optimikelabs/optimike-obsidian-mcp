@@ -132,6 +132,28 @@ function publicKey(value: string): string {
   return value;
 }
 
+function canvasPath(value: string): string {
+  if (
+    !value ||
+    value.trim() !== value ||
+    value.length > 1024 ||
+    value.startsWith("/") ||
+    value.includes("\\") ||
+    !value.toLowerCase().endsWith(".canvas") ||
+    value
+      .split("/")
+      .some((part) => !part || part === "." || part === "..") ||
+    value.split("/")[0]?.toLowerCase() === ".obsidian"
+  ) {
+    throw new McpError(
+      BaseErrorCode.VALIDATION_ERROR,
+      "path must be an unpadded vault-relative .canvas path using valid forward-slash segments.",
+      { reason: "canvas_path_invalid" },
+    );
+  }
+  return value;
+}
+
 function internalKey(value: string): string {
   return `${INTERNAL_KEY_PREFIX}${createHash("sha256")
     .update(`${INTERNAL_KEY_DOMAIN}${value}`, "utf8")
@@ -285,9 +307,10 @@ export class GovernedCanvasRuntime {
 
   async plan(input: GovernedCanvasPlanInput): Promise<GovernedCanvasReceipt> {
     const key = publicKey(input.idempotencyKey);
-    const canonical = intent(input.path, input.operations);
+    const path = canvasPath(input.path);
+    const canonical = intent(path, input.operations);
     const durableKey = internalKey(key);
-    assertPolicy("plan", input.path, canonical.operations.length);
+    assertPolicy("plan", path, canonical.operations.length);
     const existing = this.journal.getByIdempotencyKey(durableKey);
     if (existing) {
       projection(existing, key, canonical.digest);
@@ -305,7 +328,7 @@ export class GovernedCanvasRuntime {
     }
     const source = await this.backend.read({
       contractVersion: 1,
-      path: input.path,
+      path,
     });
     const sourceBytes = Buffer.byteLength(source.content, "utf8");
     if (source.size > MAX_CANVAS_BYTES || sourceBytes > MAX_CANVAS_BYTES) {
@@ -318,7 +341,7 @@ export class GovernedCanvasRuntime {
     const compiled = compileCanvasPatch(source.content, canonical.operations);
     assertPolicy(
       "plan",
-      input.path,
+      path,
       compiled.proof.changedNodes.length + compiled.proof.changedEdgeCount,
       compiled.nextContent.length,
     );
@@ -330,7 +353,7 @@ export class GovernedCanvasRuntime {
       proof: compiled.proof as unknown as Record<string, unknown>,
     });
     const child = await this.adapter.plan({
-      path: input.path,
+      path,
       nextContent: compiled.nextContent,
       idempotencyKey: durableKey,
       expectedBeforeSha256: source.sha256,

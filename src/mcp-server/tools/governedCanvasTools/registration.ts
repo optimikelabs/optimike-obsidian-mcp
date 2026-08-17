@@ -56,6 +56,7 @@ const PlanSchema = z.object({
     .string()
     .min(1)
     .max(1024)
+    .refine((value) => value.trim() === value, "path must not be padded")
     .describe("Vault-relative path of one existing .canvas file."),
   operations: z
     .array(OperationSchema)

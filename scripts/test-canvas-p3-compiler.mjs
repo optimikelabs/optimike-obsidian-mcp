@@ -113,6 +113,24 @@ assert.throws(
   /already changed before its implicit removal/u,
 );
 
+const largeText = "x".repeat(1_048_576);
+assert.throws(
+  () =>
+    compileCanvasPatch(
+      `${JSON.stringify({ nodes: [], edges: [] })}\n`,
+      Array.from({ length: 6 }, (_, index) => ({
+        op: "add_text_node",
+        id: `large-${index}`,
+        text: largeText,
+        x: index * 220,
+        y: 0,
+        width: 200,
+        height: 100,
+      })),
+    ),
+  /exceeds .* during compilation/u,
+);
+
 const stressEdgeIds = Array.from(
   { length: 300 },
   (_, index) => `edge-${String(index).padStart(3, "0")}-${"x".repeat(247)}`,

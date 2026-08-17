@@ -11,6 +11,7 @@ import { operationDigest } from "./operations/contract.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 
 type CanvasObject = Record<string, unknown>;
+const MAX_CANVAS_BYTES = 5 * 1024 * 1024;
 
 export type CanvasPatchOperation =
   | {
@@ -75,6 +76,16 @@ function fail(message: string, reason: string): never {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function boundedCanvasContent(value: string): string {
+  if (Buffer.byteLength(value, "utf8") > MAX_CANVAS_BYTES) {
+    fail(
+      `Canvas content exceeds ${MAX_CANVAS_BYTES} UTF-8 bytes during compilation.`,
+      "canvas_compiled_content_too_large",
+    );
+  }
+  return value;
 }
 
 function record(value: unknown, label: string): CanvasObject {
@@ -363,7 +374,7 @@ export function compileCanvasPatch(
   inputOperations: CanvasPatchOperation[],
 ): CompiledCanvasPatch {
   const operations = canonicalizeCanvasPatchOperations(inputOperations);
-  const before = parseStrict(source);
+  const before = parseStrict(boundedCanvasContent(source));
   if (graphError(before)) {
     fail("The current Canvas graph is invalid.", "canvas_graph_invalid_before");
   }
@@ -399,7 +410,9 @@ export function compileCanvasPatch(
         ...(operation.color === undefined ? {} : { color: operation.color }),
       };
       expectedNodes.push(node);
-      next = replaceAt(next, ["nodes", currentNodes.length], node);
+      next = boundedCanvasContent(
+        replaceAt(next, ["nodes", currentNodes.length], node),
+      );
       changedNodes.add(operation.id);
       continue;
     }
@@ -419,7 +432,9 @@ export function compileCanvasPatch(
       }
       expectedNodes[index]!.text = operation.text;
       const currentIndex = indexById(currentNodes, operation.id);
-      next = replaceAt(next, ["nodes", currentIndex, "text"], operation.text);
+      next = boundedCanvasContent(
+        replaceAt(next, ["nodes", currentIndex, "text"], operation.text),
+      );
       changedNodes.add(operation.id);
       continue;
     }
@@ -441,7 +456,9 @@ export function compileCanvasPatch(
       for (const [key, value] of updates) {
         if (value === undefined) continue;
         expectedNodes[index]![key] = value;
-        next = replaceAt(next, ["nodes", currentIndex, key], value);
+        next = boundedCanvasContent(
+          replaceAt(next, ["nodes", currentIndex, key], value),
+        );
       }
       changedNodes.add(operation.id);
       continue;
@@ -479,13 +496,17 @@ export function compileCanvasPatch(
         removedIncidentEdges.add(edgeId);
       }
       if (incidentIds.length > 0) {
-        next = removeEdgesById(next, new Set(incidentIds));
+        next = boundedCanvasContent(
+          removeEdgesById(next, new Set(incidentIds)),
+        );
       }
       const fresh = parseStrict(next);
-      next = replaceAt(
-        next,
-        ["nodes", indexById(entityArray(fresh, "nodes"), operation.id)],
-        undefined,
+      next = boundedCanvasContent(
+        replaceAt(
+          next,
+          ["nodes", indexById(entityArray(fresh, "nodes"), operation.id)],
+          undefined,
+        ),
       );
       changedNodes.add(operation.id);
       continue;
@@ -525,7 +546,9 @@ export function compileCanvasPatch(
         ...(operation.color === undefined ? {} : { color: operation.color }),
       };
       expectedEdges.push(edge);
-      next = replaceAt(next, ["edges", currentEdges.length], edge);
+      next = boundedCanvasContent(
+        replaceAt(next, ["edges", currentEdges.length], edge),
+      );
       changedEdges.add(operation.id);
       continue;
     }
@@ -534,10 +557,12 @@ export function compileCanvasPatch(
     if (index === -1)
       fail(`Canvas edge ${operation.id} was not found.`, "canvas_edge_missing");
     expectedEdges.splice(index, 1);
-    next = replaceAt(
-      next,
-      ["edges", indexById(currentEdges, operation.id)],
-      undefined,
+    next = boundedCanvasContent(
+      replaceAt(
+        next,
+        ["edges", indexById(currentEdges, operation.id)],
+        undefined,
+      ),
     );
     changedEdges.add(operation.id);
   }
