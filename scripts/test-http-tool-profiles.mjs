@@ -143,7 +143,9 @@ async function waitForHealth(baseUrl, child) {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`backend exited early with ${child.exitCode}`);
+      throw new Error(
+        `backend exited early with ${child.exitCode}: ${child.stderrText}`,
+      );
     }
     try {
       const response = await fetch(new URL("/healthz", baseUrl));
@@ -151,7 +153,7 @@ async function waitForHealth(baseUrl, child) {
     } catch {}
     await sleep(100);
   }
-  throw new Error("backend did not become healthy");
+  throw new Error(`backend did not become healthy: ${child.stderrText}`);
 }
 
 function toolNames(payload) {
@@ -162,7 +164,7 @@ function toolNames(payload) {
 
 const vault = await createVault();
 const port = await unusedPort();
-const logDir = path.join(vault, "logs");
+const logDir = path.join(process.cwd(), ".tmp", `http-tool-profiles-${port}`);
 await mkdir(logDir, { recursive: true });
 const child = spawn(process.execPath, ["dist/index.js"], {
   cwd: process.cwd(),
@@ -196,7 +198,11 @@ const child = spawn(process.execPath, ["dist/index.js"], {
     // A process-wide env profile must not change the public /mcp legacy contract.
     MCP_TOOL_PROFILE: "tasks",
   },
-  stdio: "ignore",
+  stdio: ["ignore", "pipe", "pipe"],
+});
+child.stderrText = "";
+child.stderr?.on("data", (chunk) => {
+  child.stderrText += String(chunk);
 });
 
 try {
@@ -310,5 +316,6 @@ try {
     sleep(5_000),
   ]);
   if (child.exitCode === null) child.kill("SIGKILL");
+  await rm(logDir, { recursive: true, force: true });
   await rm(vault, { recursive: true, force: true });
 }
