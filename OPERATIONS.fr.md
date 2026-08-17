@@ -247,6 +247,39 @@ ne passe que si le reçu est `committed`, conserve le hash de la cible scellée 
 le hash réellement observé après settlement, et si une dérive supplémentaire du
 corps ou du frontmatter reste `outcome_unknown`.
 
+Le dépôt fournit cette gate live discriminante pour les plugins pris en charge :
+
+```powershell
+$env:OBSIDIAN_MODIFIED_TIME_CANARY_PATH = "Canary/modified-time-settlement.md"
+$env:OBSIDIAN_MODIFIED_TIME_CANARY_CONFIRM = "I_UNDERSTAND_THIS_DISPOSABLE_NOTE_WILL_BE_MUTATED_AND_RESTORED"
+$env:OBSIDIAN_MODIFIED_TIME_CANARY_VAULT = "operon-bridge-pilot-vault"
+$env:OBSIDIAN_MODIFIED_TIME_CANARY_PLUGIN_ID = "frontmatter-date-manager"
+$env:OBSIDIAN_MODIFIED_TIME_CANARY_PROPERTY = "modification"
+$env:OBSIDIAN_API_KEY = "<cle-local-rest-api>"
+$env:MCP_WRITE_MODE = "guarded"
+npm run smoke:modified-time-settlement-live
+```
+
+Le script perd volontairement la réponse CAS réussie et la première relecture
+de réconciliation. Il prouve d’abord le settlement du timestamp seul, puis que
+le même comportement accompagné d’une dérive du corps reste
+`outcome_unknown`. Avant chaque mutation, il attend le prochain tick que le
+format configuré, à la minute ou à la seconde, peut réellement représenter,
+puis franchit la marge de fraîcheur du plugin supporté. Il ne désactive le
+plugin de date que pour la restauration
+exacte, rétablit son état activé, écrit une preuve JSON expurgée sous la racine
+temporaire du système et ne conserve les éléments privés de récupération que si
+la restauration exacte ne peut pas être vérifiée.
+
+`Ctrl-C` et `SIGTERM` exécutent cette même restauration protégée avant la sortie
+du processus. Les mainteneurs peuvent prouver ce chemin d’interruption de façon
+déterministe avec
+`OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL=SIGTERM_DURING_POSITIVE_APPLY` : le
+signal est injecté après l’acceptation du CAS par le Bridge mais avant la fin de
+l’apply MCP. Le code de sortie attendu est `143`, tandis que le hash de la note
+et l’état activé du plugin doivent tous deux être identiques à leurs valeurs
+initiales.
+
 ## Frontmatter gouvernée P1
 
 P1 accepte des intentions top-level `set`/`delete` bornées et les compile sans

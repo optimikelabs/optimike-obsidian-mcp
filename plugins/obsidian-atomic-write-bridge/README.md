@@ -36,6 +36,12 @@ The Bridge never relaxes CAS and never decides that a changed note is
 equivalent. Optimike MCP may use this metadata only after an effect, within a
 bounded attempt window, and only when the configured property is protected and
 the rest of the observed note is byte-identical to the sealed result.
+Only source-stable plain YAML property names are advertised: Unicode
+letters/marks/numbers, `_`, `.`, `-`, and internal spaces, starting with a letter
+or `_`. YAML boolean/null words, purely numeric starts, colon, comma, newline,
+surrounding whitespace, quoting indicators such as `#`, and names longer than
+128 JavaScript string code units are rejected. The comma boundary is also required because
+`MCP_PROTECTED_FRONTMATTER_KEYS` is a comma-delimited fail-closed list.
 
 ## Install from source
 

@@ -95,7 +95,14 @@ Receipts and logs never expose `nextContent` or the physical journal path.
 Atomic Write Bridge 0.2.0 reports the exact modified-time property configured by
 an enabled supported integration: Frontmatter Date Manager, Update Time, or
 Update time on edit. Planning seals that policy only when the property is also
-listed in `MCP_PROTECTED_FRONTMATTER_KEYS`.
+listed in `MCP_PROTECTED_FRONTMATTER_KEYS`. Because that configuration is a
+comma-delimited list, the Bridge never advertises a modified-time property whose
+name contains a comma. It also requires a source-stable plain YAML key made of
+Unicode letters, marks or numbers plus `_`, `.`, `-` and internal spaces, so
+quoted forms such as `#modified` cannot disagree with the runtime's exact
+top-level line proof. It must start with a letter or `_`; YAML boolean/null
+words, numeric starts, colon, newline, surrounding whitespace and names longer
+than 128 JavaScript string code units are rejected at the same boundary.
 
 The write precondition remains an exact whole-file SHA-256 CAS: settlement does
 not weaken pre-effect CAS. No timestamp is ignored before the effect. During

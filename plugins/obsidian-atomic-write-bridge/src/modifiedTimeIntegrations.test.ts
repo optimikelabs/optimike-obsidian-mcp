@@ -64,6 +64,50 @@ test("rejects inactive, numeric, timezone and unsafe configurations", () => {
     ),
     [],
   );
+  assert.deepEqual(
+    getModifiedTimeIntegrations(
+      app({
+        "update-time": { settings: { updatedPropertyName: "true" } },
+      }),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    getModifiedTimeIntegrations(
+      app({
+        "update-time": { settings: { updatedPropertyName: "modified,time" } },
+      }),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    getModifiedTimeIntegrations(
+      app({
+        "update-time": { settings: { updatedPropertyName: "#modified" } },
+      }),
+    ),
+    [],
+  );
+});
+
+test("accepts source-stable plain YAML property names", () => {
+  assert.deepEqual(
+    getModifiedTimeIntegrations(
+      app({
+        "update-time-on-edit": {
+          settings: {
+            dateFormat: "yyyy-MM-dd'T'HH:mm",
+            headerUpdated: "last modified",
+          },
+        },
+        "update-time": { settings: { updatedPropertyName: "modified.at" } },
+      }),
+    ),
+    [
+      { pluginId: "update-time-on-edit", propertyName: "last modified" },
+      { pluginId: "update-time", propertyName: "modified.at" },
+    ],
+  );
 });
 
 test("deduplicates properties exposed by more than one supported plugin", () => {

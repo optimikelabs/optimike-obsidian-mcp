@@ -32,6 +32,12 @@ const bridgeReadme = await text(
   "plugins/obsidian-atomic-write-bridge/README.md",
 );
 const liveCanary = await text("scripts/smoke-atomic-note-mcp-live.mjs");
+const modifiedTimeLiveCanary = await text(
+  "scripts/smoke-modified-time-settlement-live.mjs",
+);
+const modifiedTimeCanaryHelpers = await text(
+  "scripts/modified-time-canary-helpers.mjs",
+);
 const operations = await text("OPERATIONS.md");
 const operationsFr = await text("OPERATIONS.fr.md");
 const security = await text("SECURITY.md");
@@ -73,6 +79,10 @@ assert.equal(
 assert.equal(
   pkg.scripts["smoke:atomic-note-mcp-live"],
   "npm run build && node scripts/smoke-atomic-note-mcp-live.mjs",
+);
+assert.equal(
+  pkg.scripts["smoke:modified-time-settlement-live"],
+  "npm run build && node scripts/smoke-modified-time-settlement-live.mjs",
 );
 assert.equal(
   pkg.scripts["test:governed-note-replace-http"],
@@ -189,6 +199,16 @@ assert.match(adr, /never\s+ignores a field\s+globally/i);
 assert.match(bridgeReadme, /Version 0\.2\.0/i);
 assert.match(bridgeReadme, /Frontmatter Date Manager/i);
 assert.match(bridgeReadme, /Update Time/i);
+assert.match(bridgeReadme, /comma-delimited fail-closed list/i);
+assert.match(bridgeReadme, /128 JavaScript string code units/i);
+assert.match(bridgeReadme, /source-stable plain YAML property names/i);
+assert.match(contract, /never advertises[\s\S]*contains a comma/i);
+assert.match(contractFr, /n.annonce[\s\S]*contient une virgule/i);
+assert.match(contract, /128 JavaScript string code units/i);
+assert.doesNotMatch(contract, /128-byte/i);
+assert.match(contract, /quoted forms such as `#modified`/i);
+assert.match(contractFr, /128 unités de code de chaîne JavaScript/i);
+assert.match(contractFr, /formes quotées comme `#modified`/i);
 assert.match(
   security,
   /Supported modified-time plugins do not weaken that CAS/i,
@@ -204,10 +224,73 @@ assert.match(
   operationsFr,
   /dérive supplémentaire du[\s\S]*corps ou du frontmatter/i,
 );
+assert.match(operations, /smoke:modified-time-settlement-live/);
+assert.match(operationsFr, /smoke:modified-time-settlement-live/);
+assert.match(modifiedTimeLiveCanary, /os\.tmpdir\(\)/);
+assert.match(modifiedTimeLiveCanary, /dropNextCasResponse/);
+assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);
+assert.match(modifiedTimeLiveCanary, /waitForNextRepresentableTimestamp/);
+assert.match(modifiedTimeCanaryHelpers, /\[,\\r\\n:\]/);
+assert.match(modifiedTimeCanaryHelpers, /\\p\{L\}.*\\p\{M\}.*\\p\{N\}/);
+assert.match(modifiedTimeCanaryHelpers, /representableTickMs/);
+assert.match(modifiedTimeCanaryHelpers, /60_000/);
+assert.match(
+  pkg.scripts["check:atomic-write"],
+  /test-modified-time-canary-helpers/,
+);
+assert.match(modifiedTimeLiveCanary, /positiveStatus\.outcome, "committed"/);
+assert.match(
+  modifiedTimeLiveCanary,
+  /negativeStatus\.outcome, "outcome_unknown"/,
+);
+assert.match(modifiedTimeLiveCanary, /finalRead\.sha256, originalSha256/);
+assert.ok(
+  modifiedTimeLiveCanary.indexOf("const finalRead = await atomicRead();") <
+    modifiedTimeLiveCanary.indexOf("restored = true;"),
+  "restoration authority must follow the final post-plugin hash read",
+);
+assert.doesNotMatch(
+  modifiedTimeLiveCanary,
+  /path\.join\(process\.cwd\(\), ["']\.tmp["']\)/,
+);
+assert.match(modifiedTimeLiveCanary, /process\.on\("SIGINT", handleSigint\)/);
+assert.match(modifiedTimeLiveCanary, /process\.on\("SIGTERM", handleSigterm\)/);
+assert.match(modifiedTimeLiveCanary, /function cleanupOnce\(\)/);
+assert.match(modifiedTimeLiveCanary, /function trackMutation\(promise/);
+assert.match(modifiedTimeLiveCanary, /quiesceActiveMutation/);
+assert.match(
+  modifiedTimeLiveCanary,
+  /mutationQuiesced = await quiesceActiveMutation\(\);[\s\S]*await client\.close/,
+);
+assert.match(
+  modifiedTimeLiveCanary,
+  /mutationQuiesced &&[\s\S]*originalContent !== undefined/,
+);
+assert.match(
+  modifiedTimeLiveCanary,
+  /status\.backend\.bindingFingerprint !== originalBindingFingerprint/,
+);
+assert.match(
+  modifiedTimeLiveCanary,
+  /current\.sha256,[\s\S]*originalContent,[\s\S]*originalBindingFingerprint/,
+);
+assert.match(
+  modifiedTimeLiveCanary,
+  /finally \{[\s\S]*await cleanupOnce\(\);[\s\S]*process\.off\("SIGINT"/,
+);
+assert.match(operations, /SELF_SIGNAL=SIGTERM_DURING_POSITIVE_APPLY/);
+assert.match(operationsFr, /SELF_SIGNAL=SIGTERM_DURING_POSITIVE_APPLY/);
+assert.match(
+  modifiedTimeLiveCanary,
+  /signalDuringPositiveApply[\s\S]*request\.socket\.destroy\(\);[\s\S]*process\.emit\("SIGTERM"/,
+);
 
 await access("scripts/test-governed-note-replace-mcp.mjs");
 await access("scripts/test-governed-note-replace-http.mjs");
 await access("scripts/smoke-atomic-note-mcp-live.mjs");
+await access("scripts/smoke-modified-time-settlement-live.mjs");
+await access("scripts/modified-time-canary-helpers.mjs");
+await access("scripts/test-modified-time-canary-helpers.mjs");
 assert.match(
   liveCanary,
   /transientLogsParent[\s\S]*process\.cwd\(\)[\s\S]*["']logs["'][\s\S]*mkdtempSync/,

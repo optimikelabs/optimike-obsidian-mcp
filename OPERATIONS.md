@@ -240,6 +240,36 @@ receipt is `committed`, records both the sealed target hash and the actual
 settled hash, and an additional body or frontmatter change still remains
 `outcome_unknown`.
 
+The repository provides that discriminating live gate for supported plugins:
+
+```bash
+OBSIDIAN_MODIFIED_TIME_CANARY_PATH="Canary/modified-time-settlement.md" \
+OBSIDIAN_MODIFIED_TIME_CANARY_CONFIRM=I_UNDERSTAND_THIS_DISPOSABLE_NOTE_WILL_BE_MUTATED_AND_RESTORED \
+OBSIDIAN_MODIFIED_TIME_CANARY_VAULT="operon-bridge-pilot-vault" \
+OBSIDIAN_MODIFIED_TIME_CANARY_PLUGIN_ID="frontmatter-date-manager" \
+OBSIDIAN_MODIFIED_TIME_CANARY_PROPERTY="modification" \
+OBSIDIAN_API_KEY="<local-rest-api-key>" MCP_WRITE_MODE=guarded \
+npm run smoke:modified-time-settlement-live
+```
+
+The script deliberately loses both the successful CAS response and the first
+reconciliation read. It proves timestamp-only settlement, then proves that the
+same timestamp behavior plus an additional body drift remains
+`outcome_unknown`. Before each mutation it waits for the next timestamp tick
+that the configured minute- or second-resolution format can represent, then
+crosses the supported plugin freshness margin. It disables the date plugin only
+for exact restoration,
+restores the original enabled state, writes a redacted JSON proof under the
+operating-system temporary root, and retains private recovery material only if
+exact restoration cannot be verified.
+
+`Ctrl-C` and `SIGTERM` run that same guarded restoration before the process
+exits. Maintainers can prove this interruption path deterministically by setting
+`OBSIDIAN_MODIFIED_TIME_CANARY_SELF_SIGNAL=SIGTERM_DURING_POSITIVE_APPLY`; the
+signal is injected after the Bridge accepts the CAS but before the MCP apply
+settles. The expected process exit code is `143`, while the note hash and plugin
+enabled state must both match their initial values.
+
 ## Governed frontmatter P1
 
 P1 accepts bounded top-level `set`/`delete` intentions and compiles them without

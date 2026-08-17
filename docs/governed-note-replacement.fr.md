@@ -102,7 +102,15 @@ soumis à la politique de rétention bornée existante. Reçus et logs n’expos
 Atomic Write Bridge 0.2.0 annonce la propriété de date de modification
 réellement configurée par une intégration supportée et active : Frontmatter Date
 Manager, Update Time ou Update time on edit. Le planning ne scelle cette policy
-que si la propriété figure aussi dans `MCP_PROTECTED_FRONTMATTER_KEYS`.
+que si la propriété figure aussi dans `MCP_PROTECTED_FRONTMATTER_KEYS`. Cette
+configuration étant une liste séparée par des virgules, le Bridge n’annonce
+jamais une propriété de modification dont le nom contient une virgule ; les
+noms doivent aussi rester des clés YAML plain source-stable, composées de
+lettres, marques ou chiffres Unicode, de `_`, `.`, `-` et d’espaces internes.
+Elles commencent par une lettre ou `_`. Les booléens/null YAML, débuts
+numériques, formes quotées comme `#modified`, deux-points, sauts de ligne,
+espaces périphériques ou plus de 128 unités de code de chaîne JavaScript sont
+rejetés à la même frontière.
 
 La précondition d’écriture reste un CAS SHA-256 exact sur le fichier complet :
 le settlement n’affaiblit pas le CAS pré-effet. Aucun timestamp n’est ignoré
