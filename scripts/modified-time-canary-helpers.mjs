@@ -8,7 +8,9 @@ export function isSafeModifiedTimePropertyName(value) {
     value.length > 0 &&
     value.length <= 128 &&
     value.trim() === value &&
-    !/[,\r\n:]/u.test(value)
+    !/[,\r\n:]/u.test(value) &&
+    !/^(?:null|true|false|yes|no|on|off)$/iu.test(value) &&
+    /^[\p{L}_](?:[\p{L}\p{M}\p{N}_. -]*[\p{L}\p{M}\p{N}_.-])?$/u.test(value)
   );
 }
 

@@ -200,10 +200,15 @@ assert.match(bridgeReadme, /Version 0\.2\.0/i);
 assert.match(bridgeReadme, /Frontmatter Date Manager/i);
 assert.match(bridgeReadme, /Update Time/i);
 assert.match(bridgeReadme, /comma-delimited fail-closed list/i);
+assert.match(bridgeReadme, /128 JavaScript string code units/i);
+assert.match(bridgeReadme, /source-stable plain YAML property names/i);
 assert.match(contract, /never advertises[\s\S]*contains a comma/i);
 assert.match(contractFr, /n.annonce[\s\S]*contient une virgule/i);
 assert.match(contract, /128 JavaScript string code units/i);
 assert.doesNotMatch(contract, /128-byte/i);
+assert.match(contract, /quoted forms such as `#modified`/i);
+assert.match(contractFr, /128 unités de code de chaîne JavaScript/i);
+assert.match(contractFr, /formes quotées comme `#modified`/i);
 assert.match(
   security,
   /Supported modified-time plugins do not weaken that CAS/i,
@@ -226,7 +231,7 @@ assert.match(modifiedTimeLiveCanary, /dropNextCasResponse/);
 assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);
 assert.match(modifiedTimeLiveCanary, /waitForNextRepresentableTimestamp/);
 assert.match(modifiedTimeCanaryHelpers, /\[,\\r\\n:\]/);
-assert.doesNotMatch(modifiedTimeCanaryHelpers, /\\p\{L\}.*\\p\{N\}/);
+assert.match(modifiedTimeCanaryHelpers, /\\p\{L\}.*\\p\{M\}.*\\p\{N\}/);
 assert.match(modifiedTimeCanaryHelpers, /representableTickMs/);
 assert.match(modifiedTimeCanaryHelpers, /60_000/);
 assert.match(

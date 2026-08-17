@@ -7,10 +7,16 @@ import {
 assert.equal(isSafeModifiedTimePropertyName("modification"), true);
 assert.equal(isSafeModifiedTimePropertyName("last modified"), true);
 assert.equal(isSafeModifiedTimePropertyName("modified.at"), true);
+assert.equal(isSafeModifiedTimePropertyName("création date"), true);
+assert.equal(isSafeModifiedTimePropertyName("version2"), true);
 assert.equal(isSafeModifiedTimePropertyName(" modified"), false);
 assert.equal(isSafeModifiedTimePropertyName("modified "), false);
 assert.equal(isSafeModifiedTimePropertyName("modified:at"), false);
 assert.equal(isSafeModifiedTimePropertyName("modified,time"), false);
+assert.equal(isSafeModifiedTimePropertyName("#modified"), false);
+assert.equal(isSafeModifiedTimePropertyName("modified/key"), false);
+assert.equal(isSafeModifiedTimePropertyName("123"), false);
+assert.equal(isSafeModifiedTimePropertyName("true"), false);
 assert.equal(isSafeModifiedTimePropertyName("modified\nat"), false);
 assert.equal(isSafeModifiedTimePropertyName("x".repeat(129)), false);
 
