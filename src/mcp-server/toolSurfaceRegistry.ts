@@ -18,12 +18,16 @@ export const TOOL_GROUP_IDS = [
   "canvas.governed",
   "external.move",
   "external.read",
-  "metadata.direct",
+  "metadata.direct.batch",
+  "metadata.direct.frontmatter",
+  "metadata.direct.tags",
   "metadata.governed",
-  "notes.direct",
+  "notes.direct.admin",
+  "notes.direct.common",
   "notes.governed",
   "notes.read",
-  "runtime",
+  "runtime.maintenance",
+  "runtime.status",
   "semantic.canonical",
   "semantic.legacy",
   "tasks.markdown",
@@ -46,6 +50,12 @@ export type ToolAnnotationClass =
   | "governed-mutation";
 
 export type GovernedLifecycleRole = "plan" | "apply" | "status" | "recover";
+export type ToolStaticRequirement = "vault-cache";
+
+export interface ToolAvailabilityRule {
+  modes: readonly ToolRegistrationMode[];
+  requires: readonly ToolStaticRequirement[];
+}
 
 export interface ToolSurfaceEntry {
   name: string;
@@ -57,6 +67,8 @@ export interface ToolSurfaceEntry {
   annotationClass: ToolAnnotationClass;
   lifecycleRole?: GovernedLifecycleRole;
   aliasOf?: string;
+  preferredAlternativeFamily?: string;
+  availabilityRules?: readonly ToolAvailabilityRule[];
 }
 
 const ALL_MODES = TOOL_REGISTRATION_MODES;
@@ -102,6 +114,8 @@ function defineTool(
     annotationClass?: ToolAnnotationClass;
     lifecycleRole?: GovernedLifecycleRole;
     aliasOf?: string;
+    preferredAlternativeFamily?: string;
+    availabilityRules?: readonly ToolAvailabilityRule[];
   } = {},
 ): ToolSurfaceEntry {
   return {
@@ -114,6 +128,12 @@ function defineTool(
     annotationClass: options.annotationClass ?? "read-only",
     ...(options.lifecycleRole ? { lifecycleRole: options.lifecycleRole } : {}),
     ...(options.aliasOf ? { aliasOf: options.aliasOf } : {}),
+    ...(options.preferredAlternativeFamily
+      ? { preferredAlternativeFamily: options.preferredAlternativeFamily }
+      : {}),
+    ...(options.availabilityRules
+      ? { availabilityRules: options.availabilityRules }
+      : {}),
   };
 }
 
@@ -172,33 +192,40 @@ const OPERON_MUTATION_TOOLS = [
 export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
   defineTool("obsidian_read_note", "notes.read", "notes-core", ALL_MODES),
   defineTool("obsidian_list_notes", "notes.read", "notes-core", ALL_MODES),
-  defineTool("obsidian_global_search", "notes.read", "notes-core", ALL_MODES),
+  defineTool("obsidian_global_search", "notes.read", "notes-core", ALL_MODES, {
+    availabilityRules: [
+      {
+        modes: ALL_MODES,
+        requires: ["vault-cache"],
+      },
+    ],
+  }),
 
   defineTool(
     "obsidian_update_note",
-    "notes.direct",
+    "notes.direct.common",
     "notes-core",
     GUARDED_NOTE_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
   defineTool(
     "obsidian_search_replace",
-    "notes.direct",
+    "notes.direct.common",
     "notes-core",
     GUARDED_NOTE_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
   defineTool(
     "obsidian_delete_note",
-    "notes.direct",
-    "notes-core",
+    "notes.direct.admin",
+    "notes-admin",
     LIVE_OR_FILESYSTEM_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
   defineTool(
     "obsidian_move_note",
-    "notes.direct",
-    "notes-core",
+    "notes.direct.admin",
+    "notes-admin",
     FILESYSTEM_ONLY,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
@@ -211,22 +238,26 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
 
   defineTool(
     "obsidian_manage_frontmatter",
-    "metadata.direct",
-    "frontmatter",
+    "metadata.direct.frontmatter",
+    "frontmatter-direct",
     GUARDED_NOTE_MODES,
-    { surfaceClass: "direct", annotationClass: "destructive" },
+    {
+      surfaceClass: "direct",
+      annotationClass: "destructive",
+      preferredAlternativeFamily: "frontmatter-patch",
+    },
   ),
   defineTool(
     "obsidian_manage_tags",
-    "metadata.direct",
+    "metadata.direct.tags",
     "tags",
     LIVE_OR_FILESYSTEM_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
   defineTool(
     "obsidian_batch_frontmatter",
-    "metadata.direct",
-    "frontmatter",
+    "metadata.direct.batch",
+    "frontmatter-batch",
     FILESYSTEM_ONLY,
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
@@ -237,9 +268,30 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "frontmatter-patch",
   ),
 
-  defineTool("bases_list", "bases.read", "bases", BASE_READ_MODES),
-  defineTool("bases_get_schema", "bases.read", "bases", BASE_READ_MODES),
-  defineTool("bases_query", "bases.read", "bases", BASE_READ_MODES),
+  defineTool("bases_list", "bases.read", "bases", BASE_READ_MODES, {
+    availabilityRules: [
+      {
+        modes: ["headless-readonly"],
+        requires: ["vault-cache"],
+      },
+    ],
+  }),
+  defineTool("bases_get_schema", "bases.read", "bases", BASE_READ_MODES, {
+    availabilityRules: [
+      {
+        modes: ["headless-readonly"],
+        requires: ["vault-cache"],
+      },
+    ],
+  }),
+  defineTool("bases_query", "bases.read", "bases", BASE_READ_MODES, {
+    availabilityRules: [
+      {
+        modes: ["headless-readonly"],
+        requires: ["vault-cache"],
+      },
+    ],
+  }),
 
   defineTool(
     "bases_create",
@@ -274,7 +326,11 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "canvas.direct",
     "canvas",
     FILESYSTEM_ONLY,
-    { surfaceClass: "direct", annotationClass: "destructive" },
+    {
+      surfaceClass: "direct",
+      annotationClass: "destructive",
+      preferredAlternativeFamily: "canvas-patch",
+    },
   ),
 
   ...governedFamily(
@@ -342,10 +398,10 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     },
   ),
 
-  defineTool("obsidian_runtime_status", "runtime", "runtime", ALL_MODES),
+  defineTool("obsidian_runtime_status", "runtime.status", "runtime", ALL_MODES),
   defineTool(
     "obsidian_runtime_maintenance",
-    "runtime",
+    "runtime.maintenance",
     "runtime",
     ALL_MODES,
     { annotationClass: "maintenance" },
@@ -440,17 +496,36 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
 export interface CompileToolSurfaceInput {
   registrationMode: ToolRegistrationMode;
   groups?: readonly ToolGroupId[];
+  availableStaticRequirements?: readonly ToolStaticRequirement[];
+}
+
+function staticRequirementsSatisfied(
+  entry: ToolSurfaceEntry,
+  registrationMode: ToolRegistrationMode,
+  availableStaticRequirements: readonly ToolStaticRequirement[] | undefined,
+): boolean {
+  if (!availableStaticRequirements) return true;
+  const available = new Set<ToolStaticRequirement>(availableStaticRequirements);
+  return (entry.availabilityRules ?? [])
+    .filter((rule) => rule.modes.includes(registrationMode))
+    .every((rule) => rule.requires.every((requirement) => available.has(requirement)));
 }
 
 export function compileToolSurface({
   registrationMode,
   groups = TOOL_GROUP_IDS,
+  availableStaticRequirements,
 }: CompileToolSurfaceInput): readonly ToolSurfaceEntry[] {
   const selectedGroups = new Set<ToolGroupId>(groups);
   return TOOL_SURFACE_REGISTRY.filter(
     (entry) =>
       selectedGroups.has(entry.group) &&
-      entry.registrationModes.includes(registrationMode),
+      entry.registrationModes.includes(registrationMode) &&
+      staticRequirementsSatisfied(
+        entry,
+        registrationMode,
+        availableStaticRequirements,
+      ),
   ).sort((left, right) => left.name.localeCompare(right.name));
 }
 
