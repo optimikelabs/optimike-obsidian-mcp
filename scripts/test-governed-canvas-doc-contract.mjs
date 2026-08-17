@@ -43,6 +43,10 @@ for (const invariant of [
   "OBSIDIAN_BASE_URL",
   "MCP_WRITE_MODE",
   "smoke:governed-canvas-live",
+  "5 MiB",
+  "5 Mio",
+  "1 to 64",
+  "1 à 64",
 ]) {
   assert.equal(
     joined.includes(invariant),

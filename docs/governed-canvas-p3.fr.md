@@ -29,6 +29,12 @@ ciblées ou non ciblées. Il refuse un graphe initial invalide et valide le
 graphe final : IDs uniques, forme des nœuds, géométrie, côtés et références des
 edges. Il ne rend pas le Canvas et ne juge pas la qualité visuelle du layout.
 
+Un plan accepte de 1 à 64 intentions publiques. Le Canvas initial et chaque
+projection intermédiaire/finale doivent rester au plus à 5 Mio en UTF-8. Le
+mode guarded peut imposer une limite effective plus basse selon le nombre
+d'effets scellés sur les nœuds et edges, y compris les edges incidentes
+supprimées avec un nœud.
+
 ## Frontière durable et atomique
 
 Le plan lit le `.canvas`, compile le JSON strict suivant, enregistre une preuve
