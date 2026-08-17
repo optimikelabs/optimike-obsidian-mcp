@@ -582,6 +582,13 @@ export class ObsidianNoteReplaceOperationAdapter
         this.transitionOrReload(plan, [plan.status], "committed"),
       );
     }
+    const settlement = this.modifiedTimeSettlement(plan, read.content);
+    if (settlement) {
+      return receipt(
+        this.profile,
+        this.commitWithModifiedTimeSettlementOrReload(plan, settlement),
+      );
+    }
     if (read.sha256 !== plan.beforeSha256) {
       return receipt(
         this.profile,

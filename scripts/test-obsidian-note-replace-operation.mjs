@@ -1357,6 +1357,68 @@ try {
   }
 
   {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    const clock = () => now;
+    const { backend, adapter } = fixture(
+      "recover-race-to-modified-time-settlement",
+      {
+        now: clock,
+        modifiedTimeProtectedKeys: ["modification"],
+      },
+    );
+    backend.content =
+      "---\nmodification: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "modification",
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const settled = expected.replace(
+      "modification: 2026-08-17T09:59",
+      "modification: 2026-08-17T10:00",
+    );
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "recover-race-to-modified-time-settlement",
+    });
+    backend.failBeforeWriteOnce = true;
+    const unknown = await adapter.apply(
+      planned.planRef,
+      "recover-race-to-modified-time-settlement",
+    );
+    assert.equal(unknown.outcome, "outcome_unknown");
+    backend.afterRead = async () => {
+      backend.content = settled;
+      now = Date.parse("2026-08-17T10:00:02.000Z");
+    };
+    const recovered = await adapter.recover(
+      planned.planRef,
+      "recover-race-to-modified-time-settlement",
+    );
+    assert.equal(recovered.outcome, "committed");
+    assert.equal(recovered.afterProof.details.sha256, sha256(settled));
+    assert.equal(recovered.afterProof.details.sealedSha256, sha256(expected));
+    assert.equal(
+      recovered.afterProof.details.settlementPropertyName,
+      "modification",
+    );
+    assert.equal(
+      backend.replaceCalls,
+      1,
+      "recovery must converge on the settled proof without replaying CAS",
+    );
+  }
+
+  {
     const { backend, databasePath, journal, adapter } = fixture(
       "same-intent-winner-before-drift",
     );
