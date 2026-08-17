@@ -592,9 +592,11 @@ function startHttpServerWithRetry(
       }
 
       try {
-        const fetch = async (request: Request) => {
+        const fetch: typeof app.fetch = (request, env, executionCtx) => {
           const routed = rewriteProfiledMcpRequest(request);
-          return routed instanceof Response ? routed : app.fetch(routed);
+          return routed instanceof Response
+            ? routed
+            : app.fetch(routed, env, executionCtx);
         };
         const serverInstance = serve(
           { fetch, port: currentPort, hostname: host },
