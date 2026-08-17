@@ -137,13 +137,21 @@ function collectSourceFiles(root) {
   return result;
 }
 
-const sourceFiles = collectSourceFiles(path.join(repoRoot, "src", "mcp-server"));
+const registrySource = path.join(
+  repoRoot,
+  "src",
+  "mcp-server",
+  "toolSurfaceRegistry.ts",
+);
+const sourceFiles = collectSourceFiles(path.join(repoRoot, "src", "mcp-server")).filter(
+  (file) => path.resolve(file) !== path.resolve(registrySource),
+);
 const sourceCorpus = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
 
 for (const entry of TOOL_SURFACE_REGISTRY) {
   assert.ok(
     sourceCorpus.includes(`\"${entry.name}\"`) || sourceCorpus.includes(`'${entry.name}'`),
-    `registry entry ${entry.name} is not present in MCP source`,
+    `registry entry ${entry.name} is not present outside the registry itself`,
   );
 }
 
