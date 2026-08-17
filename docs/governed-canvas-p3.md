@@ -29,6 +29,11 @@ entities. It rejects an invalid current graph and validates the final graph,
 including unique IDs, node shape, geometry, edge sides, and edge references.
 It does not render the Canvas or judge visual layout quality.
 
+One plan accepts 1 to 64 public intentions. The current Canvas and every
+intermediate/final projection must remain at or below 5 MiB of UTF-8 content.
+Guarded mode may impose a lower effective limit based on the sealed number of
+node and edge effects, including incident edges removed with a node.
+
 ## Durable and atomic boundary
 
 Planning reads the current `.canvas`, compiles the next strict JSON, records a

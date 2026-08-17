@@ -12,7 +12,7 @@ setup or operations guides, not in this index.
 | [Common governed operation runtime](ADR-Common-Operation-Runtime.md)                                               | Accepted and released in 2.6.0; public atomic-note projection and live canary complete | Shared plan, apply, status, receipt and exact-plan recovery vocabulary      |
 | [P1 governed frontmatter projection](ADR-Governed-Frontmatter-P1.md)                                               | Accepted, implemented and released in 2.7.0                                            | Source-preserving domain compiler projected over the released P0 runtime    |
 | [P2 governed Base formula operation](ADR-Governed-Base-Formula-P2.md)                                              | Accepted, implemented and released in 2.8.0; live pilot passed                         | Second typed backend, source-preserving formula intent and legacy migration |
-| [P3 governed Canvas graph operation](ADR-Governed-Canvas-P3.md)                                                    | Accepted for implementation; live pilot required before release                        | Typed Canvas CAS, graph intent, unknown-value preservation                  |
+| [P3 governed Canvas graph operation](ADR-Governed-Canvas-P3.md)                                                    | Accepted, implemented and released in 2.9.0; live pilot passed                         | Typed Canvas CAS, graph intent, unknown-value preservation                  |
 
 ## Status vocabulary
 
@@ -35,3 +35,7 @@ The P2 ADR is accepted and implemented after its parsed-node
 source-preservation proof, second typed Bridge CAS, HTTP mutation backpressure,
 Linux/Windows CI, exact-head Codex Review, live Base canary, merge, and
 post-merge `main` workflow all passed. It is released in `2.8.0`.
+The P3 ADR is accepted and implemented after its bounded graph compiler,
+typed Canvas CAS, durable recovery tests, Linux/Windows CI, live Obsidian
+canary, independent hostile audit, merge, and post-merge `main` workflow all
+passed. It is released in `2.9.0`.

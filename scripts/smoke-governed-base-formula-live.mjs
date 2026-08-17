@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -27,6 +28,9 @@ const writeMode = process.env.MCP_WRITE_MODE?.trim() ?? "readonly";
 const CONFIRMATION =
   "I_UNDERSTAND_THIS_DISPOSABLE_BASE_WILL_BE_TEMPORARILY_PATCHED";
 const FORMULA = "_optimike_p2_canary";
+const packageVersion = JSON.parse(
+  readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+).version;
 
 if (!canaryPath?.toLowerCase().endsWith(".base")) {
   throw new Error(
@@ -286,7 +290,7 @@ try {
         originalSha256: original.sha256,
         finalSha256: final.sha256,
         bridgeVersion: status.plugin.version,
-        mcpVersion: process.env.MCP_SERVER_VERSION ?? "2.8.3",
+        mcpVersion: process.env.MCP_SERVER_VERSION ?? packageVersion,
         checks: [
           "typed_base_binding",
           "plan_without_write",

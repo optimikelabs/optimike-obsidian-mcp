@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-08-17
+
+### Added
+
+- Governed JSON Canvas P3 surface:
+  `obsidian_canvas_patch_plan`, `obsidian_canvas_patch_apply`,
+  `obsidian_canvas_patch_status`, and `obsidian_canvas_patch_recover`.
+- Atomic Write Bridge `0.4.0` adds an independent default-off Canvas write
+  gate, typed read/CAS routes, vault binding, SHA-256 compare-and-swap inside
+  `Vault.process`, and JSON Canvas 1.0 graph validation.
+- The MCP routing guide is now exposed as the canonical
+  `optimike://guides/tool-routing` resource over stdio and HTTP.
+
+### Changed
+
+- Tool descriptions and routing documentation now direct governed note,
+  Frontmatter, Base, Canvas, and Operon mutations to their canonical lifecycle
+  while keeping direct helpers as explicit compatibility paths.
+- Canvas node and edge intentions project over the shared durable operation
+  runtime; no generic public `operation_*` API is introduced.
+
+### Security
+
+- Planning and CAS reject malformed standard JSON Canvas fields, dangling
+  edges, duplicate or ambiguous entity histories, padded/non-canonical paths,
+  sources or projections above 5 MiB, and projected effects above the active
+  guarded policy before any durable write is admitted.
+- Localized edge deletion preserves untouched JSON literals and each surviving
+  edge's original adjacent separator instead of reparsing or globally
+  normalizing unknown values.
+
+### Validation
+
+- The exact release candidate passed 19 Windows/Linux PR checks, an independent
+  hostile contract audit, and the live Operon Bridge pilot-vault canary. The
+  canary proved no-write planning, invalid-graph rejection, exact-plan recovery
+  after a pre-dispatch interruption, post-write lost-response reconciliation,
+  idempotent replay, stale-plan conflict, and exact restoration of the original
+  Canvas SHA-256.
+
 ## [2.8.3] - 2026-08-17
 
 ### Fixed
