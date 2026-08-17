@@ -46,6 +46,7 @@ export type ObsidianNoteReplacePlan = {
   };
   modifiedTimeSettlementPolicy?: ModifiedTimeSettlementPolicy;
   executionStartedAtEpochMs?: number;
+  settlementObservationStartedAtEpochMs?: number;
   modifiedTimeSettlementEvidence?: ModifiedTimeSettlementEvidence;
 };
 
@@ -362,6 +363,52 @@ export class ObsidianNoteReplaceJournal {
     );
   }
 
+  beginModifiedTimeSettlementObservation(
+    operationId: string,
+    expected: Array<"applying" | "outcome_unknown">,
+    expectedExecutionAttemptId?: string,
+  ): ObsidianNoteReplacePlan {
+    this.maybePurgeTerminalPlans();
+    const current = this.get(operationId);
+    if (!current || !expected.some((status) => status === current.status)) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    if (
+      current.status === "applying" &&
+      (!expectedExecutionAttemptId ||
+        current.executionOwner?.attemptId !== expectedExecutionAttemptId)
+    ) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    if (current.settlementObservationStartedAtEpochMs !== undefined) {
+      return current;
+    }
+    const updated: ObsidianNoteReplacePlan = {
+      ...current,
+      settlementObservationStartedAtEpochMs: this.now(),
+      updatedAt: new Date(this.now()).toISOString(),
+    };
+    const placeholders = expected.map(() => "?").join(", ");
+    const result = this.db
+      .prepare(
+        `UPDATE obsidian_note_replace_plans
+         SET payload_json = ?, updated_at = ?
+         WHERE operation_id = ? AND status IN (${placeholders})
+           AND payload_json = ?`,
+      )
+      .run(
+        JSON.stringify(updated),
+        updated.updatedAt,
+        operationId,
+        ...expected,
+        JSON.stringify(current),
+      );
+    if (Number(result.changes) !== 1) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    return updated;
+  }
+
   commitWithModifiedTimeSettlement(
     operationId: string,
     expected: Array<"applying" | "outcome_unknown">,
@@ -427,6 +474,7 @@ export class ObsidianNoteReplaceJournal {
               attemptId: randomUUID(),
             },
             executionStartedAtEpochMs: this.now(),
+            settlementObservationStartedAtEpochMs: undefined,
           }
         : { executionOwner: undefined }),
       ...(settlementEvidence

@@ -30,6 +30,20 @@ import {
 } from "./modifiedTimeSettlement.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
+const DatePluginIdSchema = z.enum([
+  "update-time-on-edit",
+  "frontmatter-date-manager",
+  "update-time",
+]);
+const DatePropertyRoleSchema = z.enum(["created", "modified", "viewed"]);
+const FrontmatterPropertyNameSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[\p{L}_](?:[\p{L}\p{M}\p{N}_. -]*[\p{L}\p{M}\p{N}_.-])?$/u)
+  .refine((value) => value.trim() === value)
+  .refine((value) => !/[,:\r\n]/u.test(value))
+  .refine((value) => !/^(?:null|true|false|yes|no|on|off)$/iu.test(value));
 
 export type AtomicResourceProfile = {
   operationKind: string;
@@ -72,17 +86,14 @@ const StatusSchema = z
           integrations: z
             .array(
               z.object({
-                pluginId: z.enum([
-                  "update-time-on-edit",
-                  "frontmatter-date-manager",
-                  "update-time",
-                ]),
-                propertyName: z
-                  .string()
-                  .min(1)
-                  .max(128)
-                  .regex(/^[^:\r\n]+$/u)
-                  .refine((value) => value.trim() === value),
+                pluginId: DatePluginIdSchema,
+                propertyName: FrontmatterPropertyNameSchema,
+                settlementObservationDelayMs: z
+                  .number()
+                  .int()
+                  .min(0)
+                  .max(4 * 60 * 1000)
+                  .optional(),
               }),
             )
             .max(3),
@@ -91,6 +102,40 @@ const StatusSchema = z
             .int()
             .min(-14 * 60)
             .max(14 * 60),
+        }),
+      })
+      .optional(),
+    protection: z
+      .object({
+        contractVersion: z.literal(1),
+        frontmatterDateProperties: z.object({
+          integrations: z
+            .array(
+              z
+                .object({
+                  pluginId: DatePluginIdSchema,
+                  createdPropertyName: FrontmatterPropertyNameSchema.optional(),
+                  modifiedPropertyName:
+                    FrontmatterPropertyNameSchema.optional(),
+                  viewedPropertyName: FrontmatterPropertyNameSchema.optional(),
+                })
+                .refine(
+                  (integration) =>
+                    integration.createdPropertyName !== undefined ||
+                    integration.modifiedPropertyName !== undefined ||
+                    integration.viewedPropertyName !== undefined,
+                ),
+            )
+            .max(3),
+          unsupportedIntegrations: z
+            .array(
+              z.object({
+                pluginId: DatePluginIdSchema,
+                activeRoles: z.array(DatePropertyRoleSchema).min(1).max(3),
+              }),
+            )
+            .max(3)
+            .optional(),
         }),
       })
       .optional(),
@@ -140,10 +185,118 @@ export type ObsidianNoteReplacePlanInput = {
 export type ObsidianNoteReplaceAdapterOptions = {
   modifiedTimeProtectedKeys?: readonly string[];
   now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
 };
 
 function normalizedKey(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function hasSettlementObservationDelay<
+  T extends { settlementObservationDelayMs?: number },
+>(value: T): value is T & { settlementObservationDelayMs: number } {
+  return value.settlementObservationDelayMs !== undefined;
+}
+
+function effectiveProtectedFrontmatterKeysFromStatus(
+  status: z.infer<typeof StatusSchema>,
+  configuredKeys: readonly string[],
+): string[] {
+  const keys = new Map<string, string>();
+  const add = (value: string | undefined): void => {
+    if (!value) return;
+    const normalized = normalizedKey(value);
+    if (normalized && !keys.has(normalized)) keys.set(normalized, value);
+  };
+  configuredKeys.forEach(add);
+  status.settlement?.modifiedTimeFrontmatter.integrations.forEach(
+    (integration) => add(integration.propertyName),
+  );
+  status.protection?.frontmatterDateProperties.integrations.forEach(
+    (integration) => {
+      add(integration.createdPropertyName);
+      add(integration.modifiedPropertyName);
+      add(integration.viewedPropertyName);
+    },
+  );
+  return [...keys.values()];
+}
+
+export function effectiveAtomicWriteProtectedFrontmatterKeys(
+  status: unknown,
+  configuredKeys: readonly string[],
+): string[] {
+  return effectiveProtectedFrontmatterKeysFromStatus(
+    StatusSchema.parse(status),
+    configuredKeys,
+  );
+}
+
+export type AtomicWriteDateProtection = {
+  createdPropertyNames: string[];
+  unsupportedModifiedPropertyNames: string[];
+  unsupportedIntegrations: Array<{
+    pluginId: z.infer<typeof DatePluginIdSchema>;
+    activeRoles: Array<z.infer<typeof DatePropertyRoleSchema>>;
+  }>;
+};
+
+export function effectiveAtomicWriteDateProtection(
+  status: unknown,
+): AtomicWriteDateProtection {
+  const parsed = StatusSchema.parse(status);
+  const settlementIntegrations = new Set(
+    (parsed.settlement?.modifiedTimeFrontmatter.integrations ?? [])
+      .filter(hasSettlementObservationDelay)
+      .map(
+        (integration) =>
+          `${integration.pluginId}\u0000${normalizedKey(integration.propertyName)}`,
+      ),
+  );
+  const created = new Map<string, string>();
+  const unsupportedModified = new Map<string, string>();
+  const unsupportedIntegrations = new Map<
+    z.infer<typeof DatePluginIdSchema>,
+    Set<z.infer<typeof DatePropertyRoleSchema>>
+  >();
+  for (const integration of parsed.protection?.frontmatterDateProperties
+    .unsupportedIntegrations ?? []) {
+    const roles =
+      unsupportedIntegrations.get(integration.pluginId) ??
+      new Set<z.infer<typeof DatePropertyRoleSchema>>();
+    integration.activeRoles.forEach((role) => roles.add(role));
+    unsupportedIntegrations.set(integration.pluginId, roles);
+  }
+  for (const integration of parsed.protection?.frontmatterDateProperties
+    .integrations ?? []) {
+    if (integration.createdPropertyName) {
+      created.set(
+        normalizedKey(integration.createdPropertyName),
+        integration.createdPropertyName,
+      );
+    }
+    if (
+      integration.modifiedPropertyName &&
+      !settlementIntegrations.has(
+        `${integration.pluginId}\u0000${normalizedKey(integration.modifiedPropertyName)}`,
+      )
+    ) {
+      unsupportedModified.set(
+        normalizedKey(integration.modifiedPropertyName),
+        integration.modifiedPropertyName,
+      );
+    }
+  }
+  return {
+    createdPropertyNames: [...created.values()],
+    unsupportedModifiedPropertyNames: [...unsupportedModified.values()],
+    unsupportedIntegrations: [...unsupportedIntegrations.entries()].map(
+      ([pluginId, activeRoles]) => ({
+        pluginId,
+        activeRoles: [...activeRoles.values()],
+      }),
+    ),
+  };
 }
 
 function settlementPolicy(
@@ -152,12 +305,27 @@ function settlementPolicy(
 ): ModifiedTimeSettlementPolicy | undefined {
   const advertised = status.settlement?.modifiedTimeFrontmatter;
   if (!advertised) return undefined;
+  if (
+    advertised.integrations.some(
+      (integration) => integration.settlementObservationDelayMs === undefined,
+    )
+  ) {
+    throw new McpError(
+      BaseErrorCode.FORBIDDEN,
+      "The Atomic Write Bridge does not advertise a bounded settlement observation delay. Upgrade the Bridge to 0.3.0 or later before governed writes.",
+      { reason: "atomic_write_settlement_delay_missing" },
+    );
+  }
   const protectedSet = new Set(
-    protectedKeys.map(normalizedKey).filter(Boolean),
+    effectiveProtectedFrontmatterKeysFromStatus(status, protectedKeys)
+      .map(normalizedKey)
+      .filter(Boolean),
   );
-  const integrations = advertised.integrations.filter((integration) =>
-    protectedSet.has(normalizedKey(integration.propertyName)),
-  );
+  const integrations = advertised.integrations
+    .filter(hasSettlementObservationDelay)
+    .filter((integration) =>
+      protectedSet.has(normalizedKey(integration.propertyName)),
+    );
   if (integrations.length === 0) return undefined;
   return {
     contractVersion: 1,
@@ -171,6 +339,23 @@ function sameSettlementPolicy(
   right: ModifiedTimeSettlementPolicy | undefined,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function hasBoundedSettlementObservationDelays(
+  policy: ModifiedTimeSettlementPolicy | undefined,
+): boolean {
+  return (
+    policy === undefined ||
+    policy.integrations.every((integration) => {
+      const delay: unknown = integration.settlementObservationDelayMs;
+      return (
+        typeof delay === "number" &&
+        Number.isInteger(delay) &&
+        delay >= 0 &&
+        delay <= 4 * 60 * 1000
+      );
+    })
+  );
 }
 
 function sameBackendTarget(
@@ -553,6 +738,15 @@ export class ObsidianNoteReplaceOperationAdapter
     if (plan.status !== "applying" && plan.status !== "outcome_unknown") {
       return receipt(this.profile, plan);
     }
+    if (
+      !hasBoundedSettlementObservationDelays(plan.modifiedTimeSettlementPolicy)
+    ) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "The sealed plan predates bounded settlement observation delays and cannot be recovered safely. Re-plan with Atomic Write Bridge 0.3.0 or later.",
+        { reason: "sealed_settlement_delay_missing" },
+      );
+    }
     plan = await this.reconcile(plan);
     if (plan.status === "applying") {
       // A live executor still owns this plan. Only a persisted interruption
@@ -562,6 +756,11 @@ export class ObsidianNoteReplaceOperationAdapter
     if (plan.status !== "outcome_unknown") {
       return receipt(this.profile, plan);
     }
+    plan = this.beginModifiedTimeSettlementObservationOrReload(plan);
+    if (plan.status !== "outcome_unknown") {
+      return receipt(this.profile, plan);
+    }
+    await this.awaitModifiedTimeSettlementObservation(plan);
     const read = ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
@@ -634,6 +833,7 @@ export class ObsidianNoteReplaceOperationAdapter
     recoveredFromUnknown: boolean,
   ): Promise<ObsidianNoteReplacePlan> {
     const executionAttemptId = this.requiredExecutionAttemptId(plan);
+    let casDispatched = false;
     try {
       const status = StatusSchema.parse(await this.backend.status());
       if (status.backend.bindingFingerprint !== plan.bindingFingerprint) {
@@ -655,7 +855,6 @@ export class ObsidianNoteReplaceOperationAdapter
         );
       }
       if (
-        plan.modifiedTimeSettlementPolicy &&
         !sameSettlementPolicy(
           plan.modifiedTimeSettlementPolicy,
           settlementPolicy(
@@ -672,15 +871,25 @@ export class ObsidianNoteReplaceOperationAdapter
           executionAttemptId,
         );
       }
-      const result = CasSchema.parse(
-        await this.backend.replace({
-          contractVersion: 1,
-          path: plan.path,
-          bindingFingerprint: plan.bindingFingerprint,
-          expectedSha256: plan.beforeSha256,
-          nextContent: plan.nextContent,
-        }),
+      casDispatched = true;
+      const rawResult = await this.backend.replace({
+        contractVersion: 1,
+        path: plan.path,
+        bindingFingerprint: plan.bindingFingerprint,
+        expectedSha256: plan.beforeSha256,
+        nextContent: plan.nextContent,
+      });
+      plan = this.beginModifiedTimeSettlementObservationOrReload(
+        plan,
+        executionAttemptId,
       );
+      if (
+        plan.status !== "applying" ||
+        plan.executionOwner?.attemptId !== executionAttemptId
+      ) {
+        return plan;
+      }
+      const result = CasSchema.parse(rawResult);
       if (
         result.bindingFingerprint !== plan.bindingFingerprint ||
         result.path !== plan.path ||
@@ -691,6 +900,16 @@ export class ObsidianNoteReplaceOperationAdapter
           "Atomic-write postflight did not match the sealed plan.",
         );
       }
+      if (plan.modifiedTimeSettlementPolicy) {
+        await this.awaitModifiedTimeSettlementObservation(plan);
+        const reconciled = await this.reconcile(plan, executionAttemptId);
+        if (reconciled.status !== "applying") return reconciled;
+        return this.uncertain(
+          plan,
+          "The post-write observation did not reach either sealed proof.",
+          executionAttemptId,
+        );
+      }
       return this.transitionOrReload(
         plan,
         ["applying"],
@@ -699,11 +918,37 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     } catch (error) {
+      if (
+        casDispatched &&
+        plan.modifiedTimeSettlementPolicy &&
+        plan.settlementObservationStartedAtEpochMs === undefined
+      ) {
+        plan = this.beginModifiedTimeSettlementObservationOrReload(
+          plan,
+          executionAttemptId,
+        );
+        if (
+          plan.status !== "applying" ||
+          plan.executionOwner?.attemptId !== executionAttemptId
+        ) {
+          return plan;
+        }
+      }
       const conflict =
         error instanceof McpError && error.code === BaseErrorCode.CONFLICT;
       if (conflict) {
+        if (!casDispatched) {
+          return this.transitionOrReload(
+            plan,
+            ["applying"],
+            "conflict",
+            error.message,
+            executionAttemptId,
+          );
+        }
         let reconciled: ObsidianNoteReplacePlan;
         try {
+          await this.awaitModifiedTimeSettlementObservation(plan);
           reconciled = await this.reconcileCasConflict(
             plan,
             executionAttemptId,
@@ -736,11 +981,14 @@ export class ObsidianNoteReplaceOperationAdapter
           executionAttemptId,
         );
       }
-      const reconciled = await this.reconcile(plan, executionAttemptId).catch(
-        () => plan,
-      );
-      if (reconciled.status !== "applying") {
-        return reconciled;
+      if (casDispatched) {
+        await this.awaitModifiedTimeSettlementObservation(plan);
+        const reconciled = await this.reconcile(plan, executionAttemptId).catch(
+          () => plan,
+        );
+        if (reconciled.status !== "applying") {
+          return reconciled;
+        }
       }
       return this.uncertain(
         plan,
@@ -759,6 +1007,12 @@ export class ObsidianNoteReplaceOperationAdapter
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
     const matchesTarget = sameBackendTarget(plan, read);
+    if (
+      matchesTarget &&
+      this.modifiedTimeSettlementObservationRemainingMs(plan) > 0
+    ) {
+      return plan;
+    }
     if (matchesTarget && read.sha256 === plan.afterSha256) {
       return this.transitionOrReload(
         plan,
@@ -811,6 +1065,12 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     }
+    if (
+      plan.modifiedTimeSettlementPolicy &&
+      this.modifiedTimeSettlementObservationRemainingMs(plan) > 0
+    ) {
+      return plan;
+    }
     if (read.sha256 === plan.afterSha256) {
       if (observesLiveExecutor) {
         return this.commitAfterVerifiedProofOrReload(plan);
@@ -851,6 +1111,9 @@ export class ObsidianNoteReplaceOperationAdapter
   ): ModifiedTimeSettlementEvidence | undefined {
     if (
       !plan.modifiedTimeSettlementPolicy ||
+      !hasBoundedSettlementObservationDelays(
+        plan.modifiedTimeSettlementPolicy,
+      ) ||
       plan.executionStartedAtEpochMs === undefined ||
       !plan.nextContent
     ) {
@@ -865,6 +1128,71 @@ export class ObsidianNoteReplaceOperationAdapter
         settlementObservedAtEpochMs: (this.options.now ?? Date.now)(),
       },
     );
+  }
+
+  private async awaitModifiedTimeSettlementObservation(
+    plan: ObsidianNoteReplacePlan,
+  ): Promise<void> {
+    const remainingMs = this.modifiedTimeSettlementObservationRemainingMs(plan);
+    if (!Number.isFinite(remainingMs)) {
+      throw new Error(
+        "Modified-time settlement observation was not started after the CAS attempt.",
+      );
+    }
+    if (remainingMs <= 0) return;
+    const sleep =
+      this.options.sleep ??
+      ((milliseconds: number) =>
+        new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+    await sleep(remainingMs);
+  }
+
+  private modifiedTimeSettlementObservationRemainingMs(
+    plan: ObsidianNoteReplacePlan,
+  ): number {
+    if (!plan.modifiedTimeSettlementPolicy) {
+      return 0;
+    }
+    if (
+      !hasBoundedSettlementObservationDelays(plan.modifiedTimeSettlementPolicy)
+    ) {
+      return Number.POSITIVE_INFINITY;
+    }
+    if (plan.settlementObservationStartedAtEpochMs === undefined) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const observationDelayMs = Math.max(
+      0,
+      ...plan.modifiedTimeSettlementPolicy.integrations.map(
+        (integration) => integration.settlementObservationDelayMs,
+      ),
+    );
+    const now = this.options.now ?? Date.now;
+    return Math.max(
+      0,
+      plan.settlementObservationStartedAtEpochMs + observationDelayMs - now(),
+    );
+  }
+
+  private beginModifiedTimeSettlementObservationOrReload(
+    plan: ObsidianNoteReplacePlan,
+    expectedExecutionAttemptId?: string,
+  ): ObsidianNoteReplacePlan {
+    if (!plan.modifiedTimeSettlementPolicy) return plan;
+    if (plan.settlementObservationStartedAtEpochMs !== undefined) return plan;
+    if (plan.status !== "applying" && plan.status !== "outcome_unknown") {
+      return this.journal.get(plan.operationId) ?? plan;
+    }
+    try {
+      return this.journal.beginModifiedTimeSettlementObservation(
+        plan.operationId,
+        [plan.status],
+        expectedExecutionAttemptId,
+      );
+    } catch (error) {
+      if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+      return this.journal.get(plan.operationId) ?? plan;
+    }
   }
 
   private commitWithModifiedTimeSettlementOrReload(

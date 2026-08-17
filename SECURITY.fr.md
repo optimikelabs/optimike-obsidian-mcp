@@ -93,12 +93,17 @@ par défaut.
   binding backend et CAS SHA-256 via `Vault.process`. Après une réponse perdue,
   appeler `status`, jamais une nouvelle mutation aveugle ; `recover` reprend
   uniquement le plan exact scellé et n’est pas un undo.
-- Les plugins de date de modification pris en charge n’affaiblissent pas ce CAS.
-  Leur propriété active doit aussi être protégée par le MCP et scellée dans le
-  plan ; la réconciliation n’accepte qu’un timestamp frontmatter canonique et
-  monotone dans la fenêtre réelle d’apply (cinq minutes au maximum), si restaurer
-  cette ligne rend la note byte-identical à la cible scellée. Toute autre dérive
-  concurrente reste refusée fermée.
+- Les plugins de date pris en charge n’affaiblissent pas ce CAS. Le Bridge
+  `0.3.0` protège dynamiquement leurs propriétés actives de création,
+  modification et dernière vue. La création doit déjà exister et la dernière
+  vue n’est jamais ignorée. Seule une propriété de modification compatible peut
+  être admise : le MCP attend le délai d’observation borné annoncé et n’accepte
+  qu’un timestamp canonique et monotone dans la fenêtre réelle d’apply (cinq
+  minutes au maximum), si restaurer cette ligne rend la note byte-identical à
+  la cible scellée. Les configurations à effets multiples restent refusées
+  fermées. Un nom de propriété actif impossible à représenter sûrement est
+  signalé par plugin/rôle et bloque l’écriture avant CAS ; il n’est jamais omis
+  silencieusement. Toute autre dérive reste refusée fermée.
 - `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` contient le contenu scellé des plans
   non terminaux. Le conserver local à la machine, à accès restreint, hors du
   coffre, des dépôts, dossiers synchronisés, artefacts publiés et diagnostics

@@ -95,6 +95,9 @@ class FakeObsidianAtomicWriteServer {
     this.blockedCas = undefined;
     this.hangingCas = undefined;
     this.vaultReadsUnavailable = false;
+    this.dateProtection = undefined;
+    this.unsupportedDateProtection = undefined;
+    this.settlement = undefined;
   }
 
   async listen() {
@@ -167,6 +170,22 @@ class FakeObsidianAtomicWriteServer {
           writeEnabled: this.writeEnabled,
         },
         limits: { markdownOnly: true },
+        ...(this.dateProtection || this.unsupportedDateProtection
+          ? {
+              protection: {
+                contractVersion: 1,
+                frontmatterDateProperties: {
+                  integrations: this.dateProtection ?? [],
+                  ...(this.unsupportedDateProtection
+                    ? {
+                        unsupportedIntegrations: this.unsupportedDateProtection,
+                      }
+                    : {}),
+                },
+              },
+            }
+          : {}),
+        ...(this.settlement ? { settlement: this.settlement } : {}),
       });
       return;
     }
@@ -400,7 +419,10 @@ function childEnv(writeMode = "full", runtimeMode = "live", overrides = {}) {
     MCP_GUARDED_MAX_WRITE_CHARS: "100000",
     MCP_PROTECTED_FRONTMATTER_KEYS: "création,modification",
     MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: journalPath,
-    MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH: path.join(testRoot, "base-formula.sqlite"),
+    MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH: path.join(
+      testRoot,
+      "base-formula.sqlite",
+    ),
     MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: "1000",
     OBSIDIAN_RUNTIME_MODE: runtimeMode,
     OBSIDIAN_BASE_URL: fake.baseUrl,
@@ -596,6 +618,217 @@ try {
     /protected frontmatter/u,
   );
   assert.equal(fake.casRequests, 0);
+
+  fake.reset(
+    "---\nbornAt: 2026-08-13\nchangedAt: 2026-08-17T10:00\nviewedAt: 2026-08-17T09:00\nstatut: actif\n---\nbefore\n",
+  );
+  fake.dateProtection = [
+    {
+      pluginId: "update-time-on-edit",
+      createdPropertyName: "bornAt",
+      modifiedPropertyName: "changedAt",
+      viewedPropertyName: "viewedAt",
+    },
+  ];
+  fake.settlement = {
+    contractVersion: 1,
+    modifiedTimeFrontmatter: {
+      integrations: [
+        {
+          pluginId: "update-time-on-edit",
+          propertyName: "changedAt",
+          settlementObservationDelayMs: 250,
+        },
+      ],
+      utcOffsetMinutes: 0,
+    },
+  };
+  const customCreatedAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent:
+        "---\nbornAt: 2099-01-01\nchangedAt: 2026-08-17T10:00\nviewedAt: 2026-08-17T09:00\nstatut: actif\n---\nforbidden\n",
+      idempotencyKey: "dynamic-protected-created-frontmatter",
+    },
+    true,
+  );
+  assert.match(
+    customCreatedAttempt.payload.error.message,
+    /protected frontmatter/u,
+  );
+  assert.equal(fake.casRequests, 0);
+
+  const customModifiedAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent:
+        "---\nbornAt: 2026-08-13\nchangedAt: 2099-01-01T00:00\nviewedAt: 2026-08-17T09:00\nstatut: actif\n---\nforbidden\n",
+      idempotencyKey: "dynamic-protected-modified-frontmatter",
+    },
+    true,
+  );
+  assert.match(
+    customModifiedAttempt.payload.error.message,
+    /protected frontmatter/u,
+  );
+  assert.equal(fake.casRequests, 0);
+
+  const customViewedAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent:
+        "---\nbornAt: 2026-08-13\nchangedAt: 2026-08-17T10:00\nviewedAt: 2099-01-01T00:00\nstatut: actif\n---\nforbidden\n",
+      idempotencyKey: "dynamic-protected-viewed-frontmatter",
+    },
+    true,
+  );
+  assert.match(
+    customViewedAttempt.payload.error.message,
+    /protected frontmatter/u,
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset("---\nstatut: actif\n---\nbefore\n");
+  fake.dateProtection = [
+    {
+      pluginId: "update-time",
+      createdPropertyName: "bornAt",
+    },
+  ];
+  const missingCreatedAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: "---\nstatut: actif\n---\nafter\n",
+      idempotencyKey: "dynamic-missing-created-frontmatter",
+    },
+    true,
+  );
+  assert.match(
+    missingCreatedAttempt.payload.error.message,
+    /creation-date properties to exist/u,
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset("---\nchangedAt: 2026-08-17T10:00\n---\nbefore\n");
+  fake.dateProtection = [
+    {
+      pluginId: "frontmatter-date-manager",
+      modifiedPropertyName: "changedAt",
+    },
+  ];
+  const unsupportedSettlementAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: "---\nchangedAt: 2026-08-17T10:00\n---\nafter\n",
+      idempotencyKey: "dynamic-unsupported-modified-settlement",
+    },
+    true,
+  );
+  assert.match(
+    unsupportedSettlementAttempt.payload.error.message,
+    /cannot safely settle/u,
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset("---\nstatut: actif\n---\nbefore\n");
+  fake.unsupportedDateProtection = [
+    {
+      pluginId: "frontmatter-date-manager",
+      activeRoles: ["viewed"],
+    },
+    {
+      pluginId: "update-time",
+      activeRoles: ["created", "modified"],
+    },
+  ];
+  const unrepresentableDateConfigurationAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: "---\nstatut: actif\n---\nafter\n",
+      idempotencyKey: "dynamic-unrepresentable-date-configuration",
+    },
+    true,
+  );
+  assert.match(
+    unrepresentableDateConfigurationAttempt.payload.error.message,
+    /cannot safely represent active date-property settings/u,
+  );
+  assert.match(
+    unrepresentableDateConfigurationAttempt.payload.error.message,
+    /frontmatter-date-manager \(viewed\)/u,
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset("---\nstatut: actif\n---\nbefore\n");
+  const unsupportedConfigurationChangedPlan = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: "---\nstatut: actif\n---\nafter\n",
+      idempotencyKey: "dynamic-unsupported-date-config-before-apply",
+    },
+  );
+  fake.unsupportedDateProtection = [
+    {
+      pluginId: "frontmatter-date-manager",
+      activeRoles: ["viewed"],
+    },
+  ];
+  const casBeforeUnsupportedConfigurationChange = fake.casRequests;
+  const unsupportedConfigurationChangedApply = await call(
+    session,
+    "obsidian_note_replace_apply",
+    {
+      planRef: unsupportedConfigurationChangedPlan.payload.planRef,
+      idempotencyKey: "dynamic-unsupported-date-config-before-apply",
+    },
+  );
+  assertTerminal(unsupportedConfigurationChangedApply.payload, "rejected");
+  assert.equal(fake.casRequests, casBeforeUnsupportedConfigurationChange);
+
+  fake.reset("---\ncustomDate: 2026-08-17T10:00\nstatut: actif\n---\nbefore\n");
+  const protectionChangedPlan = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent:
+        "---\ncustomDate: 2099-01-01T00:00\nstatut: actif\n---\nafter\n",
+      idempotencyKey: "dynamic-protection-changed-before-apply",
+    },
+  );
+  fake.dateProtection = [
+    {
+      pluginId: "frontmatter-date-manager",
+      modifiedPropertyName: "customDate",
+    },
+  ];
+  const casBeforeProtectionChange = fake.casRequests;
+  const protectionChangedApply = await call(
+    session,
+    "obsidian_note_replace_apply",
+    {
+      planRef: protectionChangedPlan.payload.planRef,
+      idempotencyKey: "dynamic-protection-changed-before-apply",
+    },
+  );
+  assertTerminal(protectionChangedApply.payload, "rejected");
+  assert.equal(fake.casRequests, casBeforeProtectionChange);
+
+  fake.reset();
 
   const invalidMarkdown = await call(
     session,

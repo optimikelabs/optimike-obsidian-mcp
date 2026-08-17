@@ -232,13 +232,15 @@ restoration retains the private directory at the recovery path printed when the
 script starts; restore only from its explicit backup metadata. Never point the
 canary at an ordinary user note.
 
-Atomic Write Bridge `0.2.0` also reports supported active modified-time
-integrations. When the disposable vault uses one, include its configured
-property in `MCP_PROTECTED_FRONTMATTER_KEYS` and add a lost-response canary in
-which the plugin advances only that timestamp. The gate passes only when the
-receipt is `committed`, records both the sealed target hash and the actual
-settled hash, and an additional body or frontmatter change still remains
-`outcome_unknown`.
+Atomic Write Bridge `0.3.0` reports supported active creation, modification and
+last-viewed properties. The MCP derives their structural protection without a
+duplicate `MCP_PROTECTED_FRONTMATTER_KEYS` entry; that variable remains
+additive for custom fields. The live gate deliberately uses a static sentinel
+key so it proves the Bridge-derived property. It passes only when the receipt
+is `committed`, records both the sealed target hash and the actual settled hash,
+and an additional body or frontmatter change remains `outcome_unknown`.
+This lost-response canary therefore verifies the derived contract rather than a
+duplicate environment allowlist.
 
 The repository provides that discriminating live gate for supported plugins:
 
@@ -252,16 +254,24 @@ OBSIDIAN_API_KEY="<local-rest-api-key>" MCP_WRITE_MODE=guarded \
 npm run smoke:modified-time-settlement-live
 ```
 
-The script deliberately loses both the successful CAS response and the first
-reconciliation read. It proves timestamp-only settlement, then proves that the
-same timestamp behavior plus an additional body drift remains
-`outcome_unknown`. Before each mutation it waits for the next timestamp tick
-that the configured minute- or second-resolution format can represent, then
-crosses the supported plugin freshness margin. It disables the date plugin only
-for exact restoration,
+The default positive case keeps the successful CAS response and proves that the
+MCP waits for the real plugin write before returning `committed`. The negative
+case deliberately loses both the successful CAS response and the first
+reconciliation read, then proves that the same timestamp behavior plus an
+additional body drift remains `outcome_unknown`. Before each mutation the
+script waits for the next timestamp tick that the configured minute- or
+second-resolution format can represent, then crosses the supported plugin
+freshness margin. It disables the date plugin only for exact restoration,
 restores the original enabled state, writes a redacted JSON proof under the
 operating-system temporary root, and retains private recovery material only if
 exact restoration cannot be verified.
+
+The deterministic operation fixture mirrors that normal-response path and also
+proves custom creation/modification/last-viewed names, missing-creation refusal
+and apply-time settings revalidation. It also proves that every active
+date-property role whose configured name is not source-stable is surfaced as an
+unsupported configuration and rejected before CAS, including when that setting
+appears between plan and apply.
 
 `Ctrl-C` and `SIGTERM` run that same guarded restoration before the process
 exits. Maintainers can prove this interruption path deterministically by setting

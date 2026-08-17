@@ -56,8 +56,30 @@ export type AtomicWriteStatusResponse = {
           | "frontmatter-date-manager"
           | "update-time";
         propertyName: string;
+        settlementObservationDelayMs?: number;
       }>;
       utcOffsetMinutes: number;
+    };
+  };
+  protection?: {
+    contractVersion: 1;
+    frontmatterDateProperties: {
+      integrations: Array<{
+        pluginId:
+          | "update-time-on-edit"
+          | "frontmatter-date-manager"
+          | "update-time";
+        createdPropertyName?: string;
+        modifiedPropertyName?: string;
+        viewedPropertyName?: string;
+      }>;
+      unsupportedIntegrations?: Array<{
+        pluginId:
+          | "update-time-on-edit"
+          | "frontmatter-date-manager"
+          | "update-time";
+        activeRoles: Array<"created" | "modified" | "viewed">;
+      }>;
     };
   };
 };

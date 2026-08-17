@@ -92,17 +92,43 @@ Receipts and logs never expose `nextContent` or the physical journal path.
 
 ### Bounded modified-time settlement
 
-Atomic Write Bridge 0.2.0 reports the exact modified-time property configured by
-an enabled supported integration: Frontmatter Date Manager, Update Time, or
-Update time on edit. Planning seals that policy only when the property is also
-listed in `MCP_PROTECTED_FRONTMATTER_KEYS`. Because that configuration is a
-comma-delimited list, the Bridge never advertises a modified-time property whose
-name contains a comma. It also requires a source-stable plain YAML key made of
-Unicode letters, marks or numbers plus `_`, `.`, `-` and internal spaces, so
-quoted forms such as `#modified` cannot disagree with the runtime's exact
-top-level line proof. It must start with a letter or `_`; YAML boolean/null
-words, numeric starts, colon, newline, surrounding whitespace and names longer
-than 128 JavaScript string code units are rejected at the same boundary.
+Atomic Write Bridge 0.3.0 reads the active settings of Frontmatter Date Manager,
+Update Time and Update time on edit. Its protection contract reports their
+actual creation, modification and last-viewed property names. The MCP adds
+those names to its structural protection automatically;
+`MCP_PROTECTED_FRONTMATTER_KEYS` remains additive for custom fields and older
+Bridges. A configured creation property must already exist in the target note,
+otherwise planning fails closed because the plugin could insert a second line
+after the CAS. Last-viewed is protected but never settled: opening a note is a
+separate user event, not an expected consequence of the write.
+
+Only a compatible modification property enters the settlement contract. The
+Bridge also reports the bounded observation delay implied by each plugin's
+debounce/rate-limit settings. The MCP starts that durable window only after the
+CAS call returns (or fails after dispatch), then waits before its postflight
+read even when the CAS response succeeds normally. A concurrent `status` or
+`recover` observer cannot terminalize either the sealed hash or an early
+timestamp settlement during that wait. Numeric values,
+forced timezones, unsupported formats or delays beyond four minutes are not
+admitted. A delay-less legacy settlement advertisement, including Bridge 0.2.0
+with an active date integration, fails closed and requires Bridge 0.3.0 or
+later. A non-terminal legacy receipt already sealed without that delay remains
+`outcome_unknown` and must be re-planned; recovery never guesses a zero delay.
+Frontmatter Date Manager is also protection-only when update count,
+a post-update command or inversion repair is enabled, because those settings
+can change more than the single modification line. An active modification
+property without a matching settlement entry makes planning fail closed.
+
+The Bridge requires source-stable plain YAML keys made of Unicode letters,
+marks or numbers plus `_`, `.`, `-` and internal spaces. It never advertises a
+property whose name contains a comma. Quoted forms such as `#modified`, YAML
+boolean/null words, numeric starts, colon, newline, surrounding whitespace and
+names longer than 128 JavaScript string code units are rejected at the same
+boundary. If any active creation, modification or last-viewed property is not
+representable at that boundary, the Bridge reports the affected plugin and
+role without returning the unsafe raw name. The MCP rejects planning before CAS
+instead of silently treating that active property as absent. This signal is
+revalidated at apply/recover like the other date-plugin settings.
 
 The write precondition remains an exact whole-file SHA-256 CAS: settlement does
 not weaken pre-effect CAS. No timestamp is ignored before the effect. During
@@ -110,7 +136,7 @@ postflight, lost-response reconciliation, or status after interruption, the
 adapter may accept exactly one additional top-level frontmatter line only when
 all of these facts are proven:
 
-- it is the unique configured modified-time property reported by the Bridge;
+- it is a configured modified-time property reported by the Bridge;
 - the proof still comes from the sealed backend identity and logical target;
 - both values are canonical local datetimes and the observed value advances;
 - the observed timestamp falls inside the real, at-most-five-minute apply and

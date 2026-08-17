@@ -92,11 +92,17 @@ by default.
   backend binding and SHA-256 CAS through `Vault.process`. A lost response is
   followed by `status`, never by a blind new mutation; `recover` resumes only
   the exact sealed plan and is not undo.
-- Supported modified-time plugins do not weaken that CAS. Their active property
-  must also be MCP-protected and sealed in the plan; reconciliation accepts only
-  one canonical monotonic frontmatter timestamp inside the actual apply window
-  (at most five minutes) when restoring that line makes the note byte-identical
-  to the sealed target. All other concurrent drift remains fail-closed.
+- Supported date plugins do not weaken that CAS. Bridge `0.3.0` dynamically
+  protects their active creation, modification and last-viewed properties.
+  Creation must already exist and last-viewed is never ignored. Only a
+  compatible modification property may settle: the MCP waits the advertised
+  bounded observation delay and accepts one canonical monotonic timestamp
+  inside the actual apply window (at most five minutes) when restoring that
+  line makes the note byte-identical to the sealed target. Unsupported
+  multi-effect configurations remain fail-closed. An active configured
+  property name that cannot be represented safely is reported by plugin/role
+  and rejects the write before CAS; it is never silently omitted. All other
+  drift remains fail-closed.
 - `MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH` contains non-terminal sealed content.
   Keep it machine-local, access-restricted and outside the vault, repositories,
   synchronized folders, backups published as artifacts and public diagnostics.

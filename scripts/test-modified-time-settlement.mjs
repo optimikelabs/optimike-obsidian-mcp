@@ -16,6 +16,7 @@ const policy = {
     {
       pluginId: "frontmatter-date-manager",
       propertyName: "modification",
+      settlementObservationDelayMs: 0,
     },
   ],
   utcOffsetMinutes: 0,

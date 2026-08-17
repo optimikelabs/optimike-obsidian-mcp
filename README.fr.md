@@ -15,15 +15,15 @@ documents autorisés hors du coffre.
 
 ## Carte des capacités
 
-| Domaine                 | Ce que fournit le MCP                                                                           | Dépendance principale                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Notes                   | Lecture/recherche/update plus plans gouvernés de note atomique et Frontmatter source-preserving | Coffre ; Local REST API + Atomic Write Bridge pour le CAS gouverné |
-| Bases et Canvas         | Requêtes Bases, plans de formules gouvernés et source-preserving, validation et helpers Canvas bornés | Bases Bridge live et CAS Base typé |
-| Tâches                  | Lecture/requête Tasks + 23 outils Operon gouvernés                                              | Operon Developer API V1 via le Bridge                              |
-| Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable                                   | `.smart-env` + embedding Ollama ou OpenAI                          |
-| Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions                            | Filesystem local                                                   |
-| Documents externes      | Lectures/handoff gouvernés + move local opt-in avec réparation                                  | Allowlist ; stdio local pour le move                               |
-| Administration headless | Opérations bornées sur notes, métadonnées et filesystem du coffre                               | Mode guarded/filesystem sur un coffre copié                        |
+| Domaine                 | Ce que fournit le MCP                                                                                 | Dépendance principale                                              |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Notes                   | Lecture/recherche/update plus plans gouvernés de note atomique et Frontmatter source-preserving       | Coffre ; Local REST API + Atomic Write Bridge pour le CAS gouverné |
+| Bases et Canvas         | Requêtes Bases, plans de formules gouvernés et source-preserving, validation et helpers Canvas bornés | Bases Bridge live et CAS Base typé                                 |
+| Tâches                  | Lecture/requête Tasks + 23 outils Operon gouvernés                                                    | Operon Developer API V1 via le Bridge                              |
+| Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable                                         | `.smart-env` + embedding Ollama ou OpenAI                          |
+| Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions                                  | Filesystem local                                                   |
+| Documents externes      | Lectures/handoff gouvernés + move local opt-in avec réparation                                        | Allowlist ; stdio local pour le move                               |
+| Administration headless | Opérations bornées sur notes, métadonnées et filesystem du coffre                                     | Mode guarded/filesystem sur un coffre copié                        |
 
 Le registre actuel des outils vit dans
 [Surface des outils](docs/obsidian_mcp_tools_spec.md). Leur disponibilité dépend
@@ -90,7 +90,7 @@ Activer seulement les surfaces utilisées :
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) :
   notes, métadonnées et tags en live ;
 - **Bases Bridge (REST)** inclus : requêtes `.base` live et CAS typé opt-in pour les formules source-preserving gouvernées `plan → apply → status → recover` ; les remplacements complets historiques sont désactivés par défaut ([contrat P2](docs/governed-base-formula-p2.fr.md)) ;
-- **Optimike Atomic Write Bridge** inclus : compare-and-replace SHA-256 opt-in pour les plans gouvernés de note complète et Frontmatter source-preserving `plan → apply → status → recover` ; le Bridge 0.2.0 annonce aussi les métadonnées strictement bornées de settlement des plugins de date actifs supportés, sans assouplir le CAS ; `planRef` opaque, réponse perdue → `status`, recovery exact ≠ undo ([note](docs/governed-note-replacement.fr.md), [P1](docs/governed-frontmatter-p1.fr.md)) ;
+- **Optimike Atomic Write Bridge** inclus : compare-and-replace SHA-256 opt-in pour les plans gouvernés de note complète et Frontmatter source-preserving `plan → apply → status → recover` ; le Bridge 0.3.0 dérive les noms configurés des propriétés de création, modification et dernière vue depuis les plugins de date actifs supportés, refuse les noms actifs qu’il ne peut pas représenter sûrement, et seul un timestamp de modification strictement borné peut être admis après le CAS ; `planRef` opaque, réponse perdue → `status`, recovery exact ≠ undo ([note](docs/governed-note-replacement.fr.md), [P1](docs/governed-frontmatter-p1.fr.md)) ;
 - **Smart Connections** : index sémantique `.smart-env` ;
 - **Operon Developer API V1** et **Optimike Operon Bridge** inclus : tâches live
   gouvernées via la Developer API officielle V1 ;

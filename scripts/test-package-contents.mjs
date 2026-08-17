@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
 
 const npmCli = process.env.npm_execpath;
-const command = npmCli ? process.execPath : "npm";
+const command = npmCli
+  ? process.execPath
+  : process.platform === "win32"
+    ? "npm.cmd"
+    : "npm";
 const args = npmCli
   ? [npmCli, "pack", "--dry-run", "--json"]
   : ["pack", "--dry-run", "--json"];

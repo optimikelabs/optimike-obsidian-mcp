@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.3] - 2026-08-17
+
+### Fixed
+
+- Governed note and Frontmatter writes now derive the configured creation,
+  modification and last-viewed property names from supported active Obsidian
+  date plugins instead of assuming `création` and `modification`.
+- A successful CAS now waits for the plugin-advertised bounded observation
+  delay and re-reads the note before committing its receipt, covering deferred
+  timestamp writes even when the original CAS response was received normally.
+- The observation window now starts at the durable post-CAS boundary rather
+  than at preflight, and concurrent status/recovery cannot commit either a
+  sealed or partial settlement proof before the longest configured delay ends.
+
+### Security
+
+- Creation and last-viewed properties are protected but never ignored during
+  reconciliation. An active creation property must already exist before a plan
+  is admitted.
+- Unsupported multi-effect date-plugin configurations fail closed. In
+  particular, Frontmatter Date Manager update counters, post-update commands,
+  inversion repair, numeric values, forced timezones and excessive delays are
+  never treated as a one-line timestamp settlement.
+- Legacy settlement advertisements without an explicit bounded delay fail
+  closed; active date integrations require Atomic Write Bridge 0.3.0 or later,
+  and legacy non-terminal receipts without a sealed delay remain unrecoverable
+  rather than guessing a zero wait.
+- Active creation, modification or last-viewed properties whose configured
+  names cannot be represented as source-stable plain YAML keys are now reported
+  explicitly by plugin and role and rejected before CAS instead of disappearing
+  from the protection contract.
+
+### Changed
+
+- Atomic Write Bridge `0.3.0` exposes additive date-property protection and a
+  bounded settlement observation delay. Static
+  `MCP_PROTECTED_FRONTMATTER_KEYS` remains an additive policy for custom or
+  unsupported fields, not a duplicate configuration requirement.
+
+### Validation
+
+- Deterministic Bridge and real stdio MCP tests cover custom property names,
+  last-viewed protection, missing creation fields, apply-time configuration
+  changes, invalid active names, shared-property plugins, unsafe FDM options and delayed settlement
+  after a successful CAS response. Concurrent observers are also proven unable
+  to terminalize either the sealed hash or an early timestamp settlement before
+  that delay expires, even when preflight itself outlasts the delay.
+
 ## [2.8.2] - 2026-08-17
 
 ### Fixed

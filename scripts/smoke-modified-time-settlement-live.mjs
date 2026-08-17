@@ -321,12 +321,14 @@ assert.equal(typeof proxyAddress, "object");
 const proxyBaseUrl = `http://127.0.0.1:${proxyAddress.port}`;
 
 const protectedKeys = new Set(
-  (process.env.MCP_PROTECTED_FRONTMATTER_KEYS ?? "création,modification")
+  (
+    process.env.MCP_PROTECTED_FRONTMATTER_KEYS ??
+    "canary-static-key-not-present"
+  )
     .split(",")
     .map((key) => key.trim())
     .filter(Boolean),
 );
-protectedKeys.add(propertyName);
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: ["dist/index.js"],
@@ -393,6 +395,17 @@ async function applyWithLostResponse(receipt, idempotencyKey) {
   assert.equal(result.outcome, "outcome_unknown");
   assert.equal(dropNextCasResponse, false);
   assert.equal(dropNextReconciliationRead, false);
+  return result;
+}
+
+async function applyWithResponse(receipt, idempotencyKey) {
+  const result = await trackMutation(
+    call("obsidian_note_replace_apply", {
+      planRef: receipt.planRef,
+      idempotencyKey,
+    }),
+  );
+  assert.equal(result.outcome, "committed");
   return result;
 }
 
@@ -594,7 +607,7 @@ try {
   );
   const status = await atomicStatus();
   assert.equal(status.plugin.id, "obsidian-atomic-write-bridge");
-  assert.equal(status.plugin.version, "0.2.0");
+  assert.equal(status.plugin.version, "0.3.0");
   assert.equal(status.backend.writeEnabled, true);
   assert.match(status.backend.bindingFingerprint, /^[a-f0-9]{64}$/u);
   originalBindingFingerprint = status.backend.bindingFingerprint;
@@ -608,6 +621,22 @@ try {
     ),
     true,
     "The Bridge did not advertise the expected modified-time integration.",
+  );
+  const protectedIntegrations =
+    status.protection?.frontmatterDateProperties?.integrations ?? [];
+  assert.equal(
+    protectedIntegrations.some(
+      (integration) =>
+        integration.pluginId === pluginId &&
+        integration.modifiedPropertyName === propertyName,
+    ),
+    true,
+    "The Bridge did not dynamically protect the expected modified-time property.",
+  );
+  assert.equal(
+    protectedKeys.has(propertyName),
+    false,
+    "The canary must prove Bridge-derived protection without a duplicate static MCP key.",
   );
 
   const original = await atomicRead();
@@ -659,7 +688,9 @@ try {
   }\n${positiveMarker}\n`;
   const positiveKey = `modified-time-live:${runId}:positive`;
   const positivePlan = await plan(positiveTarget, positiveKey);
-  const positiveApply = await applyWithLostResponse(positivePlan, positiveKey);
+  const positiveApply = await (selfSignal
+    ? applyWithLostResponse(positivePlan, positiveKey)
+    : applyWithResponse(positivePlan, positiveKey));
   if (selfSignal === "SIGTERM_AFTER_POSITIVE_APPLY") {
     process.emit("SIGTERM", "SIGTERM");
     process.emit("SIGTERM", "SIGTERM");

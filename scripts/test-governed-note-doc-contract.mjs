@@ -196,39 +196,79 @@ assert.match(contractFr, /cinq minutes maximum/i);
 assert.match(adr, /never weaken the admission or pre-effect CAS/i);
 assert.match(adr, /same sealed backend identity and logical target/i);
 assert.match(adr, /never\s+ignores a field\s+globally/i);
-assert.match(bridgeReadme, /Version 0\.2\.0/i);
+assert.match(bridgeReadme, /Version 0\.3\.0/i);
 assert.match(bridgeReadme, /Frontmatter Date Manager/i);
 assert.match(bridgeReadme, /Update Time/i);
-assert.match(bridgeReadme, /comma-delimited fail-closed list/i);
+assert.match(
+  bridgeReadme,
+  /comma-delimited\s+`MCP_PROTECTED_FRONTMATTER_KEYS`/i,
+);
 assert.match(bridgeReadme, /128 JavaScript string code units/i);
 assert.match(bridgeReadme, /source-stable plain YAML property names/i);
+assert.match(bridgeReadme, /creation, modification\s+and last-viewed/i);
+assert.match(bridgeReadme, /Last-viewed is\s+protected only/i);
+assert.match(bridgeReadme, /bounded observation delay/i);
+assert.match(
+  contract,
+  /adds\s+those names to its structural protection automatically/i,
+);
+assert.match(contract, /creation property must already exist/i);
+assert.match(contract, /Last-viewed is protected but never settled/i);
+assert.match(contract, /delay-less legacy settlement advertisement/i);
+assert.match(contract, /legacy receipt[\s\S]*remains\s+`outcome_unknown`/i);
+assert.match(contract, /starts that durable window only after the\s+CAS call/i);
+assert.match(
+  contract,
+  /`status` or\s+`recover` observer cannot terminalize either the sealed hash or an early\s+timestamp settlement/i,
+);
+assert.match(adr, /observation delay starts at the durable post-dispatch/i);
+assert.match(contractFr, /ajoute automatiquement ces noms à sa protection/i);
+assert.match(contractFr, /dernière vue est protégée mais jamais admise/i);
+assert.match(contractFr, /annonce legacy sans délai/i);
+assert.match(contractFr, /reçu legacy[\s\S]*reste\s+`outcome_unknown`/i);
+assert.match(
+  contractFr,
+  /observateur `status` ou `recover` concurrent ne peut terminaliser/i,
+);
 assert.match(contract, /never advertises[\s\S]*contains a comma/i);
 assert.match(contractFr, /n.annonce[\s\S]*contient une virgule/i);
 assert.match(contract, /128 JavaScript string code units/i);
 assert.doesNotMatch(contract, /128-byte/i);
 assert.match(contract, /quoted forms such as `#modified`/i);
-assert.match(contractFr, /128 unités de code de chaîne JavaScript/i);
-assert.match(contractFr, /formes quotées comme `#modified`/i);
 assert.match(
-  security,
-  /Supported modified-time plugins do not weaken that CAS/i,
+  contract,
+  /reports the affected plugin and\s+role[\s\S]*rejects planning before CAS/i,
 );
+assert.match(contractFr, /128 unités de code de chaîne JavaScript/i);
+assert.match(contractFr, /formes quotées comme\s+`#modified`/i);
+assert.match(
+  contractFr,
+  /annonce\s+le plugin et le rôle concernés[\s\S]*refuse le planning avant CAS/i,
+);
+assert.match(security, /Supported date plugins do not weaken that CAS/i);
 assert.match(
   securityFr,
-  /plugins de date de modification[\s\S]*n.affaiblissent pas ce CAS/i,
+  /plugins de date pris en charge[\s\S]*n.affaiblissent pas ce CAS/i,
 );
 assert.match(operations, /lost-response canary/i);
 assert.match(operations, /additional body or frontmatter change/i);
+assert.match(operations, /unsupported configuration and rejected before CAS/i);
 assert.match(operationsFr, /canary à réponse perdue/i);
 assert.match(
   operationsFr,
   /dérive supplémentaire du[\s\S]*corps ou du frontmatter/i,
+);
+assert.match(
+  operationsFr,
+  /configuration non supportée et refusé\s+avant CAS/i,
 );
 assert.match(operations, /smoke:modified-time-settlement-live/);
 assert.match(operationsFr, /smoke:modified-time-settlement-live/);
 assert.match(modifiedTimeLiveCanary, /os\.tmpdir\(\)/);
 assert.match(modifiedTimeLiveCanary, /dropNextCasResponse/);
 assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);
+assert.match(modifiedTimeLiveCanary, /applyWithResponse/);
+assert.match(modifiedTimeLiveCanary, /result\.outcome, "committed"/);
 assert.match(modifiedTimeLiveCanary, /waitForNextRepresentableTimestamp/);
 assert.match(modifiedTimeCanaryHelpers, /\[,\\r\\n:\]/);
 assert.match(modifiedTimeCanaryHelpers, /\\p\{L\}.*\\p\{M\}.*\\p\{N\}/);

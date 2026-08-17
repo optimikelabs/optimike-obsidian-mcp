@@ -99,18 +99,46 @@ soumis à la politique de rétention bornée existante. Reçus et logs n’expos
 
 ### Settlement borné de la date de modification
 
-Atomic Write Bridge 0.2.0 annonce la propriété de date de modification
-réellement configurée par une intégration supportée et active : Frontmatter Date
-Manager, Update Time ou Update time on edit. Le planning ne scelle cette policy
-que si la propriété figure aussi dans `MCP_PROTECTED_FRONTMATTER_KEYS`. Cette
-configuration étant une liste séparée par des virgules, le Bridge n’annonce
-jamais une propriété de modification dont le nom contient une virgule ; les
-noms doivent aussi rester des clés YAML plain source-stable, composées de
-lettres, marques ou chiffres Unicode, de `_`, `.`, `-` et d’espaces internes.
-Elles commencent par une lettre ou `_`. Les booléens/null YAML, débuts
-numériques, formes quotées comme `#modified`, deux-points, sauts de ligne,
+Atomic Write Bridge 0.3.0 lit les réglages actifs de Frontmatter Date Manager,
+Update Time et Update time on edit. Son contrat de protection annonce les vrais
+noms configurés des propriétés de création, modification et dernière vue. Le
+MCP ajoute automatiquement ces noms à sa protection structurelle ;
+`MCP_PROTECTED_FRONTMATTER_KEYS` reste additif pour les champs personnalisés et
+les anciens Bridges. Une propriété de création active doit déjà exister dans la
+note cible, sinon le planning échoue fermé car le plugin pourrait insérer une
+seconde ligne après le CAS. La dernière vue est protégée mais jamais admise en
+settlement : ouvrir une note est un événement utilisateur distinct, pas une
+conséquence attendue de l’écriture.
+
+Seule une propriété de modification compatible entre dans le contrat de
+settlement. Le Bridge annonce aussi le délai d’observation borné issu du
+debounce/rate-limit de chaque plugin. Le MCP ne démarre cette fenêtre durable
+qu’après le retour du CAS — réussi ou en échec après envoi — puis attend avant
+sa relecture postflight même lorsque la réponse CAS réussit normalement. Un
+observateur `status` ou `recover` concurrent ne peut terminaliser ni le hash
+scellé ni un premier settlement de timestamp pendant cette attente. Valeurs
+numériques, fuseaux forcés, formats non supportés ou délais supérieurs à quatre
+minutes ne sont pas admis. Une annonce legacy sans délai — notamment Bridge
+0.2.0 avec une intégration de date active — échoue fermé et exige Bridge 0.3.0
+ou ultérieur. Un reçu legacy non terminal déjà scellé sans ce délai reste
+`outcome_unknown` et doit être replanifié ; le recovery ne suppose jamais un
+délai nul. Frontmatter Date Manager reste également en
+protection seule si le compteur d’updates, une commande post-update ou la
+réparation d’inversion est actif, car ces réglages peuvent modifier plus que la
+seule ligne de modification. Une propriété de modification active sans entrée
+de settlement correspondante fait échouer le planning fermé.
+
+Le Bridge exige des clés YAML plain source-stable composées de lettres, marques
+ou chiffres Unicode, de `_`, `.`, `-` et d’espaces internes. Il n’annonce jamais
+une propriété dont le nom contient une virgule. Les formes quotées comme
+`#modified`, booléens/null YAML, débuts numériques, deux-points, sauts de ligne,
 espaces périphériques ou plus de 128 unités de code de chaîne JavaScript sont
-rejetés à la même frontière.
+rejetés à la même frontière. Si une propriété active de création, modification
+ou dernière vue n’est pas représentable à cette frontière, le Bridge annonce
+le plugin et le rôle concernés sans renvoyer le nom brut dangereux. Le MCP
+refuse le planning avant CAS au lieu de traiter silencieusement cette propriété
+active comme absente. Ce signal est revalidé à l’apply/recover comme les autres
+réglages des plugins de date.
 
 La précondition d’écriture reste un CAS SHA-256 exact sur le fichier complet :
 le settlement n’affaiblit pas le CAS pré-effet. Aucun timestamp n’est ignoré
@@ -119,7 +147,7 @@ un status après interruption, l’adaptateur peut accepter une seule ligne
 top-level du frontmatter supplémentaire uniquement si toutes ces preuves sont
 réunies :
 
-- il s’agit de l’unique propriété de modification configurée annoncée par le
+- il s’agit d’une propriété de modification configurée annoncée par le
   Bridge ;
 - la preuve provient toujours de l’identité backend et de la cible logique
   scellées ;
