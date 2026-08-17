@@ -254,22 +254,21 @@ OBSIDIAN_API_KEY="<local-rest-api-key>" MCP_WRITE_MODE=guarded \
 npm run smoke:modified-time-settlement-live
 ```
 
-The script deliberately loses both the successful CAS response and the first
-reconciliation read. It proves timestamp-only settlement, then proves that the
-same timestamp behavior plus an additional body drift remains
-`outcome_unknown`. Before each mutation it waits for the next timestamp tick
-that the configured minute- or second-resolution format can represent, then
-crosses the supported plugin freshness margin. It disables the date plugin only
-for exact restoration,
+The default positive case keeps the successful CAS response and proves that the
+MCP waits for the real plugin write before returning `committed`. The negative
+case deliberately loses both the successful CAS response and the first
+reconciliation read, then proves that the same timestamp behavior plus an
+additional body drift remains `outcome_unknown`. Before each mutation the
+script waits for the next timestamp tick that the configured minute- or
+second-resolution format can represent, then crosses the supported plugin
+freshness margin. It disables the date plugin only for exact restoration,
 restores the original enabled state, writes a redacted JSON proof under the
 operating-system temporary root, and retains private recovery material only if
 exact restoration cannot be verified.
 
-The deterministic operation fixture separately proves the normal-response
-path: after CAS success, the MCP waits the Bridge-advertised plugin delay,
-re-reads the note and commits the observed settled hash. It also proves custom
-creation/modification/last-viewed names, missing-creation refusal and
-apply-time settings revalidation.
+The deterministic operation fixture mirrors that normal-response path and also
+proves custom creation/modification/last-viewed names, missing-creation refusal
+and apply-time settings revalidation.
 
 `Ctrl-C` and `SIGTERM` run that same guarded restoration before the process
 exits. Maintainers can prove this interruption path deterministically by setting

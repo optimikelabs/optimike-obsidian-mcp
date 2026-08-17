@@ -246,6 +246,8 @@ assert.match(operationsFr, /smoke:modified-time-settlement-live/);
 assert.match(modifiedTimeLiveCanary, /os\.tmpdir\(\)/);
 assert.match(modifiedTimeLiveCanary, /dropNextCasResponse/);
 assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);
+assert.match(modifiedTimeLiveCanary, /applyWithResponse/);
+assert.match(modifiedTimeLiveCanary, /result\.outcome, "committed"/);
 assert.match(modifiedTimeLiveCanary, /waitForNextRepresentableTimestamp/);
 assert.match(modifiedTimeCanaryHelpers, /\[,\\r\\n:\]/);
 assert.match(modifiedTimeCanaryHelpers, /\\p\{L\}.*\\p\{M\}.*\\p\{N\}/);

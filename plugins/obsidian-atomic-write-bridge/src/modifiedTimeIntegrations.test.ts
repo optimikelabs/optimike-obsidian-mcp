@@ -42,7 +42,7 @@ test("resolves supported enabled modified-time plugin settings", () => {
       {
         pluginId: "frontmatter-date-manager",
         propertyName: "modification",
-        settlementObservationDelayMs: 32_250,
+        settlementObservationDelayMs: 37_250,
       },
       {
         pluginId: "update-time",
@@ -250,7 +250,7 @@ test("keeps each active plugin when they share one property", () => {
       {
         pluginId: "frontmatter-date-manager",
         propertyName: "modification",
-        settlementObservationDelayMs: 32_250,
+        settlementObservationDelayMs: 37_250,
       },
     ],
   );

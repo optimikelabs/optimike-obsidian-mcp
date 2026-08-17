@@ -263,22 +263,22 @@ $env:MCP_WRITE_MODE = "guarded"
 npm run smoke:modified-time-settlement-live
 ```
 
-Le script perd volontairement la réponse CAS réussie et la première relecture
-de réconciliation. Il prouve d’abord le settlement du timestamp seul, puis que
-le même comportement accompagné d’une dérive du corps reste
-`outcome_unknown`. Avant chaque mutation, il attend le prochain tick que le
-format configuré, à la minute ou à la seconde, peut réellement représenter,
-puis franchit la marge de fraîcheur du plugin supporté. Il ne désactive le
-plugin de date que pour la restauration
-exacte, rétablit son état activé, écrit une preuve JSON expurgée sous la racine
-temporaire du système et ne conserve les éléments privés de récupération que si
-la restauration exacte ne peut pas être vérifiée.
+Le cas positif par défaut conserve la réponse CAS réussie et prouve que le MCP
+attend la vraie écriture du plugin avant de retourner `committed`. Le cas
+négatif perd volontairement la réponse CAS réussie et la première relecture de
+réconciliation, puis prouve que le même comportement accompagné d’une dérive du
+corps reste `outcome_unknown`. Avant chaque mutation, le script attend le
+prochain tick que le format configuré, à la minute ou à la seconde, peut
+réellement représenter, puis franchit la marge de fraîcheur du plugin supporté.
+Il ne désactive le plugin de date que pour la restauration exacte, rétablit son
+état activé, écrit une preuve JSON expurgée sous la racine temporaire du système
+et ne conserve les éléments privés de récupération que si la restauration
+exacte ne peut pas être vérifiée.
 
-La fixture d’opération déterministe prouve séparément le chemin à réponse
-normale : après le succès du CAS, le MCP attend le délai du plugin annoncé par
-le Bridge, relit la note et commit le hash settled observé. Elle prouve aussi
-les noms personnalisés de création/modification/dernière vue, le refus d’une
-création absente et la revalidation des réglages au moment de l’apply.
+La fixture d’opération déterministe reproduit ce chemin à réponse normale. Elle
+prouve aussi les noms personnalisés de création/modification/dernière vue, le
+refus d’une création absente et la revalidation des réglages au moment de
+l’apply.
 
 `Ctrl-C` et `SIGTERM` exécutent cette même restauration protégée avant la sortie
 du processus. Les mainteneurs peuvent prouver ce chemin d’interruption de façon

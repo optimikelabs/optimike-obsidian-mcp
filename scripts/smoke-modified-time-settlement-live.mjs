@@ -398,6 +398,17 @@ async function applyWithLostResponse(receipt, idempotencyKey) {
   return result;
 }
 
+async function applyWithResponse(receipt, idempotencyKey) {
+  const result = await trackMutation(
+    call("obsidian_note_replace_apply", {
+      planRef: receipt.planRef,
+      idempotencyKey,
+    }),
+  );
+  assert.equal(result.outcome, "committed");
+  return result;
+}
+
 let originalContent;
 let originalSha256;
 let originalBindingFingerprint;
@@ -677,7 +688,9 @@ try {
   }\n${positiveMarker}\n`;
   const positiveKey = `modified-time-live:${runId}:positive`;
   const positivePlan = await plan(positiveTarget, positiveKey);
-  const positiveApply = await applyWithLostResponse(positivePlan, positiveKey);
+  const positiveApply = await (selfSignal
+    ? applyWithLostResponse(positivePlan, positiveKey)
+    : applyWithResponse(positivePlan, positiveKey));
   if (selfSignal === "SIGTERM_AFTER_POSITIVE_APPLY") {
     process.emit("SIGTERM", "SIGTERM");
     process.emit("SIGTERM", "SIGTERM");

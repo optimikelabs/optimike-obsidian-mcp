@@ -111,9 +111,11 @@ const DEFINITIONS: readonly IntegrationDefinition[] = [
         settings.inversionFixStrategy === "disabled"),
     settlementObservationDelayMs: (settings) => {
       const minimumSeconds = boundedDelay(settings.minSecondsBetweenSaves, 30);
+      // FDM 1.2/1.3 combines a 2 s modify debounce with a 5 s freshness
+      // window before its configured minimum interval can be observed safely.
       return minimumSeconds === undefined
         ? undefined
-        : boundedDelay(2_250 + minimumSeconds * 1_000, 32_250);
+        : boundedDelay(7_250 + minimumSeconds * 1_000, 37_250);
     },
   },
   {
