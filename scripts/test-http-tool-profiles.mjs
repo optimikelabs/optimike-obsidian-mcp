@@ -236,7 +236,7 @@ try {
   const legacyNames = toolNames(legacyList);
 
   assert.equal(standardNames.length, 9);
-  assert.equal(tasksNames.length, 31);
+  assert.equal(tasksNames.length, 14);
   assert.equal(fullNames.length, 48);
   assert.deepEqual(legacyNames, fullNames, "/mcp must remain an alias of /mcp/full");
 
@@ -249,10 +249,32 @@ try {
   assert.ok(fullNames.includes("smart_search"));
   assert.ok(fullNames.includes("smart-search"));
 
-  assert.ok(!standardNames.includes("operon_create_task"));
-  assert.ok(tasksNames.includes("operon_create_task"));
-  assert.ok(tasksNames.includes("operon_list_pending_recoveries"));
-  assert.ok(tasksNames.includes("operon_recover_mutation"));
+  for (const snapshotSafe of [
+    "operon_status",
+    "operon_get_configuration",
+    "operon_list_tasks",
+    "operon_get_task",
+    "operon_query_tasks",
+    "operon_validate",
+  ]) {
+    assert.ok(tasksNames.includes(snapshotSafe), `headless tasks lost ${snapshotSafe}`);
+  }
+  for (const liveOnly of [
+    "operon_query_saved_filter",
+    "operon_get_diagnostics",
+    "operon_find_tasks",
+    "operon_resolve_task",
+    "operon_get_relationships",
+    "operon_build_context",
+    "operon_get_timer_state",
+    "operon_create_task",
+    "operon_update_task",
+    "operon_transition_task",
+    "operon_list_pending_recoveries",
+    "operon_recover_mutation",
+  ]) {
+    assert.ok(!tasksNames.includes(liveOnly), `headless tasks exposed ${liveOnly}`);
+  }
 
   const mismatchPost = await protocolRequest({
     baseUrl,
@@ -304,7 +326,7 @@ try {
   assert.match(await unknown.text(), /unknown_tool_profile/);
 
   console.log(
-    "PASS: HTTP profile endpoints coexist on one backend, /mcp stays full, semantic aliases are modern-profile-hidden, and sessions cannot cross profile routes",
+    "PASS: HTTP profile endpoints coexist, /mcp stays full, headless tasks are snapshot-safe, semantic aliases stay modern-profile-hidden, and sessions cannot cross profile routes",
   );
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");
