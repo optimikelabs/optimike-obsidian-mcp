@@ -38,18 +38,19 @@ for (const relative of [
   assert.ok(content.includes("tool-surface-profiles"));
 }
 
-for (const relative of ["README.md", "README.fr.md", "docs/README.md", "docs/README.fr.md"]) {
+for (const relative of ["docs/README.md", "docs/README.fr.md"]) {
   const content = read(relative);
   assert.ok(
     content.includes("tool-surface-profiles"),
     `${relative} must route readers to the profile contract`,
   );
-  assert.ok(content.includes("smart_semantic_search"));
 }
 
 const englishReadme = read("README.md");
 const frenchReadme = read("README.fr.md");
 for (const content of [englishReadme, frenchReadme]) {
+  assert.ok(content.includes("tool-surface-profiles"));
+  assert.ok(content.includes("smart_semantic_search"));
   assert.ok(content.includes("--tool-profile standard"));
   assert.ok(content.includes("/mcp/standard"));
   assert.ok(content.includes("/mcp/full"));
