@@ -85,6 +85,11 @@ for (const entry of TOOL_SURFACE_REGISTRY) {
 
 assert.equal(getToolSurfaceEntry("smart_search")?.aliasOf, "smart_semantic_search");
 assert.equal(getToolSurfaceEntry("smart-search")?.aliasOf, "smart_semantic_search");
+assert.equal(
+  getToolSurfaceEntry("bases_upsert_config")?.group,
+  "bases.compat",
+  "whole-Base replacement must have its own compatibility group",
+);
 
 const expectedLifecycleRoles = ["apply", "plan", "recover", "status"];
 const governedFamilies = new Map();
@@ -180,5 +185,5 @@ for (const name of sourceDeclaredTools) {
 }
 
 console.log(
-  `PASS: canonical tool registry covers ${TOOL_SURFACE_REGISTRY.length} cross-runtime names; live=${EXPECTED_COUNTS_BY_MODE.live}, headless-filesystem=${EXPECTED_COUNTS_BY_MODE["headless-filesystem"]}`,
+  `PASS: canonical tool registry covers ${TOOL_SURFACE_REGISTRY.length} cross-runtime names; live=${EXPECTED_COUNTS_BY_MODE.live}, headless-filesystem=${EXPECTED_COUNTS_BY_MODE["headless-filesystem"]}; whole-Base compatibility is isolated`,
 );
