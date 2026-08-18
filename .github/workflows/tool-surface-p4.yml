@@ -6,6 +6,7 @@ on:
       - "package.json"
       - "README.md"
       - "README.fr.md"
+      - "docs/obsidian_mcp_tools_spec.md"
       - "docs/tool-surface-profiles.md"
       - "docs/tool-surface-profiles.fr.md"
       - "docs/mcp-routing-guide.md"
