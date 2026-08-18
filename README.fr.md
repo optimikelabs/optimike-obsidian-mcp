@@ -18,29 +18,66 @@ documents autorisés hors du coffre.
 | Domaine                 | Ce que fournit le MCP                                                                                 | Dépendance principale                                              |
 | ----------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Notes                   | Lecture/recherche/update plus plans gouvernés de note atomique et Frontmatter source-preserving       | Coffre ; Local REST API + Atomic Write Bridge pour le CAS gouverné |
-| Bases et Canvas         | Requêtes/formules Base, plans de graphe Canvas gouvernés et helpers headless directs                   | Bases Bridge ; Atomic Write Bridge 0.4.0 pour le CAS Canvas         |
+| Bases et Canvas         | Requêtes/formules Base, plans de graphe Canvas gouvernés et helpers headless directs                  | Bases Bridge ; Atomic Write Bridge 0.4.0 pour le CAS Canvas        |
 | Tâches                  | Lecture/requête Tasks + 23 outils Operon gouvernés                                                    | Operon Developer API V1 via le Bridge                              |
-| Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable                                         | `.smart-env` + embedding Ollama ou OpenAI                          |
+| Recherche sémantique    | Recherche Smart Connections avec cache de métadonnées durable                                        | `.smart-env` + embedding Ollama ou OpenAI                          |
 | Runtime                 | Cache SQLite partagé, santé, maintenance, mode dégradé et exclusions                                  | Filesystem local                                                   |
 | Documents externes      | Lectures/handoff gouvernés + move local opt-in avec réparation                                        | Allowlist ; stdio local pour le move                               |
 | Administration headless | Opérations bornées sur notes, métadonnées et filesystem du coffre                                     | Mode guarded/filesystem sur un coffre copié                        |
 
 Le registre actuel des outils vit dans
 [Surface des outils](docs/obsidian_mcp_tools_spec.md). Leur disponibilité dépend
-du mode runtime ; consulter la
-[Matrice des capacités](docs/runtime-capability-matrix.fr.md) avant d’activer
+du mode runtime et du profil d’outils ; consulter la
+[Matrice des capacités](docs/runtime-capability-matrix.fr.md) et les
+[Profils de surface d’outils](docs/tool-surface-profiles.fr.md) avant d’activer
 des écritures.
 
-## Choisir un profil
+## Choisir un runtime et un transport
 
-| Besoin                                   | Profil recommandé                              | Posture                     |
-| ---------------------------------------- | ---------------------------------------------- | --------------------------- |
-| Codex (vérifié) ou client stdio local    | `dist/stdio-proxy.js`                          | Profil local par défaut     |
-| Automatisation Obsidian Desktop          | `live` ou `hybrid` via le proxy stdio          | Desktop de confiance        |
-| CI, serveur ou copie synchronisée        | `headless-readonly`                            | Profil headless le plus sûr |
-| Écritures bornées sur coffre copié/dédié | `headless-guarded`, puis `headless-filesystem` | Opt-in explicite            |
-| HTTP direct sur la même machine          | HTTP loopback authentifié                      | Supporté avec limites       |
-| HTTP distant                             | Reverse proxy TLS revu + réseau privé          | Pilote seulement            |
+| Besoin                                   | Runtime / transport recommandé                     | Posture                     |
+| ---------------------------------------- | --------------------------------------------------- | --------------------------- |
+| Agent stdio local                        | `dist/stdio-proxy.js`                               | Proxy par client            |
+| Automatisation Obsidian Desktop          | `live` ou `hybrid` via le proxy stdio               | Desktop de confiance        |
+| CI, serveur ou copie synchronisée        | `headless-readonly`                                 | Mode headless le plus sûr   |
+| Écritures bornées sur coffre copié/dédié | `headless-guarded`, puis `headless-filesystem`      | Opt-in explicite            |
+| HTTP direct sur la même machine          | HTTP loopback authentifié                           | Supporté avec limites       |
+| HTTP distant                             | Reverse proxy TLS revu + réseau privé               | Pilote seulement            |
+
+Le runtime répond à « que peut faire le backend en sécurité ? ». Il ne décide
+pas combien d’outils un agent doit voir.
+
+## Choisir une surface d’outils
+
+| Besoin | Profil recommandé | Taille live/hybrid complète |
+| --- | --- | ---: |
+| Travail général sur le coffre | `standard` | 19 outils |
+| Notes + tags + authoring Bases/Canvas | `authoring` | 31 outils |
+| Workflows Tasks / Operon | `tasks` | 31 outils |
+| Compatibilité, administration et surfaces spécialisées | `full` | 72 outils |
+
+Les profils modernes n’exposent qu’un seul nom pour la recherche sémantique :
+`smart_semantic_search`. Les anciens alias de compatibilité restent accessibles
+uniquement dans `full` pendant la branche 2.x et leur suppression physique est
+réservée à la 3.0.
+
+En stdio, sélectionner le profil avant `tools/list` :
+
+```bash
+node dist/stdio-proxy.js --tool-profile standard
+```
+
+En HTTP, le profil vit dans l’URL MCP :
+
+```text
+/mcp/standard
+/mcp/authoring
+/mcp/tasks
+/mcp/full
+```
+
+Le `/mcp` historique reste équivalent à `/mcp/full` pendant la branche 2.x. Voir
+[Profils de surface d’outils](docs/tool-surface-profiles.fr.md) pour la liaison
+de session, les exemples clients et les règles de compatibilité.
 
 Le serveur Node ne doit jamais être exposé directement à Internet. Voir
 [Sécurité](SECURITY.fr.md) et
@@ -59,7 +96,7 @@ git clone https://github.com/optimikelabs/optimike-obsidian-mcp.git
 cd optimike-obsidian-mcp
 npm install
 npm run build
-node dist/stdio-proxy.js
+node dist/stdio-proxy.js --tool-profile standard
 ```
 
 Avec le package, le binaire proxy explicite est
@@ -71,7 +108,11 @@ Configuration Codex minimale :
 ```toml
 [mcp_servers.optimike-obsidian-mcp-stdio]
 command = "node"
-args = ["/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js"]
+args = [
+  "/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js",
+  "--tool-profile",
+  "standard"
+]
 
 [mcp_servers.optimike-obsidian-mcp-stdio.env]
 OBSIDIAN_VAULT = "/chemin/vers/coffre"
@@ -170,10 +211,11 @@ Commencer par
 
 ## Recherche sémantique
 
-`smart_semantic_search` interroge un index Smart Connections local. L’embedding
-de requête peut rester local via Ollama ou passer par OpenAI selon la
-configuration. Avec OpenAI, l’outil devient donc open-world même si l’index du
-coffre reste local.
+`smart_semantic_search` est l’outil canonique de recherche sémantique. Les
+profils modernes n’exposent que ce nom. Il interroge un index Smart Connections
+local. L’embedding de requête peut rester local via Ollama ou passer par OpenAI
+selon la configuration. Avec OpenAI, l’outil devient donc open-world même si
+l’index du coffre reste local.
 
 Voir [Exploitation](OPERATIONS.fr.md) pour les providers et le cache.
 
@@ -196,6 +238,7 @@ partagée hors du vrai coffre synchronisé.
 ## Documentation
 
 - Entrée par audience et besoin : [Hub documentaire](docs/README.fr.md)
+- Profils d’exposition et exemples clients : [Profils de surface d’outils](docs/tool-surface-profiles.fr.md)
 - Runtime et maintenance : [OPERATIONS.fr.md](OPERATIONS.fr.md)
 - Sécurité et frontière de déploiement : [SECURITY.fr.md](SECURITY.fr.md)
 - Outils actuels : [Surface des outils](docs/obsidian_mcp_tools_spec.md)
