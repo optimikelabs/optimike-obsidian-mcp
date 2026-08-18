@@ -41,7 +41,7 @@ source = source.replace(
     for (const removedAlias of ["smart_search", "smart-search"]) {
       if (toolsByName.has(removedAlias)) {
         throw new Error(
-          \\`\${removedAlias} was removed in Optimike MCP 3.0 and must not appear in tools/list.\\`,
+          removedAlias + " was removed in Optimike MCP 3.0 and must not appear in tools/list.",
         );
       }
     }
