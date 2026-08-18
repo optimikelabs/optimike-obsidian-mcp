@@ -264,6 +264,28 @@ assert.match(
 );
 assert.match(operations, /smoke:modified-time-settlement-live/);
 assert.match(operationsFr, /smoke:modified-time-settlement-live/);
+assert.match(operations, /byte-exact canary refuses before mutation/i);
+assert.match(
+  operationsFr,
+  /restauration octet pour octet refuse avant mutation/i,
+);
+assert.match(
+  operations,
+  /the two\s+gates deliberately prove separate contracts/i,
+);
+assert.match(
+  operationsFr,
+  /deux gates prouvent volontairement\s+deux contrats distincts/i,
+);
+assert.match(liveCanary, /assertAtomicNoteCanaryDateIsolation\(status\)/);
+assert.match(
+  modifiedTimeCanaryHelpers,
+  /requires active modified-time integrations to be disabled before mutation/,
+);
+assert.match(
+  modifiedTimeLiveCanary,
+  /supportsModifiedTimeSettlementBridgeVersion\(status\.plugin\.version\)/,
+);
 assert.match(modifiedTimeLiveCanary, /os\.tmpdir\(\)/);
 assert.match(modifiedTimeLiveCanary, /dropNextCasResponse/);
 assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);

@@ -2,6 +2,28 @@ const LOCAL_DATETIME =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/u;
 const PLUGIN_FRESHNESS_MARGIN_MS = 5_200;
 
+export function supportsModifiedTimeSettlementBridgeVersion(value) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/u.exec(value ?? "");
+  if (!match) return false;
+  const [, major, minor] = match.map(Number);
+  return major > 0 || (major === 0 && minor >= 3);
+}
+
+export function assertAtomicNoteCanaryDateIsolation(status) {
+  const integrations =
+    status?.settlement?.modifiedTimeFrontmatter?.integrations ?? [];
+  if (!Array.isArray(integrations) || integrations.length === 0) return;
+  const active = integrations
+    .map(
+      (integration) =>
+        `${integration?.pluginId ?? "unknown"}:${integration?.propertyName ?? "unknown"}`,
+    )
+    .join(", ");
+  throw new Error(
+    `The byte-exact atomic-note canary requires active modified-time integrations to be disabled before mutation (${active}). Run smoke:modified-time-settlement-live separately with the integration enabled.`,
+  );
+}
+
 export function isSafeModifiedTimePropertyName(value) {
   return (
     typeof value === "string" &&

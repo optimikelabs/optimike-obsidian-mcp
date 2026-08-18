@@ -217,8 +217,9 @@ protégé et le write gate désactivé par défaut de l’Atomic Write Bridge re
 actifs au planning et avant chaque effet possible.
 
 Avant merge ou release, activer l’Atomic Write Bridge uniquement dans un coffre
-Desktop jetable, créer une note canary `.md` existante et dédiée, puis exécuter
-dans PowerShell :
+Desktop jetable, créer une note canary `.md` existante et dédiée, désactiver les
+plugins qui modifient automatiquement le frontmatter de modification, puis
+exécuter dans PowerShell :
 
 ```powershell
 $env:OBSIDIAN_ATOMIC_NOTE_CANARY_PATH="Canary/Atomic Note.md"
@@ -237,9 +238,13 @@ et sauvegarde. Un échec géré avant mutation supprime aussi ce dossier après
 avoir vérifié que la note est inchangée. Une interruption brutale ou une
 restauration non vérifiée conserve le dossier privé au chemin de récupération
 affiché au démarrage ; ne restaurer qu’à partir des métadonnées explicites de sa
-sauvegarde. Ne jamais viser une note utilisateur ordinaire.
+sauvegarde. Ne jamais viser une note utilisateur ordinaire. Le canary à
+restauration octet pour octet refuse avant mutation si le Bridge annonce une
+intégration de modification automatique active. La réactiver ensuite et lancer
+le canary de settlement dédié ci-dessous : ces deux gates prouvent volontairement
+deux contrats distincts.
 
-Atomic Write Bridge `0.3.0` expose les propriétés actives de création,
+Atomic Write Bridge `0.3.0` ou ultérieur expose les propriétés actives de création,
 modification et dernière vue prises en charge. Le MCP dérive leur protection
 structurelle sans doublon dans `MCP_PROTECTED_FRONTMATTER_KEYS`, qui reste
 additif pour les champs personnalisés. La gate live utilise volontairement une

@@ -1,9 +1,41 @@
 import assert from "node:assert/strict";
 import {
+  assertAtomicNoteCanaryDateIsolation,
   isSafeModifiedTimePropertyName,
   modifiedTimeFrontmatterPropertyValue,
   nextRepresentableTimestampReadyAt,
+  supportsModifiedTimeSettlementBridgeVersion,
 } from "./modified-time-canary-helpers.mjs";
+
+assert.equal(supportsModifiedTimeSettlementBridgeVersion("0.3.0"), true);
+assert.equal(supportsModifiedTimeSettlementBridgeVersion("0.4.0"), true);
+assert.equal(supportsModifiedTimeSettlementBridgeVersion("1.0.0"), true);
+assert.equal(supportsModifiedTimeSettlementBridgeVersion("0.2.9"), false);
+assert.equal(
+  supportsModifiedTimeSettlementBridgeVersion("0.3.0-beta.1"),
+  false,
+);
+assert.equal(supportsModifiedTimeSettlementBridgeVersion("invalid"), false);
+
+assert.doesNotThrow(() =>
+  assertAtomicNoteCanaryDateIsolation({ settlement: undefined }),
+);
+assert.throws(
+  () =>
+    assertAtomicNoteCanaryDateIsolation({
+      settlement: {
+        modifiedTimeFrontmatter: {
+          integrations: [
+            {
+              pluginId: "frontmatter-date-manager",
+              propertyName: "modification",
+            },
+          ],
+        },
+      },
+    }),
+  /requires active modified-time integrations to be disabled before mutation \(frontmatter-date-manager:modification\)/u,
+);
 
 assert.equal(isSafeModifiedTimePropertyName("modification"), true);
 assert.equal(isSafeModifiedTimePropertyName("last modified"), true);
