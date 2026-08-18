@@ -5,6 +5,7 @@ import {
   compileToolProfile,
   compileToolProfileNames,
   parseToolProfileId,
+  selectAvailableToolProfileNames,
 } from "../dist/mcp-server/toolProfiles.js";
 import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.js";
 
@@ -13,10 +14,10 @@ const WITH_CACHE = ["vault-cache"];
 const EXPECTED_COUNTS = {
   live: { standard: 19, authoring: 31, tasks: 31, full: 72 },
   "hybrid-live": { standard: 19, authoring: 31, tasks: 31, full: 72 },
-  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 31, full: 45 },
-  "headless-readonly": { standard: 9, authoring: 9, tasks: 31, full: 48 },
-  "headless-guarded": { standard: 12, authoring: 12, tasks: 31, full: 51 },
-  "headless-filesystem": { standard: 12, authoring: 17, tasks: 31, full: 60 },
+  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
+  "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
+  "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
+  "headless-filesystem": { standard: 12, authoring: 17, tasks: 14, full: 60 },
 };
 
 assert.deepEqual(TOOL_PROFILE_IDS, ["standard", "authoring", "tasks", "full"]);
@@ -159,8 +160,66 @@ for (const required of [
   "list_all_tasks",
   "query_tasks",
 ]) {
-  assert.ok(tasksLive.includes(required), `tasks profile lost ${required}`);
+  assert.ok(tasksLive.includes(required), `live tasks profile lost ${required}`);
 }
+
+const tasksSnapshot = compileToolProfileNames({
+  profile: "tasks",
+  registrationMode: "headless-readonly",
+  availableStaticRequirements: WITH_CACHE,
+});
+assert.equal(tasksSnapshot.length, 14);
+for (const required of [
+  "operon_status",
+  "operon_get_configuration",
+  "operon_list_tasks",
+  "operon_get_task",
+  "operon_query_tasks",
+  "operon_validate",
+  "list_all_tasks",
+  "query_tasks",
+]) {
+  assert.ok(tasksSnapshot.includes(required), `snapshot tasks profile lost ${required}`);
+}
+for (const liveOnly of [
+  "operon_query_saved_filter",
+  "operon_get_diagnostics",
+  "operon_find_tasks",
+  "operon_resolve_task",
+  "operon_get_relationships",
+  "operon_build_context",
+  "operon_get_timer_state",
+  "operon_create_task",
+  "operon_update_task",
+  "operon_transition_task",
+  "operon_list_pending_recoveries",
+  "operon_recover_mutation",
+]) {
+  assert.ok(
+    !tasksSnapshot.includes(liveOnly),
+    `snapshot tasks profile must hide live-only tool ${liveOnly}`,
+  );
+}
+
+const selectedSnapshotTasks = selectAvailableToolProfileNames({
+  profile: "tasks",
+  availableNames: compileToolProfileNames({
+    profile: "full",
+    registrationMode: "headless-readonly",
+    availableStaticRequirements: WITH_CACHE,
+  }),
+});
+assert.deepEqual(selectedSnapshotTasks, tasksSnapshot);
+
+const selectedLiveTasks = selectAvailableToolProfileNames({
+  profile: "tasks",
+  availableNames: compileToolProfileNames({
+    profile: "full",
+    registrationMode: "live",
+    availableStaticRequirements: WITH_CACHE,
+  }),
+});
+assert.deepEqual(selectedLiveTasks, tasksLive);
 
 const standardWithoutCache = compileToolProfileNames({
   profile: "standard",
@@ -185,4 +244,4 @@ for (const absent of [
 }
 assert.equal(readonlyWithoutCache.length, 5);
 
-console.log("PASS: standard, authoring, tasks and full profiles are deterministic, portable and SemVer-safe for semantic aliases");
+console.log("PASS: profiles are deterministic, semantic aliases stay full-only, and headless tasks expose only snapshot-safe Operon reads");
