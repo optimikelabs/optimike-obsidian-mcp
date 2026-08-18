@@ -40,11 +40,11 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 | Besoin | Profil | Taille live/hybrid complète |
 | --- | --- | ---: |
 | Travail général sur le coffre | `standard` | 19 |
-| Notes, tags, Bases et Canvas | `authoring` | 31 |
+| Notes, tags, Bases et Canvas | `authoring` | 30 |
 | Workflows Tasks / Operon | `tasks` | 31 |
 | Compatibilité, admin et surfaces spécialisées | `full` | 72 |
 
-Pendant la branche 2.x, `full` conserve toute la surface de compatibilité. Les profils modernes n’exposent que `smart_semantic_search` ; les alias historiques `smart_search` et `smart-search` restent réservés à `full` jusqu’à la 3.0.
+Pendant la branche 2.x, `full` conserve toute la surface de compatibilité. Les profils modernes n’exposent que `smart_semantic_search` ; les alias historiques `smart_search` et `smart-search` restent réservés à `full` jusqu’à la 3.0. `bases_upsert_config` reste lui aussi une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
 Sélectionner le profil avant `tools/list` :
 
