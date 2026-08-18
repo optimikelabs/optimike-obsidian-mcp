@@ -38,12 +38,21 @@ for (const relative of [
   assert.ok(content.includes("tool-surface-profiles"));
 }
 
-for (const relative of ["docs/README.md", "docs/README.fr.md"]) {
+for (const relative of ["README.md", "README.fr.md", "docs/README.md", "docs/README.fr.md"]) {
   const content = read(relative);
   assert.ok(
     content.includes("tool-surface-profiles"),
     `${relative} must route readers to the profile contract`,
   );
+  assert.ok(content.includes("smart_semantic_search"));
+}
+
+const englishReadme = read("README.md");
+const frenchReadme = read("README.fr.md");
+for (const content of [englishReadme, frenchReadme]) {
+  assert.ok(content.includes("--tool-profile standard"));
+  assert.ok(content.includes("/mcp/standard"));
+  assert.ok(content.includes("/mcp/full"));
 }
 
 const routingResource = read("src/mcp-server/resources/toolRoutingResource.ts");
@@ -51,4 +60,4 @@ assert.ok(routingResource.includes("smart_semantic_search"));
 assert.ok(!routingResource.includes("`smart_search`"));
 assert.ok(!routingResource.includes("`smart-search`"));
 
-console.log("PASS: profile docs own compatibility while routing docs teach only smart_semantic_search");
+console.log("PASS: README/profile docs own compatibility while routing docs teach only smart_semantic_search");
