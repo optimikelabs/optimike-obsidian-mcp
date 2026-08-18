@@ -55,6 +55,12 @@ for (const content of [englishReadme, frenchReadme]) {
   assert.ok(content.includes("/mcp/full"));
 }
 
+const toolSpec = read("docs/obsidian_mcp_tools_spec.md");
+assert.ok(toolSpec.includes("`smart_semantic_search`: **canonical**"));
+assert.ok(toolSpec.includes("`smart_search`: deprecated 2.x compatibility alias, visible only in `full`"));
+assert.ok(toolSpec.includes("`smart-search`: deprecated 2.x compatibility alias, visible only in `full`"));
+assert.ok(toolSpec.includes("physical removal is reserved\nfor 3.0"));
+
 const routingResource = read("src/mcp-server/resources/toolRoutingResource.ts");
 assert.ok(routingResource.includes("smart_semantic_search"));
 assert.ok(!routingResource.includes("`smart_search`"));
