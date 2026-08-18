@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selected through `MCP_TOOL_PROFILE`, `--tool-profile`, per-client stdio
   proxy configuration, or the `/mcp/{profile}` HTTP routes.
 - A 31-case harness-neutral routing corpus and JSONL scorer measure first-tool
-  accuracy, forbidden calls, success, required call sequences, latency and
+  accuracy, forbidden calls, success, per-case minimum call counts, latency and
   token use without publishing fabricated model scores.
 
 ### Changed
