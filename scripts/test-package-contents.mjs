@@ -20,14 +20,25 @@ const files = new Set(
   report.flatMap((entry) => entry.files.map((file) => file.path)),
 );
 const requiredFiles = [
+  "dist/index-v3.js",
+  "dist/stdio-surface-proxy.js",
   "dist/index.js",
   "dist/stdio-proxy.js",
+  "dist/mcp-server/toolSurface/catalog.js",
+  "dist/mcp-server/toolSurface/runtime.js",
+  "dist/mcp-server/toolSurface/httpBoundary.js",
   "README.md",
   "README.fr.md",
   "SECURITY.md",
   "SECURITY.fr.md",
   "docs/README.md",
   "docs/README.fr.md",
+  "docs/tool-surface-profiles.md",
+  "docs/tool-surface-profiles.fr.md",
+  "docs/obsidian_mcp_tools_spec.md",
+  "docs/mcp-routing-guide.md",
+  "docs/mcp-routing-guide.fr.md",
+  "docs/adr/ADR-Tool-Surface-Profiles-V3.md",
   "docs/governed-note-replacement.md",
   "docs/governed-note-replacement.fr.md",
   "docs/governed-frontmatter-p1.md",
@@ -40,6 +51,9 @@ const requiredFiles = [
   "docs/governed-canvas-p3.fr.md",
   "docs/adr/ADR-Governed-Canvas-P3.md",
   "docs/adr/README.md",
+  "scripts/test-tool-surface-v3.mjs",
+  "scripts/test-http-tool-profiles-v3.mjs",
+  "scripts/smoke-tool-surface-v3.mjs",
   "scripts/test-governed-note-replace-mcp.mjs",
   "scripts/test-governed-note-replace-http.mjs",
   "scripts/smoke-atomic-note-mcp-live.mjs",
@@ -58,10 +72,10 @@ const requiredFiles = [
 const missing = requiredFiles.filter((file) => !files.has(file));
 if (missing.length > 0) {
   throw new Error(
-    `Package is missing installable Bridge artifacts: ${missing.join(", ")}`,
+    `Package is missing V3 server, profile, governed-operation, documentation or Bridge artifacts: ${missing.join(", ")}`,
   );
 }
 
 console.log(
-  `PASS: package contains ${requiredFiles.length} runnable server, governed-operation, documentation and Bridge artifacts`,
+  `PASS: package contains ${requiredFiles.length} V3 server, profile, governed-operation, documentation and Bridge artifacts`,
 );

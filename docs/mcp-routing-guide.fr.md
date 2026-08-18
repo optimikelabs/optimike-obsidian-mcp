@@ -1,142 +1,116 @@
 # Guide de routage MCP
 
-Version anglaise : [mcp-routing-guide.md](mcp-routing-guide.md)
+English version: [mcp-routing-guide.md](mcp-routing-guide.md)
 
-Docs liées : [README](../README.fr.md),
-[Guide d’exploitation](../OPERATIONS.fr.md),
-[Matrice des capacités runtime](runtime-capability-matrix.fr.md),
-[Profil serveur headless](headless-server-profile.fr.md) et
-[Racines documentaires externes](external-roots-setup.fr.md)
+Voir aussi : [Profils de surface d’outils](tool-surface-profiles.fr.md), [Matrice des capacités runtime](runtime-capability-matrix.fr.md), [Opérations](../OPERATIONS.fr.md), [External Roots](external-roots-setup.fr.md).
 
-![Parcours de décision pour router le travail agentique dans Optimike Obsidian MCP](assets/readme/routing-guide.fr.svg)
+Optimike MCP expose son guide de routage adapté au profil via la ressource MCP :
 
-Ce guide aide les agents à choisir la bonne couche pour travailler avec Obsidian.
+```text
+optimike://guides/tool-routing
+```
+
+La ressource est rendue pour le profil actif et ne mentionne que les outils visibles dans la session.
+
+## Choisir d’abord la surface
+
+Utiliser le profil le plus étroit couvrant la mission :
+
+| Mission | Profil |
+| --- | --- |
+| Lecture, recherche et travail courant dans le coffre | `standard` |
+| Écriture de notes, Frontmatter, Bases et Canvas | `authoring` |
+| Operon et opérations de tâches | `tasks` |
+| Compatibilité, administration et diagnostic large | `full` |
+
+Le profil contrôle la découverte et l’appel. Le mode de runtime et la write policy continuent de contrôler les effets possibles.
 
 ## Décision par défaut
 
-| Besoin                                                                     | Utiliser                                                        | Pourquoi                                                                          |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Lire, lister, rechercher, Tasks, recherche sémantique                      | Optimike MCP                                                    | Surface stable entre live, hybrid et headless.                                    |
-| Lire un document explicitement configuré hors du coffre                    | Outils external-roots du MCP                                    | Confinement default-deny avec chemins logiques portables.                         |
-| Déplacer un fichier externe sans casser silencieusement ses liens ÉLYSIA   | Workflow de move externe en stdio local                         | Inventaire, plan durable, réparations CAS exactes, reçu et rollback.              |
-| Comportement Obsidian complet, commandes, active file, Bases via plugin    | Optimike MCP en `live` ou `hybrid` avec Obsidian Desktop ouvert | C'est le seul mode avec sémantique Desktop/plugin.                                |
-| Serveur backend sûr au-dessus d'un vault synchronisé                       | Optimike MCP en `headless-readonly` d'abord                     | Pas besoin de Desktop et aucun risque d'écriture.                                 |
-| Écritures Markdown/frontmatter/tags/admin bornées sur copie ou vault dédié | Optimike MCP en `headless-filesystem`                           | Sécurité de chemins, dry-run par défaut et préconditions.                         |
-| Édition fichier directe ponctuelle hors contrat MCP                        | Outils filesystem                                               | Utile pour du travail local type repo, mais l'agent porte tous les garde-fous.    |
-| Actions ou diagnostics app-native Obsidian                                 | Obsidian CLI                                                    | Utile comme plan de contrôle Desktop/app, pas comme headless strict.              |
-| Savoir écrire la syntaxe Markdown, Bases ou Canvas Obsidian                | Skills ou docs de format Obsidian                               | Les skills enseignent les conventions ; elles n'exécutent pas les opérations MCP. |
+| Besoin | Utiliser | Pourquoi |
+| --- | --- | --- |
+| Lire, lister ou chercher du texte exact | Outils Obsidian de lecture/recherche | Surface stable en live, hybrid et headless. |
+| Similarité sémantique | `smart_semantic_search` | Seul nom public de recherche sémantique en 3.0. |
+| Tâches gérées par Operon | Outils Operon du profil `tasks` | Identités, révisions, workflows et récupération natifs. |
+| Inspection de tâches Markdown Tasks-compatible | `list_all_tasks` / `query_tasks` | Lecture de cases Markdown sans revendiquer la propriété Operon. |
+| Remplacer complètement une note existante | Cycle `obsidian_note_replace_plan` | Contenu scellé, CAS, reçu durable et récupération du plan exact. |
+| Modifier des propriétés Frontmatter de premier niveau | Cycle `obsidian_frontmatter_patch_plan` | Projection préservant la source et récupération durable. |
+| Modifier une formule nommée dans Bases | Cycle `bases_formula_patch_plan` | Intention typée appliquée par Base CAS. |
+| Modifier un graphe Canvas existant | Cycle `obsidian_canvas_patch_plan` | Validation du graphe, préservation des valeurs inconnues et Canvas CAS. |
+| Lire/transmettre un document externe configuré | Outils de lecture External Roots | Racines logiques default-deny et chemins physiques masqués. |
+| Déplacer un fichier externe avec réparation exacte des liens ÉLYSIA | Transaction External Move en stdio local | Inventaire, plan scellé, réparations conditionnelles et rollback. |
+| Sémantique complète de l’interface/plugins Obsidian | `live` ou `hybrid` avec Desktop ouvert | Les modes headless ne chargent ni plugins communautaires ni état UI. |
+| Validation backend/CI | `headless-readonly` d’abord | Aucune écriture. |
+| Travail filesystem borné sur une copie/coffre dédié | `headless-guarded` ou `headless-filesystem` | Opt-in explicite, sécurité des chemins et préconditions. |
 
-## Outils directs, legacy et gouvernés
+## Recherche sémantique canonique
 
-Quand plusieurs outils touchent le même domaine, ils ne sont pas
-interchangeables. Appliquer cette priorité :
+Utiliser :
 
-| Intention                                          | Outil préféré                                                                     | Limite de la voie directe ou legacy                                                                                            |
-| -------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Similarité sémantique                              | `smart_semantic_search`                                                           | `smart_search` et `smart-search` sont des alias de compatibilité de la même implémentation.                                    |
-| Lecture de tâches gérées par Operon                | `operon_list_tasks`, `operon_query_tasks`                                         | `list_all_tasks` et `query_tasks` inspectent le Markdown compatible Obsidian Tasks.                                            |
-| Remplacement complet d'une note Markdown existante | `obsidian_note_replace_plan`, puis les outils apply/status/recover correspondants | L'overwrite de `obsidian_update_note` ne fournit ni reçu durable ni récupération du plan exact.                                |
-| Set/delete du frontmatter de premier niveau        | `obsidian_frontmatter_patch_plan`, puis son cycle associé                         | `obsidian_manage_frontmatter` reste utile pour la lecture, la compatibilité ou quand la projection gouvernée live est absente. |
-| Set/delete d'une formule Base nommée               | `bases_formula_patch_plan`, puis son cycle associé                                | `bases_upsert_config` est une voie de compatibilité whole-config désactivée par défaut.                                        |
-| Mutation du graphe d'un JSON Canvas existant       | `obsidian_canvas_patch_plan`, puis son cycle associé                              | `obsidian_manage_canvas` est un helper filesystem headless direct, sans recovery durable.                                      |
+```text
+smart_semantic_search
+```
 
-Les mutations directes append, prepend, search/replace et tags restent exposées
-quand le runtime actif les autorise. Elles ne produisent pas de reçu durable
-plan/status/recovery. Les mutations filesystem headless sont des fallbacks
-bornés pour une copie ou un coffre dédié ; elles ne garantissent pas la
-sémantique Desktop/plugins.
+Optimike MCP 3.0 a supprimé `smart_search` et `smart-search`. Ces alias appelaient la même implémentation et ne doivent plus apparaître dans les prompts, allowlists ou workflows.
 
-Le serveur expose la même priorité concise via la ressource MCP
-`optimike://guides/tool-routing`. Un client peut la lister et la lire sans
-ajouter un nouvel outil de mutation appelable.
+## Outils directs et gouvernés
 
-## Nouveau en V2.2
+Les deux familles possèdent des garanties différentes.
 
-Utiliser `obsidian_validate_format` avant les écritures risquées ou le contenu généré :
+| Intention | Préférer | Frontière directe/compatibilité |
+| --- | --- | --- |
+| Remplacement complet d’une note | `obsidian_note_replace_plan → apply/status/recover` | `obsidian_update_note` sert les append/prepend/create directs intentionnels. |
+| Remplacement à haute assurance dérivé d’un search/replace | Contenu complet via le cycle de remplacement | `obsidian_search_replace` n’a pas de récupération durable. |
+| Set/delete Frontmatter | `obsidian_frontmatter_patch_plan → ...` | `obsidian_manage_frontmatter` est un fallback borné lorsque la famille gouvernée est structurellement absente. |
+| Mutation de formule Base | `bases_formula_patch_plan → ...` | `bases_upsert_config` reste une compatibilité whole-config du profil `full`, pas un fallback de formule. |
+| Mutation d’un Canvas existant | `obsidian_canvas_patch_plan → ...` | `obsidian_manage_canvas` est un fallback headless-filesystem sans reçus durables. |
 
-- `kind: markdown` vérifie frontmatter YAML, tags, wikilinks, embeds, callouts et code fences.
-- `kind: base` vérifie YAML `.base`, views, références de formules et formes courantes.
-- `kind: canvas` vérifie JSON Canvas, nodes, edges, IDs, géométrie et références d'edges.
-- `kind: auto` infère depuis l'extension de `filePath`.
+Ne pas choisir un outil direct seulement parce qu’il comporte moins d’étapes. Le choisir uniquement lorsque sa garantie plus étroite correspond à l’intention.
 
-Pour un Canvas existant en mode live/hybrid, préférer
-`obsidian_canvas_patch_plan → apply → status/recover`. Le compilateur gouverné
-borne les intentions sur les nœuds texte, la géométrie, la suppression de
-nœuds et les edges, préserve les valeurs inconnues, valide le graphe final et
-applique via le gate CAS Canvas séparé d'Atomic Write Bridge 0.4.0.
+## Séquence gouvernée
 
-Utiliser `obsidian_manage_canvas` seulement comme helper direct en
-`headless-filesystem` :
+1. Appeler le `*_plan` du domaine une seule fois avec une clé d’idempotence appartenant à l’appelant.
+2. Inspecter le reçu et conserver la référence opaque.
+3. Appeler le `*_apply` correspondant avec la même clé.
+4. Après timeout ou perte de transport, appeler d’abord `*_status`.
+5. Appeler `*_recover` uniquement lorsque le reçu autorise la récupération de ce plan exact.
 
-- `validate` lit et valide un `.canvas` existant.
-- `create` écrit un `.canvas` structurellement valide.
-- `add_text_node` ajoute un nœud texte.
-- `connect_nodes` ajoute une edge entre deux node IDs existants.
+Ne jamais recréer une mutation simplement parce que la réponse d’apply a été perdue.
 
-Le dry-run est le défaut pour les opérations d'écriture.
+Chaque famille gouvernée est exposée atomiquement. Si `plan` ou `apply` est visible, `status` et `recover` le sont aussi.
 
-## Routage documentaire externe
+## Récupération entre sessions
 
-Un lien Obsidian vers un fichier local n’autorise pas l’accès à ce fichier.
-Employer les outils external-roots uniquement lorsque l’opérateur a
-explicitement configuré un identifiant logique.
+Une session est liée à un profil. Un plan durable n’est pas lié à ce profil.
 
-Workflow agent :
+Après reconnexion, utiliser tout profil exposant la même famille complète, ou `full`, pour inspecter/récupérer le plan. Le journal d’origine, le binding backend, la clé d’idempotence et la write policy restent les autorités.
 
-1. Appeler `external_runtime_status` ou `external_roots_list` ; ne jamais déduire
-   une racine depuis un chemin physique trouvé dans une note.
-2. Employer `external_list` et `external_stat` avec l’identifiant et un chemin
-   relatif à la racine.
-3. Employer `external_read` uniquement pour du texte UTF-8 borné.
-4. Pour un PDF ou un document Office, demander explicitement
-   `external_handoff` :
-   - le stdio local retourne un `local_path` temporaire vérifié ;
-   - le HTTP direct authentifié peut retourner un `http_ticket` opt-in, réclamé
-     une seule fois via `GET /external-handoff` avec la même identité bearer et
-     le header `X-External-Handoff-Ticket`.
-5. Conserver comme provenance l’identifiant logique, le chemin relatif, la
-   taille et le SHA-256. Ne jamais persister le chemin temporaire ni le ticket.
+## Projection sur les runtimes
 
-Pour un move gouverné par ÉLYSIA :
+Les profils sont compilés sur les outils structurellement enregistrés par le runtime.
 
-1. vérifier que le lien `file:///` cliquable possède l’identité canonique
-   adjacente `external-ref:<rootId>::<chemin-relatif-encode-en-pourcentage>` ;
-2. employer `external_references_scan`, puis `external_move_plan` ;
-3. s’arrêter si `manualReview` n’est pas vide ; ne jamais réparer
-   automatiquement une occurrence legacy ou ambiguë ;
-4. examiner `external_move_status`, puis appeler `external_move_apply`
-   uniquement avec les gates write locaux explicites et la même clé
-   d’idempotence ;
-5. vérifier le fichier cible et les notes réparées ; employer
-   `external_move_rollback` seulement tant que ses préconditions persistées
-   tiennent encore.
+- `live` : outils Desktop/Local REST API et Bridges gouvernés disponibles ;
+- `hybrid` : lectures résilientes et outils live lorsque l’API est configurée/joignable ;
+- `headless-readonly` : lectures cache/filesystem et validation ;
+- `headless-guarded` : écritures directes prudentes sur notes/Frontmatter ;
+- `headless-filesystem` : administration filesystem et helpers directs Canvas/Bases.
 
-Cette transaction est réservée au stdio local. Elle accepte un fichier régulier,
-une cible absente dans un dossier parent existant, et un move sans écrasement
-dans la même racine et sur le même volume. Les éditions concurrentes de notes
-sont protégées par une précondition SHA-256 exacte en `headless-filesystem` sur
-une copie ou un coffre dédié. L’apply live via Local REST échoue fermé, car les
-remplacements de note complète n’imposent pas encore `If-Match`. Ne pas router
-create, replace, upload, delete, sync, dossier, cross-root ou cross-volume dans
-ce workflow.
+La santé transitoire d’un backend ne modifie pas la surface. Un outil momentanément indisponible retourne un diagnostic explicite.
 
-Toute opération external-root en HTTP direct exige `external:read`. Le HTTP
-distant reste pilote derrière un proxy TLS et des contrôles réseau revus.
-Le HTTP direct refuse scan de références, plan/status de move, apply et
-rollback ; un ticket d’artefact autorise uniquement le téléchargement.
+## Documents externes
 
-Ne pas promettre l’extraction au seul motif que le handoff fonctionne :
-l’extraction dépend du client appelant. Ne pas copier silencieusement le contenu
-externe dans le coffre, le fusionner à la recherche du coffre ou traiter la
-racine configurée comme une sauvegarde.
+Un chemin physique cité dans une note n’accorde aucune autorisation.
 
-## Ce que le headless valide mais ne garantit pas
+1. Inspecter `external_runtime_status` ou `external_roots_list`.
+2. Utiliser `rootId` et des chemins relatifs à la racine.
+3. Utiliser `external_read` seulement pour du texte UTF-8 borné.
+4. Utiliser `external_handoff` pour les binaires ; l’extraction appartient au client.
+5. Conserver la provenance logique et le SHA-256, jamais les chemins temporaires.
 
-La validation headless attrape les erreurs locales de format. Elle ne rend pas Obsidian, ne charge pas les plugins communautaires, n'évalue pas le comportement exact de l'UI Bases, n'exécute pas les formules, ne résout pas les backlinks via l'index interne Obsidian et ne confirme pas le layout visuel Canvas.
+External Move reste limité au stdio local et exige son bundle complet de cinq outils. Arrêter dès que `manualReview` n’est pas vide.
 
-## Règle pratique pour agents
+## Limites headless
 
-1. Valider le contenu généré avec `obsidian_validate_format`.
-2. Si le comportement Desktop/plugin compte, utiliser `live` ou `hybrid` avec Obsidian ouvert.
-3. Sur backend, commencer par `headless-readonly`.
-4. Activer `headless-filesystem` seulement sur copie ou vault dédié avec rollback.
+La validation headless ne rend pas Obsidian, ne charge pas les plugins, n’évalue pas fidèlement les formules/vues Bases de l’UI, n’utilise pas le fichier actif, n’exécute pas la palette de commandes et ne juge pas la qualité visuelle d’un Canvas.
+
+Commencer par `headless-readonly`, puis n’activer les écritures filesystem que sur une copie ou un coffre dédié avec procédure de rollback explicite.

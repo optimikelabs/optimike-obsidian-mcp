@@ -40,6 +40,8 @@ for (const [name, content, forbidden] of [
 ]) {
   assert.match(content, /local_path/);
   assert.match(content, /http_ticket/);
+  assert.match(content, /tool[- ]surface|surface d[’']outils/i);
+  assert.match(content, /smart_semantic_search/);
   for (const pattern of forbidden) {
     assert.doesNotMatch(
       content,
@@ -51,9 +53,12 @@ for (const [name, content, forbidden] of [
 
 const externalAdr = await text("docs/adr/ADR-External-Document-Roots.md");
 const httpAdr = await text("docs/adr/ADR-HTTP-External-Artifact-Delivery.md");
+const surfaceAdr = await text("docs/adr/ADR-Tool-Surface-Profiles-V3.md");
 assert.match(externalAdr, /handoff transport amended/i);
 assert.match(httpAdr, /Status: accepted and implemented on `main`/);
 assert.match(httpAdr, /remote HTTP remains pilot-only/i);
+assert.match(surfaceAdr, /server-owned, client-assisted/i);
+assert.match(surfaceAdr, /74 cross-runtime names/i);
 
 const matrix = await text("docs/runtime-capability-matrix.md");
 const matrixFr = await text("docs/runtime-capability-matrix.fr.md");
@@ -106,16 +111,22 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "2.9.0",
-  "released package metadata must match the 2.9.0 governed Canvas release",
+  "3.0.0",
+  "released package metadata must match the V3 tool-surface contract",
 );
+assert.equal(packageJson.main, "dist/index-v3.js");
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts.inspect, "node scripts/run-inspector.mjs");
 assert.equal(
-  packageJson.bin["optimike-obsidian-mcp-proxy"],
-  "dist/stdio-proxy.js",
+  packageJson.bin["optimike-obsidian-mcp"],
+  "dist/index-v3.js",
 );
+assert.equal(
+  packageJson.bin["optimike-obsidian-mcp-proxy"],
+  "dist/stdio-surface-proxy.js",
+);
+assert.match(packageJson.scripts["test:runtime"], /test:tool-surface-v3/u);
 
 const mcpConfig = JSON.parse(await text("mcp.json"));
 const httpExample = mcpConfig.mcpServers["optimike-obsidian-mcp-http"].env;
@@ -128,6 +139,7 @@ const bilingualPairs = [
   ["OPERATIONS.md", "OPERATIONS.fr.md"],
   ["SECURITY.md", "SECURITY.fr.md"],
   ["docs/README.md", "docs/README.fr.md"],
+  ["docs/tool-surface-profiles.md", "docs/tool-surface-profiles.fr.md"],
   ["docs/external-roots-setup.md", "docs/external-roots-setup.fr.md"],
   ["docs/runtime-capability-matrix.md", "docs/runtime-capability-matrix.fr.md"],
   ["docs/governed-note-replacement.md", "docs/governed-note-replacement.fr.md"],
@@ -138,6 +150,22 @@ const bilingualPairs = [
 ];
 for (const pair of bilingualPairs) {
   for (const file of pair) await access(path.join(root, file));
+}
+
+const toolSpec = await text("docs/obsidian_mcp_tools_spec.md");
+assert.match(toolSpec, /74 names/u);
+assert.match(toolSpec, /smart_semantic_search/u);
+assert.match(toolSpec, /smart_search.*removed|removed.*smart_search/iu);
+assert.match(toolSpec, /Hidden means uncallable/u);
+
+const surfaceDoc = await text("docs/tool-surface-profiles.md");
+const surfaceDocFr = await text("docs/tool-surface-profiles.fr.md");
+for (const content of [surfaceDoc, surfaceDocFr]) {
+  for (const profile of ["standard", "authoring", "tasks", "full"]) {
+    assert.ok(content.includes(`\`${profile}\``), `Surface doc omits ${profile}`);
+  }
+  assert.match(content, /smart_semantic_search/u);
+  assert.match(content, /plan.*apply.*status.*recover/isu);
 }
 
 const governedNoteContract = await text("docs/governed-note-replacement.md");
@@ -161,6 +189,7 @@ assert.match(governedNoteContractFr, /appeler d’abord\s+`status`/iu);
 
 const envExample = await text(".env.server.example");
 assert.match(envExample, /MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH=\//u);
+assert.match(envExample, /MCP_TOOL_PROFILE/u);
 
 const operonContract = await text("docs/operon-mcp-contract.md");
 const operonContractFr = await text("docs/operon-mcp-contract.fr.md");
@@ -211,5 +240,5 @@ assert.deepEqual(
 );
 
 console.log(
-  `PASS: documentation contract, bilingual entrypoints, runtime registry and relative links are coherent`,
+  "PASS: V3 documentation contract, bilingual entrypoints, profile registry and relative links are coherent",
 );

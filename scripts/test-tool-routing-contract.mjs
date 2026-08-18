@@ -41,8 +41,6 @@ assert.deepEqual(readResult, {
 });
 
 const routingPairs = [
-  ["smart_search", "smart_semantic_search"],
-  ["smart-search", "smart_semantic_search"],
   ["list_all_tasks", "operon_list_tasks"],
   ["query_tasks", "operon_query_tasks"],
   ["obsidian_update_note", "obsidian_note_replace_plan"],
@@ -62,6 +60,14 @@ for (const [overlappingTool, preferredTool] of routingPairs) {
   );
 }
 
+assert.ok(TOOL_ROUTING_RESOURCE_TEXT.includes("smart_semantic_search"));
+assert.match(
+  TOOL_ROUTING_RESOURCE_TEXT,
+  /no longer\s+exposes[\s\S]*smart_search[\s\S]*smart-search/u,
+);
+assert.ok(TOOL_ROUTING_RESOURCE_TEXT.includes("tool profile"));
+assert.ok(TOOL_ROUTING_RESOURCE_TEXT.includes("durable plan does not"));
+
 for (const relativePath of [
   "docs/mcp-routing-guide.md",
   "docs/mcp-routing-guide.fr.md",
@@ -70,6 +76,10 @@ for (const relativePath of [
   assert.ok(
     content.includes(TOOL_ROUTING_RESOURCE_URI),
     `${relativePath} does not advertise the routing resource`,
+  );
+  assert.ok(
+    content.includes("smart_semantic_search"),
+    `${relativePath} omits canonical semantic search`,
   );
   for (const [, preferredTool] of routingPairs) {
     assert.ok(
@@ -80,5 +90,5 @@ for (const relativePath of [
 }
 
 console.log(
-  "PASS: canonical tool-routing resource, overlap precedence and bilingual documentation agree",
+  "PASS: canonical V3 tool-routing resource, governed precedence and bilingual documentation agree",
 );

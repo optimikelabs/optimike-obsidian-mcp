@@ -5,38 +5,39 @@ export const TOOL_ROUTING_RESOURCE_URI =
 
 export const TOOL_ROUTING_RESOURCE_TEXT = `# Optimike MCP tool routing
 
-Use the narrowest tool that owns the required guarantee. Tool availability is
-runtime-dependent; never infer that an absent tool can be emulated safely.
+Tool availability depends on the runtime mode and the immutable tool profile
+selected before MCP initialization. Use the narrowest exposed tool that owns the
+required guarantee. Never infer that an absent tool can be emulated safely.
 
 ## Canonical priorities
 
 - Read, list and exact text search: use the dedicated read/search tools.
-- Semantic search: use \`smart_semantic_search\`. \`smart_search\` and
-  \`smart-search\` are legacy compatibility aliases of the same implementation.
+- Semantic similarity: use \`smart_semantic_search\`. Optimike MCP 3.0 no longer
+  exposes the former \`smart_search\` or \`smart-search\` aliases.
 - Operon-managed tasks: use \`operon_list_tasks\` or \`operon_query_tasks\`. Use
-  \`list_all_tasks\` and \`query_tasks\` only for legacy Obsidian Tasks-compatible
+  \`list_all_tasks\` and \`query_tasks\` only for Obsidian Tasks-compatible
   Markdown inspection.
 - Complete replacement of an existing Markdown note in live/hybrid mode: prefer
   \`obsidian_note_replace_plan\`, then apply the sealed plan. After a lost response,
   call status before recover; never issue a new blind mutation. Use
-  \`obsidian_update_note\` for intentional direct append/prepend/create operations;
-  its overwrite mode is a compatibility path without a durable receipt.
+  \`obsidian_update_note\` only when its direct append/prepend/create contract is
+  intentional.
 - \`obsidian_search_replace\` is a direct edit without durable recovery. For a
-  high-assurance replacement, compute the intended complete content and route it
-  through \`obsidian_note_replace_plan\`.
-- Top-level frontmatter set/delete in live/hybrid mode: prefer
-  \`obsidian_frontmatter_patch_plan\`. Use \`obsidian_manage_frontmatter\` for
-  direct reads, compatibility, or a runtime where the governed tool is absent.
+  high-assurance replacement, compile the intended complete content through
+  \`obsidian_note_replace_plan\`.
+- Top-level Frontmatter set/delete in live/hybrid mode: prefer
+  \`obsidian_frontmatter_patch_plan\`. The direct Frontmatter helper is a bounded
+  fallback only when the governed family is structurally absent.
 - Named Base formula set/delete: prefer \`bases_formula_patch_plan\`.
-  \`bases_upsert_config\` is a legacy whole-config compatibility path and must not
-  bypass the governed formula contract.
+  \`bases_upsert_config\` is a full-profile compatibility path, not a formula
+  fallback.
 - Existing JSON Canvas graph mutation in live/hybrid mode: prefer
   \`obsidian_canvas_patch_plan\`, then its matching apply/status/recover tools.
-  \`obsidian_manage_canvas\` is a direct headless-filesystem helper without a
-  durable receipt and must not emulate the governed CAS path.
+  \`obsidian_manage_canvas\` is a direct headless-filesystem fallback without a
+  durable receipt.
 - Direct append/prepend/search-replace/tag tools do not provide a durable
   plan/status/recovery receipt. Use them only when that narrower direct contract
-  is intentional and allowed by the active runtime policy.
+  is intentional and allowed by the runtime policy.
 - Headless filesystem mutations are bounded fallback operations for copied or
   dedicated vaults. They do not claim Obsidian Desktop or plugin semantics.
 
@@ -48,6 +49,10 @@ runtime-dependent; never infer that an absent tool can be emulated safely.
 4. After timeout or transport loss, call \`*_status\` first.
 5. Call \`*_recover\` only when the receipt authorizes recovery of that exact plan.
 
+A session belongs to one tool profile. A durable plan does not; it can be
+inspected or recovered after reconnecting from any profile that exposes the same
+complete family and satisfies the existing runtime/write authority.
+
 There is intentionally no generic public \`operation_*\` surface.
 `;
 
@@ -58,7 +63,7 @@ export function registerToolRoutingResource(server: McpServer): void {
     {
       title: "Optimike MCP tool routing",
       description:
-        "Canonical precedence between direct, legacy and governed Optimike MCP tools.",
+        "Canonical precedence between direct, compatibility and governed Optimike MCP tools in the active profile.",
       mimeType: "text/markdown",
     },
     async () => ({
