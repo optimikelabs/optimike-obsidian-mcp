@@ -28,6 +28,8 @@ const requiredFiles = [
   "SECURITY.fr.md",
   "docs/README.md",
   "docs/README.fr.md",
+  "docs/tool-surface-profiles.md",
+  "docs/tool-surface-profiles.fr.md",
   "docs/governed-note-replacement.md",
   "docs/governed-note-replacement.fr.md",
   "docs/governed-frontmatter-p1.md",
@@ -58,7 +60,7 @@ const requiredFiles = [
 const missing = requiredFiles.filter((file) => !files.has(file));
 if (missing.length > 0) {
   throw new Error(
-    `Package is missing installable Bridge artifacts: ${missing.join(", ")}`,
+    `Package is missing required runnable, documentation or Bridge artifacts: ${missing.join(", ")}`,
   );
 }
 

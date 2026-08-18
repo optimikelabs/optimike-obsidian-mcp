@@ -40,9 +40,17 @@ assert.deepEqual(readResult, {
   ],
 });
 
+assert.ok(
+  TOOL_ROUTING_RESOURCE_TEXT.includes("smart_semantic_search"),
+  "routing resource must expose the canonical semantic-search name",
+);
+assert.ok(
+  !TOOL_ROUTING_RESOURCE_TEXT.includes("`smart_search`") &&
+    !TOOL_ROUTING_RESOURCE_TEXT.includes("`smart-search`"),
+  "canonical routing resource must not teach semantic-search compatibility aliases",
+);
+
 const routingPairs = [
-  ["smart_search", "smart_semantic_search"],
-  ["smart-search", "smart_semantic_search"],
   ["list_all_tasks", "operon_list_tasks"],
   ["query_tasks", "operon_query_tasks"],
   ["obsidian_update_note", "obsidian_note_replace_plan"],
@@ -70,6 +78,10 @@ for (const relativePath of [
   assert.ok(
     content.includes(TOOL_ROUTING_RESOURCE_URI),
     `${relativePath} does not advertise the routing resource`,
+  );
+  assert.ok(
+    content.includes("smart_semantic_search"),
+    `${relativePath} omits canonical semantic search`,
   );
   for (const [, preferredTool] of routingPairs) {
     assert.ok(

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "./config/toolProfileCli.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -25,6 +26,11 @@ import {
   ExternalStatSchema,
   externalRootsResult,
 } from "./mcp-server/tools/externalRootsTools/registration.js";
+import {
+  selectAvailableToolProfileNames,
+  type ToolProfileId,
+} from "./mcp-server/toolProfiles.js";
+import { resolveToolProfile } from "./mcp-server/toolProfileRuntime.js";
 import { config, profileExternalMoveJournalPath } from "./config/index.js";
 import { ensureLocalBackendRunning } from "./runtime/localBackend.js";
 import {
@@ -57,6 +63,7 @@ const port = Number(process.env.MCP_HTTP_PORT || "3010");
 const backendUrl = new URL(`http://${host}:${port}/mcp`);
 const healthUrl = new URL(`http://${host}:${port}/healthz`);
 const backendBearerToken = process.env.MCP_BACKEND_BEARER_TOKEN?.trim();
+const toolProfile: ToolProfileId = resolveToolProfile();
 
 const proxyServer = new Server(
   { name: `${packageName}-stdio-proxy`, version: packageVersion },
@@ -64,6 +71,7 @@ const proxyServer = new Server(
 );
 
 let backend: BackendClient | undefined;
+let allowedToolNames: Set<string> | undefined;
 let externalRootsService: ExternalRootsService | undefined;
 let externalMoveCoordinator: ExternalMoveCoordinator | undefined;
 let externalMoveBindingIdentity: ExternalMoveBindingIdentity | undefined;
@@ -124,6 +132,26 @@ function invalidExternalArguments(
   };
 }
 
+function hiddenToolResult(toolName: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify(
+          {
+            error: "tool_not_exposed",
+            message: `Tool ${toolName} is not exposed by MCP tool profile ${toolProfile}.`,
+            toolProfile,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+    isError: true,
+  };
+}
+
 function isReconnectableBackendError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return (
@@ -149,6 +177,7 @@ async function ensureBackendConnected(forceReconnect = false): Promise<Client> {
     ]);
     backend = undefined;
   }
+  allowedToolNames = undefined;
 
   await ensureLocalBackendRunning({
     serviceName: packageName,
@@ -159,6 +188,9 @@ async function ensureBackendConnected(forceReconnect = false): Promise<Client> {
     env: {
       ...process.env,
       MCP_TRANSPORT_TYPE: "http",
+      // One shared backend must never inherit a per-agent stdio profile.
+      // Per-client exposure is enforced by this proxy; the backend stays full.
+      MCP_TOOL_PROFILE: "full",
     },
     startupTimeoutMs: Number(process.env.MCP_PROXY_START_TIMEOUT_MS || "20000"),
   });
@@ -217,6 +249,30 @@ async function withBackendRetry<T>(
   }
 }
 
+async function filteredBackendTools(params?: Record<string, unknown>) {
+  const result = await withBackendRetry("listTools", (client) =>
+    client.listTools(params),
+  );
+  const selected = new Set(
+    selectAvailableToolProfileNames({
+      profile: toolProfile,
+      availableNames: result.tools.map((tool) => tool.name),
+    }),
+  );
+  allowedToolNames = selected;
+  return {
+    ...result,
+    tools: result.tools.filter((tool) => selected.has(tool.name)),
+  };
+}
+
+async function toolIsExposed(toolName: string): Promise<boolean> {
+  if (!allowedToolNames) {
+    await filteredBackendTools();
+  }
+  return allowedToolNames?.has(toolName) ?? false;
+}
+
 async function shutdown(signal: string) {
   console.error(`[${packageName}] proxy shutdown on ${signal}`);
   await Promise.allSettled([
@@ -268,10 +324,14 @@ async function start() {
   }
 
   proxyServer.setRequestHandler(ListToolsRequestSchema, async (request) =>
-    withBackendRetry("listTools", (client) => client.listTools(request.params)),
+    filteredBackendTools(request.params),
   );
 
   proxyServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (!(await toolIsExposed(request.params.name))) {
+      return hiddenToolResult(request.params.name);
+    }
+
     if (request.params.name === "external_runtime_status") {
       return externalRootsResult(async () => ({
         enabled: Boolean(externalRootsService),
@@ -494,7 +554,7 @@ async function start() {
   const stdioTransport = new StdioServerTransport();
   await proxyServer.connect(stdioTransport);
   console.error(
-    `[${packageName}] stdio proxy connected to ${backendUrl.toString()}`,
+    `[${packageName}] stdio proxy connected to ${backendUrl.toString()} with tool profile ${toolProfile}`,
   );
 }
 

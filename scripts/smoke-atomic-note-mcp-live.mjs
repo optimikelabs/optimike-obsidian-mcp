@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { assertAtomicNoteCanaryDateIsolation } from "./modified-time-canary-helpers.mjs";
 
 const canaryPath = process.env.OBSIDIAN_ATOMIC_NOTE_CANARY_PATH?.trim();
 const confirmation = process.env.OBSIDIAN_ATOMIC_NOTE_CANARY_CONFIRM?.trim();
@@ -148,6 +149,7 @@ async function proveDirectBridgeCasConflict() {
     target: canaryPath,
   });
   const status = await rest.getAtomicWriteStatus(context);
+  assertAtomicNoteCanaryDateIsolation(status);
   const before = await rest.readAtomicWriteNote(
     { contractVersion: 1, path: canaryPath },
     context,

@@ -2,25 +2,38 @@
 
 French version: [mcp-routing-guide.fr.md](mcp-routing-guide.fr.md)
 
-Related docs: [README](../README.md), [Operations](../OPERATIONS.md),
-[Runtime Capability Matrix](runtime-capability-matrix.md),
+Related docs: [README](../README.md), [Tool Surface Profiles](tool-surface-profiles.md),
+[Operations](../OPERATIONS.md), [Runtime Capability Matrix](runtime-capability-matrix.md),
 [Headless Server Profile](headless-server-profile.md), and
 [External document roots](external-roots-setup.md)
 
 ![Decision path for routing agent work through Optimike Obsidian MCP](assets/readme/routing-guide.en.svg)
 
-This guide helps agents choose the right layer for Obsidian work.
+This guide helps agents choose the right layer and canonical tool for Obsidian work.
+
+## Choose the exposure surface first
+
+Runtime and tool profile are independent decisions:
+
+- the runtime (`live`, `hybrid`, `headless-*`) defines what the backend can safely provide;
+- the tool profile (`standard`, `authoring`, `tasks`, `full`) defines what the client sees before `tools/list`.
+
+For new integrations, prefer `standard` for general vault work, `authoring` for
+Bases/Canvas/tag authoring, and `tasks` for Operon workflows. `full` is the 2.x
+compatibility/admin surface. See [Tool Surface Profiles](tool-surface-profiles.md).
 
 ## Default Decision
 
 | Need                                                                         | Use                                                           | Why                                                                     |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Read, list, search, tasks, semantic search                                   | Optimike MCP                                                  | Stable tool surface across live, hybrid, and headless modes.            |
-| Read an explicitly configured document outside the vault                     | Optimike MCP external-root tools                              | Default-deny confinement with portable logical paths.                   |
-| Move one external file without silently breaking ÉLYSIA links                | Local stdio on a copied or dedicated vault                    | Inventory, durable plan, exact hash repairs, receipt and rollback.      |
+| Read, list, search, semantic search                                          | `standard` profile                                            | Small general-purpose surface with canonical search/write routing.      |
+| Operon or Markdown Tasks workflows                                           | `tasks` profile                                               | Complete Operon contract plus Tasks-compatible Markdown tools.          |
+| Bases, tags or Canvas authoring                                               | `authoring` profile                                           | Adds the authoring-specific surfaces without the full admin set.        |
+| Read an explicitly configured document outside the vault                     | `full` + Optimike MCP external-root tools                     | External roots are specialized and default-deny.                        |
+| Move one external file without silently breaking ÉLYSIA links                | `full` over local stdio on a copied or dedicated vault        | Inventory, durable plan, exact hash repairs, receipt and rollback.      |
 | Full Obsidian behavior, commands, active file, plugin-backed Bases           | Optimike MCP in `live` or `hybrid` with Obsidian Desktop open | This is the only mode with Desktop/plugin-backed semantics.             |
-| Safe backend server over a synced vault                                      | Optimike MCP in `headless-readonly` first                     | No Desktop required and no write risk.                                  |
-| Bounded Markdown/frontmatter/tag/admin writes on a copied or dedicated vault | Optimike MCP in `headless-filesystem`                         | Path safety, dry-run defaults, and preconditions.                       |
+| Safe backend server over a synced vault                                      | `headless-readonly` first                                     | No Desktop required and no write risk.                                  |
+| Bounded Markdown/frontmatter/tag/admin writes on a copied or dedicated vault | `headless-filesystem`                                         | Path safety, dry-run defaults, and preconditions.                       |
 | Direct one-off file edits outside the MCP contract                           | Filesystem tools                                              | Useful for local repo-style work, but the agent owns all safety checks. |
 | App-native Obsidian actions or diagnostics                                   | Obsidian CLI                                                  | Useful as a Desktop/app control plane, not strict headless.             |
 | Knowing how to write Obsidian Markdown, Bases, or Canvas syntax              | Obsidian-format skills or docs                                | Skills teach format conventions; they do not execute MCP operations.    |
@@ -39,15 +52,15 @@ explicit vault-relative path first, then use the ordinary note tools. The
 optional upstream Periodic Notes API extension is a separate integration and is
 not assumed by Optimike MCP.
 
-## Direct, legacy and governed tools
+## Direct, compatibility and governed tools
 
 When multiple tools touch the same domain, they are not interchangeable. Use
 this precedence:
 
-| Intent                                            | Preferred tool                                                            | Direct or legacy boundary                                                                                              |
+| Intent                                            | Preferred tool                                                            | Direct or compatibility boundary                                                                                       |
 | ------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Semantic similarity                               | `smart_semantic_search`                                                   | `smart_search` and `smart-search` are compatibility aliases of the same implementation.                                |
-| Operon-managed task reads                         | `operon_list_tasks`, `operon_query_tasks`                                 | `list_all_tasks` and `query_tasks` inspect legacy Obsidian Tasks-compatible Markdown.                                  |
+| Semantic similarity                               | `smart_semantic_search`                                                   | This is the only semantic-search name taught to new agents and exposed by modern profiles.                             |
+| Operon-managed task reads                         | `operon_list_tasks`, `operon_query_tasks`                                 | `list_all_tasks` and `query_tasks` inspect Obsidian Tasks-compatible Markdown.                                         |
 | Complete replacement of an existing Markdown note | `obsidian_note_replace_plan` then its matching apply/status/recover tools | `obsidian_update_note` overwrite has no durable receipt or exact-plan recovery.                                        |
 | Top-level frontmatter set/delete                  | `obsidian_frontmatter_patch_plan` then its matching lifecycle             | `obsidian_manage_frontmatter` remains useful for reads, compatibility, or when the governed live projection is absent. |
 | Named Base formula set/delete                     | `bases_formula_patch_plan` then its matching lifecycle                    | `bases_upsert_config` is a default-off whole-config compatibility path.                                                |
@@ -63,7 +76,20 @@ The server exposes the same concise precedence as the MCP resource
 `optimike://guides/tool-routing`. Clients can list and read that resource without
 adding another callable mutation tool.
 
-## New In V2.2
+## Governed sequence
+
+For every governed family:
+
+1. Call the domain-specific `*_plan` tool once with a caller-owned idempotency key.
+2. Inspect the returned receipt and retain its opaque `planRef`.
+3. Call the matching `*_apply` tool with the same key.
+4. After timeout or transport loss, call `*_status` first.
+5. Call `*_recover` only when the receipt authorizes recovery of that exact plan.
+
+A profile always exposes the full `plan → apply → status → recover` family or
+none of it. The profile that created a plan is never recovery authority.
+
+## Format validation
 
 Use `obsidian_validate_format` before risky writes or generated content:
 
@@ -91,14 +117,13 @@ Dry-run is the default for write operations.
 
 An Obsidian link to a local file does not authorize access to that file. Use
 external-root tools only when the operator has explicitly configured a logical
-root ID.
+root ID and selected the specialized `full` surface.
 
 Agent workflow:
 
 1. Call `external_runtime_status` or `external_roots_list`; never infer a root
    from a physical path found in a note.
-2. Use `external_list` and `external_stat` with a root ID and root-relative
-   path.
+2. Use `external_list` and `external_stat` with a root ID and root-relative path.
 3. Use `external_read` only for bounded UTF-8 text.
 4. For PDF or Office content, request `external_handoff` explicitly:
    - local stdio returns a verified temporary `local_path`;
@@ -113,8 +138,7 @@ For an ÉLYSIA-managed move:
 1. ensure the clickable `file:///` link has an adjacent canonical identity:
    `external-ref:<rootId>::<percent-encoded-relative-path>`;
 2. use `external_references_scan`, then `external_move_plan`;
-3. stop when `manualReview` is non-empty; never repair a legacy or ambiguous
-   occurrence automatically;
+3. stop when `manualReview` is non-empty; never repair a historical or ambiguous occurrence automatically;
 4. inspect `external_move_status`, then call `external_move_apply` only with
    explicit local write gates and the same idempotency key;
 5. verify both the target file and repaired notes; use
@@ -129,9 +153,9 @@ Do not route create, replace, upload, delete, sync, directory, cross-root or
 cross-volume operations through this workflow.
 
 Every direct HTTP external-root operation requires `external:read`. Remote HTTP
-remains pilot-only behind reviewed TLS proxy and network controls.
-Direct HTTP rejects external reference scan, move plan/status, apply and
-rollback; an artifact ticket authorizes download only.
+remains pilot-only behind reviewed TLS proxy and network controls. Direct HTTP
+rejects external reference scan, move plan/status, apply and rollback; an
+artifact ticket authorizes download only.
 
 Do not promise extraction merely because handoff succeeds: extraction depends
 on the calling client. Do not silently copy external content into the vault,
@@ -139,11 +163,17 @@ merge it into vault search, or treat the configured root as a backup.
 
 ## What Headless Can Validate But Not Guarantee
 
-Headless validation catches local format errors. It does not render Obsidian, load community plugins, evaluate exact Bases UI behavior, execute formulas, resolve backlinks through Obsidian's internal index, or confirm visual Canvas layout.
+Headless validation catches local format errors. It does not render Obsidian,
+load community plugins, evaluate exact Bases UI behavior, execute formulas,
+resolve backlinks through Obsidian's internal index, or confirm visual Canvas
+layout.
 
 ## Practical Rule For Agents
 
-1. Validate generated content with `obsidian_validate_format`.
-2. If Desktop/plugin behavior matters, use `live` or `hybrid` with Obsidian open.
-3. If running on a backend, start with `headless-readonly`.
-4. Enable `headless-filesystem` only on a copied or dedicated vault with rollback.
+1. Select the narrowest server profile that contains the required domain.
+2. Validate generated content with `obsidian_validate_format`.
+3. If Desktop/plugin behavior matters, use `live` or `hybrid` with Obsidian open.
+4. If running on a backend, start with `headless-readonly`.
+5. Enable `headless-filesystem` only on a copied or dedicated vault with rollback.
+
+There is intentionally no generic public `operation_*` surface.

@@ -2,6 +2,51 @@ const LOCAL_DATETIME =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/u;
 const PLUGIN_FRESHNESS_MARGIN_MS = 5_200;
 
+export function supportsModifiedTimeSettlementBridgeVersion(value) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/u.exec(value ?? "");
+  if (!match) return false;
+  const [, major, minor] = match.map(Number);
+  return major > 0 || (major === 0 && minor >= 3);
+}
+
+export function assertAtomicNoteCanaryDateIsolation(status) {
+  const settlementIntegrations =
+    status?.settlement?.modifiedTimeFrontmatter?.integrations ?? [];
+  const protection = status?.protection?.frontmatterDateProperties;
+  const protectionIntegrations = protection?.integrations ?? [];
+  const unsupportedIntegrations = protection?.unsupportedIntegrations ?? [];
+  const active = new Set();
+
+  if (Array.isArray(settlementIntegrations)) {
+    for (const integration of settlementIntegrations) {
+      active.add(
+        `${integration?.pluginId ?? "unknown"}:${integration?.propertyName ?? "unknown"}`,
+      );
+    }
+  }
+  if (Array.isArray(protectionIntegrations)) {
+    for (const integration of protectionIntegrations) {
+      if (integration?.modifiedPropertyName) {
+        active.add(
+          `${integration?.pluginId ?? "unknown"}:${integration.modifiedPropertyName}`,
+        );
+      }
+    }
+  }
+  if (Array.isArray(unsupportedIntegrations)) {
+    for (const integration of unsupportedIntegrations) {
+      if (integration?.activeRoles?.includes("modified")) {
+        active.add(`${integration?.pluginId ?? "unknown"}:modified(unsupported)`);
+      }
+    }
+  }
+
+  if (active.size === 0) return;
+  throw new Error(
+    `The byte-exact atomic-note canary requires active modified-time integrations to be disabled before mutation (${[...active].join(", ")}). Run smoke:modified-time-settlement-live separately with the integration enabled.`,
+  );
+}
+
 export function isSafeModifiedTimePropertyName(value) {
   return (
     typeof value === "string" &&

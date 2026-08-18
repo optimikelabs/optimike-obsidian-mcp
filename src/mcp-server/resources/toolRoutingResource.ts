@@ -1,4 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import "../../config/toolProfileCli.js";
+import { installToolProfileRegistrationGate } from "../toolProfileRuntime.js";
 
 export const TOOL_ROUTING_RESOURCE_URI =
   "optimike://guides/tool-routing" as const;
@@ -6,13 +8,14 @@ export const TOOL_ROUTING_RESOURCE_URI =
 export const TOOL_ROUTING_RESOURCE_TEXT = `# Optimike MCP tool routing
 
 Use the narrowest tool that owns the required guarantee. Tool availability is
-runtime-dependent; never infer that an absent tool can be emulated safely.
+runtime- and profile-dependent; never infer that an absent tool can be emulated safely.
 
 ## Canonical priorities
 
 - Read, list and exact text search: use the dedicated read/search tools.
-- Semantic search: use \`smart_semantic_search\`. \`smart_search\` and
-  \`smart-search\` are legacy compatibility aliases of the same implementation.
+- Semantic search: use \`smart_semantic_search\`. It is the only semantic-search
+  name exposed by modern 2.10 profiles; compatibility aliases remain a \`full\`
+  2.x concern and are not part of canonical routing.
 - Operon-managed tasks: use \`operon_list_tasks\` or \`operon_query_tasks\`. Use
   \`list_all_tasks\` and \`query_tasks\` only for legacy Obsidian Tasks-compatible
   Markdown inspection.
@@ -28,8 +31,8 @@ runtime-dependent; never infer that an absent tool can be emulated safely.
   \`obsidian_frontmatter_patch_plan\`. Use \`obsidian_manage_frontmatter\` for
   direct reads, compatibility, or a runtime where the governed tool is absent.
 - Named Base formula set/delete: prefer \`bases_formula_patch_plan\`.
-  \`bases_upsert_config\` is a legacy whole-config compatibility path and must not
-  bypass the governed formula contract.
+  \`bases_upsert_config\` is a whole-config compatibility path and must not bypass
+  the governed formula contract.
 - Existing JSON Canvas graph mutation in live/hybrid mode: prefer
   \`obsidian_canvas_patch_plan\`, then its matching apply/status/recover tools.
   \`obsidian_manage_canvas\` is a direct headless-filesystem helper without a
@@ -52,13 +55,17 @@ There is intentionally no generic public \`operation_*\` surface.
 `;
 
 export function registerToolRoutingResource(server: McpServer): void {
+  // server.ts calls this bootstrap point before registering any MCP tools.
+  // Install the selected profile first so hidden tools never reach tools/list.
+  installToolProfileRegistrationGate(server);
+
   server.registerResource(
     "optimike-tool-routing",
     TOOL_ROUTING_RESOURCE_URI,
     {
       title: "Optimike MCP tool routing",
       description:
-        "Canonical precedence between direct, legacy and governed Optimike MCP tools.",
+        "Canonical precedence between direct, compatibility and governed Optimike MCP tools.",
       mimeType: "text/markdown",
     },
     async () => ({

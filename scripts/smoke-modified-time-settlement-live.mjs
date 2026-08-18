@@ -19,6 +19,7 @@ import {
   isSafeModifiedTimePropertyName,
   modifiedTimeFrontmatterPropertyValue,
   nextRepresentableTimestampReadyAt,
+  supportsModifiedTimeSettlementBridgeVersion,
 } from "./modified-time-canary-helpers.mjs";
 
 const canaryPath = process.env.OBSIDIAN_MODIFIED_TIME_CANARY_PATH?.trim();
@@ -607,7 +608,11 @@ try {
   );
   const status = await atomicStatus();
   assert.equal(status.plugin.id, "obsidian-atomic-write-bridge");
-  assert.equal(status.plugin.version, "0.3.0");
+  assert.equal(
+    supportsModifiedTimeSettlementBridgeVersion(status.plugin.version),
+    true,
+    `Atomic Write Bridge ${status.plugin.version} does not support bounded modified-time settlement; version 0.3.0 or later is required.`,
+  );
   assert.equal(status.backend.writeEnabled, true);
   assert.match(status.backend.bindingFingerprint, /^[a-f0-9]{64}$/u);
   originalBindingFingerprint = status.backend.bindingFingerprint;

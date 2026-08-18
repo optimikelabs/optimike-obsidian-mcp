@@ -212,7 +212,8 @@ current MCP write policy, protected frontmatter and the default-off Atomic Write
 Bridge gate remain effective at planning and before every possible effect.
 
 Before merge or release, enable the Atomic Write Bridge only in a disposable
-Desktop vault, create one dedicated existing `.md` canary note, then run:
+Desktop vault, create one dedicated existing `.md` canary note, disable any
+plugin that automatically changes modified-time frontmatter, then run:
 
 ```bash
 OBSIDIAN_ATOMIC_NOTE_CANARY_PATH="Canary/Atomic Note.md" \
@@ -230,9 +231,12 @@ logs, and backup. A handled failure before mutation also removes that directory
 after verifying the note is unchanged. An abrupt interruption or an unverified
 restoration retains the private directory at the recovery path printed when the
 script starts; restore only from its explicit backup metadata. Never point the
-canary at an ordinary user note.
+canary at an ordinary user note. The byte-exact canary refuses before mutation
+when the Bridge advertises an active modified-time integration. Re-enable the
+integration afterward and run the dedicated settlement canary below; the two
+gates deliberately prove separate contracts.
 
-Atomic Write Bridge `0.3.0` reports supported active creation, modification and
+Atomic Write Bridge `0.3.0` or later reports supported active creation, modification and
 last-viewed properties. The MCP derives their structural protection without a
 duplicate `MCP_PROTECTED_FRONTMATTER_KEYS` entry; that variable remains
 additive for custom fields. The live gate deliberately uses a static sentinel
