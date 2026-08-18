@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-08-18
+
+### Added
+
+- One canonical registry describes every MCP tool name, family, lifecycle,
+  runtime requirement and static dependency across live, hybrid and headless
+  modes.
+- Portable `standard`, `authoring`, `tasks` and `full` tool profiles can be
+  selected through `MCP_TOOL_PROFILE`, `--tool-profile`, per-client stdio
+  proxy configuration, or the `/mcp/{profile}` HTTP routes.
+- A 31-case harness-neutral routing corpus and JSONL scorer measure first-tool
+  accuracy, forbidden calls, success, required call sequences, latency and
+  token use without publishing fabricated model scores.
+
+### Changed
+
+- The 2.x default remains `full`, preserving the existing client surface.
+  `standard` exposes 19 tools, `authoring` 30, and live `tasks` 31; snapshot
+  task profiles retain only snapshot-safe Operon reads.
+- `smart_semantic_search` is the sole semantic-search name taught by routing
+  documentation and exposed outside `full`. The deprecated `smart_search` and
+  `smart-search` aliases remain physically available only in `full` until the
+  planned 3.0 removal.
+- Governed `plan` / `apply` / `status` / `recover` families become visible
+  atomically only when their complete quartet is registered. A direct fallback
+  remains available while a governed family is incomplete.
+- `bases_upsert_config` remains a full-only whole-Base compatibility operation;
+  it is not exposed as an authoring or formula fallback.
+
+### Security
+
+- Tool visibility remains separate from write authorization. Profiles do not
+  weaken write policy, scope, Bridge gates, CAS, idempotency, confirmation or
+  durable recovery authority.
+- Hidden tools are rejected on direct `tools/call`, not merely omitted from
+  `tools/list`. HTTP sessions are bound to both verified identity and their
+  selected profile, preventing cross-route session reuse.
+- The byte-exact atomic-note canary now refuses before mutation for every
+  advertised active modified-time writer, including protection-only and
+  unsupported configurations. Modified-time settlement remains a separate,
+  bounded live gate.
+
+### Validation
+
+- The exact feature head `c5e0ef0a4c` passed 27/27 P0-P4, Operon Bridge and
+  Runtime checks plus an exact-head Codex Review with no major issue.
+- Two live Obsidian Desktop canaries passed in the disposable Operon Bridge
+  pilot vault: bounded modified-time settlement with lost-response recovery,
+  and the `standard` profile's byte-exact governed note lifecycle with exact
+  restoration. The active modified-time preflight also proved no mutation.
+- Post-merge `main` passed all 13 Runtime jobs on
+  `2d227d86d83f505a4e8da87f1a9ed9fad409fce3`.
+
 ## [2.9.0] - 2026-08-17
 
 ### Added
