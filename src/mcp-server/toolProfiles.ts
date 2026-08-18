@@ -66,6 +66,13 @@ const OPERON_LIVE_ONLY_READ_TOOLS = new Set([
   "operon_list_pending_recoveries",
 ]);
 
+const GOVERNED_LIFECYCLE_ROLES = [
+  "plan",
+  "apply",
+  "status",
+  "recover",
+] as const;
+
 export const TOOL_PROFILES: Readonly<Record<ToolProfileId, ToolProfileDefinition>> = {
   standard: {
     id: "standard",
@@ -127,7 +134,9 @@ function suppressPreferredFallbacks(
   );
 }
 
-function assertGovernedFamiliesAtomic(entries: readonly ToolSurfaceEntry[]): void {
+function lifecycleRolesByFamily(
+  entries: readonly ToolSurfaceEntry[],
+): Map<string, Set<string>> {
   const lifecycleByFamily = new Map<string, Set<string>>();
   for (const entry of entries) {
     if (!entry.lifecycleRole) continue;
@@ -135,13 +144,34 @@ function assertGovernedFamiliesAtomic(entries: readonly ToolSurfaceEntry[]): voi
     roles.add(entry.lifecycleRole);
     lifecycleByFamily.set(entry.family, roles);
   }
+  return lifecycleByFamily;
+}
 
-  const complete = new Set(["plan", "apply", "status", "recover"]);
-  for (const [family, roles] of lifecycleByFamily) {
-    if (
-      roles.size !== complete.size ||
-      [...complete].some((role) => !roles.has(role))
-    ) {
+function lifecycleIsComplete(roles: ReadonlySet<string>): boolean {
+  return (
+    roles.size === GOVERNED_LIFECYCLE_ROLES.length &&
+    GOVERNED_LIFECYCLE_ROLES.every((role) => roles.has(role))
+  );
+}
+
+function hideIncompleteGovernedFamilies(
+  entries: readonly ToolSurfaceEntry[],
+): readonly ToolSurfaceEntry[] {
+  const lifecycleByFamily = lifecycleRolesByFamily(entries);
+  const completeFamilies = new Set(
+    [...lifecycleByFamily]
+      .filter(([, roles]) => lifecycleIsComplete(roles))
+      .map(([family]) => family),
+  );
+
+  return entries.filter(
+    (entry) => !entry.lifecycleRole || completeFamilies.has(entry.family),
+  );
+}
+
+function assertGovernedFamiliesAtomic(entries: readonly ToolSurfaceEntry[]): void {
+  for (const [family, roles] of lifecycleRolesByFamily(entries)) {
+    if (!lifecycleIsComplete(roles)) {
       throw new Error(
         `Tool profile exposes an incomplete governed lifecycle for ${family}: ${[...roles].sort().join(", ")}.`,
       );
@@ -169,15 +199,30 @@ function modernRuntimeAvailable(
   return true;
 }
 
+interface FinalizeProfileEntriesOptions {
+  tolerateIncompleteRegistration?: boolean;
+}
+
 function finalizeProfileEntries(
   definition: ToolProfileDefinition,
   entries: readonly ToolSurfaceEntry[],
   operonLive: boolean,
+  options: FinalizeProfileEntriesOptions = {},
 ): readonly ToolSurfaceEntry[] {
   let selected =
     definition.id === "full"
       ? entries
       : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive));
+
+  // A concrete McpServer registers tools one at a time. During that transient
+  // construction phase a governed quartet is necessarily incomplete. Keep the
+  // whole family disabled until all four members exist, then expose it in one
+  // reconciliation. Static profile compilation remains strict and will still
+  // fail on an actually incomplete catalogue.
+  if (options.tolerateIncompleteRegistration) {
+    selected = hideIncompleteGovernedFamilies(selected);
+  }
+
   if (definition.preferCanonicalAlternatives) {
     selected = suppressPreferredFallbacks(selected);
   }
@@ -224,6 +269,10 @@ export interface SelectAvailableToolProfileInput {
  * service contract is statically live-only. Presence of the governed note
  * family is used as the concrete live/hybrid marker because it is registered
  * before Operon in live-capable server construction and is absent headlessly.
+ *
+ * Registration is incremental, so a governed quartet may be transiently
+ * incomplete while the server factory is still constructing the instance. In
+ * that case the entire family remains hidden until all four names are present.
  */
 export function selectAvailableToolProfileNames({
   profile,
@@ -242,7 +291,7 @@ export function selectAvailableToolProfileNames({
     .filter((entry) => groups.has(entry.group));
   const operonLive = uniqueNames.includes("obsidian_note_replace_plan");
 
-  return finalizeProfileEntries(definition, entries, operonLive).map(
-    (entry) => entry.name,
-  );
+  return finalizeProfileEntries(definition, entries, operonLive, {
+    tolerateIncompleteRegistration: true,
+  }).map((entry) => entry.name);
 }
