@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "package.json"
+      - "README.md"
+      - "README.fr.md"
       - "docs/tool-surface-profiles.md"
       - "docs/tool-surface-profiles.fr.md"
       - "docs/mcp-routing-guide.md"
