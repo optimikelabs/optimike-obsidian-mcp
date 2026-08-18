@@ -55,6 +55,17 @@ const TASK_GROUPS = [
   "validation",
 ] as const satisfies readonly ToolGroupId[];
 
+const OPERON_LIVE_ONLY_READ_TOOLS = new Set([
+  "operon_query_saved_filter",
+  "operon_get_diagnostics",
+  "operon_find_tasks",
+  "operon_resolve_task",
+  "operon_get_relationships",
+  "operon_build_context",
+  "operon_get_timer_state",
+  "operon_list_pending_recoveries",
+]);
+
 export const TOOL_PROFILES: Readonly<Record<ToolProfileId, ToolProfileDefinition>> = {
   standard: {
     id: "standard",
@@ -73,14 +84,14 @@ export const TOOL_PROFILES: Readonly<Record<ToolProfileId, ToolProfileDefinition
   tasks: {
     id: "tasks",
     description:
-      "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract, canonical semantic search, validation and runtime status.",
+      "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract when the Desktop Bridge is configured, and only the snapshot-safe Operon read subset in non-live runtimes.",
     groups: TASK_GROUPS,
     preferCanonicalAlternatives: true,
   },
   full: {
     id: "full",
     description:
-      "Compatibility surface: every tool registered by the active runtime, including legacy aliases, admin, maintenance and external-root capabilities.",
+      "Compatibility surface: every tool registered by the active runtime, including legacy aliases, unavailable fail-closed compatibility tools, admin, maintenance and external-root capabilities.",
     groups: TOOL_GROUP_IDS,
     preferCanonicalAlternatives: false,
   },
@@ -138,13 +149,38 @@ function assertGovernedFamiliesAtomic(entries: readonly ToolSurfaceEntry[]): voi
   }
 }
 
+function operonLiveForRegistrationMode(
+  registrationMode: ToolRegistrationMode,
+): boolean {
+  return registrationMode === "live" || registrationMode === "hybrid-live";
+}
+
+function modernRuntimeAvailable(
+  entry: ToolSurfaceEntry,
+  operonLive: boolean,
+): boolean {
+  if (entry.group === "tasks.operon.write") return operonLive;
+  if (
+    entry.group === "tasks.operon.read" &&
+    OPERON_LIVE_ONLY_READ_TOOLS.has(entry.name)
+  ) {
+    return operonLive;
+  }
+  return true;
+}
+
 function finalizeProfileEntries(
   definition: ToolProfileDefinition,
   entries: readonly ToolSurfaceEntry[],
+  operonLive: boolean,
 ): readonly ToolSurfaceEntry[] {
-  const selected = definition.preferCanonicalAlternatives
-    ? suppressPreferredFallbacks(entries)
-    : entries;
+  let selected =
+    definition.id === "full"
+      ? entries
+      : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive));
+  if (definition.preferCanonicalAlternatives) {
+    selected = suppressPreferredFallbacks(selected);
+  }
   assertGovernedFamiliesAtomic(selected);
   return [...selected].sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -160,7 +196,11 @@ export function compileToolProfile({
     groups: definition.groups,
     availableStaticRequirements,
   });
-  return finalizeProfileEntries(definition, entries);
+  return finalizeProfileEntries(
+    definition,
+    entries,
+    operonLiveForRegistrationMode(registrationMode),
+  );
 }
 
 export function compileToolProfileNames(
@@ -180,8 +220,10 @@ export interface SelectAvailableToolProfileInput {
  * profile contract with real registration rather than predicting availability.
  *
  * `full` intentionally preserves unknown future names for 2.x compatibility.
- * Modern profiles fail closed on unknown names by omitting them until the
- * canonical registry classifies them.
+ * Modern profiles fail closed on unknown names and hide Operon tools whose
+ * service contract is statically live-only. Presence of the governed note
+ * family is used as the concrete live/hybrid marker because it is registered
+ * before Operon in live-capable server construction and is absent headlessly.
  */
 export function selectAvailableToolProfileNames({
   profile,
@@ -198,6 +240,9 @@ export function selectAvailableToolProfileNames({
     .map((name) => getToolSurfaceEntry(name))
     .filter((entry): entry is ToolSurfaceEntry => Boolean(entry))
     .filter((entry) => groups.has(entry.group));
+  const operonLive = uniqueNames.includes("obsidian_note_replace_plan");
 
-  return finalizeProfileEntries(definition, entries).map((entry) => entry.name);
+  return finalizeProfileEntries(definition, entries, operonLive).map(
+    (entry) => entry.name,
+  );
 }
