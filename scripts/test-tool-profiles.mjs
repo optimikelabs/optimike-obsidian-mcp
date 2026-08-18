@@ -12,12 +12,12 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 19, authoring: 31, tasks: 31, full: 72 },
-  "hybrid-live": { standard: 19, authoring: 31, tasks: 31, full: 72 },
+  live: { standard: 19, authoring: 30, tasks: 31, full: 72 },
+  "hybrid-live": { standard: 19, authoring: 30, tasks: 31, full: 72 },
   "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
   "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
   "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
-  "headless-filesystem": { standard: 12, authoring: 17, tasks: 14, full: 60 },
+  "headless-filesystem": { standard: 12, authoring: 16, tasks: 14, full: 60 },
 };
 
 assert.deepEqual(TOOL_PROFILE_IDS, ["standard", "authoring", "tasks", "full"]);
@@ -70,6 +70,10 @@ for (const profile of ["standard", "authoring", "tasks"]) {
       !names.includes("smart_search") && !names.includes("smart-search"),
       `${profile}/${registrationMode} must hide semantic-search compatibility aliases`,
     );
+    assert.ok(
+      !names.includes("bases_upsert_config"),
+      `${profile}/${registrationMode} must keep whole-Base config replacement full-only`,
+    );
     for (const hidden of [
       "obsidian_runtime_maintenance",
       "obsidian_admin_filesystem",
@@ -94,6 +98,12 @@ for (const registrationMode of TOOL_REGISTRATION_MODES) {
   assert.ok(full.includes("smart_semantic_search"));
   assert.ok(full.includes("smart_search"));
   assert.ok(full.includes("smart-search"));
+  if (registrationMode === "live" || registrationMode === "hybrid-live" || registrationMode === "headless-filesystem") {
+    assert.ok(
+      full.includes("bases_upsert_config"),
+      `${registrationMode}/full must preserve whole-Base compatibility`,
+    );
+  }
 }
 
 for (const profile of TOOL_PROFILE_IDS) {
@@ -143,6 +153,16 @@ for (const profile of ["standard", "authoring"]) {
   );
   assert.ok(!guarded.includes("obsidian_frontmatter_patch_plan"));
 }
+
+const authoringLive = compileToolProfileNames({
+  profile: "authoring",
+  registrationMode: "live",
+  availableStaticRequirements: WITH_CACHE,
+});
+assert.ok(authoringLive.includes("bases_create"));
+assert.ok(authoringLive.includes("bases_upsert_rows"));
+assert.ok(authoringLive.includes("bases_formula_patch_plan"));
+assert.ok(!authoringLive.includes("bases_upsert_config"));
 
 const tasksLive = compileToolProfileNames({
   profile: "tasks",
@@ -244,4 +264,4 @@ for (const absent of [
 }
 assert.equal(readonlyWithoutCache.length, 5);
 
-console.log("PASS: profiles are deterministic, semantic aliases stay full-only, and headless tasks expose only snapshot-safe Operon reads");
+console.log("PASS: profiles are deterministic, semantic aliases and whole-Base config stay full-only, governed families are atomic, and headless tasks expose only snapshot-safe Operon reads");
