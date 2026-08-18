@@ -2,115 +2,84 @@
 
 Version anglaise : [tool-surface-profiles.md](tool-surface-profiles.md)
 
-Optimike Obsidian MCP sépare deux contrats qui répondent à deux problèmes
-différents :
+Optimike Obsidian MCP sépare deux contrats indépendants :
 
 - le **mode runtime** contrôle ce que le backend peut fournir en sécurité (`live`, `hybrid`, `headless-readonly`, `headless-guarded`, `headless-filesystem`) ;
-- le **profil d’outils** contrôle ce qu’un client MCP voit avant `tools/list`.
+- le **profil d’outils** contrôle ce qu’un client MCP peut découvrir et appeler avant `tools/list`.
 
-Les profils réduisent l’ambiguïté côté modèle et le volume des schémas exposés.
-Ils ne constituent pas une frontière d’autorisation. Les contrôles runtime,
-write-mode, bridge, scopes, confirmations et CAS restent autoritaires même si un
-outil est visible.
+Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils ne constituent pas une frontière d’autorisation : mode runtime, write policy, grants des Bridges, scopes, confirmations, CAS, idempotence et règles de récupération restent autoritaires.
 
 ## Profils publics
 
 | Profil | Usage visé | Surface complète live/hybrid |
 | --- | --- | ---: |
-| `standard` | Lecture/recherche générale du coffre + authoring note/frontmatter courant | 19 outils |
-| `authoring` | `standard` + tags, authoring/formules Bases et authoring Canvas | 31 outils |
-| `tasks` | Compatibilité Markdown Tasks + contrat MCP Operon complet | 31 outils |
+| `standard` | Lecture/recherche générale et travail courant gouverné Note/Frontmatter | 19 outils |
+| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas | 30 outils |
+| `tasks` | Compatibilité Markdown Tasks + contrat MCP Operon live complet | 31 outils |
 | `full` | Surface compatibilité/admin 2.x du runtime actif | 72 outils |
 
-Ces nombres sont des projections du registre actuel et peuvent être plus faibles
-dans un runtime plus restreint. Par exemple, `standard` expose 9 outils en
-`headless-readonly`. `full` signifie « tous les outils enregistrés par le runtime
-actif », pas « toujours 72 outils ».
+Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 72 outils. Le registre canonique couvre 76 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`.
 
-Le registre canonique couvre 76 noms uniques entre tous les runtimes, car quatre
-outils existent uniquement en `headless-filesystem` et ne font donc pas partie
-des 72 outils live/hybrid.
+## Noms réservés à la compatibilité
 
-## Nom de la recherche sémantique
+Les profils modernes excluent volontairement les voies de compatibilité qui ajouteraient une décision au modèle sans apporter une capacité normale distincte.
 
-Les profils modernes n’exposent qu’un seul nom public :
+La recherche sémantique utilise un seul nom canonique :
 
 ```text
 smart_semantic_search
 ```
 
-Les anciens alias `smart_search` et `smart-search` sont masqués dans `standard`,
-`authoring` et `tasks`. Ils restent visibles uniquement dans `full` pendant la
-branche 2.x pour ne pas casser silencieusement un client public existant. Leur
-suppression physique est réservée à la 3.0, sauf décision ultérieure d’assumer
-une rupture SemVer en mineure.
+Les anciens alias `smart_search` et `smart-search` restent physiquement enregistrés et visibles uniquement dans `full` pendant la branche 2.x. Leur suppression physique est réservée à la 3.0.
 
-Tout nouveau routage agentique ou intégration doit utiliser uniquement
-`smart_semantic_search`.
+`bases_upsert_config` est également réservé à `full` en 2.10. Il remplace une configuration Base complète et n’est pas un fallback de l’édition gouvernée des formules. `authoring` conserve `bases_create`, `bases_upsert_rows` et la famille gouvernée complète `bases_formula_patch_*`.
 
 ## Familles gouvernées
 
-Une famille gouvernée est exposée atomiquement. Lorsqu’un profil expose l’une de
-ces familles, les quatre opérations restent visibles ensemble :
+Une famille gouvernée est exposée atomiquement :
 
 ```text
 plan → apply → status → recover
 ```
 
-Cela vaut pour le remplacement gouverné de note, la projection Frontmatter, les
-formules Base et le patch de graphe Canvas.
+Cela vaut pour le remplacement de Note, la projection Frontmatter, les formules Bases et le patch de graphe Canvas.
 
-Un profil ne modifie jamais le contenu scellé du plan, son journal, sa clé
-d’idempotence, son binding backend ni son autorité de récupération. Un plan
-durable créé dans une session peut être inspecté ou récupéré depuis une autre
-session ou un autre profil qui expose la même famille, sous réserve des
-politiques runtime et d’écriture/sécurité habituelles.
+L’enregistrement des outils est incrémental dans la factory serveur. Tant que les quatre membres d’une famille ne sont pas enregistrés, toute la famille gouvernée reste masquée et le fallback direct légitime reste visible. À l’arrivée du quatrième membre, le quartet devient visible en une seule réconciliation et le fallback devenu secondaire est masqué. La compilation statique reste stricte et rejette une famille réellement incomplète.
+
+Un profil ne modifie jamais le contenu scellé du plan, les journaux, l’idempotence, le binding backend ni l’autorité de récupération. Un plan durable créé dans une session peut être inspecté ou récupéré depuis une autre session ou un autre profil exposant la même famille complète, sous réserve des politiques runtime et d’écriture/sécurité habituelles.
 
 ## Canonique et fallback direct
 
-Les profils modernes peuvent masquer un outil direct de compatibilité lorsque
-la famille gouvernée correspondante est réellement enregistrée. Ils conservent
-la voie directe lorsqu’aucun équivalent gouverné n’existe dans le runtime.
+Les profils modernes ne masquent une voie directe que lorsque la famille gouvernée correspondante est structurellement complète dans le runtime courant.
 
-Exemple actuel :
-
-- `live` / `hybrid` live : la famille complète `obsidian_frontmatter_patch_*`
-  est exposée et `obsidian_manage_frontmatter` est masqué ;
-- `headless-guarded` / `headless-filesystem` : la famille gouvernée Frontmatter
-  n’existe pas, donc `obsidian_manage_frontmatter` reste le fallback borné.
+- `live` / `hybrid` live : exposer `obsidian_frontmatter_patch_{plan,apply,status,recover}` et masquer `obsidian_manage_frontmatter` ;
+- `headless-guarded` / `headless-filesystem` : la famille Frontmatter gouvernée est absente, donc `obsidian_manage_frontmatter` reste le fallback borné ;
+- les helpers Canvas directs de `headless-filesystem` restent disponibles uniquement lorsque la famille Canvas live gouvernée est structurellement absente ;
+- `bases_upsert_config` n’est jamais un fallback de formule et reste réservé à `full`.
 
 `full` n’applique jamais cette suppression au profit de la voie canonique.
 
 ## Sélection en stdio
 
-Le comportement historique reste `full` lorsqu’aucun profil n’est indiqué.
-
-Via argument :
+Le défaut de compatibilité de la branche 2.x reste `full` lorsqu’aucun profil n’est indiqué.
 
 ```bash
 node dist/stdio-proxy.js --tool-profile standard
 ```
 
-ou via environnement :
+ou :
 
 ```bash
 MCP_TOOL_PROFILE=standard node dist/stdio-proxy.js
 ```
 
-`--tool-profile` gagne sur `MCP_TOOL_PROFILE`. Un profil inconnu ou un argument
-répété échoue fermé au lieu de retomber sur `full`.
+`--tool-profile` prévaut sur `MCP_TOOL_PROFILE`. Une valeur inconnue, vide ou répétée échoue fermé au lieu de retomber sur `full`.
 
-Le proxy stdio applique le profil **par client**. S’il doit lancer le backend
-HTTP partagé, il lance explicitement ce backend en `full`, puis filtre sa propre
-surface client. Un agent `standard` et un agent `tasks` peuvent donc partager le
-même backend sans modifier mutuellement leur liste d’outils.
-
-Un outil masqué est aussi refusé lorsqu’il est appelé directement ; le profilage
-n’est pas un simple filtrage cosmétique de `tools/list`.
+Le proxy stdio applique le profil par client. Lorsqu’il démarre le backend HTTP partagé, il le démarre explicitement en `full`, puis filtre `tools/list` et `tools/call` pour son client. Un outil local du proxy masqué n’est donc pas appelable en connaissant simplement son nom.
 
 ## Sélection en HTTP
 
-Le serveur HTTP expose des routes de profil explicites et immuables :
+Le serveur expose des routes de profil immuables :
 
 ```text
 /mcp              → full (alias de compatibilité 2.x)
@@ -120,112 +89,31 @@ Le serveur HTTP expose des routes de profil explicites et immuables :
 /mcp/full         → full
 ```
 
-Une session est liée à son identité vérifiée **et** à son profil d’outils. Un
-`sessionId` créé sur `/mcp/standard` ne peut pas être réutilisé sur `/mcp/full`,
-y compris pour les requêtes de session POST, GET ou DELETE. Un mismatch de
-profil échoue fermé avec la même posture générique « session invalide/expirée »
-qu’un mismatch d’identité.
+Une session est liée à son identité vérifiée et à son profil. Un `sessionId` créé sur `/mcp/standard` ne peut pas être réutilisé sur `/mcp/full`, y compris pour POST, GET ou DELETE. Un mismatch de profil utilise la même posture générique « session invalide/expirée » qu’un mismatch d’identité.
 
-Le profil est porté par un contexte de requête uniquement pendant la création du
-`McpServer` propre à la session. Il n’est jamais écrit dans un état global du
-processus ; plusieurs profils peuvent donc coexister simultanément sur le même
-backend HTTP.
+Le contexte de profil est limité à la requête pendant la création du `McpServer` de la session ; plusieurs profils peuvent coexister sur un même backend sans mutation d’un profil global de processus.
 
-## Filtrage supplémentaire côté client
+## Contrat serveur, optimisation client
 
-Les profils serveur sont le contrat portable. Un client peut ensuite réduire
-encore cette surface avec ses propres fonctions, mais il ne devient jamais la
-source de vérité.
+Le profil serveur est le contrat portable. Un client peut encore réduire ou différer cette surface, mais ne devient jamais la source de vérité d’Optimike.
 
-Mécanismes complémentaires possibles :
+Mécanismes clients optionnels :
 
 - Codex : `enabled_tools` / `disabled_tools` ;
 - Gemini CLI : `includeTools` / `excludeTools` ;
-- Claude Code : tool search / chargement différé des outils MCP ;
+- Claude Code : tool search / chargement MCP différé ;
 - Hermes Agent : filtres include/exclude ;
 - OpenClaw : `toolFilter.include` / `toolFilter.exclude`.
 
-Ces mécanismes diffèrent selon les harnesses et peuvent évoluer séparément.
-Choisir d’abord le profil Optimike adapté, puis n’utiliser le filtrage client que
-s’il apporte un gain local supplémentaire.
+Ces mécanismes peuvent évoluer indépendamment. Choisir d’abord un profil Optimike, puis utiliser le filtrage client uniquement comme optimisation supplémentaire.
 
-## Exemples clients
+## Frontière de migration
 
-### Codex — stdio
+La 2.10 reste compatible SemVer avec la branche 2.x :
 
-```toml
-[mcp_servers.optimike]
-command = "node"
-args = [
-  "/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js",
-  "--tool-profile",
-  "standard"
-]
+- profil stdio non indiqué → `full` ;
+- `/mcp` historique → `/mcp/full` ;
+- `smart_search` et `smart-search` restent disponibles dans `full` ;
+- les surfaces `full` du runtime actif restent compatibles avec la 2.9.
 
-[mcp_servers.optimike.env]
-OBSIDIAN_VAULT = "/chemin/vers/coffre"
-OBSIDIAN_RUNTIME_MODE = "live"
-OBSIDIAN_BASE_URL = "http://127.0.0.1:27123"
-OBSIDIAN_API_KEY = "<cle-local-rest-api>"
-```
-
-`enabled_tools` peut éventuellement réduire encore la surface déjà sélectionnée
-côté serveur.
-
-### Gemini CLI — stdio
-
-```json
-{
-  "mcpServers": {
-    "optimike": {
-      "command": "node",
-      "args": [
-        "/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js",
-        "--tool-profile",
-        "standard"
-      ],
-      "env": {
-        "OBSIDIAN_VAULT": "/chemin/vers/coffre",
-        "OBSIDIAN_RUNTIME_MODE": "live"
-      }
-    }
-  }
-}
-```
-
-`includeTools` / `excludeTools` restent des réductions optionnelles côté client.
-
-### Claude Code — stdio
-
-```bash
-claude mcp add optimike -- node \
-  /chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js \
-  --tool-profile standard
-```
-
-Claude Code peut aussi différer le chargement de grandes surfaces MCP via son
-tool search. Le profil serveur reste utile : il définit la surface publique
-canonique avant toute stratégie propre au client.
-
-### Client HTTP générique
-
-Le profil vit directement dans l’URL MCP :
-
-```text
-http://127.0.0.1:3010/mcp/standard
-```
-
-Aucun header propriétaire n’est nécessaire.
-
-## Règle de compatibilité 2.x
-
-Pendant la branche 2.x :
-
-- aucun profil indiqué → `full` ;
-- `/mcp` historique → comportement `/mcp/full` ;
-- les alias de recherche sémantique restent accessibles uniquement dans `full` ;
-- les profils modernes sont opt-in et peuvent être recommandés pour les nouvelles installations ;
-- la visibilité ne relâche jamais les contrôles runtime/écriture/sécurité existants.
-
-Une future version majeure pourra faire de `standard` le défaut et retirer les
-alias dépréciés après une fenêtre de migration explicite.
+La 3.0 est la frontière de rupture prévue pour supprimer physiquement les alias sémantiques et faire de `standard` la surface moderne par défaut, après admission complète de la 2.10.
