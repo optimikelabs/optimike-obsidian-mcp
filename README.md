@@ -44,7 +44,7 @@ Runtime answers what the backend can execute. It does not decide how many tools 
 | Tasks / Operon workflows | `tasks` | 31 |
 | Compatibility, admin and specialized surfaces | `full` | 72 |
 
-During the 2.x line, `full` preserves the complete compatibility surface. Modern profiles expose only `smart_semantic_search`; the legacy aliases `smart_search` and `smart-search` remain `full`-only until 3.0. `bases_upsert_config` is likewise a `full`-only whole-Base compatibility path; normal authoring uses bounded Base creation/row writes plus the governed formula family.
+During the 2.x line, `full` preserves the complete compatibility surface. Modern profiles expose only `smart_semantic_search`; the legacy aliases `smart_search` and `smart-search` remain `full`-only until 3.0. `bases_upsert_config` is likewise a `full`-only whole-Base compatibility path; legacy whole-file config writes are default-off, while normal authoring uses bounded Base creation/row writes plus the governed formula family.
 
 Select the profile before `tools/list`:
 
