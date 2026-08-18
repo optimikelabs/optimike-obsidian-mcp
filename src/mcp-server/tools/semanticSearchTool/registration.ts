@@ -1,10 +1,10 @@
 /**
- * Semantic search (Smart Connections) — Implémentation réelle
- * - Lit les embeddings dans `.smart-env`
- * - Encode la requête via un embedder configurable (auto: s'aligne sur le modèle du vault)
- * - Classement cosinus, filtres dossier/tag, snippets optionnels
- * - Expose `smart_semantic_search` + legacy aliases `smart_search` and `smart-search`
- * Schéma JSON "Codex-friendly" (pas d'integer ni d'unions).
+ * Semantic search (Smart Connections) — canonical V3 implementation
+ * - Reads embeddings from `.smart-env`
+ * - Encodes the query through a configurable embedder
+ * - Ranks by cosine similarity with optional folder/tag filters and snippets
+ * - Exposes only `smart_semantic_search`
+ * Codex-friendly JSON schema (no integer or union types).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -184,7 +184,6 @@ function pickDominantModel(items: SmartVec[]): string | undefined {
 function wrapLooseObjectToJson(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "{}";
-  // embedding_models.ajson uses a loose object fragment (no outer braces)
   const withoutTrailingComma = trimmed.replace(/,\s*$/u, "");
   return `{${withoutTrailingComma}}`;
 }
@@ -193,7 +192,6 @@ async function detectOllamaBaseUrlFromSmartEnv(
   smartEnvDir: string,
   preferredModel?: string,
 ): Promise<string | undefined> {
-  // 1) Prefer Smart Environment default embedding model host, if present.
   try {
     const smartEnvJsonPath = path.join(smartEnvDir, "smart_env.json");
     const smartEnvRaw = await fs.readFile(smartEnvJsonPath, "utf-8");
@@ -220,10 +218,9 @@ async function detectOllamaBaseUrlFromSmartEnv(
       }
     }
   } catch {
-    // ignore and fall back
+    // Ignore and fall back to the model scan.
   }
 
-  // 2) Fallback: scan embedding_models.ajson for a matching model_key.
   if (preferredModel) {
     try {
       const modelsPath = path.join(
@@ -249,7 +246,7 @@ async function detectOllamaBaseUrlFromSmartEnv(
         }
       }
     } catch {
-      // ignore
+      // Ignore and return no inferred host.
     }
   }
 
@@ -562,35 +559,20 @@ export const registerSemanticSearchTool = async (
   _obsidianService: ObsidianRestApiService | undefined,
   _vaultCacheService: VaultCacheService | undefined,
 ): Promise<void> => {
-  const register = (name: string, description: string) => {
-    server.tool(
-      name,
-      description,
-      In.shape,
-      READ_ONLY_OPEN_WORLD_TOOL_ANNOTATIONS,
-      async (params: InType, _extra: unknown) => {
-        try {
-          const payload = await handleSearchRequest(params);
-          Out.parse(payload);
-          return makeSuccessResult(payload);
-        } catch (error) {
-          return makeErrorResult(error);
-        }
-      },
-    );
-  };
-
-  register(
+  server.tool(
     "smart_semantic_search",
-    "Semantic search powered by Smart Connections embeddings (query embedder auto-matches the vault model).",
-  );
-  register(
-    "smart_search",
-    "Legacy compatibility alias of smart_semantic_search with the same implementation. Prefer smart_semantic_search for new calls.",
-  );
-  register(
-    "smart-search",
-    "Legacy compatibility alias of smart_semantic_search with the same implementation. Prefer smart_semantic_search for new calls.",
+    "Semantic search powered by Smart Connections embeddings (query embedder auto-matches the vault model). This is the only public semantic-search name in Optimike MCP 3.0.",
+    In.shape,
+    READ_ONLY_OPEN_WORLD_TOOL_ANNOTATIONS,
+    async (params: InType, _extra: unknown) => {
+      try {
+        const payload = await handleSearchRequest(params);
+        Out.parse(payload);
+        return makeSuccessResult(payload);
+      } catch (error) {
+        return makeErrorResult(error);
+      }
+    },
   );
 };
 

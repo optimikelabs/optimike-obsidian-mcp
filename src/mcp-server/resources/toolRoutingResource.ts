@@ -26,8 +26,8 @@ required guarantee. Never infer that an absent tool can be emulated safely.
   high-assurance replacement, compile the intended complete content through
   \`obsidian_note_replace_plan\`.
 - Top-level Frontmatter set/delete in live/hybrid mode: prefer
-  \`obsidian_frontmatter_patch_plan\`. The direct Frontmatter helper is a bounded
-  fallback only when the governed family is structurally absent.
+  \`obsidian_frontmatter_patch_plan\`. \`obsidian_manage_frontmatter\` is a bounded
+  direct fallback only when the governed family is structurally absent.
 - Named Base formula set/delete: prefer \`bases_formula_patch_plan\`.
   \`bases_upsert_config\` is a full-profile compatibility path, not a formula
   fallback.

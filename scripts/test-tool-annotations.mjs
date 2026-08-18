@@ -28,7 +28,8 @@ for (const file of listTypeScriptFiles(sourceRoot)) {
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text === "tool"
+      (node.expression.name.text === "tool" ||
+        node.expression.name.text === "registerTool")
     ) {
       const line =
         sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
@@ -42,7 +43,12 @@ for (const file of listTypeScriptFiles(sourceRoot)) {
             : undefined,
       };
       registrations.push(registration);
-      if (node.arguments.length < 5) missingAnnotations.push(registration);
+      if (
+        node.expression.name.text === "tool" &&
+        node.arguments.length < 5
+      ) {
+        missingAnnotations.push(registration);
+      }
     }
     ts.forEachChild(node, visit);
   }
@@ -84,6 +90,23 @@ for (const name of governedToolNames) {
     );
   }
 }
+
+const semanticMatches = registrations.filter(
+  (item) => item.name === "smart_semantic_search",
+);
+if (semanticMatches.length !== 1) {
+  throw new Error(
+    `Expected exactly one smart_semantic_search registration, found ${semanticMatches.length}`,
+  );
+}
+for (const removedAlias of ["smart_search", "smart-search"]) {
+  if (registrations.some((item) => item.name === removedAlias)) {
+    throw new Error(
+      `Semantic-search alias must be physically absent in V3: ${removedAlias}`,
+    );
+  }
+}
+
 for (const name of [
   "operation_plan",
   "operation_apply",
@@ -96,5 +119,5 @@ for (const name of [
 }
 
 console.log(
-  `PASS: ${registrations.length} MCP tool registrations include annotations; governed note/frontmatter/Base/Canvas tools are unique and generic operation tools remain internal`,
+  `PASS: ${registrations.length} MCP tool registrations include annotations; V3 semantic search is canonical-only; governed note/frontmatter/Base/Canvas tools are unique; generic operation tools remain internal`,
 );
