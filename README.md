@@ -1,68 +1,58 @@
 # Optimike Obsidian MCP
 
 [![Latest release](https://img.shields.io/github/v/release/optimikelabs/optimike-obsidian-mcp?display_name=tag&sort=semver)](https://github.com/optimikelabs/optimike-obsidian-mcp/releases/latest)
-French version: [README.fr.md](README.fr.md) · Documentation hub: [docs/README.md](docs/README.md)
-Operations: [OPERATIONS.md](OPERATIONS.md)
-Security: [SECURITY.md](SECURITY.md)
+
+French version: [README.fr.md](README.fr.md) · [Documentation hub](docs/README.md) · [Operations](OPERATIONS.md) · [Security](SECURITY.md)
 
 ![Overview of Optimike Obsidian MCP between agent clients, Obsidian and governed external documents](docs/assets/readme/overview.en.svg)
 
-Optimike Obsidian MCP gives MCP clients a governed operational surface over an
-Obsidian vault. It combines live Desktop operations, resilient headless modes,
-structured task and Bases support, semantic search, runtime observability, and
-explicitly governed access to configured documents outside the vault.
+Optimike Obsidian MCP gives MCP clients a governed operational surface over an Obsidian vault: live Desktop operations, resilient headless modes, Tasks and Operon, Bases and Canvas, semantic search, runtime observability, and bounded access to configured external documents.
 
 ## Capability map
 
-| Area                    | What the MCP provides                                                                                     | Main dependency                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Notes                   | Read/search/update plus governed atomic note and source-preserving Frontmatter plans                      | Vault; Local REST API + Atomic Write Bridge for governed CAS |
-| Bases and Canvas        | Bases queries/formula plans plus governed Canvas graph plans and direct headless helpers                  | Bases Bridge; Atomic Write Bridge 0.4.0 for Canvas CAS       |
-| Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools                                        | Operon Developer API V1 through the Bridge                   |
-| Semantic search         | Smart Connections index search with durable metadata cache                                                | `.smart-env` plus Ollama or OpenAI query embedding           |
-| Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions                                    | Local filesystem                                             |
-| External documents      | Governed reads/handoff plus opt-in local move with exact link repair                                      | Allowlist; local stdio for move                              |
-| Headless administration | Guarded note, metadata and vault-filesystem operations                                                    | Guarded/filesystem mode on a copied vault                    |
+| Area | What the MCP provides | Main dependency |
+| --- | --- | --- |
+| Notes | Read/search/direct edits plus governed note and Frontmatter operations | Vault; Local REST API + Atomic Write Bridge |
+| Bases and Canvas | Queries, bounded writes, governed formulas and Canvas graph plans | Bases Bridge; Atomic Write Bridge |
+| Tasks | Tasks-compatible Markdown plus 23 governed Operon tools | Operon Developer API V1 through the Bridge |
+| Semantic search | Smart Connections index search | `.smart-env` + Ollama or OpenAI-compatible query embedding |
+| Runtime | Shared SQLite cache, health, maintenance and degraded modes | Local filesystem |
+| External documents | Default-deny reads/handoff plus opt-in local move | Explicit root allowlist |
+| Headless administration | Guarded metadata and filesystem operations | Copied or dedicated vault |
 
-The current tool registry is documented in
-[Tool Surface](docs/obsidian_mcp_tools_spec.md). Availability varies by runtime
-mode and by tool profile; use the [Runtime Capability Matrix](docs/runtime-capability-matrix.md)
-and [Tool Surface Profiles](docs/tool-surface-profiles.md) before enabling writes.
+The canonical tool registry is documented in [Tool Surface](docs/obsidian_mcp_tools_spec.md).
 
-## Choose a runtime and transport
+## Runtime and transport
 
-| Need                                       | Recommended runtime / transport                            | Posture                 |
-| ------------------------------------------ | ---------------------------------------------------------- | ----------------------- |
-| Local stdio agent                          | `dist/stdio-proxy.js`                                      | Per-client proxy        |
-| Obsidian Desktop automation                | `live` or `hybrid` through the stdio proxy                 | Trusted Desktop         |
-| CI, server or synchronized vault copy      | `headless-readonly`                                        | Safest headless mode    |
-| Bounded writes on a copied/dedicated vault | `headless-guarded` then `headless-filesystem`              | Explicit opt-in         |
-| Direct HTTP on the same machine            | Authenticated loopback HTTP                                | Supported with limits   |
-| Remote HTTP                                | Reviewed TLS reverse proxy and private network controls    | Pilot only              |
+| Need | Recommended runtime / transport |
+| --- | --- |
+| Local agent | stdio proxy |
+| Obsidian Desktop automation | `live` or `hybrid` |
+| CI/server/synchronized copy | `headless-readonly` |
+| Bounded writes on copied/dedicated vault | `headless-guarded`, then `headless-filesystem` |
+| Same-machine HTTP | authenticated loopback HTTP |
+| Remote HTTP | reviewed TLS reverse proxy + private network; pilot only |
 
-Runtime answers what the backend can safely do. It does not decide how many
-tools an agent should see.
+Runtime answers what the backend can execute. It does not decide how many tools the model should see.
 
-## Choose a tool surface
+## Tool surface profiles
 
-| Need | Recommended tool profile | Full live/hybrid size |
+| Need | Profile | Full live/hybrid size |
 | --- | --- | ---: |
-| General vault work | `standard` | 19 tools |
-| Notes + tags + Bases/Canvas authoring | `authoring` | 31 tools |
-| Tasks / Operon workflows | `tasks` | 31 tools |
-| Compatibility, admin and specialized surfaces | `full` | 72 tools |
+| General vault work | `standard` | 19 |
+| Notes, tags, Bases and Canvas authoring | `authoring` | 31 |
+| Tasks / Operon workflows | `tasks` | 31 |
+| Compatibility, admin and specialized surfaces | `full` | 72 |
 
-Modern profiles expose only `smart_semantic_search` for semantic search.
-Historical compatibility aliases remain available only in `full` during the 2.x
-line and are planned for physical removal in 3.0.
+During the 2.x line, `full` preserves the complete compatibility surface. Modern profiles expose only `smart_semantic_search`; the legacy aliases `smart_search` and `smart-search` remain `full`-only until 3.0.
 
-For stdio, select a profile before `tools/list`:
+Select the profile before `tools/list`:
 
 ```bash
 node dist/stdio-proxy.js --tool-profile standard
 ```
 
-For HTTP, select it in the MCP URL:
+HTTP profile routes:
 
 ```text
 /mcp/standard
@@ -71,20 +61,14 @@ For HTTP, select it in the MCP URL:
 /mcp/full
 ```
 
-Legacy `/mcp` remains equivalent to `/mcp/full` during 2.x. See
-[Tool Surface Profiles](docs/tool-surface-profiles.md) for session binding,
-client examples and compatibility rules.
+Legacy `/mcp` remains equivalent to `/mcp/full` during 2.x. See [Tool Surface Profiles](docs/tool-surface-profiles.md).
 
-The Node server must never be exposed directly to the public internet. See
-[Security](SECURITY.md) and the
-[HTTP delivery ADR](docs/adr/ADR-HTTP-External-Artifact-Delivery.md).
-
-## Quick start from source
+## Quick start
 
 Requirements:
 
 - Node.js `>=22.7.5`;
-- Obsidian Desktop only when using live Desktop features;
+- Obsidian Desktop only for live features;
 - capability-specific plugins listed below.
 
 ```bash
@@ -95,9 +79,12 @@ npm run build
 node dist/stdio-proxy.js --tool-profile standard
 ```
 
-For a package install, the explicit proxy binary is
-`optimike-obsidian-mcp-proxy`. The legacy
-`optimike-obsidian-mcp` binary still starts the backend directly.
+Package binaries:
+
+```text
+optimike-obsidian-mcp
+optimike-obsidian-mcp-proxy
+```
 
 Minimal Codex configuration:
 
@@ -117,111 +104,64 @@ OBSIDIAN_BASE_URL = "http://127.0.0.1:27123"
 OBSIDIAN_API_KEY = "<local-rest-api-key>"
 ```
 
-Keep real paths, API keys and external-root configurations outside the
-repository and outside distributable vault content.
+Keep real paths, API keys, journals and external-root configuration outside the repository and distributable vault content.
 
 ## Optional Obsidian integrations
 
 Enable only the surfaces you use:
 
-- [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api):
-  live note, metadata and tag operations;
-- bundled **Bases Bridge (REST)**: live `.base` queries plus opt-in typed CAS for governed source-preserving formula `plan → apply → status → recover`; legacy whole-file config writes are default-off compatibility paths ([P2 contract](docs/governed-base-formula-p2.md));
-- bundled **Optimike Atomic Write Bridge**: independent default-off SHA-256 CAS gates for Markdown and JSON Canvas, backing governed note, Frontmatter and Canvas `plan → apply → status → recover`; Bridge 0.3.0 added bounded date-property protection/settlement and 0.4.0 adds typed Canvas read/CAS with graph validation; opaque `planRef`, lost response → `status`, exact-plan recovery ≠ undo ([note contract](docs/governed-note-replacement.md), [P1 contract](docs/governed-frontmatter-p1.md), [Canvas P3 contract](docs/governed-canvas-p3.md));
-- **Smart Connections**: semantic index under `.smart-env`;
-- **Operon Developer API V1** and the bundled **Optimike Operon Bridge**: governed live
-  task operations through the official Developer API V1;
-- Kairélys compatibility remains available as a bounded legacy/rollback path,
-  not as the production owner;
-- **Obsidian Tasks**: canonical Tasks parsing and configuration.
+- [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) for live note, metadata and tag operations;
+- bundled **Bases Bridge** for live Bases and governed formula CAS;
+- bundled **Optimike Atomic Write Bridge** for governed Note, Frontmatter and Canvas `plan → apply → status → recover`;
+- **Smart Connections** for the local semantic index;
+- **Operon Developer API V1** and bundled **Optimike Operon Bridge** for governed task operations;
+- **Obsidian Tasks** for Tasks-compatible Markdown parsing.
 
-Operon apply requires two explicit opt-ins:
+Operon mutations require the Bridge mutation setting plus:
 
 ```text
-Optimike Operon Bridge setting: Allow task mutations
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Stale Operon snapshots remain read-only. Atomic Markdown and Canvas writes have separate default-off bridge settings and do not require Operon's Developer API grant.
+Stale Operon snapshots remain read-only. No Operon route falls back to raw Markdown or private APIs. Full compatibility, certified/provisional versions, recovery semantics and current API gaps live in the [Operon MCP contract](docs/operon-mcp-contract.md) and [CLI / Developer API audit](docs/operon-cli-audit.md).
 
-The MCP exposes a curated agent surface rather than every Operon CLI function.
-Native diagnostics, finder/resolve, bounded relationships/context and timer
-state are available as read-only tools. Dedicated relationship and recurrence
-writes use official sealed preview/apply plans; destructive and operator
-commands stay in the CLI. Agents use MCP because it adds bounded schemas,
-least-privilege capability checks, dry-run, revision locking, durable
-idempotency, postflight verification and exact-plan recovery. A generic CLI
-passthrough would bypass those guarantees. See the
-[Operon MCP contract](docs/operon-mcp-contract.md) and
-[Operon CLI / Developer API audit](docs/operon-cli-audit.md).
-Transition apply is available through the Bridge. Elevated or destructive plans
-still require fresh confirmation in the owning Obsidian vault window and fail
-closed after 45 seconds when no confirmation can be presented.
+## Governed operations
 
-Compatibility note: the adapter negotiates Operon Developer API V1 with
-`contractVersion: 1` and `runtimeApi: 1`. Versions in the explicit certified
-set report `certified`; unknown non-denied versions exposing the accessor report
-`compatible-provisional`. Live use still requires `developerApi`, `ok`,
-`index.ready`, and the exact capability. Missing capabilities fail closed only
-for affected tools; known regressions remain denied.
-Operon `3.2.0` remains the earlier certified pilot baseline. Modified-time frontmatter settlement and
-multi-window consent were merged upstream before the current release. Saved-filter execution is available
-through the additive task-workflow Developer API after an exact grant, but the
-official API does not expose the saved-filter catalog: callers must supply an
-exact `filterSetId` obtained from Operon's UI/configuration or an operator
-workflow. Adoption remains unavailable on the official Developer API. Operon
-`3.3.2` with Operon CLI `1.1.2` is the current complete live-pilot baseline and
-remains admitted as `compatible-provisional` by the contract-first policy
-rather than a product-version allowlist. Operon `3.3.2` restores the Developer
-API Settings controls, rejects implicit File Task renames, and fixes unscoped
-Project Serial transition settlement. The production acceptance proved a
-non-terminal transition and exact restoration with 30 tasks, no pending
-recovery, and `P0/P1/P2 = 0/0/0`. Adoption is the only tracked official API gap
-([Operon #140](https://github.com/hasanyilmaz/operon/issues/140)). No MCP route
-falls back to Markdown or private APIs.
+Governed Note, Frontmatter, Base formula and Canvas families are exposed atomically:
+
+```text
+plan → apply → status → recover
+```
+
+After timeout or transport loss, call `status` before `recover`; never create a blind replacement mutation. Durable plans are not bound to the profile that created them.
 
 ## External document roots
 
-External roots are disabled by default. Their ordinary reads and handoffs form
-a default-deny authorization broker, not an external index, sync engine or
-backup system.
+External roots are disabled by default. They are an authorization broker, not an index, sync engine or backup system.
 
-The same `external_handoff` tool selects a transport-aware delivery:
+`external_handoff` is transport-aware:
 
 - local stdio returns a verified short-lived `local_path`;
-- authenticated direct HTTP may return an opt-in, identity-bound, single-use
-  `http_ticket`;
-- neither delivery mode discloses the physical source path or authorizes a
-  mutation.
+- authenticated direct HTTP may return an opt-in, identity-bound, single-use `http_ticket`;
+- neither delivery mode authorizes mutation or reveals the physical source path.
 
-One deliberately narrow mutation exists outside the handoff path: local stdio
-through `headless-filesystem` on a copied or dedicated vault can move or rename
-one regular file within the same opted-in root and repair exact ÉLYSIA
-references. It requires an inventory and durable plan, explicit write gates,
-hash/CAS preconditions, a journal and compensating rollback. It is not exposed
-over direct HTTP and does not add create, replace, delete, upload or sync.
+A separate local-stdio transaction can move one regular file within the same configured root and repair exact ÉLYSIA references. It requires inventory, a durable plan, explicit write gates, hash/CAS preconditions, journaling and rollback. It is not exposed over direct HTTP and does not add generic create, replace, delete, upload or sync.
 
-The MCP core does not embed PDF, Office or OCR engines. The calling client owns
-binary extraction and must verify size and SHA-256.
+The MCP core does not embed PDF, Office or OCR engines. The caller owns binary extraction and verifies size and SHA-256.
 
-Start with
-[External document roots — setup and operations](docs/external-roots-setup.md).
+See [External Roots Setup](docs/external-roots-setup.md).
 
 ## Semantic search
 
-`smart_semantic_search` is the canonical semantic-search tool. Modern profiles
-expose only that name. It searches a local Smart Connections index. Query
-embedding can remain local through Ollama or use OpenAI, depending on operator
-configuration. A configured OpenAI provider therefore makes this tool
-open-world even though the indexed vault data remains local.
+`smart_semantic_search` is the canonical semantic-search tool. It searches the local Smart Connections index. Query embedding can remain local through Ollama or use an OpenAI-compatible provider.
 
-See [Operations](OPERATIONS.md) for provider configuration and cache behavior.
+See [Operations](OPERATIONS.md) for providers and cache behavior.
 
 ## Verification
 
 ```bash
 npm run build
-npm run test:runtime && npm run test:governed-note-replace-mcp && npm run test:governed-note-replace-http
+npm run test:runtime
 npm run check:operon
 npm run test:external-roots
 npm run test:docs
@@ -229,27 +169,20 @@ npm run test:package
 npm run audit:production
 ```
 
-The runtime suites use disposable vaults and include Linux/Windows CI coverage.
-For production-like validation, keep the shared cache database outside the real
-synced vault.
+Runtime suites use disposable vaults and run in Linux/Windows CI.
 
 ## Documentation
 
-- Start here by audience and task: [Documentation hub](docs/README.md)
-- Tool exposure profiles and client examples: [Tool Surface Profiles](docs/tool-surface-profiles.md)
-- Runtime and maintenance: [OPERATIONS.md](OPERATIONS.md)
-- Security and deployment boundary: [SECURITY.md](SECURITY.md)
-- Current tools: [Tool Surface](docs/obsidian_mcp_tools_spec.md)
-- Runtime modes: [Runtime Capability Matrix](docs/runtime-capability-matrix.md)
-- Agent routing: [MCP Routing Guide](docs/mcp-routing-guide.md)
-- Operon tools and guarantees: [Operon MCP Contract](docs/operon-mcp-contract.md)
-- Operon surface and CLI routing: [Operon CLI / Developer API audit](docs/operon-cli-audit.md)
-- Headless deployment: [Headless Server Profile](docs/headless-server-profile.md)
-- Linux headless multi-client pilot: [Pilot and capability matrix](docs/headless-multiclient-pilot.md)
-- OSS gateway integration: [Gateway Compatibility](docs/gateway-compatibility.md)
-- External documents: [External Roots Setup](docs/external-roots-setup.md)
-- Architecture decisions and status: [ADR Index](docs/adr/README.md)
-- Public ÉLYSIA task profile: [profiles/elysia-tasks/README.fr.md](profiles/elysia-tasks/README.fr.md)
+- [Documentation hub](docs/README.md)
+- [Tool Surface Profiles](docs/tool-surface-profiles.md)
+- [Tool Surface](docs/obsidian_mcp_tools_spec.md)
+- [Runtime Capability Matrix](docs/runtime-capability-matrix.md)
+- [MCP Routing Guide](docs/mcp-routing-guide.md)
+- [Operon MCP Contract](docs/operon-mcp-contract.md)
+- [External Roots Setup](docs/external-roots-setup.md)
+- [Headless Server Profile](docs/headless-server-profile.md)
+- [Gateway Compatibility](docs/gateway-compatibility.md)
+- [ADR Index](docs/adr/README.md)
 
 ## Credits
 
