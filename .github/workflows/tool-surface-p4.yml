@@ -48,4 +48,5 @@ jobs:
       - run: node scripts/test-tool-routing-scorer.mjs
       - run: node scripts/test-tool-surface-profile-docs.mjs
       - run: node scripts/test-tool-routing-contract.mjs
+      - run: npm run build:bridges
       - run: npm run test:package
