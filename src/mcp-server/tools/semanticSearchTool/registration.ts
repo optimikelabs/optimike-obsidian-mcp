@@ -3,7 +3,7 @@
  * - Lit les embeddings dans `.smart-env`
  * - Encode la requête via un embedder configurable (auto: s'aligne sur le modèle du vault)
  * - Classement cosinus, filtres dossier/tag, snippets optionnels
- * - Expose `smart_semantic_search` + legacy aliases `smart_search` and `smart-search`
+ * - Expose the single canonical `smart_semantic_search` tool
  * Schéma JSON "Codex-friendly" (pas d'integer ni d'unions).
  */
 
@@ -583,14 +583,6 @@ export const registerSemanticSearchTool = async (
   register(
     "smart_semantic_search",
     "Semantic search powered by Smart Connections embeddings (query embedder auto-matches the vault model).",
-  );
-  register(
-    "smart_search",
-    "Legacy compatibility alias of smart_semantic_search with the same implementation. Prefer smart_semantic_search for new calls.",
-  );
-  register(
-    "smart-search",
-    "Legacy compatibility alias of smart_semantic_search with the same implementation. Prefer smart_semantic_search for new calls.",
   );
 };
 

@@ -103,7 +103,9 @@ async function protocolRequest({
   sessionId,
   requestBody,
 }) {
-  const response = await fetch(new URL("/mcp", baseUrl), {
+  // This broad multiclient runtime test exercises the complete headless surface.
+  // The unqualified /mcp standard default is covered by profile-route tests.
+  const response = await fetch(new URL("/mcp/full", baseUrl), {
     method: "POST",
     headers: {
       Accept: "application/json, text/event-stream",

@@ -92,6 +92,7 @@ async function main() {
       MCP_WRITE_MODE: "readonly",
       SEMANTIC_SEARCH_PREWARM: "false",
       MCP_TRANSPORT_TYPE: "stdio",
+      MCP_TOOL_PROFILE: "full",
       MCP_LOG_LEVEL: process.env.MCP_LOG_LEVEL ?? "error",
     },
   });

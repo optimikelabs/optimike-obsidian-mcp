@@ -73,7 +73,9 @@ const GOVERNED_LIFECYCLE_ROLES = [
   "recover",
 ] as const;
 
-export const TOOL_PROFILES: Readonly<Record<ToolProfileId, ToolProfileDefinition>> = {
+export const TOOL_PROFILES: Readonly<
+  Record<ToolProfileId, ToolProfileDefinition>
+> = {
   standard: {
     id: "standard",
     description:
@@ -98,7 +100,7 @@ export const TOOL_PROFILES: Readonly<Record<ToolProfileId, ToolProfileDefinition
   full: {
     id: "full",
     description:
-      "Compatibility surface: every tool registered by the active runtime, including legacy aliases, unavailable fail-closed compatibility tools, admin, maintenance and external-root capabilities.",
+      "Explicit complete surface: every tool registered by the active runtime, including unavailable fail-closed compatibility tools, admin, maintenance and external-root capabilities.",
     groups: TOOL_GROUP_IDS,
     preferCanonicalAlternatives: false,
   },
@@ -169,7 +171,9 @@ function hideIncompleteGovernedFamilies(
   );
 }
 
-function assertGovernedFamiliesAtomic(entries: readonly ToolSurfaceEntry[]): void {
+function assertGovernedFamiliesAtomic(
+  entries: readonly ToolSurfaceEntry[],
+): void {
   for (const [family, roles] of lifecycleRolesByFamily(entries)) {
     if (!lifecycleIsComplete(roles)) {
       throw new Error(
@@ -227,7 +231,9 @@ function finalizeProfileEntries(
     selected = suppressPreferredFallbacks(selected);
   }
   assertGovernedFamiliesAtomic(selected);
-  return [...selected].sort((left, right) => left.name.localeCompare(right.name));
+  return [...selected].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
 }
 
 export function compileToolProfile({
@@ -264,7 +270,7 @@ export interface SelectAvailableToolProfileInput {
  * This is the runtime authority used by P2/P3: it intersects the portable
  * profile contract with real registration rather than predicting availability.
  *
- * `full` intentionally preserves unknown future names for 2.x compatibility.
+ * `full` intentionally preserves unknown future names as the explicit complete surface.
  * Modern profiles fail closed on unknown names and hide Operon tools whose
  * service contract is statically live-only. Presence of the governed note
  * family is used as the concrete live/hybrid marker because it is registered

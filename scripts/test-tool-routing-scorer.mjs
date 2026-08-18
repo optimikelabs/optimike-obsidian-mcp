@@ -21,10 +21,10 @@ try {
         inputTokens: 1000,
       }),
       JSON.stringify({
-        id: "semantic-canonical",
+        id: "runtime-status",
         harness: "fixture",
         surface: "full",
-        toolsCalled: ["smart_search", "smart_semantic_search"],
+        toolsCalled: ["obsidian_runtime_maintenance", "obsidian_runtime_status"],
         success: true,
         latencyMs: 140,
         inputTokens: 1400,
@@ -85,7 +85,7 @@ try {
     "the three required external-move calls must not be scored as unnecessary",
   );
   assert.equal(report.failures.length, 1);
-  assert.equal(report.failures[0].firstTool, "smart_search");
+  assert.equal(report.failures[0].firstTool, "obsidian_runtime_maintenance");
 
   console.log("PASS: routing eval scorer distinguishes canonical and forbidden tool choices");
 } finally {

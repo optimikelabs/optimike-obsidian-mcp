@@ -6,8 +6,9 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 const httpUrl = process.env.MCP_SMOKE_HTTP_URL ?? "http://127.0.0.1:3010/mcp";
 const healthUrl =
-  process.env.MCP_SMOKE_HEALTH_URL ?? httpUrl.replace(/\/mcp\/?$/u, "/healthz");
-const minTools = Number(process.env.MCP_SMOKE_MIN_TOOLS ?? "20");
+  process.env.MCP_SMOKE_HEALTH_URL ??
+  httpUrl.replace(/\/mcp(?:\/[^/]+)?\/?$/u, "/healthz");
+const minTools = Number(process.env.MCP_SMOKE_MIN_TOOLS ?? "19");
 const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "8000");
 const includeStdioProxy =
   (process.env.MCP_SMOKE_STDIO_PROXY ?? "true").toLowerCase() === "true";

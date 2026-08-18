@@ -15,6 +15,12 @@ const repoRoot = path.resolve(
 
 let registeredResource;
 registerToolRoutingResource({
+  tool() {
+    return { enable() {}, disable() {} };
+  },
+  registerTool() {
+    return { enable() {}, disable() {} };
+  },
   registerResource(name, uri, metadata, callback) {
     assert.equal(
       registeredResource,

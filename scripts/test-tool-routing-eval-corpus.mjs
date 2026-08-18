@@ -7,11 +7,17 @@ import {
 import { getToolSurfaceEntry } from "../dist/mcp-server/toolSurfaceRegistry.js";
 
 const corpus = JSON.parse(
-  fs.readFileSync(new URL("../evals/tool-routing-corpus.json", import.meta.url), "utf8"),
+  fs.readFileSync(
+    new URL("../evals/tool-routing-corpus.json", import.meta.url),
+    "utf8",
+  ),
 );
 
 assert.ok(Array.isArray(corpus));
-assert.ok(corpus.length >= 25 && corpus.length <= 40, "initial routing corpus must remain 25-40 cases");
+assert.ok(
+  corpus.length >= 25 && corpus.length <= 40,
+  "initial routing corpus must remain 25-40 cases",
+);
 
 const ids = new Set();
 for (const testCase of corpus) {
@@ -29,8 +35,9 @@ for (const testCase of corpus) {
   assert.ok(Array.isArray(testCase.acceptableFirstTools));
   assert.ok(Array.isArray(testCase.forbiddenTools ?? []));
   assert.ok(
-    Number.isInteger(testCase.minimumToolCalls ?? (testCase.expectNoTool ? 0 : 1)) &&
-      (testCase.minimumToolCalls ?? (testCase.expectNoTool ? 0 : 1)) >= 0,
+    Number.isInteger(
+      testCase.minimumToolCalls ?? (testCase.expectNoTool ? 0 : 1),
+    ) && (testCase.minimumToolCalls ?? (testCase.expectNoTool ? 0 : 1)) >= 0,
     `${testCase.id} minimumToolCalls must be a non-negative integer`,
   );
 
@@ -56,7 +63,10 @@ for (const testCase of corpus) {
     ...testCase.acceptableFirstTools,
     ...(testCase.forbiddenTools ?? []),
   ]) {
-    assert.ok(getToolSurfaceEntry(name), `${testCase.id} references unknown tool ${name}`);
+    assert.ok(
+      getToolSurfaceEntry(name),
+      `${testCase.id} references unknown tool ${name}`,
+    );
   }
 
   const liveProfile = new Set(
@@ -76,16 +86,13 @@ for (const testCase of corpus) {
 
 for (const testCase of corpus) {
   if (testCase.recommendedProfile === "full") continue;
-  assert.ok(
-    !(testCase.acceptableFirstTools ?? []).includes("smart_search") &&
-      !(testCase.acceptableFirstTools ?? []).includes("smart-search"),
-    `${testCase.id} teaches a deprecated semantic alias`,
-  );
+  assert.ok(!(testCase.acceptableFirstTools ?? []).includes("smart_search"));
+  assert.ok(!(testCase.acceptableFirstTools ?? []).includes("smart-search"));
 }
 
 const semantic = corpus.find((item) => item.id === "semantic-canonical");
 assert.deepEqual(semantic?.acceptableFirstTools, ["smart_semantic_search"]);
-assert.ok(semantic?.forbiddenTools.includes("smart_search"));
-assert.ok(semantic?.forbiddenTools.includes("smart-search"));
 
-console.log(`PASS: ${corpus.length} routing eval cases are profile-valid and canonical`);
+console.log(
+  `PASS: ${corpus.length} routing eval cases are profile-valid and canonical`,
+);

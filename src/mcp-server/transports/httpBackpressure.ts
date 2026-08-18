@@ -9,8 +9,6 @@ import {
 
 const DEFAULT_EXPENSIVE_TOOLS = [
   "smart_semantic_search",
-  "smart_search",
-  "smart-search",
   "obsidian_runtime_maintenance",
   "obsidian_global_search",
   "bases_query",
@@ -201,10 +199,7 @@ export const httpBackpressureConfig = {
 };
 
 export type AdmissionRejectReason =
-  | "queue-full"
-  | "identity-queue-full"
-  | "timeout"
-  | "cancelled";
+  "queue-full" | "identity-queue-full" | "timeout" | "cancelled";
 
 export class AdmissionRejectedError extends Error {
   public readonly name = "AdmissionRejectedError";
@@ -794,8 +789,7 @@ export async function classifyHttpOperation(
 
   try {
     const payload = (await readBoundedJsonBody(c.req.raw, bodyLimits)) as
-      | JsonRpcEnvelope
-      | JsonRpcEnvelope[];
+      JsonRpcEnvelope | JsonRpcEnvelope[];
     if (Array.isArray(payload)) {
       throw new JsonRpcBatchUnsupportedError();
     }

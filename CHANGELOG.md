@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-18
+
+### Removed
+
+- Removed the `smart_search` and `smart-search` compatibility aliases. Semantic
+  search now has one registered MCP name: `smart_semantic_search`.
+
+### Changed
+
+- An unspecified stdio profile now selects `standard` instead of `full`.
+- The unqualified HTTP `/mcp` route now selects `standard`; `/mcp/full` remains
+  available as the explicit complete active-runtime surface.
+- Full live/hybrid registration is now 70 tools, while the default `standard`
+  live/hybrid surface remains 19 tools.
+
+### Migration
+
+- Replace every `smart_search` or `smart-search` call with
+  `smart_semantic_search`.
+- Clients that depended on implicit access to administration, external-root or
+  specialized tools must explicitly select `full` with
+  `MCP_TOOL_PROFILE=full`, `--tool-profile full`, or `/mcp/full`.
+
 ## [2.10.0] - 2026-08-18
 
 ### Added

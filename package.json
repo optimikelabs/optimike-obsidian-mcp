@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "2.10.0",
+  "version": "3.0.0",
   "description": "Unified Obsidian MCP server with shared local cache, Operon and Tasks tools, Bases support, semantic search, runtime observability, and degraded read mode for durable agent workflows.",
   "main": "dist/index.js",
   "files": [

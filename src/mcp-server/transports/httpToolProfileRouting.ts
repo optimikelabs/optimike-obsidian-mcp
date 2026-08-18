@@ -10,7 +10,7 @@ export const INTERNAL_TOOL_PROFILE_HEADER =
 export function toolProfileForMcpPath(
   pathname: string,
 ): ToolProfileId | undefined {
-  if (pathname === "/mcp") return "full";
+  if (pathname === "/mcp") return "standard";
   if (!pathname.startsWith("/mcp/")) return undefined;
 
   const suffix = pathname.slice("/mcp/".length);
@@ -25,7 +25,9 @@ export function toolProfileForMcpPath(
  * route. The internal profile header is always overwritten from the path, so a
  * caller cannot inject or switch profile through a custom header.
  */
-export function rewriteProfiledMcpRequest(request: Request): Request | Response {
+export function rewriteProfiledMcpRequest(
+  request: Request,
+): Request | Response {
   const url = new URL(request.url);
   let profile: ToolProfileId | undefined;
   try {
@@ -63,8 +65,10 @@ export function rewriteProfiledMcpRequest(request: Request): Request | Response 
   } as RequestInit & { duplex?: "half" });
 }
 
-export function toolProfileFromInternalRequest(request: Request): ToolProfileId {
+export function toolProfileFromInternalRequest(
+  request: Request,
+): ToolProfileId {
   return parseToolProfileId(
-    request.headers.get(INTERNAL_TOOL_PROFILE_HEADER) ?? "full",
+    request.headers.get(INTERNAL_TOOL_PROFILE_HEADER) ?? "standard",
   );
 }

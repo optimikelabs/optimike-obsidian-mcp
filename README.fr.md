@@ -10,41 +10,41 @@ Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouver
 
 ## Carte des capacités
 
-| Domaine | Ce que fournit le MCP | Dépendance principale |
-| --- | --- | --- |
-| Notes | Lecture/recherche/éditions directes + opérations gouvernées Note et Frontmatter | Coffre ; Local REST API + Atomic Write Bridge |
-| Bases et Canvas | Requêtes, écritures bornées, formules et graphes Canvas gouvernés | Bases Bridge ; Atomic Write Bridge |
-| Tâches | Markdown Tasks-compatible + 23 outils Operon gouvernés | Operon Developer API V1 via le Bridge |
-| Recherche sémantique | Recherche dans l’index Smart Connections | `.smart-env` + embedding Ollama ou compatible OpenAI |
-| Runtime | Cache SQLite partagé, santé, maintenance et modes dégradés | Filesystem local |
-| Documents externes | Lectures/handoff default-deny + move local opt-in | Allowlist de racines |
-| Administration headless | Opérations métadonnées/filesystem bornées | Copie ou coffre dédié |
+| Domaine                 | Ce que fournit le MCP                                                           | Dépendance principale                                |
+| ----------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Notes                   | Lecture/recherche/éditions directes + opérations gouvernées Note et Frontmatter | Coffre ; Local REST API + Atomic Write Bridge        |
+| Bases et Canvas         | Requêtes, écritures bornées, formules et graphes Canvas gouvernés               | Bases Bridge ; Atomic Write Bridge                   |
+| Tâches                  | Markdown Tasks-compatible + 23 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
+| Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` + embedding Ollama ou compatible OpenAI |
+| Runtime                 | Cache SQLite partagé, santé, maintenance et modes dégradés                      | Filesystem local                                     |
+| Documents externes      | Lectures/handoff default-deny + move local opt-in                               | Allowlist de racines                                 |
+| Administration headless | Opérations métadonnées/filesystem bornées                                       | Copie ou coffre dédié                                |
 
 Le registre canonique des outils est documenté dans [Surface des outils](docs/obsidian_mcp_tools_spec.md).
 
 ## Runtime et transport
 
-| Besoin | Runtime / transport recommandé |
-| --- | --- |
-| Agent local | proxy stdio |
-| Automatisation Obsidian Desktop | `live` ou `hybrid` |
-| CI/serveur/copie synchronisée | `headless-readonly` |
-| Écritures bornées sur copie/coffre dédié | `headless-guarded`, puis `headless-filesystem` |
-| HTTP sur la même machine | HTTP loopback authentifié |
-| HTTP distant | reverse proxy TLS revu + réseau privé ; pilote seulement |
+| Besoin                                   | Runtime / transport recommandé                           |
+| ---------------------------------------- | -------------------------------------------------------- |
+| Agent local                              | proxy stdio                                              |
+| Automatisation Obsidian Desktop          | `live` ou `hybrid`                                       |
+| CI/serveur/copie synchronisée            | `headless-readonly`                                      |
+| Écritures bornées sur copie/coffre dédié | `headless-guarded`, puis `headless-filesystem`           |
+| HTTP sur la même machine                 | HTTP loopback authentifié                                |
+| HTTP distant                             | reverse proxy TLS revu + réseau privé ; pilote seulement |
 
 Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combien d’outils le modèle doit voir.
 
 ## Profils de surface d’outils
 
-| Besoin | Profil | Taille live/hybrid complète |
-| --- | --- | ---: |
-| Travail général sur le coffre | `standard` | 19 |
-| Notes, tags, Bases et Canvas | `authoring` | 30 |
-| Workflows Tasks / Operon | `tasks` | 31 |
-| Compatibilité, admin et surfaces spécialisées | `full` | 72 |
+| Besoin                                               | Profil      | Taille live/hybrid complète |
+| ---------------------------------------------------- | ----------- | --------------------------: |
+| Travail général sur le coffre                        | `standard`  |                          19 |
+| Notes, tags, Bases et Canvas                         | `authoring` |                          30 |
+| Workflows Tasks / Operon                             | `tasks`     |                          31 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          70 |
 
-Pendant la branche 2.x, `full` conserve toute la surface de compatibilité. Les profils modernes n’exposent que `smart_semantic_search` ; les alias historiques `smart_search` et `smart-search` restent réservés à `full` jusqu’à la 3.0. `bases_upsert_config` reste lui aussi une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
+En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
 Sélectionner le profil avant `tools/list` :
 
@@ -61,7 +61,7 @@ Routes HTTP profilées :
 /mcp/full
 ```
 
-Le `/mcp` historique reste équivalent à `/mcp/full` pendant la branche 2.x. Voir [Profils de surface d’outils](docs/tool-surface-profiles.fr.md).
+Le chemin `/mcp` sans qualificatif utilise désormais `standard` ; `/mcp/full` reste la route complète explicite. Voir [Profils de surface d’outils](docs/tool-surface-profiles.fr.md).
 
 ## Démarrage rapide
 

@@ -11,14 +11,14 @@ Profiles reduce schema volume and routing ambiguity. They are not an authorizati
 
 ## Public profiles
 
-| Profile | Intended use | Full live/hybrid surface |
-| --- | --- | ---: |
-| `standard` | General vault reading/search and common governed note/Frontmatter work | 19 tools |
-| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring | 30 tools |
-| `tasks` | Markdown Tasks compatibility plus the complete live Operon MCP contract | 31 tools |
-| `full` | 2.x compatibility/admin surface for the active runtime | 72 tools |
+| Profile     | Intended use                                                                | Full live/hybrid surface |
+| ----------- | --------------------------------------------------------------------------- | -----------------------: |
+| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 19 tools |
+| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 30 tools |
+| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 31 tools |
+| `full`      | Explicit complete/admin surface for the active runtime                      |                 70 tools |
 
-Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 72 tools. The canonical registry covers 76 unique names across all runtimes because four names exist only in `headless-filesystem`.
+Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 70 tools. The canonical registry covers 74 unique names across all runtimes because four names exist only in `headless-filesystem`.
 
 ## Compatibility-only names
 
@@ -30,9 +30,9 @@ Semantic search uses one canonical name:
 smart_semantic_search
 ```
 
-The historical `smart_search` and `smart-search` aliases remain physically registered and visible only in `full` during the 2.x line. Their physical removal is reserved for 3.0.
+The historical `smart_search` and `smart-search` aliases were physically removed in 3.0. Existing clients must call `smart_semantic_search`.
 
-`bases_upsert_config` is also `full`-only in 2.10. It replaces a whole Base configuration and is not a fallback for governed formula editing. `authoring` keeps `bases_create`, `bases_upsert_rows` and the complete governed `bases_formula_patch_*` family.
+`bases_upsert_config` remains `full`-only. It replaces a whole Base configuration and is not a fallback for governed formula editing. `authoring` keeps `bases_create`, `bases_upsert_rows` and the complete governed `bases_formula_patch_*` family.
 
 ## Governed families
 
@@ -61,7 +61,7 @@ Modern profiles hide a direct tool only when the corresponding governed family i
 
 ## Stdio selection
 
-The 2.x compatibility default is `full` when no profile is specified.
+The 3.0 default is `standard` when no profile is specified.
 
 ```bash
 node dist/stdio-proxy.js --tool-profile standard
@@ -73,7 +73,7 @@ or:
 MCP_TOOL_PROFILE=standard node dist/stdio-proxy.js
 ```
 
-`--tool-profile` takes precedence over `MCP_TOOL_PROFILE`. Unknown, empty or repeated CLI values fail closed rather than falling back to `full`.
+`--tool-profile` takes precedence over `MCP_TOOL_PROFILE`. Unknown, empty or repeated CLI values fail closed rather than falling back to `standard`.
 
 The stdio proxy applies the profile per client. When it starts the shared HTTP backend, it explicitly starts that backend as `full`, then filters both `tools/list` and `tools/call` for its client. A hidden local proxy tool is therefore also uncallable by name.
 
@@ -82,7 +82,7 @@ The stdio proxy applies the profile per client. When it starts the shared HTTP b
 The server exposes immutable profile routes:
 
 ```text
-/mcp              → full (2.x compatibility alias)
+/mcp              → standard (3.0 default)
 /mcp/standard     → standard
 /mcp/authoring    → authoring
 /mcp/tasks        → tasks
@@ -107,13 +107,11 @@ Optional client mechanisms include:
 
 These client features can evolve independently. Select an Optimike profile first; use client filtering only as an additional optimization.
 
-## Migration boundary
+## Migrating from 2.10
 
-2.10 remains SemVer-compatible with 2.x:
+3.0 makes two intentional breaking changes:
 
-- unspecified stdio profile → `full`;
-- legacy `/mcp` → `/mcp/full`;
-- `smart_search` and `smart-search` remain available in `full`;
-- full active-runtime surfaces remain compatible with 2.9.
+- unspecified stdio profile and unqualified `/mcp` now select `standard`;
+- `smart_search` and `smart-search` no longer exist; call `smart_semantic_search`.
 
-3.0 is the planned breaking boundary for physical semantic-alias removal and for making the modern default surface `standard` after 2.10 has passed its release gates.
+Clients that genuinely need administration, external roots or specialized compatibility tools must opt in with `MCP_TOOL_PROFILE=full`, `--tool-profile full`, or `/mcp/full`. Profile selection still changes discovery, not authorization.

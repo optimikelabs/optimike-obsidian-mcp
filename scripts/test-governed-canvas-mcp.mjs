@@ -25,6 +25,7 @@ const transport = new StdioClientTransport({
     ...process.env,
     NODE_ENV: "test",
     MCP_TRANSPORT_TYPE: "stdio",
+    MCP_TOOL_PROFILE: "authoring",
     MCP_LOG_LEVEL: "error",
     LOGS_DIR: logs,
     MCP_WRITE_MODE: "full",

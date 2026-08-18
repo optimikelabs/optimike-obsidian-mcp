@@ -322,6 +322,9 @@ async function main() {
       OBSIDIAN_BASE_URL: fakeRestUrl ?? "http://127.0.0.1:9",
       SEMANTIC_SEARCH_PREWARM: "false",
       MCP_TRANSPORT_TYPE: "stdio",
+      // This broad runtime smoke validates every registered capability. The
+      // 3.0 default-standard contract is covered by dedicated profile tests.
+      MCP_TOOL_PROFILE: "full",
       MCP_LOG_LEVEL: process.env.MCP_LOG_LEVEL ?? "error",
     },
   });
@@ -383,14 +386,10 @@ async function main() {
           .join(", ")}`,
       );
     }
-    const semanticSearchAliases = new Set([
-      "smart-search",
-      "smart_search",
-      "smart_semantic_search",
-    ]);
+    const semanticSearchNames = new Set(["smart_semantic_search"]);
     const closedWorldSemanticSearchTools = tools.tools.filter(
       (tool) =>
-        semanticSearchAliases.has(tool.name) &&
+        semanticSearchNames.has(tool.name) &&
         tool.annotations?.openWorldHint !== true,
     );
     if (closedWorldSemanticSearchTools.length > 0) {
@@ -400,15 +399,9 @@ async function main() {
           .join(", ")}`,
       );
     }
-    for (const alias of ["smart_search", "smart-search"]) {
-      const description = toolsByName.get(alias)?.description ?? "";
-      if (
-        !description.includes("Legacy compatibility alias") ||
-        !description.includes("Prefer smart_semantic_search")
-      ) {
-        throw new Error(
-          `${alias} must identify itself as a legacy alias and route new calls to smart_semantic_search.`,
-        );
+    for (const removedAlias of ["smart_search", "smart-search"]) {
+      if (toolsByName.has(removedAlias)) {
+        throw new Error(`${removedAlias} must be physically absent in 3.0.`);
       }
     }
 

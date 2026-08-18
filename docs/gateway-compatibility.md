@@ -37,10 +37,11 @@ documentation. Their auxiliary-route behavior was not proven end to end.
 
 Optimike exposes both:
 
-- the Streamable HTTP endpoint `/mcp`;
+- the Streamable HTTP profile endpoints (`/mcp` defaults to `standard`, while
+  `/mcp/full` explicitly exposes the complete active-runtime surface);
 - the authenticated auxiliary download endpoint `/external-handoff`.
 
-An MCP-only virtual target proves only `/mcp`. The selected agentgateway route
+An MCP-only virtual target proves only the selected `/mcp` profile route. The selected agentgateway route
 forwards the complete bounded HTTP surface, so the same bearer token,
 `Mcp-Session-Id`, `X-External-Handoff-Ticket`, correlation headers, streaming
 body and status codes reach Optimike unchanged.

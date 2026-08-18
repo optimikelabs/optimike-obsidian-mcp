@@ -57,7 +57,7 @@ const backendExternalPath = path.join(sandbox, "backend-external");
 const configPath = path.join(sandbox, "external-roots.json");
 const backendConfigPath = path.join(sandbox, "backend-external-roots.json");
 const port = await unusedPort();
-const httpUrl = new URL(`http://127.0.0.1:${port}/mcp`);
+const httpUrl = new URL(`http://127.0.0.1:${port}/mcp/full`);
 const healthUrl = new URL(`http://127.0.0.1:${port}/healthz`);
 
 await mkdir(path.join(vaultPath, ".obsidian"), { recursive: true });
@@ -118,6 +118,7 @@ const commonEnv = {
   OBSIDIAN_CACHE_SOURCE: "filesystem",
   OBSIDIAN_ENABLE_CACHE: "false",
   MCP_WRITE_MODE: "readonly",
+  MCP_TOOL_PROFILE: "full",
   SEMANTIC_SEARCH_PREWARM: "false",
   MCP_TRANSPORT_TYPE: "http",
   MCP_HTTP_HOST: "127.0.0.1",

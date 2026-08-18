@@ -12,12 +12,12 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 19, authoring: 30, tasks: 31, full: 72 },
-  "hybrid-live": { standard: 19, authoring: 30, tasks: 31, full: 72 },
-  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
-  "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
-  "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
-  "headless-filesystem": { standard: 12, authoring: 16, tasks: 14, full: 60 },
+  live: { standard: 19, authoring: 30, tasks: 31, full: 70 },
+  "hybrid-live": { standard: 19, authoring: 30, tasks: 31, full: 70 },
+  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 43 },
+  "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 46 },
+  "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 49 },
+  "headless-filesystem": { standard: 12, authoring: 16, tasks: 14, full: 58 },
 };
 
 assert.deepEqual(TOOL_PROFILE_IDS, ["standard", "authoring", "tasks", "full"]);
@@ -68,7 +68,7 @@ for (const profile of ["standard", "authoring", "tasks"]) {
     );
     assert.ok(
       !names.includes("smart_search") && !names.includes("smart-search"),
-      `${profile}/${registrationMode} must hide semantic-search compatibility aliases`,
+      `${profile}/${registrationMode} must not contain removed semantic-search aliases`,
     );
     assert.ok(
       !names.includes("bases_upsert_config"),
@@ -96,9 +96,13 @@ for (const registrationMode of TOOL_REGISTRATION_MODES) {
     availableStaticRequirements: WITH_CACHE,
   });
   assert.ok(full.includes("smart_semantic_search"));
-  assert.ok(full.includes("smart_search"));
-  assert.ok(full.includes("smart-search"));
-  if (registrationMode === "live" || registrationMode === "hybrid-live" || registrationMode === "headless-filesystem") {
+  assert.ok(!full.includes("smart_search"));
+  assert.ok(!full.includes("smart-search"));
+  if (
+    registrationMode === "live" ||
+    registrationMode === "hybrid-live" ||
+    registrationMode === "headless-filesystem"
+  ) {
     assert.ok(
       full.includes("bases_upsert_config"),
       `${registrationMode}/full must preserve whole-Base compatibility`,
@@ -180,7 +184,10 @@ for (const required of [
   "list_all_tasks",
   "query_tasks",
 ]) {
-  assert.ok(tasksLive.includes(required), `live tasks profile lost ${required}`);
+  assert.ok(
+    tasksLive.includes(required),
+    `live tasks profile lost ${required}`,
+  );
 }
 
 const tasksSnapshot = compileToolProfileNames({
@@ -199,7 +206,10 @@ for (const required of [
   "list_all_tasks",
   "query_tasks",
 ]) {
-  assert.ok(tasksSnapshot.includes(required), `snapshot tasks profile lost ${required}`);
+  assert.ok(
+    tasksSnapshot.includes(required),
+    `snapshot tasks profile lost ${required}`,
+  );
 }
 for (const liveOnly of [
   "operon_query_saved_filter",
@@ -264,4 +274,6 @@ for (const absent of [
 }
 assert.equal(readonlyWithoutCache.length, 5);
 
-console.log("PASS: profiles are deterministic, semantic aliases and whole-Base config stay full-only, governed families are atomic, and headless tasks expose only snapshot-safe Operon reads");
+console.log(
+  "PASS: profiles are deterministic, removed semantic aliases stay absent, whole-Base config stays full-only, governed families are atomic, and headless tasks expose only snapshot-safe Operon reads",
+);

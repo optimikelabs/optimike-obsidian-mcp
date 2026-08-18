@@ -30,7 +30,6 @@ export const TOOL_GROUP_IDS = [
   "runtime.maintenance",
   "runtime.status",
   "semantic.canonical",
-  "semantic.legacy",
   "tasks.markdown",
   "tasks.operon.read",
   "tasks.operon.write",
@@ -231,11 +230,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
 
-  ...governedFamily(
-    "obsidian_note_replace",
-    "notes.governed",
-    "note-replace",
-  ),
+  ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace"),
 
   defineTool(
     "obsidian_manage_frontmatter",
@@ -334,24 +329,10 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     },
   ),
 
-  ...governedFamily(
-    "obsidian_canvas_patch",
-    "canvas.governed",
-    "canvas-patch",
-  ),
+  ...governedFamily("obsidian_canvas_patch", "canvas.governed", "canvas-patch"),
 
-  defineTool(
-    "list_all_tasks",
-    "tasks.markdown",
-    "markdown-tasks",
-    ALL_MODES,
-  ),
-  defineTool(
-    "query_tasks",
-    "tasks.markdown",
-    "markdown-tasks",
-    ALL_MODES,
-  ),
+  defineTool("list_all_tasks", "tasks.markdown", "markdown-tasks", ALL_MODES),
+  defineTool("query_tasks", "tasks.markdown", "markdown-tasks", ALL_MODES),
 
   ...OPERON_READ_TOOLS.map((name) =>
     defineTool(name, "tasks.operon.read", "operon", ALL_MODES),
@@ -361,13 +342,9 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
       annotationClass: "mutation",
     }),
   ),
-  defineTool(
-    "operon_convert_task",
-    "tasks.operon.write",
-    "operon",
-    ALL_MODES,
-    { annotationClass: "destructive" },
-  ),
+  defineTool("operon_convert_task", "tasks.operon.write", "operon", ALL_MODES, {
+    annotationClass: "destructive",
+  }),
 
   defineTool(
     "smart_semantic_search",
@@ -375,28 +352,6 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "semantic-search",
     ALL_MODES,
     { annotationClass: "read-only-open-world" },
-  ),
-  defineTool(
-    "smart_search",
-    "semantic.legacy",
-    "semantic-search",
-    ALL_MODES,
-    {
-      aliasOf: "smart_semantic_search",
-      surfaceClass: "legacy",
-      annotationClass: "read-only-open-world",
-    },
-  ),
-  defineTool(
-    "smart-search",
-    "semantic.legacy",
-    "semantic-search",
-    ALL_MODES,
-    {
-      aliasOf: "smart_semantic_search",
-      surfaceClass: "legacy",
-      annotationClass: "read-only-open-world",
-    },
   ),
 
   defineTool("obsidian_runtime_status", "runtime.status", "runtime", ALL_MODES),
@@ -435,30 +390,10 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "external-roots",
     ALL_MODES,
   ),
-  defineTool(
-    "external_list",
-    "external.read",
-    "external-roots",
-    ALL_MODES,
-  ),
-  defineTool(
-    "external_stat",
-    "external.read",
-    "external-roots",
-    ALL_MODES,
-  ),
-  defineTool(
-    "external_read",
-    "external.read",
-    "external-roots",
-    ALL_MODES,
-  ),
-  defineTool(
-    "external_handoff",
-    "external.read",
-    "external-roots",
-    ALL_MODES,
-  ),
+  defineTool("external_list", "external.read", "external-roots", ALL_MODES),
+  defineTool("external_stat", "external.read", "external-roots", ALL_MODES),
+  defineTool("external_read", "external.read", "external-roots", ALL_MODES),
+  defineTool("external_handoff", "external.read", "external-roots", ALL_MODES),
   defineTool(
     "external_references_scan",
     "external.read",
@@ -466,12 +401,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     ALL_MODES,
   ),
 
-  defineTool(
-    "external_move_plan",
-    "external.move",
-    "external-move",
-    ALL_MODES,
-  ),
+  defineTool("external_move_plan", "external.move", "external-move", ALL_MODES),
   defineTool(
     "external_move_status",
     "external.move",

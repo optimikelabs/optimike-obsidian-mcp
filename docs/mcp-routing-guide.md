@@ -19,8 +19,8 @@ Runtime and tool profile are independent decisions:
 - the tool profile (`standard`, `authoring`, `tasks`, `full`) defines what the client sees before `tools/list`.
 
 For new integrations, prefer `standard` for general vault work, `authoring` for
-Bases/Canvas/tag authoring, and `tasks` for Operon workflows. `full` is the 2.x
-compatibility/admin surface. See [Tool Surface Profiles](tool-surface-profiles.md).
+Bases/Canvas/tag authoring, and `tasks` for Operon workflows. `full` is the
+explicit complete/admin surface. See [Tool Surface Profiles](tool-surface-profiles.md).
 
 ## Default Decision
 
@@ -28,7 +28,7 @@ compatibility/admin surface. See [Tool Surface Profiles](tool-surface-profiles.m
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Read, list, search, semantic search                                          | `standard` profile                                            | Small general-purpose surface with canonical search/write routing.      |
 | Operon or Markdown Tasks workflows                                           | `tasks` profile                                               | Complete Operon contract plus Tasks-compatible Markdown tools.          |
-| Bases, tags or Canvas authoring                                               | `authoring` profile                                           | Adds the authoring-specific surfaces without the full admin set.        |
+| Bases, tags or Canvas authoring                                              | `authoring` profile                                           | Adds the authoring-specific surfaces without the full admin set.        |
 | Read an explicitly configured document outside the vault                     | `full` + Optimike MCP external-root tools                     | External roots are specialized and default-deny.                        |
 | Move one external file without silently breaking ÉLYSIA links                | `full` over local stdio on a copied or dedicated vault        | Inventory, durable plan, exact hash repairs, receipt and rollback.      |
 | Full Obsidian behavior, commands, active file, plugin-backed Bases           | Optimike MCP in `live` or `hybrid` with Obsidian Desktop open | This is the only mode with Desktop/plugin-backed semantics.             |

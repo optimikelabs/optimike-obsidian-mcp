@@ -87,6 +87,9 @@ async function listToolsForMode(registrationMode) {
       OBSIDIAN_STARTUP_BLOCKING: "true",
       SEMANTIC_SEARCH_PREWARM: "false",
       MCP_TRANSPORT_TYPE: "stdio",
+      // Registry conformance compares the complete active-runtime surface.
+      // Default-standard behavior is verified by dedicated profile tests.
+      MCP_TOOL_PROFILE: "full",
       MCP_LOG_LEVEL: "error",
       MCP_WRITE_MODE: writeMode,
     },

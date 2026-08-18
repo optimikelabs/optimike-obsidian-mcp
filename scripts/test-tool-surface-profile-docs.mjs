@@ -12,17 +12,22 @@ for (const relative of [
 ]) {
   const content = read(relative);
   for (const profile of ["standard", "authoring", "tasks", "full"]) {
-    assert.ok(content.includes(`\`${profile}\``), `${relative} omits ${profile}`);
+    assert.ok(
+      content.includes(`\`${profile}\``),
+      `${relative} omits ${profile}`,
+    );
   }
   assert.ok(content.includes("smart_semantic_search"));
   assert.ok(content.includes("smart_search"));
   assert.ok(content.includes("smart-search"));
   assert.ok(
     /3\.0/u.test(content),
-    `${relative} must document the major-version alias-removal boundary`,
+    `${relative} must document the completed major-version migration`,
   );
   assert.ok(content.includes("/mcp/standard"));
   assert.ok(content.includes("/mcp/tasks"));
+  assert.match(content, /\/mcp\s+→ standard/u);
+  assert.match(content, /default is `standard`|défaut de la 3\.0 est `standard`/u);
 }
 
 for (const relative of [
@@ -58,12 +63,10 @@ for (const content of [englishReadme, frenchReadme]) {
 
 const toolSpec = read("docs/obsidian_mcp_tools_spec.md");
 assert.ok(toolSpec.includes("`smart_semantic_search`: **canonical**"));
-assert.ok(toolSpec.includes("`smart_search`: deprecated 2.x compatibility alias, visible only in `full`"));
-assert.ok(toolSpec.includes("`smart-search`: deprecated 2.x compatibility alias, visible only in `full`"));
 assert.match(
   toolSpec,
-  /physical removal is reserved\s+for 3\.0/u,
-  "tool surface spec must preserve the 3.0 physical-alias-removal boundary",
+  /aliases were physically removed in\s+3\.0/u,
+  "tool surface spec must document completed physical alias removal",
 );
 
 const routingResource = read("src/mcp-server/resources/toolRoutingResource.ts");
@@ -71,4 +74,6 @@ assert.ok(routingResource.includes("smart_semantic_search"));
 assert.ok(!routingResource.includes("`smart_search`"));
 assert.ok(!routingResource.includes("`smart-search`"));
 
-console.log("PASS: README/profile docs own compatibility while routing docs teach only smart_semantic_search");
+console.log(
+  "PASS: README/profile docs own compatibility while routing docs teach only smart_semantic_search",
+);

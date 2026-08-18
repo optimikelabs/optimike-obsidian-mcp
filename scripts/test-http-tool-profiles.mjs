@@ -133,9 +133,17 @@ async function call(client, baseUrl, method, params = {}) {
 }
 
 async function createVault() {
-  const vault = await mkdtemp(path.join(os.tmpdir(), "optimike-http-profiles-"));
-  await mkdir(path.join(vault, ".obsidian", "optimike-mcp"), { recursive: true });
-  await writeFile(path.join(vault, "Root.md"), "# HTTP profile smoke\n", "utf8");
+  const vault = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-http-profiles-"),
+  );
+  await mkdir(path.join(vault, ".obsidian", "optimike-mcp"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(vault, "Root.md"),
+    "# HTTP profile smoke\n",
+    "utf8",
+  );
   return vault;
 }
 
@@ -195,7 +203,7 @@ const child = spawn(process.execPath, ["dist/index.js"], {
     MCP_HTTP_LOOPBACK_POLICY: "shared",
     MCP_HTTP_PREAUTH_RATE_LIMIT_MAX: "1000",
     MCP_HTTP_IDENTITY_RATE_LIMIT_MAX: "1000",
-    // A process-wide env profile must not change the public /mcp legacy contract.
+    // A process-wide env profile must not change immutable HTTP profile routes.
     MCP_TOOL_PROFILE: "tasks",
   },
   stdio: ["ignore", "pipe", "pipe"],
@@ -209,12 +217,14 @@ try {
   const baseUrl = new URL(`http://127.0.0.1:${port}`);
   await waitForHealth(baseUrl, child);
 
-  const [standardToken, tasksToken, fullToken, legacyToken] = await Promise.all([
-    signToken("profile-standard"),
-    signToken("profile-tasks"),
-    signToken("profile-full"),
-    signToken("profile-legacy"),
-  ]);
+  const [standardToken, tasksToken, fullToken, legacyToken] = await Promise.all(
+    [
+      signToken("profile-standard"),
+      signToken("profile-tasks"),
+      signToken("profile-full"),
+      signToken("profile-legacy"),
+    ],
+  );
 
   const [standard, tasks, full, legacy] = await Promise.all([
     initializeClient(baseUrl, "/mcp/standard", standardToken, "standard", 1),
@@ -237,8 +247,12 @@ try {
 
   assert.equal(standardNames.length, 9);
   assert.equal(tasksNames.length, 14);
-  assert.equal(fullNames.length, 48);
-  assert.deepEqual(legacyNames, fullNames, "/mcp must remain an alias of /mcp/full");
+  assert.equal(fullNames.length, 46);
+  assert.deepEqual(
+    legacyNames,
+    standardNames,
+    "/mcp must use the 3.0 standard default",
+  );
 
   for (const modern of [standardNames, tasksNames]) {
     assert.ok(modern.includes("smart_semantic_search"));
@@ -246,8 +260,8 @@ try {
     assert.ok(!modern.includes("smart-search"));
   }
   assert.ok(fullNames.includes("smart_semantic_search"));
-  assert.ok(fullNames.includes("smart_search"));
-  assert.ok(fullNames.includes("smart-search"));
+  assert.ok(!fullNames.includes("smart_search"));
+  assert.ok(!fullNames.includes("smart-search"));
 
   for (const snapshotSafe of [
     "operon_status",
@@ -257,7 +271,10 @@ try {
     "operon_query_tasks",
     "operon_validate",
   ]) {
-    assert.ok(tasksNames.includes(snapshotSafe), `headless tasks lost ${snapshotSafe}`);
+    assert.ok(
+      tasksNames.includes(snapshotSafe),
+      `headless tasks lost ${snapshotSafe}`,
+    );
   }
   for (const liveOnly of [
     "operon_query_saved_filter",
@@ -273,7 +290,10 @@ try {
     "operon_list_pending_recoveries",
     "operon_recover_mutation",
   ]) {
-    assert.ok(!tasksNames.includes(liveOnly), `headless tasks exposed ${liveOnly}`);
+    assert.ok(
+      !tasksNames.includes(liveOnly),
+      `headless tasks exposed ${liveOnly}`,
+    );
   }
 
   const mismatchPost = await protocolRequest({
@@ -326,7 +346,7 @@ try {
   assert.match(await unknown.text(), /unknown_tool_profile/);
 
   console.log(
-    "PASS: HTTP profile endpoints coexist, /mcp stays full, headless tasks are snapshot-safe, semantic aliases stay modern-profile-hidden, and sessions cannot cross profile routes",
+    "PASS: HTTP profile endpoints coexist, /mcp defaults to standard, /mcp/full stays explicit, removed semantic aliases stay absent, and sessions cannot cross profile routes",
   );
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");

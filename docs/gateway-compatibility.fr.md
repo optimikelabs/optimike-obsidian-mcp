@@ -38,10 +38,11 @@ leur documentation officielles. Leur routage de l’endpoint auxiliaire n’a pa
 
 Optimike expose deux surfaces :
 
-- l’endpoint Streamable HTTP `/mcp` ;
+- les endpoints de profils Streamable HTTP (`/mcp` utilise `standard` par
+  défaut, tandis que `/mcp/full` expose explicitement toute la surface du runtime actif) ;
 - l’endpoint de téléchargement authentifié `/external-handoff`.
 
-Une cible virtuelle exclusivement MCP ne prouve que `/mcp`. La route
+Une cible virtuelle exclusivement MCP ne prouve que la route de profil `/mcp` choisie. La route
 agentgateway retenue transmet toute la surface HTTP bornée : le même bearer
 token, `Mcp-Session-Id`, `X-External-Handoff-Ticket`, les en-têtes de
 corrélation, le streaming et les codes de statut atteignent Optimike sans
