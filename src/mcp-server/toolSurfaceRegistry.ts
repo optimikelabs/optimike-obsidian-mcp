@@ -11,6 +11,7 @@ export type ToolRegistrationMode = (typeof TOOL_REGISTRATION_MODES)[number];
 
 export const TOOL_GROUP_IDS = [
   "admin",
+  "bases.compat",
   "bases.direct",
   "bases.governed",
   "bases.read",
@@ -302,7 +303,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
   ),
   defineTool(
     "bases_upsert_config",
-    "bases.direct",
+    "bases.compat",
     "bases",
     LIVE_OR_FILESYSTEM_MODES,
     { surfaceClass: "direct", annotationClass: "destructive" },
@@ -508,7 +509,9 @@ function staticRequirementsSatisfied(
   const available = new Set<ToolStaticRequirement>(availableStaticRequirements);
   return (entry.availabilityRules ?? [])
     .filter((rule) => rule.modes.includes(registrationMode))
-    .every((rule) => rule.requires.every((requirement) => available.has(requirement)));
+    .every((rule) =>
+      rule.requires.every((requirement) => available.has(requirement)),
+    );
 }
 
 export function compileToolSurface({
