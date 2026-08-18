@@ -1,8 +1,8 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "2.9.0",
-  "description": "Unified Obsidian MCP server with shared local cache, Operon and Tasks tools, Bases support, semantic search, runtime observability, and degraded read mode for durable agent workflows.",
-  "main": "dist/index.js",
+  "version": "3.0.0",
+  "description": "Governed Obsidian MCP server with portable tool-surface profiles, controlled editing, tasks, live bridges, headless and multi-client HTTP runtimes, plus bounded external-document handoffs.",
+  "main": "dist/index-v3.js",
   "files": [
     "dist",
     "README.md",
@@ -15,6 +15,8 @@
     "docs/README.md",
     "docs/README.fr.md",
     "docs/obsidian_mcp_tools_spec.md",
+    "docs/tool-surface-profiles.md",
+    "docs/tool-surface-profiles.fr.md",
     "docs/governed-note-replacement.fr.md",
     "docs/governed-note-replacement.md",
     "docs/runtime-capability-matrix.md",
@@ -43,6 +45,7 @@
     "docs/adr/ADR-External-Reference-Integrity.fr.md",
     "docs/adr/ADR-Operon-Bridge.md",
     "docs/adr/ADR-Common-Operation-Runtime.md",
+    "docs/adr/ADR-Tool-Surface-Profiles-V3.md",
     "docs/adr/README.md",
     "docs/operon-decision-report.md",
     "docs/operon-local-validation.md",
@@ -79,8 +82,8 @@
     "docs/tree.md"
   ],
   "bin": {
-    "optimike-obsidian-mcp": "dist/index.js",
-    "optimike-obsidian-mcp-proxy": "dist/stdio-proxy.js"
+    "optimike-obsidian-mcp": "dist/index-v3.js",
+    "optimike-obsidian-mcp-proxy": "dist/stdio-surface-proxy.js"
   },
   "type": "module",
   "repository": {
@@ -92,11 +95,11 @@
   },
   "homepage": "https://github.com/optimikelabs/optimike-obsidian-mcp#readme",
   "scripts": {
-    "build": "tsc && node scripts/make-executable.mjs dist/index.js dist/stdio-proxy.js",
-    "start:stdio": "node dist/index.js",
-    "start:proxy": "node dist/stdio-proxy.js",
+    "build": "tsc && node scripts/make-executable.mjs dist/index-v3.js dist/stdio-surface-proxy.js dist/index.js dist/stdio-proxy.js",
+    "start:stdio": "node dist/index-v3.js",
+    "start:proxy": "node dist/stdio-surface-proxy.js",
     "inspect": "node scripts/run-inspector.mjs",
-    "start": "node dist/index.js",
+    "start": "node dist/index-v3.js",
     "start:http": "node scripts/run-http.mjs",
     "start:daemon": "node scripts/run-http.mjs",
     "smoke:runtime": "node scripts/smoke-runtime.mjs",
@@ -110,7 +113,9 @@
     "test:headless-long-run": "node scripts/long-run-headless-server.mjs",
     "snapshot:vault": "node scripts/snapshot-vault.mjs",
     "check:vault-exclusions": "node scripts/check-vault-exclusion-policy.mjs",
-    "test:runtime": "npm run build && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && npm run smoke:headless-status && npm run test:local-rest-api-compat",
+    "test:runtime": "npm run build && npm run test:tool-surface-v3 && npm run smoke:headless-readonly && npm run smoke:hybrid-unavailable && npm run smoke:hybrid-api-available && npm run smoke:headless-guarded && npm run smoke:headless-filesystem && npm run smoke:headless-status && npm run test:local-rest-api-compat",
+    "test:tool-surface-v3": "npm run build && node scripts/test-tool-surface-v3.mjs && node scripts/test-http-tool-profiles-v3.mjs && node scripts/smoke-tool-surface-v3.mjs",
+    "test:http-tool-profiles-v3": "npm run build && node scripts/test-http-tool-profiles-v3.mjs",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "verify:code": "npm run audit:production && npm run build",
     "rebuild": "npx ts-node --esm scripts/clean.ts && npm run build",
@@ -142,7 +147,7 @@
     "test:external-roots": "npm run build && node scripts/test-external-reference-parser.mjs && node scripts/test-external-move-integrity.mjs && node scripts/test-backend-vault-adapter-cas.mjs && node scripts/test-obsidian-cas.mjs && node scripts/test-obsidian-search-replace-cas.mjs && node scripts/test-external-roots.mjs && node scripts/test-stdio-proxy-external-roots.mjs && node scripts/test-http-external-handoff.mjs",
     "test:external-roots:proxy": "npm run build && node scripts/test-stdio-proxy-external-roots.mjs",
     "test:http-external-handoff": "npm run build && node scripts/test-http-external-handoff.mjs",
-    "test:http-multiclient": "npm run build && node scripts/test-http-multiclient-rate-limiting.mjs && node scripts/test-http-session-bounds.mjs",
+    "test:http-multiclient": "npm run build && node scripts/test-http-multiclient-rate-limiting.mjs && node scripts/test-http-session-bounds.mjs && node scripts/test-http-tool-profiles-v3.mjs",
     "test:http-backpressure": "npm run build && node scripts/test-http-backpressure.mjs && node scripts/test-obsidian-cas.mjs && node scripts/test-obsidian-search-replace-cas.mjs && node scripts/test-external-move-integrity.mjs && node scripts/test-operon-service.mjs",
     "test:http-observability": "npm run build && node scripts/test-http-observability.mjs && node scripts/test-http-observability-endpoints.mjs",
     "test:http-headless-multiclient": "npm run build && node scripts/test-http-headless-multiclient.mjs",
