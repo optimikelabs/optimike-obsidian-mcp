@@ -11,14 +11,14 @@ Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils
 
 ## Profils publics
 
-| Profil | Usage visé | Surface complète live/hybrid |
-| --- | --- | ---: |
-| `standard` | Lecture/recherche générale et travail courant gouverné Note/Frontmatter | 19 outils |
-| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas | 30 outils |
-| `tasks` | Compatibilité Markdown Tasks + contrat MCP Operon live complet | 31 outils |
-| `full` | Surface compatibilité/admin 2.x du runtime actif | 72 outils |
+| Profil      | Usage visé                                                              | Surface complète live/hybrid |
+| ----------- | ----------------------------------------------------------------------- | ---------------------------: |
+| `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    19 outils |
+| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    30 outils |
+| `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    31 outils |
+| `full`      | Surface complète/admin explicite du runtime actif                       |                    70 outils |
 
-Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 72 outils. Le registre canonique couvre 76 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`.
+Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 70 outils. Le registre canonique couvre 74 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`.
 
 ## Noms réservés à la compatibilité
 
@@ -30,9 +30,9 @@ La recherche sémantique utilise un seul nom canonique :
 smart_semantic_search
 ```
 
-Les anciens alias `smart_search` et `smart-search` restent physiquement enregistrés et visibles uniquement dans `full` pendant la branche 2.x. Leur suppression physique est réservée à la 3.0.
+Les anciens alias `smart_search` et `smart-search` ont été physiquement supprimés en 3.0. Les clients existants doivent appeler `smart_semantic_search`.
 
-`bases_upsert_config` est également réservé à `full` en 2.10. Il remplace une configuration Base complète et n’est pas un fallback de l’édition gouvernée des formules. `authoring` conserve `bases_create`, `bases_upsert_rows` et la famille gouvernée complète `bases_formula_patch_*`.
+`bases_upsert_config` reste réservé à `full`. Il remplace une configuration Base complète et n’est pas un fallback de l’édition gouvernée des formules. `authoring` conserve `bases_create`, `bases_upsert_rows` et la famille gouvernée complète `bases_formula_patch_*`.
 
 ## Familles gouvernées
 
@@ -61,7 +61,7 @@ Les profils modernes ne masquent une voie directe que lorsque la famille gouvern
 
 ## Sélection en stdio
 
-Le défaut de compatibilité de la branche 2.x reste `full` lorsqu’aucun profil n’est indiqué.
+Le défaut de la 3.0 est `standard` lorsqu’aucun profil n’est indiqué.
 
 ```bash
 node dist/stdio-proxy.js --tool-profile standard
@@ -73,7 +73,7 @@ ou :
 MCP_TOOL_PROFILE=standard node dist/stdio-proxy.js
 ```
 
-`--tool-profile` prévaut sur `MCP_TOOL_PROFILE`. Une valeur inconnue, vide ou répétée échoue fermé au lieu de retomber sur `full`.
+`--tool-profile` prévaut sur `MCP_TOOL_PROFILE`. Une valeur inconnue, vide ou répétée échoue fermé au lieu de retomber sur `standard`.
 
 Le proxy stdio applique le profil par client. Lorsqu’il démarre le backend HTTP partagé, il le démarre explicitement en `full`, puis filtre `tools/list` et `tools/call` pour son client. Un outil local du proxy masqué n’est donc pas appelable en connaissant simplement son nom.
 
@@ -82,7 +82,7 @@ Le proxy stdio applique le profil par client. Lorsqu’il démarre le backend HT
 Le serveur expose des routes de profil immuables :
 
 ```text
-/mcp              → full (alias de compatibilité 2.x)
+/mcp              → standard (défaut 3.0)
 /mcp/standard     → standard
 /mcp/authoring    → authoring
 /mcp/tasks        → tasks
@@ -107,13 +107,11 @@ Mécanismes clients optionnels :
 
 Ces mécanismes peuvent évoluer indépendamment. Choisir d’abord un profil Optimike, puis utiliser le filtrage client uniquement comme optimisation supplémentaire.
 
-## Frontière de migration
+## Migration depuis la 2.10
 
-La 2.10 reste compatible SemVer avec la branche 2.x :
+La 3.0 introduit deux ruptures volontaires :
 
-- profil stdio non indiqué → `full` ;
-- `/mcp` historique → `/mcp/full` ;
-- `smart_search` et `smart-search` restent disponibles dans `full` ;
-- les surfaces `full` du runtime actif restent compatibles avec la 2.9.
+- un profil stdio non indiqué et `/mcp` sans qualificatif sélectionnent désormais `standard` ;
+- `smart_search` et `smart-search` n’existent plus ; utiliser `smart_semantic_search`.
 
-La 3.0 est la frontière de rupture prévue pour supprimer physiquement les alias sémantiques et faire de `standard` la surface moderne par défaut, après admission complète de la 2.10.
+Les clients qui ont réellement besoin de l’administration, des racines externes ou d’outils spécialisés doivent demander explicitement `MCP_TOOL_PROFILE=full`, `--tool-profile full` ou `/mcp/full`. Le profil contrôle toujours la découverte, pas l’autorisation.

@@ -106,6 +106,7 @@ const transport = new StdioClientTransport({
     ...process.env,
     NODE_ENV: "production",
     MCP_TRANSPORT_TYPE: "stdio",
+    MCP_TOOL_PROFILE: "authoring",
     MCP_WRITE_MODE: writeMode,
     MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH: journalPath,
     LOGS_DIR: logsPath,

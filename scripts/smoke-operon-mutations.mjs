@@ -22,7 +22,11 @@ async function main() {
     command: process.execPath,
     args: ["dist/index.js"],
     cwd: process.cwd(),
-    env: { ...process.env, MCP_TRANSPORT_TYPE: "stdio" },
+    env: {
+      ...process.env,
+      MCP_TRANSPORT_TYPE: "stdio",
+      MCP_TOOL_PROFILE: "tasks",
+    },
   });
   const client = new Client({ name: "operon-mutation-smoke", version: "1" });
   try {

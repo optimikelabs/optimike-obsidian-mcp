@@ -13,9 +13,8 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
 ## Canonical priorities
 
 - Read, list and exact text search: use the dedicated read/search tools.
-- Semantic search: use \`smart_semantic_search\`. It is the only semantic-search
-  name exposed by modern 2.10 profiles; compatibility aliases remain a \`full\`
-  2.x concern and are not part of canonical routing.
+- Semantic search: use \`smart_semantic_search\`. It is the only registered
+  semantic-search tool in 3.0.
 - Operon-managed tasks: use \`operon_list_tasks\` or \`operon_query_tasks\`. Use
   \`list_all_tasks\` and \`query_tasks\` only for legacy Obsidian Tasks-compatible
   Markdown inspection.

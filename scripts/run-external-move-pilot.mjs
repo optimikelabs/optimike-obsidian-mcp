@@ -104,6 +104,7 @@ const commonEnv = {
     `${path.resolve(process.env.PILOT_JOURNAL)}.cache.sqlite`,
   OBSIDIAN_STARTUP_BLOCKING: "false",
   MCP_WRITE_MODE: "full",
+  MCP_TOOL_PROFILE: "full",
   MCP_EXTERNAL_MOVE_ENABLED: "true",
   MCP_EXTERNAL_ROOTS_FILE: rootsFile,
   MCP_EXTERNAL_MOVE_JOURNAL_PATH: path.resolve(process.env.PILOT_JOURNAL),

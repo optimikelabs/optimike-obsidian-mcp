@@ -99,7 +99,7 @@ let first;
 let second;
 try {
   await waitForHealth(`http://127.0.0.1:${port}/healthz`, backend);
-  const mcp = `http://127.0.0.1:${port}/mcp`;
+  const mcp = `http://127.0.0.1:${port}/mcp/authoring`;
   first = await session(mcp, "canvas-http-plan");
   second = await session(mcp, "canvas-http-apply");
   const plannedResult = await first.callTool({

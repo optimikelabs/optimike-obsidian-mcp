@@ -20,38 +20,38 @@ Runtime et profil d’outils sont deux décisions indépendantes :
 
 Pour une nouvelle intégration, préférer `standard` pour le travail général sur le
 coffre, `authoring` pour Bases/Canvas/tags et `tasks` pour Operon. `full` reste la
-surface de compatibilité et d’administration 2.x. Voir
+surface complète et d’administration explicite. Voir
 [Profils de surface d’outils](tool-surface-profiles.fr.md).
 
 ## Décision par défaut
 
-| Besoin                                                                     | Utiliser                                                        | Pourquoi                                                                          |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Lire, lister, rechercher, recherche sémantique                             | Profil `standard`                                               | Petite surface généraliste avec routage canonique lecture/écriture.               |
-| Workflows Operon ou Markdown Tasks                                         | Profil `tasks`                                                  | Contrat Operon complet + outils Markdown compatibles Tasks.                       |
-| Authoring Bases, tags ou Canvas                                            | Profil `authoring`                                              | Ajoute les surfaces d’authoring sans toute l’administration.                      |
-| Lire un document explicitement configuré hors du coffre                    | `full` + outils external-roots                                  | Les racines externes sont spécialisées et default-deny.                           |
-| Déplacer un fichier externe sans casser silencieusement ses liens ÉLYSIA   | `full` en stdio local sur copie ou coffre dédié                 | Inventaire, plan durable, réparations CAS exactes, reçu et rollback.              |
-| Comportement Obsidian complet, commandes, active file, Bases via plugin    | `live` ou `hybrid` avec Obsidian Desktop ouvert                 | Seul runtime avec sémantique Desktop/plugin.                                      |
-| Serveur backend sûr au-dessus d’un coffre synchronisé                      | `headless-readonly` d’abord                                     | Pas besoin de Desktop et aucun risque d’écriture.                                 |
-| Écritures Markdown/frontmatter/tags/admin bornées sur copie ou coffre dédié| `headless-filesystem`                                           | Sécurité de chemins, dry-run par défaut et préconditions.                         |
-| Édition fichier directe ponctuelle hors contrat MCP                        | Outils filesystem                                               | L’agent porte alors tous les garde-fous.                                           |
-| Actions ou diagnostics app-native Obsidian                                 | Obsidian CLI                                                    | Plan de contrôle Desktop/app, pas headless strict.                                |
-| Savoir écrire Markdown, Bases ou Canvas Obsidian                           | Skills ou docs de format Obsidian                               | Les skills enseignent les conventions sans exécuter les opérations MCP.           |
+| Besoin                                                                      | Utiliser                                        | Pourquoi                                                                |
+| --------------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------- |
+| Lire, lister, rechercher, recherche sémantique                              | Profil `standard`                               | Petite surface généraliste avec routage canonique lecture/écriture.     |
+| Workflows Operon ou Markdown Tasks                                          | Profil `tasks`                                  | Contrat Operon complet + outils Markdown compatibles Tasks.             |
+| Authoring Bases, tags ou Canvas                                             | Profil `authoring`                              | Ajoute les surfaces d’authoring sans toute l’administration.            |
+| Lire un document explicitement configuré hors du coffre                     | `full` + outils external-roots                  | Les racines externes sont spécialisées et default-deny.                 |
+| Déplacer un fichier externe sans casser silencieusement ses liens ÉLYSIA    | `full` en stdio local sur copie ou coffre dédié | Inventaire, plan durable, réparations CAS exactes, reçu et rollback.    |
+| Comportement Obsidian complet, commandes, active file, Bases via plugin     | `live` ou `hybrid` avec Obsidian Desktop ouvert | Seul runtime avec sémantique Desktop/plugin.                            |
+| Serveur backend sûr au-dessus d’un coffre synchronisé                       | `headless-readonly` d’abord                     | Pas besoin de Desktop et aucun risque d’écriture.                       |
+| Écritures Markdown/frontmatter/tags/admin bornées sur copie ou coffre dédié | `headless-filesystem`                           | Sécurité de chemins, dry-run par défaut et préconditions.               |
+| Édition fichier directe ponctuelle hors contrat MCP                         | Outils filesystem                               | L’agent porte alors tous les garde-fous.                                |
+| Actions ou diagnostics app-native Obsidian                                  | Obsidian CLI                                    | Plan de contrôle Desktop/app, pas headless strict.                      |
+| Savoir écrire Markdown, Bases ou Canvas Obsidian                            | Skills ou docs de format Obsidian               | Les skills enseignent les conventions sans exécuter les opérations MCP. |
 
 ## Outils directs, de compatibilité et gouvernés
 
 Quand plusieurs outils touchent le même domaine, ils ne sont pas
 interchangeables. Appliquer cette priorité :
 
-| Intention                                          | Outil préféré                                                                     | Limite de la voie directe ou de compatibilité                                                                                  |
-| -------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Similarité sémantique                              | `smart_semantic_search`                                                           | C’est le seul nom enseigné aux nouveaux agents et exposé dans les profils modernes.                                            |
-| Lecture de tâches gérées par Operon                | `operon_list_tasks`, `operon_query_tasks`                                         | `list_all_tasks` et `query_tasks` inspectent le Markdown compatible Obsidian Tasks.                                            |
-| Remplacement complet d’une note Markdown existante | `obsidian_note_replace_plan`, puis apply/status/recover                            | L’overwrite de `obsidian_update_note` ne fournit ni reçu durable ni récupération du plan exact.                                |
-| Set/delete du Frontmatter de premier niveau        | `obsidian_frontmatter_patch_plan`, puis son cycle associé                         | `obsidian_manage_frontmatter` reste utile pour la lecture, la compatibilité ou quand la projection gouvernée live est absente. |
-| Set/delete d’une formule Base nommée               | `bases_formula_patch_plan`, puis son cycle associé                                | `bases_upsert_config` reste une voie whole-config de compatibilité.                                                            |
-| Mutation d’un graphe JSON Canvas existant          | `obsidian_canvas_patch_plan`, puis son cycle associé                              | `obsidian_manage_canvas` est un helper filesystem headless direct sans recovery durable.                                       |
+| Intention                                          | Outil préféré                                             | Limite de la voie directe ou de compatibilité                                                                                  |
+| -------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Similarité sémantique                              | `smart_semantic_search`                                   | C’est le seul nom enseigné aux nouveaux agents et exposé dans les profils modernes.                                            |
+| Lecture de tâches gérées par Operon                | `operon_list_tasks`, `operon_query_tasks`                 | `list_all_tasks` et `query_tasks` inspectent le Markdown compatible Obsidian Tasks.                                            |
+| Remplacement complet d’une note Markdown existante | `obsidian_note_replace_plan`, puis apply/status/recover   | L’overwrite de `obsidian_update_note` ne fournit ni reçu durable ni récupération du plan exact.                                |
+| Set/delete du Frontmatter de premier niveau        | `obsidian_frontmatter_patch_plan`, puis son cycle associé | `obsidian_manage_frontmatter` reste utile pour la lecture, la compatibilité ou quand la projection gouvernée live est absente. |
+| Set/delete d’une formule Base nommée               | `bases_formula_patch_plan`, puis son cycle associé        | `bases_upsert_config` reste une voie whole-config de compatibilité.                                                            |
+| Mutation d’un graphe JSON Canvas existant          | `obsidian_canvas_patch_plan`, puis son cycle associé      | `obsidian_manage_canvas` est un helper filesystem headless direct sans recovery durable.                                       |
 
 Les mutations directes append, prepend, search/replace et tags restent exposées
 quand le runtime actif les autorise. Elles ne produisent pas de reçu durable

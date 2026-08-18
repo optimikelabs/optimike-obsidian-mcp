@@ -11,16 +11,19 @@ import {
   getToolSurfaceEntry,
 } from "../dist/mcp-server/toolSurfaceRegistry.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
-const EXPECTED_UNION_COUNT = 76;
+const EXPECTED_UNION_COUNT = 74;
 const EXPECTED_COUNTS_BY_MODE = {
-  live: 72,
-  "hybrid-live": 72,
-  "hybrid-degraded": 45,
-  "headless-readonly": 48,
-  "headless-guarded": 51,
-  "headless-filesystem": 60,
+  live: 70,
+  "hybrid-live": 70,
+  "hybrid-degraded": 43,
+  "headless-readonly": 46,
+  "headless-guarded": 49,
+  "headless-filesystem": 58,
 };
 
 assert.equal(
@@ -53,18 +56,25 @@ for (const mode of TOOL_REGISTRATION_MODES) {
 
 assert.equal(
   compileToolNames({ registrationMode: "live" }).length,
-  72,
-  "72 is the current full live/hybrid surface, not the cross-runtime registry size",
+  70,
+  "70 is the current full live/hybrid surface, not the cross-runtime registry size",
 );
 
 for (const entry of TOOL_SURFACE_REGISTRY) {
-  assert.ok(TOOL_GROUP_IDS.includes(entry.group), `unknown group for ${entry.name}`);
+  assert.ok(
+    TOOL_GROUP_IDS.includes(entry.group),
+    `unknown group for ${entry.name}`,
+  );
   assert.ok(
     entry.registrationModes.length > 0,
     `${entry.name} must be registered in at least one mode`,
   );
   if (entry.aliasOf) {
-    assert.equal(entry.surfaceClass, "legacy", `${entry.name} alias must be legacy`);
+    assert.equal(
+      entry.surfaceClass,
+      "legacy",
+      `${entry.name} alias must be legacy`,
+    );
     assert.equal(
       entry.canonicalName,
       entry.aliasOf,
@@ -83,8 +93,8 @@ for (const entry of TOOL_SURFACE_REGISTRY) {
   }
 }
 
-assert.equal(getToolSurfaceEntry("smart_search")?.aliasOf, "smart_semantic_search");
-assert.equal(getToolSurfaceEntry("smart-search")?.aliasOf, "smart_semantic_search");
+assert.equal(getToolSurfaceEntry("smart_search"), undefined);
+assert.equal(getToolSurfaceEntry("smart-search"), undefined);
 assert.equal(
   getToolSurfaceEntry("bases_upsert_config")?.group,
   "bases.compat",
@@ -99,7 +109,11 @@ for (const entry of TOOL_SURFACE_REGISTRY) {
   items.push(entry);
   governedFamilies.set(entry.family, items);
 }
-assert.equal(governedFamilies.size, 4, "exactly four governed lifecycle families are expected");
+assert.equal(
+  governedFamilies.size,
+  4,
+  "exactly four governed lifecycle families are expected",
+);
 
 for (const [family, entries] of governedFamilies) {
   assert.deepEqual(
@@ -148,14 +162,17 @@ const registrySource = path.join(
   "mcp-server",
   "toolSurfaceRegistry.ts",
 );
-const sourceFiles = collectSourceFiles(path.join(repoRoot, "src", "mcp-server")).filter(
-  (file) => path.resolve(file) !== path.resolve(registrySource),
-);
-const sourceCorpus = sourceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+const sourceFiles = collectSourceFiles(
+  path.join(repoRoot, "src", "mcp-server"),
+).filter((file) => path.resolve(file) !== path.resolve(registrySource));
+const sourceCorpus = sourceFiles
+  .map((file) => fs.readFileSync(file, "utf8"))
+  .join("\n");
 
 for (const entry of TOOL_SURFACE_REGISTRY) {
   assert.ok(
-    sourceCorpus.includes(`\"${entry.name}\"`) || sourceCorpus.includes(`'${entry.name}'`),
+    sourceCorpus.includes(`\"${entry.name}\"`) ||
+      sourceCorpus.includes(`'${entry.name}'`),
     `registry entry ${entry.name} is not present outside the registry itself`,
   );
 }

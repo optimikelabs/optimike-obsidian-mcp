@@ -10,41 +10,41 @@ Optimike Obsidian MCP gives MCP clients a governed operational surface over an O
 
 ## Capability map
 
-| Area | What the MCP provides | Main dependency |
-| --- | --- | --- |
-| Notes | Read/search/direct edits plus governed note and Frontmatter operations | Vault; Local REST API + Atomic Write Bridge |
-| Bases and Canvas | Queries, bounded writes, governed formulas and Canvas graph plans | Bases Bridge; Atomic Write Bridge |
-| Tasks | Tasks-compatible Markdown plus 23 governed Operon tools | Operon Developer API V1 through the Bridge |
-| Semantic search | Smart Connections index search | `.smart-env` + Ollama or OpenAI-compatible query embedding |
-| Runtime | Shared SQLite cache, health, maintenance and degraded modes | Local filesystem |
-| External documents | Default-deny reads/handoff plus opt-in local move | Explicit root allowlist |
-| Headless administration | Guarded metadata and filesystem operations | Copied or dedicated vault |
+| Area                    | What the MCP provides                                                  | Main dependency                                            |
+| ----------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Notes                   | Read/search/direct edits plus governed note and Frontmatter operations | Vault; Local REST API + Atomic Write Bridge                |
+| Bases and Canvas        | Queries, bounded writes, governed formulas and Canvas graph plans      | Bases Bridge; Atomic Write Bridge                          |
+| Tasks                   | Tasks-compatible Markdown plus 23 governed Operon tools                | Operon Developer API V1 through the Bridge                 |
+| Semantic search         | Smart Connections index search                                         | `.smart-env` + Ollama or OpenAI-compatible query embedding |
+| Runtime                 | Shared SQLite cache, health, maintenance and degraded modes            | Local filesystem                                           |
+| External documents      | Default-deny reads/handoff plus opt-in local move                      | Explicit root allowlist                                    |
+| Headless administration | Guarded metadata and filesystem operations                             | Copied or dedicated vault                                  |
 
 The canonical tool registry is documented in [Tool Surface](docs/obsidian_mcp_tools_spec.md).
 
 ## Runtime and transport
 
-| Need | Recommended runtime / transport |
-| --- | --- |
-| Local agent | stdio proxy |
-| Obsidian Desktop automation | `live` or `hybrid` |
-| CI/server/synchronized copy | `headless-readonly` |
-| Bounded writes on copied/dedicated vault | `headless-guarded`, then `headless-filesystem` |
-| Same-machine HTTP | authenticated loopback HTTP |
-| Remote HTTP | reviewed TLS reverse proxy + private network; pilot only |
+| Need                                     | Recommended runtime / transport                          |
+| ---------------------------------------- | -------------------------------------------------------- |
+| Local agent                              | stdio proxy                                              |
+| Obsidian Desktop automation              | `live` or `hybrid`                                       |
+| CI/server/synchronized copy              | `headless-readonly`                                      |
+| Bounded writes on copied/dedicated vault | `headless-guarded`, then `headless-filesystem`           |
+| Same-machine HTTP                        | authenticated loopback HTTP                              |
+| Remote HTTP                              | reviewed TLS reverse proxy + private network; pilot only |
 
 Runtime answers what the backend can execute. It does not decide how many tools the model should see.
 
 ## Tool surface profiles
 
-| Need | Profile | Full live/hybrid size |
-| --- | --- | ---: |
-| General vault work | `standard` | 19 |
-| Notes, tags, Bases and Canvas authoring | `authoring` | 30 |
-| Tasks / Operon workflows | `tasks` | 31 |
-| Compatibility, admin and specialized surfaces | `full` | 72 |
+| Need                                              | Profile     | Full live/hybrid size |
+| ------------------------------------------------- | ----------- | --------------------: |
+| General vault work                                | `standard`  |                    19 |
+| Notes, tags, Bases and Canvas authoring           | `authoring` |                    30 |
+| Tasks / Operon workflows                          | `tasks`     |                    31 |
+| Explicit complete, admin and specialized surfaces | `full`      |                    70 |
 
-During the 2.x line, `full` preserves the complete compatibility surface. Modern profiles expose only `smart_semantic_search`; the legacy aliases `smart_search` and `smart-search` remain `full`-only until 3.0. `bases_upsert_config` is likewise a `full`-only whole-Base compatibility path; legacy whole-file config writes are default-off, while normal authoring uses bounded Base creation/row writes plus the governed formula family.
+In 3.0, an unspecified profile defaults to `standard`. `smart_semantic_search` is the only registered semantic-search name; the former `smart_search` and `smart-search` aliases have been removed. `full` remains an explicit opt-in for the complete active-runtime surface. `bases_upsert_config` is a `full`-only whole-Base compatibility path; legacy whole-file config writes are default-off, while normal authoring uses bounded Base creation/row writes plus the governed formula family.
 
 Select the profile before `tools/list`:
 
@@ -61,7 +61,7 @@ HTTP profile routes:
 /mcp/full
 ```
 
-Legacy `/mcp` remains equivalent to `/mcp/full` during 2.x. See [Tool Surface Profiles](docs/tool-surface-profiles.md).
+Unqualified `/mcp` now uses `standard`; `/mcp/full` remains the explicit complete route. See [Tool Surface Profiles](docs/tool-surface-profiles.md).
 
 ## Quick start
 

@@ -404,7 +404,7 @@ async function protocolRequest({
   sessionId,
   headers = {},
 }) {
-  const response = await fetch(new URL("/mcp", baseUrl), {
+  const response = await fetch(new URL("/mcp/full", baseUrl), {
     method: "POST",
     headers: {
       Accept: "application/json, text/event-stream",
@@ -747,7 +747,7 @@ async function waitForActiveRequests(baseUrl, token, predicate, label) {
 async function openEventStream(client, baseUrl, correlationId, incidentId) {
   const controller = new AbortController();
   const response = await Promise.race([
-    fetch(new URL("/mcp", baseUrl), {
+    fetch(new URL("/mcp/full", baseUrl), {
       method: "GET",
       headers: {
         Accept: "text/event-stream",
@@ -847,7 +847,7 @@ function startBlockedProtocolRequest(client, baseUrl, id) {
       );
     },
   });
-  const responsePromise = fetch(new URL("/mcp", baseUrl), {
+  const responsePromise = fetch(new URL("/mcp/full", baseUrl), {
     method: "POST",
     headers: {
       Accept: "application/json, text/event-stream",

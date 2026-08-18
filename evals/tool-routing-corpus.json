@@ -3,8 +3,7 @@
     "id": "semantic-canonical",
     "prompt": "Find notes semantically related to antifragility even if they do not contain that exact word.",
     "recommendedProfile": "standard",
-    "acceptableFirstTools": ["smart_semantic_search"],
-    "forbiddenTools": ["smart_search", "smart-search"]
+    "acceptableFirstTools": ["smart_semantic_search"]
   },
   {
     "id": "read-exact-note",

@@ -42,6 +42,7 @@ const transport = new StdioClientTransport({
     OBSIDIAN_CACHE_SOURCE: "filesystem",
     OBSIDIAN_ENABLE_CACHE: "false",
     MCP_WRITE_MODE: "readonly",
+    MCP_TOOL_PROFILE: "full",
     SEMANTIC_SEARCH_PREWARM: "false",
     MCP_TRANSPORT_TYPE: "stdio",
     MCP_LOG_LEVEL: "error",

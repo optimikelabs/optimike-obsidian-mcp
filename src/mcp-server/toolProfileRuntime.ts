@@ -14,7 +14,7 @@ export function resolveToolProfile(raw?: string): ToolProfileId {
     raw?.trim() ||
     currentToolProfileContext() ||
     process.env.MCP_TOOL_PROFILE?.trim() ||
-    "full";
+    "standard";
   return parseToolProfileId(selected);
 }
 
@@ -26,7 +26,7 @@ export function resolveToolProfile(raw?: string): ToolProfileId {
  * every registered handle, recompute the selected profile from the concrete
  * names currently present, and reconcile enabled state after each registration.
  * This makes canonical/direct fallback resolution independent of registration
- * order while preserving `full` as the unfiltered 2.x compatibility surface.
+ * order while keeping `full` available as an explicit unfiltered surface.
  *
  * HTTP session creation may provide a request-scoped profile through
  * AsyncLocalStorage; stdio falls back to CLI/env selection.
@@ -77,8 +77,11 @@ export function installToolProfileRegistrationGate(
     ...rest: unknown[]
   ) => remember(name, originalTool(name, ...rest))) as typeof server.tool;
 
-  (server as unknown as { registerTool: typeof server.registerTool }).registerTool = ((
-    name: string,
-    ...rest: unknown[]
-  ) => remember(name, originalRegisterTool(name, ...rest))) as typeof server.registerTool;
+  (
+    server as unknown as { registerTool: typeof server.registerTool }
+  ).registerTool = ((name: string, ...rest: unknown[]) =>
+    remember(
+      name,
+      originalRegisterTool(name, ...rest),
+    )) as typeof server.registerTool;
 }

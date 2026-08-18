@@ -8,8 +8,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { installToolProfileRegistrationGate } from "../dist/mcp-server/toolProfileRuntime.js";
 
 async function createVault() {
-  const root = await mkdtemp(path.join(os.tmpdir(), "optimike-profile-runtime-"));
-  await mkdir(path.join(root, ".obsidian", "optimike-mcp"), { recursive: true });
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "optimike-profile-runtime-"),
+  );
+  await mkdir(path.join(root, ".obsidian", "optimike-mcp"), {
+    recursive: true,
+  });
   await writeFile(path.join(root, "Root.md"), "# profile runtime\n", "utf8");
   return root;
 }
@@ -42,14 +46,19 @@ async function openClient({ vault, args = [], env = {} }) {
     cwd: process.cwd(),
     env: envFor(vault, env),
   });
-  const client = new Client({ name: "tool-profile-runtime-test", version: "0" });
+  const client = new Client({
+    name: "tool-profile-runtime-test",
+    version: "0",
+  });
   await client.connect(transport);
   return { client, transport };
 }
 
 async function listedNames(client) {
   const result = await client.listTools();
-  return result.tools.map((tool) => tool.name).sort((a, b) => a.localeCompare(b));
+  return result.tools
+    .map((tool) => tool.name)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function registerSyntheticTool(server, name) {
@@ -121,11 +130,11 @@ try {
     const { client } = await openClient({ vault });
     try {
       const names = await listedNames(client);
-      assert.equal(names.length, 48, "2.x default must remain full");
+      assert.equal(names.length, 9, "3.0 default must be standard");
       assert.ok(names.includes("smart_semantic_search"));
-      assert.ok(names.includes("smart_search"));
-      assert.ok(names.includes("smart-search"));
-      assert.ok(names.includes("external_read"));
+      assert.ok(!names.includes("smart_search"));
+      assert.ok(!names.includes("smart-search"));
+      assert.ok(!names.includes("external_read"));
     } finally {
       await client.close().catch(() => undefined);
     }
@@ -149,8 +158,8 @@ try {
       let rejected = false;
       try {
         const hidden = await client.callTool({
-          name: "smart_search",
-          arguments: { query: "x" },
+          name: "external_read",
+          arguments: { rootId: "missing", relativePath: "missing.txt" },
         });
         const text = hidden.content.map((item) => item.text ?? "").join("\n");
         rejected =
@@ -168,11 +177,42 @@ try {
   }
 
   {
+    const { client } = await openClient({
+      vault,
+      args: ["--tool-profile", "full"],
+    });
+    try {
+      const names = await listedNames(client);
+      assert.equal(
+        names.length,
+        46,
+        "explicit full must retain the complete runtime surface",
+      );
+      assert.ok(names.includes("smart_semantic_search"));
+      assert.ok(!names.includes("smart_search"));
+      assert.ok(!names.includes("smart-search"));
+      assert.ok(names.includes("external_read"));
+
+      const removedAlias = await client.callTool({
+          name: "smart_search",
+          arguments: { query: "removed alias" },
+      });
+      assert.equal(removedAlias.isError, true);
+      assert.match(
+        removedAlias.content.map((item) => item.text ?? "").join("\n"),
+        /not found|not exposed/iu,
+        "removed semantic aliases must not remain callable through explicit full",
+      );
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  {
     const previous = process.env.MCP_TOOL_PROFILE;
     process.env.MCP_TOOL_PROFILE = "full";
-    const { applyToolProfileCliOverride } = await import(
-      "../dist/config/toolProfileCli.js"
-    );
+    const { applyToolProfileCliOverride } =
+      await import("../dist/config/toolProfileCli.js");
     applyToolProfileCliOverride(["--tool-profile=tasks"]);
     assert.equal(process.env.MCP_TOOL_PROFILE, "tasks");
     assert.throws(
@@ -187,7 +227,9 @@ try {
     else process.env.MCP_TOOL_PROFILE = previous;
   }
 
-  console.log("PASS: direct server profiles preserve full compatibility, governed registration is atomic, and semantic aliases stay hidden in standard");
+  console.log(
+    "PASS: direct servers default to standard, explicit full remains available, governed registration is atomic, and removed semantic aliases stay absent",
+  );
 } finally {
   await rm(vault, { recursive: true, force: true });
 }

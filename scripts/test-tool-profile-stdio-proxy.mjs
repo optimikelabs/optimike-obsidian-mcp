@@ -18,7 +18,9 @@ async function freePort() {
 
 async function createVault() {
   const root = await mkdtemp(path.join(os.tmpdir(), "optimike-profile-proxy-"));
-  await mkdir(path.join(root, ".obsidian", "optimike-mcp"), { recursive: true });
+  await mkdir(path.join(root, ".obsidian", "optimike-mcp"), {
+    recursive: true,
+  });
   await writeFile(path.join(root, "Root.md"), "# profile proxy\n", "utf8");
   return root;
 }
@@ -61,15 +63,20 @@ async function waitForHealth(port, child) {
 }
 
 async function openProxy(vault, port, profile) {
+  const args = ["dist/stdio-proxy.js"];
+  if (profile) args.push("--tool-profile", profile);
+  const env = sharedEnv(vault, port, { MCP_TRANSPORT_TYPE: "stdio" });
+  if (profile) {
+    // Deliberately conflicting env proves CLI precedence inside each proxy.
+    env.MCP_TOOL_PROFILE = profile === "standard" ? "full" : "standard";
+  } else {
+    delete env.MCP_TOOL_PROFILE;
+  }
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["dist/stdio-proxy.js", "--tool-profile", profile],
+    args,
     cwd: process.cwd(),
-    env: sharedEnv(vault, port, {
-      MCP_TRANSPORT_TYPE: "stdio",
-      // Deliberately conflicting env proves CLI precedence inside each proxy.
-      MCP_TOOL_PROFILE: profile === "standard" ? "full" : "standard",
-    }),
+    env,
   });
   const client = new Client({
     name: `tool-profile-proxy-${profile}`,
@@ -92,6 +99,16 @@ const backend = spawn(process.execPath, ["dist/index.js"], {
 
 try {
   await waitForHealth(port, backend);
+
+  const implicit = await openProxy(vault, port);
+  try {
+    const names = (await implicit.listTools()).tools.map((tool) => tool.name);
+    assert.equal(names.length, 9);
+    assert.ok(names.includes("smart_semantic_search"));
+    assert.ok(!names.includes("external_read"));
+  } finally {
+    await implicit.close().catch(() => undefined);
+  }
 
   const standard = await openProxy(vault, port, "standard");
   try {
@@ -119,16 +136,18 @@ try {
   try {
     const result = await full.listTools();
     const names = result.tools.map((tool) => tool.name);
-    assert.equal(names.length, 48);
+    assert.equal(names.length, 46);
     assert.ok(names.includes("smart_semantic_search"));
-    assert.ok(names.includes("smart_search"));
-    assert.ok(names.includes("smart-search"));
+    assert.ok(!names.includes("smart_search"));
+    assert.ok(!names.includes("smart-search"));
     assert.ok(names.includes("external_read"));
   } finally {
     await full.close().catch(() => undefined);
   }
 
-  console.log("PASS: stdio proxy profiles are per-client while the shared backend remains full");
+  console.log(
+    "PASS: stdio proxy defaults to standard, explicit profiles remain per-client, and the shared backend remains full",
+  );
 } finally {
   if (backend.exitCode === null) backend.kill("SIGTERM");
   await new Promise((resolve) => {

@@ -22,13 +22,13 @@ registration and tool-profile exposure are separate filters:
 
 - `standard`, `authoring` and `tasks` expose curated modern surfaces before
   `tools/list`;
-- `full` preserves every tool registered by the active runtime for 2.x
-  compatibility and administration;
+- `full` explicitly exposes every tool registered by the active runtime for
+  administration and specialized compatibility work;
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 76 unique names. Full live/hybrid
-registration currently contains 72 names. See
+The current cross-runtime registry contains 74 unique names. Full live/hybrid
+registration currently contains 70 names. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
 ## MCP Resources
@@ -229,14 +229,10 @@ fail-closed; no private or Markdown fallback is introduced.
 ## Semantic Search
 
 - `smart_semantic_search`: **canonical** semantic search over Smart Connections
-  embeddings. This is the only semantic-search name exposed by `standard`,
-  `authoring` and `tasks`, and the only name new routing documentation teaches.
-- `smart_search`: deprecated 2.x compatibility alias, visible only in `full`.
-- `smart-search`: deprecated 2.x compatibility alias, visible only in `full`.
+  embeddings and the only semantic-search tool registered in 3.0.
 
-The two compatibility aliases remain physically registered during 2.x to avoid
-silently breaking an existing public client. Their physical removal is reserved
-for 3.0 unless an explicit SemVer break is chosen later.
+The former `smart_search` and `smart-search` aliases were physically removed in
+3.0. Existing clients must migrate to `smart_semantic_search`.
 
 Semantic query execution still needs a reachable query embedder provider. The
 semantic manifest/vector metadata are cached locally for faster warm refreshes.

@@ -60,7 +60,9 @@ const projectRoot = path.dirname(
 
 const host = process.env.MCP_HTTP_HOST || "127.0.0.1";
 const port = Number(process.env.MCP_HTTP_PORT || "3010");
-const backendUrl = new URL(`http://${host}:${port}/mcp`);
+// The proxy applies its own per-client profile. Its shared backend therefore
+// uses the explicit unfiltered endpoint even though /mcp defaults to standard.
+const backendUrl = new URL(`http://${host}:${port}/mcp/full`);
 const healthUrl = new URL(`http://${host}:${port}/healthz`);
 const backendBearerToken = process.env.MCP_BACKEND_BEARER_TOKEN?.trim();
 const toolProfile: ToolProfileId = resolveToolProfile();
