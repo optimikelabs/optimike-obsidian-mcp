@@ -162,6 +162,7 @@ Voir [Exploitation](OPERATIONS.fr.md) pour les providers et le cache.
 ```bash
 npm run build
 npm run test:runtime
+npm run test:governed-note-replace-mcp
 npm run check:operon
 npm run test:external-roots
 npm run test:docs
