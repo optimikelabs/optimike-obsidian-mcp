@@ -3,6 +3,7 @@ name: Tool Surface P4
 on:
   pull_request:
     paths:
+      - "package.json"
       - "docs/tool-surface-profiles.md"
       - "docs/tool-surface-profiles.fr.md"
       - "docs/mcp-routing-guide.md"
@@ -10,6 +11,7 @@ on:
       - "docs/README.md"
       - "docs/README.fr.md"
       - "evals/**"
+      - "scripts/test-package-contents.mjs"
       - "scripts/test-tool-routing-eval-corpus.mjs"
       - "scripts/test-tool-routing-scorer.mjs"
       - "scripts/score-tool-routing-evals.mjs"
@@ -43,3 +45,4 @@ jobs:
       - run: node scripts/test-tool-routing-scorer.mjs
       - run: node scripts/test-tool-surface-profile-docs.mjs
       - run: node scripts/test-tool-routing-contract.mjs
+      - run: npm run test:package
