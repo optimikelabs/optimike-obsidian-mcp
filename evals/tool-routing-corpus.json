@@ -55,6 +55,7 @@
     "prompt": "Replace the complete contents of an existing Markdown note with this final version using the safest durable path.",
     "recommendedProfile": "standard",
     "acceptableFirstTools": ["obsidian_note_replace_plan"],
+    "minimumToolCalls": 2,
     "forbiddenTools": ["obsidian_update_note"]
   },
   {
@@ -75,6 +76,7 @@
     "prompt": "Set statut: actif on this existing note while preserving the original Markdown source as much as possible.",
     "recommendedProfile": "standard",
     "acceptableFirstTools": ["obsidian_frontmatter_patch_plan"],
+    "minimumToolCalls": 2,
     "forbiddenTools": ["obsidian_manage_frontmatter"]
   },
   {
@@ -106,6 +108,7 @@
     "prompt": "Change the named priority_label formula in an existing Base using the recoverable governed path.",
     "recommendedProfile": "authoring",
     "acceptableFirstTools": ["bases_formula_patch_plan"],
+    "minimumToolCalls": 2,
     "forbiddenTools": ["bases_upsert_config"]
   },
   {
@@ -113,6 +116,7 @@
     "prompt": "Move an existing Canvas node and connect it to another node using the recoverable live path.",
     "recommendedProfile": "authoring",
     "acceptableFirstTools": ["obsidian_canvas_patch_plan"],
+    "minimumToolCalls": 2,
     "forbiddenTools": ["obsidian_manage_canvas"]
   },
   {
@@ -157,7 +161,8 @@
     "id": "operon-create",
     "prompt": "Create a new Operon task in the target project with dry-run first.",
     "recommendedProfile": "tasks",
-    "acceptableFirstTools": ["operon_create_task"]
+    "acceptableFirstTools": ["operon_create_task"],
+    "minimumToolCalls": 2
   },
   {
     "id": "operon-transition",
@@ -189,7 +194,7 @@
     "prompt": "Move this configured external file while preserving exact ElySIA references; inventory and plan before applying.",
     "recommendedProfile": "full",
     "acceptableFirstTools": ["external_references_scan", "external_move_plan"],
-    "forbiddenTools": ["external_move_apply"]
+    "minimumToolCalls": 3
   },
   {
     "id": "no-tool-explanation",

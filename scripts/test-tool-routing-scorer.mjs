@@ -38,6 +38,19 @@ try {
         latencyMs: 50,
         inputTokens: 500,
       }),
+      JSON.stringify({
+        id: "external-move-full",
+        harness: "fixture",
+        surface: "full",
+        toolsCalled: [
+          "external_references_scan",
+          "external_move_plan",
+          "external_move_apply",
+        ],
+        success: true,
+        latencyMs: 180,
+        inputTokens: 1600,
+      }),
     ].join("\n") + "\n",
     "utf8",
   );
@@ -48,7 +61,7 @@ try {
     { cwd: process.cwd(), encoding: "utf8" },
   );
   const report = JSON.parse(output);
-  assert.equal(report.evaluatedRuns, 3);
+  assert.equal(report.evaluatedRuns, 4);
 
   const standard = report.summaries.find(
     (item) => item.harness === "fixture" && item.surface === "standard",
@@ -63,8 +76,14 @@ try {
     (item) => item.harness === "fixture" && item.surface === "full",
   );
   assert.ok(full);
-  assert.equal(full.firstToolAccuracy, 0);
-  assert.equal(full.forbiddenToolRate, 1);
+  assert.equal(full.runs, 2);
+  assert.equal(full.firstToolAccuracy, 0.5);
+  assert.equal(full.forbiddenToolRate, 0.5);
+  assert.equal(
+    full.meanUnnecessaryCalls,
+    0.5,
+    "the three required external-move calls must not be scored as unnecessary",
+  );
   assert.equal(report.failures.length, 1);
   assert.equal(report.failures[0].firstTool, "smart_search");
 

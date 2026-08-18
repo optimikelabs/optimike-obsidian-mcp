@@ -28,12 +28,22 @@ for (const testCase of corpus) {
   );
   assert.ok(Array.isArray(testCase.acceptableFirstTools));
   assert.ok(Array.isArray(testCase.forbiddenTools ?? []));
+  assert.ok(
+    Number.isInteger(testCase.minimumToolCalls ?? (testCase.expectNoTool ? 0 : 1)) &&
+      (testCase.minimumToolCalls ?? (testCase.expectNoTool ? 0 : 1)) >= 0,
+    `${testCase.id} minimumToolCalls must be a non-negative integer`,
+  );
 
   if (testCase.expectNoTool) {
     assert.equal(
       testCase.acceptableFirstTools.length,
       0,
       `${testCase.id} no-tool case must not define acceptable first tools`,
+    );
+    assert.equal(
+      testCase.minimumToolCalls ?? 0,
+      0,
+      `${testCase.id} no-tool case cannot require tool calls`,
     );
   } else {
     assert.ok(

@@ -10,17 +10,40 @@ export function supportsModifiedTimeSettlementBridgeVersion(value) {
 }
 
 export function assertAtomicNoteCanaryDateIsolation(status) {
-  const integrations =
+  const settlementIntegrations =
     status?.settlement?.modifiedTimeFrontmatter?.integrations ?? [];
-  if (!Array.isArray(integrations) || integrations.length === 0) return;
-  const active = integrations
-    .map(
-      (integration) =>
+  const protection = status?.protection?.frontmatterDateProperties;
+  const protectionIntegrations = protection?.integrations ?? [];
+  const unsupportedIntegrations = protection?.unsupportedIntegrations ?? [];
+  const active = new Set();
+
+  if (Array.isArray(settlementIntegrations)) {
+    for (const integration of settlementIntegrations) {
+      active.add(
         `${integration?.pluginId ?? "unknown"}:${integration?.propertyName ?? "unknown"}`,
-    )
-    .join(", ");
+      );
+    }
+  }
+  if (Array.isArray(protectionIntegrations)) {
+    for (const integration of protectionIntegrations) {
+      if (integration?.modifiedPropertyName) {
+        active.add(
+          `${integration?.pluginId ?? "unknown"}:${integration.modifiedPropertyName}`,
+        );
+      }
+    }
+  }
+  if (Array.isArray(unsupportedIntegrations)) {
+    for (const integration of unsupportedIntegrations) {
+      if (integration?.activeRoles?.includes("modified")) {
+        active.add(`${integration?.pluginId ?? "unknown"}:modified(unsupported)`);
+      }
+    }
+  }
+
+  if (active.size === 0) return;
   throw new Error(
-    `The byte-exact atomic-note canary requires active modified-time integrations to be disabled before mutation (${active}). Run smoke:modified-time-settlement-live separately with the integration enabled.`,
+    `The byte-exact atomic-note canary requires active modified-time integrations to be disabled before mutation (${[...active].join(", ")}). Run smoke:modified-time-settlement-live separately with the integration enabled.`,
   );
 }
 

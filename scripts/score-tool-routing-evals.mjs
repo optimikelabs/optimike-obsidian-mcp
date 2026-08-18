@@ -48,9 +48,10 @@ const rows = lines.map((line, index) => {
     : testCase.acceptableFirstTools.includes(firstTool);
   const forbidden = new Set(testCase.forbiddenTools ?? []);
   const forbiddenCalls = parsed.toolsCalled.filter((name) => forbidden.has(name));
+  const minimumToolCalls = testCase.minimumToolCalls ?? (expectNoTool ? 0 : 1);
   const unnecessaryCalls = Math.max(
     0,
-    parsed.toolsCalled.length - (expectNoTool ? 0 : 1),
+    parsed.toolsCalled.length - minimumToolCalls,
   );
 
   return {
@@ -61,6 +62,7 @@ const rows = lines.map((line, index) => {
     firstTool,
     firstCorrect,
     forbiddenCalls,
+    minimumToolCalls,
     unnecessaryCalls,
   };
 });

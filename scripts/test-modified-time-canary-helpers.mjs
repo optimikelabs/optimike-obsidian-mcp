@@ -36,6 +36,66 @@ assert.throws(
     }),
   /requires active modified-time integrations to be disabled before mutation \(frontmatter-date-manager:modification\)/u,
 );
+assert.throws(
+  () =>
+    assertAtomicNoteCanaryDateIsolation({
+      settlement: { modifiedTimeFrontmatter: { integrations: [] } },
+      protection: {
+        frontmatterDateProperties: {
+          integrations: [
+            {
+              pluginId: "frontmatter-date-manager",
+              modifiedPropertyName: "last modified",
+            },
+          ],
+          unsupportedIntegrations: [],
+        },
+      },
+    }),
+  /frontmatter-date-manager:last modified/u,
+  "a protection-only modified role must block the byte-exact canary",
+);
+assert.throws(
+  () =>
+    assertAtomicNoteCanaryDateIsolation({
+      settlement: { modifiedTimeFrontmatter: { integrations: [] } },
+      protection: {
+        frontmatterDateProperties: {
+          integrations: [],
+          unsupportedIntegrations: [
+            {
+              pluginId: "frontmatter-date-manager",
+              activeRoles: ["created", "modified"],
+            },
+          ],
+        },
+      },
+    }),
+  /frontmatter-date-manager:modified\(unsupported\)/u,
+  "an unrepresentable active modified role must block before mutation",
+);
+assert.doesNotThrow(() =>
+  assertAtomicNoteCanaryDateIsolation({
+    settlement: { modifiedTimeFrontmatter: { integrations: [] } },
+    protection: {
+      frontmatterDateProperties: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            createdPropertyName: "creation",
+            viewedPropertyName: "viewed",
+          },
+        ],
+        unsupportedIntegrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            activeRoles: ["created", "viewed"],
+          },
+        ],
+      },
+    },
+  }),
+);
 
 assert.equal(isSafeModifiedTimePropertyName("modification"), true);
 assert.equal(isSafeModifiedTimePropertyName("last modified"), true);
