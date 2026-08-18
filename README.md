@@ -17,7 +17,7 @@ explicitly governed access to configured documents outside the vault.
 | Area                    | What the MCP provides                                                                                     | Main dependency                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | Notes                   | Read/search/update plus governed atomic note and source-preserving Frontmatter plans                      | Vault; Local REST API + Atomic Write Bridge for governed CAS |
-| Bases and Canvas        | Bases queries/formula plans plus governed Canvas graph plans and direct headless helpers                  | Bases Bridge; Atomic Write Bridge 0.4.0 for Canvas CAS        |
+| Bases and Canvas        | Bases queries/formula plans plus governed Canvas graph plans and direct headless helpers                  | Bases Bridge; Atomic Write Bridge 0.4.0 for Canvas CAS       |
 | Tasks                   | Obsidian Tasks-compatible list/query plus 23 governed Operon tools                                        | Operon Developer API V1 through the Bridge                   |
 | Semantic search         | Smart Connections index search with durable metadata cache                                                | `.smart-env` plus Ollama or OpenAI query embedding           |
 | Runtime                 | Shared SQLite cache, health, maintenance, degraded mode and exclusions                                    | Local filesystem                                             |
@@ -26,19 +26,54 @@ explicitly governed access to configured documents outside the vault.
 
 The current tool registry is documented in
 [Tool Surface](docs/obsidian_mcp_tools_spec.md). Availability varies by runtime
-mode; use the [Runtime Capability Matrix](docs/runtime-capability-matrix.md)
-before enabling writes.
+mode and by tool profile; use the [Runtime Capability Matrix](docs/runtime-capability-matrix.md)
+and [Tool Surface Profiles](docs/tool-surface-profiles.md) before enabling writes.
 
-## Choose a profile
+## Choose a runtime and transport
 
-| Need                                       | Recommended profile                                     | Posture                 |
-| ------------------------------------------ | ------------------------------------------------------- | ----------------------- |
-| Codex (verified) or a local stdio client   | `dist/stdio-proxy.js`                                   | Default local profile   |
-| Obsidian Desktop automation                | `live` or `hybrid` through the stdio proxy              | Trusted Desktop         |
-| CI, server or synchronized vault copy      | `headless-readonly`                                     | Safest headless profile |
-| Bounded writes on a copied/dedicated vault | `headless-guarded` then `headless-filesystem`           | Explicit opt-in         |
-| Direct HTTP on the same machine            | Authenticated loopback HTTP                             | Supported with limits   |
-| Remote HTTP                                | Reviewed TLS reverse proxy and private network controls | Pilot only              |
+| Need                                       | Recommended runtime / transport                            | Posture                 |
+| ------------------------------------------ | ---------------------------------------------------------- | ----------------------- |
+| Local stdio agent                          | `dist/stdio-proxy.js`                                      | Per-client proxy        |
+| Obsidian Desktop automation                | `live` or `hybrid` through the stdio proxy                 | Trusted Desktop         |
+| CI, server or synchronized vault copy      | `headless-readonly`                                        | Safest headless mode    |
+| Bounded writes on a copied/dedicated vault | `headless-guarded` then `headless-filesystem`              | Explicit opt-in         |
+| Direct HTTP on the same machine            | Authenticated loopback HTTP                                | Supported with limits   |
+| Remote HTTP                                | Reviewed TLS reverse proxy and private network controls    | Pilot only              |
+
+Runtime answers what the backend can safely do. It does not decide how many
+tools an agent should see.
+
+## Choose a tool surface
+
+| Need | Recommended tool profile | Full live/hybrid size |
+| --- | --- | ---: |
+| General vault work | `standard` | 19 tools |
+| Notes + tags + Bases/Canvas authoring | `authoring` | 31 tools |
+| Tasks / Operon workflows | `tasks` | 31 tools |
+| Compatibility, admin and specialized surfaces | `full` | 72 tools |
+
+Modern profiles expose only `smart_semantic_search` for semantic search.
+Historical compatibility aliases remain available only in `full` during the 2.x
+line and are planned for physical removal in 3.0.
+
+For stdio, select a profile before `tools/list`:
+
+```bash
+node dist/stdio-proxy.js --tool-profile standard
+```
+
+For HTTP, select it in the MCP URL:
+
+```text
+/mcp/standard
+/mcp/authoring
+/mcp/tasks
+/mcp/full
+```
+
+Legacy `/mcp` remains equivalent to `/mcp/full` during 2.x. See
+[Tool Surface Profiles](docs/tool-surface-profiles.md) for session binding,
+client examples and compatibility rules.
 
 The Node server must never be exposed directly to the public internet. See
 [Security](SECURITY.md) and the
@@ -57,7 +92,7 @@ git clone https://github.com/optimikelabs/optimike-obsidian-mcp.git
 cd optimike-obsidian-mcp
 npm install
 npm run build
-node dist/stdio-proxy.js
+node dist/stdio-proxy.js --tool-profile standard
 ```
 
 For a package install, the explicit proxy binary is
@@ -69,7 +104,11 @@ Minimal Codex configuration:
 ```toml
 [mcp_servers.optimike-obsidian-mcp-stdio]
 command = "node"
-args = ["/path/to/optimike-obsidian-mcp/dist/stdio-proxy.js"]
+args = [
+  "/path/to/optimike-obsidian-mcp/dist/stdio-proxy.js",
+  "--tool-profile",
+  "standard"
+]
 
 [mcp_servers.optimike-obsidian-mcp-stdio.env]
 OBSIDIAN_VAULT = "/path/to/vault"
@@ -170,7 +209,8 @@ Start with
 
 ## Semantic search
 
-`smart_semantic_search` searches a local Smart Connections index. Query
+`smart_semantic_search` is the canonical semantic-search tool. Modern profiles
+expose only that name. It searches a local Smart Connections index. Query
 embedding can remain local through Ollama or use OpenAI, depending on operator
 configuration. A configured OpenAI provider therefore makes this tool
 open-world even though the indexed vault data remains local.
@@ -196,6 +236,7 @@ synced vault.
 ## Documentation
 
 - Start here by audience and task: [Documentation hub](docs/README.md)
+- Tool exposure profiles and client examples: [Tool Surface Profiles](docs/tool-surface-profiles.md)
 - Runtime and maintenance: [OPERATIONS.md](OPERATIONS.md)
 - Security and deployment boundary: [SECURITY.md](SECURITY.md)
 - Current tools: [Tool Surface](docs/obsidian_mcp_tools_spec.md)
