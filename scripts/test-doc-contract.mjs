@@ -106,8 +106,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "2.9.0",
-  "released package metadata must match the 2.9.0 governed Canvas release",
+  "2.10.0",
+  "released package metadata must match the 2.10.0 tool-surface release",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
