@@ -6,6 +6,7 @@ names and runtime-aware registration.
 
 Related docs:
 
+- Tool exposure profiles: [tool-surface-profiles.md](tool-surface-profiles.md)
 - Runtime modes: [runtime-capability-matrix.md](runtime-capability-matrix.md)
 - Operations: [../OPERATIONS.md](../OPERATIONS.md)
 - Governed atomic note replacement: [governed-note-replacement.md](governed-note-replacement.md)
@@ -14,12 +15,27 @@ Related docs:
 - External roots: [external-roots-setup.md](external-roots-setup.md)
 - Operon contract: [operon-mcp-contract.md](operon-mcp-contract.md)
 
+## Exposure profiles
+
+The canonical registry is larger than any one normal agent surface. Runtime
+registration and tool-profile exposure are separate filters:
+
+- `standard`, `authoring` and `tasks` expose curated modern surfaces before
+  `tools/list`;
+- `full` preserves every tool registered by the active runtime for 2.x
+  compatibility and administration;
+- a hidden tool remains protected by the same runtime/write/security checks;
+  visibility is not authorization.
+
+The current cross-runtime registry contains 76 unique names. Full live/hybrid
+registration currently contains 72 names. See
+[Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
+
 ## MCP Resources
 
 - `optimike://guides/tool-routing`: concise Markdown precedence for canonical,
-  governed, direct and legacy-compatible tool families. Clients can read it
-  when choosing between overlapping domains; it adds no callable mutation
-  capability.
+  governed, direct and compatibility tool families. Clients can read it when
+  choosing between overlapping domains; it adds no callable mutation capability.
 
 ## Runtime Rules
 
@@ -212,9 +228,15 @@ fail-closed; no private or Markdown fallback is introduced.
 
 ## Semantic Search
 
-- `smart_semantic_search`: semantic search over Smart Connections embeddings.
-- `smart_search`: alias for `smart_semantic_search`.
-- `smart-search`: alias for `smart_semantic_search`.
+- `smart_semantic_search`: **canonical** semantic search over Smart Connections
+  embeddings. This is the only semantic-search name exposed by `standard`,
+  `authoring` and `tasks`, and the only name new routing documentation teaches.
+- `smart_search`: deprecated 2.x compatibility alias, visible only in `full`.
+- `smart-search`: deprecated 2.x compatibility alias, visible only in `full`.
+
+The two compatibility aliases remain physically registered during 2.x to avoid
+silently breaking an existing public client. Their physical removal is reserved
+for 3.0 unless an explicit SemVer break is chosen later.
 
 Semantic query execution still needs a reachable query embedder provider. The
 semantic manifest/vector metadata are cached locally for faster warm refreshes.
