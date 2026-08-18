@@ -60,7 +60,11 @@ const toolSpec = read("docs/obsidian_mcp_tools_spec.md");
 assert.ok(toolSpec.includes("`smart_semantic_search`: **canonical**"));
 assert.ok(toolSpec.includes("`smart_search`: deprecated 2.x compatibility alias, visible only in `full`"));
 assert.ok(toolSpec.includes("`smart-search`: deprecated 2.x compatibility alias, visible only in `full`"));
-assert.ok(toolSpec.includes("physical removal is reserved\nfor 3.0"));
+assert.match(
+  toolSpec,
+  /physical removal is reserved\s+for 3\.0/u,
+  "tool surface spec must preserve the 3.0 physical-alias-removal boundary",
+);
 
 const routingResource = read("src/mcp-server/resources/toolRoutingResource.ts");
 assert.ok(routingResource.includes("smart_semantic_search"));
