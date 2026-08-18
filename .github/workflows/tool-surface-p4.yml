@@ -48,5 +48,14 @@ jobs:
       - run: node scripts/test-tool-routing-scorer.mjs
       - run: node scripts/test-tool-surface-profile-docs.mjs
       - run: node scripts/test-tool-routing-contract.mjs
+      - name: Install Bases Bridge dependencies
+        working-directory: plugins/obsidian-bases-bridge
+        run: npm ci
+      - name: Install Operon Bridge dependencies
+        working-directory: plugins/obsidian-operon-bridge
+        run: npm ci
+      - name: Install Atomic Write Bridge dependencies
+        working-directory: plugins/obsidian-atomic-write-bridge
+        run: npm ci
       - run: npm run build:bridges
       - run: npm run test:package
