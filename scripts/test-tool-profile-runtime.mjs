@@ -3,7 +3,9 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { installToolProfileRegistrationGate } from "../dist/mcp-server/toolProfileRuntime.js";
 
 async function createVault() {
   const root = await mkdtemp(path.join(os.tmpdir(), "optimike-profile-runtime-"));
@@ -48,6 +50,69 @@ async function openClient({ vault, args = [], env = {} }) {
 async function listedNames(client) {
   const result = await client.listTools();
   return result.tools.map((tool) => tool.name).sort((a, b) => a.localeCompare(b));
+}
+
+function registerSyntheticTool(server, name) {
+  return server.tool(
+    name,
+    `synthetic ${name}`,
+    {},
+    {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async () => ({
+      content: [{ type: "text", text: "ok" }],
+      isError: false,
+    }),
+  );
+}
+
+// The registration gate is installed before production tools register. A
+// governed quartet therefore arrives one member at a time. Partial lifecycles
+// must stay hidden rather than throwing or exposing an incomplete contract.
+{
+  const server = new McpServer(
+    { name: "profile-registration-order-test", version: "0" },
+    { capabilities: { tools: { listChanged: true } } },
+  );
+  installToolProfileRegistrationGate(server, "standard");
+
+  const direct = registerSyntheticTool(server, "obsidian_manage_frontmatter");
+  assert.equal(direct.enabled, true);
+
+  const governedNames = [
+    "obsidian_frontmatter_patch_plan",
+    "obsidian_frontmatter_patch_apply",
+    "obsidian_frontmatter_patch_status",
+    "obsidian_frontmatter_patch_recover",
+  ];
+  const governedHandles = [];
+  for (const [index, name] of governedNames.entries()) {
+    governedHandles.push(registerSyntheticTool(server, name));
+    if (index < governedNames.length - 1) {
+      assert.equal(
+        direct.enabled,
+        true,
+        "direct fallback must remain available while governed registration is partial",
+      );
+      assert.ok(
+        governedHandles.every((handle) => handle.enabled === false),
+        "partial governed lifecycle must remain fully hidden",
+      );
+    }
+  }
+  assert.equal(
+    direct.enabled,
+    false,
+    "direct fallback must be hidden once the complete governed family exists",
+  );
+  assert.ok(
+    governedHandles.every((handle) => handle.enabled === true),
+    "complete governed lifecycle must become visible atomically",
+  );
 }
 
 const vault = await createVault();
@@ -122,7 +187,7 @@ try {
     else process.env.MCP_TOOL_PROFILE = previous;
   }
 
-  console.log("PASS: direct server profiles preserve full compatibility and hide semantic aliases in standard");
+  console.log("PASS: direct server profiles preserve full compatibility, governed registration is atomic, and semantic aliases stay hidden in standard");
 } finally {
   await rm(vault, { recursive: true, force: true });
 }
