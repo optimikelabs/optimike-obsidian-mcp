@@ -63,6 +63,14 @@ Modern profiles hide a direct tool only when the corresponding governed family i
 
 The 3.0 default is `standard` when no profile is specified.
 
+Profile selection is fixed for the lifetime of one stdio proxy. Starting
+Obsidian after Codex does not add tools that the selected profile excludes.
+Therefore, the absence of `operon_*` from a `standard` session means “not
+exposed by this profile”, not “the Operon plugin is not loaded”. Use `tasks` for
+task-focused sessions: its Operon tools remain discoverable while Desktop or
+the Bridge is temporarily unavailable and return a structured unavailable or
+stale status until `operon_status` can refresh the live contract.
+
 ```bash
 node dist/stdio-proxy.js --tool-profile standard
 ```

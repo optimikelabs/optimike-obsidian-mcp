@@ -63,6 +63,15 @@ Les profils modernes ne masquent une voie directe que lorsque la famille gouvern
 
 Le défaut de la 3.0 est `standard` lorsqu’aucun profil n’est indiqué.
 
+Le profil est fixé pour toute la durée de vie d’un proxy stdio. Démarrer
+Obsidian après Codex n’ajoute pas les outils exclus par le profil choisi.
+L’absence de `operon_*` dans une session `standard` signifie donc « non exposé
+par ce profil », pas « le plugin Operon n’est pas chargé ». Utiliser `tasks`
+pour une session centrée sur les tâches : ses outils Operon restent découvrables
+si Desktop ou le Bridge est momentanément indisponible et renvoient un état
+structuré indisponible ou stale jusqu’au rafraîchissement du contrat live par
+`operon_status`.
+
 ```bash
 node dist/stdio-proxy.js --tool-profile standard
 ```

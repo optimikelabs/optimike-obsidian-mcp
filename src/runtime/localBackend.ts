@@ -13,6 +13,7 @@ export type LocalBackendOptions = {
   startupTimeoutMs?: number;
   healthcheckTimeoutMs?: number;
   pollIntervalMs?: number;
+  spawnIfUnavailable?: boolean;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -100,6 +101,7 @@ export async function ensureLocalBackendRunning({
   startupTimeoutMs = 15000,
   healthcheckTimeoutMs = 1000,
   pollIntervalMs = 400,
+  spawnIfUnavailable = true,
 }: LocalBackendOptions): Promise<void> {
   const lockPath = path.join(
     os.tmpdir(),
@@ -110,6 +112,11 @@ export async function ensureLocalBackendRunning({
 
   const initialHealth = await checkHealth(url, healthcheckTimeoutMs);
   if (initialHealth.ok) return;
+  if (!spawnIfUnavailable) {
+    throw new Error(
+      `Backend is not healthy at ${url.toString()} and automatic startup is disabled.`,
+    );
+  }
 
   while (Date.now() < deadlineMs) {
     const releaseLock = await acquireLock(lockPath, startupTimeoutMs * 2);

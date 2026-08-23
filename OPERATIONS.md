@@ -610,6 +610,47 @@ Check:
 - Local REST API plugin
 - `obsidian_runtime_status`
 
+### An agent says Operon is not loaded
+
+First inspect the stdio tool profile. An omitted profile defaults to `standard`,
+which intentionally exposes no `operon_*` tools. That absence does not prove
+that the Obsidian plugin is disabled. Use `--tool-profile tasks` or
+`MCP_TOOL_PROFILE=tasks` for a task-focused client, reconnect the MCP client,
+then call `operon_status` and `operon_get_configuration`. Starting Obsidian
+after Codex is supported: tools selected by `tasks` remain visible and report a
+structured unavailable/stale state until the live Bridge can be refreshed.
+
+### One HTTP 503 closes unrelated stdio calls
+
+This was a proxy defect fixed after 3.0.0. Verify the candidate with:
+
+```bash
+npm run test:stdio-proxy-reliability
+```
+
+The deterministic fixture requires the `503` calls to fail independently,
+keeps admitted sibling reads alive, serializes session reconnection, drains the
+retired generation, replays a proven read-only network loss once, and never
+replays a mutation with an ambiguous network outcome.
+
+The live gate is stricter. Build and start the dedicated backend first, then
+run the client directly without rebuilding the active `dist`:
+
+```bash
+OBSIDIAN_STDIO_BACKPRESSURE_CANARY_PATH="path/to/disposable-or-non-sensitive-note.md" \
+MCP_HTTP_PORT=39117 \
+node scripts/smoke-stdio-backpressure-live.mjs
+```
+
+Point it at a dedicated temporary `readonly` backend with unique journals and
+low admission limits. It must observe an exact admission rejection, zero
+`Connection closed` siblings and a successful following read. A generic `503`
+or rate-limit `429` fails the gate; the latter can persist for 15 minutes on a
+shared development identity.
+The canary requires that backend to exist and never auto-spawns a detached
+replacement. Stop the tracked process, verify the port is free and delete its
+private temporary state after the run.
+
 ### Memory usage climbs too high
 
 Check:

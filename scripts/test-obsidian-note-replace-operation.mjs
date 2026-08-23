@@ -184,7 +184,20 @@ function assertSqliteContentionPolicyPrecedesWal() {
   }
 }
 
-async function waitForFiles(paths, timeoutMs = 5_000) {
+const WORKER_BARRIER_TIMEOUT_MS = Number(
+  process.env.OBSIDIAN_NOTE_REPLACE_WORKER_BARRIER_TIMEOUT_MS ?? "15000",
+);
+if (
+  !Number.isFinite(WORKER_BARRIER_TIMEOUT_MS) ||
+  WORKER_BARRIER_TIMEOUT_MS < 1_000 ||
+  WORKER_BARRIER_TIMEOUT_MS > 120_000
+) {
+  throw new Error(
+    "OBSIDIAN_NOTE_REPLACE_WORKER_BARRIER_TIMEOUT_MS must be from 1000 to 120000.",
+  );
+}
+
+async function waitForFiles(paths, timeoutMs = WORKER_BARRIER_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (!paths.every((candidate) => existsSync(candidate))) {
     if (Date.now() >= deadline) {
