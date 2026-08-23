@@ -626,6 +626,48 @@ Vérifie :
 - le plugin Local REST API
 - `obsidian_runtime_status`
 
+### Un agent affirme qu’Operon n’est pas chargé
+
+Inspecter d’abord le profil d’outils stdio. Sans profil explicite, le proxy
+choisit `standard`, qui n’expose volontairement aucun outil `operon_*`. Cette
+absence ne prouve pas que le plugin Obsidian est désactivé. Utiliser
+`--tool-profile tasks` ou `MCP_TOOL_PROFILE=tasks` pour un client centré sur les
+tâches, reconnecter le client MCP, puis appeler `operon_status` et
+`operon_get_configuration`. Démarrer Obsidian après Codex reste supporté : les
+outils choisis par `tasks` demeurent visibles et renvoient un état structuré
+indisponible ou stale jusqu’au rafraîchissement du Bridge live.
+
+### Un HTTP 503 ferme des appels stdio sans rapport
+
+Ce défaut du proxy a été corrigé après la 3.0.0. Vérifier le candidat avec :
+
+```bash
+npm run test:stdio-proxy-reliability
+```
+
+La fixture déterministe impose l’échec indépendant des appels `503`, maintient
+les lectures sœurs admises, sérialise la reconnexion de session, draine la
+génération retirée, rejoue une seule fois une rupture réseau de lecture prouvée
+et ne rejoue jamais une mutation dont l’issue réseau est ambiguë.
+
+Le gate live est plus strict. Construire et démarrer d’abord le backend dédié,
+puis lancer directement le client sans reconstruire le `dist` actif :
+
+```bash
+OBSIDIAN_STDIO_BACKPRESSURE_CANARY_PATH="chemin/vers/note-jetable-ou-non-sensible.md" \
+MCP_HTTP_PORT=39117 \
+node scripts/smoke-stdio-backpressure-live.mjs
+```
+
+Le cibler sur un backend temporaire dédié en `readonly`, avec journaux uniques
+et limites d’admission basses. Il doit observer un refus d’admission exact,
+zéro appel frère `Connection closed`, puis une lecture suivante réussie. Un
+`503` générique ou un rate-limit `429` fait échouer le gate ; ce dernier peut
+persister 15 minutes pour une identité de développement partagée.
+Le canary exige que ce backend existe et ne démarre jamais un remplacement
+détaché. Après le run, arrêter le processus suivi, vérifier que le port est
+libre et supprimer son état temporaire privé.
+
 ### La mémoire grimpe trop
 
 Vérifie :

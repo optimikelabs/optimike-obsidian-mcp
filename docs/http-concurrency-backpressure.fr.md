@@ -105,6 +105,18 @@ Une réponse admise expose `X-Optimike-Operation-Class` et `X-Optimike-Queue-Wai
 
 `503` signifie que l’opération n’a pas été admise. Le transport ne la rejoue pas. Une gateway ne peut effectuer un retry que selon la sémantique propre de l’outil. Les lectures sont généralement rejouables. Une mutation doit conserver la clé d’idempotence et les préconditions CAS existantes ; une gateway ne doit jamais les inventer ou les supprimer.
 
+Le proxy stdio local conserve cette frontière. Un résultat applicatif HTTP,
+notamment un refus d’admission `503` ou un `404` ordinaire, est renvoyé à l’appel
+concerné sans retirer le transport backend partagé ni interrompre les appels
+frères déjà admis. Seul le contrat Streamable HTTP exact de session invalide
+provoque une rotation et le rejeu de l’appel rejeté. Une rupture réseau ne peut
+être rejouée qu’une fois, et seulement si l’annotation backend prouve
+`readOnlyHint: true` ; une mutation n’est jamais rejouée et renvoie
+`backend_outcome_unknown` afin que son propre contrat de statut, d’idempotence
+ou de recovery réconcilie le résultat. La reconnexion est sérialisée, les
+annotations sont liées à la génération et les générations retirées disposent
+d’un drain borné avant fermeture forcée.
+
 ## Libération des slots
 
 Un slot accordé est libéré exactement une fois après une erreur aval, la fin du
@@ -135,6 +147,36 @@ La CI exécute une charge concurrente déterministe ainsi que les contrats exist
 
 ```bash
 npm run test:http-backpressure
+npm run test:stdio-proxy-reliability
 ```
 
 La suite tourne sur Ubuntu et Windows. Elle prouve les plafonds globaux, par client, coûteux et mutation, les limites de file, l’équité, le timeout, l’annulation, le nettoyage des slots, les headers de retry et une charge déterministe sans coffre personnel.
+
+Pour une preuve stdio live contre Obsidian Desktop, construire d’abord, puis
+démarrer un backend HTTP temporaire dédié en mode `readonly`, sur un port
+unique, avec des chemins d’état et de journaux uniques et des limites
+d’admission volontairement basses. Attendre `/healthz` et `/readyz`, puis lancer
+directement le client sans reconstruire `dist` sous le processus actif :
+
+```bash
+OBSIDIAN_STDIO_BACKPRESSURE_CANARY_PATH="chemin/vers/note-jetable-ou-non-sensible.md" \
+MCP_HTTP_PORT=39117 \
+node scripts/smoke-stdio-backpressure-live.mjs
+```
+
+Le canary ne passe que si au moins une lecture réussit, au moins un appel est
+refusé par le contrat d’admission JSON-RPC exact `SERVICE_UNAVAILABLE`, aucun
+appel frère ne renvoie `Connection closed`, puis une nouvelle lecture réussit.
+Il n’accepte que `queue-full`, `identity-queue-full`, `timeout` ou `cancelled`
+dans `data.admission`, avec le message et la valeur `data.retryable`
+correspondants. Un `503` générique, un échec upstream ou un rate-limit `429`
+n’est pas une preuve de backpressure. Connexion, découverte, burst, lecture de
+contrôle et arrêt sont tous bornés par des watchdogs. Ne pas utiliser pour ce
+gate un backend partagé déjà sollicité à répétition : sa fenêtre indépendante
+de rate-limit par identité, longue de 15 minutes, peut masquer l’admission par
+un `429` légitime.
+
+Le canary impose `MCP_PROXY_REQUIRE_EXISTING_BACKEND=true` : une cible
+indisponible échoue fermée au lieu de laisser un backend détaché non suivi.
+Après le run, arrêter le backend suivi, vérifier qu’aucun listener ne subsiste
+sur son port, puis supprimer son état privé et son dossier de logs ignoré.

@@ -106,8 +106,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.0.0",
-  "package metadata must match the 3.0.0 canonical tool-surface release",
+  "3.0.1",
+  "package metadata must match the 3.0.1 stdio reliability release",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
@@ -135,6 +135,10 @@ const bilingualPairs = [
   ["docs/headless-server-profile.md", "docs/headless-server-profile.fr.md"],
   ["docs/operon-mcp-contract.md", "docs/operon-mcp-contract.fr.md"],
   ["docs/operon-cli-audit.md", "docs/operon-cli-audit.fr.md"],
+  [
+    "docs/http-concurrency-backpressure.md",
+    "docs/http-concurrency-backpressure.fr.md",
+  ],
 ];
 for (const pair of bilingualPairs) {
   for (const file of pair) await access(path.join(root, file));
@@ -179,6 +183,27 @@ assert.match(operonContract, /generic CLI passthrough/i);
 assert.match(operonContractFr, /passthrough CLI générique/i);
 assert.match(operonContract, /structured unavailable result/i);
 assert.match(operonContractFr, /indisponibilité structurée/i);
+
+const backpressureContract = await text(
+  "docs/http-concurrency-backpressure.md",
+);
+const backpressureContractFr = await text(
+  "docs/http-concurrency-backpressure.fr.md",
+);
+for (const content of [backpressureContract, backpressureContractFr]) {
+  assert.match(content, /smoke-stdio-backpressure-live\.mjs/u);
+  assert.match(content, /identity-queue-full/u);
+  assert.match(content, /429/u);
+  assert.match(content, /Connection closed/u);
+}
+for (const content of [
+  await text("OPERATIONS.md"),
+  await text("OPERATIONS.fr.md"),
+]) {
+  assert.match(content, /smoke-stdio-backpressure-live\.mjs/u);
+  assert.match(content, /429/u);
+  assert.match(content, /Connection closed/u);
+}
 
 const brokenLinks = [];
 for (const file of await markdownFiles(root)) {

@@ -6,7 +6,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -47,6 +50,34 @@ type BackendClient = {
   client: Client;
   transport: StreamableHTTPClientTransport;
 };
+type BackendConnection = BackendClient & {
+  generation: number;
+  inFlight: number;
+  retired: boolean;
+  retiredTimer?: NodeJS.Timeout;
+  closePromise?: Promise<void>;
+};
+type BackendFailureKind = "application" | "network" | "session-invalid";
+type NetworkReplayPolicy = boolean | { toolName: string };
+type BackendRetryOptions<T> = {
+  /** Only calls with an explicit readOnlyHint may be replayed after a network loss. */
+  replayNetworkFailure: NetworkReplayPolicy;
+  onSuccess?: (result: { generation: number; value: T }) => void;
+};
+
+class BackendOperationError extends Error {
+  constructor(
+    readonly generation: number,
+    readonly originalError: unknown,
+    readonly networkReplayAuthorized: boolean,
+  ) {
+    super("Backend operation failed");
+  }
+}
+
+class BackendGenerationChangedError extends Error {}
+
+class BackendReplayNotAuthorizedError extends Error {}
 
 const packageInfo = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
@@ -72,11 +103,34 @@ const proxyServer = new Server(
   { capabilities: { tools: { listChanged: true } } },
 );
 
-let backend: BackendClient | undefined;
+let backend: BackendConnection | undefined;
+let backendGeneration = 0;
+let initialConnectionPromise: Promise<BackendConnection> | undefined;
+let reconnectPromise: Promise<BackendConnection> | undefined;
 let allowedToolNames: Set<string> | undefined;
+let readOnlyToolNames: Set<string> | undefined;
+let toolMetadataGeneration: number | undefined;
+const retiredConnections = new Set<BackendConnection>();
 let externalRootsService: ExternalRootsService | undefined;
 let externalMoveCoordinator: ExternalMoveCoordinator | undefined;
 let externalMoveBindingIdentity: ExternalMoveBindingIdentity | undefined;
+
+function boundedDurationFromEnvironment(
+  name: string,
+  fallbackMs: number,
+): number {
+  const configured = Number(process.env[name] ?? fallbackMs);
+  return Number.isFinite(configured) &&
+    configured >= 1_000 &&
+    configured <= 300_000
+    ? Math.floor(configured)
+    : fallbackMs;
+}
+
+const retiredDrainTimeoutMs = boundedDurationFromEnvironment(
+  "MCP_PROXY_RETIRED_DRAIN_TIMEOUT_MS",
+  30_000,
+);
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
@@ -154,33 +208,187 @@ function hiddenToolResult(toolName: string) {
   };
 }
 
-function isReconnectableBackendError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    message.includes("fetch failed") ||
-    message.includes("ECONNREFUSED") ||
-    message.includes("ECONNRESET") ||
-    message.includes("Invalid or expired session ID") ||
-    message.includes("Streamable HTTP error") ||
-    message.includes("terminated") ||
-    message.includes("socket hang up")
+const NETWORK_ERROR_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EPIPE",
+  "ETIMEDOUT",
+  "UND_ERR_ABORTED",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+const STREAMABLE_HTTP_POST_ERROR_PREFIX =
+  "Streamable HTTP error: Error POSTing to endpoint: ";
+const SESSION_INVALID_MESSAGES = new Set([
+  "Invalid or expired session ID.",
+  "Session not found or expired.",
+]);
+
+function errorHasNetworkCause(
+  error: unknown,
+  seen = new Set<unknown>(),
+): boolean {
+  if (typeof error !== "object" || error === null || seen.has(error)) {
+    return false;
+  }
+  seen.add(error);
+  const candidate = error as {
+    code?: unknown;
+    cause?: unknown;
+    errors?: unknown;
+  };
+  if (
+    typeof candidate.code === "string" &&
+    NETWORK_ERROR_CODES.has(candidate.code)
+  ) {
+    return true;
+  }
+  if (Array.isArray(candidate.errors)) {
+    return candidate.errors.some((nested) =>
+      errorHasNetworkCause(nested, seen),
+    );
+  }
+  return errorHasNetworkCause(candidate.cause, seen);
+}
+
+function streamableHttpApplicationMessage(
+  error: StreamableHTTPError,
+): string | undefined {
+  if (!error.message.startsWith(STREAMABLE_HTTP_POST_ERROR_PREFIX)) {
+    return undefined;
+  }
+  const responseBody = error.message.slice(
+    STREAMABLE_HTTP_POST_ERROR_PREFIX.length,
+  );
+  try {
+    const parsed = JSON.parse(responseBody) as {
+      error?: { message?: unknown };
+    };
+    return typeof parsed.error?.message === "string"
+      ? parsed.error.message
+      : undefined;
+  } catch {
+    return responseBody;
+  }
+}
+
+function classifyBackendFailure(error: unknown): BackendFailureKind {
+  // HTTP replies are application outcomes. Only the Streamable HTTP session
+  // contract gives its exact 404 payload the special meaning that the handler
+  // was not entered. A generic 404 can be an application/route outcome.
+  if (error instanceof StreamableHTTPError) {
+    return error.code === 404 &&
+      SESSION_INVALID_MESSAGES.has(
+        streamableHttpApplicationMessage(error) ?? "",
+      )
+      ? "session-invalid"
+      : "application";
+  }
+  return errorHasNetworkCause(error) ? "network" : "application";
+}
+
+function redactedBackendFailureDetail(error: unknown): string {
+  const candidate =
+    typeof error === "object" && error !== null
+      ? (error as { code?: unknown })
+      : undefined;
+  const rawCode = candidate?.code;
+  const safeCode =
+    (typeof rawCode === "string" && /^[A-Z0-9_.-]{1,64}$/u.test(rawCode)) ||
+    (typeof rawCode === "number" && Number.isInteger(rawCode))
+      ? String(rawCode)
+      : "unknown";
+  return `kind=${classifyBackendFailure(error)}, code=${safeCode}, message=[REDACTED]`;
+}
+
+function backendOutcomeUnknownError(
+  operationName: string,
+  originalError: unknown,
+  reconnectError?: unknown,
+): Error {
+  const reconnectDetail =
+    reconnectError === undefined
+      ? "reconnect=succeeded for future calls"
+      : `reconnect=failed (${redactedBackendFailureDetail(reconnectError)})`;
+  return new Error(
+    `MCP backend_outcome_unknown for ${operationName}: the network failed after a non-read-only call may have reached the backend; the proxy did not replay it. ${reconnectDetail}; original_failure=${redactedBackendFailureDetail(originalError)}`,
   );
 }
 
-async function ensureBackendConnected(forceReconnect = false): Promise<Client> {
-  if (backend && !forceReconnect) {
-    return backend.client;
-  }
+function backendReplayNotAuthorizedError(
+  operationName: string,
+  originalError: unknown,
+): Error {
+  return new Error(
+    `MCP backend_outcome_unknown for ${operationName}: the network failed and the replacement backend generation did not prove the tool read-only; the proxy did not replay it. reconnect=succeeded for future calls; original_failure=${redactedBackendFailureDetail(originalError)}`,
+  );
+}
 
-  if (backend) {
-    await Promise.allSettled([
-      backend.client.close(),
-      backend.transport.close(),
-    ]);
-    backend = undefined;
-  }
-  allowedToolNames = undefined;
+function backendOutcomeUnknownAfterRetryError(
+  operationName: string,
+  retryError: unknown,
+): Error {
+  return new Error(
+    `MCP backend_outcome_unknown for ${operationName}: the network failed after the one permitted retry of a request that may have reached the backend; the proxy did not replay it again. reconnect=not-attempted after retry; retry_failure=${redactedBackendFailureDetail(retryError)}`,
+  );
+}
 
+function closeBackendConnection(
+  connection: BackendConnection,
+  reason: "drained" | "drain-timeout" | "shutdown",
+): Promise<void> {
+  if (connection.closePromise) return connection.closePromise;
+  if (connection.retiredTimer) {
+    clearTimeout(connection.retiredTimer);
+    connection.retiredTimer = undefined;
+  }
+  connection.closePromise = Promise.allSettled([
+    connection.client.close(),
+    connection.transport.close(),
+  ]).then((results) => {
+    retiredConnections.delete(connection);
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (rejected.length > 0) {
+      console.error(
+        `[${packageName}] backend generation ${connection.generation} closed after ${reason} with ${rejected.length} close error(s)`,
+      );
+    } else {
+      console.error(
+        `[${packageName}] backend generation ${connection.generation} closed after ${reason}`,
+      );
+    }
+  });
+  return connection.closePromise;
+}
+
+function closeRetiredBackend(connection: BackendConnection): void {
+  if (!connection.retired || connection.inFlight !== 0) return;
+  void closeBackendConnection(connection, "drained");
+}
+
+function retireBackend(connection: BackendConnection): void {
+  if (connection.retired) return;
+  connection.retired = true;
+  retiredConnections.add(connection);
+  connection.retiredTimer = setTimeout(() => {
+    if (connection.closePromise) return;
+    console.error(
+      `[${packageName}] backend generation ${connection.generation} exceeded the ${retiredDrainTimeoutMs}ms retired drain; aborting ${connection.inFlight} in-flight call(s)`,
+    );
+    void closeBackendConnection(connection, "drain-timeout");
+  }, retiredDrainTimeoutMs);
+  connection.retiredTimer.unref?.();
+  closeRetiredBackend(connection);
+}
+
+async function createBackendConnection(): Promise<BackendConnection> {
   await ensureLocalBackendRunning({
     serviceName: packageName,
     url: healthUrl,
@@ -195,6 +403,8 @@ async function ensureBackendConnected(forceReconnect = false): Promise<Client> {
       MCP_TOOL_PROFILE: "full",
     },
     startupTimeoutMs: Number(process.env.MCP_PROXY_START_TIMEOUT_MS || "20000"),
+    spawnIfUnavailable:
+      process.env.MCP_PROXY_REQUIRE_EXISTING_BACKEND?.toLowerCase() !== "true",
   });
 
   if (process.env.MCP_AUTH_MODE && !backendBearerToken) {
@@ -220,41 +430,260 @@ async function ensureBackendConnected(forceReconnect = false): Promise<Client> {
     { capabilities: {} },
   );
   await client.connect(transport);
-  backend = { client, transport };
-  return client;
+  return {
+    client,
+    transport,
+    generation: ++backendGeneration,
+    inFlight: 0,
+    retired: false,
+  };
+}
+
+async function ensureBackendConnected(): Promise<BackendConnection> {
+  if (backend) return backend;
+  initialConnectionPromise ??= createBackendConnection().then((connection) => {
+    backend ??= connection;
+    if (backend !== connection) retireBackend(connection);
+    return backend;
+  });
+  try {
+    return await initialConnectionPromise;
+  } finally {
+    initialConnectionPromise = undefined;
+  }
+}
+
+async function reconnectBackend(
+  failedGeneration: number,
+): Promise<BackendConnection> {
+  if (backend && backend.generation !== failedGeneration) return backend;
+  if (!backend) return ensureBackendConnected();
+  reconnectPromise ??= (async () => {
+    const failedConnection = backend;
+    if (!failedConnection || failedConnection.generation !== failedGeneration) {
+      return ensureBackendConnected();
+    }
+    const replacement = await createBackendConnection();
+    if (backend !== failedConnection) {
+      retireBackend(replacement);
+      return backend ?? ensureBackendConnected();
+    }
+    backend = replacement;
+    allowedToolNames = undefined;
+    readOnlyToolNames = undefined;
+    toolMetadataGeneration = undefined;
+    retireBackend(failedConnection);
+    return replacement;
+  })();
+  try {
+    return await reconnectPromise;
+  } finally {
+    reconnectPromise = undefined;
+  }
+}
+
+async function withBackendLease<T>(
+  operation: (client: Client) => Promise<T>,
+  options: {
+    expectedGeneration?: number;
+    networkReplayAuthorized: boolean;
+  },
+): Promise<{ generation: number; value: T }> {
+  const connection = await ensureBackendConnected();
+  if (
+    options.expectedGeneration !== undefined &&
+    connection.generation !== options.expectedGeneration
+  ) {
+    throw new BackendGenerationChangedError();
+  }
+  connection.inFlight += 1;
+  try {
+    return {
+      generation: connection.generation,
+      value: await operation(connection.client),
+    };
+  } catch (error) {
+    throw new BackendOperationError(
+      connection.generation,
+      error,
+      options.networkReplayAuthorized,
+    );
+  } finally {
+    connection.inFlight -= 1;
+    closeRetiredBackend(connection);
+  }
+}
+
+async function toolReplayProof(
+  toolName: string,
+): Promise<{ generation: number; readOnly: boolean }> {
+  if (!readOnlyToolNames || toolMetadataGeneration !== backend?.generation) {
+    await filteredBackendTools();
+  }
+  if (
+    toolMetadataGeneration === undefined ||
+    toolMetadataGeneration !== backend?.generation
+  ) {
+    throw new Error(
+      "Backend changed generation while resolving tool replay metadata; refusing automatic replay.",
+    );
+  }
+  return {
+    generation: toolMetadataGeneration,
+    readOnly: readOnlyToolNames?.has(toolName) ?? false,
+  };
+}
+
+async function withGenerationBoundToolLease<T>(
+  toolName: string,
+  operation: (client: Client) => Promise<T>,
+  requireReadOnly: boolean,
+): Promise<{ generation: number; value: T }> {
+  // A concurrent reconnect may rotate the active backend between metadata
+  // resolution and lease acquisition. Retry only that pre-execution binding;
+  // never carry an annotation proof across generations.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const proof = await toolReplayProof(toolName);
+    if (requireReadOnly && !proof.readOnly) {
+      throw new BackendReplayNotAuthorizedError();
+    }
+    try {
+      return await withBackendLease(operation, {
+        expectedGeneration: proof.generation,
+        networkReplayAuthorized: proof.readOnly,
+      });
+    } catch (error) {
+      if (error instanceof BackendGenerationChangedError) continue;
+      throw error;
+    }
+  }
+  throw new Error(
+    "Backend changed generation repeatedly while binding tool replay metadata; refusing automatic replay.",
+  );
 }
 
 async function withBackendRetry<T>(
   operationName: string,
   operation: (client: Client) => Promise<T>,
+  options: BackendRetryOptions<T>,
 ): Promise<T> {
+  const replayPolicy = options.replayNetworkFailure;
+  const execute = (requireReadOnly: boolean) => {
+    if (typeof replayPolicy === "boolean") {
+      return withBackendLease(operation, {
+        networkReplayAuthorized: replayPolicy,
+      });
+    }
+    return withGenerationBoundToolLease(
+      replayPolicy.toolName,
+      operation,
+      requireReadOnly,
+    );
+  };
   try {
-    return await operation(await ensureBackendConnected());
+    const result = await execute(false);
+    options.onSuccess?.(result);
+    return result.value;
   } catch (error) {
-    if (!isReconnectableBackendError(error)) {
-      throw error;
+    const failedGeneration =
+      error instanceof BackendOperationError ? error.generation : undefined;
+    const originalError =
+      error instanceof BackendOperationError ? error.originalError : error;
+    const networkReplayAuthorized =
+      error instanceof BackendOperationError
+        ? error.networkReplayAuthorized
+        : false;
+    const failureKind = classifyBackendFailure(originalError);
+    if (failureKind === "application") {
+      throw originalError;
     }
 
     console.error(
-      `[${packageName}] ${operationName} failed against backend (${error instanceof Error ? error.message : String(error)}); reconnecting once`,
+      `[${packageName}] ${operationName} failed against backend (${redactedBackendFailureDetail(originalError)}); reconnecting once`,
     );
 
+    if (failedGeneration === undefined) throw originalError;
+
     try {
-      return await operation(await ensureBackendConnected(true));
+      await reconnectBackend(failedGeneration);
     } catch (retryError) {
-      const message =
-        retryError instanceof Error ? retryError.message : String(retryError);
+      if (failureKind === "network" && !networkReplayAuthorized) {
+        throw backendOutcomeUnknownError(
+          operationName,
+          originalError,
+          retryError,
+        );
+      }
       throw new Error(
-        `MCP backend_unreachable after retry for ${operationName}. Backend ${backendUrl.toString()} did not complete the request: ${message}`,
+        `MCP backend_unreachable after retry for ${operationName}. Backend ${backendUrl.toString()} did not complete the request: ${redactedBackendFailureDetail(retryError)}`,
+      );
+    }
+
+    if (failureKind === "network" && !networkReplayAuthorized) {
+      throw backendOutcomeUnknownError(operationName, originalError);
+    }
+
+    try {
+      const retried = await execute(failureKind === "network");
+      options.onSuccess?.(retried);
+      return retried.value;
+    } catch (retryError) {
+      if (retryError instanceof BackendReplayNotAuthorizedError) {
+        throw backendReplayNotAuthorizedError(operationName, originalError);
+      }
+      const retryOriginal =
+        retryError instanceof BackendOperationError
+          ? retryError.originalError
+          : retryError;
+      const retryFailureKind = classifyBackendFailure(retryOriginal);
+      if (retryFailureKind === "application") {
+        throw retryOriginal;
+      }
+      if (
+        retryError instanceof BackendOperationError &&
+        retryFailureKind === "network" &&
+        !retryError.networkReplayAuthorized
+      ) {
+        throw backendOutcomeUnknownAfterRetryError(
+          operationName,
+          retryOriginal,
+        );
+      }
+      throw new Error(
+        `MCP backend_unreachable after retry for ${operationName}. Backend ${backendUrl.toString()} did not complete the request: ${redactedBackendFailureDetail(retryOriginal)}`,
       );
     }
   }
 }
 
-async function filteredBackendTools(params?: Record<string, unknown>) {
-  const result = await withBackendRetry("listTools", (client) =>
-    client.listTools(params),
+async function filteredBackendTools(
+  params?: Record<string, unknown>,
+  staleRefreshesRemaining = 1,
+) {
+  let resultGeneration: number | undefined;
+  const result = await withBackendRetry(
+    "listTools",
+    (client) => client.listTools(params),
+    {
+      replayNetworkFailure: true,
+      onSuccess: ({ generation }) => {
+        resultGeneration = generation;
+      },
+    },
   );
+  if (resultGeneration === undefined) {
+    throw new Error(
+      "Backend tools/list completed without a connection generation.",
+    );
+  }
+  if (backend?.generation !== resultGeneration) {
+    if (staleRefreshesRemaining <= 0) {
+      throw new Error(
+        "Backend changed generation while tools/list was in flight; refusing to expose stale tool metadata.",
+      );
+    }
+    return filteredBackendTools(params, staleRefreshesRemaining - 1);
+  }
   const selected = new Set(
     selectAvailableToolProfileNames({
       profile: toolProfile,
@@ -262,6 +691,12 @@ async function filteredBackendTools(params?: Record<string, unknown>) {
     }),
   );
   allowedToolNames = selected;
+  readOnlyToolNames = new Set(
+    result.tools
+      .filter((tool) => tool.annotations?.readOnlyHint === true)
+      .map((tool) => tool.name),
+  );
+  toolMetadataGeneration = resultGeneration;
   return {
     ...result,
     tools: result.tools.filter((tool) => selected.has(tool.name)),
@@ -269,7 +704,7 @@ async function filteredBackendTools(params?: Record<string, unknown>) {
 }
 
 async function toolIsExposed(toolName: string): Promise<boolean> {
-  if (!allowedToolNames) {
+  if (!allowedToolNames || toolMetadataGeneration !== backend?.generation) {
     await filteredBackendTools();
   }
   return allowedToolNames?.has(toolName) ?? false;
@@ -277,10 +712,13 @@ async function toolIsExposed(toolName: string): Promise<boolean> {
 
 async function shutdown(signal: string) {
   console.error(`[${packageName}] proxy shutdown on ${signal}`);
+  const connections = new Set<BackendConnection>(retiredConnections);
+  if (backend) connections.add(backend);
   await Promise.allSettled([
     proxyServer.close(),
-    backend?.client.close() ?? Promise.resolve(),
-    backend?.transport.close() ?? Promise.resolve(),
+    ...[...connections].map((connection) =>
+      closeBackendConnection(connection, "shutdown"),
+    ),
   ]);
   process.exit(0);
 }
@@ -298,7 +736,7 @@ async function start() {
       process.env.MCP_EXTERNAL_ROOTS_FILE!,
     );
     const vault = new BackendVaultAdapter(
-      (name, args) =>
+      async (name, args) =>
         withBackendRetry(
           `external reference backend adapter: ${name}`,
           (client) =>
@@ -306,6 +744,7 @@ async function start() {
               { name, arguments: args },
               CompatibilityCallToolResultSchema,
             ),
+          { replayNetworkFailure: { toolName: name } },
         ),
       {
         backendEndpoint: backendUrl.toString(),
@@ -548,8 +987,11 @@ async function start() {
       )();
     }
 
-    return withBackendRetry("callTool", (client) =>
-      client.callTool(request.params, CompatibilityCallToolResultSchema),
+    return withBackendRetry(
+      "callTool",
+      (client) =>
+        client.callTool(request.params, CompatibilityCallToolResultSchema),
+      { replayNetworkFailure: { toolName: request.params.name } },
     );
   });
 

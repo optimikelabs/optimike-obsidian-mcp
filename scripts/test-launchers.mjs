@@ -7,6 +7,7 @@ import { createServer } from "node:net";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { ensureLocalBackendRunning } from "../dist/runtime/localBackend.js";
 
 async function unusedPort() {
   const server = createServer();
@@ -47,6 +48,23 @@ const vaultPath = path.join(sandbox, "vault");
 const cachePath = path.join(sandbox, "shared-cache.sqlite");
 const port = await unusedPort();
 await mkdir(vaultPath, { recursive: true });
+
+const absentBackendPort = await unusedPort();
+await assert.rejects(
+  ensureLocalBackendRunning({
+    serviceName: "optimike-launcher-no-spawn-test",
+    url: new URL(`http://127.0.0.1:${absentBackendPort}/healthz`),
+    command: process.execPath,
+    args: ["-e", "process.exit(97)"],
+    cwd: process.cwd(),
+    env: process.env,
+    startupTimeoutMs: 2_000,
+    healthcheckTimeoutMs: 250,
+    spawnIfUnavailable: false,
+  }),
+  /automatic startup is disabled/u,
+  "require-existing mode must fail closed without spawning a detached backend",
+);
 
 const output = [];
 const child = spawn(process.execPath, ["scripts/run-http.mjs"], {

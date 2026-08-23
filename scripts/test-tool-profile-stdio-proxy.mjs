@@ -119,6 +119,7 @@ try {
     assert.ok(!names.includes("smart_search"));
     assert.ok(!names.includes("smart-search"));
     assert.ok(!names.includes("external_read"));
+    assert.ok(!names.includes("operon_status"));
 
     const hidden = await standard.callTool({
       name: "external_read",
@@ -128,8 +129,45 @@ try {
     const hiddenText = hidden.content.map((item) => item.text ?? "").join("\n");
     assert.match(hiddenText, /tool_not_exposed/);
     assert.match(hiddenText, /standard/);
+
+    const hiddenOperon = await standard.callTool({
+      name: "operon_status",
+      arguments: {},
+    });
+    assert.equal(hiddenOperon.isError, true);
+    const hiddenOperonText = hiddenOperon.content
+      .map((item) => item.text ?? "")
+      .join("\n");
+    assert.match(hiddenOperonText, /tool_not_exposed/);
+    assert.match(hiddenOperonText, /standard/);
   } finally {
     await standard.close().catch(() => undefined);
+  }
+
+  const tasks = await openProxy(vault, port, "tasks");
+  try {
+    const result = await tasks.listTools();
+    const names = result.tools.map((tool) => tool.name);
+    assert.equal(names.length, 14);
+    assert.ok(names.includes("operon_status"));
+    assert.ok(names.includes("operon_get_configuration"));
+    assert.ok(names.includes("operon_list_tasks"));
+    assert.ok(!names.includes("obsidian_update_note"));
+
+    const status = await tasks.callTool({
+      name: "operon_status",
+      arguments: {},
+    });
+    const statusText = status.content
+      .map((item) => item.text ?? "")
+      .join("\n");
+    assert.match(
+      statusText,
+      /operon-cache|unavailable|headless|stale/u,
+      "the tasks profile must expose a structured non-live Operon status rather than hiding the tool",
+    );
+  } finally {
+    await tasks.close().catch(() => undefined);
   }
 
   const full = await openProxy(vault, port, "full");
@@ -146,7 +184,7 @@ try {
   }
 
   console.log(
-    "PASS: stdio proxy defaults to standard, explicit profiles remain per-client, and the shared backend remains full",
+    "PASS: stdio proxy defaults to standard, tasks exposes structured Operon status in non-live mode, explicit profiles remain per-client, and the shared backend remains full",
   );
 } finally {
   if (backend.exitCode === null) backend.kill("SIGTERM");

@@ -85,6 +85,22 @@ jobs:
       - run: npm ci --silent
       - run: npm run test:http-backpressure
 
+  stdio-proxy-reliability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --silent
+      - run: npm run test:stdio-proxy-reliability
+
   http-observability:
     strategy:
       fail-fast: false

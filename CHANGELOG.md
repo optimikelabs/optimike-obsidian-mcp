@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-08-23
+
+### Fixed
+
+- The stdio proxy no longer treats an HTTP application outcome such as
+  backpressure `503` or an ordinary `404` as a broken shared transport. One
+  rejected call therefore cannot close admitted sibling calls.
+- Backend session rotation is now single-flight and generation-aware. Retired
+  generations drain for a bounded interval, stale tool annotations cannot
+  overwrite the active generation, and shutdown closes every tracked client.
+- Network retry is limited to one call whose backend annotation proves
+  `readOnlyHint: true` on both the exact failed generation and the exact
+  replacement generation. Mutations are never replayed after an ambiguous
+  network failure and return `backend_outcome_unknown` for explicit
+  reconciliation.
+
+### Added
+
+- Deterministic Windows/Linux CI coverage for `8` admitted calls plus `2`
+  admission failures, ordinary application `404`, concurrent session
+  invalidation, stale tool metadata, bounded drain, one read-only replay and
+  mutation non-replay.
+- A redacted live stdio backpressure canary and profile diagnostics that
+  distinguish Operon hidden by `standard` from an unavailable Desktop Bridge.
+- The live canary requires an already tracked backend, validates the exact
+  admission payload and fails closed instead of auto-spawning an unowned
+  detached process.
+
 ## [3.0.0] - 2026-08-18
 
 ### Removed
