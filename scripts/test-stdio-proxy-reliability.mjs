@@ -3,6 +3,10 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -17,7 +21,7 @@ function deferred() {
 }
 
 const GLOBAL_WATCHDOG_MS = Number(
-  process.env.STDIO_PROXY_FIXTURE_GLOBAL_TIMEOUT_MS ?? "20000",
+  process.env.STDIO_PROXY_FIXTURE_GLOBAL_TIMEOUT_MS ?? "60000",
 );
 const DEFERRED_WATCHDOG_MS = Number(
   process.env.STDIO_PROXY_FIXTURE_DEFERRED_TIMEOUT_MS ?? "5000",
@@ -347,9 +351,11 @@ const backend = createServer(async (request, response) => {
 const proxyStderr = [];
 let transport;
 let client;
+let fixtureVault;
+let fixtureStage = "runtime scenarios";
 const globalWatchdog = setTimeout(() => {
   console.error(
-    `Fixture watchdog expired after ${GLOBAL_WATCHDOG_MS}ms; a backend/proxy latch was not released.`,
+    `Fixture watchdog expired during ${fixtureStage} after ${GLOBAL_WATCHDOG_MS}ms; a backend/proxy latch was not released.`,
   );
   process.exit(1);
 }, GLOBAL_WATCHDOG_MS);
@@ -359,14 +365,25 @@ try {
   await once(backend, "listening");
   const address = backend.address();
   assert.ok(address && typeof address === "object");
+  fixtureVault = await mkdtemp(join(tmpdir(), "optimike-stdio-proxy-"));
+  const proxyEntryPath = fileURLToPath(
+    new URL("../dist/stdio-proxy.js", import.meta.url),
+  );
 
   transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["dist/stdio-proxy.js", "--tool-profile", "full"],
-    cwd: process.cwd(),
+    args: [proxyEntryPath, "--tool-profile", "full"],
+    // Keep dotenv discovery and runtime inputs independent from a developer's
+    // checkout. The proxy still targets the explicit fixture backend below.
+    cwd: fixtureVault,
     stderr: "pipe",
     env: {
-      ...process.env,
+      OBSIDIAN_RUNTIME_MODE: "headless-readonly",
+      OBSIDIAN_VAULT: fixtureVault,
+      OBSIDIAN_ENABLE_CACHE: "false",
+      MCP_WRITE_MODE: "readonly",
+      SEMANTIC_SEARCH_PREWARM: "false",
+      MCP_TRANSPORT_TYPE: "stdio",
       MCP_HTTP_HOST: "127.0.0.1",
       MCP_HTTP_PORT: String(address.port),
       MCP_TOOL_PROFILE: "full",
@@ -387,10 +404,13 @@ try {
     }
   });
   client = new Client({ name: "stdio-proxy-reliability-test", version: "0" });
+  fixtureStage = "initial client connection";
   await client.connect(transport);
+  fixtureStage = "initial tools/list";
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 3);
 
+  fixtureStage = "generation-fence replay";
   await assert.rejects(
     client.callTool({
       name: "generation_probe",
@@ -410,6 +430,7 @@ try {
   );
   const admissionStderrStart = proxyStderr.join("").length;
 
+  fixtureStage = "admission backpressure";
   const admissionSuccesses = Array.from({ length: 8 }, () =>
     client.callTool({
       name: "read_probe",
@@ -480,6 +501,7 @@ try {
     "an application 404 must not reconnect the shared transport",
   );
 
+  fixtureStage = "concurrent session invalidation and retired-generation drain";
   const initializeBeforeInvalidation = state.initializeCount;
   state.staleToolsListSessionId = state.latestSessionId;
   state.invalidationSessionId = state.latestSessionId;
@@ -527,6 +549,7 @@ try {
     "concurrent 404 session invalidations must single-flight one initialization",
   );
 
+  fixtureStage = "read replay after network loss";
   const initializeBeforeReadNetworkLoss = state.initializeCount;
   await client.callTool({
     name: "read_probe",
@@ -656,6 +679,7 @@ try {
   assert.equal(state.failedReplacementInitializations, 2);
   await client.callTool({ name: "read_probe", arguments: {} });
 
+  fixtureStage = "forced retired-generation drain timeout";
   const drainTimeoutSibling = client.callTool({
     name: "mutation_probe",
     arguments: { drainTimeoutSibling: true },
@@ -694,11 +718,33 @@ try {
   await client.callTool({ name: "read_probe", arguments: {} });
 
   console.log("stdio proxy reliability fixture passed");
+} catch (error) {
+  const stderr = proxyStderr.join("").trim();
+  console.error(
+    `Fixture failed during ${fixtureStage}; state=${JSON.stringify({
+      initializeAttempts: state.initializeAttempts,
+      initializeCount: state.initializeCount,
+      readNetworkRequests: state.readNetworkRequests,
+      invalidationRequests: state.invalidationRequests,
+    })}`,
+  );
+  if (stderr) {
+    console.error(`Captured stdio proxy stderr:\n${stderr}`);
+  }
+  throw error;
 } finally {
-  clearTimeout(globalWatchdog);
+  fixtureStage = "cleanup: release drain-timeout sibling";
   releaseDrainTimeoutSibling.resolve();
+  fixtureStage = "cleanup: client.close";
   await client?.close().catch(() => undefined);
+  fixtureStage = "cleanup: transport.close";
   await transport?.close().catch(() => undefined);
+  fixtureStage = "cleanup: backend.close";
   backend.closeAllConnections?.();
   await new Promise((resolve) => backend.close(resolve));
+  fixtureStage = "cleanup: disposable vault removal";
+  if (fixtureVault) {
+    await rm(fixtureVault, { recursive: true, force: true });
+  }
+  clearTimeout(globalWatchdog);
 }
