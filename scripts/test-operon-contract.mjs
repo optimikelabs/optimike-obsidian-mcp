@@ -61,6 +61,29 @@ assert.deepEqual(
   validNativeProof,
   "a bounded native Operon mutation proof must survive MCP validation intact",
 );
+for (const mutationKind of [
+  "task.adopt",
+  "task.create",
+  "task.update",
+  "task.transition",
+  "task.relationship",
+  "task.recurrence",
+  "task.convert",
+  "task.inline-relocate",
+]) {
+  assert.equal(
+    OperonNativeMutationProofSchema.safeParse({
+      ...validNativeProof,
+      receipt: { ...validNativeProof.receipt, mutationKind },
+      postflight: {
+        status: "receipt-replay",
+        observedAt: "2026-08-24T08:00:02.000Z",
+      },
+    }).success,
+    true,
+    `native receipt proof must admit ${mutationKind}`,
+  );
+}
 assert.equal(
   OperonNativeMutationProofSchema.safeParse({
     ...validNativeProof,

@@ -1133,7 +1133,16 @@ const OperonNativeReceiptSchema = z
   .object({
     contractVersion: z.literal(1),
     planDigest: OperonPlanDigestSchema,
-    mutationKind: z.enum(["task.adopt", "task.create", "task.update"]),
+    mutationKind: z.enum([
+      "task.adopt",
+      "task.create",
+      "task.update",
+      "task.transition",
+      "task.relationship",
+      "task.recurrence",
+      "task.convert",
+      "task.inline-relocate",
+    ]),
     targetDigest: OperonPlanDigestSchema,
     terminalOutcome: z.enum(["applied", "already-applied"]),
     effectiveAt: z.string().datetime({ offset: true }),
@@ -1149,7 +1158,12 @@ const OperonNativePostflightSchema = z.discriminatedUnion("status", [
       observedAt: z.string().datetime({ offset: true }).optional(),
     })
     .strict(),
-  z.object({ status: z.literal("receipt-replay") }).strict(),
+  z
+    .object({
+      status: z.literal("receipt-replay"),
+      observedAt: z.string().datetime({ offset: true }).optional(),
+    })
+    .strict(),
 ]);
 
 export const OperonNativeMutationProofSchema = z
