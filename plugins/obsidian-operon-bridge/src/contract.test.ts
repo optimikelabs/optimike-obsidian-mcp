@@ -208,6 +208,64 @@ test("continuous snapshot churn fails not-ready before native dispatch", async (
   assert.equal(failed.payload.mutationMayHaveApplied, false);
 });
 
+test("lookup and revision validation complete durable mutation reservations", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executeExistingMutation = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+
+  for (const scenario of ["missing-task", "missing-revision"] as const) {
+    let terminal:
+      | {
+          idempotencyKey: string;
+          signature: string;
+          payload: Record<string, unknown>;
+          httpStatus: number;
+        }
+      | undefined;
+    const task =
+      scenario === "missing-task"
+        ? null
+        : { operonId: "task-1", revision: "revision-1" };
+    const fake = {
+      mutationPreflight: async () => ({ kind: "continue" }),
+      requireMutationRuntime: () => ({}),
+      oneTask: async () => ({ task }),
+      mutationOperationId: () => "fallback-operation",
+      mutationReservations: {
+        get: () => ({ operationId: "reserved-operation" }),
+      },
+      cacheMutation: (
+        idempotencyKey: string,
+        signature: string,
+        payload: Record<string, unknown>,
+        httpStatus: number,
+      ) => {
+        terminal = { idempotencyKey, signature, payload, httpStatus };
+      },
+    };
+    const result = await executeExistingMutation.call(
+      fake,
+      "update",
+      "task-1",
+      {
+        idempotencyKey: `key-${scenario}`,
+        ...(scenario === "missing-task"
+          ? { expectedRevision: "revision-1" }
+          : {}),
+      },
+      { description: "updated" },
+      async () => ({ ok: true }),
+    );
+
+    assert.equal(result.httpStatus, scenario === "missing-task" ? 404 : 400);
+    assert.equal(terminal?.httpStatus, result.httpStatus);
+    assert.equal(terminal?.idempotencyKey, `key-${scenario}`);
+    assert.equal(terminal?.payload.operationId, "reserved-operation");
+    assert.equal(terminal?.payload.mutationMayHaveApplied, false);
+    assert.equal(terminal?.payload.status, "rejected");
+  }
+});
+
 test("generic REST mutations expose only the adapter's bounded native proof", () => {
   const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
   const executeStart = mainSource.indexOf(

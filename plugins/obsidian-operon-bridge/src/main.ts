@@ -1386,8 +1386,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     idempotencyKey: string,
     signature: string,
     payload: Record<string, unknown>,
+    httpStatusOverride?: number,
   ): void {
-    const httpStatus = this.mutationHttpStatus(payload);
+    const httpStatus = httpStatusOverride ?? this.mutationHttpStatus(payload);
     this.mutationResults.set(idempotencyKey, { signature, payload, httpStatus });
     this.mutationResultTimes.set(idempotencyKey, new Date().toISOString());
     this.mutationReservations.complete(idempotencyKey, signature, payload);
@@ -2694,23 +2695,49 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const runtime = this.requireMutationRuntime(capability);
     const beforeRead = await this.oneTask(operonId, true);
     if (!beforeRead.task) {
-      return {
-        httpStatus: 404,
-        payload: errorPayload(
+      const payload = {
+        ...errorPayload(
           new Error(`Operon task not found: ${operonId}`),
           "not_found",
         ),
+        operationId:
+          this.mutationReservations.get(idempotencyKey)?.operationId ??
+          this.mutationOperationId(),
+        idempotencyKey,
+        status: "rejected",
+        before: null,
+        requested,
+        after: null,
+        retryable: false,
+        mutationMayHaveApplied: false,
+        source: "operon-live",
+        stale: false,
       };
+      this.cacheMutation(idempotencyKey, signature, payload, 404);
+      return { httpStatus: 404, payload };
     }
     const expectedRevision = String(body.expectedRevision ?? "").trim();
     if (!expectedRevision) {
-      return {
-        httpStatus: 400,
-        payload: errorPayload(
+      const payload = {
+        ...errorPayload(
           new Error("expectedRevision is required."),
           "validation_error",
         ),
+        operationId:
+          this.mutationReservations.get(idempotencyKey)?.operationId ??
+          this.mutationOperationId(),
+        idempotencyKey,
+        status: "rejected",
+        before: beforeRead.task,
+        requested,
+        after: beforeRead.task,
+        retryable: false,
+        mutationMayHaveApplied: false,
+        source: "operon-live",
+        stale: false,
       };
+      this.cacheMutation(idempotencyKey, signature, payload, 400);
+      return { httpStatus: 400, payload };
     }
     const operationId = this.mutationOperationId();
     if (expectedRevision !== beforeRead.task.revision) {

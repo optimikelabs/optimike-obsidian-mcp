@@ -203,6 +203,16 @@ assert.doesNotMatch(
   /POST \/tasks\/:operonId\/periodic-scheduling/u,
   "Operon REST documentation must not revive the obsolete periodic-scheduling route",
 );
+assert.match(operonRestContract, /POST \/mutations\/recover/u);
+assert.match(operonRestContract, /POST \/task-workflows\/recover/u);
+assert.match(
+  operonRestContract,
+  /"recoveryRef": "twr1_[\s\S]*"kind": "adopt"[\s\S]*"planDigest"/u,
+);
+assert.doesNotMatch(
+  operonRestContract,
+  /"recoveryRef": "twr1_[\s\S]{0,120}"recovery":/u,
+);
 const operonAudit = await text("docs/operon-cli-audit.md");
 const operonAuditFr = await text("docs/operon-cli-audit.fr.md");
 for (const content of [operonContract, operonContractFr]) {

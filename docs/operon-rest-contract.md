@@ -123,36 +123,35 @@ against the path allowlist, so it must not return an unscoped inventory.
 ```json
 {
   "idempotencyKey": "recovery-001",
-  "recoveryRef": "dvr1_...",
-  "recovery": {
-    "kind": "developer-api"
-  }
+  "recoveryRef": "dvr1_..."
 }
 ```
 
-For a Task Workflow recovery, the public request instead uses the nested union:
+This route accepts Developer API V1 recovery references only.
+
+### `POST /task-workflows/recover`
+
+Task Workflow recovery uses its dedicated Bridge route and flat wire shape:
 
 ```json
 {
   "idempotencyKey": "recovery-002",
   "recoveryRef": "twr1_...",
-  "recovery": {
-    "kind": "adopt",
-    "planDigest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-  }
+  "kind": "adopt",
+  "planDigest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }
 ```
 
-`recovery.kind` is mandatory and prevents the Bridge from guessing which native
-recovery surface owns the reference. `developer-api` uses Developer API V1
-recovery and its object must contain only `kind`. The three Task Workflow kinds
+`kind` is mandatory on the Task Workflow route and prevents the Bridge from
+guessing which workflow owns the reference. The three Task Workflow kinds
 (`adopt`, `periodic-create`, and `periodic-update`) accept optional `planDigest`.
 It must be an exact lowercase SHA-256 digest and binds the request to the sealed
 receipt/replay. Without it, the Bridge dispatches only if
 the same digest can be proven from `pendingRecoveries`; it does not guess or
-derive a digest from `recoveryRef`. Top-level `kind` and `planDigest` fields are
-not part of the public wire contract; that flat representation exists only as
-an internal candidate/legacy migration shape. When
+derive a digest from `recoveryRef`. The MCP tool exposes a nested `recovery`
+union, validates it, then routes `developer-api` to `/mutations/recover` and the
+three workflow kinds to `/task-workflows/recover`; direct Bridge clients must use
+the REST shapes above. When
 `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` is non-empty, apply also fails closed
 before native dispatch because the recovery reference has no canonical route
 that can be proved inside the allowlist. Recovery never accepts a new mutation
