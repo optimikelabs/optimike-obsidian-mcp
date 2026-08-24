@@ -1582,6 +1582,14 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
             },
             checkbox: "open",
             priority: { id: "priority-a", label: "A" },
+            writableFields: [
+              {
+                canonicalKey: "tags",
+                valueType: "list",
+                present: true,
+                value: ["work", "focus"],
+              },
+            ],
           },
           {
             identity: { operonId: "week123" },
@@ -1594,6 +1602,14 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
             },
             checkbox: "open",
             priority: { id: "priority-b", label: "B" },
+            writableFields: [
+              {
+                canonicalKey: "tags",
+                valueType: "list",
+                present: true,
+                value: ["work", "focus"],
+              },
+            ],
           },
         );
       }
@@ -2082,11 +2098,16 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
       periodicKind: "daily",
       routeDate: "2026-08-24",
       priorityId: "priority-a",
+      tags: ["work", "#work", " #focus ", "#focus"],
     },
     false,
   );
   assert.equal(routedPeriodicCreate.code, "applied");
   assert.equal(routedPeriodicCreate.operonId, "day1234");
+  assert.deepEqual(
+    (previewInputs.at(-1)?.items as Record<string, unknown>[])[0]?.tags,
+    ["work", "focus"],
+  );
   assert.equal(
     "secretBody" in (routedPeriodicCreate.nativeProof?.receipt ?? {}),
     false,
@@ -2133,6 +2154,74 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
     workflowRecoveryRefs.adopt,
   );
   assert.equal(recovered.code, "already-applied");
+
+  const alreadyAppliedResult = (
+    kind: "adopt" | "periodic-create",
+  ): Record<string, unknown> => ({
+    contractVersion: 1,
+    kind: "task-workflow-developer-mutation-execution-result",
+    requestId: `replay-${kind}`,
+    status: "already-applied",
+    mutationMayHaveApplied: true,
+    retryAllowed: false,
+    receipt: {
+      contractVersion: 1,
+      planDigest: workflowDigests[kind],
+      mutationKind: workflowMutationKinds[kind],
+      targetDigest: "d".repeat(64),
+      terminalOutcome: "already-applied",
+      effectiveAt: "2026-08-23T00:00:01.000Z",
+      completedAt: "2026-08-23T00:00:02.000Z",
+      expiresAt: "2026-08-23T00:05:00.000Z",
+    },
+    postflight: { status: "receipt-replay" },
+    groupResults: [],
+  });
+  nextWorkflowResult = alreadyAppliedResult("adopt");
+  const replayedAdoption = await adapter.executeTaskWorkflow(
+    "adopt",
+    {
+      targetPath: "Inbox.md",
+      line: 5,
+      expectedLine: "- [ ] Adopt me",
+    },
+    false,
+  );
+  assert.equal(replayedAdoption.code, "already-applied");
+  assert.equal(replayedAdoption.operonId, "adp1234");
+  nextWorkflowResult = alreadyAppliedResult("periodic-create");
+  const replayedPeriodicCreate = await adapter.executeTaskWorkflow(
+    "periodic-create",
+    {
+      description: "Same periodic task",
+      periodicKind: "daily",
+      routeDate: "2026-08-24",
+      priorityId: "priority-a",
+    },
+    false,
+  );
+  assert.equal(replayedPeriodicCreate.code, "already-applied");
+  assert.equal(replayedPeriodicCreate.operonId, "day1234");
+
+  const restartedAdapter = new OperonDeveloperApiRuntimeAdapter(
+    consumer,
+    operon,
+  );
+  assert.equal(await restartedAdapter.refresh(true), true);
+  nextWorkflowResult = alreadyAppliedResult("periodic-create");
+  const replayedPeriodicCreateAfterRestart =
+    await restartedAdapter.executeTaskWorkflow(
+      "periodic-create",
+      {
+        description: "Same periodic task",
+        periodicKind: "daily",
+        routeDate: "2026-08-24",
+        priorityId: "priority-a",
+      },
+      false,
+    );
+  assert.equal(replayedPeriodicCreateAfterRestart.code, "already-applied");
+  assert.equal(replayedPeriodicCreateAfterRestart.operonId, "day1234");
 });
 
 test("a rejected Operon 3.5 workflow grant does not revoke another workflow or core reads", async () => {

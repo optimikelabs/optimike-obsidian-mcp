@@ -1179,6 +1179,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     TaskWorkflowDeveloperApiV1
   >();
   private readonly taskWorkflowRecoveryDigests = new Map<string, string>();
+  private readonly taskWorkflowIdentityByPlanDigest = new Map<string, string>();
   private grantedCapabilities: ReadonlySet<string> | null = null;
   private refreshInFlight: Promise<boolean> | null = null;
   private contractState: "unverified" | "valid" | "invalid" = "unverified";
@@ -2366,9 +2367,18 @@ export class OperonDeveloperApiRuntimeAdapter {
       const lineNumber = Number(requested.line) - 1;
       try {
         const live = await this.reloadLiveTasks();
+        const replayedIdentity =
+          execution.status === "already-applied"
+            ? this.taskWorkflowIdentityByPlanDigest.get(
+                `${kind}:${preview.plan.planDigest}`,
+              )
+            : undefined;
         const adopted = live.rawTasks.filter(
           (task) =>
-            !beforeIds.has(task.identity.operonId) &&
+            (replayedIdentity
+              ? task.identity.operonId === replayedIdentity
+              : execution.status === "already-applied" ||
+                !beforeIds.has(task.identity.operonId)) &&
             task.representation === "inline" &&
             task.locator.representation === "inline" &&
             task.locator.filePath === targetPath &&
@@ -2379,6 +2389,11 @@ export class OperonDeveloperApiRuntimeAdapter {
             "no unique adopted task is visible at the sealed source line",
           );
         }
+        this.rememberTaskWorkflowIdentity(
+          kind,
+          preview.plan.planDigest,
+          adopted[0]!.identity.operonId,
+        );
         return { ...terminal, operonId: adopted[0]!.identity.operonId };
       } catch (error) {
         return this.mutationFailure(
@@ -2398,20 +2413,34 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (kind === "periodic-create") {
       try {
         const live = await this.reloadLiveTasks();
-        const description = String(requested.description ?? "").trim();
         const provenResourceKeys = this.taskWorkflowResourceKeys(execution);
+        const replayedIdentity =
+          execution.status === "already-applied"
+            ? this.taskWorkflowIdentityByPlanDigest.get(
+                `${kind}:${preview.plan.planDigest}`,
+              )
+            : undefined;
         const created = live.rawTasks.filter(
           (task) =>
-            !beforeIds.has(task.identity.operonId) &&
             task.representation === "inline" &&
-            task.description === description &&
-            provenResourceKeys.has(task.locator.filePath),
+            this.periodicCreatedTaskMatchesRequest(task, requested) &&
+            (execution.status === "already-applied"
+              ? replayedIdentity
+                ? task.identity.operonId === replayedIdentity
+                : beforeIds.has(task.identity.operonId)
+              : !beforeIds.has(task.identity.operonId) &&
+                provenResourceKeys.has(task.locator.filePath)),
         );
         if (created.length !== 1) {
           throw new Error(
             "no unique periodic task is linked to the committed native resource evidence",
           );
         }
+        this.rememberTaskWorkflowIdentity(
+          kind,
+          preview.plan.planDigest,
+          created[0]!.identity.operonId,
+        );
         return { ...terminal, operonId: created[0]!.identity.operonId };
       } catch (error) {
         return this.mutationFailure(
@@ -3131,6 +3160,67 @@ export class OperonDeveloperApiRuntimeAdapter {
       }
     }
     return keys;
+  }
+
+  private rememberTaskWorkflowIdentity(
+    kind: DeveloperApiTaskWorkflowKind,
+    planDigest: string,
+    operonId: string,
+  ): void {
+    const key = `${kind}:${planDigest}`;
+    this.taskWorkflowIdentityByPlanDigest.delete(key);
+    this.taskWorkflowIdentityByPlanDigest.set(key, operonId);
+    if (this.taskWorkflowIdentityByPlanDigest.size <= 512) return;
+    const oldest = this.taskWorkflowIdentityByPlanDigest.keys().next().value;
+    if (typeof oldest === "string")
+      this.taskWorkflowIdentityByPlanDigest.delete(oldest);
+  }
+
+  private periodicCreatedTaskMatchesRequest(
+    task: DeveloperApiTask,
+    requested: Record<string, unknown>,
+  ): boolean {
+    if (task.description !== String(requested.description ?? "").trim())
+      return false;
+    const fields = isRecord(requested.fields) ? requested.fields : {};
+    const requestedPriorityId =
+      String(requested.priorityId ?? "").trim() ||
+      (Object.prototype.hasOwnProperty.call(fields, "priority")
+        ? this.resolvePriorityId(fields.priority)
+        : null);
+    if (requestedPriorityId && task.priority?.id !== requestedPriorityId)
+      return false;
+    const requestedStatusId =
+      String(requested.statusId ?? "").trim() ||
+      (Object.prototype.hasOwnProperty.call(fields, "status")
+        ? this.resolveStatusId(fields.status)
+        : null);
+    if (requestedStatusId && task.workflow?.status.id !== requestedStatusId)
+      return false;
+    const runtime = toRuntimeTask(task);
+    if (Array.isArray(requested.tags)) {
+      const normalizeTags = (values: readonly unknown[]) =>
+        [
+          ...new Set(
+            values
+              .map(String)
+              .map((tag) => tag.trim().replace(/^#/u, "").trim())
+              .filter(Boolean),
+          ),
+        ].sort();
+      if (
+        JSON.stringify(normalizeTags(runtime.tags)) !==
+        JSON.stringify(normalizeTags(requested.tags))
+      ) return false;
+    }
+    for (const [field, value] of Object.entries(fields)) {
+      if (field === "priority" || field === "status") continue;
+      const canonical = this.canonicalField(field);
+      const expected = fieldValue(value);
+      const actual = runtime.fieldValues[canonical];
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) return false;
+    }
+    return true;
   }
 
   private taskWorkflowResultViolation(
@@ -4046,10 +4136,14 @@ export class OperonDeveloperApiRuntimeAdapter {
       });
     }
     if (Array.isArray(requested.tags)) {
-      const tags = requested.tags
-        .map(String)
-        .map((tag) => tag.replace(/^#/u, "").trim())
-        .filter(Boolean);
+      const tags = [
+        ...new Set(
+          requested.tags
+            .map(String)
+            .map((tag) => tag.trim().replace(/^#/u, "").trim())
+            .filter(Boolean),
+        ),
+      ];
       return {
         capability: "tasks.create.preview",
         mutationKind: "task.create",
