@@ -814,6 +814,24 @@ const createPeriodic = OperonCreatePeriodicTaskSchema.parse({
 assert.equal(createPeriodic.dryRun, true);
 assert.equal(createPeriodic.periodic.periodicKind, "daily");
 assert.deepEqual(createPeriodic.periodic.tags, ["work", "focus"]);
+for (const periodic of [
+  { fields: { parentTask: "abc1234" } },
+  { statusId: "planned", fields: { status: "other" } },
+  { priorityId: "priority-a", fields: { priority: "priority-b" } },
+]) {
+  assert.equal(
+    OperonCreatePeriodicTaskSchema.safeParse({
+      idempotencyKey: `contract-periodic-exclusive-${JSON.stringify(periodic)}`,
+      periodic: {
+        description: "Daily review",
+        periodicKind: "daily",
+        ...periodic,
+      },
+    }).success,
+    false,
+    "periodic creation must preserve Operon-owned parentage and unambiguous selectors",
+  );
+}
 assert.equal(
   OperonCreatePeriodicTaskSchema.safeParse({
     idempotencyKey: "contract-periodic-invalid-route-date",

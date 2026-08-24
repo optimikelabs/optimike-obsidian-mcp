@@ -824,6 +824,28 @@ export const OperonCreatePeriodicTaskSchema = MutationControlSchema.extend({
     .superRefine((value, context) => {
       validateKnownMutationFieldTypes(value.fields, context);
       validateTaskGallery(value.fields, 256, context);
+      if (value.fields?.parentTask !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["fields", "parentTask"],
+          message:
+            "Periodic-note creation owns parentage; parentTask is not accepted.",
+        });
+      }
+      if (value.statusId && value.fields?.status !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["statusId"],
+          message: "Provide at most one of fields.status or statusId.",
+        });
+      }
+      if (value.priorityId && value.fields?.priority !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["priorityId"],
+          message: "Provide at most one of fields.priority or priorityId.",
+        });
+      }
     })
     .transform((value) => {
       const fields = normalizeTaskGalleryFields(value.fields);

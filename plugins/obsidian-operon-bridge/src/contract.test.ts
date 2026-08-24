@@ -295,6 +295,39 @@ test("periodic update validates lookup and revision before durable reservation",
   }
 });
 
+test("legacy adoption validates the source file before durable reservation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executeAdoptMutation = BridgePlugin.prototype.executeAdoptMutation as Function;
+  let reservationCalls = 0;
+  const fake = {
+    mutationResults: { get: () => undefined },
+    mutationPreflight: async () => {
+      reservationCalls += 1;
+      return { kind: "continue" };
+    },
+    mutationOperationId: () => "adoption-operation",
+    requireRuntime: () => ({}),
+    indexState: async () => undefined,
+    requireMutationRuntime: () => ({ developerApi: null, api: {} }),
+    app: {
+      vault: {
+        getAbstractFileByPath: () => null,
+      },
+    },
+  };
+  const result = await executeAdoptMutation.call(fake, {
+    idempotencyKey: "legacy-adoption-missing-file",
+    adoption: {
+      targetPath: "Missing.md",
+      line: 1,
+      expectedLine: "- [ ] Missing task",
+    },
+  });
+
+  assert.equal(result.httpStatus, 404);
+  assert.equal(reservationCalls, 0);
+});
+
 test("task-workflow replay identities survive plugin-data persistence", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
   const restore = BridgePlugin.prototype.restoreTaskWorkflowIdentities as Function;

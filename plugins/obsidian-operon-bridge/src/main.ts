@@ -1924,11 +1924,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const targetPath = requested.targetPath;
     const line = Number(requested.line);
     const expectedLine = String(requested.expectedLine ?? "");
-    const preflight = await this.mutationPreflight(
+    const validation = resolveMutationPreflight({
+      cached: this.mutationResults.get(idempotencyKey),
       idempotencyKey,
       signature,
       requested,
-      () =>
+      validate: () =>
         !isCanonicalVaultMarkdownPath(targetPath) ||
         !Number.isInteger(line) ||
         line < 1 ||
@@ -1936,6 +1937,39 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         /[\r\n]/u.test(expectedLine)
           ? "adoption requires targetPath, a positive one-based line, and one exact expectedLine."
           : null,
+      operationId: () => this.mutationOperationId(),
+    });
+    if (validation.kind === "response") return validation.response;
+    if (validation.kind === "validation-error") {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(
+          new Error(validation.message),
+          "validation_error",
+        ),
+      };
+    }
+    const canonicalTargetPath = targetPath as string;
+    const candidateRuntime = this.requireRuntime();
+    await this.indexState(candidateRuntime);
+    const runtime = this.requireMutationRuntime("adopt");
+    const legacyFile = runtime.developerApi
+      ? null
+      : this.app.vault.getAbstractFileByPath(canonicalTargetPath);
+    if (!runtime.developerApi && !(legacyFile instanceof TFile)) {
+      return {
+        httpStatus: 404,
+        payload: errorPayload(
+          new Error(`Markdown source file not found: ${canonicalTargetPath}`),
+          "not_found",
+        ),
+      };
+    }
+    const preflight = await this.mutationPreflight(
+      idempotencyKey,
+      signature,
+      requested,
+      () => null,
     );
     if (preflight.kind === "response") return preflight.response;
     if (preflight.kind === "validation-error") {
@@ -1944,10 +1978,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         payload: errorPayload(new Error(preflight.message), "validation_error"),
       };
     }
-    const canonicalTargetPath = targetPath as string;
-    const candidateRuntime = this.requireRuntime();
-    await this.indexState(candidateRuntime);
-    const runtime = this.requireMutationRuntime("adopt");
     if (runtime.developerApi) {
       const operationId = this.mutationOperationId();
       const native = await runtime.developerApi.executeTaskWorkflow(
@@ -2061,17 +2091,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       this.cacheMutation(idempotencyKey, signature, payload);
       return { httpStatus: after && locationMatches ? 200 : 500, payload };
     }
-    const file = this.app.vault.getAbstractFileByPath(canonicalTargetPath);
-    if (!(file instanceof TFile)) {
-      return {
-        httpStatus: 404,
-        payload: errorPayload(
-          new Error(`Markdown source file not found: ${canonicalTargetPath}`),
-          "not_found",
-        ),
-      };
-    }
-    const content = await this.app.vault.cachedRead(file);
+    const content = await this.app.vault.cachedRead(legacyFile as TFile);
     const currentLine = content.split("\n")[line - 1];
     const normalizedCurrentLine = currentLine?.endsWith("\r")
       ? currentLine.slice(0, -1)
