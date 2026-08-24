@@ -43,6 +43,7 @@ import {
   type DeveloperApiMutationCapability,
   type DeveloperApiMutationResult,
   type DeveloperApiTaskWorkflowKind,
+  type TaskWorkflowIdentityStore,
 } from "./developer-api-adapter";
 
 const EXTENSION_ID = "optimike-operon-bridge";
@@ -53,6 +54,7 @@ const MOUNT_RETRY_MS = 500;
 const MUTATION_JOURNAL_VERSION = 1;
 const MUTATION_JOURNAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MUTATION_JOURNAL_LIMIT = 500;
+const TASK_WORKFLOW_IDENTITY_STORE_VERSION = 1;
 
 interface OptimikeOperonBridgeSettings {
   mutationsEnabled: boolean;
@@ -67,6 +69,12 @@ interface PersistedMutationJournalEntry {
   requested?: Record<string, unknown>;
   payload?: Record<string, unknown>;
   httpStatus?: number;
+}
+
+interface PersistedTaskWorkflowIdentity {
+  key: string;
+  operonId: string;
+  updatedAt: string;
 }
 
 const DEFAULT_BRIDGE_SETTINGS: OptimikeOperonBridgeSettings = {
@@ -379,6 +387,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private mutationResults = new Map<string, CachedMutation>();
   private mutationResultTimes = new Map<string, string>();
   private mutationReservations = new MutationReservationRegistry();
+  private taskWorkflowIdentities = new Map<
+    string,
+    { operonId: string; updatedAt: string }
+  >();
   private dataWriteChain: Promise<void> = Promise.resolve();
   private dataWriteFailed = false;
   private developerApiAdapter: OperonDeveloperApiRuntimeAdapter | null = null;
@@ -392,6 +404,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         : (stored as Partial<OptimikeOperonBridgeSettings> | null);
     this.settings = { ...DEFAULT_BRIDGE_SETTINGS, ...(storedSettings ?? {}) };
     this.restoreMutationJournal(stored?.mutationJournal);
+    this.restoreTaskWorkflowIdentities(stored?.taskWorkflowIdentities);
     this.addSettingTab(new OptimikeOperonBridgeSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
       this.tryMountRestExtension();
@@ -469,6 +482,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     this.developerApiAdapter = new OperonDeveloperApiRuntimeAdapter(
       this,
       plugin,
+      this.taskWorkflowIdentityStore(),
     );
     return this.developerApiAdapter;
   }
@@ -1358,6 +1372,71 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       .slice(-MUTATION_JOURNAL_LIMIT);
   }
 
+  private restoreTaskWorkflowIdentities(value: unknown): void {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const stored = value as Record<string, unknown>;
+    if (
+      stored.version !== TASK_WORKFLOW_IDENTITY_STORE_VERSION ||
+      !Array.isArray(stored.entries)
+    ) return;
+    const cutoff = Date.now() - MUTATION_JOURNAL_RETENTION_MS;
+    for (const candidate of stored.entries.slice(-MUTATION_JOURNAL_LIMIT)) {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+        continue;
+      const entry = candidate as unknown as PersistedTaskWorkflowIdentity;
+      const updatedAtMs = Date.parse(String(entry.updatedAt ?? ""));
+      if (
+        !/^(adopt|periodic-create|periodic-update):[0-9a-f]{64}$/u.test(
+          String(entry.key ?? ""),
+        ) ||
+        !/^[a-z0-9]{7}$/u.test(String(entry.operonId ?? "")) ||
+        !Number.isFinite(updatedAtMs) ||
+        updatedAtMs < cutoff
+      ) continue;
+      this.taskWorkflowIdentities.set(entry.key, {
+        operonId: entry.operonId,
+        updatedAt: entry.updatedAt,
+      });
+    }
+  }
+
+  private taskWorkflowIdentityEntries(): PersistedTaskWorkflowIdentity[] {
+    const cutoff = Date.now() - MUTATION_JOURNAL_RETENTION_MS;
+    return [...this.taskWorkflowIdentities.entries()]
+      .flatMap(([key, value]) =>
+        Date.parse(value.updatedAt) < cutoff
+          ? []
+          : [{ key, operonId: value.operonId, updatedAt: value.updatedAt }],
+      )
+      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+      .slice(-MUTATION_JOURNAL_LIMIT);
+  }
+
+  private taskWorkflowIdentityStore(): TaskWorkflowIdentityStore {
+    return {
+      get: (key) => this.taskWorkflowIdentities.get(key)?.operonId,
+      set: async (key, operonId) => {
+        this.taskWorkflowIdentities.delete(key);
+        this.taskWorkflowIdentities.set(key, {
+          operonId,
+          updatedAt: new Date().toISOString(),
+        });
+        while (this.taskWorkflowIdentities.size > MUTATION_JOURNAL_LIMIT) {
+          const oldest = this.taskWorkflowIdentities.keys().next().value;
+          if (typeof oldest !== "string") break;
+          this.taskWorkflowIdentities.delete(oldest);
+        }
+        this.queuePersistPluginData();
+        await this.dataWriteChain;
+        if (this.dataWriteFailed) {
+          throw new Error(
+            "The task-workflow identity receipt could not be persisted durably.",
+          );
+        }
+      },
+    };
+  }
+
   private async persistPluginData(): Promise<void> {
     await this.saveData({
       settings: this.settings,
@@ -1365,6 +1444,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         version: MUTATION_JOURNAL_VERSION,
         retentionDays: 30,
         entries: this.mutationJournalEntries(),
+      },
+      taskWorkflowIdentities: {
+        version: TASK_WORKFLOW_IDENTITY_STORE_VERSION,
+        retentionDays: 30,
+        entries: this.taskWorkflowIdentityEntries(),
       },
     });
   }
@@ -2198,17 +2282,25 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       dryRun: body.dryRun !== false,
       requested,
     });
-    const preflight = await this.mutationPreflight(
+    const expectedRevision = String(body.expectedRevision ?? "").trim();
+    const validation = resolveMutationPreflight({
+      cached: this.mutationResults.get(idempotencyKey),
       idempotencyKey,
       signature,
       requested,
-      () => mutationPathValidationError("update", requested),
-    );
-    if (preflight.kind === "response") return preflight.response;
-    if (preflight.kind === "validation-error") {
+      validate: () =>
+        mutationPathValidationError("update", requested) ??
+        (expectedRevision ? null : "expectedRevision is required."),
+      operationId: () => this.mutationOperationId(),
+    });
+    if (validation.kind === "response") return validation.response;
+    if (validation.kind === "validation-error") {
       return {
         httpStatus: 400,
-        payload: errorPayload(new Error(preflight.message), "validation_error"),
+        payload: errorPayload(
+          new Error(validation.message),
+          "validation_error",
+        ),
       };
     }
     const candidateRuntime = this.requireRuntime();
@@ -2224,12 +2316,18 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ),
       };
     }
-    const expectedRevision = String(body.expectedRevision ?? "").trim();
-    if (!expectedRevision) {
+    const preflight = await this.mutationPreflight(
+      idempotencyKey,
+      signature,
+      requested,
+      () => null,
+    );
+    if (preflight.kind === "response") return preflight.response;
+    if (preflight.kind === "validation-error") {
       return {
         httpStatus: 400,
         payload: errorPayload(
-          new Error("expectedRevision is required."),
+          new Error(preflight.message),
           "validation_error",
         ),
       };

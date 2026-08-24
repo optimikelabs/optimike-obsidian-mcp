@@ -110,6 +110,13 @@ For official Operon, the Bridge sends the exact preview plan to `apply`; it neve
 
 Bridge 0.8 persists its version-1 journal in local Obsidian plugin data before dispatch. It retains at most 500 entries and only entries updated during the last 30 days. On restart, a persisted `in-progress` reservation is projected to non-retryable `outcome-unknown` with `recoveryRequired: true`; callers must inspect pending recoveries and recover the same native plan. This is a bounded local replay/restart guarantee, not permanent storage: there is no promise after expiry, eviction, plugin-data loss/reset, failed persistence, or movement to another vault/device. If the reservation cannot be persisted before dispatch, no native mutation is sent.
 
+For adopted and periodic-created tasks, the Bridge also persists a bounded
+`workflow kind + planDigest -> operonId` receipt beside that journal. It uses
+the same 500-entry and 30-day boundary. A native `already-applied` replay must
+reload that exact identity and revalidate it against the live locator and
+requested stable fields; a missing, stale or mismatching identity fails closed
+instead of guessing among similar tasks.
+
 ### `GET /mutations/pending-recoveries`
 
 Returns the durable recovery references currently owned by this Bridge consumer. It is read-only and requires the official Developer API recovery surface.

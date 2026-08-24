@@ -254,6 +254,86 @@ test("lookup and revision validation happen before durable reservation", async (
   }
 });
 
+test("periodic update validates lookup and revision before durable reservation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executePeriodicUpdateMutation = BridgePlugin.prototype
+    .executePeriodicUpdateMutation as Function;
+
+  for (const scenario of ["missing-task", "missing-revision"] as const) {
+    let reservationCalls = 0;
+    let taskReads = 0;
+    const task =
+      scenario === "missing-task"
+        ? null
+        : { operonId: "task-1", revision: "revision-1" };
+    const fake = {
+      mutationResults: { get: () => undefined },
+      mutationPreflight: async () => {
+        reservationCalls += 1;
+        return { kind: "continue" };
+      },
+      mutationOperationId: () => "periodic-operation",
+      requireRuntime: () => ({}),
+      indexState: async () => undefined,
+      requireTaskWorkflowRuntime: () => ({}),
+      oneTask: async () => {
+        taskReads += 1;
+        return { task };
+      },
+    };
+    const result = await executePeriodicUpdateMutation.call(fake, "task-1", {
+      idempotencyKey: `periodic-${scenario}`,
+      ...(scenario === "missing-task"
+        ? { expectedRevision: "revision-1" }
+        : {}),
+      patch: { fields: { dateScheduled: "2026-08-25" } },
+    });
+
+    assert.equal(result.httpStatus, scenario === "missing-task" ? 404 : 400);
+    assert.equal(reservationCalls, 0);
+    assert.equal(taskReads, scenario === "missing-task" ? 1 : 0);
+  }
+});
+
+test("task-workflow replay identities survive plugin-data persistence", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreTaskWorkflowIdentities as Function;
+  const entries = BridgePlugin.prototype.taskWorkflowIdentityEntries as Function;
+  const identityStore = BridgePlugin.prototype.taskWorkflowIdentityStore as Function;
+  const persist = BridgePlugin.prototype.persistPluginData as Function;
+  const key = `periodic-create:${"a".repeat(64)}`;
+  const updatedAt = new Date().toISOString();
+  const fake: Record<string, any> = {
+    settings: { mutationsEnabled: true },
+    taskWorkflowIdentities: new Map(),
+    dataWriteChain: Promise.resolve(),
+    dataWriteFailed: false,
+    mutationJournalEntries: () => [],
+    queuePersistPluginData() {
+      this.dataWriteChain = Promise.resolve();
+    },
+    saveData: async (value: unknown) => {
+      fake.saved = value;
+    },
+  };
+
+  restore.call(fake, {
+    version: 1,
+    entries: [{ key, operonId: "day1234", updatedAt }],
+  });
+  assert.equal(fake.taskWorkflowIdentities.get(key)?.operonId, "day1234");
+  fake.taskWorkflowIdentityEntries = () => entries.call(fake);
+  await persist.call(fake);
+  assert.deepEqual(fake.saved.taskWorkflowIdentities.entries, [
+    { key, operonId: "day1234", updatedAt },
+  ]);
+
+  const store = identityStore.call(fake);
+  const secondKey = `adopt:${"b".repeat(64)}`;
+  await store.set(secondKey, "adp1234");
+  assert.equal(store.get(secondKey), "adp1234");
+});
+
 test("generic REST mutations expose only the adapter's bounded native proof", () => {
   const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
   const executeStart = mainSource.indexOf(

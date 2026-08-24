@@ -1743,7 +1743,18 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
       });
     },
   };
-  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
+  const persistedTaskWorkflowIdentities = new Map<string, string>();
+  const taskWorkflowIdentityStore = {
+    get: (key: string) => persistedTaskWorkflowIdentities.get(key),
+    set: async (key: string, operonId: string) => {
+      persistedTaskWorkflowIdentities.set(key, operonId);
+    },
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(
+    consumer,
+    operon,
+    taskWorkflowIdentityStore,
+  );
   assert.equal(await adapter.refresh(true), true);
   assert.equal(adapter.hasTaskWorkflowCapability("adopt"), true);
   assert.equal(adapter.hasTaskWorkflowCapability("periodic-create"), true);
@@ -2203,9 +2214,25 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
   assert.equal(replayedPeriodicCreate.code, "already-applied");
   assert.equal(replayedPeriodicCreate.operonId, "day1234");
 
+  const originalPeriodicTask = rawTasks.find(
+    (task) =>
+      (task.identity as { operonId?: string } | undefined)?.operonId ===
+      "day1234",
+  );
+  assert.ok(originalPeriodicTask);
+  rawTasks.push({
+    ...originalPeriodicTask,
+    identity: { operonId: "dup1234" },
+    locator: {
+      representation: "inline",
+      filePath: "Daily/2026-08-25.md",
+      lineNumber: 4,
+    },
+  });
   const restartedAdapter = new OperonDeveloperApiRuntimeAdapter(
     consumer,
     operon,
+    taskWorkflowIdentityStore,
   );
   assert.equal(await restartedAdapter.refresh(true), true);
   nextWorkflowResult = alreadyAppliedResult("periodic-create");

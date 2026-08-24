@@ -25,6 +25,11 @@ export interface DeveloperApiConsumerPlugin {
   };
 }
 
+export interface TaskWorkflowIdentityStore {
+  get(key: string): string | undefined;
+  set(key: string, operonId: string): void | Promise<void>;
+}
+
 interface DeveloperApiError {
   readonly code?: string;
   readonly reason?: string;
@@ -1187,6 +1192,7 @@ export class OperonDeveloperApiRuntimeAdapter {
   constructor(
     private readonly consumerPlugin: DeveloperApiConsumerPlugin,
     operonPlugin: unknown,
+    private readonly taskWorkflowIdentityStore?: TaskWorkflowIdentityStore,
   ) {
     this.accessor = isDeveloperApiAccessor(operonPlugin) ? operonPlugin : null;
     this.taskWorkflowAccessor = isTaskWorkflowDeveloperApiAccessor(operonPlugin)
@@ -2369,8 +2375,9 @@ export class OperonDeveloperApiRuntimeAdapter {
         const live = await this.reloadLiveTasks();
         const replayedIdentity =
           execution.status === "already-applied"
-            ? this.taskWorkflowIdentityByPlanDigest.get(
-                `${kind}:${preview.plan.planDigest}`,
+            ? this.taskWorkflowIdentity(
+                kind,
+                preview.plan.planDigest,
               )
             : undefined;
         const adopted = live.rawTasks.filter(
@@ -2389,7 +2396,7 @@ export class OperonDeveloperApiRuntimeAdapter {
             "no unique adopted task is visible at the sealed source line",
           );
         }
-        this.rememberTaskWorkflowIdentity(
+        await this.rememberTaskWorkflowIdentity(
           kind,
           preview.plan.planDigest,
           adopted[0]!.identity.operonId,
@@ -2397,7 +2404,7 @@ export class OperonDeveloperApiRuntimeAdapter {
         return { ...terminal, operonId: adopted[0]!.identity.operonId };
       } catch (error) {
         return this.mutationFailure(
-          "failed",
+          "outcome-unknown",
           `Operon applied adoption, but the adopted identity could not be proven: ${error instanceof Error ? error.message : String(error)}`,
           null,
           false,
@@ -2416,8 +2423,9 @@ export class OperonDeveloperApiRuntimeAdapter {
         const provenResourceKeys = this.taskWorkflowResourceKeys(execution);
         const replayedIdentity =
           execution.status === "already-applied"
-            ? this.taskWorkflowIdentityByPlanDigest.get(
-                `${kind}:${preview.plan.planDigest}`,
+            ? this.taskWorkflowIdentity(
+                kind,
+                preview.plan.planDigest,
               )
             : undefined;
         const created = live.rawTasks.filter(
@@ -2436,7 +2444,7 @@ export class OperonDeveloperApiRuntimeAdapter {
             "no unique periodic task is linked to the committed native resource evidence",
           );
         }
-        this.rememberTaskWorkflowIdentity(
+        await this.rememberTaskWorkflowIdentity(
           kind,
           preview.plan.planDigest,
           created[0]!.identity.operonId,
@@ -3162,12 +3170,27 @@ export class OperonDeveloperApiRuntimeAdapter {
     return keys;
   }
 
-  private rememberTaskWorkflowIdentity(
+  private taskWorkflowIdentity(
+    kind: DeveloperApiTaskWorkflowKind,
+    planDigest: string,
+  ): string | undefined {
+    const key = `${kind}:${planDigest}`;
+    return (
+      this.taskWorkflowIdentityStore?.get(key) ??
+      this.taskWorkflowIdentityByPlanDigest.get(key)
+    );
+  }
+
+  private async rememberTaskWorkflowIdentity(
     kind: DeveloperApiTaskWorkflowKind,
     planDigest: string,
     operonId: string,
-  ): void {
+  ): Promise<void> {
     const key = `${kind}:${planDigest}`;
+    if (this.taskWorkflowIdentityStore) {
+      await this.taskWorkflowIdentityStore.set(key, operonId);
+      return;
+    }
     this.taskWorkflowIdentityByPlanDigest.delete(key);
     this.taskWorkflowIdentityByPlanDigest.set(key, operonId);
     if (this.taskWorkflowIdentityByPlanDigest.size <= 512) return;
