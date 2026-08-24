@@ -15,10 +15,10 @@ Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils
 | ----------- | ----------------------------------------------------------------------- | ---------------------------: |
 | `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    19 outils |
 | `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    30 outils |
-| `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    31 outils |
-| `full`      | Surface complète/admin explicite du runtime actif                       |                    70 outils |
+| `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    33 outils |
+| `full`      | Surface complète/admin explicite du runtime actif                       |                    72 outils |
 
-Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 70 outils. Le registre canonique couvre 74 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`.
+Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 72 outils. Le registre canonique couvre 76 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Les deux ajouts 3.1 sont les opérations Operon Daily/Weekly bornées par capacité ; leur visibilité ne remplace jamais un grant live.
 
 ## Noms réservés à la compatibilité
 

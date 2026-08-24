@@ -28,6 +28,8 @@ export type WriteOperation =
   | "bases_upsert_config"
   | "bases_upsert_rows"
   | "operon_adopt_task"
+  | "operon_create_periodic_task"
+  | "operon_update_periodic_scheduling"
   | "operon_create_task"
   | "operon_update_task"
   | "operon_transition_task"

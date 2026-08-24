@@ -57,6 +57,28 @@ assert.match(httpAdr, /remote HTTP remains pilot-only/i);
 
 const matrix = await text("docs/runtime-capability-matrix.md");
 const matrixFr = await text("docs/runtime-capability-matrix.fr.md");
+const operonLocalValidation = await text("docs/operon-local-validation.md");
+const taskRuntimeReference = await text(
+  "profiles/elysia-tasks/skills/elysia-task-gouverneur/references/runtime-et-mutations.md",
+);
+for (const content of [
+  matrix,
+  matrixFr,
+  operonLocalValidation,
+  taskRuntimeReference,
+]) {
+  assert.match(content, /3\.5\.240438/u);
+  assert.match(content, /3\.5\.2/u);
+  assert.match(content, /read-only|lecture seule/iu);
+}
+assert.doesNotMatch(
+  matrix,
+  /official Operon `3\.5\.2` exposes saved-filter evaluation,[\s\S]{0,80}official adoption/iu,
+);
+assert.doesNotMatch(
+  matrixFr,
+  /Operon officiel `3\.5\.2` expose les[\s\S]{0,80}l’adoption officielle/iu,
+);
 const commonTools = [
   "external_runtime_status",
   "external_roots_list",
@@ -79,6 +101,8 @@ const commonTools = [
   "operon_get_timer_state",
   "operon_adopt_task",
   "operon_create_task",
+  "operon_create_periodic_task",
+  "operon_update_periodic_scheduling",
   "operon_update_task",
   "operon_transition_task",
   "operon_set_relationships",
@@ -106,8 +130,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.0.1",
-  "package metadata must match the 3.0.1 stdio reliability release",
+  "3.1.0",
+  "package metadata must match the 3.1.0 Operon 3.5 candidate release",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
@@ -168,6 +192,27 @@ assert.match(envExample, /MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH=\//u);
 
 const operonContract = await text("docs/operon-mcp-contract.md");
 const operonContractFr = await text("docs/operon-mcp-contract.fr.md");
+const operonRestContract = await text("docs/operon-rest-contract.md");
+assert.match(
+  operonRestContract,
+  /POST \/tasks\/:operonId\/periodic-update/u,
+  "Operon REST documentation must use the mounted periodic-update route",
+);
+assert.doesNotMatch(
+  operonRestContract,
+  /POST \/tasks\/:operonId\/periodic-scheduling/u,
+  "Operon REST documentation must not revive the obsolete periodic-scheduling route",
+);
+assert.match(operonRestContract, /POST \/mutations\/recover/u);
+assert.match(operonRestContract, /POST \/task-workflows\/recover/u);
+assert.match(
+  operonRestContract,
+  /"recoveryRef": "dvr1_[\s\S]*"kind": "adopt"[\s\S]*"planDigest"/u,
+);
+assert.doesNotMatch(
+  operonRestContract,
+  /"recoveryRef": "dvr1_[\s\S]{0,120}"recovery":/u,
+);
 const operonAudit = await text("docs/operon-cli-audit.md");
 const operonAuditFr = await text("docs/operon-cli-audit.fr.md");
 for (const content of [operonContract, operonContractFr]) {
@@ -183,6 +228,104 @@ assert.match(operonContract, /generic CLI passthrough/i);
 assert.match(operonContractFr, /passthrough CLI générique/i);
 assert.match(operonContract, /structured unavailable result/i);
 assert.match(operonContractFr, /indisponibilité structurée/i);
+for (const content of [operonContract, operonAudit]) {
+  assert.match(content, /Operon `3\.5\.2`/u);
+  assert.match(content, /Operon CLI `1\.2\.0`/u);
+  assert.match(content, /Bridge\s+`0\.8\.0`/u);
+  assert.match(content, /compatible-provisional/u);
+  assert.match(content, /opaque sealed\s+plan/iu);
+  assert.match(content, /(?:same-plan|même\s+plan)/iu);
+  assert.match(content, /taskGallery/u);
+  assert.match(content, /__taskDataType/u);
+}
+for (const content of [operonContractFr, operonAuditFr]) {
+  assert.match(content, /Operon `3\.5\.2`/u);
+  assert.match(content, /Operon CLI `1\.2\.0`/u);
+  assert.match(content, /Bridge\s+`0\.8\.0`/u);
+  assert.match(content, /compatible-provisional/u);
+  assert.match(content, /plan opaque\s+scellé/iu);
+  assert.match(content, /(?:same-plan|même\s+plan)/iu);
+  assert.match(content, /taskGallery/u);
+  assert.match(content, /__taskDataType/u);
+}
+assert.match(operonContract, /tasks\.adopt\.preview/u);
+assert.match(operonContract, /Daily\/Weekly/u);
+assert.match(operonContract, /scalar strings/u);
+assert.match(operonContract, /ordered string array/u);
+assert.match(operonContractFr, /tasks\.adopt\.preview/u);
+assert.match(operonContractFr, /Daily\/Weekly/u);
+assert.match(operonContractFr, /chaînes scalaires/u);
+assert.match(operonContractFr, /tableau ordonné/u);
+for (const content of [operonContract, operonRestContract]) {
+  assert.match(content, /reserv(?:e|es).*atomically/isu);
+  assert.match(content, /version[- ]1 journal/iu);
+  assert.match(content, /500 entries/iu);
+  assert.match(content, /30 days/iu);
+  assert.match(content, /in-progress.*outcome-unknown/isu);
+  assert.match(content, /recoveryRequired: true/u);
+  assert.match(content, /(?:no promise|promises nothing)/iu);
+  assert.match(
+    content,
+    /Task Workflow results?.*(?:strictly validated|validated as a strict)/isu,
+  );
+  assert.match(content, /nativeProof/u);
+  assert.match(content, /bounded proof projection/iu);
+  assert.match(content, /pendingRecoveries/u);
+  assert.match(content, /optional.*planDigest/iu);
+  assert.match(content, /priorityId.*postflight/isu);
+  assert.match(content, /ambiguous creation/iu);
+  assert.match(content, /compatible-provisional/u);
+}
+assert.match(operonContractFr, /réserve.*atomiquement/isu);
+assert.match(operonContractFr, /journal version 1/iu);
+assert.match(operonContractFr, /500 entrées/iu);
+assert.match(operonContractFr, /30 jours/iu);
+assert.match(operonContractFr, /in-progress.*outcome-unknown/isu);
+assert.match(operonContractFr, /recoveryRequired: true/u);
+assert.match(operonContractFr, /aucune promesse/iu);
+assert.match(
+  operonContractFr,
+  /résultats Task Workflow.*validés strictement/isu,
+);
+assert.match(operonContractFr, /nativeProof/u);
+assert.match(operonContractFr, /projection de preuve bornée/iu);
+assert.match(operonContractFr, /pendingRecoveries/u);
+assert.match(operonContractFr, /planDigest.*optionnel/isu);
+assert.match(operonContractFr, /priorityId.*postflight/isu);
+assert.match(operonContractFr, /création ambiguë/iu);
+assert.match(
+  operonContract,
+  /3\.5\.240438[\s\S]*stock `3\.5\.2` remains read-only/iu,
+);
+assert.match(
+  operonContractFr,
+  /3\.5\.240438[\s\S]*3\.5\.2` stock reste en lecture seule/iu,
+);
+assert.doesNotMatch(
+  operonContract,
+  /Adoption is available only on Operon 3\.5\.2/iu,
+);
+assert.match(
+  operonContract,
+  /Adoption[\s\S]*mutation-admitted `3\.5\.240438`[\s\S]*stock `3\.5\.2` remains read-only/iu,
+);
+assert.match(
+  operonContractFr,
+  /adoption[\s\S]*admis en mutation `3\.5\.240438`[\s\S]*3\.5\.2`[\s\S]*lecture seule/iu,
+);
+
+const profilesEn = await text("docs/tool-surface-profiles.md");
+const profilesFr = await text("docs/tool-surface-profiles.fr.md");
+assert.match(readme, /\| `tasks`\s+\|\s+33\s+\|/u);
+assert.match(readme, /\| `full`\s+\|\s+72\s+\|/u);
+assert.match(readmeFr, /\| `tasks`\s+\|\s+33\s+\|/u);
+assert.match(readmeFr, /\| `full`\s+\|\s+72\s+\|/u);
+assert.match(profilesEn, /\| `tasks`\s+\|[^\n]+33 tools/u);
+assert.match(profilesEn, /\| `full`\s+\|[^\n]+72 tools/u);
+assert.match(profilesEn, /76 unique names/u);
+assert.match(profilesFr, /\| `tasks`\s+\|[^\n]+33 outils/u);
+assert.match(profilesFr, /\| `full`\s+\|[^\n]+72 outils/u);
+assert.match(profilesFr, /76 noms uniques/u);
 
 const backpressureContract = await text(
   "docs/http-concurrency-backpressure.md",

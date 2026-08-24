@@ -1,11 +1,12 @@
 import {
-	OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
+  OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
   type OperonSemanticConfiguration,
   type RuntimeIndexDiagnostics,
   type RuntimeIndexedTask,
   type RuntimeKeyMapping,
   type RuntimePipeline,
   type RuntimePriorityDefinition,
+  type OperonFieldValue,
   isCanonicalVaultRelativePath,
   resolvePriorityStableId,
 } from "./contract";
@@ -22,6 +23,11 @@ export interface DeveloperApiConsumerPlugin {
     readonly name: string;
     readonly version: string;
   };
+}
+
+export interface TaskWorkflowIdentityStore {
+  get(key: string): string | undefined;
+  set(key: string, operonId: string): void | Promise<void>;
 }
 
 interface DeveloperApiError {
@@ -46,6 +52,11 @@ export interface DeveloperApiChannelStatus {
   };
   readonly error?: DeveloperApiError;
   readonly [key: string]: unknown;
+}
+
+export interface TaskWorkflowBeforeApplyGateResult {
+  readonly ok: boolean;
+  readonly message?: string;
 }
 
 interface DeveloperApiTaskLocator {
@@ -177,6 +188,9 @@ interface DeveloperApiMutationPreviewResult {
 }
 
 interface DeveloperApiMutationExecutionResult {
+  readonly contractVersion?: number;
+  readonly kind?: string;
+  readonly requestId?: string;
   readonly status?:
     | "applied"
     | "already-applied"
@@ -185,11 +199,36 @@ interface DeveloperApiMutationExecutionResult {
     | "outcome-unknown";
   readonly mutationMayHaveApplied?: boolean;
   readonly retryAllowed?: boolean;
+  readonly groupResults?: readonly {
+    readonly groupId?: string;
+    readonly status?: string;
+    readonly resourceRevisions?: readonly {
+      readonly resourceKind?: string;
+      readonly resourceKey?: string;
+      readonly revision?: string;
+    }[];
+    readonly error?: DeveloperApiError;
+  }[];
   readonly receipt?: {
+    readonly contractVersion?: number;
     readonly terminalOutcome?: string;
     readonly planDigest?: string;
+    readonly mutationKind?: string;
+    readonly targetDigest?: string;
+    readonly effectiveAt?: string;
+    readonly completedAt?: string;
+    readonly expiresAt?: string;
+    readonly [key: string]: unknown;
+  };
+  readonly postflight?: {
+    readonly status?: string;
+    readonly observedAt?: string;
+    readonly [key: string]: unknown;
   };
   readonly recovery?: {
+    readonly required?: boolean;
+    readonly action?: string;
+    readonly mutationMayHaveApplied?: boolean;
     readonly recoveryRef?: string;
     readonly planDigest?: string;
     readonly plan?: DeveloperApiMutationPlan;
@@ -208,6 +247,8 @@ interface DeveloperApiPendingRecovery {
 }
 
 interface DeveloperApiPendingRecoveriesResult {
+  readonly contractVersion?: number;
+  readonly kind?: string;
   readonly ok: boolean;
   readonly recoveries?: readonly DeveloperApiPendingRecovery[];
   readonly error?: DeveloperApiError;
@@ -326,6 +367,9 @@ interface DeveloperApiAccessor {
 }
 
 interface TaskWorkflowFilterResult {
+  readonly contractVersion?: number;
+  readonly kind?: string;
+  readonly requestId?: string;
   readonly ok: boolean;
   readonly tasks?: readonly DeveloperApiTask[];
   readonly page?: {
@@ -339,12 +383,152 @@ interface TaskWorkflowFilterResult {
   readonly error?: DeveloperApiError;
 }
 
+export type DeveloperApiTaskWorkflowKind =
+  | "adopt"
+  | "periodic-create"
+  | "periodic-update";
+
+interface TaskWorkflowDeveloperMutationPlan {
+  readonly contractVersion: 1;
+  readonly kind: "task-workflow-developer-mutation-plan";
+  readonly recoveryRef: string;
+  readonly planDigest: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly riskLevel: "none" | "routine" | "elevated" | "destructive";
+  readonly requiresConsent: boolean;
+}
+
+interface TaskWorkflowDeveloperMutationPreviewResult {
+  readonly contractVersion?: number;
+  readonly kind?: string;
+  readonly requestId?: string;
+  readonly ok: boolean;
+  readonly plan?: TaskWorkflowDeveloperMutationPlan;
+  readonly warnings?: readonly unknown[];
+  readonly error?: DeveloperApiError;
+}
+
+interface TaskWorkflowDeveloperMutationExecutionResult {
+  readonly contractVersion?: number;
+  readonly kind?: string;
+  readonly requestId?: string;
+  readonly status?:
+    | "applied"
+    | "already-applied"
+    | "partial"
+    | "failed"
+    | "outcome-unknown";
+  readonly mutationMayHaveApplied?: boolean;
+  readonly retryAllowed?: boolean;
+  readonly groupResults?: readonly {
+    readonly groupId?: string;
+    readonly status?: string;
+    readonly resourceRevisions?: readonly {
+      readonly resourceKind?: string;
+      readonly resourceKey?: string;
+      readonly revision?: string;
+    }[];
+  }[];
+  readonly receipt?: {
+    readonly contractVersion?: number;
+    readonly planDigest?: string;
+    readonly mutationKind?: string;
+    readonly targetDigest?: string;
+    readonly terminalOutcome?: string;
+    readonly effectiveAt?: string;
+    readonly completedAt?: string;
+    readonly expiresAt?: string;
+  };
+  readonly postflight?: {
+    readonly status?: string;
+    readonly observedAt?: string;
+  };
+  readonly recovery?: {
+    readonly required?: boolean;
+    readonly action?: string;
+    readonly mutationMayHaveApplied?: boolean;
+    readonly recoveryRef?: string;
+    readonly planDigest?: string;
+    readonly plan?: TaskWorkflowDeveloperMutationPlan;
+  };
+  readonly error?: DeveloperApiError;
+}
+
+export interface DeveloperApiTaskWorkflowNativeProof {
+  readonly contractVersion: 1;
+  readonly kind: "mutation-result";
+  readonly status:
+    | "applied"
+    | "already-applied"
+    | "partial"
+    | "failed"
+    | "outcome-unknown";
+  readonly mutationMayHaveApplied: boolean;
+  readonly retryAllowed: boolean;
+  readonly groupResults: readonly {
+    readonly groupId: string;
+    readonly status: "committed" | "failed" | "outcome-unknown";
+    readonly resourceRevisions?: readonly {
+      readonly resourceKind:
+        | "timer"
+        | "repeat-series"
+        | "active-tracker"
+        | "pinned"
+        | "project-serial"
+        | "task-source";
+      readonly resourceKey: string;
+      readonly revision: string;
+    }[];
+  }[];
+  readonly receipt?: {
+    readonly contractVersion: 1;
+    readonly planDigest: string;
+    readonly mutationKind: string;
+    readonly targetDigest: string;
+    readonly terminalOutcome: "applied" | "already-applied";
+    readonly effectiveAt: string;
+    readonly completedAt: string;
+    readonly expiresAt: string;
+  };
+  readonly postflight?: {
+    readonly status: "verified" | "receipt-replay";
+    readonly observedAt?: string;
+  };
+}
+
+interface TaskWorkflowDeveloperMutationMethods {
+  readonly preview?: (
+    input: Record<string, unknown>,
+  ) => Promise<TaskWorkflowDeveloperMutationPreviewResult>;
+  readonly apply?: (input: {
+    readonly plan: TaskWorkflowDeveloperMutationPlan;
+  }) => Promise<TaskWorkflowDeveloperMutationExecutionResult>;
+  readonly recover?: (input: {
+    readonly recoveryRef: string;
+  }) => Promise<TaskWorkflowDeveloperMutationExecutionResult>;
+  readonly pendingRecoveries?: () => Promise<DeveloperApiPendingRecoveriesResult>;
+}
+
 interface TaskWorkflowDeveloperApiV1 {
+  readonly contractVersion?: number;
+  readonly runtimeApi?: number;
   readonly tasks: {
-    readonly filterQuery: (
+    readonly filterQuery?: (
       request: Record<string, unknown>,
     ) => Promise<TaskWorkflowFilterResult>;
+    readonly adopt?: TaskWorkflowDeveloperMutationMethods;
+    readonly createPeriodicNote?: TaskWorkflowDeveloperMutationMethods;
+    readonly updatePeriodicNote?: TaskWorkflowDeveloperMutationMethods;
   };
+}
+
+interface TaskWorkflowDeveloperApiAccessResult {
+  readonly contractVersion?: number;
+  readonly kind?: string;
+  readonly ok: boolean;
+  readonly api?: TaskWorkflowDeveloperApiV1;
+  readonly error?: DeveloperApiError;
 }
 
 interface TaskWorkflowDeveloperApiAccessor {
@@ -353,13 +537,9 @@ interface TaskWorkflowDeveloperApiAccessor {
     request: {
       readonly contractVersion: 1;
       readonly runtimeApi: { readonly min: 1; readonly max: 1 };
-      readonly requestedCapabilities: readonly ["tasks.filter-query"];
+      readonly requestedCapabilities: readonly string[];
     },
-  ) => {
-    readonly ok: boolean;
-    readonly api?: TaskWorkflowDeveloperApiV1;
-    readonly error?: DeveloperApiError;
-  };
+  ) => TaskWorkflowDeveloperApiAccessResult;
 }
 
 interface DeveloperApiAccessResult {
@@ -442,11 +622,14 @@ export interface DeveloperApiMutationResult {
   readonly recoveryRef?: string;
   readonly retryable: boolean;
   readonly mutationMayHaveApplied?: boolean;
+  readonly nativeProof?: DeveloperApiTaskWorkflowNativeProof;
 }
 
 export interface DeveloperApiPendingRecoveryResult {
   readonly ok: boolean;
-  readonly recoveries: readonly DeveloperApiPendingRecovery[];
+  readonly recoveries: readonly (DeveloperApiPendingRecovery & {
+    readonly workflowKind?: DeveloperApiTaskWorkflowKind;
+  })[];
   readonly message?: string;
 }
 
@@ -508,6 +691,9 @@ const MUTATION_CAPABILITIES: Record<
 const GENERAL_FIELD_TYPES: Record<string, string> = {
   description: "text",
   priority: "text",
+  taskType: "text",
+  taskImage: "text",
+  taskGallery: "list",
   dateDue: "date",
   dateScheduled: "date",
   dateStarted: "date",
@@ -525,6 +711,9 @@ const GENERAL_FIELD_TYPES: Record<string, string> = {
 };
 
 const CREATE_FIELD_TYPES: Record<string, string> = {
+  taskType: "text",
+  taskImage: "text",
+  taskGallery: "list",
   taskIcon: "text",
   taskColor: "text",
   note: "text",
@@ -540,11 +729,28 @@ const CREATE_FIELD_TYPES: Record<string, string> = {
   links: "list",
 };
 
+const TASK_WORKFLOW_CAPABILITIES: Record<
+  DeveloperApiTaskWorkflowKind,
+  readonly [string, string]
+> = {
+  adopt: ["tasks.adopt.preview", "tasks.adopt.apply"],
+  "periodic-create": [
+    "tasks.create.periodic-note.preview",
+    "tasks.create.periodic-note.apply",
+  ],
+  "periodic-update": [
+    "tasks.update.periodic-note.preview",
+    "tasks.update.periodic-note.apply",
+  ],
+};
+
 // The official runtime may settle a graph/project-serial mutation after the
 // default local REST/MCP request budget. Returning an uncertain outcome with
 // the durable recovery reference is safer than holding the HTTP request open
 // until the caller times out and then guessing whether to retry.
 const DEVELOPER_API_APPLY_TIMEOUT_MS = 120_000;
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
+const DEVELOPER_RECOVERY_REF = /^dvr1_[0-9a-f]{48}$/u;
 
 function requestId(): string {
   return (
@@ -582,9 +788,9 @@ function stringValue(value: unknown): string | undefined {
   return undefined;
 }
 
-function fieldValue(value: unknown): string | undefined {
+function fieldValue(value: unknown): OperonFieldValue | undefined {
   if (Array.isArray(value)) {
-    return value.map((item) => String(item)).join("; ");
+    return value.map((item) => String(item));
   }
   const scalar = stringValue(value);
   if (scalar !== undefined) return scalar;
@@ -653,10 +859,14 @@ function emptyConfiguration(): OperonSemanticConfiguration {
 }
 
 function toRuntimeTask(task: DeveloperApiTask): RuntimeIndexedTask {
-  const fieldValues: Record<string, string> = {};
+  const fieldValues: Record<string, OperonFieldValue> = {};
   const writeField = (key: string, value: unknown): void => {
     const normalized = fieldValue(value);
-    if (normalized !== undefined && normalized !== "")
+    if (
+      normalized !== undefined &&
+      normalized !== "" &&
+      (!Array.isArray(normalized) || normalized.length > 0)
+    )
       fieldValues[key] = normalized;
   };
 
@@ -869,10 +1079,7 @@ function catalogConfiguration(catalog: DeveloperApiCatalog): {
       id: filter.id,
       name: filter.name,
       icon: filter.icon ?? null,
-      definition: JSON.parse(JSON.stringify(filter)) as Record<
-        string,
-        unknown
-      >,
+      definition: JSON.parse(JSON.stringify(filter)) as Record<string, unknown>,
     })),
   };
   return { pipelines, keyMappings, priorities, configuration };
@@ -972,6 +1179,12 @@ export class OperonDeveloperApiRuntimeAdapter {
   >();
   private recoveryApi: DeveloperApiV1 | null = null;
   private filterQueryApi: TaskWorkflowDeveloperApiV1 | null = null;
+  private readonly taskWorkflowApis = new Map<
+    DeveloperApiTaskWorkflowKind,
+    TaskWorkflowDeveloperApiV1
+  >();
+  private readonly taskWorkflowRecoveryDigests = new Map<string, string>();
+  private readonly taskWorkflowIdentityByPlanDigest = new Map<string, string>();
   private grantedCapabilities: ReadonlySet<string> | null = null;
   private refreshInFlight: Promise<boolean> | null = null;
   private contractState: "unverified" | "valid" | "invalid" = "unverified";
@@ -979,6 +1192,7 @@ export class OperonDeveloperApiRuntimeAdapter {
   constructor(
     private readonly consumerPlugin: DeveloperApiConsumerPlugin,
     operonPlugin: unknown,
+    private readonly taskWorkflowIdentityStore?: TaskWorkflowIdentityStore,
   ) {
     this.accessor = isDeveloperApiAccessor(operonPlugin) ? operonPlugin : null;
     this.taskWorkflowAccessor = isTaskWorkflowDeveloperApiAccessor(operonPlugin)
@@ -1011,7 +1225,11 @@ export class OperonDeveloperApiRuntimeAdapter {
   private async refreshWithStartupRetry(
     includeMutationCapabilities: boolean,
   ): Promise<boolean> {
-    for (let attempt = 0; attempt <= STARTUP_REFRESH_RETRY_LIMIT; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt <= STARTUP_REFRESH_RETRY_LIMIT;
+      attempt += 1
+    ) {
       if (await this.refreshInternal(includeMutationCapabilities)) return true;
       const retryAfterMs = this.startupRetryDelayMs();
       if (retryAfterMs === null || attempt === STARTUP_REFRESH_RETRY_LIMIT)
@@ -1047,6 +1265,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     this.mutationApis.clear();
     this.recoveryApi = null;
     this.filterQueryApi = null;
+    this.taskWorkflowApis.clear();
     this.grantedCapabilities = null;
 
     // Establish a baseline session first. Operon evaluates a requested set as
@@ -1160,6 +1379,21 @@ export class OperonDeveloperApiRuntimeAdapter {
         // down the already-verified core Developer API session.
         this.filterQueryApi = null;
       }
+      if (includeMutationCapabilities) {
+        for (const workflowKind of Object.keys(
+          TASK_WORKFLOW_CAPABILITIES,
+        ) as DeveloperApiTaskWorkflowKind[]) {
+          try {
+            const workflowApi = this.connectTaskWorkflow(workflowKind);
+            if (workflowApi)
+              this.taskWorkflowApis.set(workflowKind, workflowApi);
+          } catch {
+            // Task-workflow grants are additive and exact. A pending or broken
+            // optional workflow must never invalidate established core reads,
+            // filter execution, or already-approved mutation sessions.
+          }
+        }
+      }
       return true;
     } catch (error) {
       this.readApi = null;
@@ -1198,6 +1432,20 @@ export class OperonDeveloperApiRuntimeAdapter {
     return Boolean(this.filterQueryApi?.tasks.filterQuery);
   }
 
+  hasTaskWorkflowCapability(kind: DeveloperApiTaskWorkflowKind): boolean {
+    const api = this.taskWorkflowApis.get(kind);
+    const methods = this.taskWorkflowMethods(api, kind);
+    return Boolean(methods?.preview && methods.apply);
+  }
+
+  hasTaskWorkflowRecoverySupport(kind: DeveloperApiTaskWorkflowKind): boolean {
+    const methods = this.taskWorkflowMethods(
+      this.taskWorkflowApis.get(kind),
+      kind,
+    );
+    return Boolean(methods?.recover && methods.pendingRecoveries);
+  }
+
   async querySavedFilter(
     request: Record<string, unknown>,
   ): Promise<TaskWorkflowFilterResult> {
@@ -1227,9 +1475,10 @@ export class OperonDeveloperApiRuntimeAdapter {
         Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 100,
       ),
     );
-    return api.tasks.filterQuery({
+    const filterRequestId = requestId();
+    const result = await api.tasks.filterQuery({
       contractVersion: 1,
-      requestId: requestId(),
+      requestId: filterRequestId,
       kind: "task-filter-query",
       consistency: "live-verified",
       filterSetId,
@@ -1251,6 +1500,16 @@ export class OperonDeveloperApiRuntimeAdapter {
         ? { cursor: request.cursor }
         : {}),
     });
+    if (
+      result.contractVersion !== 1 ||
+      result.kind !== "task-filter-query-result" ||
+      result.requestId !== filterRequestId
+    ) {
+      throw new Error(
+        "Operon returned an invalid task-workflow filter-query discriminator.",
+      );
+    }
+    return result;
   }
 
   private requireReadApi(
@@ -1403,11 +1662,53 @@ export class OperonDeveloperApiRuntimeAdapter {
     const access = this.taskWorkflowAccessor.getTaskWorkflowDeveloperApiV1(
       this.consumerPlugin,
       {
-		...OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
+        ...OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
         requestedCapabilities: ["tasks.filter-query"],
       },
     );
-    return access.ok && access.api?.tasks.filterQuery ? access.api : null;
+    const api = this.taskWorkflowAccessApi(access);
+    return api?.tasks.filterQuery ? api : null;
+  }
+
+  private connectTaskWorkflow(
+    kind: DeveloperApiTaskWorkflowKind,
+  ): TaskWorkflowDeveloperApiV1 | null {
+    if (!this.taskWorkflowAccessor) return null;
+    const access = this.taskWorkflowAccessor.getTaskWorkflowDeveloperApiV1(
+      this.consumerPlugin,
+      {
+        ...OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
+        requestedCapabilities: TASK_WORKFLOW_CAPABILITIES[kind],
+      },
+    );
+    const api = this.taskWorkflowAccessApi(access);
+    if (!api) return null;
+    const methods = this.taskWorkflowMethods(api, kind);
+    return methods?.preview && methods.apply ? api : null;
+  }
+
+  private taskWorkflowAccessApi(
+    access: TaskWorkflowDeveloperApiAccessResult,
+  ): TaskWorkflowDeveloperApiV1 | null {
+    if (
+      access.contractVersion !== 1 ||
+      access.kind !== "task-workflow-developer-api-access-result" ||
+      !access.ok ||
+      !access.api ||
+      access.error !== undefined ||
+      access.api.contractVersion !== 1 ||
+      access.api.runtimeApi !== 1
+    ) return null;
+    return access.api;
+  }
+
+  private taskWorkflowMethods(
+    api: TaskWorkflowDeveloperApiV1 | undefined,
+    kind: DeveloperApiTaskWorkflowKind,
+  ): TaskWorkflowDeveloperMutationMethods | undefined {
+    if (kind === "adopt") return api?.tasks.adopt;
+    if (kind === "periodic-create") return api?.tasks.createPeriodicNote;
+    return api?.tasks.updatePeriodicNote;
   }
 
   private requestMissingCapabilities(includeMutations: boolean): void {
@@ -1454,7 +1755,8 @@ export class OperonDeveloperApiRuntimeAdapter {
       this.contractState = "invalid";
       this.channelStatus = {
         error: {
-          reason: "Operon Developer API V1 negotiation returned an invalid result.",
+          reason:
+            "Operon Developer API V1 negotiation returned an invalid result.",
         },
       };
       return null;
@@ -1686,6 +1988,27 @@ export class OperonDeveloperApiRuntimeAdapter {
       );
     }
 
+    const invalidExecution = this.baseMutationResultViolation(
+      execution,
+      preview.plan,
+    );
+    if (invalidExecution) {
+      return this.mutationFailure(
+        "outcome-unknown",
+        `Operon returned an invalid Developer API mutation result after dispatch: ${invalidExecution}`,
+        operonId,
+        false,
+        {
+          nativeStatus: execution.status ?? "invalid-result",
+          recoveryRef:
+            execution.recovery?.recoveryRef ?? preview.plan.recoveryRef,
+          planDigest: preview.plan.planDigest,
+          mutationMayHaveApplied: true,
+        },
+      );
+    }
+    const proof = this.baseMutationProof(execution);
+
     const status = execution.status ?? "failed";
     if (status === "partial" || status === "outcome-unknown") {
       return this.mutationFailure(
@@ -1700,6 +2023,7 @@ export class OperonDeveloperApiRuntimeAdapter {
             execution.recovery?.recoveryRef ?? preview.plan.recoveryRef,
           planDigest: execution.recovery?.planDigest ?? preview.plan.planDigest,
           mutationMayHaveApplied: true,
+          nativeProof: proof,
         },
       );
     }
@@ -1710,7 +2034,7 @@ export class OperonDeveloperApiRuntimeAdapter {
           "Operon rejected the mutation.",
         operonId,
         false,
-        { nativeStatus: status },
+        { nativeStatus: status, nativeProof: proof },
       );
     }
 
@@ -1729,7 +2053,11 @@ export class OperonDeveloperApiRuntimeAdapter {
           `Operon applied the create plan, but the created task could not be identified safely: ${error instanceof Error ? error.message : String(error)}`,
           null,
           false,
-          { nativeStatus: status, mutationMayHaveApplied: true },
+          {
+            nativeStatus: status,
+            mutationMayHaveApplied: true,
+            nativeProof: proof,
+          },
         );
       }
       if (!appliedOperonId) {
@@ -1738,7 +2066,11 @@ export class OperonDeveloperApiRuntimeAdapter {
           "Operon applied the create plan, but no unique created task was observable.",
           null,
           false,
-          { nativeStatus: status, mutationMayHaveApplied: true },
+          {
+            nativeStatus: status,
+            mutationMayHaveApplied: true,
+            nativeProof: proof,
+          },
         );
       }
     }
@@ -1751,7 +2083,1384 @@ export class OperonDeveloperApiRuntimeAdapter {
       recoveryRef: preview.plan.recoveryRef,
       retryable: false,
       mutationMayHaveApplied: execution.mutationMayHaveApplied ?? true,
+      nativeProof: proof,
     };
+  }
+
+  async executeTaskWorkflow(
+    kind: DeveloperApiTaskWorkflowKind,
+    requested: Record<string, unknown>,
+    dryRun: boolean,
+    beforeApply?: () => Promise<TaskWorkflowBeforeApplyGateResult>,
+  ): Promise<DeveloperApiMutationResult> {
+    const api = this.taskWorkflowApis.get(kind);
+    const methods = this.taskWorkflowMethods(api, kind);
+    if (!methods?.preview || !methods.apply) {
+      return this.mutationFailure(
+        "not-ready",
+        `Operon task-workflow Developer API grant is unavailable: ${kind}.`,
+        null,
+        true,
+      );
+    }
+
+    let previewInput: Record<string, unknown>;
+    let existingOperonId: string | null = null;
+    let beforeIds = new Set(
+      this.rawTasks.map((task) => task.identity.operonId),
+    );
+    try {
+      if (kind === "adopt") {
+        const targetPath = requested.targetPath;
+        const line = Number(requested.line);
+        const expectedLine = requested.expectedLine;
+        if (
+          !isCanonicalVaultRelativePath(targetPath) ||
+          !targetPath.endsWith(".md")
+        ) {
+          throw new Error(
+            "targetPath must be one canonical vault-relative Markdown path.",
+          );
+        }
+        if (!Number.isInteger(line) || line < 1) {
+          throw new Error("line must be a positive one-based line number.");
+        }
+        if (
+          typeof expectedLine !== "string" ||
+          expectedLine.length > 65_536 ||
+          /[\r\n]/u.test(expectedLine)
+        ) {
+          throw new Error(
+            "expectedLine must be one exact bounded source line.",
+          );
+        }
+        const statusId = String(requested.statusId ?? "").trim();
+        const terminalSourcePolicy = requested.terminalSourcePolicy;
+        if (
+          terminalSourcePolicy !== undefined &&
+          terminalSourcePolicy !== "reopen"
+        ) {
+          throw new Error(
+            "terminalSourcePolicy must be 'reopen' when supplied.",
+          );
+        }
+        previewInput = {
+          operation: "adopt-inline",
+          source: {
+            filePath: targetPath,
+            lineNumber: line - 1,
+            expectedLine,
+          },
+          ...(statusId ? { statusId } : {}),
+          ...(terminalSourcePolicy ? { terminalSourcePolicy } : {}),
+        };
+      } else if (kind === "periodic-create") {
+        if (
+          requested.periodicKind !== "daily" &&
+          requested.periodicKind !== "weekly"
+        ) {
+          throw new Error("periodicKind must be daily or weekly.");
+        }
+        if (
+          requested.routeDate !== undefined &&
+          !/^\d{4}-\d{2}-\d{2}$/u.test(String(requested.routeDate))
+        ) {
+          throw new Error("routeDate must be an ISO date key (YYYY-MM-DD).");
+        }
+        if (
+          requested.targetPath !== undefined ||
+          requested.parentTask !== undefined
+        ) {
+          throw new Error(
+            "Periodic-note creation owns routing and parentage; targetPath and parentTask are not accepted.",
+          );
+        }
+        const mapped = this.mapCreateInput({ ...requested, source: "inline" });
+        const item = (mapped.spec.items as Record<string, unknown>[])[0];
+        previewInput = {
+          operation: "create",
+          items: [
+            {
+              ...item,
+              target: {
+                representation: "inline",
+                mode: "periodic-note",
+                periodicKind: requested.periodicKind,
+                ...(requested.routeDate
+                  ? { routeDate: String(requested.routeDate) }
+                  : {}),
+              },
+            },
+          ],
+        };
+      } else {
+        existingOperonId = String(requested.operonId ?? "").trim();
+        if (!existingOperonId) throw new Error("operonId is required.");
+        const requestKeys = Object.keys(requested);
+        if (requestKeys.some((key) => key !== "operonId" && key !== "fields")) {
+          throw new Error(
+            "Periodic-note update accepts only operonId and fields.dateScheduled.",
+          );
+        }
+        const fields = requested.fields;
+        if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+          throw new Error(
+            "Periodic-note update requires fields.dateScheduled.",
+          );
+        }
+        const fieldEntries = Object.entries(fields as Record<string, unknown>);
+        if (
+          fieldEntries.length !== 1 ||
+          fieldEntries[0]?.[0] !== "dateScheduled"
+        ) {
+          throw new Error(
+            "Periodic-note update accepts exactly fields.dateScheduled.",
+          );
+        }
+        const dateScheduled = fieldEntries[0][1];
+        if (
+          dateScheduled !== null &&
+          (typeof dateScheduled !== "string" || !dateScheduled.trim())
+        ) {
+          throw new Error(
+            "fields.dateScheduled must be a non-empty date string or null.",
+          );
+        }
+        const readApi = this.readApi;
+        if (!readApi)
+          throw new Error("Operon live read session is unavailable.");
+        const task = await this.getExactTask(readApi, existingOperonId);
+        if (!task)
+          throw new Error(`Operon task not found: ${existingOperonId}.`);
+        const mapped = await this.mapMutationInput(
+          readApi,
+          "update",
+          task,
+          requested,
+        );
+        previewInput = {
+          operation: "update-periodic-note",
+          target: mapped.target,
+          changes: mapped.spec.changes,
+        };
+      }
+    } catch (error) {
+      return this.mutationFailure(
+        "invalid-input",
+        error instanceof Error ? error.message : String(error),
+        existingOperonId,
+        false,
+      );
+    }
+
+    let preview: TaskWorkflowDeveloperMutationPreviewResult;
+    try {
+      preview = await methods.preview(previewInput);
+    } catch (error) {
+      return this.mutationFailure(
+        "failed",
+        error instanceof Error ? error.message : String(error),
+        existingOperonId,
+        false,
+      );
+    }
+    const previewViolation = this.taskWorkflowPreviewViolation(preview);
+    if (previewViolation) {
+      return this.mutationFailure(
+        "failed",
+        `Operon returned an invalid task-workflow preview result; apply was not dispatched: ${previewViolation}`,
+        existingOperonId,
+        false,
+        { mutationMayHaveApplied: false },
+      );
+    }
+    if (!preview.ok || !preview.plan) {
+      return this.mutationFailure(
+        this.mapNativeErrorCode(preview.error),
+        developerErrorMessage(preview.error),
+        existingOperonId,
+        false,
+      );
+    }
+    const planViolation = this.taskWorkflowPlanViolation(preview.plan);
+    if (planViolation) {
+      return this.mutationFailure(
+        "failed",
+        `Operon returned an invalid task-workflow plan; apply was not dispatched: ${planViolation}`,
+        existingOperonId,
+        false,
+        { mutationMayHaveApplied: false },
+      );
+    }
+    const plan = this.taskWorkflowPlanMetadata(preview.plan, kind);
+    if (dryRun) {
+      return {
+        ok: true,
+        operonId: existingOperonId,
+        code: "planned",
+        nativeStatus: "planned",
+        plan,
+        planDigest: preview.plan.planDigest,
+        recoveryRef: preview.plan.recoveryRef,
+        retryable: false,
+      };
+    }
+
+    if (beforeApply) {
+      let gate: TaskWorkflowBeforeApplyGateResult;
+      try {
+        gate = await beforeApply();
+      } catch (error) {
+        return this.mutationFailure(
+          "failed",
+          `The pre-apply revision gate could not be verified: ${error instanceof Error ? error.message : String(error)}`,
+          existingOperonId,
+          true,
+          {
+            nativeStatus: "planned-not-applied",
+            planDigest: preview.plan.planDigest,
+            recoveryRef: preview.plan.recoveryRef,
+            mutationMayHaveApplied: false,
+          },
+        );
+      }
+      if (!gate.ok) {
+        return this.mutationFailure(
+          "conflict",
+          gate.message ??
+            "The task revision changed after preview; the sealed plan was not applied.",
+          existingOperonId,
+          true,
+          {
+            nativeStatus: "planned-not-applied",
+            planDigest: preview.plan.planDigest,
+            recoveryRef: preview.plan.recoveryRef,
+            mutationMayHaveApplied: false,
+          },
+        );
+      }
+    }
+
+    let execution: TaskWorkflowDeveloperMutationExecutionResult;
+    try {
+      execution = await withTimeout(
+        methods.apply({ plan: preview.plan }),
+        DEVELOPER_API_APPLY_TIMEOUT_MS,
+      );
+    } catch (error) {
+      return this.mutationFailure(
+        "outcome-unknown",
+        `Operon task-workflow apply did not return a terminal result: ${error instanceof Error ? error.message : String(error)}`,
+        existingOperonId,
+        false,
+        {
+          nativeStatus: "timeout-or-transport-error",
+          recoveryRef: preview.plan.recoveryRef,
+          planDigest: preview.plan.planDigest,
+          mutationMayHaveApplied: true,
+        },
+      );
+    }
+    const terminal = this.projectTaskWorkflowExecution(
+      execution,
+      plan,
+      existingOperonId,
+    );
+    if (!terminal.ok) return terminal;
+
+    if (kind === "adopt") {
+      const targetPath = String(requested.targetPath);
+      const lineNumber = Number(requested.line) - 1;
+      try {
+        const live = await this.reloadLiveTasks();
+        const replayedIdentity =
+          execution.status === "already-applied"
+            ? this.taskWorkflowIdentity(
+                kind,
+                preview.plan.planDigest,
+              )
+            : undefined;
+        const adopted = live.rawTasks.filter(
+          (task) =>
+            (replayedIdentity
+              ? task.identity.operonId === replayedIdentity
+              : execution.status === "already-applied" ||
+                !beforeIds.has(task.identity.operonId)) &&
+            task.representation === "inline" &&
+            task.locator.representation === "inline" &&
+            task.locator.filePath === targetPath &&
+            task.locator.lineNumber === lineNumber,
+        );
+        if (adopted.length !== 1) {
+          throw new Error(
+            "no unique adopted task is visible at the sealed source line",
+          );
+        }
+        await this.rememberTaskWorkflowIdentity(
+          kind,
+          preview.plan.planDigest,
+          adopted[0]!.identity.operonId,
+        );
+        return { ...terminal, operonId: adopted[0]!.identity.operonId };
+      } catch (error) {
+        return this.mutationFailure(
+          "outcome-unknown",
+          `Operon applied adoption, but the adopted identity could not be proven: ${error instanceof Error ? error.message : String(error)}`,
+          null,
+          false,
+          {
+            nativeStatus: execution.status,
+            planDigest: preview.plan.planDigest,
+            recoveryRef: preview.plan.recoveryRef,
+            mutationMayHaveApplied: true,
+          },
+        );
+      }
+    }
+    if (kind === "periodic-create") {
+      try {
+        const live = await this.reloadLiveTasks();
+        const provenResourceKeys = this.taskWorkflowResourceKeys(execution);
+        const replayedIdentity =
+          execution.status === "already-applied"
+            ? this.taskWorkflowIdentity(
+                kind,
+                preview.plan.planDigest,
+              )
+            : undefined;
+        const created = live.rawTasks.filter(
+          (task) =>
+            task.representation === "inline" &&
+            this.periodicCreatedTaskMatchesRequest(task, requested) &&
+            (execution.status === "already-applied"
+              ? replayedIdentity
+                ? task.identity.operonId === replayedIdentity
+                : beforeIds.has(task.identity.operonId)
+              : !beforeIds.has(task.identity.operonId) &&
+                provenResourceKeys.has(task.locator.filePath)),
+        );
+        if (created.length !== 1) {
+          throw new Error(
+            "no unique periodic task is linked to the committed native resource evidence",
+          );
+        }
+        await this.rememberTaskWorkflowIdentity(
+          kind,
+          preview.plan.planDigest,
+          created[0]!.identity.operonId,
+        );
+        return { ...terminal, operonId: created[0]!.identity.operonId };
+      } catch (error) {
+        return this.mutationFailure(
+          "outcome-unknown",
+          `Operon applied periodic-note creation, but the created identity could not be proven uniquely: ${error instanceof Error ? error.message : String(error)}`,
+          null,
+          false,
+          {
+            nativeStatus: execution.status,
+            planDigest: preview.plan.planDigest,
+            recoveryRef: preview.plan.recoveryRef,
+            mutationMayHaveApplied: true,
+          },
+        );
+      }
+    }
+    return terminal;
+  }
+
+  async pendingTaskWorkflowRecoveries(
+    kind?: DeveloperApiTaskWorkflowKind,
+  ): Promise<DeveloperApiPendingRecoveryResult> {
+    const kinds = kind
+      ? [kind]
+      : (
+          Object.keys(
+            TASK_WORKFLOW_CAPABILITIES,
+          ) as DeveloperApiTaskWorkflowKind[]
+        ).filter((candidate) => this.hasTaskWorkflowRecoverySupport(candidate));
+    if (kinds.length === 0) {
+      return {
+        ok: false,
+        recoveries: [],
+        message: "No Operon task-workflow recovery grant is available.",
+      };
+    }
+    const recoveries: (DeveloperApiPendingRecovery & {
+      workflowKind: DeveloperApiTaskWorkflowKind;
+    })[] = [];
+    for (const workflowKind of kinds) {
+      const methods = this.taskWorkflowMethods(
+        this.taskWorkflowApis.get(workflowKind),
+        workflowKind,
+      );
+      if (!methods?.pendingRecoveries) {
+        return {
+          ok: false,
+          recoveries: [],
+          message: `Operon task-workflow recovery grant is unavailable: ${workflowKind}.`,
+        };
+      }
+      try {
+        const result = await methods.pendingRecoveries();
+        const pendingViolation = this.taskWorkflowPendingViolation(result);
+        if (pendingViolation) {
+          return {
+            ok: false,
+            recoveries: [],
+            message: `Operon returned invalid task-workflow pending recovery state: ${pendingViolation}`,
+          };
+        }
+        if (!result.ok) {
+          return {
+            ok: false,
+            recoveries: [],
+            message: developerErrorMessage(result.error),
+          };
+        }
+        for (const recovery of result.recoveries ?? []) {
+          if (recovery.recoveryRef && recovery.planDigest) {
+            this.taskWorkflowRecoveryDigests.set(
+              `${workflowKind}:${recovery.recoveryRef}`,
+              recovery.planDigest,
+            );
+          }
+          recoveries.push({ ...recovery, workflowKind });
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          recoveries: [],
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    return { ok: true, recoveries };
+  }
+
+  async recoverTaskWorkflow(
+    kind: DeveloperApiTaskWorkflowKind,
+    recoveryRef: string,
+    expectedPlanDigest?: string,
+  ): Promise<DeveloperApiMutationResult> {
+    const methods = this.taskWorkflowMethods(
+      this.taskWorkflowApis.get(kind),
+      kind,
+    );
+    if (!methods?.recover) {
+      return this.mutationFailure(
+        "not-ready",
+        `Operon task-workflow recovery grant is unavailable: ${kind}.`,
+        null,
+        true,
+        { recoveryRef, mutationMayHaveApplied: true },
+      );
+    }
+    const normalizedRecoveryRef = recoveryRef.trim();
+    if (!normalizedRecoveryRef) {
+      return this.mutationFailure(
+        "invalid-input",
+        "recoveryRef is required.",
+        null,
+        false,
+      );
+    }
+    const suppliedPlanDigest = String(expectedPlanDigest ?? "").trim();
+    if (suppliedPlanDigest && !SHA256_HEX.test(suppliedPlanDigest)) {
+      return this.mutationFailure(
+        "invalid-input",
+        "planDigest must be exactly 64 lowercase SHA-256 hexadecimal characters; native recovery was not dispatched.",
+        null,
+        false,
+        {
+          recoveryRef: normalizedRecoveryRef,
+          mutationMayHaveApplied: true,
+        },
+      );
+    }
+    let planDigest =
+      this.taskWorkflowRecoveryDigests.get(`${kind}:${normalizedRecoveryRef}`) ||
+      "";
+    if (planDigest && !SHA256_HEX.test(planDigest)) {
+      return this.mutationFailure(
+        "invalid-input",
+        "The stored task-workflow planDigest is not valid lowercase SHA-256; native recovery was not dispatched.",
+        null,
+        false,
+        {
+          recoveryRef: normalizedRecoveryRef,
+          mutationMayHaveApplied: true,
+        },
+      );
+    }
+    if (suppliedPlanDigest) {
+      if (!methods.pendingRecoveries) {
+        return this.mutationFailure(
+          "not-ready",
+          "The supplied planDigest cannot be proven because pending recovery state is unavailable; native recovery was not dispatched.",
+          null,
+          true,
+          { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+        );
+      }
+      try {
+        const pending = await methods.pendingRecoveries();
+        if (this.taskWorkflowPendingViolation(pending) || !pending.ok) {
+          throw new Error("invalid task-workflow pending recovery result");
+        }
+        const match = (pending.recoveries ?? []).find(
+          (candidate) => candidate.recoveryRef === normalizedRecoveryRef,
+        );
+        const pendingPlanDigest = String(match?.planDigest ?? "").trim();
+        if (!pendingPlanDigest || !SHA256_HEX.test(pendingPlanDigest)) {
+          return this.mutationFailure(
+            "not-ready",
+            "The recovery reference is not present with a valid digest in pending recovery state; native recovery was not dispatched.",
+            null,
+            true,
+            { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+          );
+        }
+        if (pendingPlanDigest !== suppliedPlanDigest) {
+          return this.mutationFailure(
+            "invalid-input",
+            "planDigest does not match the pending native recovery; native recovery was not dispatched.",
+            null,
+            false,
+            { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+          );
+        }
+        planDigest = pendingPlanDigest;
+      } catch {
+        return this.mutationFailure(
+          "not-ready",
+          "The supplied planDigest could not be proven from pending recovery state; native recovery was not dispatched.",
+          null,
+          true,
+          { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+        );
+      }
+    } else if (!planDigest && methods.pendingRecoveries) {
+      try {
+        const pending = await methods.pendingRecoveries();
+        if (this.taskWorkflowPendingViolation(pending) || !pending.ok) {
+          throw new Error("invalid task-workflow pending recovery result");
+        }
+        const match = (pending.recoveries ?? []).find(
+          (candidate) => candidate.recoveryRef === normalizedRecoveryRef,
+        );
+        planDigest = String(match?.planDigest ?? "").trim();
+      } catch {
+        // Recovery stays fail-closed when the sealed digest cannot be proven.
+      }
+    }
+    if (planDigest && !SHA256_HEX.test(planDigest)) {
+      return this.mutationFailure(
+        "invalid-input",
+        "Operon pending recovery state returned an invalid planDigest; native recovery was not dispatched.",
+        null,
+        false,
+        {
+          recoveryRef: normalizedRecoveryRef,
+          mutationMayHaveApplied: true,
+        },
+      );
+    }
+    if (!planDigest) {
+      return this.mutationFailure(
+        "not-ready",
+        "The recovery plan digest could not be proven from pending recovery state; the native recovery was not dispatched.",
+        null,
+        true,
+        { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+      );
+    }
+    let execution: TaskWorkflowDeveloperMutationExecutionResult;
+    try {
+      execution = await methods.recover({ recoveryRef: normalizedRecoveryRef });
+    } catch (error) {
+      return this.mutationFailure(
+        "outcome-unknown",
+        `Operon task-workflow recovery did not return a terminal result: ${error instanceof Error ? error.message : String(error)}`,
+        null,
+        false,
+        { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+      );
+    }
+    return this.projectTaskWorkflowExecution(
+      execution,
+      {
+        recoveryRef: normalizedRecoveryRef,
+        planDigest,
+        mutationKind:
+          kind === "adopt"
+            ? "task.adopt"
+            : kind === "periodic-create"
+              ? "task.create"
+              : "task.update",
+      },
+      null,
+    );
+  }
+
+  private projectTaskWorkflowExecution(
+    execution: TaskWorkflowDeveloperMutationExecutionResult,
+    plan: Pick<
+      DeveloperApiMutationPlan,
+      "recoveryRef" | "planDigest" | "mutationKind"
+    >,
+    operonId: string | null,
+  ): DeveloperApiMutationResult {
+    const status = execution.status ?? "failed";
+    const proof = this.taskWorkflowProof(execution);
+    const invalid = this.taskWorkflowResultViolation(execution, plan);
+    if (invalid) {
+      return this.mutationFailure(
+        "outcome-unknown",
+        `Operon returned an invalid task-workflow result after dispatch: ${invalid}`,
+        operonId,
+        false,
+        {
+          nativeStatus: status,
+          recoveryRef: execution.recovery?.recoveryRef ?? plan.recoveryRef,
+          planDigest: plan.planDigest,
+          mutationMayHaveApplied: true,
+          nativeProof: proof,
+        },
+      );
+    }
+    if (status === "applied" || status === "already-applied") {
+      return {
+        ok: true,
+        operonId,
+        code: status,
+        nativeStatus: status,
+        planDigest: execution.receipt?.planDigest ?? plan.planDigest,
+        recoveryRef: plan.recoveryRef,
+        retryable: false,
+        mutationMayHaveApplied: true,
+        nativeProof: proof,
+      };
+    }
+    if (status === "partial" || status === "outcome-unknown") {
+      return this.mutationFailure(
+        "outcome-unknown",
+        developerErrorMessage(execution.error) ||
+          "Operon requires recovery of the same task-workflow plan.",
+        operonId,
+        false,
+        {
+          nativeStatus: status,
+          recoveryRef: execution.recovery?.recoveryRef ?? plan.recoveryRef,
+          planDigest: execution.recovery?.planDigest ?? plan.planDigest,
+          mutationMayHaveApplied: true,
+          nativeProof: proof,
+        },
+      );
+    }
+    return this.mutationFailure(
+      this.mapNativeErrorCode(execution.error),
+      developerErrorMessage(execution.error),
+      operonId,
+      false,
+      { nativeStatus: status, recoveryRef: plan.recoveryRef, nativeProof: proof },
+    );
+  }
+
+  private taskWorkflowPlanViolation(
+    plan: TaskWorkflowDeveloperMutationPlan,
+  ): string | null {
+    const allowedKeys = new Set([
+      "contractVersion",
+      "kind",
+      "recoveryRef",
+      "planDigest",
+      "createdAt",
+      "expiresAt",
+      "riskLevel",
+      "requiresConsent",
+    ]);
+    if (
+      Object.keys(plan).length !== allowedKeys.size ||
+      Object.keys(plan).some((key) => !allowedKeys.has(key)) ||
+      [...allowedKeys].some(
+        (key) => !Object.prototype.hasOwnProperty.call(plan, key),
+      )
+    )
+      return "plan contains a non-public field";
+    if (
+      plan.contractVersion !== 1 ||
+      plan.kind !== "task-workflow-developer-mutation-plan"
+    )
+      return "plan discriminator is invalid";
+    if (!DEVELOPER_RECOVERY_REF.test(plan.recoveryRef))
+      return "recoveryRef is invalid";
+    if (!SHA256_HEX.test(plan.planDigest))
+      return "planDigest must be lowercase SHA-256 hex";
+    const createdAt = Date.parse(plan.createdAt);
+    const expiresAt = Date.parse(plan.expiresAt);
+    if (
+      !Number.isFinite(createdAt) ||
+      !Number.isFinite(expiresAt) ||
+      expiresAt <= createdAt
+    ) return "plan timestamps are invalid";
+    if (!["none", "routine", "elevated", "destructive"].includes(plan.riskLevel))
+      return "riskLevel is invalid";
+    if (typeof plan.requiresConsent !== "boolean")
+      return "requiresConsent must be boolean";
+    return null;
+  }
+
+  private taskWorkflowPreviewViolation(
+    preview: TaskWorkflowDeveloperMutationPreviewResult,
+  ): string | null {
+    if (preview.contractVersion !== 1)
+      return "contractVersion must equal 1";
+    if (preview.kind !== "task-workflow-developer-mutation-preview-result")
+      return "kind must be task-workflow-developer-mutation-preview-result";
+    if (
+      typeof preview.requestId !== "string" ||
+      !preview.requestId ||
+      preview.requestId.length > 128
+    ) return "requestId is invalid";
+    if (!Array.isArray(preview.warnings)) return "warnings must be an array";
+    if (preview.ok) {
+      if (!preview.plan || preview.error !== undefined)
+        return "successful preview union is inconsistent";
+      return null;
+    }
+    if (preview.plan !== undefined || !isRecord(preview.error))
+      return "failed preview union is inconsistent";
+    return null;
+  }
+
+  private taskWorkflowPendingViolation(
+    pending: DeveloperApiPendingRecoveriesResult,
+  ): string | null {
+    if (pending.contractVersion !== 1)
+      return "contractVersion must equal 1";
+    if (
+      pending.kind !==
+      "task-workflow-developer-pending-recoveries-result"
+    )
+      return "kind must be task-workflow-developer-pending-recoveries-result";
+    if (pending.ok) {
+      if (!Array.isArray(pending.recoveries) || pending.error !== undefined)
+        return "successful pending recovery union is inconsistent";
+      if (
+        pending.recoveries.length > 512 ||
+        pending.recoveries.some((recovery) => {
+          const createdAt = Date.parse(String(recovery.createdAt ?? ""));
+          const expiresAt = Date.parse(String(recovery.expiresAt ?? ""));
+          return (
+            !DEVELOPER_RECOVERY_REF.test(String(recovery.recoveryRef ?? "")) ||
+            !SHA256_HEX.test(String(recovery.planDigest ?? "")) ||
+            !Number.isFinite(createdAt) ||
+            !Number.isFinite(expiresAt) ||
+            expiresAt <= createdAt
+          );
+        })
+      ) return "pending recovery entries are invalid or unbounded";
+      return null;
+    }
+    if (pending.recoveries !== undefined || !isRecord(pending.error))
+      return "failed pending recovery union is inconsistent";
+    return null;
+  }
+
+  private baseMutationResultViolation(
+    execution: DeveloperApiMutationExecutionResult,
+    plan: DeveloperApiMutationPlan,
+  ): string | null {
+    if (execution.contractVersion !== 1) return "contractVersion must equal 1";
+    if (execution.kind !== "developer-mutation-execution-result")
+      return "kind must be developer-mutation-execution-result";
+    if (
+      typeof execution.requestId !== "string" ||
+      !execution.requestId ||
+      execution.requestId.length > 128
+    ) return "requestId is invalid";
+    if (
+      typeof plan.planDigest !== "string" ||
+      !SHA256_HEX.test(plan.planDigest) ||
+      typeof plan.mutationKind !== "string" ||
+      !plan.mutationKind ||
+      plan.mutationKind.length > 128
+    ) return "sealed preview plan identity is invalid";
+    if (
+      !Array.isArray(execution.groupResults) ||
+      execution.groupResults.length > 32
+    ) return "groupResults must be a bounded array";
+    const resourceKinds = new Set([
+      "timer",
+      "repeat-series",
+      "active-tracker",
+      "pinned",
+      "project-serial",
+      "task-source",
+    ]);
+    for (const group of execution.groupResults) {
+      if (
+        typeof group.groupId !== "string" ||
+        !group.groupId ||
+        group.groupId.length > 256 ||
+        !["committed", "failed", "outcome-unknown"].includes(
+          String(group.status),
+        ) ||
+        (group.resourceRevisions !== undefined &&
+          (!Array.isArray(group.resourceRevisions) ||
+            group.resourceRevisions.length > 64))
+      ) return "groupResults contain an invalid group";
+      for (const revision of group.resourceRevisions ?? []) {
+        if (
+          !resourceKinds.has(String(revision.resourceKind)) ||
+          typeof revision.resourceKey !== "string" ||
+          !revision.resourceKey ||
+          revision.resourceKey.length > 1024 ||
+          typeof revision.revision !== "string" ||
+          !revision.revision ||
+          revision.revision.length > 256
+        ) return "groupResults contain an invalid resource revision";
+      }
+    }
+    const receipt = execution.receipt;
+    const receiptMatches =
+      receipt?.contractVersion === 1 &&
+      receipt.planDigest === plan.planDigest &&
+      receipt.mutationKind === plan.mutationKind &&
+      typeof receipt.targetDigest === "string" &&
+      SHA256_HEX.test(receipt.targetDigest) &&
+      typeof receipt.effectiveAt === "string" &&
+      Number.isFinite(Date.parse(receipt.effectiveAt)) &&
+      typeof receipt.completedAt === "string" &&
+      Number.isFinite(Date.parse(receipt.completedAt)) &&
+      typeof receipt.expiresAt === "string" &&
+      Number.isFinite(Date.parse(receipt.expiresAt));
+    if (execution.status === "applied") {
+      if (
+        execution.mutationMayHaveApplied !== true ||
+        execution.retryAllowed !== false ||
+        execution.error !== undefined ||
+        execution.recovery !== undefined ||
+        execution.groupResults.length === 0 ||
+        execution.groupResults.some((group) => group.status !== "committed") ||
+        !receiptMatches ||
+        receipt?.terminalOutcome !== "applied" ||
+        execution.postflight?.status !== "verified" ||
+        typeof execution.postflight.observedAt !== "string" ||
+        !Number.isFinite(Date.parse(execution.postflight.observedAt))
+      ) return "applied union is inconsistent with the sealed plan";
+      return null;
+    }
+    if (execution.status === "already-applied") {
+      if (
+        execution.mutationMayHaveApplied !== true ||
+        execution.retryAllowed !== false ||
+        execution.error !== undefined ||
+        execution.recovery !== undefined ||
+        execution.groupResults.length !== 0 ||
+        !receiptMatches ||
+        receipt?.terminalOutcome !== "already-applied" ||
+        execution.postflight?.status !== "receipt-replay"
+      ) return "already-applied union is inconsistent with the sealed plan";
+      return null;
+    }
+    if (execution.status === "failed") {
+      if (
+        execution.mutationMayHaveApplied !== false ||
+        execution.retryAllowed !== false ||
+        !isRecord(execution.error) ||
+        execution.receipt !== undefined ||
+        execution.postflight !== undefined ||
+        execution.recovery !== undefined ||
+        execution.groupResults.some(
+          (group) =>
+            group.status === "committed" || group.status === "outcome-unknown",
+        )
+      ) return "failed union contains side-effect evidence";
+      return null;
+    }
+    if (
+      execution.status === "partial" ||
+      execution.status === "outcome-unknown"
+    ) {
+      const recovery = execution.recovery;
+      if (
+        execution.mutationMayHaveApplied !== true ||
+        execution.retryAllowed !== false ||
+        !isRecord(execution.error) ||
+        execution.receipt !== undefined ||
+        execution.postflight !== undefined ||
+        recovery?.required !== true ||
+        recovery.action !== "recover-same-plan" ||
+        recovery.mutationMayHaveApplied !== true ||
+        recovery.recoveryRef !== plan.recoveryRef ||
+        recovery.planDigest !== plan.planDigest ||
+        !recovery.plan ||
+        recovery.plan.recoveryRef !== plan.recoveryRef ||
+        recovery.plan.planDigest !== plan.planDigest ||
+        recovery.plan.mutationKind !== plan.mutationKind
+      ) return "uncertain union does not preserve the same sealed plan";
+      return null;
+    }
+    return "status is not part of the Developer API mutation result union";
+  }
+
+  private baseMutationProof(
+    execution: DeveloperApiMutationExecutionResult,
+  ): DeveloperApiTaskWorkflowNativeProof {
+    type ProofGroup = DeveloperApiTaskWorkflowNativeProof["groupResults"][number];
+    type ProofRevision = NonNullable<ProofGroup["resourceRevisions"]>[number];
+    const groupResults: ProofGroup[] = (execution.groupResults ?? []).map(
+      (group) => {
+        const resourceRevisions: ProofRevision[] = (
+          group.resourceRevisions ?? []
+        ).map((revision) => ({
+          resourceKind: revision.resourceKind as ProofRevision["resourceKind"],
+          resourceKey: revision.resourceKey as string,
+          revision: revision.revision as string,
+        }));
+        return {
+          groupId: group.groupId as string,
+          status: group.status as ProofGroup["status"],
+          ...(group.resourceRevisions ? { resourceRevisions } : {}),
+        };
+      },
+    );
+    const receipt = execution.receipt;
+    const postflight = execution.postflight;
+    return {
+      contractVersion: 1,
+      kind: "mutation-result",
+      status: execution.status as DeveloperApiTaskWorkflowNativeProof["status"],
+      mutationMayHaveApplied: execution.mutationMayHaveApplied as boolean,
+      retryAllowed: execution.retryAllowed as boolean,
+      groupResults,
+      ...(receipt
+        ? {
+            receipt: {
+              contractVersion: 1,
+              planDigest: receipt.planDigest as string,
+              mutationKind: receipt.mutationKind as string,
+              targetDigest: receipt.targetDigest as string,
+              terminalOutcome: receipt.terminalOutcome as
+                | "applied"
+                | "already-applied",
+              effectiveAt: receipt.effectiveAt as string,
+              completedAt: receipt.completedAt as string,
+              expiresAt: receipt.expiresAt as string,
+            },
+          }
+        : {}),
+      ...(postflight?.status === "verified" ||
+      postflight?.status === "receipt-replay"
+        ? {
+            postflight: {
+              status: postflight.status,
+              ...(typeof postflight.observedAt === "string"
+                ? { observedAt: postflight.observedAt }
+                : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  private taskWorkflowProof(
+    execution: TaskWorkflowDeveloperMutationExecutionResult,
+  ): DeveloperApiTaskWorkflowNativeProof | undefined {
+    const statuses = new Set([
+      "applied",
+      "already-applied",
+      "partial",
+      "failed",
+      "outcome-unknown",
+    ] as const);
+    const groupStatuses = new Set([
+      "committed",
+      "failed",
+      "outcome-unknown",
+    ] as const);
+    const resourceKinds = new Set([
+      "timer",
+      "repeat-series",
+      "active-tracker",
+      "pinned",
+      "project-serial",
+      "task-source",
+    ] as const);
+    const mutationKinds = new Set([
+      "task.adopt",
+      "task.create",
+      "task.update",
+    ] as const);
+    if (
+      execution.contractVersion !== 1 ||
+      execution.kind !==
+        "task-workflow-developer-mutation-execution-result" ||
+      !statuses.has(execution.status as never) ||
+      typeof execution.mutationMayHaveApplied !== "boolean" ||
+      typeof execution.retryAllowed !== "boolean" ||
+      !Array.isArray(execution.groupResults) ||
+      execution.groupResults.length > 32
+    ) return undefined;
+    type ProofGroup = DeveloperApiTaskWorkflowNativeProof["groupResults"][number];
+    type ProofRevision = NonNullable<ProofGroup["resourceRevisions"]>[number];
+    const groupResults: ProofGroup[] = [];
+    for (const group of execution.groupResults) {
+      if (
+        typeof group.groupId !== "string" ||
+        !group.groupId ||
+        group.groupId.length > 256 ||
+        !groupStatuses.has(group.status as never) ||
+        (group.resourceRevisions !== undefined &&
+          (!Array.isArray(group.resourceRevisions) ||
+            group.resourceRevisions.length > 64))
+      ) return undefined;
+      const resourceRevisions: ProofRevision[] = [];
+      for (const revision of group.resourceRevisions ?? []) {
+        if (
+          !resourceKinds.has(revision.resourceKind as never) ||
+          typeof revision.resourceKey !== "string" ||
+          !revision.resourceKey ||
+          revision.resourceKey.length > 1024 ||
+          typeof revision.revision !== "string" ||
+          !revision.revision ||
+          revision.revision.length > 256
+        ) return undefined;
+        resourceRevisions.push({
+          resourceKind: revision.resourceKind as ProofRevision["resourceKind"],
+          resourceKey: revision.resourceKey,
+          revision: revision.revision,
+        });
+      }
+      groupResults.push({
+        groupId: group.groupId,
+        status: group.status as ProofGroup["status"],
+        ...(group.resourceRevisions ? { resourceRevisions } : {}),
+      });
+    }
+    const receipt = execution.receipt;
+    const projectedReceipt: DeveloperApiTaskWorkflowNativeProof["receipt"] =
+      receipt?.contractVersion === 1 &&
+      typeof receipt.planDigest === "string" &&
+      SHA256_HEX.test(receipt.planDigest) &&
+      mutationKinds.has(receipt.mutationKind as never) &&
+      typeof receipt.targetDigest === "string" &&
+      SHA256_HEX.test(receipt.targetDigest) &&
+      (receipt.terminalOutcome === "applied" ||
+        receipt.terminalOutcome === "already-applied") &&
+      typeof receipt.effectiveAt === "string" &&
+      Number.isFinite(Date.parse(receipt.effectiveAt)) &&
+      typeof receipt.completedAt === "string" &&
+      Number.isFinite(Date.parse(receipt.completedAt)) &&
+      typeof receipt.expiresAt === "string"
+      && Number.isFinite(Date.parse(receipt.expiresAt))
+        ? {
+            contractVersion: 1 as const,
+            planDigest: receipt.planDigest,
+            mutationKind: receipt.mutationKind as NonNullable<
+              DeveloperApiTaskWorkflowNativeProof["receipt"]
+            >["mutationKind"],
+            targetDigest: receipt.targetDigest,
+            terminalOutcome: receipt.terminalOutcome as NonNullable<
+              DeveloperApiTaskWorkflowNativeProof["receipt"]
+            >["terminalOutcome"],
+            effectiveAt: receipt.effectiveAt.slice(0, 64),
+            completedAt: receipt.completedAt.slice(0, 64),
+            expiresAt: receipt.expiresAt.slice(0, 64),
+          }
+        : undefined;
+    const postflight = execution.postflight;
+    const projectedPostflight:
+      | DeveloperApiTaskWorkflowNativeProof["postflight"]
+      | undefined =
+      postflight?.status === "verified" ||
+      postflight?.status === "receipt-replay"
+        ? {
+            status: postflight.status,
+            ...(typeof postflight.observedAt === "string"
+              ? {
+                  observedAt: Number.isFinite(Date.parse(postflight.observedAt))
+                    ? postflight.observedAt.slice(0, 64)
+                    : undefined,
+                }
+              : {}),
+          }
+        : undefined;
+    return {
+      contractVersion: 1,
+      kind: "mutation-result",
+      status: execution.status as DeveloperApiTaskWorkflowNativeProof["status"],
+      mutationMayHaveApplied: execution.mutationMayHaveApplied,
+      retryAllowed: execution.retryAllowed,
+      groupResults,
+      ...(projectedReceipt ? { receipt: projectedReceipt } : {}),
+      ...(projectedPostflight ? { postflight: projectedPostflight } : {}),
+    };
+  }
+
+  private taskWorkflowResourceKeys(
+    execution: TaskWorkflowDeveloperMutationExecutionResult,
+  ): Set<string> {
+    const keys = new Set<string>();
+    for (const group of execution.groupResults ?? []) {
+      for (const revision of group.resourceRevisions ?? []) {
+        if (!isRecord(revision)) continue;
+        if (
+          revision.resourceKind === "task-source" &&
+          typeof revision.resourceKey === "string" &&
+          revision.resourceKey
+        ) keys.add(revision.resourceKey);
+      }
+    }
+    return keys;
+  }
+
+  private taskWorkflowIdentity(
+    kind: DeveloperApiTaskWorkflowKind,
+    planDigest: string,
+  ): string | undefined {
+    const key = `${kind}:${planDigest}`;
+    return (
+      this.taskWorkflowIdentityStore?.get(key) ??
+      this.taskWorkflowIdentityByPlanDigest.get(key)
+    );
+  }
+
+  private async rememberTaskWorkflowIdentity(
+    kind: DeveloperApiTaskWorkflowKind,
+    planDigest: string,
+    operonId: string,
+  ): Promise<void> {
+    const key = `${kind}:${planDigest}`;
+    if (this.taskWorkflowIdentityStore) {
+      await this.taskWorkflowIdentityStore.set(key, operonId);
+      return;
+    }
+    this.taskWorkflowIdentityByPlanDigest.delete(key);
+    this.taskWorkflowIdentityByPlanDigest.set(key, operonId);
+    if (this.taskWorkflowIdentityByPlanDigest.size <= 512) return;
+    const oldest = this.taskWorkflowIdentityByPlanDigest.keys().next().value;
+    if (typeof oldest === "string")
+      this.taskWorkflowIdentityByPlanDigest.delete(oldest);
+  }
+
+  private periodicCreatedTaskMatchesRequest(
+    task: DeveloperApiTask,
+    requested: Record<string, unknown>,
+  ): boolean {
+    if (task.description !== String(requested.description ?? "").trim())
+      return false;
+    const fields = isRecord(requested.fields) ? requested.fields : {};
+    const requestedPriorityId =
+      String(requested.priorityId ?? "").trim() ||
+      (Object.prototype.hasOwnProperty.call(fields, "priority")
+        ? this.resolvePriorityId(fields.priority)
+        : null);
+    if (requestedPriorityId && task.priority?.id !== requestedPriorityId)
+      return false;
+    const requestedStatusId =
+      String(requested.statusId ?? "").trim() ||
+      (Object.prototype.hasOwnProperty.call(fields, "status")
+        ? this.resolveStatusId(fields.status)
+        : null);
+    if (requestedStatusId && task.workflow?.status.id !== requestedStatusId)
+      return false;
+    const runtime = toRuntimeTask(task);
+    if (Array.isArray(requested.tags)) {
+      const normalizeTags = (values: readonly unknown[]) =>
+        [
+          ...new Set(
+            values
+              .map(String)
+              .map((tag) => tag.trim().replace(/^#/u, "").trim())
+              .filter(Boolean),
+          ),
+        ].sort();
+      if (
+        JSON.stringify(normalizeTags(runtime.tags)) !==
+        JSON.stringify(normalizeTags(requested.tags))
+      ) return false;
+    }
+    for (const [field, value] of Object.entries(fields)) {
+      if (field === "priority" || field === "status") continue;
+      const canonical = this.canonicalField(field);
+      const expected = fieldValue(value);
+      const actual = runtime.fieldValues[canonical];
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) return false;
+    }
+    return true;
+  }
+
+  private taskWorkflowResultViolation(
+    execution: TaskWorkflowDeveloperMutationExecutionResult,
+    plan: Pick<
+      DeveloperApiMutationPlan,
+      "recoveryRef" | "planDigest" | "mutationKind"
+    >,
+  ): string | null {
+    if (execution.contractVersion !== 1) return "contractVersion must equal 1";
+    if (
+      execution.kind !==
+      "task-workflow-developer-mutation-execution-result"
+    )
+      return "kind must be task-workflow-developer-mutation-execution-result";
+    if (
+      typeof execution.requestId !== "string" ||
+      !execution.requestId ||
+      execution.requestId.length > 128
+    ) return "requestId is invalid";
+    if (!Array.isArray(execution.groupResults)) return "groupResults must be an array";
+    const status = execution.status;
+    const groups = execution.groupResults;
+    const receipt = execution.receipt;
+    const digestMatches =
+      receipt?.contractVersion === 1 &&
+      typeof receipt.planDigest === "string" &&
+      SHA256_HEX.test(receipt.planDigest) &&
+      receipt.planDigest === plan.planDigest;
+    const receiptStructureMatches =
+      digestMatches &&
+      receipt?.mutationKind === plan.mutationKind &&
+      typeof receipt.targetDigest === "string" &&
+      SHA256_HEX.test(receipt.targetDigest) &&
+      typeof receipt.effectiveAt === "string" &&
+      Number.isFinite(Date.parse(receipt.effectiveAt)) &&
+      typeof receipt.completedAt === "string" &&
+      Number.isFinite(Date.parse(receipt.completedAt)) &&
+      typeof receipt.expiresAt === "string" &&
+      Number.isFinite(Date.parse(receipt.expiresAt));
+    if (status === "applied") {
+      if (
+        execution.mutationMayHaveApplied !== true ||
+        execution.retryAllowed !== false ||
+        execution.error !== undefined ||
+        execution.recovery !== undefined
+      ) return "applied must be terminal and non-retryable";
+      if (
+        groups.length === 0 ||
+        groups.some(
+          (group) =>
+            !group ||
+            typeof group.groupId !== "string" ||
+            !group.groupId ||
+            group.status !== "committed" ||
+            (group.resourceRevisions !== undefined &&
+              (!Array.isArray(group.resourceRevisions) ||
+                group.resourceRevisions.length > 64 ||
+                group.resourceRevisions.some(
+                  (revision: {
+                    resourceKind?: string;
+                    resourceKey?: string;
+                    revision?: string;
+                  }) =>
+                    typeof revision.resourceKind !== "string" ||
+                    !revision.resourceKind ||
+                    typeof revision.resourceKey !== "string" ||
+                    !revision.resourceKey ||
+                    typeof revision.revision !== "string" ||
+                    !revision.revision,
+                ))),
+        )
+      ) return "applied requires non-empty committed groupResults";
+      if (new Set(groups.map((group) => group.groupId)).size !== groups.length)
+        return "groupResults contain duplicate group ids";
+      if (!receiptStructureMatches || receipt?.terminalOutcome !== "applied")
+        return "applied receipt does not match the sealed plan";
+      if (
+        execution.postflight?.status !== "verified" ||
+        typeof execution.postflight.observedAt !== "string" ||
+        !Number.isFinite(Date.parse(execution.postflight.observedAt))
+      )
+        return "applied requires verified postflight";
+      return null;
+    }
+    if (status === "already-applied") {
+      if (
+        execution.mutationMayHaveApplied !== true ||
+        execution.retryAllowed !== false ||
+        groups.length !== 0 ||
+        execution.error !== undefined ||
+        execution.recovery !== undefined
+      ) return "already-applied requires no new groups and no retry";
+      if (!receiptStructureMatches || receipt?.terminalOutcome !== "already-applied")
+        return "already-applied receipt does not match the sealed plan";
+      if (execution.postflight?.status !== "receipt-replay")
+        return "already-applied requires receipt-replay postflight";
+      return null;
+    }
+    if (status === "failed") {
+      if (
+        execution.mutationMayHaveApplied !== false ||
+        execution.retryAllowed !== false ||
+        !execution.error ||
+        receipt ||
+        execution.postflight ||
+        execution.recovery ||
+        groups.some((group) => group.status === "committed" || group.status === "outcome-unknown")
+      ) return "failed result has inconsistent side-effect evidence";
+      return null;
+    }
+    if (status === "partial" || status === "outcome-unknown") {
+      const recovery = execution.recovery;
+      if (
+        execution.mutationMayHaveApplied !== true ||
+        execution.retryAllowed !== false ||
+        !execution.error ||
+        execution.receipt !== undefined ||
+        execution.postflight !== undefined ||
+        recovery?.required !== true ||
+        recovery.action !== "recover-same-plan" ||
+        recovery.mutationMayHaveApplied !== true ||
+        recovery.recoveryRef !== plan.recoveryRef ||
+        recovery.planDigest !== plan.planDigest ||
+        !recovery.plan ||
+        this.taskWorkflowPlanViolation(recovery.plan) !== null ||
+        recovery.plan.recoveryRef !== recovery.recoveryRef ||
+        recovery.plan.planDigest !== recovery.planDigest
+      ) return "uncertain result must be non-retryable and may have applied";
+      return null;
+    }
+    return "status is not part of the task-workflow result union";
+  }
+
+  private taskWorkflowPlanMetadata(
+    plan: TaskWorkflowDeveloperMutationPlan,
+    kind: DeveloperApiTaskWorkflowKind,
+  ): DeveloperApiMutationPlan {
+    return {
+      planDigest: plan.planDigest,
+      recoveryRef: plan.recoveryRef,
+      capability: TASK_WORKFLOW_CAPABILITIES[kind][0],
+      mutationKind:
+        kind === "adopt"
+          ? "task.adopt"
+          : kind === "periodic-create"
+            ? "task.create"
+            : "task.update",
+      createdAt: plan.createdAt,
+      expiresAt: plan.expiresAt,
+      riskLevel: plan.riskLevel,
+      requiresConsent: plan.requiresConsent,
+    };
+  }
+
+  private async reloadLiveTasks(): Promise<{
+    tasks: RuntimeIndexedTask[];
+    rawTasks: DeveloperApiTask[];
+  }> {
+    if (!this.readApi)
+      throw new Error("Operon live read session is unavailable.");
+    const live = await this.readAllTasks(this.readApi);
+    this.tasks = live.tasks;
+    this.rawTasks = live.rawTasks;
+    this.indexer.taskCount = live.tasks.length;
+    if (live.generation !== null) this.generation = live.generation;
+    return live;
+  }
+
+  async refreshLiveTaskSnapshot(): Promise<void> {
+    await this.reloadLiveTasks();
   }
 
   async pendingRecoveries(): Promise<DeveloperApiPendingRecoveryResult> {
@@ -1875,7 +3584,11 @@ export class OperonDeveloperApiRuntimeAdapter {
     error: DeveloperApiError | undefined,
   ): DeveloperApiMutationResult["code"] {
     const code = String(error?.code ?? "").toLocaleLowerCase();
-    if (code.includes("conflict") || code.includes("revision"))
+    if (
+      code === "stale-source" ||
+      code.includes("conflict") ||
+      code.includes("revision")
+    )
       return "conflict";
     if (code.includes("not-found") || code.includes("missing"))
       return "not-found";
@@ -2001,6 +3714,11 @@ export class OperonDeveloperApiRuntimeAdapter {
       return { field: canonical, valueType, value: parsed };
     }
     if (valueType === "list") {
+      if (canonical === "taskGallery" && !Array.isArray(value)) {
+        throw new Error(
+          "Field 'taskGallery' requires an ordered string array; the Bridge never splits media references heuristically.",
+        );
+      }
       const values = Array.isArray(value)
         ? value
             .map(String)
@@ -2411,7 +4129,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     const fields: Record<string, unknown>[] = [];
     const rawFields = requested.fields;
     let statusId = String(requested.statusId ?? "").trim() || null;
-    let priorityId: string | null = null;
+    let priorityId = String(requested.priorityId ?? "").trim() || null;
     let parent: Record<string, unknown> | undefined;
     const related: Record<string, unknown>[] = [];
     const dependencies: Record<string, unknown>[] = [];
@@ -2487,10 +4205,14 @@ export class OperonDeveloperApiRuntimeAdapter {
       });
     }
     if (Array.isArray(requested.tags)) {
-      const tags = requested.tags
-        .map(String)
-        .map((tag) => tag.replace(/^#/u, "").trim())
-        .filter(Boolean);
+      const tags = [
+        ...new Set(
+          requested.tags
+            .map(String)
+            .map((tag) => tag.trim().replace(/^#/u, "").trim())
+            .filter(Boolean),
+        ),
+      ];
       return {
         capability: "tasks.create.preview",
         mutationKind: "task.create",
@@ -2561,6 +4283,11 @@ export class OperonDeveloperApiRuntimeAdapter {
         : { kind: "number", field, value: parsed };
     }
     if (valueType === "list") {
+      if (field === "taskGallery" && !Array.isArray(value)) {
+        throw new Error(
+          "Create field 'taskGallery' requires an ordered string array; the Bridge never splits media references heuristically.",
+        );
+      }
       const list = this.listInput(value);
       return custom
         ? { kind: "custom", field, valueType, value: list }

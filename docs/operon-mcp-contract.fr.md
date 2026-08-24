@@ -4,7 +4,7 @@ English version: [operon-mcp-contract.md](operon-mcp-contract.md)
 
 ## Surface
 
-Le serveur MCP principal enregistre vingt-trois outils Operon :
+Le serveur MCP principal enregistre vingt-cinq outils Operon :
 
 - `operon_status`
 - `operon_get_configuration`
@@ -21,6 +21,8 @@ Le serveur MCP principal enregistre vingt-trois outils Operon :
 - `operon_get_timer_state`
 - `operon_adopt_task`
 - `operon_create_task`
+- `operon_create_periodic_task`
+- `operon_update_periodic_scheduling`
 - `operon_update_task`
 - `operon_transition_task`
 - `operon_set_relationships`
@@ -100,7 +102,7 @@ opération. Une capacité optionnelle absente désactive seulement les outils qu
 en dépendent. Un futur contrat n’est jamais accepté silencieusement.
 
 `operon_query_saved_filter` est live-only et dépend d’une capacité native. Sur
-Operon officiel `3.2.0`, il utilise la Developer API task-workflow après un grant
+Operon officiel `3.5.2`, il utilise la Developer API task-workflow après un grant
 exact `tasks.filter-query`. L’appelant doit fournir un `filterSetId` exact :
 l’API officielle exécute les filtres mais n’en publie pas le catalogue. Le MCP
 ne tente jamais de reproduire leur sémantique depuis le cache.
@@ -118,30 +120,47 @@ anglais ne sont pas des identifiants d’automatisation durables.
 ## Mutations
 
 Les mutations passent par les routes REST du Bridge et la surface officielle du
-moteur chargé. Operon `3.2.0` utilise les plans typés preview/apply/recovery de
-Developer API V1. Le chemin legacy Kairélys utilise Public API v1. Aucun chemin
+moteur chargé. Pour la campagne 3.5, seule l’identité locale attestée
+`3.5.240438` utilise les plans typés preview/apply/recovery de Developer API V1 ;
+la `3.5.2` stock reste en lecture seule. Le chemin legacy Kairélys utilise Public API v1. Aucun chemin
 ne modifie directement le Markdown, n’appelle `TaskWriter`, ne lance une
 commande UI et ne réfléchit vers une méthode privée.
+
+Les plans task-workflow officiels sont des handles opaques liés à la session.
+Le MCP ne les reconstruit jamais : la récupération continue uniquement le même
+plan via son `recoveryRef`.
 
 Contrôles communs :
 
 - `dryRun` vaut `true` par défaut ;
 - `idempotencyKey` est obligatoire ;
 - une tâche Operon existante exige `expectedRevision` ;
-- l’adoption legacy exige `line` et `expectedLine` exacts ;
-- Operon `3.2.0` applique uniquement le plan prévisualisé et scellé par l’hôte ;
+- l’adoption exige `line` et `expectedLine` exacts ;
+- la candidate locale attestée `3.5.240438` applique uniquement le plan opaque prévisualisé et scellé par l’hôte ; la `3.5.2` stock reste en lecture seule ;
 - `outcome-unknown` est exposé avec sa référence de récupération et n’est jamais
   rejoué à l’aveugle ;
+- les résultats Task Workflow sont validés strictement avant projection ; une
+  preuve native malformée ou contradictoire reste `outcome-unknown`, et
+  `nativeProof` ne contient que la projection de preuve bornée ;
 - après apply, le Bridge relit l’index live vérifié et le MCP rafraîchit son
   snapshot SQLite ;
 - aucune mutation ne s’appuie sur un snapshot headless ou obsolète.
 
-Le journal `operon_mutation_journal` réserve la clé avant l’appel au Bridge.
+Le journal MCP `operon_mutation_journal` réserve la clé avant l’appel au Bridge.
 Rejouer une requête terminée avec la même clé renvoie le même `operationId` sans
 second appel. Réutiliser la clé pour une autre requête renvoie `CONFLICT`. Une
 révision périmée renvoie `conflict` sans écriture. Une réservation restée
 `in_progress` après timeout ou redémarrage bloque toute nouvelle mutation à
 l’aveugle.
+
+Bridge 0.8 réserve aussi les clés d’idempotence atomiquement et persiste son
+journal version 1 dans les données locales du plugin Obsidian avant tout dispatch
+natif. Ce journal est borné à 500 entrées et 30 jours. Une entrée `in-progress`
+restaurée devient `outcome-unknown`, non rejouable, avec
+`recoveryRequired: true`. Cette garantie couvre seulement le replay/redémarrage
+local borné : aucune promesse après expiration, éviction, perte/reset des données
+plugin, échec de persistance ou transfert vers un autre coffre/appareil. Si la
+réservation ne peut pas être persistée, aucune mutation native n’est envoyée.
 
 L’apply exige aussi `OPERON_MUTATIONS_ENABLED=true` et le réglage Bridge
 **Allow task mutations**. Une mise à jour de package ne peut donc pas activer les
@@ -151,31 +170,55 @@ L’apply exige aussi `OPERON_MUTATIONS_ENABLED=true` et le réglage Bridge
 
 - `MCP_WRITE_MODE=readonly` : dry-run uniquement.
 - `MCP_WRITE_MODE=guarded` : apply d’adoption si la capacité existe, création,
-  update, transition, remplacement de relations et relocation inline.
+  création Daily/Weekly, mise à jour du scheduling périodique, update,
+  transition, remplacement de relations et relocation inline.
 - `MCP_WRITE_MODE=full` : conversion et récurrence en plus.
-- `operon_recover_mutation` exige aussi le mode `full` et ne récupère que le
-  `recoveryRef` exact.
+- `operon_recover_mutation` exige aussi le mode `full`, le `recoveryRef` exact
+  et une union imbriquée `recovery` portant un `kind` explicite :
+  `developer-api`, `adopt`, `periodic-create` ou `periodic-update`.
 
 `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` peut limiter toutes les mutations à des
 dossiers relatifs au coffre. Les sources et destinations explicites doivent
 rester dans cette allowlist. Operon officiel `3.2.0` refuse encore un
 `targetFolder` arbitraire lorsqu’aucun contrat de destination exacte n’existe.
+Comme les entrées de récupération ne publient aucune route canonique prouvable
+contre cette politique, une allowlist de chemins non vide désactive à la fois
+`operon_list_pending_recoveries` et l’apply de récupération. Les deux échouent
+fermés avant divulgation de l’inventaire ou dispatch natif.
 
 La conversion reste destructive : file-to-inline déplace le fichier source
 dans la corbeille et inline-to-file remplace la ligne source par un lien durable.
 
 ### Règles propres aux outils
 
-`operon_adopt_task` est un outil de compatibilité enregistré, pas une capacité
-officielle d’Operon `3.2.0`. Un moteur legacy compatible peut adopter une
-checkbox exacte avec verrouillage du chemin, de la ligne et du contenu source.
-Operon officiel renvoie une indisponibilité structurée et le MCP ne simule pas
-l’adoption en éditant le Markdown.
+`operon_adopt_task` utilise l’API task-workflow additive officielle uniquement
+sur un build admis en mutation et après les grants exacts `tasks.adopt.preview`
+et `tasks.adopt.apply`. Pour la campagne 3.5, ce build est l’identité locale
+attestée `3.5.240438` ; la `3.5.2` stock reste en lecture seule. Operon applique son plan opaque scellé à une checkbox
+exacte. Un moteur legacy compatible peut encore annoncer son contrat borné,
+mais un grant officiel absent renvoie une indisponibilité structurée et le MCP
+ne simule jamais l’adoption en éditant le Markdown.
 
 `operon_create_task` crée une tâche inline ou fichier par les services officiels
 du moteur. Operon `3.2.0` accepte les champs typés, tags, `statusId`, relations,
 `targetPath` inline et templates configurés. Les propriétés YAML non gérées et
 les `targetFolder` arbitraires restent legacy-only.
+
+`operon_create_periodic_task` crée exactement une tâche inline dans la Daily ou
+Weekly Note configurée après les grants périodiques preview/apply exacts. Operon
+reste propriétaire du routage par date, des templates, de l’identité du
+conteneur et du reçu ; le MCP ne peut pas imposer un chemin ou un parent. Le
+postflight vérifie `priorityId` contre la priorité stable projetée. Si l’apply a
+pu réussir sans qu’une identité créée unique puisse être prouvée, le résultat
+reste `outcome-unknown` et le MCP ne rejoue jamais cette création ambiguë.
+`operon_update_periodic_scheduling` fixe ou efface la date planifiée d’une tâche
+exacte. Operon décide de la conserver, la détacher ou la réaligner, sans déplacer
+le Markdown source.
+
+Les champs gérés conservent leur forme officielle : `taskType` et `taskImage`
+sont des chaînes scalaires, `taskGallery` est un tableau ordonné sans perte et
+les chaînes à séparateurs sont refusées. Le champ dérivé `__taskDataType` est
+read-only et ne peut pas entrer dans une création ou une mise à jour.
 
 `operon_update_task` accepte un seul groupe par appel : description, champs
 gérés/tags ou propriété fichier non gérée lorsque le moteur l’autorise. Les
@@ -206,8 +249,21 @@ explicite en conservant `operonId`. Le Bridge vérifie source et destination
 après stabilisation de l’index.
 
 `operon_list_pending_recoveries` liste les références officielles sans appliquer
-quoi que ce soit. `operon_recover_mutation` récupère un seul plan exact et
-préserve ses preuves `planDigest` et `recoveryRef`.
+quoi que ce soit, uniquement lorsque l’allowlist de chemins est vide.
+L’entrée publique de `operon_recover_mutation` est
+`{ idempotencyKey, recoveryRef, recovery }`. `recovery` vaut soit
+`{ kind: "developer-api" }`, soit
+`{ kind: "adopt" | "periodic-create" | "periodic-update", planDigest?: sha256 }`.
+La branche `developer-api` appelle la récupération Developer API V1 et
+n’accepte pas `planDigest`. Seules les trois branches Task Workflow acceptent
+un digest SHA-256 optionnel pour lier la récupération au reçu/replay scellé.
+Sans ce digest, le Bridge ne peut prouver le lien Task Workflow qu’à partir de
+l’entrée correspondante de `pendingRecoveries` ; sinon il échoue fermé avant
+dispatch. Les champs `kind` et `planDigest` top-level ne font pas partie du
+contrat public ; cette forme plate reste une migration interne candidate/legacy.
+Toute allowlist de chemins non vide bloque aussi listing et apply, faute de route
+canonique prouvable. La réponse préserve `planDigest` lorsqu’il existe et
+`recoveryRef`.
 
 ## Preuves du pilote
 
@@ -233,14 +289,32 @@ le runtime ne peut pas prouver le résultat.
 
 ## Capacités indisponibles ou exclues
 
-Suppression, rappels, état épinglé, contrôle/session de timer, adoption et
+Suppression, rappels, état épinglé, contrôle/session de timer et
 gestion des filtres sauvegardés restent hors de la surface officielle de
 mutation agentique. L’**exécution** d’un filtre sauvegardé fonctionne sur
-Operon `3.2.0` avec un ID exact et le grant requis ; la découverte du catalogue,
-la création et l’édition des filtres ne sont pas exposées. L’adoption reste
-indisponible dans la Developer API officielle.
+Operon `3.5.2` avec un ID exact et le grant requis ; la découverte du catalogue,
+la création et l’édition des filtres ne sont pas exposées. Sur le chemin
+d’acceptation 3.5 courant, l’adoption est disponible uniquement pour le build
+admis en mutation `3.5.240438`, après ses grants additifs exacts ; la `3.5.2`
+stock reste en lecture seule.
 
 La suppression reste une action opérateur dans la CLI. Un futur
 `operon_trash_task` ne pourra être envisagé qu’avec restauration garantie sous
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
+
+## Admission de la candidate 3.1
+
+Optimike MCP `3.1.0`, Bridge `0.8.0`, Operon `3.5.2` et Operon CLI `1.2.0`
+forment l’ensemble candidat courant. La négociation du contrat et les tests
+déterministes l’admettent comme `compatible-provisional`. Une candidate patchée
+a passé le canary Obsidian Desktop exact le 2026-08-24 ; la certification exige
+encore la publication des correctifs des PR upstream `#182`, `#183` et `#184`,
+puis le passage du même gate par l’artefact stock. Ce statut provisoire ne
+relâche aucun gate de capacité, grant, mode d’écriture ou récupération.
+
+Le Bridge `0.8.0` admet les lectures de la `3.5.2` stock après négociation du
+contrat, mais masque toutes ses capacités de mutation. Le build local Pilot 2
+utilise la version manifeste synthétique explicite `3.5.240438` ; lui seul est
+admis en mutation pour l’acceptation 3.5 et ce n’est pas un identifiant de
+release upstream.

@@ -32,6 +32,11 @@ export const OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS: Readonly<
 		"Operon 3.0.0 predates the accepted Developer API V1 integration baseline.",
 };
 
+export const OPERON_BRIDGE_PROVISIONAL_MUTATION_VERSIONS = [
+	"3.3.2",
+	"3.5.240438",
+] as const;
+
 export type OperonCompatibilityState =
 	| "certified"
 	| "compatible-provisional"
@@ -61,7 +66,19 @@ export const OPERON_BRIDGE_BLOCKED_MUTATIONS = {
 } as const;
 
 export function isCertifiedDeveloperApiVersion(version: string): boolean {
-	return (OPERON_BRIDGE_DEVELOPER_API_VERSIONS as readonly string[]).includes(version.trim());
+	return (OPERON_BRIDGE_DEVELOPER_API_VERSIONS as readonly string[]).includes(
+		version.trim(),
+	);
+}
+
+export function isMutationAdmittedDeveloperApiVersion(version: string): boolean {
+	const normalized = version.trim();
+	return (
+		isCertifiedDeveloperApiVersion(normalized) ||
+		(OPERON_BRIDGE_PROVISIONAL_MUTATION_VERSIONS as readonly string[]).includes(
+			normalized,
+		)
+	);
 }
 
 export function resolveOperonCompatibility(options: {
@@ -95,7 +112,9 @@ export function resolveOperonCompatibility(options: {
 	}
 
 	if (
-		(OPERON_BRIDGE_LEGACY_VERSIONS[options.pluginId] as readonly string[]).includes(version)
+		(
+			OPERON_BRIDGE_LEGACY_VERSIONS[options.pluginId] as readonly string[]
+		).includes(version)
 	) {
 		return {
 			state: "certified",
@@ -128,12 +147,18 @@ export function isCanonicalVaultRelativePath(value: unknown): value is string {
 	const segments = value.split("/");
 	return segments.every(
 		(segment) =>
-			segment.length > 0 && segment === segment.trim() && segment !== "." && segment !== "..",
+			segment.length > 0 &&
+			segment === segment.trim() &&
+			segment !== "." &&
+			segment !== "..",
 	);
 }
 
 export function isCanonicalVaultMarkdownPath(value: unknown): value is string {
-	return isCanonicalVaultRelativePath(value) && value.toLocaleLowerCase().endsWith(".md");
+	return (
+		isCanonicalVaultRelativePath(value) &&
+		value.toLocaleLowerCase().endsWith(".md")
+	);
 }
 
 export function mutationPathValidationError(
@@ -147,15 +172,22 @@ export function mutationPathValidationError(
 		| "relocate",
 	requested: Record<string, unknown>,
 ): string | null {
-	const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(requested, key);
+	const has = (key: string): boolean =>
+		Object.prototype.hasOwnProperty.call(requested, key);
 	if (capability === "create") {
 		if (requested.source !== "inline" && requested.source !== "file") {
 			return "source must be either inline or file.";
 		}
-		if (has("targetPath") && !isCanonicalVaultMarkdownPath(requested.targetPath)) {
+		if (
+			has("targetPath") &&
+			!isCanonicalVaultMarkdownPath(requested.targetPath)
+		) {
 			return "targetPath must be an exact canonical vault-relative Markdown path.";
 		}
-		if (has("targetFolder") && !isCanonicalVaultRelativePath(requested.targetFolder)) {
+		if (
+			has("targetFolder") &&
+			!isCanonicalVaultRelativePath(requested.targetFolder)
+		) {
 			return "targetFolder must be an exact canonical vault-relative folder path.";
 		}
 		if (requested.source === "file" && has("targetPath")) {
@@ -169,10 +201,16 @@ export function mutationPathValidationError(
 		if (requested.target !== "inline" && requested.target !== "file") {
 			return "target must be either inline or file.";
 		}
-		if (has("targetPath") && !isCanonicalVaultMarkdownPath(requested.targetPath)) {
+		if (
+			has("targetPath") &&
+			!isCanonicalVaultMarkdownPath(requested.targetPath)
+		) {
 			return "targetPath must be an exact canonical vault-relative Markdown path.";
 		}
-		if (has("targetFolder") && !isCanonicalVaultRelativePath(requested.targetFolder)) {
+		if (
+			has("targetFolder") &&
+			!isCanonicalVaultRelativePath(requested.targetFolder)
+		) {
 			return "targetFolder must be an exact canonical vault-relative folder path.";
 		}
 		if (requested.target === "inline" && !has("targetPath")) {
@@ -185,7 +223,10 @@ export function mutationPathValidationError(
 			return "targetPath is supported only for file-to-inline conversion.";
 		}
 	}
-	if (capability === "relocate" && !isCanonicalVaultMarkdownPath(requested.targetPath)) {
+	if (
+		capability === "relocate" &&
+		!isCanonicalVaultMarkdownPath(requested.targetPath)
+	) {
 		return "targetPath must be an exact canonical vault-relative Markdown path.";
 	}
 	return null;
@@ -194,6 +235,100 @@ export function mutationPathValidationError(
 export interface CachedMutation {
 	signature: string;
 	payload: Record<string, unknown>;
+	httpStatus?: number;
+}
+
+export interface MutationReservation {
+	signature: string;
+	operationId: string;
+	requested: Record<string, unknown>;
+	startedAt: string;
+	promise: Promise<Record<string, unknown>>;
+	resolve: (payload: Record<string, unknown>) => void;
+}
+
+export type MutationReservationDecision =
+	| { kind: "reserved"; reservation: MutationReservation }
+	| { kind: "join"; reservation: MutationReservation }
+	| { kind: "conflict"; reservation: MutationReservation };
+
+export class MutationReservationRegistry {
+	private readonly active = new Map<string, MutationReservation>();
+
+	reserve(options: {
+		idempotencyKey: string;
+		signature: string;
+		operationId: string;
+		requested: Record<string, unknown>;
+		startedAt: string;
+	}): MutationReservationDecision {
+		const current = this.active.get(options.idempotencyKey);
+		if (current) {
+			return current.signature === options.signature
+				? { kind: "join", reservation: current }
+				: { kind: "conflict", reservation: current };
+		}
+		let resolve!: (payload: Record<string, unknown>) => void;
+		const promise = new Promise<Record<string, unknown>>((done) => {
+			resolve = done;
+		});
+		const reservation: MutationReservation = {
+			signature: options.signature,
+			operationId: options.operationId,
+			requested: structuredClone(options.requested),
+			startedAt: options.startedAt,
+			promise,
+			resolve,
+		};
+		this.active.set(options.idempotencyKey, reservation);
+		return { kind: "reserved", reservation };
+	}
+
+	complete(
+		idempotencyKey: string,
+		signature: string,
+		payload: Record<string, unknown>,
+	): void {
+		const current = this.active.get(idempotencyKey);
+		if (!current || current.signature !== signature) return;
+		this.active.delete(idempotencyKey);
+		current.resolve(payload);
+	}
+
+	get(idempotencyKey: string): MutationReservation | undefined {
+		return this.active.get(idempotencyKey);
+	}
+
+	entries(): IterableIterator<[string, MutationReservation]> {
+		return this.active.entries();
+	}
+}
+
+export function interruptedMutationPayload(options: {
+	idempotencyKey: string;
+	operationId: string;
+	requested: Record<string, unknown>;
+}): Record<string, unknown> {
+	return {
+		ok: false,
+		contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+		operationId: options.operationId,
+		idempotencyKey: options.idempotencyKey,
+		status: "outcome-unknown",
+		before: null,
+		requested: options.requested,
+		after: null,
+		error: {
+			code: "interrupted_in_progress",
+			message:
+				"The Bridge restarted while this mutation was in progress; inspect Operon pending recoveries and recover the same native plan before retrying.",
+		},
+		retryable: false,
+		mutationMayHaveApplied: true,
+		recoveryRequired: true,
+		source: "operon-live",
+		stale: false,
+	};
 }
 
 export type MutationPreflightDecision =
@@ -217,7 +352,7 @@ export function resolveMutationPreflight(options: {
 		return {
 			kind: "response",
 			response: {
-				httpStatus: 200,
+				httpStatus: cached.httpStatus ?? 200,
 				payload: { ...cached.payload, replayed: true },
 			},
 		};
@@ -238,7 +373,8 @@ export function resolveMutationPreflight(options: {
 					after: null,
 					error: {
 						code: "idempotency_key_reused",
-						message: "idempotencyKey was already used for a different mutation request.",
+						message:
+							"idempotencyKey was already used for a different mutation request.",
 					},
 					retryable: false,
 					source: "operon-live",
@@ -257,6 +393,7 @@ export type OperonTaskSource = "inline" | "file";
 export type OperonCheckboxState = "open" | "done" | "cancelled";
 export type OperonTier = "hot" | "warm" | "cold";
 export type SortDirection = "asc" | "desc";
+export type OperonFieldValue = string | string[];
 
 export interface RuntimeTaskLocation {
 	filePath: string;
@@ -268,7 +405,7 @@ export interface RuntimeIndexedTask {
 	operonId: string;
 	description: string;
 	checkbox: OperonCheckboxState;
-	fieldValues: Record<string, string>;
+	fieldValues: Record<string, OperonFieldValue>;
 	tags: string[];
 	primary: RuntimeTaskLocation;
 	datetimeModified: string;
@@ -314,7 +451,9 @@ export function resolvePriorityStableId(
 	const normalized = String(value ?? "").trim();
 	if (!normalized) return null;
 	const matches = priorities
-		.filter((priority) => priority.id === normalized || priority.label === normalized)
+		.filter(
+			(priority) => priority.id === normalized || priority.label === normalized,
+		)
 		.map((priority) => priority.id)
 		.filter((id): id is string => Boolean(id));
 	const unique = [...new Set(matches)];
@@ -353,7 +492,10 @@ export function resolveWorkflowStatus(
 }
 
 export function workflowStatusMatches(
-	actual: Pick<OperonBridgeTask, "status" | "statusId" | "statusLabel" | "pipeline" | "pipelineId">,
+	actual: Pick<
+		OperonBridgeTask,
+		"status" | "statusId" | "statusLabel" | "pipeline" | "pipelineId"
+	>,
 	requested: unknown,
 	pipelines: readonly RuntimePipeline[],
 ): boolean {
@@ -366,7 +508,8 @@ export function workflowStatusMatches(
 	return (
 		actual.status === resolved.value ||
 		(resolved.id !== null && actual.statusId === resolved.id) ||
-		(actual.pipeline === resolved.pipeline && actual.statusLabel === resolved.label)
+		(actual.pipeline === resolved.pipeline &&
+			actual.statusLabel === resolved.label)
 	);
 }
 
@@ -528,7 +671,7 @@ export interface OperonBridgeTask {
 	blocking: string[];
 	blockedBy: string[];
 	dates: OperonTaskDates;
-	fields: Record<string, string>;
+	fields: Record<string, OperonFieldValue>;
 	properties?: Record<string, unknown>;
 	plainCheckboxProgress?: {
 		total: number;
@@ -593,7 +736,7 @@ export interface OperonTaskQuery {
 	tagsAll?: string[];
 	parentTask?: string | null;
 	dates?: OperonDateFilter[];
-	fieldEquals?: Record<string, string>;
+	fieldEquals?: Record<string, OperonFieldValue>;
 	propertyEquals?: Record<string, unknown>;
 	sort?: OperonTaskSort[];
 	includeProperties?: boolean;
@@ -620,8 +763,13 @@ export interface OperonTaskPage {
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
-export function isVersionCompatible(pluginId: "kairelys" | "operon", version: string): boolean {
-	return (OPERON_BRIDGE_SUPPORTED_VERSIONS[pluginId] as readonly string[]).includes(version.trim());
+export function isVersionCompatible(
+	pluginId: "kairelys" | "operon",
+	version: string,
+): boolean {
+	return (
+		OPERON_BRIDGE_SUPPORTED_VERSIONS[pluginId] as readonly string[]
+	).includes(version.trim());
 }
 
 export interface RuntimeIndexDiagnostics {
@@ -668,12 +816,47 @@ export function isIndexReady(options: {
 	);
 }
 
-export function parseListValue(value: string | undefined): string[] {
+export function parseListValue(value: OperonFieldValue | undefined): string[] {
+	if (Array.isArray(value))
+		return value.map((item) => item.trim()).filter(Boolean);
 	if (!value?.trim()) return [];
 	return value
 		.split(/[;,]/u)
 		.map((item) => item.trim())
 		.filter(Boolean);
+}
+
+export function normalizeExpectedManagedFieldValue(
+	value: unknown,
+): OperonFieldValue | null {
+	if (value === null || value === undefined) return null;
+	return Array.isArray(value) ? value.map(String) : String(value);
+}
+
+export function managedFieldOutcomeMatches(
+	actual: OperonFieldValue | undefined,
+	requested: unknown,
+): boolean {
+	return (
+		stableStringify(actual ?? null) ===
+		stableStringify(normalizeExpectedManagedFieldValue(requested))
+	);
+}
+
+export function stablePriorityOutcomeMatches(
+	actualPriorityId: string | null,
+	requestedPriorityId: unknown,
+): boolean {
+	return (
+		typeof requestedPriorityId !== "string" ||
+		actualPriorityId === requestedPriorityId.trim()
+	);
+}
+
+function scalarFieldValue(
+	value: OperonFieldValue | undefined,
+): string | undefined {
+	return typeof value === "string" ? value : undefined;
 }
 
 export function resolveWorkflow(
@@ -775,11 +958,21 @@ export function normalizeTask(options: {
 	includeProperties: boolean;
 }): OperonBridgeTask {
 	const { task } = options;
-	const fields = { ...task.fieldValues };
-	const status = fields.status?.trim() || null;
+	const fields = Object.fromEntries(
+		Object.entries(task.fieldValues).map(([key, value]) => [
+			key,
+			Array.isArray(value) ? [...value] : value,
+		]),
+	) as Record<string, OperonFieldValue>;
+	const status = scalarFieldValue(fields.status)?.trim() || null;
 	const workflow = resolveWorkflow(status ?? undefined, options.pipelines);
-	const canonicalProperties = normalizeProperties(options.frontmatter, options.keyMappings);
-	const properties = options.includeProperties ? canonicalProperties : undefined;
+	const canonicalProperties = normalizeProperties(
+		options.frontmatter,
+		options.keyMappings,
+	);
+	const properties = options.includeProperties
+		? canonicalProperties
+		: undefined;
 	const normalized: Omit<OperonBridgeTask, "revision"> = {
 		operonId: task.operonId,
 		source: task.primary.format === "yaml" ? "file" : "inline",
@@ -793,24 +986,29 @@ export function normalizeTask(options: {
 		statusLabel: workflow.statusLabel,
 		pipeline: workflow.pipeline,
 		pipelineId: workflow.pipelineId,
-		priority: fields.priority?.trim() || null,
+		priority: scalarFieldValue(fields.priority)?.trim() || null,
 		tier: task.tier,
 		tags: [
-			...new Set(task.tags.map((tag) => tag.replace(/^#/u, "").trim()).filter(Boolean)),
+			...new Set(
+				task.tags.map((tag) => tag.replace(/^#/u, "").trim()).filter(Boolean),
+			),
 		].sort(),
-		parentTask: fields.parentTask?.trim() || null,
+		parentTask: scalarFieldValue(fields.parentTask)?.trim() || null,
 		blocking: parseListValue(fields.blocking),
 		blockedBy: parseListValue(fields.blockedBy),
 		dates: {
-			due: fields.dateDue?.trim() || null,
-			scheduled: fields.dateScheduled?.trim() || null,
-			started: fields.dateStarted?.trim() || null,
-			completed: fields.dateCompleted?.trim() || null,
-			cancelled: fields.dateCancelled?.trim() || null,
-			datetimeStart: fields.datetimeStart?.trim() || null,
-			datetimeEnd: fields.datetimeEnd?.trim() || null,
-			created: fields.datetimeCreated?.trim() || null,
-			modified: fields.datetimeModified?.trim() || task.datetimeModified?.trim() || null,
+			due: scalarFieldValue(fields.dateDue)?.trim() || null,
+			scheduled: scalarFieldValue(fields.dateScheduled)?.trim() || null,
+			started: scalarFieldValue(fields.dateStarted)?.trim() || null,
+			completed: scalarFieldValue(fields.dateCompleted)?.trim() || null,
+			cancelled: scalarFieldValue(fields.dateCancelled)?.trim() || null,
+			datetimeStart: scalarFieldValue(fields.datetimeStart)?.trim() || null,
+			datetimeEnd: scalarFieldValue(fields.datetimeEnd)?.trim() || null,
+			created: scalarFieldValue(fields.datetimeCreated)?.trim() || null,
+			modified:
+				scalarFieldValue(fields.datetimeModified)?.trim() ||
+				task.datetimeModified?.trim() ||
+				null,
 		},
 		fields,
 		...(properties ? { properties } : {}),
@@ -838,6 +1036,20 @@ function normalizeNeedle(value: unknown): string {
 		.toLocaleLowerCase();
 }
 
+function fieldValueMatches(
+	actual: OperonFieldValue | undefined,
+	expected: OperonFieldValue,
+): boolean {
+	if (Array.isArray(actual) || Array.isArray(expected)) {
+		if (!Array.isArray(actual) || !Array.isArray(expected)) return false;
+		return (
+			stableStringify(actual.map(normalizeNeedle)) ===
+			stableStringify(expected.map(normalizeNeedle))
+		);
+	}
+	return normalizeNeedle(actual) === normalizeNeedle(expected);
+}
+
 function includesEvery(haystack: string[], needles: string[]): boolean {
 	const normalized = new Set(haystack.map(normalizeNeedle));
 	return needles.every((needle) => normalized.has(normalizeNeedle(needle)));
@@ -860,7 +1072,10 @@ function propertyValue(task: OperonBridgeTask, key: string): unknown {
 	return task.properties?.[key];
 }
 
-export function filterTasks(tasks: OperonBridgeTask[], query: OperonTaskQuery): OperonBridgeTask[] {
+export function filterTasks(
+	tasks: OperonBridgeTask[],
+	query: OperonTaskQuery,
+): OperonBridgeTask[] {
 	const search = normalizeNeedle(query.search);
 	const operonIds = new Set(query.operonIds ?? []);
 	const sources = new Set(query.sources ?? []);
@@ -876,15 +1091,24 @@ export function filterTasks(tasks: OperonBridgeTask[], query: OperonTaskQuery): 
 		if (operonIds.size > 0 && !operonIds.has(task.operonId)) return false;
 		if (sources.size > 0 && !sources.has(task.source)) return false;
 		if (checkboxes.size > 0 && !checkboxes.has(task.checkbox)) return false;
-		if (statuses.size > 0 && !statuses.has(normalizeNeedle(task.status))) return false;
-		if (statusIds.size > 0 && !statusIds.has(normalizeNeedle(task.statusId))) return false;
-		if (pipelines.size > 0 && !pipelines.has(normalizeNeedle(task.pipeline))) return false;
-		if (pipelineIds.size > 0 && !pipelineIds.has(normalizeNeedle(task.pipelineId))) return false;
-		if (priorities.size > 0 && !priorities.has(normalizeNeedle(task.priority))) return false;
+		if (statuses.size > 0 && !statuses.has(normalizeNeedle(task.status)))
+			return false;
+		if (statusIds.size > 0 && !statusIds.has(normalizeNeedle(task.statusId)))
+			return false;
+		if (pipelines.size > 0 && !pipelines.has(normalizeNeedle(task.pipeline)))
+			return false;
+		if (
+			pipelineIds.size > 0 &&
+			!pipelineIds.has(normalizeNeedle(task.pipelineId))
+		)
+			return false;
+		if (priorities.size > 0 && !priorities.has(normalizeNeedle(task.priority)))
+			return false;
 		if (tiers.size > 0 && !tiers.has(task.tier)) return false;
 		if (
 			(query.pathIncludes ?? []).some(
-				(needle) => !normalizeNeedle(task.path).includes(normalizeNeedle(needle)),
+				(needle) =>
+					!normalizeNeedle(task.path).includes(normalizeNeedle(needle)),
 			)
 		) {
 			return false;
@@ -896,18 +1120,32 @@ export function filterTasks(tasks: OperonBridgeTask[], query: OperonTaskQuery): 
 		) {
 			return false;
 		}
-		if ((query.tagsAny?.length ?? 0) > 0 && !includesAny(task.tags, query.tagsAny ?? []))
+		if (
+			(query.tagsAny?.length ?? 0) > 0 &&
+			!includesAny(task.tags, query.tagsAny ?? [])
+		)
 			return false;
-		if ((query.tagsAll?.length ?? 0) > 0 && !includesEvery(task.tags, query.tagsAll ?? []))
+		if (
+			(query.tagsAll?.length ?? 0) > 0 &&
+			!includesEvery(task.tags, query.tagsAll ?? [])
+		)
 			return false;
-		if (query.parentTask !== undefined && task.parentTask !== query.parentTask) return false;
-		if ((query.dates ?? []).some((filter) => !matchesDate(task.dates[filter.field], filter)))
+		if (query.parentTask !== undefined && task.parentTask !== query.parentTask)
+			return false;
+		if (
+			(query.dates ?? []).some(
+				(filter) => !matchesDate(task.dates[filter.field], filter),
+			)
+		)
 			return false;
 		for (const [key, expected] of Object.entries(query.fieldEquals ?? {})) {
-			if (normalizeNeedle(task.fields[key]) !== normalizeNeedle(expected)) return false;
+			if (!fieldValueMatches(task.fields[key], expected)) return false;
 		}
 		for (const [key, expected] of Object.entries(query.propertyEquals ?? {})) {
-			if (stableStringify(propertyValue(task, key)) !== stableStringify(expected)) return false;
+			if (
+				stableStringify(propertyValue(task, key)) !== stableStringify(expected)
+			)
+				return false;
 		}
 		if (search) {
 			const searchable = [
@@ -922,7 +1160,9 @@ export function filterTasks(tasks: OperonBridgeTask[], query: OperonTaskQuery): 
 				task.priority,
 				task.parentTask,
 				...task.tags,
-				...Object.values(task.fields),
+				...Object.values(task.fields).flatMap((value) =>
+					Array.isArray(value) ? value : [value],
+				),
 				...(task.properties ? [stableStringify(task.properties)] : []),
 			]
 				.map(normalizeNeedle)
@@ -933,7 +1173,10 @@ export function filterTasks(tasks: OperonBridgeTask[], query: OperonTaskQuery): 
 	});
 }
 
-function sortValue(task: OperonBridgeTask, field: OperonTaskSort["field"]): string | number {
+function sortValue(
+	task: OperonBridgeTask,
+	field: OperonTaskSort["field"],
+): string | number {
 	switch (field) {
 		case "description":
 			return task.description;
@@ -997,7 +1240,13 @@ export function paginateTasks(
 	query: Pick<OperonTaskQuery, "cursor" | "limit">,
 ): Omit<
 	OperonTaskPage,
-	"contractVersion" | "source" | "stale" | "generation" | "settingsSignature" | "limitations" | "ok"
+	| "contractVersion"
+	| "source"
+	| "stale"
+	| "generation"
+	| "settingsSignature"
+	| "limitations"
+	| "ok"
 > {
 	const offset = parseCursor(query.cursor);
 	const limit = Math.max(1, Math.min(MAX_LIMIT, query.limit ?? DEFAULT_LIMIT));
@@ -1018,11 +1267,19 @@ export function queryTasks(
 	query: OperonTaskQuery,
 ): Omit<
 	OperonTaskPage,
-	"contractVersion" | "source" | "stale" | "generation" | "settingsSignature" | "limitations" | "ok"
+	| "contractVersion"
+	| "source"
+	| "stale"
+	| "generation"
+	| "settingsSignature"
+	| "limitations"
+	| "ok"
 > {
 	return paginateTasks(sortTasks(filterTasks(tasks, query), query.sort), query);
 }
 
-export function settingsSignature(configuration: OperonSemanticConfiguration): string {
+export function settingsSignature(
+	configuration: OperonSemanticConfiguration,
+): string {
 	return `fnv1a32:${fnv1a32(stableStringify(configuration))}`;
 }

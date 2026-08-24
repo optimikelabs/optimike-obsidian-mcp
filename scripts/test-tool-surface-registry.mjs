@@ -16,14 +16,14 @@ const repoRoot = path.resolve(
   "..",
 );
 
-const EXPECTED_UNION_COUNT = 74;
+const EXPECTED_UNION_COUNT = 76;
 const EXPECTED_COUNTS_BY_MODE = {
-  live: 70,
-  "hybrid-live": 70,
-  "hybrid-degraded": 43,
-  "headless-readonly": 46,
-  "headless-guarded": 49,
-  "headless-filesystem": 58,
+  live: 72,
+  "hybrid-live": 72,
+  "hybrid-degraded": 45,
+  "headless-readonly": 48,
+  "headless-guarded": 51,
+  "headless-filesystem": 60,
 };
 
 assert.equal(
@@ -56,8 +56,8 @@ for (const mode of TOOL_REGISTRATION_MODES) {
 
 assert.equal(
   compileToolNames({ registrationMode: "live" }).length,
-  70,
-  "70 is the current full live/hybrid surface, not the cross-runtime registry size",
+  72,
+  "72 is the current full live/hybrid surface, not the cross-runtime registry size",
 );
 
 for (const entry of TOOL_SURFACE_REGISTRY) {

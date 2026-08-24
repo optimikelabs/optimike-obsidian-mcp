@@ -14,7 +14,7 @@ Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouver
 | ----------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | Notes                   | Lecture/recherche/éditions directes + opérations gouvernées Note et Frontmatter | Coffre ; Local REST API + Atomic Write Bridge        |
 | Bases et Canvas         | Requêtes, écritures bornées, formules et graphes Canvas gouvernés               | Bases Bridge ; Atomic Write Bridge                   |
-| Tâches                  | Markdown Tasks-compatible + 23 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
+| Tâches                  | Markdown Tasks-compatible + 25 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
 | Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` + embedding Ollama ou compatible OpenAI |
 | Runtime                 | Cache SQLite partagé, santé, maintenance et modes dégradés                      | Filesystem local                                     |
 | Documents externes      | Lectures/handoff default-deny + move local opt-in                               | Allowlist de racines                                 |
@@ -41,8 +41,8 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 | ---------------------------------------------------- | ----------- | --------------------------: |
 | Travail général sur le coffre                        | `standard`  |                          19 |
 | Notes, tags, Bases et Canvas                         | `authoring` |                          30 |
-| Workflows Tasks / Operon                             | `tasks`     |                          31 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          70 |
+| Workflows Tasks / Operon                             | `tasks`     |                          33 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          72 |
 
 En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
@@ -114,7 +114,7 @@ N’activer que les surfaces utilisées :
 - **Bases Bridge** inclus pour Bases live et le CAS de formules gouvernées ;
 - **Optimike Atomic Write Bridge** inclus pour les cycles Note, Frontmatter et Canvas `plan → apply → status → recover` ;
 - **Smart Connections** pour l’index sémantique local ;
-- **Operon Developer API V1** et **Optimike Operon Bridge** pour les tâches gouvernées ;
+- **Operon Developer API V1** et **Optimike Operon Bridge 0.8.0** pour les tâches gouvernées. La candidate 3.1 cible Operon 3.5.2 et CLI 1.2.0. Une candidate d’acceptation patchée a passé le canary complet dans Pilot 2 le 2026-08-24 ; la release officielle reste `compatible-provisional` jusqu’à la publication des correctifs upstream requis et au passage du même gate par l’artefact stock ;
 - **Obsidian Tasks** pour le parsing Markdown Tasks-compatible.
 
 Les mutations Operon exigent le réglage de mutation du Bridge plus :
@@ -123,7 +123,7 @@ Les mutations Operon exigent le réglage de mutation du Bridge plus :
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Les snapshots Operon obsolètes restent read-only. Aucune route Operon ne retombe sur du Markdown brut ou des API privées. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
+Les snapshots Operon obsolètes restent read-only. Aucune route Operon ne retombe sur du Markdown brut ou des API privées. L’adoption officielle et le routage Daily/Weekly ne sont exposés qu’après leurs grants additifs exacts. Operon reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan. Task Type et Task Image restent scalaires, Task Gallery reste un tableau ordonné et `__taskDataType` est read-only. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
 
 ## Opérations gouvernées
 

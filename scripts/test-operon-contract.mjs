@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   OPERON_CONTRACT_VERSION,
   OperonAdoptTaskSchema,
@@ -12,19 +15,278 @@ import {
   OperonRelocateTaskSchema,
   OperonConfigurationSchema,
   OperonCreateTaskSchema,
+  OperonCreatePeriodicTaskSchema,
   OperonQuerySchema,
   OperonStatusSchema,
   OperonTaskSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
+  OperonUpdatePeriodicSchedulingSchema,
   OperonSetRelationshipsSchema,
   OperonUpdateRecurrenceSchema,
+  OperonRecoverMutationInputSchema,
+  OperonRecoverMutationSchema,
+  OperonPendingRecoveriesSchema,
+  OperonMutationResultSchema,
+  OperonNativeMutationProofSchema,
   OperonVaultMarkdownPathSchema,
   OperonVaultRelativePathSchema,
   queryOperonSnapshot,
   resolveOperonPriorityStableId,
   resolveOperonWorkflowStatus,
 } from "../dist/services/operon/contract.js";
+
+const planDigestA = "a".repeat(64);
+const validNativeProof = {
+  contractVersion: 1,
+  kind: "mutation-result",
+  status: "already-applied",
+  mutationMayHaveApplied: true,
+  retryAllowed: false,
+  groupResults: [],
+  receipt: {
+    contractVersion: 1,
+    planDigest: planDigestA,
+    mutationKind: "task.update",
+    targetDigest: "b".repeat(64),
+    terminalOutcome: "already-applied",
+    effectiveAt: "2026-08-24T08:00:00.000Z",
+    completedAt: "2026-08-24T08:00:01.000Z",
+    expiresAt: "2026-08-24T09:00:01.000Z",
+  },
+  postflight: { status: "receipt-replay" },
+};
+assert.deepEqual(
+  OperonNativeMutationProofSchema.parse(validNativeProof),
+  validNativeProof,
+  "a bounded native Operon mutation proof must survive MCP validation intact",
+);
+for (const mutationKind of [
+  "task.adopt",
+  "task.create",
+  "task.update",
+  "task.transition",
+  "task.relationship",
+  "task.recurrence",
+  "task.convert",
+  "task.inline-relocate",
+]) {
+  assert.equal(
+    OperonNativeMutationProofSchema.safeParse({
+      ...validNativeProof,
+      receipt: { ...validNativeProof.receipt, mutationKind },
+      postflight: {
+        status: "receipt-replay",
+        observedAt: "2026-08-24T08:00:02.000Z",
+      },
+    }).success,
+    true,
+    `native receipt proof must admit ${mutationKind}`,
+  );
+}
+assert.equal(
+  OperonNativeMutationProofSchema.safeParse({
+    ...validNativeProof,
+    status: "committed",
+  }).success,
+  false,
+  "unknown native proof statuses must be rejected",
+);
+assert.equal(
+  OperonNativeMutationProofSchema.safeParse({
+    ...validNativeProof,
+    groupResults: Array.from({ length: 513 }, (_, index) => ({
+      groupId: `group-${index}`,
+      status: "committed",
+    })),
+  }).success,
+  false,
+  "native proof group results must remain bounded",
+);
+assert.equal(
+  OperonNativeMutationProofSchema.safeParse({
+    ...validNativeProof,
+    receipt: {
+      ...validNativeProof.receipt,
+      planDigest: planDigestA.toUpperCase(),
+    },
+  }).success,
+  false,
+  "native receipt proofs must reject non-lowercase SHA-256 digests",
+);
+assert.equal(
+  OperonNativeMutationProofSchema.safeParse({
+    ...validNativeProof,
+    groupResults: [
+      {
+        groupId: "group-no-leak",
+        status: "failed",
+        error: { reason: "private task content" },
+      },
+    ],
+  }).success,
+  false,
+  "native group proofs must reject uncontracted error payloads",
+);
+assert.equal(
+  OperonNativeMutationProofSchema.safeParse({
+    ...validNativeProof,
+    postflight: {
+      status: "verified",
+      observedAt: "2026-08-24T08:00:01.000Z",
+      contextRevision: { private: "not projected by the Bridge" },
+    },
+  }).success,
+  false,
+  "native postflight proofs must reject unprojected context state",
+);
+assert.equal(
+  OperonRecoverMutationSchema.safeParse({
+    idempotencyKey: "recovery-contract-key",
+    recoveryRef: "dvr1_contract-recovery",
+    recovery: { kind: "periodic-update", planDigest: planDigestA },
+  }).success,
+  true,
+);
+assert.equal(
+  OperonRecoverMutationSchema.safeParse({
+    idempotencyKey: "recovery-contract-key",
+    recoveryRef: "dvr1_contract-recovery",
+    recovery: {
+      kind: "periodic-update",
+      planDigest: `sha256:${planDigestA}`,
+    },
+  }).success,
+  false,
+  "recovery planDigest must use Operon's exact lowercase 64-hex format",
+);
+assert.equal(
+  OperonRecoverMutationSchema.safeParse({
+    idempotencyKey: "recovery-contract-key",
+    recoveryRef: "dvr1_contract-recovery",
+  }).success,
+  false,
+  "every recovery must declare a typed recovery binding",
+);
+assert.equal(
+  OperonRecoverMutationSchema.safeParse({
+    idempotencyKey: "recovery-contract-key",
+    recoveryRef: "dvr1_contract-recovery",
+    recovery: { kind: "developer-api" },
+  }).success,
+  true,
+  "legacy official Developer API recovery remains available through an explicit kind",
+);
+assert.equal(
+  OperonRecoverMutationSchema.safeParse({
+    idempotencyKey: "recovery-contract-key",
+    recoveryRef: "dvr1_contract-recovery",
+    recovery: { kind: "developer-api", planDigest: planDigestA },
+  }).success,
+  false,
+  "developer-api recovery must structurally reject task-workflow plan digests",
+);
+assert.equal(
+  OperonPendingRecoveriesSchema.safeParse({
+    ok: true,
+    contractVersion: "1",
+    source: "operon-live",
+    stale: false,
+    recoveries: [{ planDigest: planDigestA }],
+  }).success,
+  true,
+);
+assert.equal(
+  OperonPendingRecoveriesSchema.safeParse({
+    ok: true,
+    contractVersion: "1",
+    source: "operon-live",
+    stale: false,
+    recoveries: [{ planDigest: planDigestA.toUpperCase() }],
+  }).success,
+  false,
+  "pending recovery results must reject non-lowercase SHA-256 digests",
+);
+assert.equal(
+  OperonMutationResultSchema.safeParse({
+    ok: true,
+    contractVersion: "1",
+    operationId: "operation-uppercase-digest",
+    idempotencyKey: "uppercase-digest-key",
+    status: "planned",
+    requested: {},
+    planDigest: planDigestA.toUpperCase(),
+    source: "operon-live",
+    stale: false,
+  }).success,
+  false,
+  "mutation results must reject non-lowercase SHA-256 digests",
+);
+assert.equal(
+  OperonMutationResultSchema.safeParse({
+    ok: true,
+    contractVersion: "1",
+    operationId: "operation-native-proof",
+    idempotencyKey: "native-proof-key",
+    status: "already-applied",
+    requested: {},
+    nativeProof: { ...validNativeProof, retryAllowed: "false" },
+    source: "operon-live",
+    stale: false,
+  }).success,
+  false,
+  "a malformed native proof must reject the complete mutation response",
+);
+
+const schemaServer = new McpServer({
+  name: "operon-recovery-schema-test",
+  version: "0",
+});
+schemaServer.tool(
+  "operon_recover_mutation",
+  OperonRecoverMutationInputSchema.shape,
+  async () => ({ content: [{ type: "text", text: "ok" }] }),
+);
+const [schemaClientTransport, schemaServerTransport] =
+  InMemoryTransport.createLinkedPair();
+const schemaClient = new Client({
+  name: "operon-recovery-schema-client",
+  version: "0",
+});
+await schemaServer.connect(schemaServerTransport);
+await schemaClient.connect(schemaClientTransport);
+const publishedRecoveryTool = (await schemaClient.listTools()).tools.find(
+  (tool) => tool.name === "operon_recover_mutation",
+);
+assert.ok(publishedRecoveryTool);
+assert.ok(
+  publishedRecoveryTool.inputSchema.required?.includes("recovery"),
+  "tools/list must publish the typed recovery binding as required",
+);
+const publishedRecoveryBinding =
+  publishedRecoveryTool.inputSchema.properties?.recovery;
+assert.ok(
+  Array.isArray(publishedRecoveryBinding?.anyOf),
+  "tools/list must publish the nested recovery discriminated union",
+);
+const publishedTaskWorkflowBranch = publishedRecoveryBinding.anyOf.find(
+  (branch) => branch.properties?.planDigest,
+);
+const publishedDeveloperApiBranch = publishedRecoveryBinding.anyOf.find(
+  (branch) => branch.properties?.kind?.const === "developer-api",
+);
+assert.equal(
+  publishedTaskWorkflowBranch?.properties?.planDigest?.pattern,
+  "^[a-f0-9]{64}$",
+  "tools/list must publish the exact lowercase SHA-256 planDigest pattern only in the task-workflow branch",
+);
+assert.equal(
+  Object.hasOwn(publishedDeveloperApiBranch?.properties ?? {}, "planDigest"),
+  false,
+  "tools/list must not publish planDigest in the developer-api branch",
+);
+await schemaClient.close();
+await schemaServer.close();
 
 assert.equal(
   resolveOperonPriorityStableId("F", [
@@ -177,6 +439,10 @@ const task = OperonTaskSchema.parse({
     status: "Project.InProgress",
     priority: "A",
     custom: "signal",
+    taskGallery: [
+      "attachments/one,comma.png",
+      "attachments\\two;semicolon.png",
+    ],
   },
   properties: { rang: 4, north_star: true },
   revision: "fnv1a32:deadbeef",
@@ -283,6 +549,7 @@ const page = queryOperonSnapshot(
     operonVersion: "2.4.0",
     bridgeVersion: "0.1.0",
     contractVersion: OPERON_CONTRACT_VERSION,
+    snapshotSchemaVersion: 2,
     settingsSignature: "fnv1a32:01234567",
     generation: 42,
     capabilities,
@@ -304,6 +571,7 @@ const stripped = queryOperonSnapshot(
     operonVersion: "2.4.0",
     bridgeVersion: "0.1.0",
     contractVersion: OPERON_CONTRACT_VERSION,
+    snapshotSchemaVersion: 2,
     settingsSignature: "fnv1a32:01234567",
     generation: 42,
     capabilities,
@@ -316,6 +584,56 @@ assert.equal(stripped.source, "operon-cache");
 assert.equal(stripped.stale, true);
 assert.equal("properties" in stripped.tasks[0], false);
 
+const galleryMatch = queryOperonSnapshot(
+  {
+    source: "operon-live",
+    stale: false,
+    snapshotAt: "2026-07-20T12:00:00.000Z",
+    snapshotAgeMs: 0,
+    operonVersion: "3.5.2",
+    bridgeVersion: "0.8.0",
+    contractVersion: OPERON_CONTRACT_VERSION,
+    snapshotSchemaVersion: 2,
+    settingsSignature: "fnv1a32:01234567",
+    generation: 42,
+    capabilities,
+    limitations: [],
+    tasks: [task],
+  },
+  {
+    fieldEquals: {
+      taskGallery: [
+        "attachments/one,comma.png",
+        "attachments\\two;semicolon.png",
+      ],
+    },
+    limit: 10,
+  },
+);
+assert.equal(galleryMatch.total, 1);
+const galleryReordered = queryOperonSnapshot(
+  {
+    ...galleryMatch,
+    tasks: [task],
+    settingsSignature: "fnv1a32:01234567",
+    generation: 42,
+  },
+  {
+    fieldEquals: {
+      taskGallery: [
+        "attachments\\two;semicolon.png",
+        "attachments/one,comma.png",
+      ],
+    },
+    limit: 10,
+  },
+);
+assert.equal(
+  galleryReordered.total,
+  0,
+  "ordered list equality must detect reordering",
+);
+
 const create = OperonCreateTaskSchema.parse({
   idempotencyKey: "contract-create-1",
   task: {
@@ -325,6 +643,215 @@ const create = OperonCreateTaskSchema.parse({
   },
 });
 assert.equal(create.dryRun, true);
+
+const createWithGallery = OperonCreateTaskSchema.parse({
+  idempotencyKey: "contract-create-gallery",
+  task: {
+    source: "inline",
+    description: "Create ordered gallery",
+    targetPath: "Efforts/Projets/Test.md",
+    fields: {
+      taskGallery: ["media/a,b.png", "media\\c;d.png", "media/a,b.png"],
+    },
+  },
+});
+assert.deepEqual(createWithGallery.task.fields.taskGallery, [
+  "media/a,b.png",
+  "media\\c;d.png",
+]);
+assert.equal(
+  OperonCreateTaskSchema.safeParse({
+    ...createWithGallery,
+    task: {
+      ...createWithGallery.task,
+      fields: { taskGallery: "media/a.png;media/b.png" },
+    },
+  }).success,
+  false,
+  "taskGallery must never be reconstructed from a delimiter string",
+);
+
+for (const field of [
+  "taskType",
+  "taskImage",
+  "taskIcon",
+  "taskColor",
+  "note",
+  "location",
+  "dateDue",
+  "dateScheduled",
+  "dateStarted",
+  "datetimeStart",
+  "datetimeEnd",
+  "estimate",
+]) {
+  assert.equal(
+    OperonCreateTaskSchema.safeParse({
+      idempotencyKey: `contract-create-scalar-${field}`,
+      task: {
+        description: "Scalar field contract",
+        source: "inline",
+        fields: { [field]: ["must-not-coerce"] },
+      },
+    }).success,
+    false,
+    `${field} must reject arrays before preview/apply`,
+  );
+  assert.equal(
+    OperonUpdateTaskSchema.safeParse({
+      operonId: "abc1234",
+      expectedRevision: task.revision,
+      idempotencyKey: `contract-update-scalar-${field}`,
+      patch: { fields: { [field]: ["must-not-coerce"] } },
+    }).success,
+    false,
+    `update ${field} must reject arrays before preview/apply`,
+  );
+}
+for (const field of ["taskGallery", "assignees", "contexts", "links"]) {
+  assert.equal(
+    OperonCreateTaskSchema.safeParse({
+      idempotencyKey: `contract-create-list-${field}`,
+      task: {
+        description: "List field contract",
+        source: "inline",
+        fields: { [field]: "must-not-split" },
+      },
+    }).success,
+    false,
+    `${field} must reject scalar coercion before preview/apply`,
+  );
+  assert.equal(
+    OperonUpdateTaskSchema.safeParse({
+      operonId: "abc1234",
+      expectedRevision: task.revision,
+      idempotencyKey: `contract-update-list-${field}`,
+      patch: { fields: { [field]: "must-not-split" } },
+    }).success,
+    false,
+    `update ${field} must reject scalar coercion before preview/apply`,
+  );
+}
+assert.equal(
+  OperonCreatePeriodicTaskSchema.safeParse({
+    idempotencyKey: "contract-periodic-scalar-field-array",
+    periodic: {
+      description: "Periodic scalar field contract",
+      periodicKind: "daily",
+      fields: { taskType: ["must-not-coerce"] },
+    },
+  }).success,
+  false,
+  "periodic creation must apply the scalar field contract before dispatch",
+);
+
+const createGallery256 = Array.from(
+  { length: 256 },
+  (_, index) => `media/create-${index}.png`,
+);
+assert.equal(
+  OperonCreateTaskSchema.safeParse({
+    idempotencyKey: "contract-create-gallery-256",
+    task: {
+      source: "inline",
+      description: "Create maximum gallery",
+      targetPath: "Efforts/Projets/Test.md",
+      fields: { taskGallery: createGallery256 },
+    },
+  }).success,
+  true,
+);
+assert.equal(
+  OperonCreateTaskSchema.safeParse({
+    idempotencyKey: "contract-create-gallery-257",
+    task: {
+      source: "inline",
+      description: "Reject oversized gallery",
+      targetPath: "Efforts/Projets/Test.md",
+      fields: { taskGallery: [...createGallery256, "media/create-256.png"] },
+    },
+  }).success,
+  false,
+  "create must reject item 257 before normalization",
+);
+
+const updateGallery512 = Array.from(
+  { length: 512 },
+  (_, index) => `media/update-${index}.png`,
+);
+assert.equal(
+  OperonUpdateTaskSchema.safeParse({
+    operonId: "abc1234",
+    expectedRevision: task.revision,
+    idempotencyKey: "contract-update-gallery-512",
+    patch: { fields: { taskGallery: updateGallery512 } },
+  }).success,
+  true,
+);
+assert.equal(
+  OperonUpdateTaskSchema.safeParse({
+    operonId: "abc1234",
+    expectedRevision: task.revision,
+    idempotencyKey: "contract-update-gallery-513",
+    patch: {
+      fields: { taskGallery: [...updateGallery512, "media/update-512.png"] },
+    },
+  }).success,
+  false,
+  "update must reject item 513 before normalization",
+);
+
+const createPeriodic = OperonCreatePeriodicTaskSchema.parse({
+  idempotencyKey: "contract-periodic-create",
+  periodic: {
+    description: "Daily review",
+    periodicKind: "daily",
+    routeDate: "2026-08-23",
+    tags: ["work", "#work", " #focus ", "", "#"],
+    fields: { taskGallery: ["media/daily,one.png"] },
+  },
+});
+assert.equal(createPeriodic.dryRun, true);
+assert.equal(createPeriodic.periodic.periodicKind, "daily");
+assert.deepEqual(createPeriodic.periodic.tags, ["work", "focus"]);
+for (const periodic of [
+  { fields: { parentTask: "abc1234" } },
+  { statusId: "planned", fields: { status: "other" } },
+  { priorityId: "priority-a", fields: { priority: "priority-b" } },
+]) {
+  assert.equal(
+    OperonCreatePeriodicTaskSchema.safeParse({
+      idempotencyKey: `contract-periodic-exclusive-${JSON.stringify(periodic)}`,
+      periodic: {
+        description: "Daily review",
+        periodicKind: "daily",
+        ...periodic,
+      },
+    }).success,
+    false,
+    "periodic creation must preserve Operon-owned parentage and unambiguous selectors",
+  );
+}
+assert.equal(
+  OperonCreatePeriodicTaskSchema.safeParse({
+    idempotencyKey: "contract-periodic-invalid-route-date",
+    periodic: {
+      description: "Daily review",
+      periodicKind: "daily",
+      routeDate: "tomorrow",
+    },
+  }).success,
+  false,
+  "periodic routeDate must be rejected at the MCP boundary",
+);
+
+const updatePeriodic = OperonUpdatePeriodicSchedulingSchema.parse({
+  operonId: "abc1234",
+  expectedRevision: task.revision,
+  idempotencyKey: "contract-periodic-update",
+  patch: { fields: { dateScheduled: null } },
+});
+assert.equal(updatePeriodic.patch.fields.dateScheduled, null);
 
 const adopt = OperonAdoptTaskSchema.parse({
   idempotencyKey: "contract-adopt-1",

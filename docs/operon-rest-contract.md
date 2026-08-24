@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with non-denied `3.3.2` when its Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use the official preview/apply/recovery surface; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
+The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with non-denied `3.3.2` and `3.5.2` when the Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use official opaque preview/apply/recovery plans; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
 
 Prefix:
 
@@ -15,24 +15,29 @@ All routes inherit Local REST API authentication and TLS behavior.
 ## Compatibility and capabilities
 
 - Bridge contract: `1`
-- Certified compatibility through official Operon `3.2.1`; provisional contract admission and complete live read/write pilot: `3.3.2` with Operon CLI `1.1.2`
+- Certified compatibility through official Operon `3.2.1`; completed provisional live pilot: `3.3.2` with CLI `1.1.2`; current provisional candidate: `3.5.2` with CLI `1.2.0` and Bridge `0.8.0`. Its patched acceptance build passed the exact live canary on 2026-08-24; stock admission still awaits the upstream fixes and a stock rerun
 - Official Operon legacy read allowlist: `2.4.0`, `2.5.0`
 - Official Operon Developer API V1 allowlist: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, `3.2.1`
 - Kairélys read allowlist: `2.5.1`, `2.5.2`, `2.5.3`, `2.6.1`, `2.6.2`, `2.6.3`
 - Legacy mutation contract: Operon Public API `1`
 - Official Operon `2.5.0`: read-only
-- Official Operon `3.x` with the negotiated V1 boundary: typed create/update/transition/relationship/recurrence/convert/relocate through Developer API V1, plus saved-filter execution through the additive task-workflow API, when the exact grants are active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
+- Official Operon `3.x` with the negotiated V1 boundary: typed create/update/transition/relationship/recurrence/convert/relocate through Developer API V1, plus saved-filter execution, adoption and Daily/Weekly workflows through the additive task-workflow API when their exact grants are active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
 - Kairélys `2.5.1` through `2.5.3` and `2.6.1` through `2.6.3` with Public API v1: read-write
 
 `GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future non-denied Operon version is admitted provisionally when its Developer API V1 accessor is present; Markdown similarity is irrelevant. Live use remains independently gated by successful negotiation, `developerApi`, top-level `ok`, `index.ready`, and the exact advertised capability.
 
-The adapter certifies official `3.2.1` and provisionally admits `3.3.2`; the complete `3.3.2` live acceptance run is green with Bridge `0.7.0` and CLI `1.1.2`. The release restores the Settings grant controls, rejects implicit File Task renames, and fixes transition settlement without Project Serial scopes. The live acceptance applied and restored a non-terminal transition, returned to 30 tasks, left no pending recovery, and validated `P0/P1/P2 = 0/0/0`. Adoption remains unavailable through the official Developer API and is tracked in [#140](https://github.com/hasanyilmaz/operon/issues/140). No Markdown or private-API fallback is introduced.
+The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The `3.5.2` / CLI `1.2.0` / Bridge `0.8.0` candidate adds official adoption, periodic-note routing and typed task media fields. Its patched acceptance build passed the live canary, but the stock release remains `compatible-provisional` until upstream fixes `#182`, `#183` and `#184` ship and the released artifact passes the same gate. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
+
+Stock `3.5.2` remains readable after successful negotiation but reports no
+mutation capabilities. The disposable Pilot 2 acceptance artifact is
+distinguished by the synthetic manifest version `3.5.240438`; that exact local
+identity alone is admitted for 3.5 mutations and is never an upstream release.
 
 Readiness requires a compatible plugin, positive generation, healthy idle V8 index, zero dirty sources, and a task count matching diagnostics. A duplicate-ID conflict is reported separately and causes MCP snapshot refresh refusal.
 
 ## Stable task projection
 
-Each task includes durable `operonId`, inline/file source, path and one-based line, description, checkbox, workflow, priority, tags, parent, dependency edges, normalized dates, managed fields, source mtime, and deterministic `revision`. Workflow projection includes both visible values (`pipeline`, `status`, `statusLabel`) and language-stable `pipelineId` / `statusId` values resolved from the live Operon settings.
+Each task includes durable `operonId`, inline/file source, path and one-based line, description, checkbox, workflow, priority, tags, parent, dependency edges, normalized dates, managed fields, source mtime, and deterministic `revision`. Managed values preserve arrays: `taskGallery` remains ordered rather than being delimiter-encoded. Workflow projection includes both visible values (`pipeline`, `status`, `statusLabel`) and language-stable `pipelineId` / `statusId` values resolved from the live Operon settings.
 
 For file tasks, `includeProperties=true` also returns unmanaged YAML properties such as `north_star` and `rang`. Raw note bodies and raw task lines are never exposed.
 
@@ -71,7 +76,7 @@ Live validation reports duplicate IDs, missing sources, unknown workflow statuse
 
 ## Mutation controls
 
-All mutation routes require `idempotencyKey`. The key is bound to the canonical request: an identical replay returns the cached result, while reuse for different input returns HTTP 409 with `idempotency_key_reused` before later payload validation. Existing-task routes also require `expectedRevision`. `dryRun` defaults to `true`; apply occurs only with `dryRun: false`.
+All mutation routes require `idempotencyKey`. The Bridge reserves the key atomically before native dispatch and binds it to the canonical request: an identical replay returns the recorded result, while reuse for different input returns HTTP 409 with `idempotency_key_reused` before later payload validation. Concurrent identical callers join the same in-flight result instead of dispatching twice. Existing-task routes also require `expectedRevision`. `dryRun` defaults to `true`; apply occurs only with `dryRun: false`.
 
 Every mutation destination is validated without normalization at both the MCP and Bridge boundaries. `targetPath` must be an exact vault-relative Markdown path; `targetFolder` must be an exact vault-relative folder path. Leading or trailing whitespace, backslashes, absolute paths, empty segments, trailing separators, `.` and `..` are rejected before any call to the task engine.
 
@@ -90,16 +95,35 @@ Responses use:
   "requested": {},
   "after": {},
   "retryable": false,
+  "recoveryRequired": false,
+  "planDigest": "optional sealed-plan digest",
+  "recoveryRef": "optional same-plan recovery reference",
+  "nativeProof": {},
   "source": "operon-live",
   "stale": false
 }
 ```
 
-For Operon 3.2.0, the Bridge sends the exact preview plan to `apply`; it never reconstructs or retries a plan after the host reports `outcome-unknown`. The response carries `recoveryRef`, `planDigest`, and `mutationMayHaveApplied` when recovery is required. The Bridge waits for Operon's index to return to a verified idle state before proving `after`. If the final state cannot be proven, it records `failed/outcome_unverified` and does not invite a blind retry. A Bridge apply is bounded at 120 seconds; a timeout is uncertain, not a permission to retry.
+For official Operon, the Bridge sends the exact preview plan to `apply`; it never reconstructs or retries a plan after the host reports `outcome-unknown`. Task Workflow results are validated as a strict V1 discriminated result: terminal status, side-effect flags, group results, sealed receipt digest and postflight status must agree. Any malformed or contradictory result becomes non-retryable `outcome-unknown`. `nativeProof` is a bounded proof projection of the validated native result, not the unrestricted Operon payload. The response carries `recoveryRef`, `planDigest`, `recoveryRequired` and `mutationMayHaveApplied` when recovery is required. The Bridge waits for Operon's index to return to a verified idle state before proving `after`. If the final state cannot be proven, it records `failed/outcome_unverified` and does not invite a blind retry. A Bridge apply is bounded at 120 seconds; a timeout is uncertain, not a permission to retry.
+
+### Local Bridge idempotency journal
+
+Bridge 0.8 persists its version-1 journal in local Obsidian plugin data before dispatch. It retains at most 500 entries and only entries updated during the last 30 days. On restart, a persisted `in-progress` reservation is projected to non-retryable `outcome-unknown` with `recoveryRequired: true`; callers must inspect pending recoveries and recover the same native plan. This is a bounded local replay/restart guarantee, not permanent storage: there is no promise after expiry, eviction, plugin-data loss/reset, failed persistence, or movement to another vault/device. If the reservation cannot be persisted before dispatch, no native mutation is sent.
+
+For adopted and periodic-created tasks, the Bridge also persists a bounded
+`workflow kind + planDigest -> operonId` receipt beside that journal. It uses
+the same 500-entry and 30-day boundary. A native `already-applied` replay must
+reload that exact identity and revalidate it against the live locator and
+requested stable fields; a missing, stale or mismatching identity fails closed
+instead of guessing among similar tasks.
 
 ### `GET /mutations/pending-recoveries`
 
 Returns the durable recovery references currently owned by this Bridge consumer. It is read-only and requires the official Developer API recovery surface.
+
+When `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` is non-empty, this listing fails
+closed. Recovery records do not expose a canonical route that the MCP can prove
+against the path allowlist, so it must not return an unscoped inventory.
 
 ### `POST /mutations/recover`
 
@@ -110,7 +134,38 @@ Returns the durable recovery references currently owned by this Bridge consumer.
 }
 ```
 
-This calls Operon's official `mutations.recover({ recoveryRef })` for the same plan. It never accepts a new mutation spec and never uses Markdown or private APIs. Recovery keeps the same two opt-ins and is restricted to the full MCP write mode.
+This route accepts Developer API V1 recovery references only.
+
+### `POST /task-workflows/recover`
+
+Task Workflow recovery uses its dedicated Bridge route and flat wire shape:
+
+```json
+{
+  "idempotencyKey": "recovery-002",
+  "recoveryRef": "dvr1_...",
+  "kind": "adopt",
+  "planDigest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+```
+
+Task Workflow V1 uses Operon's host-owned `dvr1_` recovery-reference family,
+the same opaque family as core Developer API mutations. The dedicated route
+and mandatory `kind` prevent the Bridge from guessing which workflow owns the
+reference. The three Task Workflow kinds
+(`adopt`, `periodic-create`, and `periodic-update`) accept optional `planDigest`.
+It must be an exact lowercase SHA-256 digest and binds the request to the sealed
+receipt/replay. Without it, the Bridge dispatches only if
+the same digest can be proven from `pendingRecoveries`; it does not guess or
+derive a digest from `recoveryRef`. The MCP tool exposes a nested `recovery`
+union, validates it, then routes `developer-api` to `/mutations/recover` and the
+three workflow kinds to `/task-workflows/recover`; direct Bridge clients must use
+the REST shapes above. When
+`OPERON_MUTATION_ALLOWED_PATH_PREFIXES` is non-empty, apply also fails closed
+before native dispatch because the recovery reference has no canonical route
+that can be proved inside the allowlist. Recovery never accepts a new mutation
+spec, never uses Markdown or private APIs, keeps the same two opt-ins, and is
+restricted to the full MCP write mode.
 
 ### `POST /tasks/adopt`
 
@@ -149,6 +204,14 @@ Adoption upgrades one existing checkbox in place through Operon. `line` is one-b
 Creation uses Operon's Task Creator paths, template resolution, identity generation, indexing, dependency reconciliation, aggregates, and workflow transition logic. Official Operon 3.2.0 maps the MCP payload to its typed create plan; unmanaged properties and arbitrary `targetFolder` placement are rejected because they are not part of the official Developer API contract.
 
 `statusId` is preferred over `fields.status`: it remains stable when a vault translates the displayed pipeline and status labels. Supplying both is rejected. `targetDateKey` is projected to the official `dateDue` field; destination selection remains governed by the configured Operon target policy. An explicit inline `targetPath` remains available for vault-specific layouts.
+
+### `POST /tasks/periodic`
+
+Creates exactly one task through Operon's Daily/Weekly Note workflow. `priorityId` is checked against the stable priority projected by the postflight task, not only the display label. If native apply succeeds but periodic creation cannot identify one unique created task, the Bridge preserves `outcome-unknown`; it does not turn an ambiguous creation into success or retry it.
+
+### `POST /tasks/:operonId/periodic-update`
+
+Sets or clears the exact task's scheduled date through Operon's periodic-update workflow. Operon owns retain/detach/realign semantics. The Bridge verifies the final scheduling projection and never treats the route as an implicit Markdown move.
 
 ### `POST /tasks/:operonId/update`
 

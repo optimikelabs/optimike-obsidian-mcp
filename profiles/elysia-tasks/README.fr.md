@@ -29,7 +29,9 @@ plutôt que figer un seul identifiant de plugin :
 const plugins = app.plugins?.plugins;
 const loadedTaskEngines = [plugins?.kairelys, plugins?.operon].filter(Boolean);
 if (loadedTaskEngines.length !== 1) {
-  throw new Error(`Un seul moteur de tâches doit être chargé, trouvé : ${loadedTaskEngines.length}.`);
+  throw new Error(
+    `Un seul moteur de tâches doit être chargé, trouvé : ${loadedTaskEngines.length}.`,
+  );
 }
 const [taskEngine] = loadedTaskEngines;
 if (taskEngine.api?.version !== "1") {
@@ -76,7 +78,7 @@ Le fichier de référence est [`v1/profile.json`](v1/profile.json).
 
 ## Skill agentique publique
 
-La skill portable [`elysia-task-gouverneur`](skills/elysia-task-gouverneur/SKILL.md) permet à un agent de piloter ce profil via les 23 outils `operon_*` gouvernés du MCP Optimike.
+La skill portable [`elysia-task-gouverneur`](skills/elysia-task-gouverneur/SKILL.md) permet à un agent de piloter ce profil via les 25 outils `operon_*` gouvernés du MCP Optimike. Les opérations Daily/Weekly et l’adoption officielle restent conditionnées aux grants live exacts ; leur présence dans le profil ne les autorise pas.
 
 Elle couvre :
 

@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 export const OPERON_CONTRACT_VERSION = "1" as const;
-export const OPERON_SNAPSHOT_SCHEMA_VERSION = 1;
+export const OPERON_SNAPSHOT_SCHEMA_VERSION = 2;
+export const OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION = 1;
 
 export const OperonTaskSourceSchema = z.enum(["inline", "file"]);
 export const OperonCheckboxSchema = z.enum(["open", "done", "cancelled"]);
@@ -18,6 +19,13 @@ export const OperonTaskDatesSchema = z.object({
   created: z.string().nullable(),
   modified: z.string().nullable(),
 });
+
+export const OperonFieldValueSchema = z.union([
+  z.string(),
+  z.array(z.string()),
+]);
+
+export type OperonFieldValue = z.infer<typeof OperonFieldValueSchema>;
 
 export const OperonTaskSchema = z.object({
   operonId: z.string().min(1),
@@ -39,7 +47,7 @@ export const OperonTaskSchema = z.object({
   blocking: z.array(z.string()),
   blockedBy: z.array(z.string()),
   dates: OperonTaskDatesSchema,
-  fields: z.record(z.string()),
+  fields: z.record(OperonFieldValueSchema),
   properties: z.record(z.unknown()).optional(),
   plainCheckboxProgress: z
     .object({
@@ -85,6 +93,9 @@ export const OperonCapabilitiesSchema = z.object({
   filterQuery: z.boolean().optional().default(false),
   relocate: z.boolean().optional().default(false),
   recovery: z.boolean().optional().default(false),
+  periodicCreate: z.boolean().optional().default(false),
+  periodicUpdate: z.boolean().optional().default(false),
+  taskWorkflowRecovery: z.boolean().optional().default(false),
 });
 
 export const OperonWorkflowTaxonomySchema = z.object({
@@ -270,16 +281,12 @@ export const OperonStatusSchema = z.object({
     pluginName: z.string().nullable().optional(),
     version: z.string().nullable(),
     compatible: z.boolean(),
-    compatibilityState: z.enum([
-      "certified",
-      "compatible-provisional",
-      "incompatible",
-    ]).optional(),
-    compatibilityAdmission: z.enum([
-      "developer-api-v1",
-      "legacy-version",
-      "none",
-    ]).optional(),
+    compatibilityState: z
+      .enum(["certified", "compatible-provisional", "incompatible"])
+      .optional(),
+    compatibilityAdmission: z
+      .enum(["developer-api-v1", "legacy-version", "none"])
+      .optional(),
     compatibilityReason: z.string().min(1).optional(),
     testedAgainst: z.string(),
     supportedRange: z.string(),
@@ -391,7 +398,7 @@ export const OperonQuerySchema = z.object({
   tagsAll: z.array(z.string()).optional(),
   parentTask: z.string().nullable().optional(),
   dates: z.array(OperonDateFilterSchema).optional(),
-  fieldEquals: z.record(z.string()).optional(),
+  fieldEquals: z.record(OperonFieldValueSchema).optional(),
   propertyEquals: z.record(z.unknown()).optional(),
   sort: z.array(OperonSortSchema).optional(),
   includeProperties: z.boolean().optional().default(false),
@@ -570,6 +577,130 @@ export const OperonRawPropertyValueSchema = z.union([
   z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])),
 ]);
 
+const OPERON_TEXT_MAX_LENGTH = 65_536;
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+const OperonMutationTextSchema = z
+  .string()
+  .max(OPERON_TEXT_MAX_LENGTH)
+  .refine((value) => utf8Length(value) <= OPERON_TEXT_MAX_LENGTH, {
+    message: `Value must not exceed ${OPERON_TEXT_MAX_LENGTH} UTF-8 bytes.`,
+  });
+
+const OperonMutationListItemSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(OPERON_TEXT_MAX_LENGTH)
+  .refine((value) => utf8Length(value) <= OPERON_TEXT_MAX_LENGTH, {
+    message: `Value must not exceed ${OPERON_TEXT_MAX_LENGTH} UTF-8 bytes.`,
+  });
+
+const OperonMutationFieldValueSchema = z.union([
+  OperonMutationTextSchema,
+  z.array(OperonMutationListItemSchema).max(512),
+]);
+
+const OperonMutationFieldsSchema = z.record(OperonMutationFieldValueSchema);
+
+const OPERON_SCALAR_MUTATION_FIELDS = new Set([
+  "status",
+  "priority",
+  "parentTask",
+  "taskType",
+  "taskImage",
+  "taskIcon",
+  "taskColor",
+  "note",
+  "location",
+  "dateDue",
+  "dateScheduled",
+  "dateStarted",
+  "datetimeStart",
+  "datetimeEnd",
+  "estimate",
+]);
+
+const OPERON_LIST_MUTATION_FIELDS = new Set([
+  "taskGallery",
+  "assignees",
+  "contexts",
+  "links",
+  "related",
+  "blocking",
+  "blockedBy",
+]);
+
+function validateKnownMutationFieldTypes(
+  fields:
+    | Record<string, z.infer<typeof OperonMutationFieldValueSchema>>
+    | undefined,
+  context: z.RefinementCtx,
+): void {
+  for (const [field, value] of Object.entries(fields ?? {})) {
+    if (OPERON_SCALAR_MUTATION_FIELDS.has(field) && Array.isArray(value)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fields", field],
+        message: `Managed field '${field}' requires one scalar string value.`,
+      });
+    }
+    if (OPERON_LIST_MUTATION_FIELDS.has(field) && !Array.isArray(value)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fields", field],
+        message: `Managed field '${field}' requires an ordered string array.`,
+      });
+    }
+  }
+}
+
+function validateTaskGallery(
+  fields:
+    | Record<string, z.infer<typeof OperonMutationFieldValueSchema>>
+    | undefined,
+  maximumItems: number,
+  context: z.RefinementCtx,
+): void {
+  if (!fields || !("taskGallery" in fields)) return;
+  const gallery = fields.taskGallery;
+  if (!Array.isArray(gallery)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["fields", "taskGallery"],
+      message:
+        "taskGallery must be an ordered string array; delimiter-based strings are not accepted.",
+    });
+    return;
+  }
+  if (gallery.length > maximumItems) {
+    context.addIssue({
+      code: z.ZodIssueCode.too_big,
+      maximum: maximumItems,
+      inclusive: true,
+      type: "array",
+      path: ["fields", "taskGallery"],
+      message: `taskGallery must contain at most ${maximumItems} items.`,
+    });
+  }
+}
+
+function normalizeTaskGalleryFields<
+  T extends Record<string, z.infer<typeof OperonMutationFieldValueSchema>>,
+>(fields: T | undefined): T | undefined {
+  if (!fields || !Array.isArray(fields.taskGallery)) return fields;
+  const seen = new Set<string>();
+  const taskGallery = fields.taskGallery.filter((item) => {
+    if (seen.has(item)) return false;
+    seen.add(item);
+    return true;
+  });
+  return { ...fields, taskGallery } as T;
+}
+
 const MutationControlSchema = z.object({
   idempotencyKey: z.string().min(8).max(200),
   dryRun: z.boolean().optional().default(true),
@@ -646,6 +777,22 @@ export const OperonFilterQuerySchema = z.object({
   limit: z.number().int().positive().max(500).optional().default(100),
 });
 
+const OperonIdSchema = z.string().regex(/^[a-z0-9]{7}$/u, {
+  message: "Operon ids must contain exactly seven lowercase letters or digits.",
+});
+
+const OperonDateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, {
+  message: "Date keys must use the YYYY-MM-DD format.",
+});
+
+const OperonNormalizedTagsSchema = z.array(z.string()).transform((tags) => [
+  ...new Set(
+    tags
+      .map((tag) => tag.trim().replace(/^#/u, "").trim())
+      .filter(Boolean),
+  ),
+]);
+
 export const OperonAdoptTaskSchema = MutationControlSchema.extend({
   adoption: z.object({
     targetPath: OperonVaultMarkdownPathSchema,
@@ -659,8 +806,67 @@ export const OperonAdoptTaskSchema = MutationControlSchema.extend({
         "expectedLine must contain exactly one source line.",
       ),
     statusId: z.string().trim().min(1).optional(),
+    terminalSourcePolicy: z.literal("reopen").optional(),
   }),
 });
+
+export const OperonCreatePeriodicTaskSchema = MutationControlSchema.extend({
+  periodic: z
+    .object({
+      description: z.string().trim().min(1).max(20_000),
+      periodicKind: z.enum(["daily", "weekly"]),
+      routeDate: OperonDateKeySchema.optional(),
+      statusId: z.string().trim().min(1).optional(),
+      priorityId: z.string().trim().min(1).optional(),
+      tags: OperonNormalizedTagsSchema.optional(),
+      fields: OperonMutationFieldsSchema.optional(),
+    })
+    .superRefine((value, context) => {
+      validateKnownMutationFieldTypes(value.fields, context);
+      validateTaskGallery(value.fields, 256, context);
+      if (value.fields?.parentTask !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["fields", "parentTask"],
+          message:
+            "Periodic-note creation owns parentage; parentTask is not accepted.",
+        });
+      }
+      if (value.statusId && value.fields?.status !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["statusId"],
+          message: "Provide at most one of fields.status or statusId.",
+        });
+      }
+      if (value.priorityId && value.fields?.priority !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["priorityId"],
+          message: "Provide at most one of fields.priority or priorityId.",
+        });
+      }
+    })
+    .transform((value) => {
+      const fields = normalizeTaskGalleryFields(value.fields);
+      return fields === undefined ? value : { ...value, fields };
+    }),
+});
+
+export const OperonUpdatePeriodicSchedulingSchema =
+  MutationControlSchema.extend({
+    operonId: OperonIdSchema,
+    expectedRevision: z.string().min(1),
+    patch: z
+      .object({
+        fields: z
+          .object({
+            dateScheduled: z.string().trim().min(1).nullable(),
+          })
+          .strict(),
+      })
+      .strict(),
+  });
 
 export const OperonCreateTaskSchema = MutationControlSchema.extend({
   task: z
@@ -669,7 +875,7 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
       description: z.string().trim().min(1),
       statusId: z.string().trim().min(1).optional(),
       tags: z.array(z.string()).optional(),
-      fields: z.record(z.string()).optional(),
+      fields: OperonMutationFieldsSchema.optional(),
       properties: z.record(OperonRawPropertyValueSchema).optional(),
       fileTemplateId: z.string().optional(),
       targetDateKey: z.string().optional(),
@@ -677,6 +883,8 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
       targetPath: OperonVaultMarkdownPathSchema.optional(),
     })
     .superRefine((value, context) => {
+      validateKnownMutationFieldTypes(value.fields, context);
+      validateTaskGallery(value.fields, 256, context);
       if (value.source === "file" && value.targetPath) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -691,13 +899,21 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
           message: "targetFolder is supported only for file tasks.",
         });
       }
-      if (value.statusId && value.fields?.status?.trim()) {
+      if (
+        value.statusId &&
+        typeof value.fields?.status === "string" &&
+        value.fields.status.trim()
+      ) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["statusId"],
           message: "Provide at most one of fields.status or statusId.",
         });
       }
+    })
+    .transform((value) => {
+      const fields = normalizeTaskGalleryFields(value.fields);
+      return fields === undefined ? value : { ...value, fields };
     }),
 });
 
@@ -705,10 +921,12 @@ export const OperonUpdatePatchSchema = z
   .object({
     description: z.string().trim().min(1).optional(),
     tags: z.array(z.string()).optional(),
-    fields: z.record(z.string()).optional(),
+    fields: OperonMutationFieldsSchema.optional(),
     properties: z.record(OperonRawPropertyValueSchema).optional(),
   })
   .superRefine((value, context) => {
+    validateKnownMutationFieldTypes(value.fields, context);
+    validateTaskGallery(value.fields, 512, context);
     const dedicatedFields = new Set([
       "parentTask",
       "blocking",
@@ -743,6 +961,10 @@ export const OperonUpdatePatchSchema = z
         message: "Update exactly one unmanaged property per operation.",
       });
     }
+  })
+  .transform((value) => {
+    const fields = normalizeTaskGalleryFields(value.fields);
+    return fields === undefined ? value : { ...value, fields };
   });
 
 export const OperonUpdateTaskSchema = MutationControlSchema.extend({
@@ -808,10 +1030,6 @@ export const OperonRelocateTaskSchema = MutationControlSchema.extend({
   operonId: z.string().min(1),
   expectedRevision: z.string().min(1),
   targetPath: OperonVaultMarkdownPathSchema,
-});
-
-const OperonIdSchema = z.string().regex(/^[a-z0-9]{7}$/u, {
-  message: "Operon ids must contain exactly seven lowercase letters or digits.",
 });
 
 const UniqueOperonIdsSchema = z
@@ -902,18 +1120,159 @@ export const OperonUpdateRecurrenceSchema = MutationControlSchema.extend({
   changes: OperonRecurrenceChangesSchema,
 });
 
-export const OperonRecoverMutationSchema = z.object({
-  idempotencyKey: z.string().min(8).max(200),
-  recoveryRef: z.string().trim().min(1).max(512),
+export const OperonTaskWorkflowRecoveryKindSchema = z.enum([
+  "adopt",
+  "periodic-create",
+  "periodic-update",
+]);
+
+export const OperonPlanDigestSchema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/u, "Expected a lowercase SHA-256 hex digest.")
+  .describe(
+    "Exact lowercase 64-hex planDigest returned by Operon pending recovery state; never synthesize or alter it.",
+  );
+
+export const OperonPendingRecoveriesInputSchema = z.object({
+  kind: OperonTaskWorkflowRecoveryKindSchema.optional(),
 });
+
+const OperonDeveloperApiRecoverySchema = z
+  .object({
+    kind: z.literal("developer-api"),
+  })
+  .strict();
+
+const OperonTaskWorkflowRecoverySchema = z
+  .object({
+    kind: OperonTaskWorkflowRecoveryKindSchema,
+    planDigest: OperonPlanDigestSchema.optional(),
+  })
+  .strict();
+
+export const OperonRecoveryBindingSchema = z.discriminatedUnion("kind", [
+  OperonDeveloperApiRecoverySchema,
+  OperonTaskWorkflowRecoverySchema,
+]);
+
+export const OperonRecoverMutationInputSchema = z
+  .object({
+    idempotencyKey: z.string().min(8).max(200),
+    recoveryRef: z.string().trim().min(1).max(512),
+    // The nested discriminated union keeps the MCP root an object while
+    // publishing the planDigest => task-workflow-kind implication in
+    // tools/list. The developer-api branch has no planDigest property.
+    recovery: OperonRecoveryBindingSchema,
+  })
+  .strict();
+
+export const OperonRecoverMutationSchema = OperonRecoverMutationInputSchema;
+
+const OperonPendingRecoverySchema = z
+  .object({
+    recoveryRef: z.string().trim().min(1).max(512).optional(),
+    planDigest: OperonPlanDigestSchema.optional(),
+    mutationKind: z.string().trim().min(1).max(256).optional(),
+    capability: z.string().trim().min(1).max(256).optional(),
+    riskLevel: z.string().trim().min(1).max(128).optional(),
+    createdAt: z.string().datetime({ offset: true }).optional(),
+    expiresAt: z.string().datetime({ offset: true }).optional(),
+    workflowKind: OperonTaskWorkflowRecoveryKindSchema.optional(),
+    // Accepted for the bounded MCP test fixture and older additive Bridge
+    // projections. The current Bridge uses workflowKind.
+    kind: OperonTaskWorkflowRecoveryKindSchema.optional(),
+  })
+  .strip();
 
 export const OperonPendingRecoveriesSchema = z.object({
   ok: z.literal(true),
   contractVersion: z.literal(OPERON_CONTRACT_VERSION),
   source: z.literal("operon-live"),
   stale: z.literal(false),
-  recoveries: z.array(z.record(z.unknown())),
+  recoveries: z.array(OperonPendingRecoverySchema).max(512),
 });
+
+const OperonNativeResourceRevisionSchema = z
+  .object({
+    resourceKind: z.enum([
+      "timer",
+      "repeat-series",
+      "active-tracker",
+      "pinned",
+      "project-serial",
+      "task-source",
+    ]),
+    resourceKey: z.string().min(1).max(4096),
+    revision: z.string().min(1).max(4096),
+  })
+  .strict();
+
+const OperonNativeAtomicGroupResultSchema = z
+  .object({
+    groupId: z.string().min(1).max(4096),
+    status: z.enum(["committed", "failed", "outcome-unknown"]),
+    resourceRevisions: z
+      .array(OperonNativeResourceRevisionSchema)
+      .max(1024)
+      .optional(),
+  })
+  .strict();
+
+const OperonNativeReceiptSchema = z
+  .object({
+    contractVersion: z.literal(1),
+    planDigest: OperonPlanDigestSchema,
+    mutationKind: z.enum([
+      "task.adopt",
+      "task.create",
+      "task.update",
+      "task.transition",
+      "task.relationship",
+      "task.recurrence",
+      "task.convert",
+      "task.inline-relocate",
+    ]),
+    targetDigest: OperonPlanDigestSchema,
+    terminalOutcome: z.enum(["applied", "already-applied"]),
+    effectiveAt: z.string().datetime({ offset: true }),
+    completedAt: z.string().datetime({ offset: true }),
+    expiresAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+const OperonNativePostflightSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      status: z.literal("verified"),
+      observedAt: z.string().datetime({ offset: true }).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal("receipt-replay"),
+      observedAt: z.string().datetime({ offset: true }).optional(),
+    })
+    .strict(),
+]);
+
+export const OperonNativeMutationProofSchema = z
+  .object({
+    contractVersion: z.literal(1),
+    kind: z.literal("mutation-result"),
+    status: z.enum([
+      "applied",
+      "already-applied",
+      "partial",
+      "failed",
+      "outcome-unknown",
+    ]),
+    mutationMayHaveApplied: z.boolean(),
+    retryAllowed: z.boolean(),
+    groupResults: z.array(OperonNativeAtomicGroupResultSchema).max(512),
+    receipt: OperonNativeReceiptSchema.optional(),
+    postflight: OperonNativePostflightSchema.optional(),
+  })
+  .strict();
 
 export const OperonMutationResultSchema = z.object({
   ok: z.boolean(),
@@ -937,11 +1296,12 @@ export const OperonMutationResultSchema = z.object({
   after: OperonTaskSchema.nullable().optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   retryable: z.boolean().optional(),
-  planDigest: z.string().optional(),
+  planDigest: OperonPlanDigestSchema.optional(),
   plan: z.record(z.unknown()).optional(),
   recoveryRef: z.string().optional(),
   mutationMayHaveApplied: z.boolean().optional(),
   nativeStatus: z.string().optional(),
+  nativeProof: OperonNativeMutationProofSchema.optional(),
   source: z.literal("operon-live"),
   stale: z.literal(false),
   replayed: z.boolean().optional(),
@@ -953,6 +1313,12 @@ export type OperonResolveTask = z.infer<typeof OperonResolveTaskSchema>;
 export type OperonRelationships = z.infer<typeof OperonRelationshipsSchema>;
 export type OperonContext = z.infer<typeof OperonContextSchema>;
 export type OperonAdoptTask = z.infer<typeof OperonAdoptTaskSchema>;
+export type OperonCreatePeriodicTask = z.infer<
+  typeof OperonCreatePeriodicTaskSchema
+>;
+export type OperonUpdatePeriodicScheduling = z.infer<
+  typeof OperonUpdatePeriodicSchedulingSchema
+>;
 export type OperonUpdateTask = z.infer<typeof OperonUpdateTaskSchema>;
 export type OperonSetRelationships = z.infer<
   typeof OperonSetRelationshipsSchema
@@ -964,6 +1330,9 @@ export type OperonTransitionTask = z.infer<typeof OperonTransitionTaskSchema>;
 export type OperonConvertTask = z.infer<typeof OperonConvertTaskSchema>;
 export type OperonFilterQuery = z.infer<typeof OperonFilterQuerySchema>;
 export type OperonRelocateTask = z.infer<typeof OperonRelocateTaskSchema>;
+export type OperonPendingRecoveriesInput = z.infer<
+  typeof OperonPendingRecoveriesInputSchema
+>;
 export type OperonRecoverMutation = z.infer<typeof OperonRecoverMutationSchema>;
 export type OperonMutationResult = z.infer<typeof OperonMutationResultSchema>;
 
@@ -975,6 +1344,7 @@ export interface OperonSnapshotEnvelope {
   operonVersion: string;
   bridgeVersion: string;
   contractVersion: typeof OPERON_CONTRACT_VERSION;
+  snapshotSchemaVersion: 1 | typeof OPERON_SNAPSHOT_SCHEMA_VERSION;
   settingsSignature: string | null;
   generation: number | null;
   capabilities: z.infer<typeof OperonCapabilitiesSchema>;
@@ -990,6 +1360,7 @@ export interface OperonTaskPage {
   operonVersion: string;
   bridgeVersion: string;
   contractVersion: typeof OPERON_CONTRACT_VERSION;
+  snapshotSchemaVersion: OperonSnapshotEnvelope["snapshotSchemaVersion"];
   capabilities: OperonSnapshotEnvelope["capabilities"];
   limitations: string[];
   total: number;
@@ -1004,6 +1375,31 @@ function normalizeNeedle(value: unknown): string {
   return String(value ?? "")
     .trim()
     .toLocaleLowerCase();
+}
+
+function fieldValueEquals(
+  actual: OperonFieldValue | undefined,
+  expected: OperonFieldValue,
+): boolean {
+  if (Array.isArray(actual) || Array.isArray(expected)) {
+    if (!Array.isArray(actual) || !Array.isArray(expected)) return false;
+    return (
+      actual.length === expected.length &&
+      actual.every(
+        (value, index) =>
+          normalizeNeedle(value) === normalizeNeedle(expected[index]),
+      )
+    );
+  }
+  return normalizeNeedle(actual) === normalizeNeedle(expected);
+}
+
+function searchableFieldValues(
+  fields: Record<string, OperonFieldValue>,
+): string[] {
+  return Object.values(fields).flatMap((value) =>
+    Array.isArray(value) ? value : [value],
+  );
 }
 
 function stableValue(value: unknown): unknown {
@@ -1117,8 +1513,7 @@ export function filterOperonTasks(
     )
       return false;
     for (const [key, expected] of Object.entries(query.fieldEquals ?? {})) {
-      if (normalizeNeedle(task.fields[key]) !== normalizeNeedle(expected))
-        return false;
+      if (!fieldValueEquals(task.fields[key], expected)) return false;
     }
     for (const [key, expected] of Object.entries(query.propertyEquals ?? {})) {
       if (stableStringify(task.properties?.[key]) !== stableStringify(expected))
@@ -1137,7 +1532,7 @@ export function filterOperonTasks(
         task.priority,
         task.parentTask,
         ...task.tags,
-        ...Object.values(task.fields),
+        ...searchableFieldValues(task.fields),
         ...(task.properties ? [stableStringify(task.properties)] : []),
       ]
         .map(normalizeNeedle)
@@ -1238,6 +1633,7 @@ export function queryOperonSnapshot(
     operonVersion: snapshot.operonVersion,
     bridgeVersion: snapshot.bridgeVersion,
     contractVersion: snapshot.contractVersion,
+    snapshotSchemaVersion: snapshot.snapshotSchemaVersion,
     capabilities: snapshot.capabilities,
     limitations: snapshot.limitations,
     total: filtered.length,

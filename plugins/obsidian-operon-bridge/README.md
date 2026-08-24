@@ -16,7 +16,7 @@ If both plugins are enabled, the Bridge refuses to choose an owner. Disable one 
 - Obsidian Desktop
 - Operon `2.4.0` or `2.5.0` for legacy reads
 - Operon exposing the negotiated Developer API V1 contract (`contractVersion: 1`, `runtimeApi: 1`)
-- certified Developer API releases: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`; Operon `3.3.2` is the current validated baseline and remains admitted provisionally by contract rather than product-version allowlist
+- certified Developer API releases: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`; Operon `3.3.2` is the current live-validated official baseline. A patched `3.5.2` acceptance candidate passed the Bridge `0.8.0` disposable-vault pilot on 2026-08-24, but stock `3.5.2` remains provisional until the required upstream fixes ship and are revalidated
 - Kairélys `2.5.1` through `2.5.3` (based on Operon `2.5.0`) and Kairélys `2.6.1` through `2.6.3`
   (based on Operon `2.6.0`) with Public API v1 for mutations
 - Obsidian Local REST API
@@ -33,11 +33,23 @@ API V1 accessor. Its complete live pilot passed the separate Developer API,
 schema, index, capability, readiness, saved-filter, transition, restoration,
 and recovery gates with Bridge `0.7.0`. Operon `3.3.2` restores the Settings
 grant controls, rejects implicit File Task renames, and fixes the unscoped
-Project Serial transition edge. Adoption remains unavailable through the
-official Developer API and is tracked in
-[#140](https://github.com/hasanyilmaz/operon/issues/140). Uncertain outcomes
+Project Serial transition edge. Uncertain outcomes
 remain fail-closed; the Bridge never retries blindly or falls back to
 Markdown/private APIs.
+
+Bridge `0.8.0` adds bounded support for Operon `3.5.2`'s separate
+task-workflow Developer API sessions. Adoption, daily/weekly periodic-note
+creation, and periodic-note-aware updates each negotiate their own exact grant;
+a pending or malformed optional grant cannot revoke the established core read
+or mutation sessions. Apply receives the exact opaque plan handle returned by
+preview, and recovery accepts only the matching durable `recoveryRef` and
+workflow kind. The Bridge converts its public one-based adoption line to the
+official zero-based locator exactly once. `taskType` and `taskImage` remain
+scalars, while `taskGallery` crosses the Bridge as an ordered `string[]`; the
+Bridge never guesses media boundaries by splitting a string. Operon `3.5.2`
+continues to report `compatible-provisional`. The patched acceptance candidate
+passed the live gate, but the official artifact is not promoted until the
+required upstream fixes are released and the stock build passes that same gate.
 
 Compatibility is reported explicitly:
 
@@ -68,8 +80,10 @@ Prefix: `/extensions/optimike-operon-bridge/v1`
 - `POST /tasks/filter`
 - `GET /validate`
 - `POST /tasks/adopt`
+- `POST /tasks/periodic`
 - `POST /tasks`
 - `POST /tasks/:operonId/update`
+- `POST /tasks/:operonId/periodic-update`
 - `POST /tasks/:operonId/transition`
 - `POST /tasks/:operonId/convert`
 - `POST /tasks/:operonId/relocate`
@@ -77,8 +91,10 @@ Prefix: `/extensions/optimike-operon-bridge/v1`
 - `POST /tasks/:operonId/recurrence`
 - `GET /mutations/pending-recoveries`
 - `POST /mutations/recover`
+- `GET /task-workflows/pending-recoveries`
+- `POST /task-workflows/recover`
 
-All routes inherit Local REST API authentication and local TLS settings. Saved filters run through Operon's native filter evaluator with an exact caller-supplied `filterSetId`; the official task-workflow API does not list saved filters. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected before later payload validation. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine` on engines that advertise it. Dry-run is the default.
+All routes inherit Local REST API authentication and local TLS settings. Saved filters run through Operon's native filter evaluator with an exact caller-supplied `filterSetId`; the official task-workflow API does not list saved filters. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected before later payload validation. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine` on engines that advertise it. Periodic creation requires `periodicKind: daily | weekly` and may include an exact ISO `routeDate`; periodic updates keep the existing task identity and let Operon seal the retain/detach/realign routing decision. Dry-run is the default.
 
 Mutation paths are strict, exact vault-relative paths. The MCP and Bridge reject leading or trailing whitespace, backslashes, absolute paths, empty segments, traversal, and non-Markdown `targetPath` values; they never trim or rewrite an invalid destination into a valid one.
 

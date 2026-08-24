@@ -8,6 +8,13 @@ Docs liées : [README](../README.fr.md), [Guide d’exploitation](../OPERATIONS.
 
 Optimike Obsidian MCP possède cinq contrats runtime. Les modes headless tournent au-dessus d’un vault Markdown synchronisé. Ils ne lancent pas Obsidian Desktop, ne chargent pas les plugins communautaires, n’exposent pas la palette de commandes et ne donnent pas l’état live de l’interface.
 
+En 3.1, `OBSIDIAN_STARTUP_BLOCKING` vaut `false` par défaut. Un processus MCP
+live ou hybrid reste donc actif lorsque Codex démarre avant Obsidian Desktop ;
+les outils live restent temporairement indisponibles et échouent fermés jusqu’à
+ce que Local REST réponde. Régler la variable à `true` uniquement si un
+déploiement live doit faire échouer son propre démarrage après les tentatives
+bornées du contrôle initial.
+
 ## Usage recommandé
 
 | Mode runtime                 | Idéal pour                                             | Obsidian Desktop                       | Local REST API                                                | Écritures                                                                                                | Bases                                        | Posture par défaut        |
@@ -21,33 +28,33 @@ Optimike Obsidian MCP possède cinq contrats runtime. Les modes headless tournen
 
 ## Tableau des capacités
 
-| Capacité                               | `live`                    | `hybrid` API disponible                    | `hybrid` API indisponible | `headless-readonly`             | `headless-guarded`                  | `headless-filesystem`                                                      |
-| -------------------------------------- | ------------------------- | ------------------------------------------ | ------------------------- | ------------------------------- | ----------------------------------- | -------------------------------------------------------------------------- |
-| Démarrer sans `OBSIDIAN_API_KEY`       | Non                       | Oui                                        | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
-| Démarrer sans Obsidian Desktop         | Non                       | Oui                                        | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
-| Cache filesystem                       | Optionnel                 | Oui                                        | Oui                       | Requis                          | Requis                              | Requis                                                                     |
-| Politique d’exclusion du vault         | Oui pour les scans cache  | Oui pour les scans cache                   | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
-| Lire/lister/rechercher                 | REST/cache                | REST/cache                                 | Cache/filesystem          | Cache/filesystem                | Cache/filesystem                    | Cache/filesystem                                                           |
-| Tasks list/query                       | Cache/filesystem          | Cache/filesystem                           | Cache/filesystem          | Cache/filesystem                | Cache/filesystem                    | Cache/filesystem                                                           |
-| Recherche sémantique Smart Connections | `.smart-env` + embedder   | `.smart-env` + embedder compatible         | `.smart-env` + embedder   | `.smart-env` + embedder         | `.smart-env` + embedder             | `.smart-env` + embedder                                                    |
-| Status/maintenance runtime             | Oui                       | Oui                                        | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
-| Racines documentaires externes         | Config locale optionnelle | Config locale optionnelle                  | Config locale optionnelle | Config locale optionnelle       | Config locale optionnelle           | Config locale optionnelle                                                  |
-| Scan/plan des références externes      | Stdio local               | Stdio local                                | Stdio local               | Stdio local                     | Stdio local                         | Stdio local                                                                |
-| Apply/rollback de move externe         | Non                       | Non                                        | Non                       | Non                             | Non                                 | Stdio local + `full` + opt-ins move/racine                                 |
-| Validation de format                   | Markdown/Base/Canvas      | Markdown/Base/Canvas                       | Markdown/Base/Canvas      | Markdown/Base/Canvas            | Markdown/Base/Canvas                | Markdown/Base/Canvas                                                       |
-| Update note                            | Outil REST complet        | Outil REST complet                         | Non                       | Non                             | Append/prepend seulement            | Append/prepend seulement                                                   |
-| Remplacement atomique gouverné         | CAS Atomic Write Bridge   | Idem tant que l’API et le Bridge répondent | Non                       | Non                             | Non                                 | Non                                                                        |
-| Search/replace                         | Outil REST complet        | Outil REST complet                         | Non                       | Non                             | Remplacements exacts par `filePath` | Remplacements exacts par `filePath`                                        |
-| Frontmatter                            | Outil REST complet        | Outil REST complet                         | Non                       | Non                             | `set` d’une clé unique              | `set`, batch frontmatter dry-run/apply, et rows Bases                      |
-| Tags                                   | Outil REST complet        | Outil REST complet                         | Non                       | Non                             | Non                                 | Tags frontmatter, tags inline, index/audit local, rename avec dry-run      |
-| Admin filesystem                       | Non                       | Non                                        | Non                       | Non                             | Non                                 | Archive, batch move, batch delete en dry-run par défaut                    |
-| Suppression de note                    | Suppression REST          | Suppression REST                           | Non                       | Non                             | Non                                 | Suppression filesystem avec `expectedHash` ou `expectedMtime`              |
-| Déplacement/renommage                  | Non                       | Non                                        | Non                       | Non                             | Non                                 | Déplacement filesystem avec `expectedHash` ou `expectedMtime`              |
-| Active file / UI / commandes           | Via Desktop/plugin        | Via Desktop/plugin tant que l’API répond   | Non                       | Non                             | Non                                 | Non                                                                        |
-| Bases list/schema/query                | Bases Bridge REST         | Bases Bridge REST                          | Non                       | Fallback local en lecture seule | Fallback local en lecture seule     | Fallback local avec filtres simples (`eq`, `contains`, `in`, comparaisons) |
-| Bases create/upsert                    | Bases Bridge REST         | Bases Bridge REST                          | Non                       | Non                             | Non                                 | `.base` YAML create/config + rows -> frontmatter `set`                     |
-| JSON Canvas create/edit                | CAS graphe gouverné       | Idem tant que l’API/Bridge répondent       | Non                       | Non                             | Non                                 | `.canvas` direct minimal : create, text node, edge, validate               |
-| Parité plugins Obsidian                | Plugins Desktop           | Plugins Desktop tant que l’API répond      | Non                       | Non                             | Non                                 | Non                                                                        |
+| Capacité                               | `live`                       | `hybrid` API disponible                    | `hybrid` API indisponible | `headless-readonly`             | `headless-guarded`                  | `headless-filesystem`                                                      |
+| -------------------------------------- | ---------------------------- | ------------------------------------------ | ------------------------- | ------------------------------- | ----------------------------------- | -------------------------------------------------------------------------- |
+| Démarrer sans `OBSIDIAN_API_KEY`       | Non                          | Oui                                        | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
+| Démarrer sans Obsidian Desktop         | Oui ; outils live en attente | Oui                                        | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
+| Cache filesystem                       | Optionnel                    | Oui                                        | Oui                       | Requis                          | Requis                              | Requis                                                                     |
+| Politique d’exclusion du vault         | Oui pour les scans cache     | Oui pour les scans cache                   | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
+| Lire/lister/rechercher                 | REST/cache                   | REST/cache                                 | Cache/filesystem          | Cache/filesystem                | Cache/filesystem                    | Cache/filesystem                                                           |
+| Tasks list/query                       | Cache/filesystem             | Cache/filesystem                           | Cache/filesystem          | Cache/filesystem                | Cache/filesystem                    | Cache/filesystem                                                           |
+| Recherche sémantique Smart Connections | `.smart-env` + embedder      | `.smart-env` + embedder compatible         | `.smart-env` + embedder   | `.smart-env` + embedder         | `.smart-env` + embedder             | `.smart-env` + embedder                                                    |
+| Status/maintenance runtime             | Oui                          | Oui                                        | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
+| Racines documentaires externes         | Config locale optionnelle    | Config locale optionnelle                  | Config locale optionnelle | Config locale optionnelle       | Config locale optionnelle           | Config locale optionnelle                                                  |
+| Scan/plan des références externes      | Stdio local                  | Stdio local                                | Stdio local               | Stdio local                     | Stdio local                         | Stdio local                                                                |
+| Apply/rollback de move externe         | Non                          | Non                                        | Non                       | Non                             | Non                                 | Stdio local + `full` + opt-ins move/racine                                 |
+| Validation de format                   | Markdown/Base/Canvas         | Markdown/Base/Canvas                       | Markdown/Base/Canvas      | Markdown/Base/Canvas            | Markdown/Base/Canvas                | Markdown/Base/Canvas                                                       |
+| Update note                            | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | Append/prepend seulement            | Append/prepend seulement                                                   |
+| Remplacement atomique gouverné         | CAS Atomic Write Bridge      | Idem tant que l’API et le Bridge répondent | Non                       | Non                             | Non                                 | Non                                                                        |
+| Search/replace                         | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | Remplacements exacts par `filePath` | Remplacements exacts par `filePath`                                        |
+| Frontmatter                            | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | `set` d’une clé unique              | `set`, batch frontmatter dry-run/apply, et rows Bases                      |
+| Tags                                   | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | Non                                 | Tags frontmatter, tags inline, index/audit local, rename avec dry-run      |
+| Admin filesystem                       | Non                          | Non                                        | Non                       | Non                             | Non                                 | Archive, batch move, batch delete en dry-run par défaut                    |
+| Suppression de note                    | Suppression REST             | Suppression REST                           | Non                       | Non                             | Non                                 | Suppression filesystem avec `expectedHash` ou `expectedMtime`              |
+| Déplacement/renommage                  | Non                          | Non                                        | Non                       | Non                             | Non                                 | Déplacement filesystem avec `expectedHash` ou `expectedMtime`              |
+| Active file / UI / commandes           | Via Desktop/plugin           | Via Desktop/plugin tant que l’API répond   | Non                       | Non                             | Non                                 | Non                                                                        |
+| Bases list/schema/query                | Bases Bridge REST            | Bases Bridge REST                          | Non                       | Fallback local en lecture seule | Fallback local en lecture seule     | Fallback local avec filtres simples (`eq`, `contains`, `in`, comparaisons) |
+| Bases create/upsert                    | Bases Bridge REST            | Bases Bridge REST                          | Non                       | Non                             | Non                                 | `.base` YAML create/config + rows -> frontmatter `set`                     |
+| JSON Canvas create/edit                | CAS graphe gouverné          | Idem tant que l’API/Bridge répondent       | Non                       | Non                             | Non                                 | `.canvas` direct minimal : create, text node, edge, validate               |
+| Parité plugins Obsidian                | Plugins Desktop              | Plugins Desktop tant que l’API répond      | Non                       | Non                             | Non                                 | Non                                                                        |
 
 ## Registre des tools par mode
 
@@ -64,18 +71,27 @@ Scan, plan et status sont read-only. Apply et rollback exigent en plus
 `MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, la capacité `move` de
 la racine et un backend qui expose `obsidian_search_replace` conditionnel.
 
-Tous les modes enregistrent aussi les 23 outils du contrat Operon :
+Tous les modes enregistrent aussi les 25 outils du contrat Operon :
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
 `operon_get_task`, `operon_query_tasks`, `operon_query_saved_filter`,
 `operon_validate`, `operon_get_diagnostics`, `operon_find_tasks`,
 `operon_resolve_task`, `operon_get_relationships`, `operon_build_context`,
 `operon_get_timer_state`, `operon_adopt_task`, `operon_create_task`,
+`operon_create_periodic_task`, `operon_update_periodic_scheduling`,
 `operon_update_task`, `operon_transition_task`, `operon_set_relationships`,
 `operon_update_recurrence`, `operon_convert_task`,
 `operon_relocate_task`, `operon_list_pending_recoveries` et
 `operon_recover_mutation`. Hors mode live, ils restent limités aux snapshots
 validés en lecture seule ; toute mutation échoue fermée. L’enregistrement ne
-garantit pas la disponibilité runtime : Operon officiel `3.2.x` exécute les
+garantit pas la disponibilité runtime : Operon officiel `3.5.2` expose
+l’exécution des filtres après son grant de lecture exact, mais le Bridge masque
+les mutations même si les grants adoption ou Daily/Weekly existent. Seul le
+build local attesté `3.5.240438` peut exercer ces workflows de mutation. Cette candidate patchée a passé le canary live 3.1
+le 2026-08-24 ; la release stock reste `compatible-provisional` jusqu’à la
+publication de ses correctifs upstream requis et au passage du même gate par
+l’artefact officiel. Un grant optionnel absent désactive uniquement sa
+route, sans fallback Markdown. Operon reste propriétaire du plan opaque scellé
+et de sa récupération same-plan. Operon officiel `3.2.x` exécute les
 filtres sauvegardés après un grant exact `tasks.filter-query`, mais ne publie pas
 leur catalogue ; l’adoption reste indisponible. Les relations et la récurrence
 ont passé le pilote live dédié 3.2.0. Les limites bornées #99/#101 et #139

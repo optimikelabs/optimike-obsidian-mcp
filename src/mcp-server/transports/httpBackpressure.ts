@@ -37,6 +37,8 @@ const DEFAULT_MUTATION_TOOLS = [
   "bases_upsert_config",
   "bases_upsert_rows",
   "operon_adopt_task",
+  "operon_create_periodic_task",
+  "operon_update_periodic_scheduling",
   "operon_create_task",
   "operon_update_task",
   "operon_transition_task",
@@ -199,7 +201,10 @@ export const httpBackpressureConfig = {
 };
 
 export type AdmissionRejectReason =
-  "queue-full" | "identity-queue-full" | "timeout" | "cancelled";
+  | "queue-full"
+  | "identity-queue-full"
+  | "timeout"
+  | "cancelled";
 
 export class AdmissionRejectedError extends Error {
   public readonly name = "AdmissionRejectedError";
@@ -789,7 +794,8 @@ export async function classifyHttpOperation(
 
   try {
     const payload = (await readBoundedJsonBody(c.req.raw, bodyLimits)) as
-      JsonRpcEnvelope | JsonRpcEnvelope[];
+      | JsonRpcEnvelope
+      | JsonRpcEnvelope[];
     if (Array.isArray(payload)) {
       throw new JsonRpcBatchUnsupportedError();
     }

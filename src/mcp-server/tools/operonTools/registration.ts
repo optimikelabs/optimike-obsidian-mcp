@@ -2,12 +2,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   OperonAdoptTaskSchema,
+  OperonCreatePeriodicTaskSchema,
+  OperonUpdatePeriodicSchedulingSchema,
   OperonConvertTaskSchema,
   OperonConvertTaskInputSchema,
   OperonCreateTaskSchema,
   OperonFilterQuerySchema,
   OperonRelocateTaskSchema,
+  OperonRecoverMutationInputSchema,
   OperonRecoverMutationSchema,
+  OperonPendingRecoveriesInputSchema,
   OperonTaskFinderSchema,
   OperonResolveTaskSchema,
   OperonRelationshipsSchema,
@@ -206,11 +210,29 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_adopt_task",
-    "Adopt one existing plain Markdown or Obsidian Tasks checkbox in place only when the live engine advertises adoption. Requires an exact one-based line and expectedLine precondition, plus idempotencyKey; dryRun defaults to true. Official Operon 3.2 does not currently expose this capability, and no raw Markdown fallback exists.",
+    "Adopt one existing plain Markdown or Obsidian Tasks checkbox in place through Operon's official sealed task-workflow preview/apply contract. Requires an exact one-based line and expectedLine precondition, plus idempotencyKey; dryRun defaults to true. No raw Markdown or CLI fallback exists.",
     OperonAdoptTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonAdoptTaskSchema>) =>
       runTool(() => service.adoptTask(params)),
+  );
+
+  server.tool(
+    "operon_create_periodic_task",
+    "Create exactly one inline Operon task in the configured Daily or Weekly Note through Operon's sealed periodic-note workflow. Operon owns routing, templates, container identity and receipts; routeDate is optional and dryRun defaults to true. Apply requires the live Bridge, idempotency and the periodicCreate capability.",
+    OperonCreatePeriodicTaskSchema.shape,
+    MUTATION_ANNOTATIONS,
+    async (params: z.infer<typeof OperonCreatePeriodicTaskSchema>) =>
+      runTool(() => service.createPeriodicTask(params)),
+  );
+
+  server.tool(
+    "operon_update_periodic_scheduling",
+    "Set or clear dateScheduled for one exact Operon task through the sealed periodic-update workflow. Operon decides retain, detach or realign without moving the source Markdown. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    OperonUpdatePeriodicSchedulingSchema.shape,
+    MUTATION_ANNOTATIONS,
+    async (params: z.infer<typeof OperonUpdatePeriodicSchedulingSchema>) =>
+      runTool(() => service.updatePeriodicScheduling(params)),
   );
 
   server.tool(
@@ -279,15 +301,16 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
   server.tool(
     "operon_list_pending_recoveries",
     "List durable official Operon Developer API mutation recoveries. Read-only: it does not retry or apply anything; use the returned recoveryRef only with operon_recover_mutation after inspecting the uncertain outcome.",
-    {},
+    OperonPendingRecoveriesInputSchema.shape,
     READ_ONLY_ANNOTATIONS,
-    async () => runTool(() => service.pendingRecoveries()),
+    async (params: z.infer<typeof OperonPendingRecoveriesInputSchema>) =>
+      runTool(() => service.pendingRecoveries(params)),
   );
 
   server.tool(
     "operon_recover_mutation",
-    "Recover exactly one uncertain official Operon mutation by recoveryRef. This replays the same durable plan only; it never constructs a new mutation. Requires idempotencyKey, OPERON_MUTATIONS_ENABLED=true, and MCP_WRITE_MODE=full.",
-    OperonRecoverMutationSchema.shape,
+    "Recover exactly one uncertain official Operon mutation by recoveryRef. Set recovery.kind=developer-api for legacy official recovery, or use the exact task-workflow kind returned by pending state and optionally echo its planDigest. This replays the same durable plan only; it never constructs a new mutation. Requires idempotencyKey, OPERON_MUTATIONS_ENABLED=true, MCP_WRITE_MODE=full, and an empty OPERON_MUTATION_ALLOWED_PATH_PREFIXES because current recovery records do not prove their route.",
+    OperonRecoverMutationInputSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonRecoverMutationSchema>) =>
       runTool(() => service.recoverMutation(params)),

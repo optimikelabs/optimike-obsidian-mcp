@@ -12,12 +12,12 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 19, authoring: 30, tasks: 31, full: 70 },
-  "hybrid-live": { standard: 19, authoring: 30, tasks: 31, full: 70 },
-  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 43 },
-  "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 46 },
-  "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 49 },
-  "headless-filesystem": { standard: 12, authoring: 16, tasks: 14, full: 58 },
+  live: { standard: 19, authoring: 30, tasks: 33, full: 72 },
+  "hybrid-live": { standard: 19, authoring: 30, tasks: 33, full: 72 },
+  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
+  "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
+  "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
+  "headless-filesystem": { standard: 12, authoring: 16, tasks: 14, full: 60 },
 };
 
 assert.deepEqual(TOOL_PROFILE_IDS, ["standard", "authoring", "tasks", "full"]);
@@ -177,6 +177,8 @@ for (const required of [
   "operon_list_tasks",
   "operon_query_tasks",
   "operon_create_task",
+  "operon_create_periodic_task",
+  "operon_update_periodic_scheduling",
   "operon_update_task",
   "operon_transition_task",
   "operon_list_pending_recoveries",
@@ -220,6 +222,8 @@ for (const liveOnly of [
   "operon_build_context",
   "operon_get_timer_state",
   "operon_create_task",
+  "operon_create_periodic_task",
+  "operon_update_periodic_scheduling",
   "operon_update_task",
   "operon_transition_task",
   "operon_list_pending_recoveries",
