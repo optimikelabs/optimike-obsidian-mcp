@@ -2578,7 +2578,6 @@ export class OperonDeveloperApiRuntimeAdapter {
       );
     }
     let planDigest =
-      suppliedPlanDigest ||
       this.taskWorkflowRecoveryDigests.get(`${kind}:${normalizedRecoveryRef}`) ||
       "";
     if (planDigest && !SHA256_HEX.test(planDigest)) {
@@ -2593,10 +2592,57 @@ export class OperonDeveloperApiRuntimeAdapter {
         },
       );
     }
-    if (!planDigest && methods.pendingRecoveries) {
+    if (suppliedPlanDigest) {
+      if (!methods.pendingRecoveries) {
+        return this.mutationFailure(
+          "not-ready",
+          "The supplied planDigest cannot be proven because pending recovery state is unavailable; native recovery was not dispatched.",
+          null,
+          true,
+          { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+        );
+      }
       try {
         const pending = await methods.pendingRecoveries();
-        if (this.taskWorkflowPendingViolation(pending)) {
+        if (this.taskWorkflowPendingViolation(pending) || !pending.ok) {
+          throw new Error("invalid task-workflow pending recovery result");
+        }
+        const match = (pending.recoveries ?? []).find(
+          (candidate) => candidate.recoveryRef === normalizedRecoveryRef,
+        );
+        const pendingPlanDigest = String(match?.planDigest ?? "").trim();
+        if (!pendingPlanDigest || !SHA256_HEX.test(pendingPlanDigest)) {
+          return this.mutationFailure(
+            "not-ready",
+            "The recovery reference is not present with a valid digest in pending recovery state; native recovery was not dispatched.",
+            null,
+            true,
+            { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+          );
+        }
+        if (pendingPlanDigest !== suppliedPlanDigest) {
+          return this.mutationFailure(
+            "invalid-input",
+            "planDigest does not match the pending native recovery; native recovery was not dispatched.",
+            null,
+            false,
+            { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+          );
+        }
+        planDigest = pendingPlanDigest;
+      } catch {
+        return this.mutationFailure(
+          "not-ready",
+          "The supplied planDigest could not be proven from pending recovery state; native recovery was not dispatched.",
+          null,
+          true,
+          { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+        );
+      }
+    } else if (!planDigest && methods.pendingRecoveries) {
+      try {
+        const pending = await methods.pendingRecoveries();
+        if (this.taskWorkflowPendingViolation(pending) || !pending.ok) {
           throw new Error("invalid task-workflow pending recovery result");
         }
         const match = (pending.recoveries ?? []).find(

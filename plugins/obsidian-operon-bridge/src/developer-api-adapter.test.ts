@@ -2160,6 +2160,14 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
   assert.equal(invalidRecoveryDigest.code, "invalid-input");
   assert.equal(pendingRecoveryCalls, pendingBeforeInvalidDigest);
   assert.equal(recoveryCalls, recoverBeforeInvalidDigest);
+  const wrongRecoveryDigest = await adapter.recoverTaskWorkflow(
+    "adopt",
+    workflowRecoveryRefs.adopt,
+    "f".repeat(64),
+  );
+  assert.equal(wrongRecoveryDigest.code, "invalid-input");
+  assert.equal(pendingRecoveryCalls, pendingBeforeInvalidDigest + 1);
+  assert.equal(recoveryCalls, recoverBeforeInvalidDigest);
   const recovered = await adapter.recoverTaskWorkflow(
     "adopt",
     workflowRecoveryRefs.adopt,
