@@ -162,6 +162,7 @@ test("continuous snapshot churn fails not-ready before native dispatch", async (
     signature: "signature-1",
   };
   const fake: Record<string, any> = {
+    mutationResults: { get: () => undefined },
     mutationPreflight: async () => ({ kind: "continue" }),
     requireMutationRuntime: () => runtime,
     requireRuntime: () => runtime,
@@ -208,40 +209,30 @@ test("continuous snapshot churn fails not-ready before native dispatch", async (
   assert.equal(failed.payload.mutationMayHaveApplied, false);
 });
 
-test("lookup and revision validation complete durable mutation reservations", async () => {
+test("lookup and revision validation happen before durable reservation", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
   const executeExistingMutation = BridgePlugin.prototype
     .executeExistingMutation as Function;
 
   for (const scenario of ["missing-task", "missing-revision"] as const) {
-    let terminal:
-      | {
-          idempotencyKey: string;
-          signature: string;
-          payload: Record<string, unknown>;
-          httpStatus: number;
-        }
-      | undefined;
+    let reservationCalls = 0;
+    let taskReads = 0;
     const task =
       scenario === "missing-task"
         ? null
         : { operonId: "task-1", revision: "revision-1" };
     const fake = {
-      mutationPreflight: async () => ({ kind: "continue" }),
+      mutationResults: { get: () => undefined },
+      mutationPreflight: async () => {
+        reservationCalls += 1;
+        return { kind: "continue" };
+      },
       requireMutationRuntime: () => ({}),
-      oneTask: async () => ({ task }),
+      oneTask: async () => {
+        taskReads += 1;
+        return { task };
+      },
       mutationOperationId: () => "fallback-operation",
-      mutationReservations: {
-        get: () => ({ operationId: "reserved-operation" }),
-      },
-      cacheMutation: (
-        idempotencyKey: string,
-        signature: string,
-        payload: Record<string, unknown>,
-        httpStatus: number,
-      ) => {
-        terminal = { idempotencyKey, signature, payload, httpStatus };
-      },
     };
     const result = await executeExistingMutation.call(
       fake,
@@ -258,11 +249,8 @@ test("lookup and revision validation complete durable mutation reservations", as
     );
 
     assert.equal(result.httpStatus, scenario === "missing-task" ? 404 : 400);
-    assert.equal(terminal?.httpStatus, result.httpStatus);
-    assert.equal(terminal?.idempotencyKey, `key-${scenario}`);
-    assert.equal(terminal?.payload.operationId, "reserved-operation");
-    assert.equal(terminal?.payload.mutationMayHaveApplied, false);
-    assert.equal(terminal?.payload.status, "rejected");
+    assert.equal(reservationCalls, 0);
+    assert.equal(taskReads, scenario === "missing-task" ? 1 : 0);
   }
 });
 
@@ -932,6 +920,24 @@ test("every direct mutation guard fails closed for an unattested runtime", async
       "periodic-update",
     ),
     admittedRuntime,
+  );
+
+  const legacyRuntime = {
+    version: "2.6.0",
+    api: {
+      capabilities: () => ({ ready: true, update: true }),
+    },
+  };
+  const legacy = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => legacyRuntime,
+    assertMutationRuntimeAdmitted: () => {
+      throw new Error("Developer API admission must not gate legacy Public API");
+    },
+  };
+  assert.equal(
+    BridgePlugin.prototype.requireMutationRuntime.call(legacy, "update"),
+    legacyRuntime,
   );
 });
 
