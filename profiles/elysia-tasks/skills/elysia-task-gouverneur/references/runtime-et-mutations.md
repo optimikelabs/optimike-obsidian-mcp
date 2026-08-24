@@ -43,6 +43,8 @@ Mutation :
 
 - `operon_adopt_task`
 - `operon_create_task`
+- `operon_create_periodic_task`
+- `operon_update_periodic_scheduling`
 - `operon_update_task`
 - `operon_transition_task`
 - `operon_set_relationships`
@@ -55,7 +57,9 @@ Récupération :
 - `operon_list_pending_recoveries`
 - `operon_recover_mutation`
 
-Le serveur enregistre vingt-trois outils. Leur présence ne remplace jamais le contrôle de capacité live. Operon officiel `3.2.0` exécute les filtres sauvegardés après un grant exact `tasks.filter-query` et avec un `filterSetId` exact, mais ne publie pas le catalogue de ces IDs. `adopt` reste indisponible et doit échouer de façon structurée. `operon_query_tasks` est la requête structurée Operon ; l’ancien outil non préfixé `query_tasks` relève du legacy Markdown.
+Le serveur enregistre vingt-cinq outils. Leur présence ne remplace jamais le contrôle de capacité live. Operon officiel `3.5.2` exécute les filtres sauvegardés après leur grant exact, mais reste en lecture seule à la frontière du Bridge même si les grants adoption ou Daily/Weekly existent. Seul le build local attesté `3.5.240438` exerce ces workflows de mutation. Operon ne publie toujours pas le catalogue des IDs de filtres. Un grant absent renvoie une indisponibilité structurée sans fallback Markdown. `operon_query_tasks` est la requête structurée Operon ; l’ancien outil non préfixé `query_tasks` relève du legacy Markdown.
+
+`taskType` et `taskImage` sont des valeurs scalaires. `taskGallery` est un tableau ordonné : ne jamais le convertir en chaîne à séparateurs. `__taskDataType` est dérivé et read-only. Les plans task-workflow sont opaques ; après `outcome-unknown`, récupérer uniquement le même `recoveryRef` avec le kind annoncé.
 
 Les relations sont admises en mode `guarded`. La récurrence et la récupération exigent le mode `full`. La CLI reste la surface opérateur/admin et n’est pas relayée génériquement par le MCP.
 
@@ -76,7 +80,7 @@ Pour une tâche existante :
 
 Ne jamais réutiliser la clé du dry-run pour l’apply : `dryRun` fait partie de la requête canonique.
 
-Pour une création, aucune révision antérieure n’existe : destination, pipeline, statut initial et clé d’idempotence doivent être explicites. Pour une adoption, exiger d’abord `adopt: true`, puis verrouiller le chemin, la ligne et le contenu attendu. Après une mutation de relations, relire la source et les relations inverses. Après une mutation de récurrence, vérifier règle et portée. Après `outcome-unknown`, récupérer uniquement le même `recoveryRef` ; ne jamais rejouer la mutation initiale.
+Pour une création, aucune révision antérieure n’existe : destination, pipeline, statut initial et clé d’idempotence doivent être explicites. Pour une création Daily/Weekly, laisser Operon résoudre la note, le template et le conteneur ; ne fournir ni chemin arbitraire ni parent. Pour une adoption, exiger d’abord `adopt: true`, puis verrouiller le chemin, la ligne et le contenu attendu. Après une mutation de relations, relire la source et les relations inverses. Après une mutation de récurrence, vérifier règle et portée. Après `outcome-unknown`, récupérer uniquement le même `recoveryRef` ; ne jamais rejouer la mutation initiale.
 
 ## Interdits
 

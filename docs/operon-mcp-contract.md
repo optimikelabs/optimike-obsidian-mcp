@@ -4,7 +4,7 @@ French version: [operon-mcp-contract.fr.md](operon-mcp-contract.fr.md)
 
 ## Surface
 
-The main MCP server registers twenty-three Operon tools:
+The main MCP server registers twenty-five Operon tools:
 
 - `operon_status`
 - `operon_get_configuration`
@@ -21,6 +21,8 @@ The main MCP server registers twenty-three Operon tools:
 - `operon_get_timer_state`
 - `operon_adopt_task`
 - `operon_create_task`
+- `operon_create_periodic_task`
+- `operon_update_periodic_scheduling`
 - `operon_update_task`
 - `operon_transition_task`
 - `operon_set_relationships`
@@ -76,7 +78,7 @@ Missing optional capabilities disable only dependent tools. A future contract
 version is never accepted silently.
 
 `operon_query_saved_filter` is intentionally live-only and capability-gated. On
-official Operon `3.2.0`, it delegates to the additive task-workflow Developer
+official Operon `3.5.2`, it delegates to the additive task-workflow Developer
 API after an exact `tasks.filter-query` grant. The caller must supply an exact
 `filterSetId`: the official API executes saved filters but does not expose their
 catalog. Headless snapshots never attempt to reproduce plugin filter semantics.
@@ -93,40 +95,47 @@ The cached metadata also stores the configuration used for that snapshot. Tasks 
 
 ## Mutations
 
-Mutation tools call Bridge REST routes backed by the loaded engine's official mutation surface. Operon 3.x uses Developer API V1 typed preview → apply plans with host-owned recovery; legacy Kairélys versions continue to use their Public API v1 contract. No route edits Markdown, calls `TaskWriter` directly, invokes UI commands, or reflects into private methods.
+Mutation tools call Bridge REST routes backed by the loaded engine's official mutation surface. Operon 3.x uses Developer API V1 typed preview → apply plans with host-owned recovery; legacy Kairélys versions continue to use their Public API v1 contract. Official task-workflow plans are opaque, session-bound handles: the MCP never reconstructs them and recovery continues only the same plan through its `recoveryRef`. No route edits Markdown, calls `TaskWriter` directly, invokes UI commands, or reflects into private methods.
 
 Common controls:
 
 - `dryRun` defaults to `true`;
 - `idempotencyKey` is mandatory;
 - existing Operon tasks require `expectedRevision`;
-- legacy checkbox adoption requires an exact one-based `line` and `expectedLine` precondition;
-- Operon 3.2.0 previews and applies one exact host-sealed plan;
+- adoption requires an exact one-based `line` and `expectedLine` precondition;
+- the locally attested Operon `3.5.240438` acceptance build previews and applies one exact host-sealed opaque plan; stock `3.5.2` remains read-only at the Bridge boundary;
 - `outcome-unknown` is surfaced with its recovery reference and never blind-retried;
+- Task Workflow results are strictly validated before projection; malformed or contradictory native evidence remains `outcome-unknown`, while `nativeProof` exposes only the bounded proof projection;
 - after apply, the Bridge rereads the verified live index;
 - the MCP refreshes its SQLite snapshot;
 - no mutation is available from a stale/headless snapshot.
 
-Durable results are stored in `operon_mutation_journal`. A reservation is committed before the Bridge call. Reusing an idempotency key with the same completed request returns the original `operationId` and result without calling the Bridge again. A restart or timeout that leaves the reservation `in_progress` is treated as an uncertain outcome and blocks blind retry. Reusing a key for a different request is rejected as `CONFLICT`. Revision mismatch returns `conflict` without writing.
+MCP results are stored in `operon_mutation_journal`. A reservation is committed before the Bridge call. Reusing an idempotency key with the same completed request returns the original `operationId` and result without calling the Bridge again. A restart or timeout that leaves the MCP reservation `in_progress` is treated as an uncertain outcome and blocks blind retry. Reusing a key for a different request is rejected as `CONFLICT`. Revision mismatch returns `conflict` without writing.
+
+Bridge 0.8 independently reserves idempotency keys atomically and persists its version-1 journal in local Obsidian plugin data before native dispatch. The journal is bounded to 500 entries and 30 days. A restored `in-progress` entry becomes non-retryable `outcome-unknown` with `recoveryRequired: true`. This supports bounded local replay/restart only; it promises nothing after expiry, eviction, plugin-data reset/loss, failed persistence, or transfer to another vault/device. Failure to persist the reservation prevents native dispatch.
 
 Apply additionally requires `OPERON_MUTATIONS_ENABLED=true` and the Bridge setting **Allow task mutations**. This two-sided opt-in prevents an accidental package upgrade from enabling writes.
 
 ### Write policy
 
 - `MCP_WRITE_MODE=readonly`: dry-run only.
-- `MCP_WRITE_MODE=guarded`: adopt, create, update, transition, relationship replacement, and inline relocation apply are allowed with their normal preconditions.
+- `MCP_WRITE_MODE=guarded`: adopt, create, Daily/Weekly create, periodic scheduling update, transition, relationship replacement, and inline relocation apply are allowed with their normal preconditions.
 - `MCP_WRITE_MODE=full`: conversion and recurrence apply are additionally allowed.
-- `operon_recover_mutation` also requires `MCP_WRITE_MODE=full` because it may complete an uncertain prior write; it only recovers the exact `recoveryRef` plan.
+- `operon_recover_mutation` also requires `MCP_WRITE_MODE=full` because it may complete an uncertain prior write; it requires the exact `recoveryRef` and a nested `recovery` union containing one explicit `kind`: `developer-api`, `adopt`, `periodic-create`, or `periodic-update`.
 
-`OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for legacy file-task creation or `targetPath` for inline tasks. Official Operon 3.2.0 still rejects arbitrary `targetFolder` because its Developer API has no exact folder-only target contract. Scoped conversion apply is allowed in guarded mode only when the current source and explicit destination are both inside the allowlist.
+`OPERON_MUTATION_ALLOWED_PATH_PREFIXES` optionally limits every Operon mutation to a comma-separated set of vault-relative folders. When configured, existing tasks must already live under one of those prefixes, and creation requires an explicit allowed destination: `targetFolder` for legacy file-task creation or `targetPath` for inline tasks. Official Operon 3.2.0 still rejects arbitrary `targetFolder` because its Developer API has no exact folder-only target contract. Scoped conversion apply is allowed in guarded mode only when the current source and explicit destination are both inside the allowlist. Because pending recovery records expose no canonical task route that can be proved against this policy, a non-empty path allowlist disables both `operon_list_pending_recoveries` and recovery apply; both fail closed before inventory disclosure or native dispatch.
 
 Conversion remains classified as destructive because file-to-inline moves the source file to trash and inline-to-file replaces the source line with a durable link.
 
 ### Tool-specific rules
 
-`operon_adopt_task` is a registered compatibility tool, not an official Operon `3.2.0` capability. When a compatible legacy engine advertises adoption, it upgrades one existing plain Markdown or Obsidian Tasks checkbox in place. The target file, one-based line, and exact source line must still match; otherwise the operation returns `conflict` without writing. Official Operon `3.2.0` returns a structured unavailable result and the MCP does not simulate adoption with a Markdown edit.
+`operon_adopt_task` uses the official additive task-workflow API only on a mutation-admitted build and after the exact `tasks.adopt.preview` and `tasks.adopt.apply` grants. For the 3.5 acceptance campaign, that build is the synthetic local identity `3.5.240438`; stock `3.5.2` remains read-only. The tool upgrades one exact checkbox through Operon's opaque sealed plan. The target file, one-based line, and exact source line must match; otherwise the operation returns `conflict` without writing. A compatible legacy engine may still advertise its bounded adoption contract, but a missing official grant returns a structured unavailable result and the MCP never simulates adoption with a Markdown edit.
 
 `operon_create_task` creates inline or file tasks through Operon's creator services. On official Operon 3.2.0, typed fields, tags, stable `statusId`, relationships, exact inline `targetPath`, and configured/default file templates are supported. Unmanaged YAML properties and arbitrary `targetFolder` placement are legacy-only; the official Developer API path rejects them instead of using a fallback.
+
+`operon_create_periodic_task` creates exactly one inline task in Operon's configured Daily or Weekly Note after the exact periodic preview/apply grants. Operon owns date routing, templates, container identity and receipts; the MCP cannot supply an arbitrary target path or parent. `priorityId` postflight is verified against the stable projected priority. If apply may have succeeded but no unique created identity can be proven, the result remains `outcome-unknown`; the MCP never retries the ambiguous creation. `operon_update_periodic_scheduling` sets or clears the scheduled date of one exact task. Operon decides whether the task is retained, detached or realigned, and never moves the source Markdown as a side effect of that route.
+
+Managed fields preserve their official shape. `taskType` and `taskImage` are scalar strings. `taskGallery` is a lossless ordered string array and delimiter-based strings are rejected. The derived `__taskDataType` field is read-only and cannot enter create or update input.
 
 `operon_update_task` accepts exactly one group per call: description, managed fields/tags, or one unmanaged file property. Status transitions use the dedicated tool. Unmanaged file properties are supported only by the legacy Public API path; official Operon 3.2.0 rejects them explicitly.
 
@@ -140,7 +149,7 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 `operon_relocate_task` moves an inline task to an explicit Markdown `targetPath` through Operon while preserving `operonId`. Official Operon 3.2.0 resolves a live blank destination line through `context.build`; it never guesses a line or writes the file directly. Source and target are verified after the index settles.
 
-`operon_list_pending_recoveries` lists durable official recovery references without applying anything. `operon_recover_mutation` invokes the official same-plan recovery, requires both opt-ins plus full MCP write mode, and preserves the original `planDigest`/`recoveryRef` evidence.
+`operon_list_pending_recoveries` lists durable official recovery references without applying anything, but only while the path allowlist is empty. `operon_recover_mutation` is always same-plan recovery. Its public input is `{ idempotencyKey, recoveryRef, recovery }`, where `recovery` is `{ kind: "developer-api" }` or `{ kind: "adopt" | "periodic-create" | "periodic-update", planDigest?: sha256 }`. The Developer API branch accepts no `planDigest`. Only the three Task Workflow branches accept the optional digest to bind recovery to the sealed receipt/replay. Without that digest, the Bridge can prove the Task Workflow binding only from the matching `pendingRecoveries` entry; otherwise recovery fails closed before dispatch. Top-level `kind`/`planDigest` is an internal candidate/legacy migration shape, not the public tool contract. Any non-empty path allowlist also blocks listing and apply because no canonical recovery route can be proved inside it. The tool requires both opt-ins plus full MCP write mode and preserves the original `planDigest`/`recoveryRef` evidence when present.
 
 ## Verified pilot behavior
 
@@ -172,11 +181,26 @@ reports uncertainty or unavailability without retrying or falling back.
 
 ## Deliberately unavailable or excluded capabilities
 
-Deletion, reminders, pinned state, timer control/session, adoption, and
+Deletion, reminders, pinned state, timer control/session, and
 saved-filter management remain outside the official agent mutation surface.
-Saved-filter **execution** is available on Operon `3.2.0` when the exact ID and
+Saved-filter **execution** is available on Operon `3.5.2` when the exact ID and
 grant are present; catalog discovery and filter creation/editing are not.
-Adoption remains unavailable on the official Developer API. Delete remains an
+Adoption is available on the current 3.5 acceptance path only for the mutation-admitted `3.5.240438` build after its exact additive grants; stock `3.5.2` remains read-only. Delete remains an
 operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
+
+## 3.1 candidate admission
+
+Optimike MCP `3.1.0`, Bridge `0.8.0`, Operon `3.5.2` and Operon CLI `1.2.0`
+form the current candidate set. Contract negotiation and deterministic tests
+admit it as `compatible-provisional`. A patched candidate passed the exact live
+Obsidian Desktop canary on 2026-08-24; certification still requires the fixes
+from upstream PRs `#182`, `#183` and `#184` to ship and the stock artifact to
+pass the same gate. This provisional label is intentional and does not weaken
+any capability, grant, write-mode or recovery gate.
+
+Bridge `0.8.0` admits stock `3.5.2` reads after contract negotiation but masks
+all mutation capabilities. The local Pilot 2 build uses the explicit synthetic
+manifest version `3.5.240438`; it is the only 3.5 acceptance artifact admitted
+for mutation and is not an upstream release identifier.

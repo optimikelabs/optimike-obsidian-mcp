@@ -8,6 +8,12 @@ Related docs: [README](../README.md), [Operations](../OPERATIONS.md), [Governed 
 
 Optimike Obsidian MCP has five runtime contracts. Headless modes run over a synchronized Markdown vault. They do not run Obsidian Desktop, load community plugins, expose the command palette, or provide live UI state.
 
+In 3.1, `OBSIDIAN_STARTUP_BLOCKING` defaults to `false`. A live or hybrid MCP
+process therefore stays up when Codex starts before Obsidian Desktop; live tools
+remain temporarily unavailable and fail closed until Local REST becomes
+reachable. Set the variable to `true` only when a live deployment must fail its
+own startup after the bounded initial health-check retries.
+
 The live REST adapter requires Local REST API 5.0.2 or later within the
 supported 5.x line. Its targeted writes use the native JSON PATCH instruction
 contract. Deprecated 1.x PATCH headers and the removed core `/periodic/...`
@@ -31,7 +37,7 @@ Periodic Notes API extension is outside the core MCP contract.
 | Capability                       | `live`                  | `hybrid` API available                  | `hybrid` API unavailable | `headless-readonly`     | `headless-guarded`               | `headless-filesystem`                                                    |
 | -------------------------------- | ----------------------- | --------------------------------------- | ------------------------ | ----------------------- | -------------------------------- | ------------------------------------------------------------------------ |
 | Start without `OBSIDIAN_API_KEY` | No                      | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| Start without Obsidian Desktop   | No                      | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
+| Start without Obsidian Desktop   | Yes; live tools wait    | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
 | Filesystem cache                 | Optional                | Yes                                     | Yes                      | Required                | Required                         | Required                                                                 |
 | Vault exclusion policy           | Yes for cache scans     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
 | List/read/search                 | REST/cache              | REST/cache                              | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                         |
@@ -72,18 +78,26 @@ Scan, plan and status are read-only. Apply and rollback additionally require
 capability, and a backend mode that exposes conditional
 `obsidian_search_replace`.
 
-Every mode also registers the 23 Operon contract tools:
+Every mode also registers the 25 Operon contract tools:
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
 `operon_get_task`, `operon_query_tasks`, `operon_query_saved_filter`,
 `operon_validate`, `operon_get_diagnostics`, `operon_find_tasks`,
 `operon_resolve_task`, `operon_get_relationships`, `operon_build_context`,
 `operon_get_timer_state`, `operon_adopt_task`, `operon_create_task`,
+`operon_create_periodic_task`, `operon_update_periodic_scheduling`,
 `operon_update_task`, `operon_transition_task`, `operon_set_relationships`,
 `operon_update_recurrence`, `operon_convert_task`,
 `operon_relocate_task`, `operon_list_pending_recoveries`, and
 `operon_recover_mutation`. In non-live modes they remain limited to validated
 read-only snapshots; mutation calls fail closed. Registration does not imply
-runtime availability: official Operon `3.2.x` exposes saved-filter evaluation
+runtime availability: official Operon `3.5.2` exposes saved-filter evaluation
+after its exact read grant, but Bridge mutations stay masked even when adoption
+or Daily/Weekly grants exist. Only the locally attested `3.5.240438` build may
+exercise those mutation workflows. That patched candidate passed the live 3.1 canary on 2026-08-24; the stock
+release remains `compatible-provisional` until its required upstream fixes ship
+and the official artifact passes the same gate. Missing optional grants disable only their dependent routes; they do
+not create a Markdown fallback. Operon owns the opaque sealed plan and same-plan
+recovery. Earlier official Operon `3.2.x` exposes saved-filter evaluation
 after an exact `tasks.filter-query` grant, but not catalog discovery; adoption
 remains unavailable. Relationship and recurrence apply passed the dedicated
 3.2.0 live pilot. The bounded upstream limits in #99/#101 and #139 remain.

@@ -27,8 +27,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 74 unique names. Full live/hybrid
-registration currently contains 70 names. See
+The current cross-runtime registry contains 76 unique names. Full live/hybrid
+registration currently contains 72 names. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
 ## MCP Resources
@@ -200,22 +200,31 @@ The authoritative English guarantees and compatibility matrix are in the
 - `operon_get_relationships`: bounded explicit, derived, and inferred relationship graph for one stable task.
 - `operon_build_context`: bounded exact-task, neighborhood, project, planning, or creation context with a strict hydration allowlist.
 - `operon_get_timer_state`: read active and transitioning timer state without exposing timer control.
-- `operon_adopt_task`: upgrade one exact legacy checkbox only when the loaded engine advertises adoption; official Operon 3.2.0 currently returns a structured unavailable result.
+- `operon_adopt_task`: adopt one exact checkbox only when the loaded engine grants the official task-workflow preview/apply pair. Operon 3.5.2 owns the opaque sealed plan and same-plan recovery; no Markdown fallback exists.
 - `operon_create_task`: create inline/file tasks through the loaded engine's official Developer API V1 or bounded legacy Public API v1 surface.
+- `operon_create_periodic_task`: create one inline task in the configured Daily or Weekly Note through Operon's additive periodic workflow; Operon owns routing, template, container identity and receipt.
+- `operon_update_periodic_scheduling`: set or clear one task's scheduled date through Operon's periodic workflow; Operon decides retain, detach or realign without moving source Markdown.
 - `operon_update_task`: update one mutation group with expected revision.
 - `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards when the live Developer API advertises the capability; the Bridge bounds uncertain stock-runtime applies and never retries blindly.
 - `operon_set_relationships`: replace or clear parent/blocker edges with revision locking, graph validation, and inverse-edge postflight; apply is allowed in `guarded`.
 - `operon_update_recurrence`: set or clear official recurrence fields with explicit series scope; apply requires `full`.
 - `operon_convert_task`: convert inline/file shape in `MCP_WRITE_MODE=full`.
 - `operon_relocate_task`: move an inline task to another Markdown note while preserving `operonId`.
-- `operon_list_pending_recoveries`: list durable official Developer API recovery references without applying them.
-- `operon_recover_mutation`: recover one exact official mutation plan by `recoveryRef`; requires both mutation opt-ins and full MCP write mode.
+- `operon_list_pending_recoveries`: list durable official recovery references without applying them; fails closed when a path allowlist is configured because no canonical recovery route can be proved.
+- `operon_recover_mutation`: recover one exact official mutation plan with public input `{ idempotencyKey, recoveryRef, recovery }`. The nested union is `{ kind: "developer-api" }` or `{ kind: "adopt" | "periodic-create" | "periodic-update", planDigest?: sha256 }`; the flat top-level kind/digest representation is internal migration state, not public input. It requires both mutation opt-ins, full MCP write mode, and an empty path allowlist.
 
 Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`,
 Operon/Bridge versions, capabilities, and limitations.
 
 Mutations require a live Bridge and the loaded engine's official contract.
-Operon 3.2.0 uses Developer API V1 typed preview/apply/recovery; legacy
+Operon 3.5.2 plus CLI 1.2.0 is the 3.1 candidate target through Bridge 0.8.0
+and remains `compatible-provisional`. A patched acceptance candidate passed the
+live canary on 2026-08-24; official admission still requires upstream fixes
+`#182`, `#183` and `#184` to ship and the stock artifact to pass the same gate.
+Task Type and Task Image are scalar, Task Gallery is a lossless ordered array, and
+`__taskDataType` is read-only. Optional adoption and Daily/Weekly grants are
+negotiated independently from core reads. Operon 3.2.0 uses Developer API V1
+typed preview/apply/recovery for the earlier surface; legacy
 Kairélys uses Public API v1. Dry-run is the default, idempotency is mandatory,
 existing tasks require `expectedRevision`, and there is no direct Markdown
 fallback.

@@ -180,6 +180,8 @@ const OPERON_READ_TOOLS = [
 
 const OPERON_MUTATION_TOOLS = [
   "operon_adopt_task",
+  "operon_create_periodic_task",
+  "operon_update_periodic_scheduling",
   "operon_create_task",
   "operon_update_task",
   "operon_transition_task",

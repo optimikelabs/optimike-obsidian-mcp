@@ -6,7 +6,7 @@ const consumer = {
   manifest: {
     id: "optimike-operon-bridge",
     name: "Optimike Operon Bridge",
-    version: "0.7.0",
+    version: "0.8.0",
   },
 };
 
@@ -192,12 +192,19 @@ test("Operon 3.2 adapter evaluates saved filters through the additive task-workf
       _candidate: unknown,
       request: { requestedCapabilities: readonly string[] },
     ) => ({
+      contractVersion: 1,
+      kind: "task-workflow-developer-api-access-result",
       ok: request.requestedCapabilities[0] === "tasks.filter-query",
       api: {
+        contractVersion: 1,
+        runtimeApi: 1,
         tasks: {
           filterQuery: async (input: Record<string, unknown>) => {
             filterRequest = input;
             return {
+              contractVersion: 1,
+              kind: "task-filter-query-result",
+              requestId: input.requestId,
               ok: true,
               tasks: [],
               page: {
@@ -288,7 +295,10 @@ test("an unavailable Operon 3.2 filter accessor does not hide approved core read
       }),
     },
     mutations: {
-      preview: async () => ({ ok: true, plan: { planDigest: "filter-pending" } }),
+      preview: async () => ({
+        ok: true,
+        plan: { planDigest: "filter-pending" },
+      }),
       apply: async () => ({ status: "applied" as const }),
     },
   };
@@ -297,7 +307,9 @@ test("an unavailable Operon 3.2 filter accessor does not hide approved core read
       _candidate: unknown,
       request: { requestedCapabilities: readonly string[] },
     ) => ({
-      ok: request.requestedCapabilities.every((capability) => granted.has(capability)),
+      ok: request.requestedCapabilities.every((capability) =>
+        granted.has(capability),
+      ),
       status: {
         ...readyStatus(),
         admission: { reads: true, writes: true },
@@ -310,6 +322,8 @@ test("an unavailable Operon 3.2 filter accessor does not hide approved core read
       api,
     }),
     getTaskWorkflowDeveloperApiV1: () => ({
+      contractVersion: 1,
+      kind: "task-workflow-developer-api-access-result",
       ok: false,
       error: {
         code: "authority-insufficient",
@@ -594,6 +608,55 @@ test("Operon 3 Developer API adapter previews and applies an exact typed update 
   };
   let previewInput: Record<string, unknown> | null = null;
   let appliedPlan: unknown = null;
+  let nextExecution: Record<string, unknown> | null = null;
+  const updatePlanDigest = "a".repeat(64);
+  const updateRecoveryRef = `dvr1_${"a".repeat(48)}`;
+  const validExecution = {
+    contractVersion: 1,
+    kind: "developer-mutation-execution-result",
+    requestId: "base-update-apply-1",
+    status: "applied",
+    mutationMayHaveApplied: true,
+    retryAllowed: false,
+    groupResults: [
+      {
+        groupId: "update-task-source",
+        status: "committed",
+        resourceRevisions: [
+          {
+            resourceKind: "task-source",
+            resourceKey: "Projects/Bridge.md",
+            revision: "sha256:updated",
+            privateValue: "must-not-cross-bridge",
+          },
+        ],
+      },
+    ],
+    receipt: {
+      contractVersion: 1,
+      terminalOutcome: "applied",
+      planDigest: updatePlanDigest,
+      mutationKind: "task.update",
+      targetDigest: "b".repeat(64),
+      effectiveAt: "2026-08-24T00:00:01.000Z",
+      completedAt: "2026-08-24T00:00:02.000Z",
+      expiresAt: "2026-08-24T00:05:00.000Z",
+      privateBody: "must-not-cross-bridge",
+    },
+    postflight: {
+      status: "verified",
+      observedAt: "2026-08-24T00:00:02.000Z",
+      contextRevision: { privateFingerprint: "must-not-cross-bridge" },
+    },
+  };
+  const typedUpdateRequest = {
+    description: "Updated bridge",
+    fields: {
+      taskType: "article",
+      taskImage: "[[Cover.png]]",
+      taskGallery: ["[[One.png]]", "[[Two.png]]"],
+    },
+  };
   const api = {
     hasCapability: (name: string) =>
       [
@@ -658,8 +721,8 @@ test("Operon 3 Developer API adapter previews and applies an exact typed update 
         return {
           ok: true,
           plan: {
-            planDigest: "plan-update-1",
-            recoveryRef: "recovery-update-1",
+            planDigest: updatePlanDigest,
+            recoveryRef: updateRecoveryRef,
             capability: "tasks.update.preview",
             mutationKind: "task.update",
           },
@@ -667,12 +730,9 @@ test("Operon 3 Developer API adapter previews and applies an exact typed update 
       },
       apply: async ({ plan }: { plan: unknown }) => {
         appliedPlan = plan;
-        return {
-          status: "applied" as const,
-          mutationMayHaveApplied: true,
-          retryAllowed: false,
-          receipt: { terminalOutcome: "applied", planDigest: "plan-update-1" },
-        };
+        const result = nextExecution ?? validExecution;
+        nextExecution = null;
+        return result;
       },
     },
   };
@@ -708,12 +768,24 @@ test("Operon 3 Developer API adapter previews and applies an exact typed update 
   const result = await adapter.executeMutation(
     "update",
     "abc1234",
-    { description: "Updated bridge" },
+    typedUpdateRequest,
     false,
   );
   assert.equal(result.ok, true);
   assert.equal(result.code, "applied");
-  assert.equal(result.planDigest, "plan-update-1");
+  assert.equal(result.planDigest, updatePlanDigest);
+  assert.equal(result.nativeProof?.kind, "mutation-result");
+  assert.equal(result.nativeProof?.receipt?.mutationKind, "task.update");
+  assert.equal("privateBody" in (result.nativeProof?.receipt ?? {}), false);
+  assert.equal(
+    "contextRevision" in (result.nativeProof?.postflight ?? {}),
+    false,
+  );
+  assert.equal(
+    "privateValue" in
+      (result.nativeProof?.groupResults[0]?.resourceRevisions?.[0] ?? {}),
+    false,
+  );
   assert.deepEqual(previewInput, {
     capability: "tasks.update.preview",
     mutationKind: "task.update",
@@ -729,15 +801,70 @@ test("Operon 3 Developer API adapter previews and applies an exact typed update 
       operation: "update",
       changes: [
         { field: "description", valueType: "text", value: "Updated bridge" },
+        { field: "taskType", valueType: "text", value: "article" },
+        { field: "taskImage", valueType: "text", value: "[[Cover.png]]" },
+        {
+          field: "taskGallery",
+          valueType: "list",
+          value: ["[[One.png]]", "[[Two.png]]"],
+        },
       ],
     },
   });
   assert.deepEqual(appliedPlan, {
-    planDigest: "plan-update-1",
-    recoveryRef: "recovery-update-1",
+    planDigest: updatePlanDigest,
+    recoveryRef: updateRecoveryRef,
     capability: "tasks.update.preview",
     mutationKind: "task.update",
   });
+  const { postflight: _postflight, ...withoutPostflight } = validExecution;
+  nextExecution = {
+    ...withoutPostflight,
+    requestId: "base-update-missing-postflight",
+  };
+  const missingPostflight = await adapter.executeMutation(
+    "update",
+    "abc1234",
+    typedUpdateRequest,
+    false,
+  );
+  assert.equal(missingPostflight.code, "outcome-unknown");
+  assert.equal(missingPostflight.recoveryRef, updateRecoveryRef);
+  assert.equal(missingPostflight.planDigest, updatePlanDigest);
+  assert.equal(missingPostflight.mutationMayHaveApplied, true);
+  assert.equal(missingPostflight.nativeProof, undefined);
+  nextExecution = {
+    ...validExecution,
+    requestId: "base-update-wrong-digest",
+    receipt: { ...validExecution.receipt, planDigest: "c".repeat(64) },
+  };
+  const wrongDigest = await adapter.executeMutation(
+    "update",
+    "abc1234",
+    typedUpdateRequest,
+    false,
+  );
+  assert.equal(wrongDigest.code, "outcome-unknown");
+  assert.equal(wrongDigest.recoveryRef, updateRecoveryRef);
+  assert.equal(wrongDigest.planDigest, updatePlanDigest);
+  assert.equal(wrongDigest.mutationMayHaveApplied, true);
+  assert.equal(wrongDigest.nativeProof, undefined);
+  nextExecution = {
+    ...validExecution,
+    requestId: "base-update-empty-groups",
+    groupResults: [],
+  };
+  const emptyCommittedGroups = await adapter.executeMutation(
+    "update",
+    "abc1234",
+    typedUpdateRequest,
+    false,
+  );
+  assert.equal(emptyCommittedGroups.code, "outcome-unknown");
+  assert.equal(emptyCommittedGroups.recoveryRef, updateRecoveryRef);
+  assert.equal(emptyCommittedGroups.planDigest, updatePlanDigest);
+  assert.equal(emptyCommittedGroups.mutationMayHaveApplied, true);
+  assert.equal(emptyCommittedGroups.nativeProof, undefined);
 });
 
 test("Operon 3 Developer API adapter recovers the same durable mutation plan", async () => {
@@ -1207,4 +1334,873 @@ test("Operon 3 Developer API adapter refuses an explicitly truncated page withou
     (await adapter.indexer.getIndexV8Diagnostics()).health,
     "degraded",
   );
+});
+
+test("Operon 3.5 preserves scalar task media fields and ordered taskGallery arrays", async () => {
+  const api = {
+    hasCapability: (name: string) =>
+      [
+        "system.health",
+        "system.capabilities",
+        "catalog.read",
+        "tasks.read",
+        "tasks.query",
+      ].includes(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => ({
+        ok: true,
+        contextRevision: { index: { ramGeneration: 35 } },
+      }),
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [
+          {
+            canonicalKey: "taskType",
+            displayName: "Task Type",
+            valueType: "text",
+            source: "built-in",
+            mappingStatus: "mapped",
+            mutationClass: "general-update",
+            readable: true,
+          },
+          {
+            canonicalKey: "taskImage",
+            displayName: "Task Image",
+            valueType: "text",
+            source: "built-in",
+            mappingStatus: "mapped",
+            mutationClass: "general-update",
+            readable: true,
+          },
+          {
+            canonicalKey: "taskGallery",
+            displayName: "Task Gallery",
+            valueType: "list",
+            source: "built-in",
+            mappingStatus: "mapped",
+            mutationClass: "general-update",
+            readable: true,
+          },
+        ],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async () => ({
+        ok: true,
+        tasks: [
+          {
+            identity: { operonId: "med1234" },
+            description: "Media task",
+            representation: "inline",
+            locator: {
+              representation: "inline",
+              filePath: "Projects/Media.md",
+              lineNumber: 2,
+            },
+            checkbox: "open",
+            writableFields: [
+              {
+                canonicalKey: "taskType",
+                valueType: "text",
+                present: true,
+                value: "article",
+              },
+              {
+                canonicalKey: "taskImage",
+                valueType: "text",
+                present: true,
+                value: "[[Cover.png]]",
+              },
+              {
+                canonicalKey: "taskGallery",
+                valueType: "list",
+                present: true,
+                value: ["[[A;B.png]]", "https://example.test/two.png"],
+              },
+            ],
+          },
+        ],
+        page: { truncated: false },
+        contextRevision: { index: { ramGeneration: 35 } },
+      }),
+    },
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, {
+    getDeveloperApiV1: () => ({ ok: true, status: readyStatus(), api }),
+  });
+  assert.equal(await adapter.refresh(), true);
+  const task = adapter.indexer.getTask("med1234");
+  assert.equal(task?.fieldValues.taskType, "article");
+  assert.equal(task?.fieldValues.taskImage, "[[Cover.png]]");
+  assert.deepEqual(task?.fieldValues.taskGallery, [
+    "[[A;B.png]]",
+    "https://example.test/two.png",
+  ]);
+});
+
+test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plans session-bound", async () => {
+  const requestedCapabilitySets: string[][] = [];
+  const previewInputs: Record<string, unknown>[] = [];
+  const previewHandles: unknown[] = [];
+  const appliedHandles: unknown[] = [];
+  let pendingRecoveryCalls = 0;
+  let recoveryCalls = 0;
+  let nextWorkflowResult: Record<string, unknown> | null = null;
+  let nextWorkflowPlan: Record<string, unknown> | null = null;
+  let nextWorkflowPreviewError: Record<string, unknown> | null = null;
+  const rawTasks: Record<string, unknown>[] = [];
+  const workflowDigests = {
+    adopt: "a".repeat(64),
+    "periodic-create": "b".repeat(64),
+    "periodic-update": "c".repeat(64),
+  } as const;
+  const workflowRecoveryRefs = {
+    adopt: `dvr1_${"a".repeat(48)}`,
+    "periodic-create": `dvr1_${"b".repeat(48)}`,
+    "periodic-update": `dvr1_${"c".repeat(48)}`,
+  } as const;
+  const workflowCapabilities = {
+    adopt: "tasks.adopt.preview",
+    "periodic-create": "tasks.create.periodic-note.preview",
+    "periodic-update": "tasks.update.periodic-note.preview",
+  } as const;
+  const workflowMutationKinds = {
+    adopt: "task.adopt",
+    "periodic-create": "task.create",
+    "periodic-update": "task.update",
+  } as const;
+  const api = {
+    hasCapability: (name: string) =>
+      [
+        "system.health",
+        "system.capabilities",
+        "catalog.read",
+        "tasks.read",
+        "tasks.query",
+      ].includes(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => ({
+        ok: true,
+        contextRevision: { index: { ramGeneration: 350 } },
+      }),
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async () => ({
+        ok: true,
+        tasks: rawTasks,
+        page: { truncated: false },
+        contextRevision: { index: { ramGeneration: 350 } },
+      }),
+    },
+  };
+  const makeMethods = (
+    kind: "adopt" | "periodic-create" | "periodic-update",
+  ) => ({
+    preview: async (input: Record<string, unknown>) => {
+      previewInputs.push(input);
+      if (nextWorkflowPreviewError) {
+        const error = nextWorkflowPreviewError;
+        nextWorkflowPreviewError = null;
+        return {
+          contractVersion: 1,
+          kind: "task-workflow-developer-mutation-preview-result",
+          requestId: `preview-${kind}-${previewInputs.length}`,
+          ok: false,
+          warnings: [],
+          error,
+        };
+      }
+      const plan = nextWorkflowPlan ?? {
+        contractVersion: 1,
+        kind: "task-workflow-developer-mutation-plan",
+        recoveryRef: workflowRecoveryRefs[kind],
+        planDigest: workflowDigests[kind],
+        createdAt: "2026-08-23T00:00:00.000Z",
+        expiresAt: "2026-08-23T00:05:00.000Z",
+        riskLevel: "routine",
+        requiresConsent: false,
+      };
+      nextWorkflowPlan = null;
+      previewHandles.push(plan);
+      return {
+        contractVersion: 1,
+        kind: "task-workflow-developer-mutation-preview-result",
+        requestId: `preview-${kind}-${previewInputs.length}`,
+        ok: true,
+        plan,
+        warnings: [],
+      };
+    },
+    apply: async ({ plan }: { plan: unknown }) => {
+      appliedHandles.push(plan);
+      if (nextWorkflowResult) {
+        const result = nextWorkflowResult;
+        nextWorkflowResult = null;
+        return result;
+      }
+      if (kind === "adopt") {
+        rawTasks.push({
+          identity: { operonId: "adp1234" },
+          description: "Adopt me",
+          representation: "inline",
+          locator: {
+            representation: "inline",
+            filePath: "Inbox.md",
+            lineNumber: 4,
+          },
+          checkbox: "open",
+        });
+      }
+      if (kind === "periodic-create") {
+        rawTasks.push(
+          {
+            identity: { operonId: "day1234" },
+            description: "Same periodic task",
+            representation: "inline",
+            locator: {
+              representation: "inline",
+              filePath: "Daily/2026-08-24.md",
+              lineNumber: 4,
+            },
+            checkbox: "open",
+            priority: { id: "priority-a", label: "A" },
+          },
+          {
+            identity: { operonId: "week123" },
+            description: "Same periodic task",
+            representation: "inline",
+            locator: {
+              representation: "inline",
+              filePath: "Weekly/2026-W35.md",
+              lineNumber: 4,
+            },
+            checkbox: "open",
+            priority: { id: "priority-b", label: "B" },
+          },
+        );
+      }
+      const planDigest = (plan as { planDigest: string }).planDigest;
+      return {
+        contractVersion: 1,
+        kind: "task-workflow-developer-mutation-execution-result",
+        requestId: `apply-${kind}-${appliedHandles.length}`,
+        status: "applied",
+        mutationMayHaveApplied: true,
+        retryAllowed: false,
+        receipt: {
+          contractVersion: 1,
+          planDigest,
+          mutationKind: workflowMutationKinds[kind],
+          targetDigest: "d".repeat(64),
+          terminalOutcome: "applied",
+          effectiveAt: "2026-08-23T00:00:01.000Z",
+          completedAt: "2026-08-23T00:00:02.000Z",
+          expiresAt: "2026-08-23T00:05:00.000Z",
+          secretBody: "must-not-cross-bridge",
+        },
+        postflight: {
+          status: "verified",
+          observedAt: "2026-08-23T00:00:02.000Z",
+          contextRevision: { privateFingerprint: "must-not-cross-bridge" },
+        },
+        groupResults: [
+          {
+            groupId: `group-${kind}`,
+            status: "committed",
+            error: { message: "must-not-cross-bridge" },
+            ...(kind === "periodic-create"
+              ? {
+                  resourceRevisions: [
+                    {
+                      resourceKind: "task-source",
+                      resourceKey: "Daily/2026-08-24.md",
+                      revision: "sha256:daily",
+                      privateValue: "must-not-cross-bridge",
+                    },
+                  ],
+                }
+              : {}),
+          },
+        ],
+      };
+    },
+    recover: async ({ recoveryRef }: { recoveryRef: string }) => {
+      recoveryCalls += 1;
+      return {
+        contractVersion: 1,
+        kind: "task-workflow-developer-mutation-execution-result",
+        requestId: `recover-${kind}-${recoveryCalls}`,
+        status: "already-applied",
+        mutationMayHaveApplied: true,
+        retryAllowed: false,
+        receipt: {
+          contractVersion: 1,
+          planDigest: workflowDigests[kind],
+          mutationKind: workflowMutationKinds[kind],
+          targetDigest: "d".repeat(64),
+          terminalOutcome: "already-applied",
+          effectiveAt: "2026-08-23T00:00:01.000Z",
+          completedAt: "2026-08-23T00:00:02.000Z",
+          expiresAt: "2026-08-23T00:05:00.000Z",
+        },
+        postflight: { status: "receipt-replay" },
+        groupResults: [],
+      };
+    },
+    pendingRecoveries: async () => {
+      pendingRecoveryCalls += 1;
+      return {
+        contractVersion: 1,
+        kind: "task-workflow-developer-pending-recoveries-result",
+        ok: true,
+        recoveries: [
+          {
+            recoveryRef: workflowRecoveryRefs[kind],
+            planDigest: workflowDigests[kind],
+            createdAt: "2026-08-23T00:00:00.000Z",
+            expiresAt: "2026-08-23T00:05:00.000Z",
+          },
+        ],
+      };
+    },
+  });
+  const methods = {
+    adopt: makeMethods("adopt"),
+    createPeriodicNote: makeMethods("periodic-create"),
+    updatePeriodicNote: makeMethods("periodic-update"),
+  };
+  const taskWorkflowAccess = (tasks: Record<string, unknown>) => ({
+    contractVersion: 1,
+    kind: "task-workflow-developer-api-access-result",
+    ok: true,
+    api: { contractVersion: 1, runtimeApi: 1, tasks },
+  });
+  const operon = {
+    getDeveloperApiV1: () => ({ ok: true, status: readyStatus(), api }),
+    getTaskWorkflowDeveloperApiV1: (
+      _candidate: unknown,
+      request: { requestedCapabilities: readonly string[] },
+    ) => {
+      requestedCapabilitySets.push([...request.requestedCapabilities]);
+      if (request.requestedCapabilities[0] === "tasks.filter-query") {
+        return taskWorkflowAccess({
+          filterQuery: async (input: Record<string, unknown>) => ({
+            contractVersion: 1,
+            kind: "task-filter-query-result",
+            requestId: input.requestId,
+            ok: true,
+            tasks: [],
+          }),
+        });
+      }
+      if (request.requestedCapabilities[0] === "tasks.adopt.preview") {
+        return taskWorkflowAccess({ adopt: methods.adopt });
+      }
+      if (
+        request.requestedCapabilities[0] ===
+        "tasks.create.periodic-note.preview"
+      ) {
+        return taskWorkflowAccess({
+          createPeriodicNote: methods.createPeriodicNote,
+        });
+      }
+      return taskWorkflowAccess({
+        updatePeriodicNote: methods.updatePeriodicNote,
+      });
+    },
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
+  assert.equal(await adapter.refresh(true), true);
+  assert.equal(adapter.hasTaskWorkflowCapability("adopt"), true);
+  assert.equal(adapter.hasTaskWorkflowCapability("periodic-create"), true);
+  assert.equal(adapter.hasTaskWorkflowCapability("periodic-update"), true);
+  assert.deepEqual(requestedCapabilitySets.slice(-3), [
+    ["tasks.adopt.preview", "tasks.adopt.apply"],
+    ["tasks.create.periodic-note.preview", "tasks.create.periodic-note.apply"],
+    ["tasks.update.periodic-note.preview", "tasks.update.periodic-note.apply"],
+  ]);
+  const adopted = await adapter.executeTaskWorkflow(
+    "adopt",
+    {
+      targetPath: "Inbox.md",
+      line: 5,
+      expectedLine: "- [ ] Adopt me",
+    },
+    false,
+  );
+  assert.equal(adopted.ok, true);
+  assert.equal(adopted.operonId, "adp1234");
+  assert.deepEqual(previewInputs[0], {
+    operation: "adopt-inline",
+    source: {
+      filePath: "Inbox.md",
+      lineNumber: 4,
+      expectedLine: "- [ ] Adopt me",
+    },
+  });
+  assert.equal(appliedHandles[0], previewHandles[0]);
+  const periodicCreate = await adapter.executeTaskWorkflow(
+    "periodic-create",
+    {
+      description: "Daily focus",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+      priorityId: "priority-a",
+      fields: { taskGallery: ["[[One;A.png]]", "[[Two.png]]"] },
+    },
+    true,
+  );
+  assert.equal(periodicCreate.code, "planned");
+  assert.deepEqual(
+    (previewInputs[1]?.items as Record<string, unknown>[])[0]?.target,
+    {
+      representation: "inline",
+      mode: "periodic-note",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  );
+  assert.deepEqual(
+    (previewInputs[1]?.items as Record<string, unknown>[])[0]?.fields,
+    [
+      {
+        kind: "list",
+        field: "taskGallery",
+        value: ["[[One;A.png]]", "[[Two.png]]"],
+      },
+    ],
+  );
+  assert.equal(
+    (previewInputs[1]?.items as Record<string, unknown>[])[0]?.priorityId,
+    "priority-a",
+  );
+  const periodicUpdate = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    {
+      operonId: "adp1234",
+      fields: { dateScheduled: "2026-08-25" },
+    },
+    true,
+  );
+  assert.equal(periodicUpdate.code, "planned");
+  assert.equal(previewInputs[2]?.operation, "update-periodic-note");
+  assert.deepEqual(previewInputs[2]?.changes, [
+    {
+      field: "dateScheduled",
+      valueType: "date",
+      value: "2026-08-25",
+    },
+  ]);
+  const periodicDetach = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    {
+      operonId: "adp1234",
+      fields: { dateScheduled: null },
+    },
+    true,
+  );
+  assert.equal(periodicDetach.code, "planned");
+  assert.deepEqual(previewInputs[3]?.changes, [
+    {
+      operation: "clear",
+      field: "dateScheduled",
+      valueType: "date",
+    },
+  ]);
+  const extraPeriodicField = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    {
+      operonId: "adp1234",
+      fields: {
+        dateScheduled: "2026-08-26",
+        taskGallery: ["[[Nope.png]]"],
+      },
+    },
+    true,
+  );
+  assert.equal(extraPeriodicField.code, "invalid-input");
+  assert.equal(previewInputs.length, 4);
+  const appliedBeforeStalePreview = appliedHandles.length;
+  nextWorkflowPreviewError = {
+    code: "stale-source",
+    reason: "The exact inline source line changed before preview.",
+  };
+  const staleAdoption = await adapter.executeTaskWorkflow(
+    "adopt",
+    {
+      targetPath: "Inbox.md",
+      line: 5,
+      expectedLine: "- [ ] Adopt me",
+    },
+    false,
+  );
+  assert.equal(staleAdoption.code, "conflict");
+  assert.equal(staleAdoption.mutationMayHaveApplied, undefined);
+  assert.equal(appliedHandles.length, appliedBeforeStalePreview);
+  nextWorkflowPreviewError = {
+    code: "authority-insufficient",
+    reason: "The exact task-workflow grant is no longer active.",
+  };
+  const revokedAdoption = await adapter.executeTaskWorkflow(
+    "adopt",
+    {
+      targetPath: "Inbox.md",
+      line: 5,
+      expectedLine: "- [ ] Adopt me",
+    },
+    false,
+  );
+  assert.equal(revokedAdoption.code, "not-ready");
+  assert.equal(appliedHandles.length, appliedBeforeStalePreview);
+  const appliedBeforeRevisionConflict = appliedHandles.length;
+  const revisionConflict = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    {
+      operonId: "adp1234",
+      fields: { dateScheduled: "2026-08-27" },
+    },
+    false,
+    async () => ({
+      ok: false,
+      message: "fixture revision changed after preview",
+    }),
+  );
+  assert.equal(revisionConflict.code, "conflict");
+  assert.equal(revisionConflict.mutationMayHaveApplied, false);
+  assert.equal(appliedHandles.length, appliedBeforeRevisionConflict);
+  const validPeriodicUpdatePlan = {
+    contractVersion: 1,
+    kind: "task-workflow-developer-mutation-plan",
+    recoveryRef: workflowRecoveryRefs["periodic-update"],
+    planDigest: workflowDigests["periodic-update"],
+    createdAt: "2026-08-23T00:00:00.000Z",
+    expiresAt: "2026-08-23T00:05:00.000Z",
+    riskLevel: "routine",
+    requiresConsent: false,
+  };
+  const appliedBeforeInvalidPlans = appliedHandles.length;
+  nextWorkflowPlan = {
+    ...validPeriodicUpdatePlan,
+    planDigest: workflowDigests["periodic-update"].toUpperCase(),
+  };
+  const uppercasePlanDigest = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-08-27" } },
+    false,
+  );
+  assert.equal(uppercasePlanDigest.code, "failed");
+  assert.equal(uppercasePlanDigest.mutationMayHaveApplied, false);
+  nextWorkflowPlan = { ...validPeriodicUpdatePlan, spec: { private: true } };
+  const privatePlanField = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-08-27" } },
+    false,
+  );
+  assert.equal(privatePlanField.code, "failed");
+  nextWorkflowPlan = {
+    ...validPeriodicUpdatePlan,
+    targets: [
+      {
+        operonId: "adp1234",
+        locator: {
+          representation: "inline",
+          filePath: "Daily/2026-08-23.md",
+          lineNumber: 7,
+          privateOffset: 42,
+        },
+      },
+    ],
+  };
+  const privateTargetField = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-08-27" } },
+    false,
+  );
+  assert.equal(privateTargetField.code, "failed");
+  assert.equal(privateTargetField.mutationMayHaveApplied, false);
+  assert.equal(appliedHandles.length, appliedBeforeInvalidPlans);
+  const invalidTerminalBase = {
+    contractVersion: 1,
+    kind: "task-workflow-developer-mutation-execution-result",
+    requestId: "invalid-terminal-fixture",
+    status: "applied",
+    mutationMayHaveApplied: true,
+    retryAllowed: false,
+    receipt: {
+      contractVersion: 1,
+      planDigest: workflowDigests["periodic-update"],
+      mutationKind: "task.update",
+      targetDigest: "d".repeat(64),
+      terminalOutcome: "applied",
+      effectiveAt: "2026-08-23T00:00:01.000Z",
+      completedAt: "2026-08-23T00:00:02.000Z",
+      expiresAt: "2026-08-23T00:05:00.000Z",
+    },
+    groupResults: [{ groupId: "periodic-update", status: "committed" }],
+  };
+  nextWorkflowResult = invalidTerminalBase;
+  const missingPostflight = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-08-28" } },
+    false,
+  );
+  assert.equal(missingPostflight.code, "outcome-unknown");
+  assert.equal(missingPostflight.mutationMayHaveApplied, true);
+  nextWorkflowResult = {
+    ...invalidTerminalBase,
+    receipt: {
+      ...invalidTerminalBase.receipt,
+      planDigest: "f".repeat(64),
+    },
+    postflight: {
+      status: "verified",
+      observedAt: "2026-08-23T00:00:02.000Z",
+    },
+  };
+  const substitutedDigest = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-08-29" } },
+    false,
+  );
+  assert.equal(substitutedDigest.code, "outcome-unknown");
+  nextWorkflowResult = {
+    ...invalidTerminalBase,
+    postflight: {
+      status: "verified",
+      observedAt: "2026-08-23T00:00:02.000Z",
+    },
+    groupResults: [{ groupId: "periodic-update", status: "failed" }],
+  };
+  const incoherentGroups = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-08-30" } },
+    false,
+  );
+  assert.equal(incoherentGroups.code, "outcome-unknown");
+  nextWorkflowResult = {
+    ...invalidTerminalBase,
+    kind: "mutation-result",
+    postflight: {
+      status: "verified",
+      observedAt: "2026-08-23T00:00:02.000Z",
+    },
+  };
+  const privateCoreDiscriminator = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-08-31" } },
+    false,
+  );
+  assert.equal(privateCoreDiscriminator.code, "outcome-unknown");
+  assert.match(
+    privateCoreDiscriminator.message ?? "",
+    /task-workflow-developer-mutation-execution-result/u,
+  );
+  nextWorkflowResult = {
+    contractVersion: 1,
+    kind: "task-workflow-developer-mutation-execution-result",
+    requestId: "failed-union-fixture",
+    status: "failed",
+    mutationMayHaveApplied: false,
+    retryAllowed: false,
+    groupResults: [{ groupId: "periodic-update", status: "failed" }],
+    error: { code: "conflict", reason: "official failed union" },
+  };
+  const officialFailedUnion = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-09-01" } },
+    false,
+  );
+  assert.equal(officialFailedUnion.code, "conflict");
+  nextWorkflowResult = {
+    contractVersion: 1,
+    kind: "task-workflow-developer-mutation-execution-result",
+    requestId: "uncertain-union-fixture",
+    status: "outcome-unknown",
+    mutationMayHaveApplied: true,
+    retryAllowed: false,
+    groupResults: [
+      { groupId: "periodic-update", status: "outcome-unknown" },
+    ],
+    error: {
+      code: "outcome-unknown",
+      reason: "official uncertain union",
+      retryable: false,
+      action: "recover-same-plan",
+    },
+    recovery: {
+      required: true,
+      action: "recover-same-plan",
+      mutationMayHaveApplied: true,
+      recoveryRef: workflowRecoveryRefs["periodic-update"],
+      planDigest: workflowDigests["periodic-update"],
+      plan: validPeriodicUpdatePlan,
+    },
+  };
+  const officialUncertainUnion = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-09-02" } },
+    false,
+  );
+  assert.equal(officialUncertainUnion.code, "outcome-unknown");
+  assert.equal(
+    officialUncertainUnion.recoveryRef,
+    workflowRecoveryRefs["periodic-update"],
+  );
+  const routedPeriodicCreate = await adapter.executeTaskWorkflow(
+    "periodic-create",
+    {
+      description: "Same periodic task",
+      periodicKind: "daily",
+      routeDate: "2026-08-24",
+      priorityId: "priority-a",
+    },
+    false,
+  );
+  assert.equal(routedPeriodicCreate.code, "applied");
+  assert.equal(routedPeriodicCreate.operonId, "day1234");
+  assert.equal(
+    "secretBody" in (routedPeriodicCreate.nativeProof?.receipt ?? {}),
+    false,
+  );
+  assert.equal(
+    "contextRevision" in (routedPeriodicCreate.nativeProof?.postflight ?? {}),
+    false,
+  );
+  assert.equal(
+    "error" in (routedPeriodicCreate.nativeProof?.groupResults[0] ?? {}),
+    false,
+  );
+  assert.equal(
+    "privateValue" in
+      (routedPeriodicCreate.nativeProof?.groupResults[0]?.resourceRevisions?.[0] ??
+        {}),
+    false,
+  );
+  const lossyGallery = await adapter.executeTaskWorkflow(
+    "periodic-create",
+    {
+      description: "Unsafe gallery",
+      periodicKind: "weekly",
+      fields: { taskGallery: "[[One;A.png]]; [[Two.png]]" },
+    },
+    true,
+  );
+  assert.equal(lossyGallery.code, "invalid-input");
+  const pending = await adapter.pendingTaskWorkflowRecoveries("adopt");
+  assert.equal(pending.ok, true);
+  assert.equal(pending.recoveries[0]?.workflowKind, "adopt");
+  const pendingBeforeInvalidDigest = pendingRecoveryCalls;
+  const recoverBeforeInvalidDigest = recoveryCalls;
+  const invalidRecoveryDigest = await adapter.recoverTaskWorkflow(
+    "adopt",
+    workflowRecoveryRefs.adopt,
+    workflowDigests.adopt.toUpperCase(),
+  );
+  assert.equal(invalidRecoveryDigest.code, "invalid-input");
+  assert.equal(pendingRecoveryCalls, pendingBeforeInvalidDigest);
+  assert.equal(recoveryCalls, recoverBeforeInvalidDigest);
+  const recovered = await adapter.recoverTaskWorkflow(
+    "adopt",
+    workflowRecoveryRefs.adopt,
+  );
+  assert.equal(recovered.code, "already-applied");
+});
+
+test("a rejected Operon 3.5 workflow grant does not revoke another workflow or core reads", async () => {
+  const api = {
+    hasCapability: (name: string) =>
+      [
+        "system.health",
+        "system.capabilities",
+        "catalog.read",
+        "tasks.read",
+        "tasks.query",
+      ].includes(name),
+    channel: { status: readyStatus },
+    system: {
+      health: async () => ({
+        ok: true,
+        contextRevision: { index: { ramGeneration: 351 } },
+      }),
+      capabilities: () => [],
+      diagnostics: async () => ({ ok: true }),
+    },
+    catalog: {
+      snapshot: async () => ({
+        ok: true,
+        taxonomy: { pipelines: [], priorities: [] },
+        fields: [],
+        policies: { creation: {} },
+      }),
+    },
+    tasks: {
+      query: async () => ({
+        ok: true,
+        tasks: [],
+        page: { truncated: false },
+        contextRevision: { index: { ramGeneration: 351 } },
+      }),
+    },
+  };
+  const adoption = {
+    preview: async () => ({
+      ok: true,
+      plan: { recoveryRef: "r", planDigest: "p" },
+    }),
+    apply: async () => ({ status: "applied" }),
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, {
+    getDeveloperApiV1: () => ({ ok: true, status: readyStatus(), api }),
+    getTaskWorkflowDeveloperApiV1: (
+      _candidate: unknown,
+      request: { requestedCapabilities: readonly string[] },
+    ) => {
+      if (request.requestedCapabilities[0] === "tasks.adopt.preview") {
+        return {
+          contractVersion: 1,
+          kind: "task-workflow-developer-api-access-result",
+          ok: true,
+          api: {
+            contractVersion: 1,
+            runtimeApi: 1,
+            tasks: { adopt: adoption },
+          },
+        };
+      }
+      if (
+        request.requestedCapabilities[0] ===
+        "tasks.create.periodic-note.preview"
+      ) {
+        throw new Error("periodic grant pending");
+      }
+      return {
+        contractVersion: 1,
+        kind: "task-workflow-developer-api-access-result",
+        ok: false,
+        error: { code: "authority-insufficient" },
+      };
+    },
+  });
+  assert.equal(await adapter.refresh(true), true);
+  assert.equal(adapter.indexer.getGeneration(), 351);
+  assert.equal(adapter.hasTaskWorkflowCapability("adopt"), true);
+  assert.equal(adapter.hasTaskWorkflowCapability("periodic-create"), false);
 });

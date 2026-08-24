@@ -1,6 +1,6 @@
 ---
 name: elysia-task-gouverneur
-description: 'Orchestre les tâches d’un coffre compatible avec le profil public ÉLYSIA Tasks via les 23 outils operon_* gouvernés : opérations ponctuelles, relations, récurrence, récupération, audits, triage, cycle de vie et santé du runtime, avec capacités live, IDs stables, dry-run et validation humaine.'
+description: "Orchestre les tâches d’un coffre compatible avec le profil public ÉLYSIA Tasks via les 25 outils operon_* gouvernés : opérations ponctuelles, Daily/Weekly, relations, récurrence, récupération, audits, triage, cycle de vie et santé du runtime, avec capacités live, IDs stables, dry-run et validation humaine."
 metadata:
   version: 1.3.0
   skill_structure: graph
@@ -38,14 +38,14 @@ Utilise le profil public `elysia.tasks` et la configuration live du moteur pour 
 
 ## Reference Gate Map
 
-| Intention | `module_route` | Modules obligatoires |
-|---|---|---|
-| Créer ou adopter | `operation-ponctuelle` | [admission-p90-j.md](references/admission-p90-j.md) + [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
-| Modifier, terminer, lier, gérer une récurrence, convertir ou déplacer | `operation-ponctuelle` | [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
-| Résultat incertain ou récupération | `sante-performance` | [sante-et-performance.md](references/sante-et-performance.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
-| Audit, triage, conformité ou saved filters | `audit-triage` | [audits-et-triage.md](references/audits-et-triage.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
-| Changement de phase d’un projet ou nettoyage de backlog | `cycle-vie-projet` | [cycle-de-vie-projet.md](references/cycle-de-vie-projet.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
-| Cache stale, incident, incompatibilité ou lenteur | `sante-performance` | [sante-et-performance.md](references/sante-et-performance.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
+| Intention                                                             | `module_route`         | Modules obligatoires                                                                                                                                                                    |
+| --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Créer ou adopter                                                      | `operation-ponctuelle` | [admission-p90-j.md](references/admission-p90-j.md) + [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md) |
+| Modifier, terminer, lier, gérer une récurrence, convertir ou déplacer | `operation-ponctuelle` | [operations-ponctuelles.md](references/operations-ponctuelles.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md)                                                       |
+| Résultat incertain ou récupération                                    | `sante-performance`    | [sante-et-performance.md](references/sante-et-performance.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md)                                                           |
+| Audit, triage, conformité ou saved filters                            | `audit-triage`         | [audits-et-triage.md](references/audits-et-triage.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md)                                                                   |
+| Changement de phase d’un projet ou nettoyage de backlog               | `cycle-vie-projet`     | [cycle-de-vie-projet.md](references/cycle-de-vie-projet.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md)                                                             |
+| Cache stale, incident, incompatibilité ou lenteur                     | `sante-performance`    | [sante-et-performance.md](references/sante-et-performance.md) + [runtime-et-mutations.md](references/runtime-et-mutations.md)                                                           |
 
 ## Routage rapide
 

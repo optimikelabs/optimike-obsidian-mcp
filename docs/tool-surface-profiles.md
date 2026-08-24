@@ -15,10 +15,10 @@ Profiles reduce schema volume and routing ambiguity. They are not an authorizati
 | ----------- | --------------------------------------------------------------------------- | -----------------------: |
 | `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 19 tools |
 | `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 30 tools |
-| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 31 tools |
-| `full`      | Explicit complete/admin surface for the active runtime                      |                 70 tools |
+| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 33 tools |
+| `full`      | Explicit complete/admin surface for the active runtime                      |                 72 tools |
 
-Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 70 tools. The canonical registry covers 74 unique names across all runtimes because four names exist only in `headless-filesystem`.
+Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 72 tools. The canonical registry covers 76 unique names across all runtimes because four names exist only in `headless-filesystem`. The two 3.1 additions are capability-gated Operon Daily/Weekly operations; visibility never substitutes for a live grant.
 
 ## Compatibility-only names
 

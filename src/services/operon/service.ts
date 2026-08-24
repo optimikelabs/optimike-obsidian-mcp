@@ -9,6 +9,7 @@ import { logger, requestContextService } from "../../utils/index.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import {
   OPERON_CONTRACT_VERSION,
+  OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION,
   OPERON_SNAPSHOT_SCHEMA_VERSION,
   OperonBridgePageSchema,
   OperonConfigurationSchema,
@@ -19,6 +20,8 @@ import {
   queryOperonSnapshot,
   OperonCapabilitiesSchema,
   OperonAdoptTaskSchema,
+  OperonCreatePeriodicTaskSchema,
+  OperonUpdatePeriodicSchedulingSchema,
   OperonConvertTaskSchema,
   OperonCreateTaskSchema,
   OperonFilterQuerySchema,
@@ -30,6 +33,7 @@ import {
   OperonRelocateTaskSchema,
   OperonRecoverMutationSchema,
   OperonPendingRecoveriesSchema,
+  OperonPendingRecoveriesInputSchema,
   OperonMutationResultSchema,
   OperonTransitionTaskSchema,
   OperonUpdateTaskSchema,
@@ -47,6 +51,8 @@ import {
   type OperonTaskPage,
   type OperonValidation,
   type OperonAdoptTask,
+  type OperonCreatePeriodicTask,
+  type OperonUpdatePeriodicScheduling,
   type OperonSetRelationships,
   type OperonUpdateRecurrence,
   type OperonConvertTask,
@@ -57,6 +63,7 @@ import {
   type OperonRelationships,
   type OperonContext,
   type OperonRelocateTask,
+  type OperonPendingRecoveriesInput,
   type OperonRecoverMutation,
   type OperonMutationResult,
   type OperonTransitionTask,
@@ -116,6 +123,7 @@ interface SnapshotRow {
 }
 
 interface SnapshotMeta {
+  snapshotSchemaVersion: number;
   snapshotAt: number;
   generation: number | null;
   settingsSignature: string | null;
@@ -130,6 +138,8 @@ interface SnapshotMeta {
 type OperonCapabilities = z.infer<typeof OperonCapabilitiesSchema>;
 type OperonMutationAction =
   | "adopt"
+  | "periodic-create"
+  | "periodic-update"
   | "create"
   | "update"
   | "transition"
@@ -175,6 +185,9 @@ function readOnlyCapabilities(): OperonCapabilities {
     filterQuery: false,
     relocate: false,
     recovery: false,
+    periodicCreate: false,
+    periodicUpdate: false,
+    taskWorkflowRecovery: false,
   };
 }
 
@@ -523,11 +536,15 @@ export class OperonService {
     const requested =
       action === "adopt"
         ? payload.adoption
-        : action === "create"
-          ? payload.task
-          : action === "update"
+        : action === "periodic-create"
+          ? payload.periodic
+          : action === "periodic-update"
             ? payload.patch
-            : payload;
+            : action === "create"
+              ? payload.task
+              : action === "update"
+                ? payload.patch
+                : payload;
     const request =
       requested && typeof requested === "object" && !Array.isArray(requested)
         ? (requested as Record<string, unknown>)
@@ -541,19 +558,24 @@ export class OperonService {
       if (typeof request.line !== "number" || after.line !== request.line)
         return "Adopted task line does not match the requested line.";
     }
-    if (action === "create") {
+    if (action === "create" || action === "periodic-create") {
       if (
         typeof request.description === "string" &&
         after.description !== request.description.trim()
       )
         return "Created task description does not match the request.";
       if (
+        action === "create" &&
         (request.source === "inline" || request.source === "file") &&
         after.source !== request.source
       )
         return "Created task source does not match the request.";
     }
-    if (action === "update" || action === "create") {
+    if (
+      action === "update" ||
+      action === "create" ||
+      action === "periodic-create"
+    ) {
       if (
         typeof request.description === "string" &&
         after.description !== request.description.trim()
@@ -576,6 +598,15 @@ export class OperonService {
           : {};
       for (const [key, value] of Object.entries(fields)) {
         if (key === "status") continue;
+        if (Array.isArray(value)) {
+          if (
+            !Array.isArray(after.fields[key]) ||
+            stableJson(after.fields[key]) !== stableJson(value)
+          ) {
+            return `Managed list field '${key}' does not match the request in value or order.`;
+          }
+          continue;
+        }
         const expectedValue =
           key === "priority"
             ? (resolveOperonPriorityStableId(value, priorities) ??
@@ -595,7 +626,11 @@ export class OperonService {
           return `Unmanaged property '${key}' does not match the request.`;
       }
     }
-    if (action === "transition" || action === "create") {
+    if (
+      action === "transition" ||
+      action === "create" ||
+      action === "periodic-create"
+    ) {
       if (typeof request.status === "string") {
         const requestedStatus = resolveOperonWorkflowStatus(
           request.status,
@@ -615,6 +650,21 @@ export class OperonService {
         after.statusId !== request.statusId.trim()
       )
         return "Task status id does not match the request.";
+    }
+    if (action === "periodic-update") {
+      const requestedFields =
+        request.fields &&
+        typeof request.fields === "object" &&
+        !Array.isArray(request.fields)
+          ? (request.fields as Record<string, unknown>)
+          : {};
+      const scheduled = requestedFields.dateScheduled;
+      if (
+        (scheduled === null || typeof scheduled === "string") &&
+        after.dates.scheduled !== scheduled
+      ) {
+        return "Periodic task scheduled date does not match the request.";
+      }
     }
     if (action === "relationships") {
       const relationships = payload.relationships;
@@ -728,7 +778,11 @@ export class OperonService {
         ? "relationshipMutation"
         : action === "recurrence"
           ? "recurrenceMutation"
-          : action;
+          : action === "periodic-create"
+            ? "periodicCreate"
+            : action === "periodic-update"
+              ? "periodicUpdate"
+              : action;
     if (!status.capabilities[capability]) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -745,13 +799,21 @@ export class OperonService {
         ? "operon_set_relationships"
         : action === "recurrence"
           ? "operon_update_recurrence"
-          : (`operon_${action}_task` as const);
+          : action === "periodic-create"
+            ? "operon_create_periodic_task"
+            : action === "periodic-update"
+              ? "operon_update_periodic_scheduling"
+              : (`operon_${action}_task` as const);
     const mutationData =
       action === "create"
         ? payload.task
-        : action === "update"
-          ? payload.patch
-          : null;
+        : action === "periodic-create"
+          ? payload.periodic
+          : action === "periodic-update"
+            ? payload.patch
+            : action === "update"
+              ? payload.patch
+              : null;
     const mutationRecord =
       mutationData &&
       typeof mutationData === "object" &&
@@ -780,6 +842,8 @@ export class OperonService {
       allowInGuarded:
         dryRun ||
         (action !== "recurrence" &&
+          (action !== "periodic-create" ||
+            config.operonMutationAllowedPathPrefixes.length === 0) &&
           (action !== "convert" ||
             config.operonMutationAllowedPathPrefixes.length > 0)),
       frontmatterKeys,
@@ -893,6 +957,18 @@ export class OperonService {
     }
   }
 
+  private assertRecoveryPathScope(operation: string): void {
+    if (config.operonMutationAllowedPathPrefixes.length === 0) return;
+    throw new McpError(
+      BaseErrorCode.FORBIDDEN,
+      "Operon recovery is blocked while OPERON_MUTATION_ALLOWED_PATH_PREFIXES is configured because pending recovery records do not expose canonical route evidence. Recovery therefore fails closed before listing, replay, or Bridge apply.",
+      this.requestContext(operation, {
+        allowedPathPrefixes: config.operonMutationAllowedPathPrefixes,
+        routeEvidence: "unavailable",
+      }),
+    );
+  }
+
   private async isConfiguredFileTaskFolderAllowed(): Promise<boolean> {
     try {
       const configuration = await this.fetchLiveConfiguration();
@@ -910,6 +986,22 @@ export class OperonService {
     payload: Record<string, unknown>,
     dryRun: boolean,
   ): Promise<void> {
+    // Daily/Weekly routing is sealed by Operon and the opaque preview does not
+    // provide route evidence MCP can check against configured path prefixes.
+    // Preview remains safe, but apply must fail closed before the Bridge POST.
+    if (action === "periodic-create") {
+      if (dryRun || config.operonMutationAllowedPathPrefixes.length === 0) {
+        return;
+      }
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "Scoped periodic creation requires verifiable route evidence, which the Operon preview does not expose. Clear OPERON_MUTATION_ALLOWED_PATH_PREFIXES or keep this request in dry-run mode.",
+        this.requestContext("assertOperonMutationPathScope", {
+          action,
+          allowedPathPrefixes: config.operonMutationAllowedPathPrefixes,
+        }),
+      );
+    }
     if (config.operonMutationAllowedPathPrefixes.length === 0) return;
 
     if (action === "adopt") {
@@ -1049,6 +1141,10 @@ export class OperonService {
     const values = new Map(rows.map((row) => [row.key, row.value]));
     const snapshotAt = Number(values.get("snapshot_at"));
     if (!Number.isFinite(snapshotAt) || snapshotAt <= 0) return null;
+    const snapshotSchemaVersion = Number(
+      values.get("snapshot_schema_version") ??
+        OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION,
+    );
     const generationRaw = values.get("generation");
     const generation =
       generationRaw === undefined || generationRaw === "null"
@@ -1067,6 +1163,7 @@ export class OperonService {
       ? OperonConfigurationSchema.safeParse(parsedConfiguration)
       : { success: false as const };
     return {
+      snapshotSchemaVersion,
       snapshotAt,
       generation: Number.isFinite(generation) ? generation : null,
       settingsSignature: values.get("settings_signature") ?? null,
@@ -1092,6 +1189,16 @@ export class OperonService {
         throw new McpError(
           BaseErrorCode.PARSING_ERROR,
           `Operon snapshot contract ${meta.contractVersion} is incompatible with MCP contract ${OPERON_CONTRACT_VERSION}.`,
+          this.requestContext("loadOperonSnapshot", { dbPath: this.dbPath }),
+        );
+      }
+      if (
+        meta.snapshotSchemaVersion !== OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION &&
+        meta.snapshotSchemaVersion !== OPERON_SNAPSHOT_SCHEMA_VERSION
+      ) {
+        throw new McpError(
+          BaseErrorCode.PARSING_ERROR,
+          `Operon snapshot schema ${meta.snapshotSchemaVersion} is incompatible with supported schemas ${OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION} and ${OPERON_SNAPSHOT_SCHEMA_VERSION}.`,
           this.requestContext("loadOperonSnapshot", { dbPath: this.dbPath }),
         );
       }
@@ -1138,6 +1245,7 @@ export class OperonService {
         operonVersion: meta.operonVersion,
         bridgeVersion: meta.bridgeVersion,
         contractVersion: OPERON_CONTRACT_VERSION,
+        snapshotSchemaVersion: meta.snapshotSchemaVersion as 1 | 2,
         settingsSignature: meta.settingsSignature,
         generation: meta.generation,
         capabilities: stale
@@ -1147,6 +1255,12 @@ export class OperonService {
           ? [
               ...new Set([
                 ...(meta.status?.limitations ?? []),
+                ...(meta.snapshotSchemaVersion ===
+                OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION
+                  ? [
+                      "Legacy Operon snapshot schema v1 was read through the safe v2 compatibility path; list-valued fields may remain flattened strings until a live refresh replaces the snapshot.",
+                    ]
+                  : []),
                 ...CACHE_LIMITATIONS,
               ]),
             ]
@@ -1456,6 +1570,7 @@ export class OperonService {
   ): boolean {
     return Boolean(
       snapshot &&
+        snapshot.snapshotSchemaVersion === OPERON_SNAPSHOT_SCHEMA_VERSION &&
         snapshot.generation === status.index.generation &&
         snapshot.settingsSignature === status.settingsSignature &&
         snapshot.operonVersion === status.operon.version &&
@@ -1738,10 +1853,7 @@ export class OperonService {
       );
     }
     const response = await this.getClient()
-      .post(
-        `${BRIDGE_PREFIX}/tasks/filter`,
-        params,
-      )
+      .post(`${BRIDGE_PREFIX}/tasks/filter`, params)
       .catch((error: unknown) =>
         this.bridgeHttpError(error, "operonQuerySavedFilter"),
       );
@@ -1892,6 +2004,34 @@ export class OperonService {
     );
   }
 
+  async createPeriodicTask(input: unknown): Promise<OperonMutationResult> {
+    const params: OperonCreatePeriodicTask =
+      OperonCreatePeriodicTaskSchema.parse(input);
+    return this.executeMutation(
+      "periodic-create",
+      null,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/periodic`,
+      params,
+    );
+  }
+
+  async updatePeriodicScheduling(
+    input: unknown,
+  ): Promise<OperonMutationResult> {
+    const params: OperonUpdatePeriodicScheduling =
+      OperonUpdatePeriodicSchedulingSchema.parse(input);
+    return this.executeMutation(
+      "periodic-update",
+      params.operonId,
+      params.idempotencyKey,
+      params.dryRun,
+      `${BRIDGE_PREFIX}/tasks/${encodeURIComponent(params.operonId)}/periodic-update`,
+      params,
+    );
+  }
+
   async updateTask(input: unknown): Promise<OperonMutationResult> {
     const params: OperonUpdateTask = OperonUpdateTaskSchema.parse(input);
     return this.executeMutation(
@@ -1967,7 +2107,12 @@ export class OperonService {
     );
   }
 
-  async pendingRecoveries(): Promise<Record<string, unknown>> {
+  async pendingRecoveries(
+    input: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    const params: OperonPendingRecoveriesInput =
+      OperonPendingRecoveriesInputSchema.parse(input);
+    this.assertRecoveryPathScope("operon_list_pending_recoveries");
     if (!liveModeConfigured()) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -1976,34 +2121,112 @@ export class OperonService {
       );
     }
     const status = await this.fetchLiveStatus();
-    if (!status.capabilities.recovery) {
+    if (params.kind && !status.capabilities.taskWorkflowRecovery) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        "Operon Bridge does not expose task-workflow recovery.",
+        this.requestContext("operonPendingRecoveries"),
+      );
+    }
+    const requests: Array<{
+      family: "developer-api" | "task-workflow";
+      path: string;
+      query?: Record<string, string>;
+    }> = [];
+    if (!params.kind && status.capabilities.recovery) {
+      requests.push({
+        family: "developer-api",
+        path: `${BRIDGE_PREFIX}/mutations/pending-recoveries`,
+      });
+    }
+    if (status.capabilities.taskWorkflowRecovery) {
+      requests.push({
+        family: "task-workflow",
+        path: `${BRIDGE_PREFIX}/task-workflows/pending-recoveries`,
+        ...(params.kind ? { query: { kind: params.kind } } : {}),
+      });
+    }
+    if (requests.length === 0) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
         "Operon Bridge does not expose official Developer API recovery.",
         this.requestContext("operonPendingRecoveries"),
       );
     }
-    const response = await this.getClient().get(
-      `${BRIDGE_PREFIX}/mutations/pending-recoveries`,
-    );
-    const parsed = OperonPendingRecoveriesSchema.safeParse(response.data);
-    if (!parsed.success) {
-      throw new McpError(
-        BaseErrorCode.PARSING_ERROR,
-        "Operon Bridge pending-recoveries returned an incompatible payload.",
-        this.requestContext("operonPendingRecoveries", {
-          issues: parsed.error.issues,
-        }),
+    const recoveries: Record<string, unknown>[] = [];
+    for (const request of requests) {
+      const response = await this.getClient().get(
+        request.path,
+        request.query ? { params: request.query } : undefined,
       );
+      const parsed = OperonPendingRecoveriesSchema.safeParse(response.data);
+      if (!parsed.success) {
+        throw new McpError(
+          BaseErrorCode.PARSING_ERROR,
+          `Operon Bridge ${request.family} pending-recoveries returned an incompatible payload.`,
+          this.requestContext("operonPendingRecoveries", {
+            family: request.family,
+            issues: parsed.error.issues,
+          }),
+        );
+      }
+      for (const recovery of parsed.data.recoveries) {
+        const kind =
+          request.family === "developer-api"
+            ? "developer-api"
+            : (recovery.workflowKind ?? recovery.kind);
+        if (!kind) {
+          throw new McpError(
+            BaseErrorCode.PARSING_ERROR,
+            "Operon Bridge task-workflow pending recovery omitted its workflow kind.",
+            this.requestContext("operonPendingRecoveries", {
+              family: request.family,
+            }),
+          );
+        }
+        recoveries.push({
+          ...recovery,
+          kind,
+          recoveryFamily: request.family,
+        });
+      }
     }
-    return parsed.data;
+    return {
+      ok: true,
+      contractVersion: OPERON_CONTRACT_VERSION,
+      source: "operon-live",
+      stale: false,
+      recoveries,
+    };
   }
 
   async recoverMutation(input: unknown): Promise<OperonMutationResult> {
     const params: OperonRecoverMutation =
       OperonRecoverMutationSchema.parse(input);
-    const requested = { recoveryRef: params.recoveryRef };
+    // Enforce the current path policy before consulting the durable replay
+    // journal. Otherwise a result sealed while the allowlist was empty could
+    // bypass a later, stricter configuration after restart.
+    this.assertRecoveryPathScope("operon_recover_mutation");
+    const requested = {
+      recoveryRef: params.recoveryRef,
+      recovery: params.recovery,
+    };
     const requestedJson = stableJson(requested);
+    // 3.1 candidates briefly used the same fields flat. Accept their durable
+    // journal binding internally so an upgrade does not strand a terminal
+    // replay, while the public MCP input remains nested and unambiguous.
+    const flatCandidateRequestedJson = stableJson({
+      recoveryRef: params.recoveryRef,
+      kind: params.recovery.kind,
+      ...(params.recovery.kind !== "developer-api" &&
+      params.recovery.planDigest
+        ? { planDigest: params.recovery.planDigest }
+        : {}),
+    });
+    const legacyDeveloperApiRequestedJson =
+      params.recovery.kind === "developer-api"
+        ? stableJson({ recoveryRef: params.recoveryRef })
+        : null;
     // Recovery is itself idempotent at the MCP boundary. A completed
     // recovery must replay from the durable journal after an MCP restart,
     // without requiring the Bridge to be reachable a second time.
@@ -2011,7 +2234,9 @@ export class OperonService {
     if (existing) {
       if (
         existing.action !== "recover" ||
-        existing.requestedJson !== requestedJson
+        (existing.requestedJson !== requestedJson &&
+          existing.requestedJson !== flatCandidateRequestedJson &&
+          existing.requestedJson !== legacyDeveloperApiRequestedJson)
       ) {
         throw new McpError(
           BaseErrorCode.CONFLICT,
@@ -2043,10 +2268,17 @@ export class OperonService {
       );
     }
     const status = await this.fetchLiveStatus();
-    if (!status.capabilities.recovery) {
+    const taskWorkflow = params.recovery.kind !== "developer-api";
+    if (
+      taskWorkflow
+        ? !status.capabilities.taskWorkflowRecovery
+        : !status.capabilities.recovery
+    ) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
-        "Operon Bridge does not expose official Developer API recovery.",
+        taskWorkflow
+          ? "Operon Bridge does not expose task-workflow recovery."
+          : "Operon Bridge does not expose official Developer API recovery.",
         this.requestContext("operon_recover_mutation", {
           recoveryRef: params.recoveryRef,
         }),
@@ -2071,8 +2303,23 @@ export class OperonService {
     );
     if (reservedResult) return reservedResult.result;
     const response = await this.getClient().post(
-      `${BRIDGE_PREFIX}/mutations/recover`,
-      params,
+      taskWorkflow
+        ? `${BRIDGE_PREFIX}/task-workflows/recover`
+        : `${BRIDGE_PREFIX}/mutations/recover`,
+      taskWorkflow
+        ? {
+            idempotencyKey: params.idempotencyKey,
+            recoveryRef: params.recoveryRef,
+            kind: params.recovery.kind,
+            ...(params.recovery.kind !== "developer-api" &&
+            params.recovery.planDigest
+              ? { planDigest: params.recovery.planDigest }
+              : {}),
+          }
+        : {
+            idempotencyKey: params.idempotencyKey,
+            recoveryRef: params.recoveryRef,
+          },
       { validateStatus: () => true },
     );
     const parsed = OperonMutationResultSchema.safeParse(response.data);

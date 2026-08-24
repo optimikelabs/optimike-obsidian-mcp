@@ -160,6 +160,8 @@ function makeTask(operonId, overrides = {}) {
 }
 
 const tasks = [makeTask("abc1234"), makeTask("bcd2345")];
+const taskWorkflowPlanDigest = "a".repeat(64);
+const alternateTaskWorkflowPlanDigest = "b".repeat(64);
 const state = {
   mode: "normal",
   generation: 1,
@@ -167,7 +169,9 @@ const state = {
   postCalls: 0,
   validationCalls: 0,
   mutationCalls: 0,
+  pendingRecoveryCalls: 0,
   recoveryCalls: 0,
+  lastTaskWorkflowRecoveryBody: null,
   mutations: false,
 };
 
@@ -211,6 +215,9 @@ function statusPayload() {
       ? {
           ...capabilities,
           adopt: true,
+          periodicCreate: true,
+          periodicUpdate: true,
+          taskWorkflowRecovery: true,
           create: true,
           update: true,
           transition: true,
@@ -416,6 +423,20 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (
+    request.method === "GET" &&
+    url.pathname.endsWith("/mutations/pending-recoveries")
+  ) {
+    state.pendingRecoveryCalls += 1;
+    sendJson(response, 200, {
+      ok: true,
+      contractVersion: "1",
+      source: "operon-live",
+      stale: false,
+      recoveries: [{ recoveryRef: "legacy-recovery" }],
+    });
+    return;
+  }
+  if (
     request.method === "POST" &&
     url.pathname.endsWith("/mutations/recover")
   ) {
@@ -435,8 +456,189 @@ const server = http.createServer((request, response) => {
         before: null,
         requested: { recoveryRef: params.recoveryRef },
         after: null,
-        planDigest: "plan-recovery-test",
+        planDigest: "d".repeat(64),
         recoveryRef: params.recoveryRef,
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
+  }
+  if (
+    request.method === "GET" &&
+    url.pathname.endsWith("/task-workflows/pending-recoveries")
+  ) {
+    state.pendingRecoveryCalls += 1;
+    sendJson(response, 200, {
+      ok: true,
+      contractVersion: "1",
+      source: "operon-live",
+      stale: false,
+      recoveries: [
+        {
+          ...(url.searchParams.get("kind")
+            ? { kind: url.searchParams.get("kind") }
+            : { workflowKind: "periodic-update" }),
+          planDigest: taskWorkflowPlanDigest,
+        },
+      ],
+    });
+    return;
+  }
+  if (
+    request.method === "POST" &&
+    url.pathname.endsWith("/task-workflows/recover")
+  ) {
+    state.recoveryCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      state.lastTaskWorkflowRecoveryBody = params;
+      const nativeProof = {
+        contractVersion: 1,
+        kind: "mutation-result",
+        status:
+          params.idempotencyKey === "test-workflow-recovery-malformed"
+            ? "committed"
+            : "already-applied",
+        mutationMayHaveApplied: true,
+        retryAllowed: false,
+        groupResults: [],
+        receipt: {
+          contractVersion: 1,
+          planDigest: params.planDigest,
+          mutationKind: "task.update",
+          targetDigest: "c".repeat(64),
+          terminalOutcome: "already-applied",
+          effectiveAt: "2026-08-24T08:00:00.000Z",
+          completedAt: "2026-08-24T08:00:01.000Z",
+          expiresAt: "2026-08-24T09:00:01.000Z",
+        },
+        postflight: { status: "receipt-replay" },
+      };
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-workflow-recovery-${state.recoveryCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: "already-applied",
+        before: null,
+        requested: { recoveryRef: params.recoveryRef, kind: params.kind },
+        after: null,
+        recoveryRef: params.recoveryRef,
+        nativeProof,
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
+  }
+  if (request.method === "POST" && url.pathname.endsWith("/tasks/periodic")) {
+    state.mutationCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-periodic-create-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: params.dryRun === false ? "applied" : "planned",
+        before: null,
+        requested: params.periodic,
+        after:
+          params.dryRun === false
+            ? makeTask("per1234", {
+                description: params.periodic.description,
+                fields: params.periodic.fields ?? {},
+                // Operon owns periodic routing. Keep the result outside the
+                // configured-prefix fixture: scoped apply must be rejected
+                // before POST, while unscoped apply still validates the
+                // returned canonical vault-relative path.
+                path: "Periodic/Daily/2026-08-24.md",
+              })
+            : null,
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
+  }
+  if (
+    request.method === "POST" &&
+    /\/tasks\/([^/]+)\/periodic-update$/u.test(url.pathname)
+  ) {
+    state.mutationCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      const operonId =
+        /\/tasks\/([^/]+)\/periodic-update$/u.exec(url.pathname)?.[1] ??
+        "abc1234";
+      const before = tasks[0];
+      const scheduled = params.patch.fields.dateScheduled;
+      const after = makeTask(operonId, {
+        dates: { ...before.dates, scheduled },
+        fields: {
+          ...before.fields,
+          ...(scheduled === null ? {} : { dateScheduled: scheduled }),
+        },
+      });
+      if (scheduled === null) delete after.fields.dateScheduled;
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-periodic-update-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: params.dryRun === false ? "applied" : "planned",
+        before,
+        requested: params.patch,
+        after: params.dryRun === false ? after : null,
+        source: "operon-live",
+        stale: false,
+      });
+    });
+    return;
+  }
+  if (
+    request.method === "POST" &&
+    /\/tasks\/([^/]+)\/update$/u.test(url.pathname)
+  ) {
+    state.mutationCalls += 1;
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const params = body ? JSON.parse(body) : {};
+      const operonId =
+        /\/tasks\/([^/]+)\/update$/u.exec(url.pathname)?.[1] ?? "abc1234";
+      const requestedFields = params.patch.fields ?? {};
+      const fields = { ...tasks[0].fields, ...requestedFields };
+      if (
+        state.mode === "gallery-reordered" &&
+        Array.isArray(fields.taskGallery)
+      ) {
+        fields.taskGallery = [...fields.taskGallery].reverse();
+      }
+      sendJson(response, 200, {
+        ok: true,
+        contractVersion: "1",
+        operationId: `operation-update-${state.mutationCalls}`,
+        idempotencyKey: params.idempotencyKey,
+        status: params.dryRun === false ? "applied" : "planned",
+        before: tasks[0],
+        requested: params.patch,
+        after: params.dryRun === false ? makeTask(operonId, { fields }) : null,
         source: "operon-live",
         stale: false,
       });
@@ -540,13 +742,16 @@ const server = http.createServer((request, response) => {
         if (value === null) delete fields[field];
         else fields[field] = String(value);
       }
-      const repeating = typeof fields.repeat === "string" && fields.repeat.length > 0;
+      const repeating =
+        typeof fields.repeat === "string" && fields.repeat.length > 0;
       const after = makeTask(operonId, {
         fields,
         recurrence: {
           repeating,
           seriesId: repeating ? "rsabc12" : null,
-          occurrenceDate: repeating ? (fields.dateScheduled ?? "2026-08-10") : null,
+          occurrenceDate: repeating
+            ? (fields.dateScheduled ?? "2026-08-10")
+            : null,
         },
       });
       sendJson(response, 200, {
@@ -726,15 +931,13 @@ try {
   assert.equal(secondFilterPage.hasMore, false);
   assert.equal(secondFilterPage.tasks[0].operonId, "bcd2345");
   await assert.rejects(
-    () =>
-      service.querySavedFilter({ filterSetId: "missing-filter", limit: 1 }),
+    () => service.querySavedFilter({ filterSetId: "missing-filter", limit: 1 }),
     (error) =>
       error?.code === "NOT_FOUND" &&
       error?.message === "Saved filter was not found.",
   );
   await assert.rejects(
-    () =>
-      service.querySavedFilter({ filterSetId: "invalid-filter", limit: 1 }),
+    () => service.querySavedFilter({ filterSetId: "invalid-filter", limit: 1 }),
     (error) =>
       error?.code === "VALIDATION_ERROR" &&
       error?.message === "Saved filter request is invalid.",
@@ -827,6 +1030,18 @@ try {
   });
   assert.equal(adoptionPlanned.status, "planned");
   assert.equal(state.mutationCalls, 2);
+  const periodicPlanned = await service.createPeriodicTask({
+    idempotencyKey: "test-periodic-create-idempotency",
+    dryRun: true,
+    periodic: {
+      description: "Daily task through sealed routing",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+      fields: { taskGallery: ["media/a,b.png", "media/c;d.png"] },
+    },
+  });
+  assert.equal(periodicPlanned.status, "planned");
+  assert.equal(state.mutationCalls, 3);
   const replayed = await service.createTask({
     idempotencyKey: "test-create-idempotency",
     dryRun: true,
@@ -840,7 +1055,7 @@ try {
   assert.equal(replayed.operationId, planned.operationId);
   assert.equal(
     state.mutationCalls,
-    2,
+    3,
     "journal replay must not call the Bridge twice",
   );
 
@@ -858,7 +1073,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    2,
+    3,
     "mismatched idempotency reuse must be rejected locally",
   );
 
@@ -922,7 +1137,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    2,
+    3,
     "scope rejection must happen before the Bridge call",
   );
 
@@ -940,7 +1155,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    2,
+    3,
     "non-canonical paths must be rejected before any Bridge request",
   );
 
@@ -956,7 +1171,7 @@ try {
   assert.equal(scopedInline.status, "planned");
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "explicit allowed inline target must reach the Bridge",
   );
 
@@ -987,6 +1202,49 @@ try {
     "relationship replay after restart must use the durable MCP journal",
   );
 
+  const configuredMutationPrefixes = [
+    ...config.operonMutationAllowedPathPrefixes,
+  ];
+  const callsBeforeScopedPeriodicApply = state.mutationCalls;
+  await assert.rejects(
+    service.createPeriodicTask({
+      idempotencyKey: "test-periodic-create-guarded-configured-prefixes",
+      dryRun: false,
+      periodic: {
+        description: "Daily task with opaque Operon routing",
+        periodicKind: "daily",
+        routeDate: "2026-08-24",
+      },
+    }),
+    (error) =>
+      error?.code === "FORBIDDEN" &&
+      /requires verifiable route evidence/u.test(error.message),
+    "guarded periodic apply must fail closed when configured prefixes cannot be checked against route evidence",
+  );
+  assert.equal(
+    state.mutationCalls,
+    callsBeforeScopedPeriodicApply,
+    "scoped periodic apply must be rejected before the Bridge POST",
+  );
+
+  config.operonMutationAllowedPathPrefixes = [];
+  const guardedPeriodicWithoutPrefixes = await service.createPeriodicTask({
+    idempotencyKey: "test-periodic-create-guarded-empty-prefixes",
+    dryRun: false,
+    periodic: {
+      description: "Weekly task with Operon-owned routing",
+      periodicKind: "weekly",
+      routeDate: "2026-08-24",
+    },
+  });
+  assert.equal(guardedPeriodicWithoutPrefixes.status, "applied");
+  assert.equal(
+    guardedPeriodicWithoutPrefixes.after.path,
+    "Periodic/Daily/2026-08-24.md",
+    "guarded periodic creation must not require arbitrary path prefixes",
+  );
+  config.operonMutationAllowedPathPrefixes = configuredMutationPrefixes;
+
   await assert.rejects(
     service.updateRecurrence({
       idempotencyKey: "test-recurrence-guarded",
@@ -1001,6 +1259,181 @@ try {
   );
 
   config.mcpWriteMode = "full";
+
+  const orderedGallery = ["media/a,b.png", "media\\c;d.png", "media/a,b.png"];
+  const normalizedOrderedGallery = ["media/a,b.png", "media\\c;d.png"];
+  const galleryApplied = await service.updateTask({
+    idempotencyKey: "test-gallery-ordered-apply",
+    dryRun: false,
+    operonId: "abc1234",
+    expectedRevision: tasks[0].revision,
+    patch: { fields: { taskGallery: orderedGallery } },
+  });
+  assert.deepEqual(
+    galleryApplied.after.fields.taskGallery,
+    normalizedOrderedGallery,
+    "MCP must preserve list punctuation/order and apply Operon's first-occurrence deduplication",
+  );
+
+  state.mode = "gallery-reordered";
+  await assert.rejects(
+    service.updateTask({
+      idempotencyKey: "test-gallery-reordered-conflict",
+      dryRun: false,
+      operonId: "abc1234",
+      expectedRevision: tasks[0].revision,
+      patch: { fields: { taskGallery: orderedGallery } },
+    }),
+    (error) =>
+      error?.code === "CONFLICT" && /value or order/u.test(error.message),
+    "MCP postflight must reject a reordered taskGallery",
+  );
+  state.mode = "normal";
+
+  const periodicUpdated = await service.updatePeriodicScheduling({
+    idempotencyKey: "test-periodic-update-apply",
+    dryRun: false,
+    operonId: "abc1234",
+    expectedRevision: tasks[0].revision,
+    patch: { fields: { dateScheduled: "2026-08-30" } },
+  });
+  assert.equal(periodicUpdated.after.dates.scheduled, "2026-08-30");
+
+  const pendingCallsBeforeScopedRecovery = state.pendingRecoveryCalls;
+  const recoveryCallsBeforeScopedRecovery = state.recoveryCalls;
+  await assert.rejects(
+    service.pendingRecoveries({ kind: "periodic-update" }),
+    (error) =>
+      error?.code === "FORBIDDEN" &&
+      /do not expose canonical route evidence/u.test(error.message),
+    "configured path prefixes must hide recovery references whose route cannot be proven",
+  );
+  await assert.rejects(
+    service.recoverMutation({
+      idempotencyKey: "test-scoped-recovery-bypass",
+      recoveryRef: "dvr1_scoped-recovery-bypass",
+      recovery: {
+        kind: "periodic-update",
+        planDigest: taskWorkflowPlanDigest,
+      },
+    }),
+    (error) =>
+      error?.code === "FORBIDDEN" &&
+      /before listing, replay, or Bridge apply/u.test(error.message),
+    "configured path prefixes must fail closed before recovery can reach the durable replay or Bridge",
+  );
+  assert.equal(state.pendingRecoveryCalls, pendingCallsBeforeScopedRecovery);
+  assert.equal(state.recoveryCalls, recoveryCallsBeforeScopedRecovery);
+
+  config.operonMutationAllowedPathPrefixes = [];
+
+  const workflowRecoveries = await service.pendingRecoveries({
+    kind: "periodic-update",
+  });
+  assert.equal(workflowRecoveries.recoveries[0].kind, "periodic-update");
+  assert.equal(
+    workflowRecoveries.recoveries[0].planDigest,
+    taskWorkflowPlanDigest,
+  );
+  assert.equal(
+    workflowRecoveries.recoveries[0].recoveryFamily,
+    "task-workflow",
+  );
+  const allRecoveries = await service.pendingRecoveries();
+  assert.deepEqual(
+    allRecoveries.recoveries.map((entry) => entry.recoveryFamily),
+    ["developer-api", "task-workflow"],
+    "unfiltered recovery listing must aggregate legacy and task-workflow families",
+  );
+  assert.deepEqual(
+    allRecoveries.recoveries.map((entry) => entry.kind),
+    ["developer-api", "periodic-update"],
+    "every pending recovery must expose the exact required recover kind without caller inference",
+  );
+
+  const workflowRecovered = await service.recoverMutation({
+    idempotencyKey: "test-workflow-recovery",
+    recoveryRef: "dvr1_workflow-recovery",
+    recovery: {
+      kind: "periodic-update",
+      planDigest: taskWorkflowPlanDigest,
+    },
+  });
+  assert.equal(workflowRecovered.status, "already-applied");
+  assert.equal(
+    state.lastTaskWorkflowRecoveryBody.planDigest,
+    taskWorkflowPlanDigest,
+    "task-workflow recovery must forward only the caller-provided pending plan digest",
+  );
+  assert.equal(
+    workflowRecovered.nativeProof.receipt.planDigest,
+    taskWorkflowPlanDigest,
+    "the validated native receipt proof must survive the MCP boundary",
+  );
+  const recoveryCallsAfterBoundWorkflow = state.recoveryCalls;
+  await assert.rejects(
+    service.recoverMutation({
+      idempotencyKey: "test-workflow-recovery",
+      recoveryRef: "dvr1_workflow-recovery",
+      recovery: {
+        kind: "periodic-update",
+        planDigest: alternateTaskWorkflowPlanDigest,
+      },
+    }),
+    (error) => error?.code === "CONFLICT",
+    "the durable idempotency binding must reject a different digest for the same recovery request",
+  );
+  assert.equal(
+    state.recoveryCalls,
+    recoveryCallsAfterBoundWorkflow,
+    "a digest substitution must be rejected before the Bridge POST",
+  );
+  await assert.rejects(
+    service.recoverMutation({
+      idempotencyKey: "test-workflow-recovery-malformed",
+      recoveryRef: "dvr1_workflow-recovery-malformed",
+      recovery: {
+        kind: "periodic-update",
+        planDigest: taskWorkflowPlanDigest,
+      },
+    }),
+    (error) => error?.code === "PARSING_ERROR",
+    "a malformed native mutation proof must reject the Bridge response",
+  );
+  const flatCandidateRecoveryDb = new DatabaseSync(dbPath);
+  try {
+    flatCandidateRecoveryDb
+      .prepare(
+        `UPDATE operon_mutation_journal
+         SET requested_json = ?
+         WHERE idempotency_key = ?`,
+      )
+      .run(
+        JSON.stringify({
+          kind: "periodic-update",
+          planDigest: taskWorkflowPlanDigest,
+          recoveryRef: "dvr1_workflow-recovery",
+        }),
+        "test-workflow-recovery",
+      );
+  } finally {
+    flatCandidateRecoveryDb.close();
+  }
+  const recoveryCallsBeforeFlatCandidateReplay = state.recoveryCalls;
+  const migratedFlatCandidate = await new OperonService().recoverMutation({
+    idempotencyKey: "test-workflow-recovery",
+    recoveryRef: "dvr1_workflow-recovery",
+    recovery: {
+      kind: "periodic-update",
+      planDigest: taskWorkflowPlanDigest,
+    },
+  });
+  assert.equal(migratedFlatCandidate.replayed, true);
+  assert.equal(
+    state.recoveryCalls,
+    recoveryCallsBeforeFlatCandidateReplay,
+    "the unreleased flat 3.1 recovery journal binding must migrate without another Bridge apply",
+  );
 
   const recurrenceApplied = await service.updateRecurrence({
     idempotencyKey: "test-recurrence-apply",
@@ -1037,10 +1470,27 @@ try {
   const recoveryInput = {
     idempotencyKey: "test-recovery-idempotency",
     recoveryRef: "dvr1_test-recovery-ref",
+    recovery: { kind: "developer-api" },
   };
+  const recoveryCallsBeforeLegacy = state.recoveryCalls;
   const recovered = await service.recoverMutation(recoveryInput);
   assert.equal(recovered.status, "already-applied");
-  assert.equal(state.recoveryCalls, 1);
+  assert.equal(state.recoveryCalls, recoveryCallsBeforeLegacy + 1);
+  const legacyRecoveryDb = new DatabaseSync(dbPath);
+  try {
+    legacyRecoveryDb
+      .prepare(
+        `UPDATE operon_mutation_journal
+         SET requested_json = ?
+         WHERE idempotency_key = ?`,
+      )
+      .run(
+        JSON.stringify({ recoveryRef: recoveryInput.recoveryRef }),
+        recoveryInput.idempotencyKey,
+      );
+  } finally {
+    legacyRecoveryDb.close();
+  }
   state.mode = "offline";
   const restartedRecovery = await new OperonService().recoverMutation(
     recoveryInput,
@@ -1048,10 +1498,24 @@ try {
   assert.equal(restartedRecovery.replayed, true);
   assert.equal(
     state.recoveryCalls,
-    1,
+    recoveryCallsBeforeLegacy + 1,
     "completed recovery must replay from the MCP journal after restart",
   );
   state.mode = "normal";
+  config.operonMutationAllowedPathPrefixes = configuredMutationPrefixes;
+  const recoveryCallsBeforePolicyReplay = state.recoveryCalls;
+  await assert.rejects(
+    new OperonService().recoverMutation(recoveryInput),
+    (error) =>
+      error?.code === "FORBIDDEN" &&
+      /before listing, replay, or Bridge apply/u.test(error.message),
+    "a stricter path policy must fence a durable recovery replay sealed under an earlier unscoped policy",
+  );
+  assert.equal(
+    state.recoveryCalls,
+    recoveryCallsBeforePolicyReplay,
+    "the path-policy replay fence must not contact the Bridge",
+  );
 
   const concurrentInput = {
     idempotencyKey: "test-concurrent-idempotency",
@@ -1119,8 +1583,115 @@ try {
     "restart-safe reservation must block a blind Bridge retry",
   );
 
+  const legacyDbPath = path.join(tempRoot, "legacy-v1-cache.sqlite");
+  const legacySnapshotDb = new DatabaseSync(legacyDbPath);
+  try {
+    legacySnapshotDb.exec(`
+      CREATE TABLE operon_task_snapshot (
+        operon_id TEXT PRIMARY KEY,
+        revision TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        source_mtime INTEGER,
+        payload_json TEXT NOT NULL,
+        operon_version TEXT NOT NULL,
+        bridge_version TEXT NOT NULL,
+        snapshot_at INTEGER NOT NULL
+      );
+      CREATE TABLE operon_snapshot_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
+    const snapshotAt = Date.now() - 60_000;
+    const insertTask = legacySnapshotDb.prepare(
+      `INSERT INTO operon_task_snapshot (
+        operon_id, revision, source_path, source_mtime, payload_json,
+        operon_version, bridge_version, snapshot_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const current of tasks) {
+      const legacyTask = {
+        ...current,
+        fields: {
+          status: String(current.fields.status),
+          priority: String(current.fields.priority),
+          taskGallery: "media/a,b.png; media\\c;d.png",
+        },
+      };
+      insertTask.run(
+        legacyTask.operonId,
+        legacyTask.revision,
+        legacyTask.path,
+        legacyTask.sourceMtime,
+        JSON.stringify(legacyTask),
+        "2.4.0",
+        "0.1.0",
+        snapshotAt,
+      );
+    }
+    const legacyStatus = statusPayload();
+    delete legacyStatus.capabilities.periodicCreate;
+    delete legacyStatus.capabilities.periodicUpdate;
+    delete legacyStatus.capabilities.taskWorkflowRecovery;
+    const writeLegacyMeta = legacySnapshotDb.prepare(
+      "INSERT INTO operon_snapshot_meta (key, value) VALUES (?, ?)",
+    );
+    for (const [key, value] of [
+      // Real v1 snapshots predate the explicit schema marker. Its absence is
+      // the durable signal the reader must safely interpret as schema v1.
+      ["snapshot_at", String(snapshotAt)],
+      ["generation", String(state.generation)],
+      ["settings_signature", "fnv1a32:settings"],
+      ["operon_version", "2.4.0"],
+      ["bridge_version", "0.1.0"],
+      ["contract_version", "1"],
+      ["status_json", JSON.stringify(legacyStatus)],
+    ]) {
+      writeLegacyMeta.run(key, value);
+    }
+  } finally {
+    legacySnapshotDb.close();
+  }
+  const originalDbPath = config.obsidianSharedCacheDbPath;
+  config.obsidianSharedCacheDbPath = legacyDbPath;
+  state.mode = "offline";
+  const legacyService = new OperonService();
+  const migratedLegacySnapshot = await legacyService.ensureSnapshot();
+  assert.equal(migratedLegacySnapshot.snapshotSchemaVersion, 1);
+  assert.equal(
+    typeof migratedLegacySnapshot.tasks[0].fields.taskGallery,
+    "string",
+    "v1 compatibility must not invent list boundaries from a lossy delimiter string",
+  );
+  assert.ok(
+    migratedLegacySnapshot.limitations.some((entry) =>
+      entry.includes("Legacy Operon snapshot schema v1"),
+    ),
+    "v1 compatibility must disclose the flattened-list limitation",
+  );
+  tasks[0].fields.taskGallery = ["media/a,b.png", "media\\c;d.png"];
+  state.mode = "normal";
+  const postCallsBeforeV2Refresh = state.postCalls;
+  const refreshedV2Snapshot = await legacyService.ensureSnapshot();
+  assert.equal(refreshedV2Snapshot.snapshotSchemaVersion, 2);
+  assert.ok(
+    state.postCalls > postCallsBeforeV2Refresh,
+    "a matching-generation v1 snapshot must still be replaced by a live v2 refresh",
+  );
+  assert.deepEqual(refreshedV2Snapshot.tasks[0].fields.taskGallery, [
+    "media/a,b.png",
+    "media\\c;d.png",
+  ]);
+  assert.ok(
+    refreshedV2Snapshot.limitations.every(
+      (entry) => !entry.includes("Legacy Operon snapshot schema v1"),
+    ),
+    "the v1 compatibility limitation must disappear after a proven live v2 refresh",
+  );
+  config.obsidianSharedCacheDbPath = originalDbPath;
+
   console.log(
-    "PASS: Operon snapshot refresh, readiness gating, generation reuse, stale fallback, property gating, duplicate/P0 refusal, pagination/validation drift preservation, short-status postflight, durable recovery replay, scoped mutations, and durable/concurrent mutation idempotency",
+    "PASS: Operon snapshot v2/v1 compatibility, typed ordered fields, periodic workflows, task-workflow recovery, readiness gating, postflight, scoped mutations, and durable/concurrent mutation idempotency",
   );
 } finally {
   await new Promise((resolve, reject) =>

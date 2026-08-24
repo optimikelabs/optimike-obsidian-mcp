@@ -2,16 +2,26 @@
 
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
-Date: 2026-08-17
-Reference: official Operon `3.3.2` provisionally admitted by contract, certified Operon `3.2.1`, Operon CLI `1.1.2`, Developer API V1 and `cli-manifest-v1.json`.
+Updated: 2026-08-24
+Current candidate: official Operon `3.5.2`, Operon CLI `1.2.0`, Bridge `0.8.0`, Developer API V1 and the additive task-workflow API. A patched candidate passed the exact live Desktop canary on 2026-08-24. The official artifact remains `compatible-provisional` until upstream PRs `#182`, `#183` and `#184` ship and the stock release passes the same gate.
+
+Operon CLI `1.2.0` adds operator access to Daily/Weekly routing and the typed
+Task Type, Task Image and ordered Task Gallery fields. The MCP does not relay
+the CLI generically: it exposes only the two bounded periodic operations and
+official adoption after their exact grants. Operon owns every opaque sealed
+plan and same-plan recovery. `taskType` and `taskImage` remain scalar,
+`taskGallery` remains an ordered array, and `__taskDataType` is read-only.
+
+## Historical 3.3.2 acceptance
 
 The original 2026-08-01 CLI observations were made against Operon `3.0.1` and
 remain historical evidence. The current MCP adapter certifies `3.2.1` and
 admits `3.3.2` provisionally after contract negotiation. The complete `3.3.2`
 live acceptance run is green with CLI `1.1.2`: Settings grant controls, File
 Task rename refusal, and unscoped transition settlement are fixed upstream.
-Adoption remains unavailable through the official Developer API and is tracked
-in [#140](https://github.com/hasanyilmaz/operon/issues/140). The MCP remains
+Adoption was unavailable through that Developer API generation and was tracked
+in [#140](https://github.com/hasanyilmaz/operon/issues/140). Operon `3.5.2` now
+exposes it through exact additive grants. The MCP remains
 fail-closed and does not fall back to Markdown or private APIs.
 
 ## Decision
@@ -28,16 +38,17 @@ Do not expose a generic CLI passthrough through MCP.
 
 ## Surface comparison
 
-The MCP registers twenty-three governed tools, including six bounded Developer
+The MCP registers twenty-five governed tools, including six bounded Developer
 API reasoning reads. Saved-filter execution is available when the negotiated
 task-workflow contract advertises it
 after an exact `tasks.filter-query` grant, but the official API does not expose
-the saved-filter catalog. Adoption remains an unavailable compatibility tool:
+the saved-filter catalog. Adoption and periodic-note workflows remain
+capability-gated:
 
 - reads: status, configuration, list/get/query, capability-gated saved filters, validation;
 - native reasoning reads: diagnostics, finder, resolve, relationships, context,
   and timer state;
-- mutations: capability-gated adoption, create, update, transition, relationships, recurrence, convert, relocate;
+- mutations: capability-gated adoption, create, Daily/Weekly create, periodic scheduling update, transition, relationships, recurrence, convert, relocate;
 - recovery: list pending official recoveries and recover one exact plan.
 
 The official CLI/Developer API additionally exposes:
@@ -56,20 +67,20 @@ operation with a clear ÉLYSIA use case and a matching proof/guard.
 
 ## Extension ranking
 
-| Candidate | ÉLYSIA utility | Risk | Decision |
-| --- | --- | --- | --- |
-| diagnostics snapshot | High | Low | Implemented read-only through Developer API V1 |
-| task finder / entity resolve | High | Low | Implemented with bounded candidates/results |
-| relationships read | High | Medium | Implemented with one exact root, depth ≤ 3 and result cap |
-| context pack | High | Medium | Implemented with projections, size caps and hydration allowlist |
-| timer read | Medium | Low | Implemented as observation only; no timer control |
-| relationship writes | High | Medium-High | Implemented as complete typed replacement with revision, sealed preview/apply, inverse-edge postflight and recovery |
-| recurrence writes | Medium-High | High | Implemented as scoped typed update; apply requires full mode, postflight and recovery |
-| reminder writes | Medium | High | Defer; keep in CLI until a concrete agent use case and dedicated contract exist |
-| timer control/session | Medium | High | Defer; changes active execution state and needs an explicit human gate |
-| pinned state | Low-Medium | Medium | Defer; presentation/state preference, not a core ÉLYSIA action |
-| delete | Medium | Destructive | Do not expose until a dedicated reversible-trash contract exists |
-| generic CLI command | Unbounded | High | Reject; it bypasses the Bridge contract and makes capability drift invisible |
+| Candidate                    | ÉLYSIA utility | Risk        | Decision                                                                                                            |
+| ---------------------------- | -------------- | ----------- | ------------------------------------------------------------------------------------------------------------------- |
+| diagnostics snapshot         | High           | Low         | Implemented read-only through Developer API V1                                                                      |
+| task finder / entity resolve | High           | Low         | Implemented with bounded candidates/results                                                                         |
+| relationships read           | High           | Medium      | Implemented with one exact root, depth ≤ 3 and result cap                                                           |
+| context pack                 | High           | Medium      | Implemented with projections, size caps and hydration allowlist                                                     |
+| timer read                   | Medium         | Low         | Implemented as observation only; no timer control                                                                   |
+| relationship writes          | High           | Medium-High | Implemented as complete typed replacement with revision, sealed preview/apply, inverse-edge postflight and recovery |
+| recurrence writes            | Medium-High    | High        | Implemented as scoped typed update; apply requires full mode, postflight and recovery                               |
+| reminder writes              | Medium         | High        | Defer; keep in CLI until a concrete agent use case and dedicated contract exist                                     |
+| timer control/session        | Medium         | High        | Defer; changes active execution state and needs an explicit human gate                                              |
+| pinned state                 | Low-Medium     | Medium      | Defer; presentation/state preference, not a core ÉLYSIA action                                                      |
+| delete                       | Medium         | Destructive | Do not expose until a dedicated reversible-trash contract exists                                                    |
+| generic CLI command          | Unbounded      | High        | Reject; it bypasses the Bridge contract and makes capability drift invisible                                        |
 
 ## Current proof boundary
 

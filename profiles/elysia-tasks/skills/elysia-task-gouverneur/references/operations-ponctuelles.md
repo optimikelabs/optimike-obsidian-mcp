@@ -14,11 +14,19 @@ Utiliser `operon_create_task` pour une action qui n’existe pas encore. Résoud
 
 ### Adopter
 
-Le verdict `ADOPT` ne garantit pas l’apply. Utiliser `operon_adopt_task` seulement si le runtime annonce `adopt: true`, puis verrouiller le chemin, le numéro de ligne et le contenu attendu. Sinon retourner une indisponibilité structurée sans modifier le Markdown.
+Le verdict `ADOPT` ne garantit pas l’apply. Utiliser `operon_adopt_task` seulement si le runtime annonce `adopt: true`, puis verrouiller le chemin, le numéro de ligne et le contenu attendu. Operon doit produire et appliquer son plan opaque scellé ; sinon retourner une indisponibilité structurée sans modifier le Markdown.
+
+### Créer dans une Daily ou Weekly Note
+
+Utiliser `operon_create_periodic_task` seulement si `periodicCreate: true`. Fournir le kind Daily/Weekly et, au besoin, une date de routage ; ne jamais imposer `targetPath` ou `parentTask`. Relire la tâche créée et sa note périodique après apply.
+
+### Réaligner le scheduling périodique
+
+Utiliser `operon_update_periodic_scheduling` seulement si `periodicUpdate: true`, avec `expectedRevision`. Operon décide retain, detach ou realign sans déplacement du Markdown source. Un changement de note exige une autre opération explicite.
 
 ### Modifier
 
-Utiliser `operon_update_task` et envoyer seulement les champs intentionnellement modifiés. Préserver les propriétés inconnues.
+Utiliser `operon_update_task` et envoyer seulement les champs intentionnellement modifiés. Préserver les propriétés inconnues. Envoyer `taskGallery` comme tableau ordonné, jamais comme chaîne ; ne jamais écrire `__taskDataType`.
 
 ### Changer d’état
 

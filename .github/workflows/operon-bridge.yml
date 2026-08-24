@@ -3,18 +3,26 @@ name: Operon Bridge
 on:
   push:
     branches:
-      - feat/operon-bridge-integration
+      - main
   pull_request:
     paths:
       - "src/services/operon/**"
       - "src/mcp-server/tools/operonTools/**"
       - "src/mcp-server/tools/runtimeTools/registration.ts"
+      - "src/mcp-server/toolSurfaceRegistry.ts"
+      - "src/services/writePolicy.ts"
       - "plugins/obsidian-operon-bridge/**"
       - "scripts/test-operon-contract.mjs"
       - "scripts/test-operon-service.mjs"
+      - "scripts/smoke-operon-35-live.mjs"
       - "docs/operon-*.md"
       - "docs/adr/ADR-Operon-Bridge.md"
+      - "profiles/elysia-tasks/**"
+      - "README.md"
+      - "README.fr.md"
+      - "CHANGELOG.md"
       - "package.json"
+      - "package-lock.json"
       - ".github/workflows/operon-bridge.yml"
 
 permissions:
@@ -22,7 +30,14 @@ permissions:
 
 jobs:
   mcp:
-    runs-on: ubuntu-latest
+    name: MCP contract and service (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,10 +48,18 @@ jobs:
       - run: npm run test:runtime
       - run: npm run test:operon-contract
       - run: npm run test:operon-service
+      - run: npm run test:docs
       - run: npm pack --dry-run
 
   bridge:
-    runs-on: ubuntu-latest
+    name: Bridge (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: plugins/obsidian-operon-bridge
@@ -52,7 +75,7 @@ jobs:
       - name: Upload installable Bridge artifact
         uses: actions/upload-artifact@v4
         with:
-          name: optimike-operon-bridge
+          name: optimike-operon-bridge-${{ matrix.os }}
           path: |
             plugins/obsidian-operon-bridge/build/main.js
             plugins/obsidian-operon-bridge/build/manifest.json

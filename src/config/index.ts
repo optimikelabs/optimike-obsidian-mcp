@@ -139,7 +139,10 @@ const EnvSchema = z
     OBSIDIAN_STARTUP_BLOCKING: z
       .string()
       .transform((val) => val.toLowerCase() === "true")
-      .default("true"),
+      // A desktop MCP client can legitimately start before Obsidian. Keep the
+      // transport alive by default and let live tools report a temporary
+      // unavailable/degraded state until Local REST becomes reachable.
+      .default("false"),
     MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
     MCP_EXTERNAL_MOVE_ENABLED: z
       .string()

@@ -45,6 +45,8 @@ function testGovernedStateChangesUseMutationBackpressureByDefault() {
     "obsidian_canvas_patch_plan",
     "obsidian_canvas_patch_apply",
     "obsidian_canvas_patch_recover",
+    "operon_create_periodic_task",
+    "operon_update_periodic_scheduling",
   ];
   for (const toolName of governedStateChanges) {
     assert.equal(
@@ -415,6 +417,67 @@ async function testRealMiddlewareResponses() {
     "mutation",
   );
   await admittedSecond.arrayBuffer();
+}
+
+async function testOperonPeriodicToolsUseMutationSaturation() {
+  for (const [index, toolName] of [
+    "operon_create_periodic_task",
+    "operon_update_periodic_scheduling",
+  ].entries()) {
+    const admission = controller({
+      maxInFlight: 2,
+      maxInFlightPerIdentity: 2,
+      mutationMaxInFlight: 1,
+      mutationMaxInFlightPerIdentity: 1,
+      maxQueued: 0,
+      maxQueuedPerIdentity: 0,
+    });
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      attachTestIdentity(c, c.req.header("x-test-identity") ?? "anonymous");
+      await next();
+    });
+    app.use("/mcp", createHttpBackpressureMiddleware(admission));
+    app.post("/mcp", async (c) => {
+      await sleep(Number(c.req.header("x-test-delay-ms") ?? "0"));
+      return c.json({ ok: true });
+    });
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 100 + index,
+      method: "tools/call",
+      params: { name: toolName, arguments: {} },
+    });
+    const request = (identity, delay) =>
+      app.request("http://test/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-test-identity": identity,
+          "x-test-delay-ms": String(delay),
+        },
+        body,
+      });
+
+    const held = request("periodic-a", 60);
+    await sleep(5);
+    assert.equal(admission.getSnapshot().mutationInFlight, 1);
+    const rejected = await request("periodic-b", 0);
+    assert.equal(rejected.status, 503);
+    assert.equal(
+      rejected.headers.get("x-optimike-operation-class"),
+      "mutation",
+      `${toolName} must be classified from its JSON-RPC envelope as a mutation`,
+    );
+    const completed = await held;
+    assert.equal(completed.status, 200);
+    assert.equal(
+      completed.headers.get("x-optimike-operation-class"),
+      "mutation",
+    );
+    await completed.arrayBuffer();
+    assert.equal(admission.getSnapshot().mutationInFlight, 0);
+  }
 }
 
 async function testDownstreamAdmissionErrorIsNotReclassified() {
@@ -901,6 +964,7 @@ await testRoundRobinFairness();
 await testReleaseAfterError();
 await testDeterministicLoad();
 await testRealMiddlewareResponses();
+await testOperonPeriodicToolsUseMutationSaturation();
 await testDownstreamAdmissionErrorIsNotReclassified();
 await testRequestBodyParsingIsBoundedAndAdmitted();
 await testBodyGuardHasBoundedGlobalAdmission();

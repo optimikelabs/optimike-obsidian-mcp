@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-08-24
+
+### Added
+
+- Official Operon task adoption through the exact additive
+  `tasks.adopt.preview` / `tasks.adopt.apply` grant pair. The MCP applies only
+  Operon's opaque sealed plan and recovers only that same plan; it never falls
+  back to a Markdown rewrite.
+- Capability-gated Daily and Weekly Note tools:
+  `operon_create_periodic_task` lets Operon own periodic routing and
+  `operon_update_periodic_scheduling` lets it retain, detach or realign a task
+  without moving the source Markdown.
+- Typed Task Type and Task Image scalar fields plus lossless ordered Task
+  Gallery arrays. The derived `__taskDataType` field remains read-only.
+
+### Changed
+
+- Candidate compatibility target: Operon `3.5.2`, Operon CLI `1.2.0` and
+  Optimike Operon Bridge `0.8.0`. The patched acceptance candidate passed the
+  complete live Desktop canary on 2026-08-24 with exact restoration and no
+  pending recovery. The official Operon artifact remains
+  `compatible-provisional` until upstream PRs `#182`, `#183` and `#184` ship
+  and that stock release passes the same gate.
+- The Operon contract now contains 25 tools. Live `tasks` contains 33 tools and
+  live `full` contains 72; `standard` and `authoring` remain unchanged.
+
+### Security
+
+- Optional task-workflow grants are negotiated independently. A missing or
+  denied adoption/periodic grant disables only its dependent tool and never
+  invalidates established core reads or authorizes a broader fallback.
+
 ## [3.0.1] - 2026-08-23
 
 ### Fixed
