@@ -729,6 +729,18 @@ const OperonIdSchema = z.string().regex(/^[a-z0-9]{7}$/u, {
   message: "Operon ids must contain exactly seven lowercase letters or digits.",
 });
 
+const OperonDateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, {
+  message: "Date keys must use the YYYY-MM-DD format.",
+});
+
+const OperonNormalizedTagsSchema = z.array(z.string()).transform((tags) => [
+  ...new Set(
+    tags
+      .map((tag) => tag.trim().replace(/^#/u, "").trim())
+      .filter(Boolean),
+  ),
+]);
+
 export const OperonAdoptTaskSchema = MutationControlSchema.extend({
   adoption: z.object({
     targetPath: OperonVaultMarkdownPathSchema,
@@ -751,10 +763,10 @@ export const OperonCreatePeriodicTaskSchema = MutationControlSchema.extend({
     .object({
       description: z.string().trim().min(1).max(20_000),
       periodicKind: z.enum(["daily", "weekly"]),
-      routeDate: z.string().trim().min(1).optional(),
+      routeDate: OperonDateKeySchema.optional(),
       statusId: z.string().trim().min(1).optional(),
       priorityId: z.string().trim().min(1).optional(),
-      tags: z.array(z.string()).optional(),
+      tags: OperonNormalizedTagsSchema.optional(),
       fields: OperonMutationFieldsSchema.optional(),
     })
     .superRefine((value, context) => {

@@ -733,11 +733,25 @@ const createPeriodic = OperonCreatePeriodicTaskSchema.parse({
     description: "Daily review",
     periodicKind: "daily",
     routeDate: "2026-08-23",
+    tags: ["work", "#work", " #focus ", "", "#"],
     fields: { taskGallery: ["media/daily,one.png"] },
   },
 });
 assert.equal(createPeriodic.dryRun, true);
 assert.equal(createPeriodic.periodic.periodicKind, "daily");
+assert.deepEqual(createPeriodic.periodic.tags, ["work", "focus"]);
+assert.equal(
+  OperonCreatePeriodicTaskSchema.safeParse({
+    idempotencyKey: "contract-periodic-invalid-route-date",
+    periodic: {
+      description: "Daily review",
+      periodicKind: "daily",
+      routeDate: "tomorrow",
+    },
+  }).success,
+  false,
+  "periodic routeDate must be rejected at the MCP boundary",
+);
 
 const updatePeriodic = OperonUpdatePeriodicSchedulingSchema.parse({
   operonId: "abc1234",
