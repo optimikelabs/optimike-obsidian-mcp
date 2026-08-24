@@ -136,14 +136,16 @@ Task Workflow recovery uses its dedicated Bridge route and flat wire shape:
 ```json
 {
   "idempotencyKey": "recovery-002",
-  "recoveryRef": "twr1_...",
+  "recoveryRef": "dvr1_...",
   "kind": "adopt",
   "planDigest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }
 ```
 
-`kind` is mandatory on the Task Workflow route and prevents the Bridge from
-guessing which workflow owns the reference. The three Task Workflow kinds
+Task Workflow V1 uses Operon's host-owned `dvr1_` recovery-reference family,
+the same opaque family as core Developer API mutations. The dedicated route
+and mandatory `kind` prevent the Bridge from guessing which workflow owns the
+reference. The three Task Workflow kinds
 (`adopt`, `periodic-create`, and `periodic-update`) accept optional `planDigest`.
 It must be an exact lowercase SHA-256 digest and binds the request to the sealed
 receipt/replay. Without it, the Bridge dispatches only if

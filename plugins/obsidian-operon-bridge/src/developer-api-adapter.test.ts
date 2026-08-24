@@ -1899,6 +1899,17 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
   const appliedBeforeInvalidPlans = appliedHandles.length;
   nextWorkflowPlan = {
     ...validPeriodicUpdatePlan,
+    recoveryRef: `twr1_${"c".repeat(48)}`,
+  };
+  const inventedWorkflowRecoveryFamily = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "adp1234", fields: { dateScheduled: "2026-08-27" } },
+    false,
+  );
+  assert.equal(inventedWorkflowRecoveryFamily.code, "failed");
+  assert.equal(inventedWorkflowRecoveryFamily.mutationMayHaveApplied, false);
+  nextWorkflowPlan = {
+    ...validPeriodicUpdatePlan,
     planDigest: workflowDigests["periodic-update"].toUpperCase(),
   };
   const uppercasePlanDigest = await adapter.executeTaskWorkflow(
