@@ -671,6 +671,80 @@ assert.equal(
   "taskGallery must never be reconstructed from a delimiter string",
 );
 
+for (const field of [
+  "taskType",
+  "taskImage",
+  "taskIcon",
+  "taskColor",
+  "note",
+  "location",
+  "dateDue",
+  "dateScheduled",
+  "dateStarted",
+  "datetimeStart",
+  "datetimeEnd",
+  "estimate",
+]) {
+  assert.equal(
+    OperonCreateTaskSchema.safeParse({
+      idempotencyKey: `contract-create-scalar-${field}`,
+      task: {
+        description: "Scalar field contract",
+        source: "inline",
+        fields: { [field]: ["must-not-coerce"] },
+      },
+    }).success,
+    false,
+    `${field} must reject arrays before preview/apply`,
+  );
+  assert.equal(
+    OperonUpdateTaskSchema.safeParse({
+      operonId: "abc1234",
+      expectedRevision: task.revision,
+      idempotencyKey: `contract-update-scalar-${field}`,
+      patch: { fields: { [field]: ["must-not-coerce"] } },
+    }).success,
+    false,
+    `update ${field} must reject arrays before preview/apply`,
+  );
+}
+for (const field of ["taskGallery", "assignees", "contexts", "links"]) {
+  assert.equal(
+    OperonCreateTaskSchema.safeParse({
+      idempotencyKey: `contract-create-list-${field}`,
+      task: {
+        description: "List field contract",
+        source: "inline",
+        fields: { [field]: "must-not-split" },
+      },
+    }).success,
+    false,
+    `${field} must reject scalar coercion before preview/apply`,
+  );
+  assert.equal(
+    OperonUpdateTaskSchema.safeParse({
+      operonId: "abc1234",
+      expectedRevision: task.revision,
+      idempotencyKey: `contract-update-list-${field}`,
+      patch: { fields: { [field]: "must-not-split" } },
+    }).success,
+    false,
+    `update ${field} must reject scalar coercion before preview/apply`,
+  );
+}
+assert.equal(
+  OperonCreatePeriodicTaskSchema.safeParse({
+    idempotencyKey: "contract-periodic-scalar-field-array",
+    periodic: {
+      description: "Periodic scalar field contract",
+      periodicKind: "daily",
+      fields: { taskType: ["must-not-coerce"] },
+    },
+  }).success,
+  false,
+  "periodic creation must apply the scalar field contract before dispatch",
+);
+
 const createGallery256 = Array.from(
   { length: 256 },
   (_, index) => `media/create-${index}.png`,

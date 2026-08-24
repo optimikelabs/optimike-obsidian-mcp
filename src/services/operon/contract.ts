@@ -606,6 +606,58 @@ const OperonMutationFieldValueSchema = z.union([
 
 const OperonMutationFieldsSchema = z.record(OperonMutationFieldValueSchema);
 
+const OPERON_SCALAR_MUTATION_FIELDS = new Set([
+  "status",
+  "priority",
+  "parentTask",
+  "taskType",
+  "taskImage",
+  "taskIcon",
+  "taskColor",
+  "note",
+  "location",
+  "dateDue",
+  "dateScheduled",
+  "dateStarted",
+  "datetimeStart",
+  "datetimeEnd",
+  "estimate",
+]);
+
+const OPERON_LIST_MUTATION_FIELDS = new Set([
+  "taskGallery",
+  "assignees",
+  "contexts",
+  "links",
+  "related",
+  "blocking",
+  "blockedBy",
+]);
+
+function validateKnownMutationFieldTypes(
+  fields:
+    | Record<string, z.infer<typeof OperonMutationFieldValueSchema>>
+    | undefined,
+  context: z.RefinementCtx,
+): void {
+  for (const [field, value] of Object.entries(fields ?? {})) {
+    if (OPERON_SCALAR_MUTATION_FIELDS.has(field) && Array.isArray(value)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fields", field],
+        message: `Managed field '${field}' requires one scalar string value.`,
+      });
+    }
+    if (OPERON_LIST_MUTATION_FIELDS.has(field) && !Array.isArray(value)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fields", field],
+        message: `Managed field '${field}' requires an ordered string array.`,
+      });
+    }
+  }
+}
+
 function validateTaskGallery(
   fields:
     | Record<string, z.infer<typeof OperonMutationFieldValueSchema>>
@@ -770,6 +822,7 @@ export const OperonCreatePeriodicTaskSchema = MutationControlSchema.extend({
       fields: OperonMutationFieldsSchema.optional(),
     })
     .superRefine((value, context) => {
+      validateKnownMutationFieldTypes(value.fields, context);
       validateTaskGallery(value.fields, 256, context);
     })
     .transform((value) => {
@@ -808,6 +861,7 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
       targetPath: OperonVaultMarkdownPathSchema.optional(),
     })
     .superRefine((value, context) => {
+      validateKnownMutationFieldTypes(value.fields, context);
       validateTaskGallery(value.fields, 256, context);
       if (value.source === "file" && value.targetPath) {
         context.addIssue({
@@ -849,6 +903,7 @@ export const OperonUpdatePatchSchema = z
     properties: z.record(OperonRawPropertyValueSchema).optional(),
   })
   .superRefine((value, context) => {
+    validateKnownMutationFieldTypes(value.fields, context);
     validateTaskGallery(value.fields, 512, context);
     const dedicatedFields = new Set([
       "parentTask",
