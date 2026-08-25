@@ -1008,6 +1008,8 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       developerApi: {
         hasMutationCapability: () => true,
         hasTaskWorkflowCapability: () => true,
+        hasRecoverySupport: () => true,
+        hasTaskWorkflowRecoverySupport: () => true,
       },
     };
     const fake = {
@@ -1027,6 +1029,8 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     developerApi: {
       hasMutationCapability: () => false,
       hasTaskWorkflowCapability: () => false,
+      hasRecoverySupport: () => false,
+      hasTaskWorkflowRecoverySupport: () => false,
     },
   };
   const missingCapability = {
@@ -1039,7 +1043,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
         missingCapability,
         "update",
       ),
-    /mutation capability is unavailable: update/u,
+    /mutation or recovery capability is unavailable: update/u,
   );
   assert.throws(
     () =>
@@ -1047,7 +1051,38 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
         missingCapability,
         "periodic-update",
       ),
-    /task-workflow Developer API capability is unavailable: periodic-update/u,
+    /task-workflow Developer API capability or recovery support is unavailable: periodic-update/u,
+  );
+
+  const missingRecoveryRuntime = {
+    version: "99.0.0",
+    compatible: true,
+    developerApi: {
+      hasMutationCapability: () => true,
+      hasTaskWorkflowCapability: () => true,
+      hasRecoverySupport: () => false,
+      hasTaskWorkflowRecoverySupport: () => false,
+    },
+  };
+  const missingRecovery = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => missingRecoveryRuntime,
+  };
+  assert.throws(
+    () =>
+      BridgePlugin.prototype.requireMutationRuntime.call(
+        missingRecovery,
+        "update",
+      ),
+    /mutation or recovery capability is unavailable: update/u,
+  );
+  assert.throws(
+    () =>
+      BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+        missingRecovery,
+        "periodic-create",
+      ),
+    /task-workflow Developer API capability or recovery support is unavailable: periodic-create/u,
   );
 
   const legacyRuntime = {
@@ -1102,6 +1137,21 @@ test("future contract-compatible Operon releases project read-write capabilities
   assert.equal(invalidCapabilities.update, false);
   assert.equal(invalidCapabilities.adopt, false);
   assert.equal(invalidCapabilities.recovery, false);
+
+  const noRecoveryAdapter = {
+    ...adapter,
+    hasRecoverySupport: () => false,
+    hasTaskWorkflowRecoverySupport: () => false,
+  };
+  const noRecoveryCapabilities = BridgePlugin.prototype.capabilities.call(
+    fake,
+    { ...runtime, developerApi: noRecoveryAdapter },
+    true,
+  );
+  assert.equal(noRecoveryCapabilities.update, false);
+  assert.equal(noRecoveryCapabilities.adopt, false);
+  assert.equal(noRecoveryCapabilities.periodicCreate, false);
+  assert.equal(noRecoveryCapabilities.periodicUpdate, false);
 });
 
 test("normalization and filtering preserve ordered list fields without scalar coercion", () => {
