@@ -1360,46 +1360,67 @@ export class OperonService {
     }
   }
 
-  private async fetchLiveStatus(): Promise<OperonStatus> {
+  private async fetchBridgeStatus(
+    operation: string,
+  ): Promise<OperonStatus> {
     const response = await this.getClient().get(`${BRIDGE_PREFIX}/status`);
     const parsed = OperonStatusSchema.safeParse(response.data);
     if (!parsed.success) {
       throw new McpError(
         BaseErrorCode.PARSING_ERROR,
         "Operon Bridge /status returned an incompatible payload.",
-        this.requestContext("fetchLiveOperonStatus", {
+        this.requestContext(operation, {
           issues: parsed.error.issues,
         }),
       );
     }
+    return parsed.data;
+  }
+
+  private async fetchLiveStatus(): Promise<OperonStatus> {
+    const status = await this.fetchBridgeStatus("fetchLiveOperonStatus");
     if (
-      !parsed.data.ok ||
-      !parsed.data.operon.compatible ||
-      !parsed.data.index.ready
+      !status.ok ||
+      !status.operon.compatible ||
+      !status.index.ready
     ) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
-        `Operon Bridge is not ready (present=${parsed.data.operon.present}, version=${parsed.data.operon.version ?? "unknown"}, compatible=${parsed.data.operon.compatible}).`,
+        `Operon Bridge is not ready (present=${status.operon.present}, version=${status.operon.version ?? "unknown"}, compatible=${status.operon.compatible}).`,
         this.requestContext("fetchLiveOperonStatus"),
       );
     }
-    if (!parsed.data.capabilities.list || !parsed.data.capabilities.query) {
+    if (!status.capabilities.list || !status.capabilities.query) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
         "Operon Bridge does not expose the required read capabilities.",
         this.requestContext("fetchLiveOperonStatus"),
       );
     }
-    if (parsed.data.index.duplicateConflictCount > 0) {
+    if (status.index.duplicateConflictCount > 0) {
       throw new McpError(
         BaseErrorCode.CONFLICT,
-        `Operon reports ${parsed.data.index.duplicateConflictCount} duplicate operonId conflict(s).`,
+        `Operon reports ${status.index.duplicateConflictCount} duplicate operonId conflict(s).`,
         this.requestContext("fetchLiveOperonStatus", {
-          duplicateConflictCount: parsed.data.index.duplicateConflictCount,
+          duplicateConflictCount: status.index.duplicateConflictCount,
         }),
       );
     }
-    return parsed.data;
+    return status;
+  }
+
+  private async fetchLiveRecoveryStatus(): Promise<OperonStatus> {
+    const status = await this.fetchBridgeStatus(
+      "fetchLiveOperonRecoveryStatus",
+    );
+    if (!status.operon.present || !status.operon.compatible) {
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        `Operon recovery is unavailable (present=${status.operon.present}, version=${status.operon.version ?? "unknown"}, compatible=${status.operon.compatible}).`,
+        this.requestContext("fetchLiveOperonRecoveryStatus"),
+      );
+    }
+    return status;
   }
 
   private async fetchLiveValidation(): Promise<OperonValidation> {
@@ -2120,7 +2141,7 @@ export class OperonService {
         this.requestContext("operonPendingRecoveries"),
       );
     }
-    const status = await this.fetchLiveStatus();
+    const status = await this.fetchLiveRecoveryStatus();
     if (params.kind && !status.capabilities.taskWorkflowRecovery) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -2267,7 +2288,7 @@ export class OperonService {
         }),
       );
     }
-    const status = await this.fetchLiveStatus();
+    const status = await this.fetchLiveRecoveryStatus();
     const taskWorkflow = params.recovery.kind !== "developer-api";
     if (
       taskWorkflow

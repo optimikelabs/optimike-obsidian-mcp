@@ -1351,6 +1351,26 @@ try {
     "every pending recovery must expose the exact required recover kind without caller inference",
   );
 
+  state.mode = "initializing";
+  const unsettledRecoveries = await service.pendingRecoveries({
+    kind: "periodic-update",
+  });
+  assert.equal(
+    unsettledRecoveries.recoveries[0].kind,
+    "periodic-update",
+    "pending recovery must remain reachable while the live index is unsettled",
+  );
+  const unsettledRecovered = await service.recoverMutation({
+    idempotencyKey: "test-unsettled-workflow-recovery",
+    recoveryRef: "dvr1_unsettled-workflow-recovery",
+    recovery: {
+      kind: "periodic-update",
+      planDigest: taskWorkflowPlanDigest,
+    },
+  });
+  assert.equal(unsettledRecovered.status, "already-applied");
+  state.mode = "normal";
+
   const workflowRecovered = await service.recoverMutation({
     idempotencyKey: "test-workflow-recovery",
     recoveryRef: "dvr1_workflow-recovery",
