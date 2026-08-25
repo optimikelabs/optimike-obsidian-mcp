@@ -1096,6 +1096,57 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
+  private async recoveryStatusPayload(): Promise<Record<string, unknown>> {
+    const runtime = this.getOperonRuntime();
+    const loadedEngine = runtime
+      ? null
+      : resolveTaskEnginePlugin((this.app as any).plugins);
+    const loadedVersion = String(
+      (loadedEngine?.plugin as { manifest?: { version?: unknown } } | undefined)
+        ?.manifest?.version ?? "",
+    ).trim();
+    if (
+      runtime?.developerApi &&
+      runtime.compatible &&
+      this.settings.mutationsEnabled
+    ) {
+      await runtime.developerApi.refreshRecovery();
+      for (const kind of [
+        "adopt",
+        "periodic-create",
+        "periodic-update",
+      ] as const) {
+        await runtime.developerApi.refreshTaskWorkflowRecovery(kind);
+      }
+    }
+    const contractInvalid =
+      runtime?.developerApi?.negotiatedContractState === "invalid";
+    const capabilities = this.capabilities(runtime, false);
+    const compatible = Boolean(runtime?.compatible && !contractInvalid);
+    return {
+      ok: Boolean(
+        compatible &&
+          (capabilities.recovery || capabilities.taskWorkflowRecovery),
+      ),
+      contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+      bridge: {
+        id: this.manifest.id,
+        version: this.manifest.version,
+      },
+      operon: {
+        present: Boolean(runtime || loadedEngine),
+        version: runtime?.version ?? (loadedVersion || null),
+        compatible,
+      },
+      capabilities: {
+        recovery: capabilities.recovery,
+        taskWorkflowRecovery: capabilities.taskWorkflowRecovery,
+      },
+      source: "operon-runtime",
+      stale: false,
+    };
+  }
+
   private requireRuntime(): OperonRuntime {
     const runtime = this.getOperonRuntime();
     if (!runtime) {
@@ -3467,6 +3518,16 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         sendJson(res, 503, errorPayload(error, "operon_unavailable"));
       }
     });
+
+    api
+      .addRoute(`${REST_PREFIX}/recovery-status`)
+      .get(async (_req: any, res: any) => {
+        try {
+          sendJson(res, 200, await this.recoveryStatusPayload());
+        } catch (error) {
+          sendJson(res, 503, errorPayload(error, "recovery_unavailable"));
+        }
+      });
 
     api
       .addRoute(`${REST_PREFIX}/configuration`)

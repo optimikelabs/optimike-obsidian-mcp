@@ -15,6 +15,7 @@ import {
   OperonConfigurationSchema,
   OperonQuerySchema,
   OperonStatusSchema,
+  OperonRecoveryStatusSchema,
   OperonTaskSchema,
   OperonValidationSchema,
   queryOperonSnapshot,
@@ -47,6 +48,7 @@ import {
   type OperonQuery,
   type OperonSnapshotEnvelope,
   type OperonStatus,
+  type OperonRecoveryStatus,
   type OperonTask,
   type OperonTaskPage,
   type OperonValidation,
@@ -1409,10 +1411,21 @@ export class OperonService {
     return status;
   }
 
-  private async fetchLiveRecoveryStatus(): Promise<OperonStatus> {
-    const status = await this.fetchBridgeStatus(
-      "fetchLiveOperonRecoveryStatus",
+  private async fetchLiveRecoveryStatus(): Promise<OperonRecoveryStatus> {
+    const response = await this.getClient().get(
+      `${BRIDGE_PREFIX}/recovery-status`,
     );
+    const parsed = OperonRecoveryStatusSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        "Operon Bridge /recovery-status returned an incompatible payload.",
+        this.requestContext("fetchLiveOperonRecoveryStatus", {
+          issues: parsed.error.issues,
+        }),
+      );
+    }
+    const status = parsed.data;
     if (!status.operon.present || !status.operon.compatible) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,

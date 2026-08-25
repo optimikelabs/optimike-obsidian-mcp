@@ -24,7 +24,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 - Official Operon `3.x` with the negotiated V1 boundary: typed create/update/transition/relationship/recurrence/convert/relocate through Developer API V1, plus saved-filter execution, adoption and Daily/Weekly workflows through the additive task-workflow API when their exact grants are active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
 - Kairélys `2.5.1` through `2.5.3` and `2.6.1` through `2.6.3` with Public API v1: read-write
 
-`GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future non-denied Operon version is admitted provisionally when its Developer API V1 accessor is present; Markdown similarity is irrelevant. Live use remains independently gated by successful negotiation, `developerApi`, top-level `ok`, `index.ready`, and the exact advertised capability.
+`GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future non-denied Operon version is admitted provisionally when its Developer API V1 accessor is present; Markdown similarity is irrelevant. Reads and new writes remain independently gated by successful negotiation, `developerApi`, top-level `ok`, `index.ready`, and the exact advertised capability. Recovery is the deliberate exception: `GET /recovery-status` negotiates only exact core and task-workflow recovery sessions without awaiting health, catalog or task-index reads, allowing same-plan recovery when those surfaces are degraded or hung.
 
 The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The `3.5.3` / CLI `1.2.0` / Bridge `0.8.1` candidate adds official adoption, periodic-note routing and typed task media fields. Product-version certification remains explicit, but valid mutations are admitted by negotiated contract, exact capabilities, schemas, live health, settled index and recovery support rather than a second version allowlist. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
 
@@ -46,6 +46,7 @@ The `revision` covers the normalized projection and source mtime. Every existing
 ## Read routes
 
 - `GET /status`
+- `GET /recovery-status` (recovery-only preflight; no live-index read)
 - `GET /configuration`
 - `GET /diagnostics`
 - `GET /tasks?cursor=0&limit=100&includeProperties=false`

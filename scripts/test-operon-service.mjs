@@ -279,6 +279,35 @@ const server = http.createServer((request, response) => {
     return;
   }
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  if (
+    request.method === "GET" &&
+    url.pathname.endsWith("/recovery-status")
+  ) {
+    const status = statusPayload();
+    sendJson(response, 200, {
+      ok:
+        status.operon.compatible &&
+        (status.capabilities.recovery ||
+          status.capabilities.taskWorkflowRecovery),
+      contractVersion: "1",
+      bridge: {
+        id: status.bridge.id,
+        version: status.bridge.version,
+      },
+      operon: {
+        present: status.operon.present,
+        version: status.operon.version,
+        compatible: status.operon.compatible,
+      },
+      capabilities: {
+        recovery: status.capabilities.recovery,
+        taskWorkflowRecovery: status.capabilities.taskWorkflowRecovery,
+      },
+      source: "operon-runtime",
+      stale: false,
+    });
+    return;
+  }
   if (request.method === "GET" && url.pathname.endsWith("/status")) {
     sendJson(response, 200, statusPayload());
     return;

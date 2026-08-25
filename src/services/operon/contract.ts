@@ -308,6 +308,30 @@ export const OperonStatusSchema = z.object({
 
 export type OperonStatus = z.infer<typeof OperonStatusSchema>;
 
+export const OperonRecoveryStatusSchema = z.object({
+  ok: z.boolean(),
+  contractVersion: z.literal(OPERON_CONTRACT_VERSION),
+  bridge: z.object({
+    id: z.string(),
+    version: z.string(),
+  }),
+  operon: z.object({
+    present: z.boolean(),
+    version: z.string().nullable(),
+    compatible: z.boolean(),
+  }),
+  capabilities: z.object({
+    recovery: z.boolean(),
+    taskWorkflowRecovery: z.boolean(),
+  }),
+  source: z.literal("operon-runtime"),
+  stale: z.literal(false),
+});
+
+export type OperonRecoveryStatus = z.infer<
+  typeof OperonRecoveryStatusSchema
+>;
+
 export const OperonBridgePageSchema = z.object({
   ok: z.literal(true),
   contractVersion: z.literal(OPERON_CONTRACT_VERSION),

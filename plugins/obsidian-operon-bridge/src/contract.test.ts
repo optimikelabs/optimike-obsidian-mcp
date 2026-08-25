@@ -1298,6 +1298,25 @@ test("future contract-compatible Operon releases project read-write capabilities
     1,
     "a settled status refresh already negotiated recovery with the full contract",
   );
+  const recoveryStatus = await BridgePlugin.prototype.recoveryStatusPayload.call(
+    {
+      getOperonRuntime: () => runtime,
+      app: { plugins: {} },
+      manifest: { id: "optimike-operon-bridge", version: "0.8.1" },
+      settings: { mutationsEnabled: true },
+      capabilities: BridgePlugin.prototype.capabilities,
+    },
+  );
+  assert.equal(recoveryStatus.ok, true);
+  assert.deepEqual(recoveryStatus.capabilities, {
+    recovery: true,
+    taskWorkflowRecovery: true,
+  });
+  assert.equal(
+    recoveryRefreshes,
+    2,
+    "the recovery-only status must negotiate without invoking indexState",
+  );
 
   const disabledRecoveryCapabilities = BridgePlugin.prototype.capabilities.call(
     { settings: { mutationsEnabled: false } },
