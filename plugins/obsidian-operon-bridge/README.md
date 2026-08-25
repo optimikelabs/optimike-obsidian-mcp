@@ -37,11 +37,14 @@ Project Serial transition edge. Uncertain outcomes
 remain fail-closed; the Bridge never retries blindly or falls back to
 Markdown/private APIs.
 
-Bridge `0.8.1` supports Operon `3.5.3`'s separate
+Bridge `0.8.2` supports Operon `3.5.3`'s separate
 task-workflow Developer API sessions. Adoption, daily/weekly periodic-note
-creation, and periodic-note-aware updates each negotiate their own exact grant;
+creation, and periodic-note-aware updates each negotiate their own exact grant
+on first use, even when the last status snapshot reported the capability cold;
 a pending or malformed optional grant cannot revoke the established core read
-or mutation sessions. Apply receives the exact opaque plan handle returned by
+or mutation sessions. Saved-filter execution follows the same operation-scoped
+rule for `tasks.filter-query`: ordinary status/index refreshes request no
+optional grant. Apply receives the exact opaque plan handle returned by
 preview, and recovery accepts only the matching durable `recoveryRef` and
 workflow kind. The Bridge converts its public one-based adoption line to the
 official zero-based locator exactly once. `taskType` and `taskImage` remain
@@ -96,7 +99,11 @@ Prefix: `/extensions/optimike-operon-bridge/v1`
 - `GET /task-workflows/pending-recoveries`
 - `POST /task-workflows/recover`
 
-All routes inherit Local REST API authentication and local TLS settings. `/recovery-status` negotiates only exact recovery capabilities and never waits for health, catalog or task-index reads, so an uncertain operation remains recoverable while `/status` is degraded. Saved filters run through Operon's native filter evaluator with an exact caller-supplied `filterSetId`; the official task-workflow API does not list saved filters. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected before later payload validation. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine` on engines that advertise it. Periodic creation requires `periodicKind: daily | weekly` and may include an exact ISO `routeDate`; periodic updates keep the existing task identity and let Operon seal the retain/detach/realign routing decision. Dry-run is the default.
+All routes inherit Local REST API authentication and local TLS settings. `/recovery-status` negotiates only exact recovery capabilities and never waits for health, catalog or task-index reads, so an uncertain operation remains recoverable while `/status` is degraded. Saved filters run through Operon's native filter evaluator with an exact caller-supplied `filterSetId`; the official task-workflow API does not list saved filters. A cold status capability is advisory: the first exact saved-filter call negotiates only `tasks.filter-query`. Mutations require idempotency; an idempotency key is bound to one canonical request and conflicting reuse is rejected before later payload validation. No periodic-create reservation is persisted until its exact grant negotiation succeeds, so approval can be followed by a safe same-key retry. Existing-task mutations require the live revision; in-place adoption instead requires an exact one-based line plus `expectedLine` on engines that advertise it. Periodic creation requires `periodicKind: daily | weekly` and may include an exact ISO `routeDate`; periodic updates keep the existing task identity and let Operon seal the retain/detach/realign routing decision. Dry-run is the default.
+
+Ordinary `/status` calls, including degraded startup polls, request no additive
+workflow, saved-filter, or recovery grant. `/recovery-status` is a separate
+operator surface and may negotiate the recovery contracts it reports.
 
 Mutation paths are strict, exact vault-relative paths. The MCP and Bridge reject leading or trailing whitespace, backslashes, absolute paths, empty segments, traversal, and non-Markdown `targetPath` values; they never trim or rewrite an invalid destination into a valid one.
 

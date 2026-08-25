@@ -274,6 +274,7 @@ export const OperonStatusSchema = z.object({
     id: z.string(),
     version: z.string(),
     mode: z.enum(["read-only", "read-write"]),
+    mutationsEnabled: z.boolean().optional(),
   }),
   operon: z.object({
     present: z.boolean(),

@@ -78,7 +78,8 @@ periodic scheduling with a configured modified-time plugin, same-source graph
 ordering, durable concurrent replay, zero validation violations, zero pending
 recoveries and exact restoration. This remains historical evidence for the
 unpublished patched candidate; Operon `3.5.3` ships superseding implementations,
-passed the same complete gate with Bridge `0.8.1`, and is the current released
+passed the same complete gate with Bridge `0.8.1`; Bridge `0.8.2` retains that
+contract and adds exact first-use workflow negotiation as the current released
 official validation target.
 
 Still outside this local acceptance proof:

@@ -30,7 +30,7 @@ const EXPECTED_OPERON_VERSION = (
   process.env.OPERON_35_CANARY_EXPECTED_OPERON_VERSION ?? "3.5.3"
 ).trim();
 const EXPECTED_BRIDGE_VERSION = (
-  process.env.OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.8.1"
+  process.env.OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.8.2"
 ).trim();
 const EXPECTED_BASE_URL = "http://127.0.0.1:27233";
 const FIXTURE_PATH = "Canary/Operon-3.5-Live-Canary.md";
@@ -776,7 +776,7 @@ function sameOptionalFileState(left, right) {
   );
 }
 
-function assertLiveStatus(status) {
+function assertLiveStatus(status, requireTaskWorkflowCapabilities = true) {
   assert.equal(status?.ok, true, "Operon status is not healthy.");
   assert.equal(status?.source, "operon-runtime");
   assert.equal(status?.stale, false);
@@ -789,20 +789,25 @@ function assertLiveStatus(status) {
   assert.equal(Number.isInteger(status?.index?.generation), true);
   assert.ok(status.index.generation > 0);
   assert.equal(status?.index?.duplicateConflictCount, 0);
-  for (const capability of [
+  const requiredCapabilities = [
     "status",
     "configuration",
     "list",
     "get",
     "query",
     "validate",
-    "adopt",
     "create",
     "update",
-    "periodicCreate",
-    "periodicUpdate",
-    "taskWorkflowRecovery",
-  ]) {
+  ];
+  if (requireTaskWorkflowCapabilities) {
+    requiredCapabilities.push(
+      "adopt",
+      "periodicCreate",
+      "periodicUpdate",
+      "taskWorkflowRecovery",
+    );
+  }
+  for (const capability of requiredCapabilities) {
     assert.equal(
       status?.capabilities?.[capability],
       true,
@@ -919,6 +924,7 @@ async function main() {
     startupOrder: { enabled: startupOrder, degradedObserved: false },
     routeDates: dates,
     runtime: null,
+    firstUseNegotiation: {},
     validation: {},
     frontmatterDateManager: {},
     adoption: {},
@@ -1135,7 +1141,10 @@ async function main() {
       if (!observed.isError) {
         try {
           const liveStatus = observed.payload?.live;
-          assertLiveStatus(liveStatus);
+          // A cold status must prove the core runtime only. Optional workflows
+          // are deliberately negotiated by the exact first operation rather
+          // than by this readiness poll.
+          assertLiveStatus(liveStatus, false);
           return { status: liveStatus, attempts };
         } catch {
           // The same stdio connection remains alive while the live runtime settles.
@@ -1518,12 +1527,26 @@ async function main() {
           "periodicCreate",
           "periodicUpdate",
           "taskWorkflowRecovery",
+          "filterQuery",
         ].map((name) => [name, live.status.capabilities[name]]),
       ),
     };
+    for (const capability of [
+      "adopt",
+      "periodicCreate",
+      "periodicUpdate",
+      "taskWorkflowRecovery",
+      "filterQuery",
+    ]) {
+      assert.equal(
+        live.status.capabilities[capability],
+        false,
+        `Optional capability must remain cold before its exact first operation: ${capability}.`,
+      );
+    }
+    evidence.firstUseNegotiation.initiallyCold = true;
 
     await validateZero("before");
-    await pendingRecoveriesZero("before");
 
     const collisionMarkers = [
       ...new Set([
@@ -1704,6 +1727,15 @@ async function main() {
       "adoption apply",
       "applied",
     );
+    const postAdoptionStatus = await call("operon_status", {
+      forceRefresh: true,
+    });
+    assertRefreshedSnapshotStatus(postAdoptionStatus);
+    assert.equal(postAdoptionStatus.snapshot.capabilities.adopt, true);
+    assert.equal(postAdoptionStatus.snapshot.capabilities.periodicCreate, false);
+    assert.equal(postAdoptionStatus.snapshot.capabilities.periodicUpdate, false);
+    assert.equal(postAdoptionStatus.snapshot.capabilities.filterQuery, false);
+    evidence.firstUseNegotiation.adoptionOnly = true;
     evidence.nativeProofs.push(
       assertNativeMutationProof(adopted, "adoption apply"),
     );
@@ -1851,6 +1883,20 @@ async function main() {
       dates.daily,
       "Daily periodic create",
     );
+    const postPeriodicCreateStatus = await call("operon_status", {
+      forceRefresh: true,
+    });
+    assertRefreshedSnapshotStatus(postPeriodicCreateStatus);
+    assert.equal(
+      postPeriodicCreateStatus.snapshot.capabilities.periodicCreate,
+      true,
+    );
+    assert.equal(
+      postPeriodicCreateStatus.snapshot.capabilities.periodicUpdate,
+      false,
+    );
+    assert.equal(postPeriodicCreateStatus.snapshot.capabilities.filterQuery, false);
+    evidence.firstUseNegotiation.periodicCreateOnly = true;
     const weekly = await periodicCreateViaMcp(
       "weekly",
       dates.weekly,
@@ -1864,8 +1910,8 @@ async function main() {
     assertRefreshedSnapshotStatus(schedulingCapabilityStatus);
     assert.equal(
       schedulingCapabilityStatus.snapshot.capabilities.periodicUpdate,
-      true,
-      "The created periodic fixture cannot be scheduled because the live projection does not explicitly expose periodicUpdate: true.",
+      false,
+      "Periodic-update must remain cold until its own exact first operation.",
     );
     const beforeSchedule = await stableTask(daily.operonId);
     assert.deepEqual(
@@ -1906,6 +1952,16 @@ async function main() {
     );
     assert.equal(schedulePreview.plan?.mutationKind, "task.update");
     assert.equal(schedulePreview.plan?.planDigest, schedulePreview.planDigest);
+    const postPeriodicUpdateStatus = await call("operon_status", {
+      forceRefresh: true,
+    });
+    assertRefreshedSnapshotStatus(postPeriodicUpdateStatus);
+    assert.equal(
+      postPeriodicUpdateStatus.snapshot.capabilities.periodicUpdate,
+      true,
+    );
+    assert.equal(postPeriodicUpdateStatus.snapshot.capabilities.filterQuery, false);
+    evidence.firstUseNegotiation.periodicUpdateOnly = true;
     trackPlannedTaskSourceArtifacts(
       schedulePreview.plan,
       "Periodic scheduling set preview",

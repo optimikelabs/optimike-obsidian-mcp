@@ -162,6 +162,7 @@ test("continuous snapshot churn fails not-ready before native dispatch", async (
   };
   const fake: Record<string, any> = {
     mutationResults: { get: () => undefined },
+    activeMutationReservationResponse: async () => null,
     mutationPreflight: async () => ({ kind: "continue" }),
     requireMutationRuntime: () => runtime,
     requireRuntime: () => runtime,
@@ -222,6 +223,7 @@ test("lookup and revision validation happen before durable reservation", async (
         : { operonId: "task-1", revision: "revision-1" };
     const fake = {
       mutationResults: { get: () => undefined },
+      activeMutationReservationResponse: async () => null,
       mutationPreflight: async () => {
         reservationCalls += 1;
         return { kind: "continue" };
@@ -253,6 +255,176 @@ test("lookup and revision validation happen before durable reservation", async (
   }
 });
 
+test("periodic-create negotiates its exact grant before durable reservation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executePeriodicCreateMutation = BridgePlugin.prototype
+    .executePeriodicCreateMutation as Function;
+  let grantAvailable = false;
+  let reservationCalls = 0;
+  let nativeDispatches = 0;
+  const runtime = {
+    developerApi: {
+      executeTaskWorkflow: async () => {
+        nativeDispatches += 1;
+        return { status: "planned" };
+      },
+    },
+  };
+  const fake: Record<string, any> = {
+    mutationResults: { get: () => undefined },
+    activeMutationReservationResponse: async () => null,
+    mutationOperationId: () => "periodic-operation",
+    requireTaskWorkflowRuntime: async () => {
+      if (!grantAvailable) throw new Error("exact grant pending");
+      return runtime;
+    },
+    mutationPreflight: async () => {
+      reservationCalls += 1;
+      return { kind: "continue" };
+    },
+    taskWorkflowMutationPayload: () => ({
+      httpStatus: 200,
+      payload: { status: "planned" },
+    }),
+  };
+  const request = {
+    idempotencyKey: "periodic-first-use",
+    dryRun: true,
+    periodic: {
+      description: "Cold exact grant",
+      periodicKind: "daily",
+    },
+  };
+
+  await assert.rejects(
+    () => executePeriodicCreateMutation.call(fake, request),
+    /exact grant pending/u,
+  );
+  assert.equal(
+    reservationCalls,
+    0,
+    "a pending consent must not create a durable idempotency reservation",
+  );
+  assert.equal(nativeDispatches, 0);
+
+  grantAvailable = true;
+  const result = await executePeriodicCreateMutation.call(fake, request);
+  assert.equal(result.httpStatus, 200);
+  assert.equal(reservationCalls, 1);
+  assert.equal(nativeDispatches, 1);
+});
+
+test("a pending exact workflow grant is marked as a proven pre-dispatch failure", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const requireTaskWorkflowRuntime = BridgePlugin.prototype
+    .requireTaskWorkflowRuntime as Function;
+  const sendMutationFailure = BridgePlugin.prototype
+    .sendMutationFailure as Function;
+  const runtime = {
+    compatible: true,
+    indexer: { getAllTasks: () => [] },
+    developerApi: {
+      hasTaskWorkflowCapability: () => false,
+      hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflow: async () => false,
+    },
+  };
+  const guard = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => runtime,
+    requireSettledMutationIndex: async () => undefined,
+  };
+  let pendingError: unknown;
+  try {
+    await requireTaskWorkflowRuntime.call(guard, "periodic-create");
+  } catch (error) {
+    pendingError = error;
+  }
+  assert.ok(pendingError instanceof Error);
+
+  let statusCode = 0;
+  let payload: Record<string, any> | undefined;
+  const response = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(value: Record<string, any>) {
+      payload = value;
+    },
+  };
+  await sendMutationFailure.call(
+    {
+      failReservedMutation: () => {
+        throw new Error("a pre-dispatch grant failure must not touch another reservation");
+      },
+    },
+    response,
+    {},
+    pendingError,
+    "mutation_unavailable",
+  );
+  assert.equal(statusCode, 503);
+  assert.equal(payload?.error?.code, "task_workflow_capability_unavailable");
+  assert.equal(payload?.retryable, true);
+  assert.equal(payload?.mutationMayHaveApplied, false);
+});
+
+test("an active periodic-create reservation is joined before grant negotiation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executePeriodicCreateMutation = BridgePlugin.prototype
+    .executePeriodicCreateMutation as Function;
+  const activeMutationReservationResponse = BridgePlugin.prototype
+    .activeMutationReservationResponse as Function;
+  const requested = {
+    description: "Concurrent periodic create",
+    periodicKind: "daily",
+  };
+  const signature = JSON.stringify({
+    capability: "periodic-create",
+    dryRun: true,
+    requested,
+  });
+  const activePayload = {
+    ok: true,
+    contractVersion: "1",
+    operationId: "active-operation",
+    idempotencyKey: "active-periodic-key",
+    status: "planned",
+    before: null,
+    requested,
+    after: null,
+    source: "operon-live",
+    stale: false,
+  };
+  let grantNegotiations = 0;
+  const fake: Record<string, any> = {
+    mutationResults: { get: () => undefined },
+    mutationReservations: {
+      get: () => ({
+        signature,
+        promise: Promise.resolve(activePayload),
+      }),
+    },
+    mutationOperationId: () => "unused-operation",
+    mutationHttpStatus: () => 200,
+    requireTaskWorkflowRuntime: async () => {
+      grantNegotiations += 1;
+      throw new Error("must not negotiate while an operation is active");
+    },
+  };
+  fake.activeMutationReservationResponse = (...args: unknown[]) =>
+    activeMutationReservationResponse.call(fake, ...args);
+
+  const result = await executePeriodicCreateMutation.call(fake, {
+    idempotencyKey: "active-periodic-key",
+    dryRun: true,
+    periodic: requested,
+  });
+  assert.equal(result.payload.operationId, "active-operation");
+  assert.equal(grantNegotiations, 0);
+});
+
 test("periodic update validates lookup and revision before durable reservation", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
   const executePeriodicUpdateMutation = BridgePlugin.prototype
@@ -267,6 +439,7 @@ test("periodic update validates lookup and revision before durable reservation",
         : { operonId: "task-1", revision: "revision-1" };
     const fake = {
       mutationResults: { get: () => undefined },
+      activeMutationReservationResponse: async () => null,
       mutationPreflight: async () => {
         reservationCalls += 1;
         return { kind: "continue" };
@@ -300,6 +473,7 @@ test("legacy adoption validates the source file before durable reservation", asy
   let reservationCalls = 0;
   const fake = {
     mutationResults: { get: () => undefined },
+    activeMutationReservationResponse: async () => null,
     mutationPreflight: async () => {
       reservationCalls += 1;
       return { kind: "continue" };
@@ -1080,6 +1254,55 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     coldRuntime,
   );
 
+  let exactWorkflowNegotiation: string | null = null;
+  let workflowNegotiated = false;
+  const workflowColdRuntime = {
+    version: "99.0.0",
+    compatible: true,
+    indexer: { getAllTasks: () => [] },
+    developerApi: {
+      hasTaskWorkflowCapability: () => workflowNegotiated,
+      hasTaskWorkflowRecoverySupport: () => workflowNegotiated,
+      refreshTaskWorkflow: async (kind: string) => {
+        exactWorkflowNegotiation = kind;
+        workflowNegotiated = true;
+        return true;
+      },
+    },
+  };
+  const workflowCold = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => workflowColdRuntime,
+    indexState: async () => ({
+      ready: true,
+      diagnostics: { taskCount: 0 },
+    }),
+    runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+    isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+    requireSettledMutationIndex:
+      BridgePlugin.prototype.requireSettledMutationIndex,
+  };
+  assert.equal(
+    await BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+      workflowCold,
+      "periodic-create",
+    ),
+    workflowColdRuntime,
+    "the first exact task-workflow operation must negotiate its additive grant",
+  );
+  assert.equal(exactWorkflowNegotiation, "periodic-create");
+  workflowNegotiated = false;
+  exactWorkflowNegotiation = null;
+  assert.equal(
+    await BridgePlugin.prototype.requireMutationRuntime.call(
+      workflowCold,
+      "adopt",
+    ),
+    workflowColdRuntime,
+    "adoption must negotiate only its exact task-workflow grant on first use",
+  );
+  assert.equal(exactWorkflowNegotiation, "adopt");
+
   const unsettled = {
     ...cold,
     indexState: async () => ({
@@ -1125,6 +1348,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       hasTaskWorkflowCapability: () => false,
       hasRecoverySupport: () => false,
       hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflow: async () => false,
       refreshTaskWorkflowRecovery: async () => false,
     },
   };
@@ -1166,6 +1390,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       hasTaskWorkflowCapability: () => true,
       hasRecoverySupport: () => false,
       hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflow: async () => false,
       refreshTaskWorkflowRecovery: async () => false,
     },
   };
@@ -1277,32 +1502,17 @@ test("future contract-compatible Operon releases project read-write capabilities
     true,
     "workflow recovery must remain advertised while the live index is unsettled",
   );
-  await BridgePlugin.prototype.refreshRecoveryCapabilities.call(
-    fake,
-    runtime,
-    false,
-  );
-  assert.equal(recoveryRefreshes, 1);
-  assert.deepEqual(workflowRecoveryRefreshes, [
-    "adopt",
-    "periodic-create",
-    "periodic-update",
-  ]);
-  await BridgePlugin.prototype.refreshRecoveryCapabilities.call(
-    fake,
-    runtime,
-    true,
-  );
-  assert.equal(
-    recoveryRefreshes,
-    1,
-    "a settled status refresh already negotiated recovery with the full contract",
+  assert.equal(recoveryRefreshes, 0);
+  assert.deepEqual(
+    workflowRecoveryRefreshes,
+    [],
+    "ordinary status must not negotiate optional recovery grants",
   );
   const recoveryStatus = await BridgePlugin.prototype.recoveryStatusPayload.call(
     {
       getOperonRuntime: () => runtime,
       app: { plugins: {} },
-      manifest: { id: "optimike-operon-bridge", version: "0.8.1" },
+      manifest: { id: "optimike-operon-bridge", version: "0.8.2" },
       settings: { mutationsEnabled: true },
       capabilities: BridgePlugin.prototype.capabilities,
     },
@@ -1314,9 +1524,14 @@ test("future contract-compatible Operon releases project read-write capabilities
   });
   assert.equal(
     recoveryRefreshes,
-    2,
+    1,
     "the recovery-only status must negotiate without invoking indexState",
   );
+  assert.deepEqual(workflowRecoveryRefreshes, [
+    "adopt",
+    "periodic-create",
+    "periodic-update",
+  ]);
 
   const disabledRecoveryCapabilities = BridgePlugin.prototype.capabilities.call(
     { settings: { mutationsEnabled: false } },
@@ -1373,7 +1588,7 @@ test("normalization and filtering preserve ordered list fields without scalar co
       { canonicalKey: "taskGallery", visiblePropertyName: "Task Gallery" },
     ],
     operonVersion: "3.5.3",
-    bridgeVersion: "0.8.1",
+    bridgeVersion: "0.8.2",
     includeProperties: false,
   });
   assert.deepEqual(normalized.fields.taskGallery, [

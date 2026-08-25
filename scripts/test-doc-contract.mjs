@@ -130,8 +130,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.1.1",
-  "package metadata must match the 3.1.1 contract-first Operon release",
+  "3.1.2",
+  "package metadata must match the 3.1.2 cold-negotiation Operon release",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
@@ -231,7 +231,7 @@ assert.match(operonContractFr, /indisponibilité structurée/i);
 for (const content of [operonContract, operonAudit]) {
   assert.match(content, /Operon `3\.5\.3`/u);
   assert.match(content, /Operon CLI `1\.2\.0`/u);
-  assert.match(content, /Bridge\s+`0\.8\.1`/u);
+  assert.match(content, /Bridge\s+`0\.8\.2`/u);
   assert.match(content, /compatible-provisional/u);
   assert.match(content, /opaque sealed\s+plan/iu);
   assert.match(content, /(?:same-plan|même\s+plan)/iu);
@@ -241,7 +241,7 @@ for (const content of [operonContract, operonAudit]) {
 for (const content of [operonContractFr, operonAuditFr]) {
   assert.match(content, /Operon `3\.5\.3`/u);
   assert.match(content, /Operon CLI `1\.2\.0`/u);
-  assert.match(content, /Bridge\s+`0\.8\.1`/u);
+  assert.match(content, /Bridge\s+`0\.8\.2`/u);
   assert.match(content, /compatible-provisional/u);
   assert.match(content, /plan opaque\s+scellé/iu);
   assert.match(content, /(?:same-plan|même\s+plan)/iu);

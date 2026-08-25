@@ -591,7 +591,7 @@ const galleryMatch = queryOperonSnapshot(
     snapshotAt: "2026-07-20T12:00:00.000Z",
     snapshotAgeMs: 0,
     operonVersion: "3.5.3",
-    bridgeVersion: "0.8.1",
+    bridgeVersion: "0.8.2",
     contractVersion: OPERON_CONTRACT_VERSION,
     snapshotSchemaVersion: 2,
     settingsSignature: "fnv1a32:01234567",

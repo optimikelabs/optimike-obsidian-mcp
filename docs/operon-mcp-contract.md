@@ -70,8 +70,9 @@ and index diagnostics. Status distinguishes:
 - `incompatible`: an absent, denied, or invalid contract boundary.
 
 This compatibility state is independent from live index readiness. Callers
-must also require top-level `ok`, `index.ready`, and the exact advertised
-capability before using a route.
+must also require top-level `ok` and `index.ready`. Core capabilities remain
+hard route gates; the cold status of an additive first-use capability is
+advisory because only its exact operation may negotiate it.
 
 Known behavioral regressions may remain denied by exact version and operation.
 Missing optional capabilities disable only dependent tools. A future contract
@@ -81,7 +82,10 @@ version is never accepted silently.
 official Operon `3.5.3`, it delegates to the additive task-workflow Developer
 API after an exact `tasks.filter-query` grant. The caller must supply an exact
 `filterSetId`: the official API executes saved filters but does not expose their
-catalog. Headless snapshots never attempt to reproduce plugin filter semantics.
+catalog. A cold cached capability does not block the call: the Bridge negotiates
+only `tasks.filter-query` on first exact use. Status/index refreshes request no
+optional grant. Headless snapshots never attempt to reproduce plugin filter
+semantics.
 
 The six additional Developer API reads are also live-only. They expose native
 runtime diagnostics, ranked finder, entity resolution, bounded relationship
@@ -190,12 +194,29 @@ operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.1.1 release admission
+## 3.1.2 release admission
 
-Optimike MCP `3.1.1`, Bridge `0.8.1`, Operon `3.5.3` and Operon CLI `1.2.0`
+Optimike MCP `3.1.2`, Bridge `0.8.2`, Operon `3.5.3` and Operon CLI `1.2.0`
 form the current released set. Operon `3.5.3` remains
 `compatible-provisional` until it joins the explicit certified evidence set,
 but that label no longer masks valid mutation capabilities. Product version is
 diagnostic metadata and may select an explicit deny or narrowly blocked path;
 it is not a positive mutation allowlist. Contract negotiation, exact grants,
 schemas, live health, settled index, write policy and recovery remain mandatory.
+
+Task-workflow status is advisory rather than a preflight denylist. The first
+adoption or periodic operation reaches the Bridge, which requests only that
+workflow's exact additive grant, but only when status still proves the global
+Bridge mutation setting is enabled. That setting is reported separately from
+the currently warm write capabilities, so a fully cold session is not mistaken
+for a globally read-only Bridge. Bridges that predate this explicit field keep
+their advertised capability gate and do not receive the new cold-grant bypass.
+Pending, refused or malformed grants fail
+closed without revoking established core sessions. Periodic creation persists
+no idempotency reservation before that negotiation succeeds, so the same request
+and key can be retried after manual approval. The MCP journal likewise releases
+only a Bridge-certified pre-dispatch reservation (`mutationMayHaveApplied: false`);
+all ambiguous transport or post-dispatch failures remain durable and fail closed.
+Ordinary healthy or degraded status polls never negotiate additive filter,
+workflow, or recovery grants; only the exact operation or dedicated recovery
+surface may do so.

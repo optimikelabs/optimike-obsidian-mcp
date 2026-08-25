@@ -1213,10 +1213,16 @@ export class OperonDeveloperApiRuntimeAdapter {
     return this.contractState;
   }
 
-  async refresh(includeMutationCapabilities = false): Promise<boolean> {
+  async refresh(
+    includeMutationCapabilities = false,
+    includeTaskWorkflowCapabilities = includeMutationCapabilities,
+    includeFilterQueryCapability = includeTaskWorkflowCapabilities,
+  ): Promise<boolean> {
     if (this.refreshInFlight) return this.refreshInFlight;
     this.refreshInFlight = this.refreshWithStartupRetry(
       includeMutationCapabilities,
+      includeTaskWorkflowCapabilities,
+      includeFilterQueryCapability,
     ).finally(() => {
       this.refreshInFlight = null;
     });
@@ -1225,13 +1231,22 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   private async refreshWithStartupRetry(
     includeMutationCapabilities: boolean,
+    includeTaskWorkflowCapabilities: boolean,
+    includeFilterQueryCapability: boolean,
   ): Promise<boolean> {
     for (
       let attempt = 0;
       attempt <= STARTUP_REFRESH_RETRY_LIMIT;
       attempt += 1
     ) {
-      if (await this.refreshInternal(includeMutationCapabilities)) return true;
+      if (
+        await this.refreshInternal(
+          includeMutationCapabilities,
+          includeTaskWorkflowCapabilities,
+          includeFilterQueryCapability,
+        )
+      )
+        return true;
       const retryAfterMs = this.startupRetryDelayMs();
       if (retryAfterMs === null || attempt === STARTUP_REFRESH_RETRY_LIMIT)
         return false;
@@ -1260,11 +1275,13 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   private async refreshInternal(
     includeMutationCapabilities: boolean,
+    includeTaskWorkflowCapabilities: boolean,
+    includeFilterQueryCapability: boolean,
   ): Promise<boolean> {
     this.readApi = null;
     this.optionalReadApis.clear();
     this.mutationApis.clear();
-    this.filterQueryApi = null;
+    if (includeFilterQueryCapability) this.filterQueryApi = null;
     if (!includeMutationCapabilities) {
       this.recoveryApi = null;
       this.taskWorkflowApis.clear();
@@ -1374,15 +1391,17 @@ export class OperonDeveloperApiRuntimeAdapter {
       // consent request. Probe it only after preserving every already-granted
       // core read and mutation session, so a pending filter grant cannot make
       // the established V1 surface appear unavailable during the same refresh.
-      try {
-        this.filterQueryApi = this.connectFilterQuery();
-      } catch {
-        // Saved-filter execution is an additive Operon 3.2 capability. A
-        // broken or temporarily incompatible optional accessor must not tear
-        // down the already-verified core Developer API session.
-        this.filterQueryApi = null;
+      if (includeFilterQueryCapability) {
+        try {
+          this.filterQueryApi = this.connectFilterQuery();
+        } catch {
+          // Saved-filter execution is an additive Operon 3.2 capability. A
+          // broken or temporarily incompatible optional accessor must not tear
+          // down the already-verified core Developer API session.
+          this.filterQueryApi = null;
+        }
       }
-      if (includeMutationCapabilities) {
+      if (includeMutationCapabilities && includeTaskWorkflowCapabilities) {
         this.taskWorkflowApis.clear();
         for (const workflowKind of Object.keys(
           TASK_WORKFLOW_CAPABILITIES,
@@ -1436,6 +1455,19 @@ export class OperonDeveloperApiRuntimeAdapter {
     return Boolean(this.filterQueryApi?.tasks.filterQuery);
   }
 
+  async refreshFilterQuery(): Promise<boolean> {
+    let api: TaskWorkflowDeveloperApiV1 | null = null;
+    try {
+      api = this.connectFilterQuery();
+    } catch {
+      // Saved-filter consent is exact and optional. A pending or malformed
+      // grant fails closed without invalidating core reads or mutation sessions.
+    }
+    if (!api) return false;
+    this.filterQueryApi = api;
+    return true;
+  }
+
   hasTaskWorkflowCapability(kind: DeveloperApiTaskWorkflowKind): boolean {
     const api = this.taskWorkflowApis.get(kind);
     const methods = this.taskWorkflowMethods(api, kind);
@@ -1450,6 +1482,22 @@ export class OperonDeveloperApiRuntimeAdapter {
     return Boolean(methods?.recover && methods.pendingRecoveries);
   }
 
+  async refreshTaskWorkflow(
+    kind: DeveloperApiTaskWorkflowKind,
+  ): Promise<boolean> {
+    let api: TaskWorkflowDeveloperApiV1 | null = null;
+    try {
+      api = this.connectTaskWorkflow(kind);
+    } catch {
+      // First-use negotiation is exact and additive. A pending or malformed
+      // optional grant fails closed without invalidating any established core
+      // Developer API session.
+    }
+    if (!api) return false;
+    this.taskWorkflowApis.set(kind, api);
+    return true;
+  }
+
   async refreshTaskWorkflowRecovery(
     kind: DeveloperApiTaskWorkflowKind,
   ): Promise<boolean> {
@@ -1458,12 +1506,11 @@ export class OperonDeveloperApiRuntimeAdapter {
       api = this.connectTaskWorkflowRecovery(kind);
     } catch {
       // A failed exact negotiation must fail closed without depending on, or
-      // mutating, the live task index.
+      // mutating, the live task index. Preserve any already-negotiated session:
+      // a concurrent recovery poll must not revoke the API that an active
+      // mutation obtained before entering its durable preflight.
     }
-    if (!api) {
-      this.taskWorkflowApis.delete(kind);
-      return false;
-    }
+    if (!api) return false;
     this.taskWorkflowApis.set(kind, api);
     return true;
   }

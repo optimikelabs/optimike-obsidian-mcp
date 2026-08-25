@@ -303,6 +303,15 @@ function errorPayload(
   };
 }
 
+class TaskWorkflowCapabilityUnavailableError extends Error {
+  constructor(kind: DeveloperApiTaskWorkflowKind) {
+    super(
+      `Operon task-workflow Developer API capability or recovery support is unavailable: ${kind}; no Markdown or private-API fallback is used.`,
+    );
+    this.name = "TaskWorkflowCapabilityUnavailableError";
+  }
+}
+
 function sanitizeQuery(input: unknown): OperonTaskQuery {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
   const source = input as Record<string, unknown>;
@@ -844,28 +853,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
-  private async refreshRecoveryCapabilities(
-    runtime: OperonRuntime | null,
-    ready: boolean,
-  ): Promise<void> {
-    if (
-      ready ||
-      !runtime?.developerApi ||
-      !runtime.compatible ||
-      !this.settings.mutationsEnabled
-    ) {
-      return;
-    }
-    await runtime.developerApi.refreshRecovery();
-    for (const kind of [
-      "adopt",
-      "periodic-create",
-      "periodic-update",
-    ] as const) {
-      await runtime.developerApi.refreshTaskWorkflowRecovery(kind);
-    }
-  }
-
   private limitations(runtime: OperonRuntime | null, ready: boolean): string[] {
     const capabilities = this.capabilities(runtime, ready);
     return capabilities.create ||
@@ -890,7 +877,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (!runtime?.compatible)
       return { ready: false, generation: null, diagnostics: null };
     if (runtime.developerApi) {
-      await runtime.developerApi.refresh(this.settings.mutationsEnabled);
+      // Index settlement may refresh core mutation sessions, but optional
+      // task-workflow consent stays operation-scoped. Only the invoked workflow
+      // is negotiated by its mutation guard below.
+      await runtime.developerApi.refresh(this.settings.mutationsEnabled, false);
       const generation = runtime.indexer.getGeneration();
       const diagnostics = await runtime.indexer.getIndexV8Diagnostics();
       return {
@@ -1021,7 +1011,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const ready = Boolean(
       runtime && this.isSettledRuntimeIndex(runtime, indexState),
     );
-    await this.refreshRecoveryCapabilities(runtime, ready);
     const capabilities = this.capabilities(runtime, ready);
     const contractInvalid =
       runtime?.developerApi?.negotiatedContractState === "invalid";
@@ -1051,6 +1040,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       bridge: {
         id: this.manifest.id,
         version: this.manifest.version,
+        mutationsEnabled: this.settings.mutationsEnabled,
         mode:
           capabilities.update ||
           capabilities.transition ||
@@ -1641,6 +1631,31 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     return terminal;
   }
 
+  private async activeMutationReservationResponse(
+    idempotencyKey: string,
+    signature: string,
+    requested: Record<string, unknown>,
+  ): Promise<{
+    httpStatus: number;
+    payload: Record<string, unknown>;
+  } | null> {
+    const active = this.mutationReservations.get(idempotencyKey);
+    if (!active) return null;
+    if (active.signature !== signature) {
+      const conflict = resolveMutationPreflight({
+        cached: { signature: active.signature, payload: {} },
+        idempotencyKey,
+        signature,
+        requested,
+        validate: () => null,
+        operationId: () => this.mutationOperationId(),
+      });
+      return conflict.kind === "response" ? conflict.response : null;
+    }
+    const payload = await active.promise;
+    return { httpStatus: this.mutationHttpStatus(payload), payload };
+  }
+
   private failReservedMutation(
     body: Record<string, unknown>,
     error: unknown,
@@ -1704,6 +1719,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     error: unknown,
     fallbackCode: string,
   ): Promise<void> {
+    if (error instanceof TaskWorkflowCapabilityUnavailableError) {
+      sendJson(res, 503, {
+        ...errorPayload(error, "task_workflow_capability_unavailable"),
+        retryable: true,
+        mutationMayHaveApplied: false,
+      });
+      return;
+    }
     const failed = this.failReservedMutation(body, error);
     if (failed) {
       await this.sendDurableMutationResponse(res, failed);
@@ -1728,9 +1751,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||
           !runtime.developerApi.hasTaskWorkflowRecoverySupport("adopt"))
       ) {
-        throw new Error(
-          "Operon task-workflow Developer API adoption or recovery grant is unavailable; the Bridge will not use a Markdown or private-API fallback.",
-        );
+        await runtime.developerApi.refreshTaskWorkflow("adopt");
+      }
+      if (
+        capability === "adopt" &&
+        (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||
+          !runtime.developerApi.hasTaskWorkflowRecoverySupport("adopt"))
+      ) {
+        throw new TaskWorkflowCapabilityUnavailableError("adopt");
       }
       if (capability !== "adopt") {
         const blocked = (
@@ -1776,15 +1804,19 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
       await this.requireSettledMutationIndex(runtime);
+      if (
+        !runtime.developerApi.hasTaskWorkflowCapability(kind) ||
+        !runtime.developerApi.hasTaskWorkflowRecoverySupport(kind)
+      ) {
+        await runtime.developerApi.refreshTaskWorkflow(kind);
+      }
     }
     if (
       !runtime.developerApi ||
       !runtime.developerApi.hasTaskWorkflowCapability(kind) ||
       !runtime.developerApi.hasTaskWorkflowRecoverySupport(kind)
     ) {
-      throw new Error(
-        `Operon task-workflow Developer API capability or recovery support is unavailable: ${kind}; no Markdown or private-API fallback is used.`,
-      );
+      throw new TaskWorkflowCapabilityUnavailableError(kind);
     }
     return runtime;
   }
@@ -2094,6 +2126,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ),
       };
     }
+    const activeReservation = await this.activeMutationReservationResponse(
+      idempotencyKey,
+      signature,
+      requested,
+    );
+    if (activeReservation) return activeReservation;
     const canonicalTargetPath = targetPath as string;
     const runtime = await this.requireMutationRuntime("adopt");
     const legacyFile = runtime.developerApi
@@ -2380,17 +2418,39 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       dryRun: body.dryRun !== false,
       requested,
     });
-    const preflight = await this.mutationPreflight(
+    const validation = resolveMutationPreflight({
+      cached: this.mutationResults.get(idempotencyKey),
       idempotencyKey,
       signature,
       requested,
-      () =>
+      validate: () =>
         typeof requested.description !== "string" ||
         !requested.description.trim() ||
         (requested.periodicKind !== "daily" &&
           requested.periodicKind !== "weekly")
           ? "periodic creation requires description and periodicKind daily or weekly."
           : null,
+      operationId: () => this.mutationOperationId(),
+    });
+    if (validation.kind === "response") return validation.response;
+    if (validation.kind === "validation-error") {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(new Error(validation.message), "validation_error"),
+      };
+    }
+    const activeReservation = await this.activeMutationReservationResponse(
+      idempotencyKey,
+      signature,
+      requested,
+    );
+    if (activeReservation) return activeReservation;
+    const runtime = await this.requireTaskWorkflowRuntime("periodic-create");
+    const preflight = await this.mutationPreflight(
+      idempotencyKey,
+      signature,
+      requested,
+      () => null,
     );
     if (preflight.kind === "response") return preflight.response;
     if (preflight.kind === "validation-error") {
@@ -2399,7 +2459,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         payload: errorPayload(new Error(preflight.message), "validation_error"),
       };
     }
-    const runtime = await this.requireTaskWorkflowRuntime("periodic-create");
     const native = await runtime.developerApi!.executeTaskWorkflow(
       "periodic-create",
       requested,
@@ -2464,6 +2523,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ),
       };
     }
+    const activeReservation = await this.activeMutationReservationResponse(
+      idempotencyKey,
+      signature,
+      requested,
+    );
+    if (activeReservation) return activeReservation;
     const runtime = await this.requireTaskWorkflowRuntime("periodic-update");
     const before = (await this.oneTask(operonId, true)).task;
     if (!before) {
@@ -3936,6 +4001,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             const snapshot = await this.allTasksSnapshot(
               boolValue(body.includeProperties),
             );
+            if (!runtime.developerApi.hasFilterQueryCapability()) {
+              await runtime.developerApi.refreshFilterQuery();
+            }
             if (!runtime.developerApi.hasFilterQueryCapability()) {
               sendJson(
                 res,

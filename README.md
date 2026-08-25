@@ -114,7 +114,7 @@ Enable only the surfaces you use:
 - bundled **Bases Bridge** for live Bases and governed formula CAS;
 - bundled **Optimike Atomic Write Bridge** for governed Note, Frontmatter and Canvas `plan → apply → status → recover`;
 - **Smart Connections** for the local semantic index;
-- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.8.1** for governed task operations. Operon 3.5.3 and CLI 1.2.0 are the current live target. Unknown non-denied Operon releases remain writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate;
+- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.8.2** for governed task operations. Operon 3.5.3 and CLI 1.2.0 are the current live target. Unknown non-denied Operon releases remain writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate;
 - **Obsidian Tasks** for Tasks-compatible Markdown parsing.
 
 Operon mutations require the Bridge mutation setting plus:
@@ -123,7 +123,7 @@ Operon mutations require the Bridge mutation setting plus:
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Stale Operon snapshots remain read-only. No Operon route falls back to raw Markdown or private APIs. Official adoption and Daily/Weekly routing are exposed only after their exact additive grants. Operon owns every opaque sealed plan and same-plan recovery. Task Type and Task Image stay scalar, Task Gallery stays an ordered array, and `__taskDataType` is read-only. Full compatibility, certified/provisional versions, recovery semantics and current API gaps live in the [Operon MCP contract](docs/operon-mcp-contract.md) and [CLI / Developer API audit](docs/operon-cli-audit.md).
+Stale Operon snapshots remain read-only. No Operon route falls back to raw Markdown or private APIs. Official adoption and Daily/Weekly routing negotiate their exact additive grant on first use, including after a cold MCP start; a pending or refused grant still fails closed. Operon owns every opaque sealed plan and same-plan recovery. Task Type and Task Image stay scalar, Task Gallery stays an ordered array, and `__taskDataType` is read-only. Full compatibility, certified/provisional versions, recovery semantics and current API gaps live in the [Operon MCP contract](docs/operon-mcp-contract.md) and [CLI / Developer API audit](docs/operon-cli-audit.md).
 
 ## Governed operations
 

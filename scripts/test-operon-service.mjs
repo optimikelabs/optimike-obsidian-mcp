@@ -173,6 +173,11 @@ const state = {
   recoveryCalls: 0,
   lastTaskWorkflowRecoveryBody: null,
   mutations: false,
+  bridgeModeOverride: null,
+  omitMutationsEnabled: false,
+  workflowCold: false,
+  filterCold: false,
+  workflowGrantPending: false,
 };
 
 function statusPayload() {
@@ -187,7 +192,12 @@ function statusPayload() {
     bridge: {
       id: "optimike-operon-bridge",
       version: "0.1.0",
-      mode: "read-only",
+      mode:
+        state.bridgeModeOverride ??
+        (state.mutations ? "read-write" : "read-only"),
+      ...(state.omitMutationsEnabled
+        ? {}
+        : { mutationsEnabled: state.mutations }),
     },
     operon: {
       present: state.mode !== "absent",
@@ -214,10 +224,11 @@ function statusPayload() {
     capabilities: state.mutations
       ? {
           ...capabilities,
-          adopt: true,
-          periodicCreate: true,
-          periodicUpdate: true,
-          taskWorkflowRecovery: true,
+          filterQuery: !state.filterCold,
+          adopt: !state.workflowCold,
+          periodicCreate: !state.workflowCold,
+          periodicUpdate: !state.workflowCold,
+          taskWorkflowRecovery: !state.workflowCold,
           create: true,
           update: true,
           transition: true,
@@ -226,7 +237,7 @@ function statusPayload() {
           convert: true,
           recovery: true,
         }
-      : capabilities,
+      : { ...capabilities, filterQuery: !state.filterCold },
     source: "operon-runtime",
     stale: false,
     limitations: ["read-only"],
@@ -566,13 +577,26 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "POST" && url.pathname.endsWith("/tasks/periodic")) {
-    state.mutationCalls += 1;
     let body = "";
     request.on("data", (chunk) => {
       body += chunk;
     });
     request.on("end", () => {
       const params = body ? JSON.parse(body) : {};
+      if (state.workflowGrantPending) {
+        sendJson(response, 503, {
+          ok: false,
+          contractVersion: "1",
+          error: {
+            code: "task_workflow_capability_unavailable",
+            message: "The exact periodic-create grant is pending.",
+          },
+          retryable: true,
+          mutationMayHaveApplied: false,
+        });
+        return;
+      }
+      state.mutationCalls += 1;
       sendJson(response, 200, {
         ok: true,
         contractVersion: "1",
@@ -944,6 +968,7 @@ try {
   );
   assert.equal((await service.timers()).operation, "timers");
 
+  state.filterCold = true;
   const firstFilterPage = await service.querySavedFilter({
     filterSetId: "elysia-now",
     limit: 1,
@@ -951,6 +976,12 @@ try {
   assert.equal(firstFilterPage.count, 1);
   assert.equal(firstFilterPage.hasMore, true);
   assert.equal(firstFilterPage.tasks[0].operonId, "abc1234");
+  assert.equal(
+    firstFilterPage.capabilities.filterQuery,
+    true,
+    "a successful exact negotiation must override the preceding cold snapshot",
+  );
+  state.filterCold = false;
   const secondFilterPage = await service.querySavedFilter({
     filterSetId: "elysia-now",
     limit: 1,
@@ -1071,6 +1102,24 @@ try {
   });
   assert.equal(periodicPlanned.status, "planned");
   assert.equal(state.mutationCalls, 3);
+
+  state.workflowCold = true;
+  const coldPeriodicPlanned = await service.createPeriodicTask({
+    idempotencyKey: "test-periodic-create-cold-idempotency",
+    dryRun: true,
+    periodic: {
+      description: "Cold Daily grant negotiation",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  });
+  assert.equal(coldPeriodicPlanned.status, "planned");
+  assert.equal(
+    state.mutationCalls,
+    4,
+    "an additive task-workflow route must reach the Bridge when status is cold",
+  );
+  state.workflowCold = false;
   const replayed = await service.createTask({
     idempotencyKey: "test-create-idempotency",
     dryRun: true,
@@ -1084,7 +1133,7 @@ try {
   assert.equal(replayed.operationId, planned.operationId);
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "journal replay must not call the Bridge twice",
   );
 
@@ -1102,7 +1151,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "mismatched idempotency reuse must be rejected locally",
   );
 
@@ -1166,7 +1215,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "scope rejection must happen before the Bridge call",
   );
 
@@ -1184,7 +1233,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "non-canonical paths must be rejected before any Bridge request",
   );
 
@@ -1200,7 +1249,7 @@ try {
   assert.equal(scopedInline.status, "planned");
   assert.equal(
     state.mutationCalls,
-    4,
+    5,
     "explicit allowed inline target must reach the Bridge",
   );
 
@@ -1585,6 +1634,102 @@ try {
     state.mutationCalls,
     mutationCallsBeforeConcurrent + 1,
     "concurrent identical requests must share one Bridge operation",
+  );
+
+  const fullyColdInput = {
+    idempotencyKey: "test-fully-cold-enabled-bridge",
+    dryRun: true,
+    periodic: {
+      description: "Fully cold enabled Bridge",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  };
+  const callsBeforeFullyCold = state.mutationCalls;
+  state.workflowCold = true;
+  state.bridgeModeOverride = "read-only";
+  const fullyColdResult = await service.createPeriodicTask(fullyColdInput);
+  assert.equal(fullyColdResult.status, "planned");
+  assert.equal(state.mutationCalls, callsBeforeFullyCold + 1);
+  state.workflowCold = false;
+  state.bridgeModeOverride = null;
+
+  const legacyColdInput = {
+    idempotencyKey: "test-legacy-bridge-cold-workflow",
+    dryRun: true,
+    periodic: {
+      description: "Legacy Bridge cold workflow",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  };
+  const callsBeforeLegacyCold = state.mutationCalls;
+  state.workflowCold = true;
+  state.bridgeModeOverride = "read-write";
+  state.omitMutationsEnabled = true;
+  await assert.rejects(
+    service.createPeriodicTask(legacyColdInput),
+    (error) => error?.code === "SERVICE_UNAVAILABLE",
+  );
+  assert.equal(
+    state.mutationCalls,
+    callsBeforeLegacyCold,
+    "an older Bridge without the explicit global gate must keep its cold capability block",
+  );
+  state.workflowCold = false;
+  state.bridgeModeOverride = null;
+  state.omitMutationsEnabled = false;
+
+  const pendingGrantInput = {
+    idempotencyKey: "test-pending-grant-same-key-retry",
+    dryRun: true,
+    periodic: {
+      description: "Pending grant retry",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  };
+  const callsBeforePendingGrant = state.mutationCalls;
+  state.workflowGrantPending = true;
+  await assert.rejects(
+    service.createPeriodicTask(pendingGrantInput),
+    (error) =>
+      error?.code === "SERVICE_UNAVAILABLE" &&
+      /grant is pending/u.test(error.message),
+  );
+  assert.equal(state.mutationCalls, callsBeforePendingGrant);
+  state.workflowGrantPending = false;
+  const approvedSameKey = await service.createPeriodicTask(pendingGrantInput);
+  assert.equal(approvedSameKey.status, "planned");
+  assert.equal(
+    state.mutationCalls,
+    callsBeforePendingGrant + 1,
+    "manual approval must allow the exact same key to reach the Bridge once",
+  );
+
+  const globallyDisabledInput = {
+    idempotencyKey: "test-globally-disabled-same-key-retry",
+    dryRun: true,
+    periodic: {
+      description: "Globally disabled mutation surface",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  };
+  const callsBeforeDisabledSurface = state.mutationCalls;
+  state.mutations = false;
+  await assert.rejects(
+    service.createPeriodicTask(globallyDisabledInput),
+    (error) => error?.code === "SERVICE_UNAVAILABLE",
+  );
+  assert.equal(state.mutationCalls, callsBeforeDisabledSurface);
+  state.mutations = true;
+  const enabledSameKey = await service.createPeriodicTask(globallyDisabledInput);
+  assert.equal(enabledSameKey.status, "planned");
+  assert.equal(
+    state.mutationCalls,
+    callsBeforeDisabledSurface + 1,
+    "global mutation disablement must not poison the same-key retry journal",
   );
 
   const interruptedInput = {

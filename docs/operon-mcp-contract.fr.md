@@ -94,8 +94,10 @@ Le statut distingue :
 - `incompatible` : frontière absente, explicitement refusée ou invalide.
 
 Cet état de compatibilité est indépendant de la disponibilité live de l’index.
-Avant d’utiliser une route, le client doit aussi exiger `ok`, `index.ready` et
-la capacité exacte annoncée.
+Avant d’utiliser une route, le client doit aussi exiger `ok` et `index.ready`.
+Les capacités principales restent des gates strictes ; l’état froid d’une
+capacité additive de premier usage est seulement diagnostique, car seule son
+opération exacte peut la négocier.
 
 Une régression comportementale connue peut rester bloquée par version et par
 opération. Une capacité optionnelle absente désactive seulement les outils qui
@@ -104,8 +106,11 @@ en dépendent. Un futur contrat n’est jamais accepté silencieusement.
 `operon_query_saved_filter` est live-only et dépend d’une capacité native. Sur
 Operon officiel `3.5.3`, il utilise la Developer API task-workflow après un grant
 exact `tasks.filter-query`. L’appelant doit fournir un `filterSetId` exact :
-l’API officielle exécute les filtres mais n’en publie pas le catalogue. Le MCP
-ne tente jamais de reproduire leur sémantique depuis le cache.
+l’API officielle exécute les filtres mais n’en publie pas le catalogue. Une
+capacité froide dans le dernier statut ne bloque pas l’appel : le Bridge négocie
+uniquement `tasks.filter-query` au premier usage exact. Les rafraîchissements de
+statut/index ne demandent aucun grant optionnel. Le MCP ne tente jamais de
+reproduire leur sémantique depuis le cache.
 
 Les six lectures Developer API supplémentaires sont également live-only :
 diagnostics, recherche classée, résolution d’entité, graphe de relations borné,
@@ -300,9 +305,9 @@ La suppression reste une action opérateur dans la CLI. Un futur
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
 
-## Admission de la release 3.1.1
+## Admission de la release 3.1.2
 
-Optimike MCP `3.1.1`, Bridge `0.8.1`, Operon `3.5.3` et Operon CLI `1.2.0`
+Optimike MCP `3.1.2`, Bridge `0.8.2`, Operon `3.5.3` et Operon CLI `1.2.0`
 forment l’ensemble publié courant. Operon `3.5.3` reste
 `compatible-provisional` jusqu’à son entrée dans l’ensemble explicite de preuves
 certifiées, mais ce libellé ne masque plus les mutations valides. La version
@@ -310,3 +315,21 @@ produit reste une métadonnée diagnostique pouvant sélectionner un refus ou un
 exception bornée ; elle n’est pas une allowlist positive de mutation. Contrat,
 grants exacts, schémas, santé live, index stabilisé, politique d’écriture et
 recovery restent obligatoires.
+
+Le statut task-workflow est un diagnostic, pas une liste de refus préalable. La
+première adoption ou opération périodique atteint le Bridge, qui ne demande que
+le grant additif exact de ce workflow, mais seulement si le statut prouve encore
+que le réglage global de mutation du Bridge est activé. Ce réglage est exposé
+séparément des capacités d’écriture déjà négociées, afin qu’une session entièrement
+froide ne soit pas prise pour un Bridge globalement en lecture seule. Les Bridges
+antérieurs à ce champ explicite conservent leur gate par capacité annoncée et ne
+bénéficient pas du nouveau passage à froid. Un grant en attente, refusé ou malformé
+échoue fermé sans révoquer les sessions principales déjà établies. La création
+périodique ne persiste aucune réservation d’idempotence avant la réussite de
+cette négociation : la même requête et la même clé peuvent être rejouées après
+l’approbation manuelle. Le journal MCP ne libère lui aussi qu’une réservation
+certifiée pré-dispatch par le Bridge (`mutationMayHaveApplied: false`) ; toute
+erreur ambiguë de transport ou post-dispatch reste durable et échoue fermé. Un
+statut ordinaire, sain ou dégradé, ne négocie jamais les grants additifs de
+filtre, workflow ou recovery ; seules l’opération exacte ou la surface de
+récupération dédiée peuvent le faire.

@@ -2,11 +2,11 @@
 
 ## Current release — 2026-08-25
 
-Optimike MCP `3.1.1` and Bridge `0.8.1` target official Operon `3.5.3` with
+Optimike MCP `3.1.2` and Bridge `0.8.2` target official Operon `3.5.3` with
 Operon CLI `1.2.0`. The release preserves ordered `taskGallery` values,
 keeps `taskType` and `taskImage` scalar, rejects writes to `__taskDataType`, and
 adds two bounded Daily/Weekly operations. Official adoption and periodic
-workflows require their exact additive grants; missing grants fail closed and
+workflows negotiate their exact additive grants on first use; missing grants fail closed and
 never activate a Markdown fallback. Operon remains the owner of every opaque
 sealed plan and same-plan recovery.
 
@@ -139,7 +139,7 @@ reconciliation remains fixture evidence, not part of this live acceptance
 claim.
 
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
-remain historical. The current target is Operon `3.5.3` with Bridge `0.8.1`;
+remain historical. The current target is Operon `3.5.3` with Bridge `0.8.2`;
 CLI `1.2.0` is the paired operator-reference target.
 
 ## Deliberately excluded or unavailable
@@ -160,8 +160,11 @@ Keep the current Operon integration active. Use MCP/Bridge for governed agent
 workflows and CLI for broad operator work. Keep Kairélys disabled but available
 for rollback until a separate non-dependency proof authorizes removal.
 
-The 3.1.1 implementation is released. Stock Operon 3.5.3 / Bridge 0.8.1 passed
-the Pilot 2 canary, exact Codex Review and the complete Linux/Windows PR and
-post-merge CI gates. The release is tagged from merge commit
-`77322f84903fddfdc1bb056981b997a96bdeebca`. The separate real
+The 3.1.1 implementation is released from merge commit
+`77322f84903fddfdc1bb056981b997a96bdeebca`. Its stock Operon 3.5.3 / Bridge
+0.8.1 Pilot 2 evidence remains valid. Bridge 0.8.2 has repeated the complete
+Pilot 2 canary with exact fixture and inventory restoration, zero validation
+violations, zero pending recoveries and zero retained periodic artifacts while
+adding cold first-use negotiation for the exact additive workflow grant. The
+separate real
 Sync/non-dependency decision remains outside this integration scope.
