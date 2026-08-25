@@ -1882,14 +1882,10 @@ export class OperonService {
         this.requestContext("operonQuerySavedFilter"),
       );
     }
+    // The status snapshot may be cold for this optional grant. Dispatch the
+    // exact saved-filter request so the Bridge can negotiate only
+    // tasks.filter-query and fail closed if consent is absent.
     const status = await this.fetchLiveStatus();
-    if (!status.capabilities.filterQuery) {
-      throw new McpError(
-        BaseErrorCode.SERVICE_UNAVAILABLE,
-        "Operon saved-filter query capability is unavailable.",
-        this.requestContext("operonQuerySavedFilter"),
-      );
-    }
     const response = await this.getClient()
       .post(`${BRIDGE_PREFIX}/tasks/filter`, params)
       .catch((error: unknown) =>
@@ -1911,7 +1907,7 @@ export class OperonService {
       snapshotAgeMs: 0,
       operonVersion: status.operon.version ?? "unknown",
       bridgeVersion: status.bridge.version,
-      capabilities: status.capabilities,
+      capabilities: { ...status.capabilities, filterQuery: true },
     };
   }
 

@@ -94,8 +94,10 @@ Le statut distingue :
 - `incompatible` : frontière absente, explicitement refusée ou invalide.
 
 Cet état de compatibilité est indépendant de la disponibilité live de l’index.
-Avant d’utiliser une route, le client doit aussi exiger `ok`, `index.ready` et
-la capacité exacte annoncée.
+Avant d’utiliser une route, le client doit aussi exiger `ok` et `index.ready`.
+Les capacités principales restent des gates strictes ; l’état froid d’une
+capacité additive de premier usage est seulement diagnostique, car seule son
+opération exacte peut la négocier.
 
 Une régression comportementale connue peut rester bloquée par version et par
 opération. Une capacité optionnelle absente désactive seulement les outils qui
@@ -104,8 +106,11 @@ en dépendent. Un futur contrat n’est jamais accepté silencieusement.
 `operon_query_saved_filter` est live-only et dépend d’une capacité native. Sur
 Operon officiel `3.5.3`, il utilise la Developer API task-workflow après un grant
 exact `tasks.filter-query`. L’appelant doit fournir un `filterSetId` exact :
-l’API officielle exécute les filtres mais n’en publie pas le catalogue. Le MCP
-ne tente jamais de reproduire leur sémantique depuis le cache.
+l’API officielle exécute les filtres mais n’en publie pas le catalogue. Une
+capacité froide dans le dernier statut ne bloque pas l’appel : le Bridge négocie
+uniquement `tasks.filter-query` au premier usage exact. Les rafraîchissements de
+statut/index ne demandent aucun grant optionnel. Le MCP ne tente jamais de
+reproduire leur sémantique depuis le cache.
 
 Les six lectures Developer API supplémentaires sont également live-only :
 diagnostics, recherche classée, résolution d’entité, graphe de relations borné,
@@ -314,4 +319,7 @@ recovery restent obligatoires.
 Le statut task-workflow est un diagnostic, pas une liste de refus préalable. La
 première adoption ou opération périodique atteint le Bridge, qui ne demande que
 le grant additif exact de ce workflow. Un grant en attente, refusé ou malformé
-échoue fermé sans révoquer les sessions principales déjà établies.
+échoue fermé sans révoquer les sessions principales déjà établies. La création
+périodique ne persiste aucune réservation d’idempotence avant la réussite de
+cette négociation : la même requête et la même clé peuvent être rejouées après
+l’approbation manuelle.

@@ -174,6 +174,7 @@ const state = {
   lastTaskWorkflowRecoveryBody: null,
   mutations: false,
   workflowCold: false,
+  filterCold: false,
 };
 
 function statusPayload() {
@@ -215,6 +216,7 @@ function statusPayload() {
     capabilities: state.mutations
       ? {
           ...capabilities,
+          filterQuery: !state.filterCold,
           adopt: !state.workflowCold,
           periodicCreate: !state.workflowCold,
           periodicUpdate: !state.workflowCold,
@@ -227,7 +229,7 @@ function statusPayload() {
           convert: true,
           recovery: true,
         }
-      : capabilities,
+      : { ...capabilities, filterQuery: !state.filterCold },
     source: "operon-runtime",
     stale: false,
     limitations: ["read-only"],
@@ -945,6 +947,7 @@ try {
   );
   assert.equal((await service.timers()).operation, "timers");
 
+  state.filterCold = true;
   const firstFilterPage = await service.querySavedFilter({
     filterSetId: "elysia-now",
     limit: 1,
@@ -952,6 +955,12 @@ try {
   assert.equal(firstFilterPage.count, 1);
   assert.equal(firstFilterPage.hasMore, true);
   assert.equal(firstFilterPage.tasks[0].operonId, "abc1234");
+  assert.equal(
+    firstFilterPage.capabilities.filterQuery,
+    true,
+    "a successful exact negotiation must override the preceding cold snapshot",
+  );
+  state.filterCold = false;
   const secondFilterPage = await service.querySavedFilter({
     filterSetId: "elysia-now",
     limit: 1,

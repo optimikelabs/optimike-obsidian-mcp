@@ -191,7 +191,7 @@ The authoritative English guarantees and compatibility matrix are in the
 - `operon_query_tasks`: filter by task IDs, stable pipeline/status IDs, visible workflow labels, text, source, checkbox, priority,
   tier, paths, tags, parents, dates, canonical/custom fields, or unmanaged file-task
   properties.
-- `operon_query_saved_filter`: evaluate one saved filter only when the live engine advertises the native capability; official Operon 3.2.0 supports execution through `tasks.filter-query` after an exact grant, but callers must supply the exact ID because the official API does not expose the saved-filter catalog.
+- `operon_query_saved_filter`: evaluate one saved filter through the live engine; a cold status snapshot is advisory and the first exact call negotiates only `tasks.filter-query`. Callers must supply the exact ID because the official API does not expose the saved-filter catalog.
 - `operon_validate`: live duplicate/source/workflow graph validation, or a limited
   snapshot-only validation with explicit caveats.
 - `operon_get_diagnostics`: native Developer API lifecycle, persistence, grant, catalog, capability, and transport diagnostics.
@@ -223,6 +223,9 @@ are admitted by the negotiated contract and exact live gates rather than a
 product-version allowlist. Additive task-workflow operations may reach the
 Bridge when their cached capability is cold so the exact grant can be negotiated
 on first use; the Bridge still fails closed if negotiation fails.
+The same operation-scoped negotiation applies to saved-filter execution, while
+status/index refreshes request no optional grants. Periodic creation creates no
+durable idempotency reservation until its exact grant is available.
 Task Type and Task Image are scalar, Task Gallery is a lossless ordered array, and
 `__taskDataType` is read-only. Optional adoption and Daily/Weekly grants are
 negotiated independently from core reads. Operon 3.2.0 uses Developer API V1

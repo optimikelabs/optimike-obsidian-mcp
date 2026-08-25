@@ -2396,17 +2396,33 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       dryRun: body.dryRun !== false,
       requested,
     });
-    const preflight = await this.mutationPreflight(
+    const validation = resolveMutationPreflight({
+      cached: this.mutationResults.get(idempotencyKey),
       idempotencyKey,
       signature,
       requested,
-      () =>
+      validate: () =>
         typeof requested.description !== "string" ||
         !requested.description.trim() ||
         (requested.periodicKind !== "daily" &&
           requested.periodicKind !== "weekly")
           ? "periodic creation requires description and periodicKind daily or weekly."
           : null,
+      operationId: () => this.mutationOperationId(),
+    });
+    if (validation.kind === "response") return validation.response;
+    if (validation.kind === "validation-error") {
+      return {
+        httpStatus: 400,
+        payload: errorPayload(new Error(validation.message), "validation_error"),
+      };
+    }
+    const runtime = await this.requireTaskWorkflowRuntime("periodic-create");
+    const preflight = await this.mutationPreflight(
+      idempotencyKey,
+      signature,
+      requested,
+      () => null,
     );
     if (preflight.kind === "response") return preflight.response;
     if (preflight.kind === "validation-error") {
@@ -2415,7 +2431,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         payload: errorPayload(new Error(preflight.message), "validation_error"),
       };
     }
-    const runtime = await this.requireTaskWorkflowRuntime("periodic-create");
     const native = await runtime.developerApi!.executeTaskWorkflow(
       "periodic-create",
       requested,
@@ -3952,6 +3967,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             const snapshot = await this.allTasksSnapshot(
               boolValue(body.includeProperties),
             );
+            if (!runtime.developerApi.hasFilterQueryCapability()) {
+              await runtime.developerApi.refreshFilterQuery();
+            }
             if (!runtime.developerApi.hasFilterQueryCapability()) {
               sendJson(
                 res,

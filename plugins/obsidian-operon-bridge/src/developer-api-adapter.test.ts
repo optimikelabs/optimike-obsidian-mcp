@@ -223,6 +223,8 @@ test("Operon 3.2 adapter evaluates saved filters through the additive task-workf
 
   const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, operon);
   assert.equal(await adapter.refresh(), true);
+  assert.equal(adapter.hasFilterQueryCapability(), false);
+  assert.equal(await adapter.refreshFilterQuery(), true);
   assert.equal(adapter.hasFilterQueryCapability(), true);
   assert.deepEqual(adapter.semanticConfiguration.views.filters[0], {
     id: "filter-now",
@@ -1806,6 +1808,12 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
   assert.equal(coldAdapter.indexer.getGeneration(), 350);
   assert.equal(coldAdapter.hasTaskWorkflowCapability("adopt"), false);
   assert.equal(coldAdapter.hasTaskWorkflowCapability("periodic-create"), false);
+  assert.deepEqual(
+    requestedCapabilitySets,
+    [],
+    "status refresh must not request any additive grant",
+  );
+  assert.equal(await coldAdapter.refreshFilterQuery(), true);
   assert.deepEqual(requestedCapabilitySets, [["tasks.filter-query"]]);
   assert.equal(await coldAdapter.refreshTaskWorkflow("periodic-create"), true);
   assert.deepEqual(requestedCapabilitySets.at(-1), [

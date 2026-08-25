@@ -253,6 +253,64 @@ test("lookup and revision validation happen before durable reservation", async (
   }
 });
 
+test("periodic-create negotiates its exact grant before durable reservation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executePeriodicCreateMutation = BridgePlugin.prototype
+    .executePeriodicCreateMutation as Function;
+  let grantAvailable = false;
+  let reservationCalls = 0;
+  let nativeDispatches = 0;
+  const runtime = {
+    developerApi: {
+      executeTaskWorkflow: async () => {
+        nativeDispatches += 1;
+        return { status: "planned" };
+      },
+    },
+  };
+  const fake: Record<string, any> = {
+    mutationResults: { get: () => undefined },
+    mutationOperationId: () => "periodic-operation",
+    requireTaskWorkflowRuntime: async () => {
+      if (!grantAvailable) throw new Error("exact grant pending");
+      return runtime;
+    },
+    mutationPreflight: async () => {
+      reservationCalls += 1;
+      return { kind: "continue" };
+    },
+    taskWorkflowMutationPayload: () => ({
+      httpStatus: 200,
+      payload: { status: "planned" },
+    }),
+  };
+  const request = {
+    idempotencyKey: "periodic-first-use",
+    dryRun: true,
+    periodic: {
+      description: "Cold exact grant",
+      periodicKind: "daily",
+    },
+  };
+
+  await assert.rejects(
+    () => executePeriodicCreateMutation.call(fake, request),
+    /exact grant pending/u,
+  );
+  assert.equal(
+    reservationCalls,
+    0,
+    "a pending consent must not create a durable idempotency reservation",
+  );
+  assert.equal(nativeDispatches, 0);
+
+  grantAvailable = true;
+  const result = await executePeriodicCreateMutation.call(fake, request);
+  assert.equal(result.httpStatus, 200);
+  assert.equal(reservationCalls, 1);
+  assert.equal(nativeDispatches, 1);
+});
+
 test("periodic update validates lookup and revision before durable reservation", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
   const executePeriodicUpdateMutation = BridgePlugin.prototype

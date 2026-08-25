@@ -1216,11 +1216,13 @@ export class OperonDeveloperApiRuntimeAdapter {
   async refresh(
     includeMutationCapabilities = false,
     includeTaskWorkflowCapabilities = includeMutationCapabilities,
+    includeFilterQueryCapability = includeTaskWorkflowCapabilities,
   ): Promise<boolean> {
     if (this.refreshInFlight) return this.refreshInFlight;
     this.refreshInFlight = this.refreshWithStartupRetry(
       includeMutationCapabilities,
       includeTaskWorkflowCapabilities,
+      includeFilterQueryCapability,
     ).finally(() => {
       this.refreshInFlight = null;
     });
@@ -1230,6 +1232,7 @@ export class OperonDeveloperApiRuntimeAdapter {
   private async refreshWithStartupRetry(
     includeMutationCapabilities: boolean,
     includeTaskWorkflowCapabilities: boolean,
+    includeFilterQueryCapability: boolean,
   ): Promise<boolean> {
     for (
       let attempt = 0;
@@ -1240,6 +1243,7 @@ export class OperonDeveloperApiRuntimeAdapter {
         await this.refreshInternal(
           includeMutationCapabilities,
           includeTaskWorkflowCapabilities,
+          includeFilterQueryCapability,
         )
       )
         return true;
@@ -1272,11 +1276,12 @@ export class OperonDeveloperApiRuntimeAdapter {
   private async refreshInternal(
     includeMutationCapabilities: boolean,
     includeTaskWorkflowCapabilities: boolean,
+    includeFilterQueryCapability: boolean,
   ): Promise<boolean> {
     this.readApi = null;
     this.optionalReadApis.clear();
     this.mutationApis.clear();
-    this.filterQueryApi = null;
+    if (includeFilterQueryCapability) this.filterQueryApi = null;
     if (!includeMutationCapabilities) {
       this.recoveryApi = null;
       this.taskWorkflowApis.clear();
@@ -1386,13 +1391,15 @@ export class OperonDeveloperApiRuntimeAdapter {
       // consent request. Probe it only after preserving every already-granted
       // core read and mutation session, so a pending filter grant cannot make
       // the established V1 surface appear unavailable during the same refresh.
-      try {
-        this.filterQueryApi = this.connectFilterQuery();
-      } catch {
-        // Saved-filter execution is an additive Operon 3.2 capability. A
-        // broken or temporarily incompatible optional accessor must not tear
-        // down the already-verified core Developer API session.
-        this.filterQueryApi = null;
+      if (includeFilterQueryCapability) {
+        try {
+          this.filterQueryApi = this.connectFilterQuery();
+        } catch {
+          // Saved-filter execution is an additive Operon 3.2 capability. A
+          // broken or temporarily incompatible optional accessor must not tear
+          // down the already-verified core Developer API session.
+          this.filterQueryApi = null;
+        }
       }
       if (includeMutationCapabilities && includeTaskWorkflowCapabilities) {
         this.taskWorkflowApis.clear();
@@ -1446,6 +1453,19 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   hasFilterQueryCapability(): boolean {
     return Boolean(this.filterQueryApi?.tasks.filterQuery);
+  }
+
+  async refreshFilterQuery(): Promise<boolean> {
+    let api: TaskWorkflowDeveloperApiV1 | null = null;
+    try {
+      api = this.connectFilterQuery();
+    } catch {
+      // Saved-filter consent is exact and optional. A pending or malformed
+      // grant fails closed without invalidating core reads or mutation sessions.
+    }
+    if (!api) return false;
+    this.filterQueryApi = api;
+    return true;
   }
 
   hasTaskWorkflowCapability(kind: DeveloperApiTaskWorkflowKind): boolean {
