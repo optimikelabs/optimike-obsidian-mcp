@@ -917,6 +917,36 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
+  private runtimeTaskCount(runtime: OperonRuntime): number {
+    return typeof runtime.indexer.taskCount === "number"
+      ? runtime.indexer.taskCount
+      : runtime.indexer.getAllTasks().length;
+  }
+
+  private isSettledRuntimeIndex(
+    runtime: OperonRuntime,
+    state: {
+      ready: boolean;
+      diagnostics: RuntimeIndexDiagnostics | null;
+    },
+  ): boolean {
+    return Boolean(
+      state.ready &&
+        state.diagnostics?.taskCount === this.runtimeTaskCount(runtime),
+    );
+  }
+
+  private async requireSettledMutationIndex(
+    runtime: OperonRuntime,
+  ): Promise<void> {
+    const state = await this.indexState(runtime);
+    if (!this.isSettledRuntimeIndex(runtime, state)) {
+      throw new Error(
+        "Operon live index is not settled; Bridge mutations remain unavailable.",
+      );
+    }
+  }
+
   private async validateSettledIndex(runtime: OperonRuntime): Promise<void> {
     if (!runtime.indexer.validateIndexV8Now) return;
     if (!this.indexValidationInFlight) {
@@ -962,13 +992,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       : null;
     const indexState = await this.indexState(runtime);
     const registry = runtime?.indexer.getDuplicateRegistry?.();
-    const taskCount = runtime
-      ? typeof runtime.indexer.taskCount === "number"
-        ? runtime.indexer.taskCount
-        : runtime.indexer.getAllTasks().length
-      : 0;
+    const taskCount = runtime ? this.runtimeTaskCount(runtime) : 0;
     const ready = Boolean(
-      indexState.ready && indexState.diagnostics?.taskCount === taskCount,
+      runtime && this.isSettledRuntimeIndex(runtime, indexState),
     );
     const capabilities = this.capabilities(runtime, ready);
     const contractInvalid =
@@ -1619,7 +1645,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
-      await this.indexState(runtime);
+      await this.requireSettledMutationIndex(runtime);
       if (
         capability === "adopt" &&
         (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||
@@ -1672,7 +1698,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
-      await this.indexState(runtime);
+      await this.requireSettledMutationIndex(runtime);
     }
     if (
       !runtime.developerApi ||

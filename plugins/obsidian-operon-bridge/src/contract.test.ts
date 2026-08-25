@@ -1005,6 +1005,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     const runtime = {
       version: "99.0.0",
       compatible: true,
+      indexer: { getAllTasks: () => [] },
       developerApi: {
         hasMutationCapability: () => true,
         hasTaskWorkflowCapability: () => true,
@@ -1015,7 +1016,14 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     const fake = {
       settings: { mutationsEnabled: true },
       requireRuntime: () => runtime,
-      indexState: async () => ({ ready: true }),
+      indexState: async () => ({
+        ready: true,
+        diagnostics: { taskCount: 0 },
+      }),
+      runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+      isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+      requireSettledMutationIndex:
+        BridgePlugin.prototype.requireSettledMutationIndex,
     };
     assert.equal(
       await guard.call(fake, ...args),
@@ -1028,6 +1036,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
   const coldRuntime = {
     version: "99.0.0",
     compatible: true,
+    indexer: { getAllTasks: () => [] },
     developerApi: {
       hasMutationCapability: () => negotiated,
       hasTaskWorkflowCapability: () => negotiated,
@@ -1040,8 +1049,12 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     requireRuntime: () => coldRuntime,
     indexState: async () => {
       negotiated = true;
-      return { ready: true };
+      return { ready: true, diagnostics: { taskCount: 0 } };
     },
+    runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+    isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+    requireSettledMutationIndex:
+      BridgePlugin.prototype.requireSettledMutationIndex,
   };
   assert.equal(
     await BridgePlugin.prototype.requireMutationRuntime.call(cold, "create"),
@@ -1056,9 +1069,38 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     coldRuntime,
   );
 
+  const unsettled = {
+    ...cold,
+    indexState: async () => ({
+      ready: false,
+      diagnostics: { taskCount: 0 },
+    }),
+  };
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireMutationRuntime.call(unsettled, "create"),
+    /live index is not settled/u,
+  );
+  const countMismatch = {
+    ...cold,
+    indexState: async () => ({
+      ready: true,
+      diagnostics: { taskCount: 1 },
+    }),
+  };
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+        countMismatch,
+        "periodic-create",
+      ),
+    /live index is not settled/u,
+  );
+
   const missingCapabilityRuntime = {
     version: "99.0.0",
     compatible: true,
+    indexer: { getAllTasks: () => [] },
     developerApi: {
       hasMutationCapability: () => false,
       hasTaskWorkflowCapability: () => false,
@@ -1069,7 +1111,14 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
   const missingCapability = {
     settings: { mutationsEnabled: true },
     requireRuntime: () => missingCapabilityRuntime,
-    indexState: async () => ({ ready: true }),
+    indexState: async () => ({
+      ready: true,
+      diagnostics: { taskCount: 0 },
+    }),
+    runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+    isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+    requireSettledMutationIndex:
+      BridgePlugin.prototype.requireSettledMutationIndex,
   };
   await assert.rejects(
     async () =>
@@ -1091,6 +1140,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
   const missingRecoveryRuntime = {
     version: "99.0.0",
     compatible: true,
+    indexer: { getAllTasks: () => [] },
     developerApi: {
       hasMutationCapability: () => true,
       hasTaskWorkflowCapability: () => true,
@@ -1101,7 +1151,14 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
   const missingRecovery = {
     settings: { mutationsEnabled: true },
     requireRuntime: () => missingRecoveryRuntime,
-    indexState: async () => ({ ready: true }),
+    indexState: async () => ({
+      ready: true,
+      diagnostics: { taskCount: 0 },
+    }),
+    runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+    isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+    requireSettledMutationIndex:
+      BridgePlugin.prototype.requireSettledMutationIndex,
   };
   await assert.rejects(
     async () =>
