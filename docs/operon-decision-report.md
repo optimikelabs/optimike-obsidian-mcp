@@ -1,16 +1,16 @@
 # Operon integration decision report
 
-## Current candidate — 2026-08-25
+## Current release — 2026-08-25
 
 Optimike MCP `3.1.1` and Bridge `0.8.1` target official Operon `3.5.3` with
-Operon CLI `1.2.0`. The candidate preserves ordered `taskGallery` values,
+Operon CLI `1.2.0`. The release preserves ordered `taskGallery` values,
 keeps `taskType` and `taskImage` scalar, rejects writes to `__taskDataType`, and
 adds two bounded Daily/Weekly operations. Official adoption and periodic
 workflows require their exact additive grants; missing grants fail closed and
 never activate a Markdown fallback. Operon remains the owner of every opaque
 sealed plan and same-plan recovery.
 
-The deterministic contract candidate is `compatible-provisional`: this label
+The deterministic contract remains `compatible-provisional`: this label
 describes certification evidence, not mutation admission. A non-denied future
 Operon release remains writable when the exact Developer API V1 contract,
 capabilities, schemas, live health, settled index and recovery support validate.
@@ -22,9 +22,10 @@ degraded status and became live after Pilot 2 opened. The final patched
 candidate (`#182` + `#183` + `#184`, combined code head `4412a20`, local
 attested manifest version `3.5.240438`) also passed the
 complete canary with exact restoration, zero retained periodic artifacts and
-zero pending recoveries. Operon `3.5.3` now ships superseding implementations of
-those fixes. The stock 3.5.3 artifact and Bridge 0.8.1 are rerun through the same
-gate before release. The detailed execution journal lives in
+zero pending recoveries. Operon `3.5.3` ships superseding implementations of
+those fixes. The stock 3.5.3 artifact and Bridge 0.8.1 subsequently passed the
+same complete Pilot 2 gate, including exact restoration and zero retained
+periodic artifacts. The detailed execution journal lives in
 [the local validation recipe](operon-local-validation.md).
 
 ## Historical status — 2026-08-17
@@ -64,7 +65,7 @@ commands when a capability is missing or an outcome is uncertain.
 - double mutation opt-in and mode-based write policy;
 - no generic CLI passthrough.
 
-The 3.1 candidate extends that list to twenty-five tools with
+The 3.1 release extends that list to twenty-five tools with
 `operon_create_periodic_task` and `operon_update_periodic_scheduling`; adoption
 is now official but still grant-gated.
 
@@ -146,7 +147,7 @@ CLI `1.2.0` is the paired operator-reference target.
 - deletion: CLI operator action until a reversible `operon_trash_task` contract
   exists;
 - reminders, pinned state and timer control/session: retained in the CLI;
-- official adoption in the 3.5.3 candidate remains capability- and grant-gated;
+- official adoption in the 3.5.3 release remains capability- and grant-gated;
   it was unavailable in the historical 3.3.2 Developer API generation;
 - saved-filter execution is available with an exact ID and grant, while catalog
   discovery and filter creation/editing remain unavailable;
@@ -159,7 +160,8 @@ Keep the current Operon integration active. Use MCP/Bridge for governed agent
 workflows and CLI for broad operator work. Keep Kairélys disabled but available
 for rollback until a separate non-dependency proof authorizes removal.
 
-The 3.1.1 implementation and deterministic checks are complete. Publication
-depends on the stock Operon 3.5.3 / Bridge 0.8.1 Pilot 2 canary, exact CI and
-review gates. The separate real Sync/non-dependency decision remains outside
-this integration scope.
+The 3.1.1 implementation is released. Stock Operon 3.5.3 / Bridge 0.8.1 passed
+the Pilot 2 canary, exact Codex Review and the complete Linux/Windows PR and
+post-merge CI gates. The release is tagged from merge commit
+`77322f84903fddfdc1bb056981b997a96bdeebca`. The separate real
+Sync/non-dependency decision remains outside this integration scope.

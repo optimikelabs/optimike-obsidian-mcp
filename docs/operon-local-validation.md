@@ -7,7 +7,7 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `3.5.3` with Operon CLI `1.2.0` for the current candidate; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Operon `3.5.3` with Operon CLI `1.2.0` for the current release; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
 - Optimike Operon Bridge `0.8.1`
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
@@ -21,7 +21,7 @@ contract-first policy. Settings grant controls, implicit File Task rename
 refusal, and unscoped transition settlement are fixed in `3.3.2`. Adoption was
 unavailable through that Developer API generation. Operon `3.5.3` exposes
 adoption plus Daily/Weekly workflows through exact additive grants. The 3.1
-candidate preserves `taskGallery` as an ordered array, keeps `taskType` and
+release preserves `taskGallery` as an ordered array, keeps `taskType` and
 `taskImage` scalar, and treats `__taskDataType` as read-only. It remains
 `compatible-provisional` as certification metadata, while mutation admission
 depends on the negotiated contract and exact live gates rather than a product
@@ -257,7 +257,7 @@ PASS when:
 
 ## 8a. Exact Operon 3.5 live canary
 
-Run only after the exact candidate Bridge is installed and the Pilot 2 status,
+Run only after the exact release Bridge is installed and the Pilot 2 status,
 grants, index and validation gates above are green. The recommended mode proves
 the real startup order: MCP connects first while Pilot 2 is closed, the same MCP
 connection survives a degraded status, then the CLI opens only Pilot 2 and that
@@ -304,7 +304,7 @@ The script refuses to start unless all of these gates hold:
 The command writes its JSON evidence under the OS temporary root and prints the
 exact `evidenceFile`. Certification is forbidden unless the command exits `0`,
 the printed summary has `ok=true`, `fixtureRestored=true` and
-`periodicArtifactsRetained=0`, and the evidence confirms the exact candidate
+`periodicArtifactsRetained=0`, and the evidence confirms the exact release
 versions, zero validation violations, zero pending recoveries, byte-exact
 artifact restoration, and—when startup-order mode is selected—
 `degradedObserved=true`, `connectionAliveAfterDegraded=true`,
@@ -342,9 +342,10 @@ summary reported `ok=true`, `fixtureRestored=true` and
 `periodicArtifactsRetained=0`. It also proved Daily/Weekly creation, periodic
 scheduling set/clear with Frontmatter Date Manager active, concurrent Bridge
 replay, zero validation violations and zero pending recoveries. This is
-historical acceptance evidence for the patched candidate. Operon `3.5.3` ships
-superseding implementations of the three fixes and must pass this same recipe
-with Bridge `0.8.1`. The synthetic `3.5.240438` identity remains historical and
+historical acceptance evidence for the patched candidate. Stock Operon `3.5.3`
+with Bridge `0.8.1` passed this same complete recipe on 2026-08-25, with
+`ok=true`, exact fixture restoration and zero retained periodic artifacts. The
+synthetic `3.5.240438` identity remains historical and
 must never be published as an upstream Operon release.
 
 ## 9. Restart and reindex

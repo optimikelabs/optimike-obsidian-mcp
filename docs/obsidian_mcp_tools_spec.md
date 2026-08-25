@@ -217,7 +217,7 @@ Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`
 Operon/Bridge versions, capabilities, and limitations.
 
 Mutations require a live Bridge and the loaded engine's official contract.
-Operon 3.5.3 plus CLI 1.2.0 is the 3.1.1 candidate target through Bridge 0.8.1
+Operon 3.5.3 plus CLI 1.2.0 is the 3.1.1 released target through Bridge 0.8.1
 and remains `compatible-provisional` as certification metadata. Valid mutations
 are admitted by the negotiated contract and exact live gates rather than a
 product-version allowlist.

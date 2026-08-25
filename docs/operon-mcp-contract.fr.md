@@ -300,10 +300,10 @@ La suppression reste une action opérateur dans la CLI. Un futur
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
 
-## Admission de la candidate 3.1.1
+## Admission de la release 3.1.1
 
 Optimike MCP `3.1.1`, Bridge `0.8.1`, Operon `3.5.3` et Operon CLI `1.2.0`
-forment l’ensemble candidat courant. Operon `3.5.3` reste
+forment l’ensemble publié courant. Operon `3.5.3` reste
 `compatible-provisional` jusqu’à son entrée dans l’ensemble explicite de preuves
 certifiées, mais ce libellé ne masque plus les mutations valides. La version
 produit reste une métadonnée diagnostique pouvant sélectionner un refus ou une

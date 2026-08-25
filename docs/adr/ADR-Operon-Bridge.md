@@ -2,9 +2,9 @@
 
 - Status: accepted and implemented on `main`
 - Date: 2026-07-21
-- Amended: 2026-08-24
-- MCP baseline: `optimikelabs/optimike-obsidian-mcp@8cea94610a526e50a017d334be6008b8dab79500`
-- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and provisional candidate `3.5.3` / CLI `1.2.0`
+- Amended: 2026-08-25
+- MCP baseline: `optimikelabs/optimike-obsidian-mcp@77322f84903fddfdc1bb056981b997a96bdeebca`
+- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and released provisional `3.5.3` / CLI `1.2.0`
 
 ## Problem
 
@@ -77,8 +77,9 @@ non-blocking startup before Obsidian, exact-grant auth, Daily/Weekly creation,
 periodic scheduling with a configured modified-time plugin, same-source graph
 ordering, durable concurrent replay, zero validation violations, zero pending
 recoveries and exact restoration. This remains historical evidence for the
-pre-release candidate; Operon `3.5.3` ships superseding implementations and is
-the current official validation target.
+unpublished patched candidate; Operon `3.5.3` ships superseding implementations,
+passed the same complete gate with Bridge `0.8.1`, and is the current released
+official validation target.
 
 Still outside this local acceptance proof:
 
