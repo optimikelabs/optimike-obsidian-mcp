@@ -924,6 +924,7 @@ async function main() {
     startupOrder: { enabled: startupOrder, degradedObserved: false },
     routeDates: dates,
     runtime: null,
+    firstUseNegotiation: {},
     validation: {},
     frontmatterDateManager: {},
     adoption: {},
@@ -1526,12 +1527,26 @@ async function main() {
           "periodicCreate",
           "periodicUpdate",
           "taskWorkflowRecovery",
+          "filterQuery",
         ].map((name) => [name, live.status.capabilities[name]]),
       ),
     };
+    for (const capability of [
+      "adopt",
+      "periodicCreate",
+      "periodicUpdate",
+      "taskWorkflowRecovery",
+      "filterQuery",
+    ]) {
+      assert.equal(
+        live.status.capabilities[capability],
+        false,
+        `Optional capability must remain cold before its exact first operation: ${capability}.`,
+      );
+    }
+    evidence.firstUseNegotiation.initiallyCold = true;
 
     await validateZero("before");
-    await pendingRecoveriesZero("before");
 
     const collisionMarkers = [
       ...new Set([
@@ -1712,6 +1727,15 @@ async function main() {
       "adoption apply",
       "applied",
     );
+    const postAdoptionStatus = await call("operon_status", {
+      forceRefresh: true,
+    });
+    assertRefreshedSnapshotStatus(postAdoptionStatus);
+    assert.equal(postAdoptionStatus.snapshot.capabilities.adopt, true);
+    assert.equal(postAdoptionStatus.snapshot.capabilities.periodicCreate, false);
+    assert.equal(postAdoptionStatus.snapshot.capabilities.periodicUpdate, false);
+    assert.equal(postAdoptionStatus.snapshot.capabilities.filterQuery, false);
+    evidence.firstUseNegotiation.adoptionOnly = true;
     evidence.nativeProofs.push(
       assertNativeMutationProof(adopted, "adoption apply"),
     );
@@ -1859,6 +1883,20 @@ async function main() {
       dates.daily,
       "Daily periodic create",
     );
+    const postPeriodicCreateStatus = await call("operon_status", {
+      forceRefresh: true,
+    });
+    assertRefreshedSnapshotStatus(postPeriodicCreateStatus);
+    assert.equal(
+      postPeriodicCreateStatus.snapshot.capabilities.periodicCreate,
+      true,
+    );
+    assert.equal(
+      postPeriodicCreateStatus.snapshot.capabilities.periodicUpdate,
+      false,
+    );
+    assert.equal(postPeriodicCreateStatus.snapshot.capabilities.filterQuery, false);
+    evidence.firstUseNegotiation.periodicCreateOnly = true;
     const weekly = await periodicCreateViaMcp(
       "weekly",
       dates.weekly,
@@ -1872,8 +1910,8 @@ async function main() {
     assertRefreshedSnapshotStatus(schedulingCapabilityStatus);
     assert.equal(
       schedulingCapabilityStatus.snapshot.capabilities.periodicUpdate,
-      true,
-      "The created periodic fixture cannot be scheduled because the live projection does not explicitly expose periodicUpdate: true.",
+      false,
+      "Periodic-update must remain cold until its own exact first operation.",
     );
     const beforeSchedule = await stableTask(daily.operonId);
     assert.deepEqual(
@@ -1914,6 +1952,16 @@ async function main() {
     );
     assert.equal(schedulePreview.plan?.mutationKind, "task.update");
     assert.equal(schedulePreview.plan?.planDigest, schedulePreview.planDigest);
+    const postPeriodicUpdateStatus = await call("operon_status", {
+      forceRefresh: true,
+    });
+    assertRefreshedSnapshotStatus(postPeriodicUpdateStatus);
+    assert.equal(
+      postPeriodicUpdateStatus.snapshot.capabilities.periodicUpdate,
+      true,
+    );
+    assert.equal(postPeriodicUpdateStatus.snapshot.capabilities.filterQuery, false);
+    evidence.firstUseNegotiation.periodicUpdateOnly = true;
     trackPlannedTaskSourceArtifacts(
       schedulePreview.plan,
       "Periodic scheduling set preview",
