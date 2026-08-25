@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with non-denied `3.3.2` and `3.5.2` when the Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use official opaque preview/apply/recovery plans; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
+The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with later non-denied releases such as `3.5.3` when the Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use official opaque preview/apply/recovery plans; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
 
 Prefix:
 
@@ -15,7 +15,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 ## Compatibility and capabilities
 
 - Bridge contract: `1`
-- Certified compatibility through official Operon `3.2.1`; completed provisional live pilot: `3.3.2` with CLI `1.1.2`; current provisional candidate: `3.5.2` with CLI `1.2.0` and Bridge `0.8.0`. Its patched acceptance build passed the exact live canary on 2026-08-24; stock admission still awaits the upstream fixes and a stock rerun
+- Certified compatibility through official Operon `3.2.1`; completed provisional live pilot: `3.3.2` with CLI `1.1.2`; current provisional candidate: `3.5.3` with CLI `1.2.0` and Bridge `0.8.1`
 - Official Operon legacy read allowlist: `2.4.0`, `2.5.0`
 - Official Operon Developer API V1 allowlist: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, `3.2.1`
 - Kairélys read allowlist: `2.5.1`, `2.5.2`, `2.5.3`, `2.6.1`, `2.6.2`, `2.6.3`
@@ -24,14 +24,14 @@ All routes inherit Local REST API authentication and TLS behavior.
 - Official Operon `3.x` with the negotiated V1 boundary: typed create/update/transition/relationship/recurrence/convert/relocate through Developer API V1, plus saved-filter execution, adoption and Daily/Weekly workflows through the additive task-workflow API when their exact grants are active. The grant state and capability advertisement are both reported in `/status`; an uncertain apply is returned as such and is never retried blindly.
 - Kairélys `2.5.1` through `2.5.3` and `2.6.1` through `2.6.3` with Public API v1: read-write
 
-`GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future non-denied Operon version is admitted provisionally when its Developer API V1 accessor is present; Markdown similarity is irrelevant. Live use remains independently gated by successful negotiation, `developerApi`, top-level `ok`, `index.ready`, and the exact advertised capability.
+`GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future non-denied Operon version is admitted provisionally when its Developer API V1 accessor is present; Markdown similarity is irrelevant. Reads and new writes remain independently gated by successful negotiation, `developerApi`, top-level `ok`, `index.ready`, and the exact advertised capability. Recovery is the deliberate exception: `GET /recovery-status` negotiates only exact core and task-workflow recovery sessions without awaiting health, catalog or task-index reads, allowing same-plan recovery when those surfaces are degraded or hung.
 
-The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The `3.5.2` / CLI `1.2.0` / Bridge `0.8.0` candidate adds official adoption, periodic-note routing and typed task media fields. Its patched acceptance build passed the live canary, but the stock release remains `compatible-provisional` until upstream fixes `#182`, `#183` and `#184` ship and the released artifact passes the same gate. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
+The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The `3.5.3` / CLI `1.2.0` / Bridge `0.8.1` candidate adds official adoption, periodic-note routing and typed task media fields. Product-version certification remains explicit, but valid mutations are admitted by negotiated contract, exact capabilities, schemas, live health, settled index and recovery support rather than a second version allowlist. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
 
-Stock `3.5.2` remains readable after successful negotiation but reports no
-mutation capabilities. The disposable Pilot 2 acceptance artifact is
-distinguished by the synthetic manifest version `3.5.240438`; that exact local
-identity alone is admitted for 3.5 mutations and is never an upstream release.
+A future non-denied product version remains `compatible-provisional` until it
+joins the certified evidence set, but it may advertise mutations when every
+contract and live-use gate validates. Known-bad versions and narrowly documented
+mutation paths remain explicitly denied.
 
 Readiness requires a compatible plugin, positive generation, healthy idle V8 index, zero dirty sources, and a task count matching diagnostics. A duplicate-ID conflict is reported separately and causes MCP snapshot refresh refusal.
 
@@ -46,6 +46,7 @@ The `revision` covers the normalized projection and source mtime. Every existing
 ## Read routes
 
 - `GET /status`
+- `GET /recovery-status` (recovery-only preflight; no live-index read)
 - `GET /configuration`
 - `GET /diagnostics`
 - `GET /tasks?cursor=0&limit=100&includeProperties=false`

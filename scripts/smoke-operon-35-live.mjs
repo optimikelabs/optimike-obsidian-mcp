@@ -26,9 +26,14 @@ const EXPECTED_VAULT = path.resolve(
   "C:\\Users\\micka\\.codex\\visualizations\\2026\\07\\20\\019f801c-bc43-72f0-bf34-31552d406cbc\\operon-bridge-pilot-vault-2.5.0",
 );
 const EXPECTED_VAULT_NAME = "operon-bridge-pilot-vault-2.5.0";
-const EXPECTED_OPERON_VERSION = "3.5.240438";
+const EXPECTED_OPERON_VERSION = (
+  process.env.OPERON_35_CANARY_EXPECTED_OPERON_VERSION ?? "3.5.3"
+).trim();
+const EXPECTED_BRIDGE_VERSION = (
+  process.env.OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.8.1"
+).trim();
 const EXPECTED_BASE_URL = "http://127.0.0.1:27233";
-const FIXTURE_PATH = "Canary/Operon-3.5.2-Live-Canary.md";
+const FIXTURE_PATH = "Canary/Operon-3.5-Live-Canary.md";
 const PERIODIC_REGISTRY_PATH = path.join(
   EXPECTED_VAULT,
   ".obsidian",
@@ -775,7 +780,7 @@ function assertLiveStatus(status) {
   assert.equal(status?.ok, true, "Operon status is not healthy.");
   assert.equal(status?.source, "operon-runtime");
   assert.equal(status?.stale, false);
-  assert.equal(status?.bridge?.version, "0.8.0");
+  assert.equal(status?.bridge?.version, EXPECTED_BRIDGE_VERSION);
   assert.equal(status?.bridge?.mode, "read-write");
   assert.equal(status?.operon?.present, true);
   assert.equal(status?.operon?.version, EXPECTED_OPERON_VERSION);
@@ -810,7 +815,7 @@ function assertRefreshedSnapshotStatus(status) {
   assert.equal(status?.ok, true, "Forced Operon snapshot refresh failed.");
   assert.equal(status?.source, "operon-live");
   assert.equal(status?.stale, false);
-  assert.equal(status?.snapshot?.bridgeVersion, "0.8.0");
+  assert.equal(status?.snapshot?.bridgeVersion, EXPECTED_BRIDGE_VERSION);
   assert.equal(status?.snapshot?.operonVersion, EXPECTED_OPERON_VERSION);
   assert.equal(Number.isInteger(status?.snapshot?.generation), true);
   assert.ok(status.snapshot.generation > 0);
@@ -1189,7 +1194,7 @@ async function main() {
   }
 
   async function periodicCreateViaMcp(kind, routeDate, label) {
-    const description = `Operon 3.5.2 ${kind} canary ${runId}`;
+    const description = `Operon 3.5 ${kind} canary ${runId}`;
     const before = await markdownInventory();
     const periodic = {
       description,
@@ -1657,7 +1662,7 @@ async function main() {
     const expectedLine = `- [ ] Operon adoption canary ${runId}`;
     const initialFixture = [
       "---",
-      "canary: operon-3.5.2-live",
+      "canary: operon-3.5-live",
       `modification: ${ORIGINAL_MODIFICATION}`,
       "---",
       "",
@@ -2037,7 +2042,7 @@ async function main() {
       sourcePathHash: shortHash(sourceLocator.path),
     };
 
-    const concurrentDescription = `Operon 3.5.2 concurrent periodic canary ${runId}`;
+    const concurrentDescription = `Operon 3.5 concurrent periodic canary ${runId}`;
     const concurrentBody = JSON.stringify({
       idempotencyKey: `${runId}:bridge:periodic-concurrent`,
       dryRun: false,

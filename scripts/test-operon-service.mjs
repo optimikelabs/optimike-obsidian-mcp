@@ -279,6 +279,35 @@ const server = http.createServer((request, response) => {
     return;
   }
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  if (
+    request.method === "GET" &&
+    url.pathname.endsWith("/recovery-status")
+  ) {
+    const status = statusPayload();
+    sendJson(response, 200, {
+      ok:
+        status.operon.compatible &&
+        (status.capabilities.recovery ||
+          status.capabilities.taskWorkflowRecovery),
+      contractVersion: "1",
+      bridge: {
+        id: status.bridge.id,
+        version: status.bridge.version,
+      },
+      operon: {
+        present: status.operon.present,
+        version: status.operon.version,
+        compatible: status.operon.compatible,
+      },
+      capabilities: {
+        recovery: status.capabilities.recovery,
+        taskWorkflowRecovery: status.capabilities.taskWorkflowRecovery,
+      },
+      source: "operon-runtime",
+      stale: false,
+    });
+    return;
+  }
   if (request.method === "GET" && url.pathname.endsWith("/status")) {
     sendJson(response, 200, statusPayload());
     return;
@@ -1350,6 +1379,26 @@ try {
     ["developer-api", "periodic-update"],
     "every pending recovery must expose the exact required recover kind without caller inference",
   );
+
+  state.mode = "initializing";
+  const unsettledRecoveries = await service.pendingRecoveries({
+    kind: "periodic-update",
+  });
+  assert.equal(
+    unsettledRecoveries.recoveries[0].kind,
+    "periodic-update",
+    "pending recovery must remain reachable while the live index is unsettled",
+  );
+  const unsettledRecovered = await service.recoverMutation({
+    idempotencyKey: "test-unsettled-workflow-recovery",
+    recoveryRef: "dvr1_unsettled-workflow-recovery",
+    recovery: {
+      kind: "periodic-update",
+      planDigest: taskWorkflowPlanDigest,
+    },
+  });
+  assert.equal(unsettledRecovered.status, "already-applied");
+  state.mode = "normal";
 
   const workflowRecovered = await service.recoverMutation({
     idempotencyKey: "test-workflow-recovery",

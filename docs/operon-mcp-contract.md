@@ -78,7 +78,7 @@ Missing optional capabilities disable only dependent tools. A future contract
 version is never accepted silently.
 
 `operon_query_saved_filter` is intentionally live-only and capability-gated. On
-official Operon `3.5.2`, it delegates to the additive task-workflow Developer
+official Operon `3.5.3`, it delegates to the additive task-workflow Developer
 API after an exact `tasks.filter-query` grant. The caller must supply an exact
 `filterSetId`: the official API executes saved filters but does not expose their
 catalog. Headless snapshots never attempt to reproduce plugin filter semantics.
@@ -103,7 +103,7 @@ Common controls:
 - `idempotencyKey` is mandatory;
 - existing Operon tasks require `expectedRevision`;
 - adoption requires an exact one-based `line` and `expectedLine` precondition;
-- the locally attested Operon `3.5.240438` acceptance build previews and applies one exact host-sealed opaque plan; stock `3.5.2` remains read-only at the Bridge boundary;
+- any non-denied Operon release with the negotiated V1 contract previews and applies one exact host-sealed opaque plan only after its exact capability, schema, health, settled-index and recovery gates pass;
 - `outcome-unknown` is surfaced with its recovery reference and never blind-retried;
 - Task Workflow results are strictly validated before projection; malformed or contradictory native evidence remains `outcome-unknown`, while `nativeProof` exposes only the bounded proof projection;
 - after apply, the Bridge rereads the verified live index;
@@ -129,7 +129,7 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 ### Tool-specific rules
 
-`operon_adopt_task` uses the official additive task-workflow API only on a mutation-admitted build and after the exact `tasks.adopt.preview` and `tasks.adopt.apply` grants. For the 3.5 acceptance campaign, that build is the synthetic local identity `3.5.240438`; stock `3.5.2` remains read-only. The tool upgrades one exact checkbox through Operon's opaque sealed plan. The target file, one-based line, and exact source line must match; otherwise the operation returns `conflict` without writing. A compatible legacy engine may still advertise its bounded adoption contract, but a missing official grant returns a structured unavailable result and the MCP never simulates adoption with a Markdown edit.
+`operon_adopt_task` uses the official additive task-workflow API only after the exact `tasks.adopt.preview` and `tasks.adopt.apply` grants. Product-version membership is not a second mutation gate. The tool upgrades one exact checkbox through Operon's opaque sealed plan. The target file, one-based line, and exact source line must match; otherwise the operation returns `conflict` without writing. A compatible legacy engine may still advertise its bounded adoption contract, but a missing official grant returns a structured unavailable result and the MCP never simulates adoption with a Markdown edit.
 
 `operon_create_task` creates inline or file tasks through Operon's creator services. On official Operon 3.2.0, typed fields, tags, stable `statusId`, relationships, exact inline `targetPath`, and configured/default file templates are supported. Unmanaged YAML properties and arbitrary `targetFolder` placement are legacy-only; the official Developer API path rejects them instead of using a fallback.
 
@@ -183,24 +183,19 @@ reports uncertainty or unavailability without retrying or falling back.
 
 Deletion, reminders, pinned state, timer control/session, and
 saved-filter management remain outside the official agent mutation surface.
-Saved-filter **execution** is available on Operon `3.5.2` when the exact ID and
+Saved-filter **execution** is available on Operon `3.5.3` when the exact ID and
 grant are present; catalog discovery and filter creation/editing are not.
-Adoption is available on the current 3.5 acceptance path only for the mutation-admitted `3.5.240438` build after its exact additive grants; stock `3.5.2` remains read-only. Delete remains an
+Adoption is available after its exact additive grants and the shared live contract gates. Delete remains an
 operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.1 candidate admission
+## 3.1.1 candidate admission
 
-Optimike MCP `3.1.0`, Bridge `0.8.0`, Operon `3.5.2` and Operon CLI `1.2.0`
-form the current candidate set. Contract negotiation and deterministic tests
-admit it as `compatible-provisional`. A patched candidate passed the exact live
-Obsidian Desktop canary on 2026-08-24; certification still requires the fixes
-from upstream PRs `#182`, `#183` and `#184` to ship and the stock artifact to
-pass the same gate. This provisional label is intentional and does not weaken
-any capability, grant, write-mode or recovery gate.
-
-Bridge `0.8.0` admits stock `3.5.2` reads after contract negotiation but masks
-all mutation capabilities. The local Pilot 2 build uses the explicit synthetic
-manifest version `3.5.240438`; it is the only 3.5 acceptance artifact admitted
-for mutation and is not an upstream release identifier.
+Optimike MCP `3.1.1`, Bridge `0.8.1`, Operon `3.5.3` and Operon CLI `1.2.0`
+form the current candidate set. Operon `3.5.3` remains
+`compatible-provisional` until it joins the explicit certified evidence set,
+but that label no longer masks valid mutation capabilities. Product version is
+diagnostic metadata and may select an explicit deny or narrowly blocked path;
+it is not a positive mutation allowlist. Contract negotiation, exact grants,
+schemas, live health, settled index, write policy and recovery remain mandatory.

@@ -90,12 +90,12 @@ Every mode also registers the 25 Operon contract tools:
 `operon_relocate_task`, `operon_list_pending_recoveries`, and
 `operon_recover_mutation`. In non-live modes they remain limited to validated
 read-only snapshots; mutation calls fail closed. Registration does not imply
-runtime availability: official Operon `3.5.2` exposes saved-filter evaluation
-after its exact read grant, but Bridge mutations stay masked even when adoption
-or Daily/Weekly grants exist. Only the locally attested `3.5.240438` build may
-exercise those mutation workflows. That patched candidate passed the live 3.1 canary on 2026-08-24; the stock
-release remains `compatible-provisional` until its required upstream fixes ship
-and the official artifact passes the same gate. Missing optional grants disable only their dependent routes; they do
+runtime availability: official Operon `3.5.3` exposes saved-filter evaluation,
+adoption and Daily/Weekly workflows after their exact grants. A non-denied
+future release is not forced into read-only mode solely because its product
+version is unknown: the Bridge admits each mutation only after Developer API V1
+negotiation, exact capability/schema validation, live health, settled index,
+write policy and recovery checks all pass. Missing optional grants disable only their dependent routes; they do
 not create a Markdown fallback. Operon owns the opaque sealed plan and same-plan
 recovery. Earlier official Operon `3.2.x` exposes saved-filter evaluation
 after an exact `tasks.filter-query` grant, but not catalog discovery; adoption

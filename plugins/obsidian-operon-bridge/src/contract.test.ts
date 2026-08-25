@@ -19,7 +19,6 @@ import {
   normalizeTask,
   resolvePriorityStableId,
   resolveOperonCompatibility,
-  isMutationAdmittedDeveloperApiVersion,
   paginateTasks,
   queryTasks,
   resolveWorkflow,
@@ -672,7 +671,7 @@ test("legacy version compatibility remains an explicit tested-version allowlist"
   assert.equal(isVersionCompatible("kairelys", "2.6.4"), false);
 });
 
-test("certified Developer API versions remain explicit and only unverified mutations stay fail-closed", () => {
+test("certified Developer API versions and known mutation exceptions remain explicit", () => {
 	assert.deepEqual(OPERON_BRIDGE_DEVELOPER_API_VERSIONS, [
 		"3.0.1",
 		"3.1.0",
@@ -966,21 +965,24 @@ test("normalization preserves canonical/custom fields and unmanaged file propert
   assert.match(value.revision, /^fnv1a32:[0-9a-f]{8}$/u);
 });
 
-test("provisional mutation admission is explicit and build-attested", () => {
-	assert.equal(isMutationAdmittedDeveloperApiVersion("3.2.1"), true);
-	assert.equal(isMutationAdmittedDeveloperApiVersion("3.3.2"), true);
-	assert.equal(isMutationAdmittedDeveloperApiVersion("3.5.2"), false);
-	assert.equal(
-		isMutationAdmittedDeveloperApiVersion("3.5.240438"),
-		true,
-	);
-	assert.equal(isMutationAdmittedDeveloperApiVersion("3.5.3"), false);
+test("valid Developer API V1 releases do not need a product-version mutation allowlist", () => {
+  assert.deepEqual(
+    resolveOperonCompatibility({
+      pluginId: "operon",
+      version: "99.0.0",
+      hasDeveloperApiV1: true,
+    }),
+    {
+      state: "compatible-provisional",
+      admission: "developer-api-v1",
+      reason:
+        "The loaded Operon version is not yet certified, but it exposes the negotiated Developer API V1 boundary; runtime capability and schema checks remain mandatory.",
+    },
+  );
 });
 
-test("every direct mutation guard fails closed for an unattested runtime", async () => {
+test("direct mutation guards rely on negotiated capabilities instead of product versions", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
-  const assertMutationRuntimeAdmitted = BridgePlugin.prototype
-    .assertMutationRuntimeAdmitted as Function;
   const guards: Array<[string, Function, unknown[]]> = [
     [
       "mutation",
@@ -993,6 +995,11 @@ test("every direct mutation guard fails closed for an unattested runtime", async
       ["periodic-update"],
     ],
     [
+      "task workflow recovery",
+      BridgePlugin.prototype.requireTaskWorkflowRecoveryRuntime as Function,
+      ["periodic-update"],
+    ],
+    [
       "recovery",
       BridgePlugin.prototype.requireDeveloperApiMutationRuntime as Function,
       [],
@@ -1001,38 +1008,202 @@ test("every direct mutation guard fails closed for an unattested runtime", async
 
   for (const [label, guard, args] of guards) {
     const runtime = {
-      version: "3.5.2",
-      developerApi: { hasTaskWorkflowCapability: () => true },
+      version: "99.0.0",
+      compatible: true,
+      indexer: { getAllTasks: () => [] },
+      developerApi: {
+        hasMutationCapability: () => true,
+        hasTaskWorkflowCapability: () => true,
+        hasRecoverySupport: () => true,
+        refreshRecovery: async () => true,
+        hasTaskWorkflowRecoverySupport: () => true,
+        refreshTaskWorkflowRecovery: async () => true,
+      },
     };
     const fake = {
       settings: { mutationsEnabled: true },
       requireRuntime: () => runtime,
-      assertMutationRuntimeAdmitted: (candidate: unknown) =>
-        assertMutationRuntimeAdmitted.call(fake, candidate),
+      indexState: async () => ({
+        ready: true,
+        diagnostics: { taskCount: 0 },
+      }),
+      runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+      isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+      requireSettledMutationIndex:
+        BridgePlugin.prototype.requireSettledMutationIndex,
     };
-    assert.throws(
-      () => guard.call(fake, ...args),
-      /3\.5\.2 is not admitted for Bridge mutations/u,
-      label,
+    assert.equal(
+      await guard.call(fake, ...args),
+      runtime,
+      `${label} must remain available for a future version with the negotiated contract`,
     );
   }
 
-  const admittedRuntime = {
-    version: "3.5.240438",
-    developerApi: { hasTaskWorkflowCapability: () => true },
+  let negotiated = false;
+  const coldRuntime = {
+    version: "99.0.0",
+    compatible: true,
+    indexer: { getAllTasks: () => [] },
+    developerApi: {
+      hasMutationCapability: () => negotiated,
+      hasTaskWorkflowCapability: () => negotiated,
+      hasRecoverySupport: () => negotiated,
+      hasTaskWorkflowRecoverySupport: () => negotiated,
+      refreshTaskWorkflowRecovery: async () => {
+        negotiated = true;
+        return true;
+      },
+    },
   };
-  const admitted = {
+  const cold = {
     settings: { mutationsEnabled: true },
-    requireRuntime: () => admittedRuntime,
-    assertMutationRuntimeAdmitted: (candidate: unknown) =>
-      assertMutationRuntimeAdmitted.call(admitted, candidate),
+    requireRuntime: () => coldRuntime,
+    indexState: async () => {
+      negotiated = true;
+      return { ready: true, diagnostics: { taskCount: 0 } };
+    },
+    runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+    isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+    requireSettledMutationIndex:
+      BridgePlugin.prototype.requireSettledMutationIndex,
   };
   assert.equal(
-    BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
-      admitted,
-      "periodic-update",
+    await BridgePlugin.prototype.requireMutationRuntime.call(cold, "create"),
+    coldRuntime,
+  );
+  negotiated = false;
+  assert.equal(
+    await BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+      cold,
+      "periodic-create",
     ),
-    admittedRuntime,
+    coldRuntime,
+  );
+
+  const unsettled = {
+    ...cold,
+    indexState: async () => ({
+      ready: false,
+      diagnostics: { taskCount: 0 },
+    }),
+  };
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireMutationRuntime.call(unsettled, "create"),
+    /live index is not settled/u,
+  );
+  const countMismatch = {
+    ...cold,
+    indexState: async () => ({
+      ready: true,
+      diagnostics: { taskCount: 1 },
+    }),
+  };
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+        countMismatch,
+        "periodic-create",
+      ),
+    /live index is not settled/u,
+  );
+  assert.equal(
+    await BridgePlugin.prototype.requireTaskWorkflowRecoveryRuntime.call(
+      unsettled,
+      "periodic-create",
+    ),
+    coldRuntime,
+    "task-workflow recovery must remain available while the live index is unsettled",
+  );
+
+  const missingCapabilityRuntime = {
+    version: "99.0.0",
+    compatible: true,
+    indexer: { getAllTasks: () => [] },
+    developerApi: {
+      hasMutationCapability: () => false,
+      hasTaskWorkflowCapability: () => false,
+      hasRecoverySupport: () => false,
+      hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflowRecovery: async () => false,
+    },
+  };
+  const missingCapability = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => missingCapabilityRuntime,
+    indexState: async () => ({
+      ready: true,
+      diagnostics: { taskCount: 0 },
+    }),
+    runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+    isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+    requireSettledMutationIndex:
+      BridgePlugin.prototype.requireSettledMutationIndex,
+  };
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireMutationRuntime.call(
+        missingCapability,
+        "update",
+      ),
+    /mutation or recovery capability is unavailable: update/u,
+  );
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+        missingCapability,
+        "periodic-update",
+      ),
+    /task-workflow Developer API capability or recovery support is unavailable: periodic-update/u,
+  );
+
+  const missingRecoveryRuntime = {
+    version: "99.0.0",
+    compatible: true,
+    indexer: { getAllTasks: () => [] },
+    developerApi: {
+      hasMutationCapability: () => true,
+      hasTaskWorkflowCapability: () => true,
+      hasRecoverySupport: () => false,
+      hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflowRecovery: async () => false,
+    },
+  };
+  const missingRecovery = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => missingRecoveryRuntime,
+    indexState: async () => ({
+      ready: true,
+      diagnostics: { taskCount: 0 },
+    }),
+    runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+    isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+    requireSettledMutationIndex:
+      BridgePlugin.prototype.requireSettledMutationIndex,
+  };
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireMutationRuntime.call(
+        missingRecovery,
+        "update",
+      ),
+    /mutation or recovery capability is unavailable: update/u,
+  );
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+        missingRecovery,
+        "periodic-create",
+      ),
+    /task-workflow Developer API capability or recovery support is unavailable: periodic-create/u,
+  );
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireTaskWorkflowRecoveryRuntime.call(
+        missingRecovery,
+        "periodic-create",
+      ),
+    /task-workflow Developer API recovery support is unavailable: periodic-create/u,
   );
 
   const legacyRuntime = {
@@ -1044,14 +1215,140 @@ test("every direct mutation guard fails closed for an unattested runtime", async
   const legacy = {
     settings: { mutationsEnabled: true },
     requireRuntime: () => legacyRuntime,
-    assertMutationRuntimeAdmitted: () => {
-      throw new Error("Developer API admission must not gate legacy Public API");
-    },
   };
   assert.equal(
-    BridgePlugin.prototype.requireMutationRuntime.call(legacy, "update"),
+    await BridgePlugin.prototype.requireMutationRuntime.call(legacy, "update"),
     legacyRuntime,
   );
+});
+
+test("future contract-compatible Operon releases project read-write capabilities", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  let recoveryRefreshes = 0;
+  const workflowRecoveryRefreshes: string[] = [];
+  const adapter = {
+    hasMutationCapability: () => true,
+    hasTaskWorkflowCapability: () => true,
+    hasReadCapability: () => true,
+    hasFilterQueryCapability: () => true,
+    hasRecoverySupport: () => true,
+    hasTaskWorkflowRecoverySupport: () => true,
+    refreshRecovery: async () => {
+      recoveryRefreshes += 1;
+      return true;
+    },
+    refreshTaskWorkflowRecovery: async (kind: string) => {
+      workflowRecoveryRefreshes.push(kind);
+      return true;
+    },
+  };
+  const runtime = {
+    version: "99.0.0",
+    compatible: true,
+    developerApi: adapter,
+  };
+  const fake = { settings: { mutationsEnabled: true } };
+  const capabilities = BridgePlugin.prototype.capabilities.call(
+    fake,
+    runtime,
+    true,
+  );
+  assert.equal(capabilities.update, true);
+  assert.equal(capabilities.adopt, true);
+  assert.equal(capabilities.periodicCreate, true);
+  assert.equal(capabilities.periodicUpdate, true);
+  assert.equal(capabilities.recovery, true);
+  assert.equal(capabilities.taskWorkflowRecovery, true);
+
+  const dirtyIndexCapabilities = BridgePlugin.prototype.capabilities.call(
+    fake,
+    runtime,
+    false,
+  );
+  assert.equal(dirtyIndexCapabilities.update, false);
+  assert.equal(dirtyIndexCapabilities.adopt, false);
+  assert.equal(
+    dirtyIndexCapabilities.recovery,
+    true,
+    "core recovery must remain advertised while the live index is unsettled",
+  );
+  assert.equal(
+    dirtyIndexCapabilities.taskWorkflowRecovery,
+    true,
+    "workflow recovery must remain advertised while the live index is unsettled",
+  );
+  await BridgePlugin.prototype.refreshRecoveryCapabilities.call(
+    fake,
+    runtime,
+    false,
+  );
+  assert.equal(recoveryRefreshes, 1);
+  assert.deepEqual(workflowRecoveryRefreshes, [
+    "adopt",
+    "periodic-create",
+    "periodic-update",
+  ]);
+  await BridgePlugin.prototype.refreshRecoveryCapabilities.call(
+    fake,
+    runtime,
+    true,
+  );
+  assert.equal(
+    recoveryRefreshes,
+    1,
+    "a settled status refresh already negotiated recovery with the full contract",
+  );
+  const recoveryStatus = await BridgePlugin.prototype.recoveryStatusPayload.call(
+    {
+      getOperonRuntime: () => runtime,
+      app: { plugins: {} },
+      manifest: { id: "optimike-operon-bridge", version: "0.8.1" },
+      settings: { mutationsEnabled: true },
+      capabilities: BridgePlugin.prototype.capabilities,
+    },
+  );
+  assert.equal(recoveryStatus.ok, true);
+  assert.deepEqual(recoveryStatus.capabilities, {
+    recovery: true,
+    taskWorkflowRecovery: true,
+  });
+  assert.equal(
+    recoveryRefreshes,
+    2,
+    "the recovery-only status must negotiate without invoking indexState",
+  );
+
+  const disabledRecoveryCapabilities = BridgePlugin.prototype.capabilities.call(
+    { settings: { mutationsEnabled: false } },
+    runtime,
+    false,
+  );
+  assert.equal(disabledRecoveryCapabilities.recovery, false);
+  assert.equal(disabledRecoveryCapabilities.taskWorkflowRecovery, false);
+
+  const invalidCapabilities = BridgePlugin.prototype.capabilities.call(
+    fake,
+    { ...runtime, compatible: false },
+    true,
+  );
+  assert.equal(invalidCapabilities.update, false);
+  assert.equal(invalidCapabilities.adopt, false);
+  assert.equal(invalidCapabilities.recovery, false);
+
+  const noRecoveryAdapter = {
+    ...adapter,
+    hasRecoverySupport: () => false,
+    hasTaskWorkflowRecoverySupport: () => false,
+  };
+  const noRecoveryCapabilities = BridgePlugin.prototype.capabilities.call(
+    fake,
+    { ...runtime, developerApi: noRecoveryAdapter },
+    true,
+  );
+  assert.equal(noRecoveryCapabilities.update, false);
+  assert.equal(noRecoveryCapabilities.adopt, false);
+  assert.equal(noRecoveryCapabilities.periodicCreate, false);
+  assert.equal(noRecoveryCapabilities.periodicUpdate, false);
 });
 
 test("normalization and filtering preserve ordered list fields without scalar coercion", () => {
@@ -1075,8 +1372,8 @@ test("normalization and filtering preserve ordered list fields without scalar co
       { canonicalKey: "taskImage", visiblePropertyName: "Task Image" },
       { canonicalKey: "taskGallery", visiblePropertyName: "Task Gallery" },
     ],
-    operonVersion: "3.5.2",
-    bridgeVersion: "0.8.0",
+    operonVersion: "3.5.3",
+    bridgeVersion: "0.8.1",
     includeProperties: false,
   });
   assert.deepEqual(normalized.fields.taskGallery, [

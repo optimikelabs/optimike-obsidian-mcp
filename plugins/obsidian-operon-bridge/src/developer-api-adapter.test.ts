@@ -6,7 +6,7 @@ const consumer = {
   manifest: {
     id: "optimike-operon-bridge",
     name: "Optimike Operon Bridge",
-    version: "0.8.0",
+    version: "0.8.1",
   },
 };
 
@@ -464,6 +464,33 @@ test("Operon 3 Developer API adapter turns malformed or throwing negotiation int
   assert.equal(incomplete.negotiatedContractState, "invalid");
 });
 
+test("post-apply identity proof retries a stale live read without replaying the mutation", async () => {
+  type LateTask = { identity: { operonId: string } };
+  const target = {
+    identity: { operonId: "late123" },
+  };
+  let readCalls = 0;
+  const fake = {
+    reloadLiveTasks: async () => ({
+      tasks: [],
+      rawTasks: readCalls++ === 0 ? [] : [target],
+    }),
+  };
+  const proof = await (
+    OperonDeveloperApiRuntimeAdapter.prototype as unknown as {
+      findUniqueLiveTaskAfterMutation: (
+        this: typeof fake,
+        predicate: (task: LateTask) => boolean,
+      ) => Promise<LateTask | null>;
+    }
+  ).findUniqueLiveTaskAfterMutation.call(
+    fake,
+    (task) => task.identity.operonId === "late123",
+  );
+  assert.equal(proof, target);
+  assert.equal(readCalls, 2);
+});
+
 test("Operon 3 Developer API adapter keeps approved capabilities usable with a partial grant", async () => {
   const granted = new Set([
     "system.health",
@@ -868,6 +895,7 @@ test("Operon 3 Developer API adapter previews and applies an exact typed update 
 });
 
 test("Operon 3 Developer API adapter recovers the same durable mutation plan", async () => {
+  let liveReadsFail = false;
   const api = {
     hasCapability: (name: string) =>
       [
@@ -882,12 +910,15 @@ test("Operon 3 Developer API adapter recovers the same durable mutation plan", a
       ].includes(name),
     channel: { status: readyStatus },
     system: {
-      health: async () => ({
-        ok: true,
-        lifecyclePhase: "ready",
-        v8PersistencePhase: "idle",
-        contextRevision: { index: { ramGeneration: 19 } },
-      }),
+      health: async () => {
+        if (liveReadsFail) throw new Error("live index is dirty");
+        return {
+          ok: true,
+          lifecyclePhase: "ready",
+          v8PersistencePhase: "idle",
+          contextRevision: { index: { ramGeneration: 19 } },
+        };
+      },
       capabilities: () => [],
       diagnostics: async () => ({}),
     },
@@ -953,6 +984,17 @@ test("Operon 3 Developer API adapter recovers the same durable mutation plan", a
   assert.equal(recovered.code, "already-applied");
   assert.equal(recovered.recoveryRef, "recovery-1");
   assert.equal(recovered.planDigest, "plan-recovery-1");
+
+  liveReadsFail = true;
+  assert.equal(await adapter.refresh(true), false);
+  assert.equal(
+    adapter.hasRecoverySupport(),
+    true,
+    "a failed live read refresh must not destroy an established recovery session",
+  );
+  assert.equal(await adapter.refreshRecovery(), true);
+  const recoveredWithDirtyIndex = await adapter.recoverMutation("recovery-1");
+  assert.equal(recoveredWithDirtyIndex.code, "already-applied");
 });
 
 test("Operon 3 Developer API adapter builds official relationship and recurrence plans", async () => {
@@ -1452,6 +1494,7 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
   const appliedHandles: unknown[] = [];
   let pendingRecoveryCalls = 0;
   let recoveryCalls = 0;
+  let liveReadsFail = false;
   let nextWorkflowResult: Record<string, unknown> | null = null;
   let nextWorkflowPlan: Record<string, unknown> | null = null;
   let nextWorkflowPreviewError: Record<string, unknown> | null = null;
@@ -1487,10 +1530,13 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
       ].includes(name),
     channel: { status: readyStatus },
     system: {
-      health: async () => ({
-        ok: true,
-        contextRevision: { index: { ramGeneration: 350 } },
-      }),
+      health: async () => {
+        if (liveReadsFail) throw new Error("live index is dirty");
+        return {
+          ok: true,
+          contextRevision: { index: { ramGeneration: 350 } },
+        };
+      },
       capabilities: () => [],
       diagnostics: async () => ({ ok: true }),
     },
@@ -2257,6 +2303,29 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
     );
   assert.equal(replayedPeriodicCreateAfterRestart.code, "already-applied");
   assert.equal(replayedPeriodicCreateAfterRestart.operonId, "day1234");
+
+  liveReadsFail = true;
+  assert.equal(await restartedAdapter.refresh(true), false);
+  assert.equal(
+    restartedAdapter.hasTaskWorkflowRecoverySupport("periodic-create"),
+    true,
+    "a failed live read refresh must preserve an established workflow recovery session",
+  );
+  assert.equal(
+    await restartedAdapter.refreshTaskWorkflowRecovery("periodic-create"),
+    true,
+    "recovery negotiation must not depend on health, catalog, or task reads",
+  );
+  assert.equal(
+    restartedAdapter.hasTaskWorkflowRecoverySupport("periodic-create"),
+    true,
+  );
+  const recoveredWithDirtyIndex = await restartedAdapter.recoverTaskWorkflow(
+    "periodic-create",
+    workflowRecoveryRefs["periodic-create"],
+    workflowDigests["periodic-create"],
+  );
+  assert.equal(recoveredWithDirtyIndex.code, "already-applied");
 });
 
 test("a rejected Operon 3.5 workflow grant does not revoke another workflow or core reads", async () => {

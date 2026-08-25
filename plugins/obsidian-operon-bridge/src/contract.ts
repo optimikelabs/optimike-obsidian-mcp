@@ -32,11 +32,6 @@ export const OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS: Readonly<
 		"Operon 3.0.0 predates the accepted Developer API V1 integration baseline.",
 };
 
-export const OPERON_BRIDGE_PROVISIONAL_MUTATION_VERSIONS = [
-	"3.3.2",
-	"3.5.240438",
-] as const;
-
 export type OperonCompatibilityState =
 	| "certified"
 	| "compatible-provisional"
@@ -68,16 +63,6 @@ export const OPERON_BRIDGE_BLOCKED_MUTATIONS = {
 export function isCertifiedDeveloperApiVersion(version: string): boolean {
 	return (OPERON_BRIDGE_DEVELOPER_API_VERSIONS as readonly string[]).includes(
 		version.trim(),
-	);
-}
-
-export function isMutationAdmittedDeveloperApiVersion(version: string): boolean {
-	const normalized = version.trim();
-	return (
-		isCertifiedDeveloperApiVersion(normalized) ||
-		(OPERON_BRIDGE_PROVISIONAL_MUTATION_VERSIONS as readonly string[]).includes(
-			normalized,
-		)
 	);
 }
 

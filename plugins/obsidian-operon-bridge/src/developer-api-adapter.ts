@@ -749,6 +749,7 @@ const TASK_WORKFLOW_CAPABILITIES: Record<
 // the durable recovery reference is safer than holding the HTTP request open
 // until the caller times out and then guessing whether to retry.
 const DEVELOPER_API_APPLY_TIMEOUT_MS = 120_000;
+const POST_APPLY_IDENTITY_RETRY_DELAYS_MS = [0, 100, 300, 750, 1_500] as const;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const DEVELOPER_RECOVERY_REF = /^dvr1_[0-9a-f]{48}$/u;
 
@@ -1263,9 +1264,11 @@ export class OperonDeveloperApiRuntimeAdapter {
     this.readApi = null;
     this.optionalReadApis.clear();
     this.mutationApis.clear();
-    this.recoveryApi = null;
     this.filterQueryApi = null;
-    this.taskWorkflowApis.clear();
+    if (!includeMutationCapabilities) {
+      this.recoveryApi = null;
+      this.taskWorkflowApis.clear();
+    }
     this.grantedCapabilities = null;
 
     // Establish a baseline session first. Operon evaluates a requested set as
@@ -1380,6 +1383,7 @@ export class OperonDeveloperApiRuntimeAdapter {
         this.filterQueryApi = null;
       }
       if (includeMutationCapabilities) {
+        this.taskWorkflowApis.clear();
         for (const workflowKind of Object.keys(
           TASK_WORKFLOW_CAPABILITIES,
         ) as DeveloperApiTaskWorkflowKind[]) {
@@ -1444,6 +1448,24 @@ export class OperonDeveloperApiRuntimeAdapter {
       kind,
     );
     return Boolean(methods?.recover && methods.pendingRecoveries);
+  }
+
+  async refreshTaskWorkflowRecovery(
+    kind: DeveloperApiTaskWorkflowKind,
+  ): Promise<boolean> {
+    let api: TaskWorkflowDeveloperApiV1 | null = null;
+    try {
+      api = this.connectTaskWorkflowRecovery(kind);
+    } catch {
+      // A failed exact negotiation must fail closed without depending on, or
+      // mutating, the live task index.
+    }
+    if (!api) {
+      this.taskWorkflowApis.delete(kind);
+      return false;
+    }
+    this.taskWorkflowApis.set(kind, api);
+    return true;
   }
 
   async querySavedFilter(
@@ -1620,6 +1642,16 @@ export class OperonDeveloperApiRuntimeAdapter {
     return Boolean(mutations?.recover && mutations.pendingRecoveries);
   }
 
+  async refreshRecovery(): Promise<boolean> {
+    const api = this.connect(BASELINE_CAPABILITIES);
+    if (!api?.mutations?.recover || !api.mutations.pendingRecoveries) {
+      this.recoveryApi = null;
+      return false;
+    }
+    this.recoveryApi = api;
+    return true;
+  }
+
   private connectApproved(
     requestedCapabilities: readonly string[],
     updateStatus = true,
@@ -1685,6 +1717,23 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (!api) return null;
     const methods = this.taskWorkflowMethods(api, kind);
     return methods?.preview && methods.apply ? api : null;
+  }
+
+  private connectTaskWorkflowRecovery(
+    kind: DeveloperApiTaskWorkflowKind,
+  ): TaskWorkflowDeveloperApiV1 | null {
+    if (!this.taskWorkflowAccessor) return null;
+    const access = this.taskWorkflowAccessor.getTaskWorkflowDeveloperApiV1(
+      this.consumerPlugin,
+      {
+        ...OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
+        requestedCapabilities: TASK_WORKFLOW_CAPABILITIES[kind],
+      },
+    );
+    const api = this.taskWorkflowAccessApi(access);
+    if (!api) return null;
+    const methods = this.taskWorkflowMethods(api, kind);
+    return methods?.recover && methods.pendingRecoveries ? api : null;
   }
 
   private taskWorkflowAccessApi(
@@ -2372,7 +2421,6 @@ export class OperonDeveloperApiRuntimeAdapter {
       const targetPath = String(requested.targetPath);
       const lineNumber = Number(requested.line) - 1;
       try {
-        const live = await this.reloadLiveTasks();
         const replayedIdentity =
           execution.status === "already-applied"
             ? this.taskWorkflowIdentity(
@@ -2380,7 +2428,7 @@ export class OperonDeveloperApiRuntimeAdapter {
                 preview.plan.planDigest,
               )
             : undefined;
-        const adopted = live.rawTasks.filter(
+        const adopted = await this.findUniqueLiveTaskAfterMutation(
           (task) =>
             (replayedIdentity
               ? task.identity.operonId === replayedIdentity
@@ -2391,7 +2439,7 @@ export class OperonDeveloperApiRuntimeAdapter {
             task.locator.filePath === targetPath &&
             task.locator.lineNumber === lineNumber,
         );
-        if (adopted.length !== 1) {
+        if (!adopted) {
           throw new Error(
             "no unique adopted task is visible at the sealed source line",
           );
@@ -2399,9 +2447,9 @@ export class OperonDeveloperApiRuntimeAdapter {
         await this.rememberTaskWorkflowIdentity(
           kind,
           preview.plan.planDigest,
-          adopted[0]!.identity.operonId,
+          adopted.identity.operonId,
         );
-        return { ...terminal, operonId: adopted[0]!.identity.operonId };
+        return { ...terminal, operonId: adopted.identity.operonId };
       } catch (error) {
         return this.mutationFailure(
           "outcome-unknown",
@@ -2419,7 +2467,6 @@ export class OperonDeveloperApiRuntimeAdapter {
     }
     if (kind === "periodic-create") {
       try {
-        const live = await this.reloadLiveTasks();
         const provenResourceKeys = this.taskWorkflowResourceKeys(execution);
         const replayedIdentity =
           execution.status === "already-applied"
@@ -2428,7 +2475,7 @@ export class OperonDeveloperApiRuntimeAdapter {
                 preview.plan.planDigest,
               )
             : undefined;
-        const created = live.rawTasks.filter(
+        const created = await this.findUniqueLiveTaskAfterMutation(
           (task) =>
             task.representation === "inline" &&
             this.periodicCreatedTaskMatchesRequest(task, requested) &&
@@ -2439,7 +2486,7 @@ export class OperonDeveloperApiRuntimeAdapter {
               : !beforeIds.has(task.identity.operonId) &&
                 provenResourceKeys.has(task.locator.filePath)),
         );
-        if (created.length !== 1) {
+        if (!created) {
           throw new Error(
             "no unique periodic task is linked to the committed native resource evidence",
           );
@@ -2447,9 +2494,9 @@ export class OperonDeveloperApiRuntimeAdapter {
         await this.rememberTaskWorkflowIdentity(
           kind,
           preview.plan.planDigest,
-          created[0]!.identity.operonId,
+          created.identity.operonId,
         );
-        return { ...terminal, operonId: created[0]!.identity.operonId };
+        return { ...terminal, operonId: created.identity.operonId };
       } catch (error) {
         return this.mutationFailure(
           "outcome-unknown",
@@ -3457,6 +3504,31 @@ export class OperonDeveloperApiRuntimeAdapter {
     this.indexer.taskCount = live.tasks.length;
     if (live.generation !== null) this.generation = live.generation;
     return live;
+  }
+
+  private async findUniqueLiveTaskAfterMutation(
+    predicate: (task: DeveloperApiTask) => boolean,
+  ): Promise<DeveloperApiTask | null> {
+    let lastError: unknown = null;
+    for (const delayMs of POST_APPLY_IDENTITY_RETRY_DELAYS_MS) {
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => {
+          globalThis.setTimeout(resolve, delayMs);
+        });
+      }
+      try {
+        const live = await this.reloadLiveTasks();
+        const matches = live.rawTasks.filter(predicate);
+        if (matches.length === 1) return matches[0]!;
+        lastError = new Error(
+          `post-apply identity match count remained ${matches.length}`,
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError) throw lastError;
+    return null;
   }
 
   async refreshLiveTaskSnapshot(): Promise<void> {
