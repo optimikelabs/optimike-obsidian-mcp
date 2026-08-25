@@ -19,7 +19,6 @@ import {
   normalizeTask,
   resolvePriorityStableId,
   resolveOperonCompatibility,
-  isMutationAdmittedDeveloperApiVersion,
   paginateTasks,
   queryTasks,
   resolveWorkflow,
@@ -672,7 +671,7 @@ test("legacy version compatibility remains an explicit tested-version allowlist"
   assert.equal(isVersionCompatible("kairelys", "2.6.4"), false);
 });
 
-test("certified Developer API versions remain explicit and only unverified mutations stay fail-closed", () => {
+test("certified Developer API versions and known mutation exceptions remain explicit", () => {
 	assert.deepEqual(OPERON_BRIDGE_DEVELOPER_API_VERSIONS, [
 		"3.0.1",
 		"3.1.0",
@@ -966,21 +965,24 @@ test("normalization preserves canonical/custom fields and unmanaged file propert
   assert.match(value.revision, /^fnv1a32:[0-9a-f]{8}$/u);
 });
 
-test("provisional mutation admission is explicit and build-attested", () => {
-	assert.equal(isMutationAdmittedDeveloperApiVersion("3.2.1"), true);
-	assert.equal(isMutationAdmittedDeveloperApiVersion("3.3.2"), true);
-	assert.equal(isMutationAdmittedDeveloperApiVersion("3.5.2"), false);
-	assert.equal(
-		isMutationAdmittedDeveloperApiVersion("3.5.240438"),
-		true,
-	);
-	assert.equal(isMutationAdmittedDeveloperApiVersion("3.5.3"), false);
+test("valid Developer API V1 releases do not need a product-version mutation allowlist", () => {
+  assert.deepEqual(
+    resolveOperonCompatibility({
+      pluginId: "operon",
+      version: "99.0.0",
+      hasDeveloperApiV1: true,
+    }),
+    {
+      state: "compatible-provisional",
+      admission: "developer-api-v1",
+      reason:
+        "The loaded Operon version is not yet certified, but it exposes the negotiated Developer API V1 boundary; runtime capability and schema checks remain mandatory.",
+    },
+  );
 });
 
-test("every direct mutation guard fails closed for an unattested runtime", async () => {
+test("direct mutation guards rely on negotiated capabilities instead of product versions", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
-  const assertMutationRuntimeAdmitted = BridgePlugin.prototype
-    .assertMutationRuntimeAdmitted as Function;
   const guards: Array<[string, Function, unknown[]]> = [
     [
       "mutation",
@@ -1001,38 +1003,51 @@ test("every direct mutation guard fails closed for an unattested runtime", async
 
   for (const [label, guard, args] of guards) {
     const runtime = {
-      version: "3.5.2",
-      developerApi: { hasTaskWorkflowCapability: () => true },
+      version: "99.0.0",
+      compatible: true,
+      developerApi: {
+        hasMutationCapability: () => true,
+        hasTaskWorkflowCapability: () => true,
+      },
     };
     const fake = {
       settings: { mutationsEnabled: true },
       requireRuntime: () => runtime,
-      assertMutationRuntimeAdmitted: (candidate: unknown) =>
-        assertMutationRuntimeAdmitted.call(fake, candidate),
     };
-    assert.throws(
-      () => guard.call(fake, ...args),
-      /3\.5\.2 is not admitted for Bridge mutations/u,
-      label,
+    assert.equal(
+      guard.call(fake, ...args),
+      runtime,
+      `${label} must remain available for a future version with the negotiated contract`,
     );
   }
 
-  const admittedRuntime = {
-    version: "3.5.240438",
-    developerApi: { hasTaskWorkflowCapability: () => true },
+  const missingCapabilityRuntime = {
+    version: "99.0.0",
+    compatible: true,
+    developerApi: {
+      hasMutationCapability: () => false,
+      hasTaskWorkflowCapability: () => false,
+    },
   };
-  const admitted = {
+  const missingCapability = {
     settings: { mutationsEnabled: true },
-    requireRuntime: () => admittedRuntime,
-    assertMutationRuntimeAdmitted: (candidate: unknown) =>
-      assertMutationRuntimeAdmitted.call(admitted, candidate),
+    requireRuntime: () => missingCapabilityRuntime,
   };
-  assert.equal(
-    BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
-      admitted,
-      "periodic-update",
-    ),
-    admittedRuntime,
+  assert.throws(
+    () =>
+      BridgePlugin.prototype.requireMutationRuntime.call(
+        missingCapability,
+        "update",
+      ),
+    /mutation capability is unavailable: update/u,
+  );
+  assert.throws(
+    () =>
+      BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+        missingCapability,
+        "periodic-update",
+      ),
+    /task-workflow Developer API capability is unavailable: periodic-update/u,
   );
 
   const legacyRuntime = {
@@ -1044,14 +1059,49 @@ test("every direct mutation guard fails closed for an unattested runtime", async
   const legacy = {
     settings: { mutationsEnabled: true },
     requireRuntime: () => legacyRuntime,
-    assertMutationRuntimeAdmitted: () => {
-      throw new Error("Developer API admission must not gate legacy Public API");
-    },
   };
   assert.equal(
     BridgePlugin.prototype.requireMutationRuntime.call(legacy, "update"),
     legacyRuntime,
   );
+});
+
+test("future contract-compatible Operon releases project read-write capabilities", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const adapter = {
+    hasMutationCapability: () => true,
+    hasTaskWorkflowCapability: () => true,
+    hasReadCapability: () => true,
+    hasFilterQueryCapability: () => true,
+    hasRecoverySupport: () => true,
+    hasTaskWorkflowRecoverySupport: () => true,
+  };
+  const runtime = {
+    version: "99.0.0",
+    compatible: true,
+    developerApi: adapter,
+  };
+  const fake = { settings: { mutationsEnabled: true } };
+  const capabilities = BridgePlugin.prototype.capabilities.call(
+    fake,
+    runtime,
+    true,
+  );
+  assert.equal(capabilities.update, true);
+  assert.equal(capabilities.adopt, true);
+  assert.equal(capabilities.periodicCreate, true);
+  assert.equal(capabilities.periodicUpdate, true);
+  assert.equal(capabilities.recovery, true);
+  assert.equal(capabilities.taskWorkflowRecovery, true);
+
+  const invalidCapabilities = BridgePlugin.prototype.capabilities.call(
+    fake,
+    { ...runtime, compatible: false },
+    true,
+  );
+  assert.equal(invalidCapabilities.update, false);
+  assert.equal(invalidCapabilities.adopt, false);
+  assert.equal(invalidCapabilities.recovery, false);
 });
 
 test("normalization and filtering preserve ordered list fields without scalar coercion", () => {
@@ -1075,8 +1125,8 @@ test("normalization and filtering preserve ordered list fields without scalar co
       { canonicalKey: "taskImage", visiblePropertyName: "Task Image" },
       { canonicalKey: "taskGallery", visiblePropertyName: "Task Gallery" },
     ],
-    operonVersion: "3.5.2",
-    bridgeVersion: "0.8.0",
+    operonVersion: "3.5.3",
+    bridgeVersion: "0.8.1",
     includeProperties: false,
   });
   assert.deepEqual(normalized.fields.taskGallery, [

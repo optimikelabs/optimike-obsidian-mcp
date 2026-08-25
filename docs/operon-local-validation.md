@@ -7,8 +7,8 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `3.5.2` with Operon CLI `1.2.0` for the current candidate; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
-- Optimike Operon Bridge `0.8.0`
+- Operon `3.5.3` with Operon CLI `1.2.0` for the current candidate; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Optimike Operon Bridge `0.8.1`
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
@@ -19,11 +19,13 @@ the Developer API, schema, index, capability, and readiness gates and is
 complete and green; keeping its runtime state provisional preserves the
 contract-first policy. Settings grant controls, implicit File Task rename
 refusal, and unscoped transition settlement are fixed in `3.3.2`. Adoption was
-unavailable through that Developer API generation. Operon `3.5.2` exposes
+unavailable through that Developer API generation. Operon `3.5.3` exposes
 adoption plus Daily/Weekly workflows through exact additive grants. The 3.1
 candidate preserves `taskGallery` as an ordered array, keeps `taskType` and
 `taskImage` scalar, and treats `__taskDataType` as read-only. It remains
-`compatible-provisional` until this recipe passes on the exact candidate.
+`compatible-provisional` as certification metadata, while mutation admission
+depends on the negotiated contract and exact live gates rather than a product
+version allowlist.
 Unsupported or uncertain paths stay fail-closed; this
 recipe never authorizes a Markdown/private-API fallback or a blind retry.
 
@@ -123,7 +125,7 @@ PASS when:
 - index generation is greater than zero;
 - diagnostics report `health=healthy`, `runtimePhase=idle`,
   `verifiedThisSession=true`, and `dirtySourceCount=0`;
-- official Operon `3.5.2` reports the exact Developer API V1 and additive
+- official Operon `3.5.3` reports the exact Developer API V1 and additive
   task-workflow grants; the Bridge advertises only the mutation capabilities
   that the live runtime proves and bounds uncertain applies without a blind
   retry;
@@ -237,10 +239,10 @@ operon_recover_mutation
 PASS when:
 
 - all twenty-five tools are registered;
-- official Operon `3.5.2` remains read-only through the Bridge even when
-  adoption and periodic grants exist; only the locally attested `3.5.240438`
-  build exercises those mutation workflows, and a missing grant returns a
-  structured unavailable result without a Markdown fallback;
+- official Operon `3.5.3` exposes mutations after Developer API V1 negotiation,
+  exact grants, valid response schemas, live health, a settled index, write
+  policy and recovery checks; a missing or malformed gate returns a structured
+  unavailable result without a Markdown fallback;
 - saved-filter execution succeeds only after an exact `tasks.filter-query`
   grant and caller-supplied filter ID; the official catalog remains unavailable;
 - recovery requires the public nested `recovery` union: `{ kind:
@@ -253,7 +255,7 @@ PASS when:
 - subsequent calls with unchanged generation do not rewrite the full snapshot;
 - responses say `source=operon-live`, `stale=false`.
 
-## 8a. Exact Operon 3.5.2 live canary
+## 8a. Exact Operon 3.5 live canary
 
 Run only after the exact candidate Bridge is installed and the Pilot 2 status,
 grants, index and validation gates above are green. The recommended mode proves
@@ -292,7 +294,7 @@ The script refuses to start unless all of these gates hold:
 - Local REST uses exactly `http://127.0.0.1:27233` and a non-empty API key;
 - `OPERON_MUTATIONS_ENABLED=true`, the Bridge mutation setting is enabled, and
   all required Developer API/task-workflow grants and capabilities are live;
-- `Canary/Operon-3.5.2-Live-Canary.md` does not already exist;
+- `Canary/Operon-3.5-Live-Canary.md` does not already exist;
 - the explicit mutation confirmation is exact; startup-order mode additionally
   requires the exact open-vault confirmation;
 - the canary process forces `MCP_WRITE_MODE=full`, an empty mutation path
@@ -340,12 +342,10 @@ summary reported `ok=true`, `fixtureRestored=true` and
 `periodicArtifactsRetained=0`. It also proved Daily/Weekly creation, periodic
 scheduling set/clear with Frontmatter Date Manager active, concurrent Bridge
 replay, zero validation violations and zero pending recoveries. This is
-acceptance evidence for the patched candidate, not certification of the stock
-`3.5.2` artifact. Keep the official release `compatible-provisional` until the
-three upstream fixes ship and the released artifact passes this same recipe.
-Bridge `0.8.0` therefore keeps stock `3.5.2` readable but masks every mutation
-capability. The synthetic `3.5.240438` identity is reserved for this disposable
-acceptance build and must never be published as an upstream Operon release.
+historical acceptance evidence for the patched candidate. Operon `3.5.3` ships
+superseding implementations of the three fixes and must pass this same recipe
+with Bridge `0.8.1`. The synthetic `3.5.240438` identity remains historical and
+must never be published as an upstream Operon release.
 
 ## 9. Restart and reindex
 

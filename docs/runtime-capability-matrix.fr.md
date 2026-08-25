@@ -83,13 +83,12 @@ Tous les modes enregistrent aussi les 25 outils du contrat Operon :
 `operon_relocate_task`, `operon_list_pending_recoveries` et
 `operon_recover_mutation`. Hors mode live, ils restent limités aux snapshots
 validés en lecture seule ; toute mutation échoue fermée. L’enregistrement ne
-garantit pas la disponibilité runtime : Operon officiel `3.5.2` expose
-l’exécution des filtres après son grant de lecture exact, mais le Bridge masque
-les mutations même si les grants adoption ou Daily/Weekly existent. Seul le
-build local attesté `3.5.240438` peut exercer ces workflows de mutation. Cette candidate patchée a passé le canary live 3.1
-le 2026-08-24 ; la release stock reste `compatible-provisional` jusqu’à la
-publication de ses correctifs upstream requis et au passage du même gate par
-l’artefact officiel. Un grant optionnel absent désactive uniquement sa
+garantit pas la disponibilité runtime : Operon officiel `3.5.3` expose
+l’exécution des filtres, l’adoption et les workflows Daily/Weekly après leurs
+grants exacts. Une future version non refusée ne bascule pas en lecture seule
+uniquement parce que son numéro est inconnu : le Bridge n’admet chaque mutation
+qu’après négociation de la Developer API V1, validation exacte de la capacité et
+du schéma, santé live, index stabilisé, politique d’écriture et recovery. Un grant optionnel absent désactive uniquement sa
 route, sans fallback Markdown. Operon reste propriétaire du plan opaque scellé
 et de sa récupération same-plan. Operon officiel `3.2.x` exécute les
 filtres sauvegardés après un grant exact `tasks.filter-query`, mais ne publie pas

@@ -6,7 +6,7 @@ const consumer = {
   manifest: {
     id: "optimike-operon-bridge",
     name: "Optimike Operon Bridge",
-    version: "0.8.0",
+    version: "0.8.1",
   },
 };
 

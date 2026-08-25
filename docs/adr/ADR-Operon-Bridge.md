@@ -4,11 +4,11 @@
 - Date: 2026-07-21
 - Amended: 2026-08-24
 - MCP baseline: `optimikelabs/optimike-obsidian-mcp@8cea94610a526e50a017d334be6008b8dab79500`
-- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and provisional candidate `3.5.2` / CLI `1.2.0`
+- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and provisional candidate `3.5.3` / CLI `1.2.0`
 
 ## Problem
 
-Operon unifies inline and file tasks around stable identity and one domain model. Earlier releases exposed no public versioned mutation API; official Operon `3.5.2` exposes Developer API V1 plus additive saved-filter, adoption and Daily/Weekly task workflows. Agent writes must still preserve workflow normalization, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, conversions, ordered task media and index/view reconciliation. Direct Markdown edits or direct `TaskWriter` calls do not satisfy that contract.
+Operon unifies inline and file tasks around stable identity and one domain model. Earlier releases exposed no public versioned mutation API; official Operon `3.5.3` exposes Developer API V1 plus additive saved-filter, adoption and Daily/Weekly task workflows. Agent writes must still preserve workflow normalization, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, conversions, ordered task media and index/view reconciliation. Direct Markdown edits or direct `TaskWriter` calls do not satisfy that contract.
 
 ## Decision
 
@@ -41,7 +41,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Official Operon 
 
 ## Public API boundary
 
-`OperonPublicApiV1` remains the legacy Kairélys boundary. Official Operon `3.x` exposes host-verified Developer API V1 reads plus preview/apply/recovery for typed create, update, transition, relationship replacement, recurrence update, conversion, and inline relocation. Operon `3.5.2` adds exact-grant adoption and Daily/Weekly workflows to the additive task-workflow API. Those plans are opaque and session-bound; recovery continues only the same `recoveryRef`. Task Type and Task Image remain scalar, Task Gallery remains ordered, and `__taskDataType` remains read-only. Elevated or destructive applies require fresh host-owned consent in the owning vault window and fail closed after a bounded timeout.
+`OperonPublicApiV1` remains the legacy Kairélys boundary. Official Operon `3.x` exposes host-verified Developer API V1 reads plus preview/apply/recovery for typed create, update, transition, relationship replacement, recurrence update, conversion, and inline relocation. Operon `3.5.3` exposes exact-grant adoption and Daily/Weekly workflows through the additive task-workflow API. Those plans are opaque and session-bound; recovery continues only the same `recoveryRef`. Task Type and Task Image remain scalar, Task Gallery remains ordered, and `__taskDataType` remains read-only. Elevated or destructive applies require fresh host-owned consent in the owning vault window and fail closed after a bounded timeout.
 
 No ÉLYSIA-specific workflow, UX, view, calendar, Kanban, or data-model logic belongs in Operon. Compatibility fixes remain generic upstream PRs; the MCP never depends on private methods or an ÉLYSIA-specific Operon fork.
 
@@ -76,8 +76,9 @@ The patched Operon `3.5.2` acceptance candidate combining upstream PRs `#182`,
 non-blocking startup before Obsidian, exact-grant auth, Daily/Weekly creation,
 periodic scheduling with a configured modified-time plugin, same-source graph
 ordering, durable concurrent replay, zero validation violations, zero pending
-recoveries and exact restoration. Stock `3.5.2` remains provisional until those
-fixes ship and the released artifact passes the same gate.
+recoveries and exact restoration. This remains historical evidence for the
+pre-release candidate; Operon `3.5.3` ships superseding implementations and is
+the current official validation target.
 
 Still outside this local acceptance proof:
 

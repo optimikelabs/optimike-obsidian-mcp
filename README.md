@@ -114,7 +114,7 @@ Enable only the surfaces you use:
 - bundled **Bases Bridge** for live Bases and governed formula CAS;
 - bundled **Optimike Atomic Write Bridge** for governed Note, Frontmatter and Canvas `plan → apply → status → recover`;
 - **Smart Connections** for the local semantic index;
-- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.8.0** for governed task operations. The 3.1 candidate targets Operon 3.5.2 and CLI 1.2.0. A patched acceptance candidate passed the complete Pilot 2 canary on 2026-08-24; the official release remains `compatible-provisional` until the required upstream fixes ship and the stock artifact passes the same gate;
+- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.8.1** for governed task operations. Operon 3.5.3 and CLI 1.2.0 are the current live target. Unknown non-denied Operon releases remain writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate;
 - **Obsidian Tasks** for Tasks-compatible Markdown parsing.
 
 Operon mutations require the Bridge mutation setting plus:

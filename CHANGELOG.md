@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-08-25
+
+### Fixed
+
+- Removed the duplicate product-version allowlist from Operon Developer API V1
+  mutations. Non-denied future releases now remain writable when the negotiated
+  V1 contract, exact capabilities, response schemas, live health, settled index
+  and recovery support validate; malformed contracts and missing capabilities
+  still fail closed.
+- Added regression coverage proving that a future contract-compatible Operon
+  release projects read-write capabilities while an invalid or incomplete
+  runtime remains read-only.
+
+### Changed
+
+- Current live target: Operon `3.5.3`, Operon CLI `1.2.0` and Optimike Operon
+  Bridge `0.8.1`.
+
 ## [3.1.0] - 2026-08-24
 
 ### Added

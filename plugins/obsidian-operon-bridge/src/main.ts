@@ -3,7 +3,6 @@ import {
   OPERON_BRIDGE_CONTRACT_VERSION,
   OPERON_BRIDGE_LEGACY_VERSIONS,
   OPERON_BRIDGE_BLOCKED_MUTATIONS,
-  isMutationAdmittedDeveloperApiVersion,
   OPERON_BRIDGE_TESTED_VERSION,
   isIndexReady,
   isCanonicalVaultRelativePath,
@@ -744,8 +743,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       const mutationEnabled = Boolean(
         runtime.compatible &&
           ready &&
-          this.settings.mutationsEnabled &&
-          isMutationAdmittedDeveloperApiVersion(runtime.version),
+          this.settings.mutationsEnabled,
       );
       const supports = (capability: DeveloperApiMutationCapability): boolean =>
         mutationEnabled &&
@@ -1617,7 +1615,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
-      this.assertMutationRuntimeAdmitted(runtime);
       if (
         capability === "adopt" &&
         !runtime.developerApi.hasTaskWorkflowCapability("adopt")
@@ -1625,6 +1622,18 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         throw new Error(
           "Operon task-workflow Developer API adoption grant is unavailable; the Bridge will not use a Markdown or private-API fallback.",
         );
+      }
+      if (capability !== "adopt") {
+        const blocked = (
+          OPERON_BRIDGE_BLOCKED_MUTATIONS[
+            runtime.version as keyof typeof OPERON_BRIDGE_BLOCKED_MUTATIONS
+          ] ?? []
+        ).includes(capability as never);
+        if (blocked || !runtime.developerApi.hasMutationCapability(capability)) {
+          throw new Error(
+            `Operon Developer API V1 mutation capability is unavailable: ${capability}.`,
+          );
+        }
       }
       return runtime;
     }
@@ -1652,7 +1661,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       );
     }
     const runtime = this.requireRuntime();
-    this.assertMutationRuntimeAdmitted(runtime);
     if (
       !runtime.developerApi ||
       !runtime.developerApi.hasTaskWorkflowCapability(kind)
@@ -1671,21 +1679,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       );
     }
     const runtime = this.requireRuntime();
-    this.assertMutationRuntimeAdmitted(runtime);
     if (!runtime.developerApi) {
       throw new Error(
         "Operon Developer API V1 is unavailable; no Public API or Markdown fallback is used for recovery.",
       );
     }
     return runtime;
-  }
-
-  private assertMutationRuntimeAdmitted(runtime: OperonRuntime): void {
-    if (!isMutationAdmittedDeveloperApiVersion(runtime.version)) {
-      throw new Error(
-        `Operon ${runtime.version} is not admitted for Bridge mutations; reads remain available, but mutation routes fail closed until this exact build is certified or explicitly attested.`,
-      );
-    }
   }
 
   private async executeDeveloperRead(

@@ -2,8 +2,8 @@
 
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
-Updated: 2026-08-24
-Current candidate: official Operon `3.5.2`, Operon CLI `1.2.0`, Bridge `0.8.0`, Developer API V1 and the additive task-workflow API. A patched candidate passed the exact live Desktop canary on 2026-08-24. The official artifact remains `compatible-provisional` until upstream PRs `#182`, `#183` and `#184` ship and the stock release passes the same gate.
+Updated: 2026-08-25
+Current candidate: official Operon `3.5.3`, Operon CLI `1.2.0`, Bridge `0.8.1`, Developer API V1 and the additive task-workflow API. Operon 3.5.3 ships superseding implementations of upstream PRs `#182`, `#183` and `#184`. `compatible-provisional` describes certification evidence only; mutation admission follows the negotiated contract and exact live capabilities rather than a product-version allowlist.
 
 Operon CLI `1.2.0` adds operator access to Daily/Weekly routing and the typed
 Task Type, Task Image and ordered Task Gallery fields. The MCP does not relay
@@ -20,7 +20,7 @@ admits `3.3.2` provisionally after contract negotiation. The complete `3.3.2`
 live acceptance run is green with CLI `1.1.2`: Settings grant controls, File
 Task rename refusal, and unscoped transition settlement are fixed upstream.
 Adoption was unavailable through that Developer API generation and was tracked
-in [#140](https://github.com/hasanyilmaz/operon/issues/140). Operon `3.5.2` now
+in [#140](https://github.com/hasanyilmaz/operon/issues/140). Operon `3.5.3` now
 exposes it through exact additive grants. The MCP remains
 fail-closed and does not fall back to Markdown or private APIs.
 

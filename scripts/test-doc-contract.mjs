@@ -67,17 +67,17 @@ for (const content of [
   operonLocalValidation,
   taskRuntimeReference,
 ]) {
-  assert.match(content, /3\.5\.240438/u);
-  assert.match(content, /3\.5\.2/u);
-  assert.match(content, /read-only|lecture seule/iu);
+  assert.match(content, /3\.5\.3/u);
+  assert.match(content, /Developer API V1/u);
+  assert.match(content, /contract|contrat/iu);
 }
-assert.doesNotMatch(
+assert.match(
   matrix,
-  /official Operon `3\.5\.2` exposes saved-filter evaluation,[\s\S]{0,80}official adoption/iu,
+  /not forced into read-only mode solely because its product[\s\S]{0,30}version is unknown/iu,
 );
-assert.doesNotMatch(
+assert.match(
   matrixFr,
-  /Operon officiel `3\.5\.2` expose les[\s\S]{0,80}l’adoption officielle/iu,
+  /ne bascule pas en lecture seule[\s\S]{0,60}numéro est inconnu/iu,
 );
 const commonTools = [
   "external_runtime_status",
@@ -130,8 +130,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.1.0",
-  "package metadata must match the 3.1.0 Operon 3.5 candidate release",
+  "3.1.1",
+  "package metadata must match the 3.1.1 contract-first Operon release",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
@@ -229,9 +229,9 @@ assert.match(operonContractFr, /passthrough CLI générique/i);
 assert.match(operonContract, /structured unavailable result/i);
 assert.match(operonContractFr, /indisponibilité structurée/i);
 for (const content of [operonContract, operonAudit]) {
-  assert.match(content, /Operon `3\.5\.2`/u);
+  assert.match(content, /Operon `3\.5\.3`/u);
   assert.match(content, /Operon CLI `1\.2\.0`/u);
-  assert.match(content, /Bridge\s+`0\.8\.0`/u);
+  assert.match(content, /Bridge\s+`0\.8\.1`/u);
   assert.match(content, /compatible-provisional/u);
   assert.match(content, /opaque sealed\s+plan/iu);
   assert.match(content, /(?:same-plan|même\s+plan)/iu);
@@ -239,9 +239,9 @@ for (const content of [operonContract, operonAudit]) {
   assert.match(content, /__taskDataType/u);
 }
 for (const content of [operonContractFr, operonAuditFr]) {
-  assert.match(content, /Operon `3\.5\.2`/u);
+  assert.match(content, /Operon `3\.5\.3`/u);
   assert.match(content, /Operon CLI `1\.2\.0`/u);
-  assert.match(content, /Bridge\s+`0\.8\.0`/u);
+  assert.match(content, /Bridge\s+`0\.8\.1`/u);
   assert.match(content, /compatible-provisional/u);
   assert.match(content, /plan opaque\s+scellé/iu);
   assert.match(content, /(?:same-plan|même\s+plan)/iu);
@@ -295,23 +295,19 @@ assert.match(operonContractFr, /priorityId.*postflight/isu);
 assert.match(operonContractFr, /création ambiguë/iu);
 assert.match(
   operonContract,
-  /3\.5\.240438[\s\S]*stock `3\.5\.2` remains read-only/iu,
+  /product version[\s\S]*not a positive mutation allowlist/iu,
 );
 assert.match(
   operonContractFr,
-  /3\.5\.240438[\s\S]*3\.5\.2` stock reste en lecture seule/iu,
+  /version produit[\s\S]*n’est pas une allowlist positive de mutation/iu,
 );
 assert.doesNotMatch(
   operonContract,
-  /Adoption is available only on Operon 3\.5\.2/iu,
+  /stock `3\.5\.3` remains read-only/iu,
 );
-assert.match(
-  operonContract,
-  /Adoption[\s\S]*mutation-admitted `3\.5\.240438`[\s\S]*stock `3\.5\.2` remains read-only/iu,
-);
-assert.match(
+assert.doesNotMatch(
   operonContractFr,
-  /adoption[\s\S]*admis en mutation `3\.5\.240438`[\s\S]*3\.5\.2`[\s\S]*lecture seule/iu,
+  /3\.5\.3` stock[\s\S]*lecture seule/iu,
 );
 
 const profilesEn = await text("docs/tool-surface-profiles.md");

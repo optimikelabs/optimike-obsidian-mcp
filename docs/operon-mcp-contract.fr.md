@@ -102,7 +102,7 @@ opération. Une capacité optionnelle absente désactive seulement les outils qu
 en dépendent. Un futur contrat n’est jamais accepté silencieusement.
 
 `operon_query_saved_filter` est live-only et dépend d’une capacité native. Sur
-Operon officiel `3.5.2`, il utilise la Developer API task-workflow après un grant
+Operon officiel `3.5.3`, il utilise la Developer API task-workflow après un grant
 exact `tasks.filter-query`. L’appelant doit fournir un `filterSetId` exact :
 l’API officielle exécute les filtres mais n’en publie pas le catalogue. Le MCP
 ne tente jamais de reproduire leur sémantique depuis le cache.
@@ -120,9 +120,9 @@ anglais ne sont pas des identifiants d’automatisation durables.
 ## Mutations
 
 Les mutations passent par les routes REST du Bridge et la surface officielle du
-moteur chargé. Pour la campagne 3.5, seule l’identité locale attestée
-`3.5.240438` utilise les plans typés preview/apply/recovery de Developer API V1 ;
-la `3.5.2` stock reste en lecture seule. Le chemin legacy Kairélys utilise Public API v1. Aucun chemin
+moteur chargé. Toute release Operon non refusée qui négocie le contrat V1 utilise
+les plans typés preview/apply/recovery uniquement après validation des capacités,
+schémas, santé, index stabilisé et recovery. Le chemin legacy Kairélys utilise Public API v1. Aucun chemin
 ne modifie directement le Markdown, n’appelle `TaskWriter`, ne lance une
 commande UI et ne réfléchit vers une méthode privée.
 
@@ -136,7 +136,7 @@ Contrôles communs :
 - `idempotencyKey` est obligatoire ;
 - une tâche Operon existante exige `expectedRevision` ;
 - l’adoption exige `line` et `expectedLine` exacts ;
-- la candidate locale attestée `3.5.240438` applique uniquement le plan opaque prévisualisé et scellé par l’hôte ; la `3.5.2` stock reste en lecture seule ;
+- toute release non refusée avec le contrat V1 applique uniquement le plan opaque prévisualisé et scellé par l’hôte après le passage de tous les gates live ;
 - `outcome-unknown` est exposé avec sa référence de récupération et n’est jamais
   rejoué à l’aveugle ;
 - les résultats Task Workflow sont validés strictement avant projection ; une
@@ -192,9 +192,8 @@ dans la corbeille et inline-to-file remplace la ligne source par un lien durable
 ### Règles propres aux outils
 
 `operon_adopt_task` utilise l’API task-workflow additive officielle uniquement
-sur un build admis en mutation et après les grants exacts `tasks.adopt.preview`
-et `tasks.adopt.apply`. Pour la campagne 3.5, ce build est l’identité locale
-attestée `3.5.240438` ; la `3.5.2` stock reste en lecture seule. Operon applique son plan opaque scellé à une checkbox
+après les grants exacts `tasks.adopt.preview` et `tasks.adopt.apply`. Le numéro de
+version produit n’est pas un second gate de mutation. Operon applique son plan opaque scellé à une checkbox
 exacte. Un moteur legacy compatible peut encore annoncer son contrat borné,
 mais un grant officiel absent renvoie une indisponibilité structurée et le MCP
 ne simule jamais l’adoption en éditant le Markdown.
@@ -292,29 +291,22 @@ le runtime ne peut pas prouver le résultat.
 Suppression, rappels, état épinglé, contrôle/session de timer et
 gestion des filtres sauvegardés restent hors de la surface officielle de
 mutation agentique. L’**exécution** d’un filtre sauvegardé fonctionne sur
-Operon `3.5.2` avec un ID exact et le grant requis ; la découverte du catalogue,
-la création et l’édition des filtres ne sont pas exposées. Sur le chemin
-d’acceptation 3.5 courant, l’adoption est disponible uniquement pour le build
-admis en mutation `3.5.240438`, après ses grants additifs exacts ; la `3.5.2`
-stock reste en lecture seule.
+Operon `3.5.3` avec un ID exact et le grant requis ; la découverte du catalogue,
+la création et l’édition des filtres ne sont pas exposées. L’adoption est
+disponible après ses grants additifs exacts et les gates live communs.
 
 La suppression reste une action opérateur dans la CLI. Un futur
 `operon_trash_task` ne pourra être envisagé qu’avec restauration garantie sous
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
 
-## Admission de la candidate 3.1
+## Admission de la candidate 3.1.1
 
-Optimike MCP `3.1.0`, Bridge `0.8.0`, Operon `3.5.2` et Operon CLI `1.2.0`
-forment l’ensemble candidat courant. La négociation du contrat et les tests
-déterministes l’admettent comme `compatible-provisional`. Une candidate patchée
-a passé le canary Obsidian Desktop exact le 2026-08-24 ; la certification exige
-encore la publication des correctifs des PR upstream `#182`, `#183` et `#184`,
-puis le passage du même gate par l’artefact stock. Ce statut provisoire ne
-relâche aucun gate de capacité, grant, mode d’écriture ou récupération.
-
-Le Bridge `0.8.0` admet les lectures de la `3.5.2` stock après négociation du
-contrat, mais masque toutes ses capacités de mutation. Le build local Pilot 2
-utilise la version manifeste synthétique explicite `3.5.240438` ; lui seul est
-admis en mutation pour l’acceptation 3.5 et ce n’est pas un identifiant de
-release upstream.
+Optimike MCP `3.1.1`, Bridge `0.8.1`, Operon `3.5.3` et Operon CLI `1.2.0`
+forment l’ensemble candidat courant. Operon `3.5.3` reste
+`compatible-provisional` jusqu’à son entrée dans l’ensemble explicite de preuves
+certifiées, mais ce libellé ne masque plus les mutations valides. La version
+produit reste une métadonnée diagnostique pouvant sélectionner un refus ou une
+exception bornée ; elle n’est pas une allowlist positive de mutation. Contrat,
+grants exacts, schémas, santé live, index stabilisé, politique d’écriture et
+recovery restent obligatoires.
