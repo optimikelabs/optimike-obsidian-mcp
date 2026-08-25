@@ -1224,6 +1224,8 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
 
 test("future contract-compatible Operon releases project read-write capabilities", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
+  let recoveryRefreshes = 0;
+  const workflowRecoveryRefreshes: string[] = [];
   const adapter = {
     hasMutationCapability: () => true,
     hasTaskWorkflowCapability: () => true,
@@ -1231,6 +1233,14 @@ test("future contract-compatible Operon releases project read-write capabilities
     hasFilterQueryCapability: () => true,
     hasRecoverySupport: () => true,
     hasTaskWorkflowRecoverySupport: () => true,
+    refreshRecovery: async () => {
+      recoveryRefreshes += 1;
+      return true;
+    },
+    refreshTaskWorkflowRecovery: async (kind: string) => {
+      workflowRecoveryRefreshes.push(kind);
+      return true;
+    },
   };
   const runtime = {
     version: "99.0.0",
@@ -1249,6 +1259,53 @@ test("future contract-compatible Operon releases project read-write capabilities
   assert.equal(capabilities.periodicUpdate, true);
   assert.equal(capabilities.recovery, true);
   assert.equal(capabilities.taskWorkflowRecovery, true);
+
+  const dirtyIndexCapabilities = BridgePlugin.prototype.capabilities.call(
+    fake,
+    runtime,
+    false,
+  );
+  assert.equal(dirtyIndexCapabilities.update, false);
+  assert.equal(dirtyIndexCapabilities.adopt, false);
+  assert.equal(
+    dirtyIndexCapabilities.recovery,
+    true,
+    "core recovery must remain advertised while the live index is unsettled",
+  );
+  assert.equal(
+    dirtyIndexCapabilities.taskWorkflowRecovery,
+    true,
+    "workflow recovery must remain advertised while the live index is unsettled",
+  );
+  await BridgePlugin.prototype.refreshRecoveryCapabilities.call(
+    fake,
+    runtime,
+    false,
+  );
+  assert.equal(recoveryRefreshes, 1);
+  assert.deepEqual(workflowRecoveryRefreshes, [
+    "adopt",
+    "periodic-create",
+    "periodic-update",
+  ]);
+  await BridgePlugin.prototype.refreshRecoveryCapabilities.call(
+    fake,
+    runtime,
+    true,
+  );
+  assert.equal(
+    recoveryRefreshes,
+    1,
+    "a settled status refresh already negotiated recovery with the full contract",
+  );
+
+  const disabledRecoveryCapabilities = BridgePlugin.prototype.capabilities.call(
+    { settings: { mutationsEnabled: false } },
+    runtime,
+    false,
+  );
+  assert.equal(disabledRecoveryCapabilities.recovery, false);
+  assert.equal(disabledRecoveryCapabilities.taskWorkflowRecovery, false);
 
   const invalidCapabilities = BridgePlugin.prototype.capabilities.call(
     fake,

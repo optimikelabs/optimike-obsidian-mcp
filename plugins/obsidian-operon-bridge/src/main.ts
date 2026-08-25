@@ -745,6 +745,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ready &&
           this.settings.mutationsEnabled,
       );
+      const recoveryEnabled = Boolean(
+        runtime.compatible && this.settings.mutationsEnabled,
+      );
       const supports = (capability: DeveloperApiMutationCapability): boolean =>
         mutationEnabled &&
         runtime.developerApi!.hasRecoverySupport() &&
@@ -797,9 +800,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           readable && runtime.developerApi!.hasFilterQueryCapability(),
         relocate: supports("relocate"),
         convert: supports("convert"),
-        recovery: mutationEnabled && runtime.developerApi!.hasRecoverySupport(),
+        recovery: recoveryEnabled && runtime.developerApi!.hasRecoverySupport(),
         taskWorkflowRecovery:
-          mutationEnabled &&
+          recoveryEnabled &&
           (["adopt", "periodic-create", "periodic-update"] as const).some(
             (kind) =>
               runtime.developerApi!.hasTaskWorkflowRecoverySupport(kind),
@@ -839,6 +842,28 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       recovery: false,
       taskWorkflowRecovery: false,
     };
+  }
+
+  private async refreshRecoveryCapabilities(
+    runtime: OperonRuntime | null,
+    ready: boolean,
+  ): Promise<void> {
+    if (
+      ready ||
+      !runtime?.developerApi ||
+      !runtime.compatible ||
+      !this.settings.mutationsEnabled
+    ) {
+      return;
+    }
+    await runtime.developerApi.refreshRecovery();
+    for (const kind of [
+      "adopt",
+      "periodic-create",
+      "periodic-update",
+    ] as const) {
+      await runtime.developerApi.refreshTaskWorkflowRecovery(kind);
+    }
   }
 
   private limitations(runtime: OperonRuntime | null, ready: boolean): string[] {
@@ -996,6 +1021,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const ready = Boolean(
       runtime && this.isSettledRuntimeIndex(runtime, indexState),
     );
+    await this.refreshRecoveryCapabilities(runtime, ready);
     const capabilities = this.capabilities(runtime, ready);
     const contractInvalid =
       runtime?.developerApi?.negotiatedContractState === "invalid";
