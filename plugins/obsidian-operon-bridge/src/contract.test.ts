@@ -995,6 +995,11 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       ["periodic-update"],
     ],
     [
+      "task workflow recovery",
+      BridgePlugin.prototype.requireTaskWorkflowRecoveryRuntime as Function,
+      ["periodic-update"],
+    ],
+    [
       "recovery",
       BridgePlugin.prototype.requireDeveloperApiMutationRuntime as Function,
       [],
@@ -1096,6 +1101,14 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       ),
     /live index is not settled/u,
   );
+  assert.equal(
+    await BridgePlugin.prototype.requireTaskWorkflowRecoveryRuntime.call(
+      unsettled,
+      "periodic-create",
+    ),
+    coldRuntime,
+    "task-workflow recovery must remain available while the live index is unsettled",
+  );
 
   const missingCapabilityRuntime = {
     version: "99.0.0",
@@ -1175,6 +1188,14 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
         "periodic-create",
       ),
     /task-workflow Developer API capability or recovery support is unavailable: periodic-create/u,
+  );
+  await assert.rejects(
+    async () =>
+      BridgePlugin.prototype.requireTaskWorkflowRecoveryRuntime.call(
+        missingRecovery,
+        "periodic-create",
+      ),
+    /task-workflow Developer API recovery support is unavailable: periodic-create/u,
   );
 
   const legacyRuntime = {
