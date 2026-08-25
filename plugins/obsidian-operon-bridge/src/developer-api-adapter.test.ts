@@ -464,6 +464,33 @@ test("Operon 3 Developer API adapter turns malformed or throwing negotiation int
   assert.equal(incomplete.negotiatedContractState, "invalid");
 });
 
+test("post-apply identity proof retries a stale live read without replaying the mutation", async () => {
+  type LateTask = { identity: { operonId: string } };
+  const target = {
+    identity: { operonId: "late123" },
+  };
+  let readCalls = 0;
+  const fake = {
+    reloadLiveTasks: async () => ({
+      tasks: [],
+      rawTasks: readCalls++ === 0 ? [] : [target],
+    }),
+  };
+  const proof = await (
+    OperonDeveloperApiRuntimeAdapter.prototype as unknown as {
+      findUniqueLiveTaskAfterMutation: (
+        this: typeof fake,
+        predicate: (task: LateTask) => boolean,
+      ) => Promise<LateTask | null>;
+    }
+  ).findUniqueLiveTaskAfterMutation.call(
+    fake,
+    (task) => task.identity.operonId === "late123",
+  );
+  assert.equal(proof, target);
+  assert.equal(readCalls, 2);
+});
+
 test("Operon 3 Developer API adapter keeps approved capabilities usable with a partial grant", async () => {
   const granted = new Set([
     "system.health",
