@@ -1263,9 +1263,11 @@ export class OperonDeveloperApiRuntimeAdapter {
     this.readApi = null;
     this.optionalReadApis.clear();
     this.mutationApis.clear();
-    this.recoveryApi = null;
     this.filterQueryApi = null;
-    this.taskWorkflowApis.clear();
+    if (!includeMutationCapabilities) {
+      this.recoveryApi = null;
+      this.taskWorkflowApis.clear();
+    }
     this.grantedCapabilities = null;
 
     // Establish a baseline session first. Operon evaluates a requested set as
@@ -1380,6 +1382,7 @@ export class OperonDeveloperApiRuntimeAdapter {
         this.filterQueryApi = null;
       }
       if (includeMutationCapabilities) {
+        this.taskWorkflowApis.clear();
         for (const workflowKind of Object.keys(
           TASK_WORKFLOW_CAPABILITIES,
         ) as DeveloperApiTaskWorkflowKind[]) {
@@ -1444,6 +1447,24 @@ export class OperonDeveloperApiRuntimeAdapter {
       kind,
     );
     return Boolean(methods?.recover && methods.pendingRecoveries);
+  }
+
+  async refreshTaskWorkflowRecovery(
+    kind: DeveloperApiTaskWorkflowKind,
+  ): Promise<boolean> {
+    let api: TaskWorkflowDeveloperApiV1 | null = null;
+    try {
+      api = this.connectTaskWorkflowRecovery(kind);
+    } catch {
+      // A failed exact negotiation must fail closed without depending on, or
+      // mutating, the live task index.
+    }
+    if (!api) {
+      this.taskWorkflowApis.delete(kind);
+      return false;
+    }
+    this.taskWorkflowApis.set(kind, api);
+    return true;
   }
 
   async querySavedFilter(
@@ -1620,6 +1641,16 @@ export class OperonDeveloperApiRuntimeAdapter {
     return Boolean(mutations?.recover && mutations.pendingRecoveries);
   }
 
+  async refreshRecovery(): Promise<boolean> {
+    const api = this.connect(BASELINE_CAPABILITIES);
+    if (!api?.mutations?.recover || !api.mutations.pendingRecoveries) {
+      this.recoveryApi = null;
+      return false;
+    }
+    this.recoveryApi = api;
+    return true;
+  }
+
   private connectApproved(
     requestedCapabilities: readonly string[],
     updateStatus = true,
@@ -1685,6 +1716,23 @@ export class OperonDeveloperApiRuntimeAdapter {
     if (!api) return null;
     const methods = this.taskWorkflowMethods(api, kind);
     return methods?.preview && methods.apply ? api : null;
+  }
+
+  private connectTaskWorkflowRecovery(
+    kind: DeveloperApiTaskWorkflowKind,
+  ): TaskWorkflowDeveloperApiV1 | null {
+    if (!this.taskWorkflowAccessor) return null;
+    const access = this.taskWorkflowAccessor.getTaskWorkflowDeveloperApiV1(
+      this.consumerPlugin,
+      {
+        ...OPERON_BRIDGE_DEVELOPER_API_CONTRACT,
+        requestedCapabilities: TASK_WORKFLOW_CAPABILITIES[kind],
+      },
+    );
+    const api = this.taskWorkflowAccessApi(access);
+    if (!api) return null;
+    const methods = this.taskWorkflowMethods(api, kind);
+    return methods?.recover && methods.pendingRecoveries ? api : null;
   }
 
   private taskWorkflowAccessApi(

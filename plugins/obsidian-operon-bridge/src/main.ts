@@ -1722,10 +1722,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
-      // Recovery must renegotiate a cold Developer API session, but it must
-      // remain available when the operation being recovered left the live
-      // index dirty or otherwise unsettled.
-      await this.indexState(runtime);
+      // Recovery negotiates its exact additive API independently of health,
+      // catalog, and task reads. The operation being recovered may itself
+      // have left those read surfaces dirty or otherwise unavailable.
+      await runtime.developerApi.refreshTaskWorkflowRecovery(kind);
     }
     if (
       !runtime.developerApi ||
@@ -1738,7 +1738,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     return runtime;
   }
 
-  private requireDeveloperApiMutationRuntime(): OperonRuntime {
+  private async requireDeveloperApiMutationRuntime(): Promise<OperonRuntime> {
     if (!this.settings.mutationsEnabled) {
       throw new Error(
         "Operon Bridge mutations are disabled in plugin settings.",
@@ -1748,6 +1748,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (!runtime.developerApi) {
       throw new Error(
         "Operon Developer API V1 is unavailable; no Public API or Markdown fallback is used for recovery.",
+      );
+    }
+    await runtime.developerApi.refreshRecovery();
+    if (!runtime.developerApi.hasRecoverySupport()) {
+      throw new Error(
+        "Operon Developer API V1 recovery support is unavailable; no Public API or Markdown fallback is used for recovery.",
       );
     }
     return runtime;
@@ -1828,8 +1834,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       () => null,
     );
     if (preflight.kind === "response") return preflight.response;
-    const runtime = this.requireDeveloperApiMutationRuntime();
-    await this.indexState(runtime);
+    const runtime = await this.requireDeveloperApiMutationRuntime();
     const native: DeveloperApiMutationResult =
       await runtime.developerApi!.recoverMutation(recoveryRef);
     const payload: Record<string, unknown> = {
@@ -3583,8 +3588,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       .addRoute(`${REST_PREFIX}/mutations/pending-recoveries`)
       .get(async (_req: any, res: any) => {
         try {
-          const runtime = this.requireDeveloperApiMutationRuntime();
-          await this.indexState(runtime);
+          const runtime = await this.requireDeveloperApiMutationRuntime();
           const result = await runtime.developerApi!.pendingRecoveries();
           if (!result.ok) {
             sendJson(
@@ -3649,8 +3653,25 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             );
             return;
           }
-          const runtime = this.requireDeveloperApiMutationRuntime();
-          await this.indexState(runtime);
+          if (!this.settings.mutationsEnabled) {
+            throw new Error(
+              "Operon Bridge mutations are disabled in plugin settings.",
+            );
+          }
+          const runtime = this.requireRuntime();
+          if (!runtime.developerApi) {
+            throw new Error(
+              "Operon task-workflow Developer API recovery support is unavailable.",
+            );
+          }
+          const recoveryKinds = decodedKind
+            ? [decodedKind]
+            : (["adopt", "periodic-create", "periodic-update"] as const);
+          for (const recoveryKind of recoveryKinds) {
+            await runtime.developerApi.refreshTaskWorkflowRecovery(
+              recoveryKind,
+            );
+          }
           const result =
             await runtime.developerApi!.pendingTaskWorkflowRecoveries(
               decodedKind ?? undefined,

@@ -1015,7 +1015,9 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
         hasMutationCapability: () => true,
         hasTaskWorkflowCapability: () => true,
         hasRecoverySupport: () => true,
+        refreshRecovery: async () => true,
         hasTaskWorkflowRecoverySupport: () => true,
+        refreshTaskWorkflowRecovery: async () => true,
       },
     };
     const fake = {
@@ -1047,6 +1049,10 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       hasTaskWorkflowCapability: () => negotiated,
       hasRecoverySupport: () => negotiated,
       hasTaskWorkflowRecoverySupport: () => negotiated,
+      refreshTaskWorkflowRecovery: async () => {
+        negotiated = true;
+        return true;
+      },
     },
   };
   const cold = {
@@ -1119,6 +1125,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       hasTaskWorkflowCapability: () => false,
       hasRecoverySupport: () => false,
       hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflowRecovery: async () => false,
     },
   };
   const missingCapability = {
@@ -1159,6 +1166,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       hasTaskWorkflowCapability: () => true,
       hasRecoverySupport: () => false,
       hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflowRecovery: async () => false,
     },
   };
   const missingRecovery = {
