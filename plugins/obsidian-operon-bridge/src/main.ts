@@ -1609,9 +1609,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     sendJson(res, 503, errorPayload(error, fallbackCode));
   }
 
-  private requireMutationRuntime(
+  private async requireMutationRuntime(
     capability: "adopt" | DeveloperApiMutationCapability,
-  ): OperonRuntime {
+  ): Promise<OperonRuntime> {
     if (!this.settings.mutationsEnabled) {
       throw new Error(
         "Operon Bridge mutations are disabled in plugin settings.",
@@ -1619,6 +1619,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
+      await this.indexState(runtime);
       if (
         capability === "adopt" &&
         (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||
@@ -1661,15 +1662,18 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     return runtime;
   }
 
-  private requireTaskWorkflowRuntime(
+  private async requireTaskWorkflowRuntime(
     kind: DeveloperApiTaskWorkflowKind,
-  ): OperonRuntime {
+  ): Promise<OperonRuntime> {
     if (!this.settings.mutationsEnabled) {
       throw new Error(
         "Operon Bridge mutations are disabled in plugin settings.",
       );
     }
     const runtime = this.requireRuntime();
+    if (runtime.developerApi) {
+      await this.indexState(runtime);
+    }
     if (
       !runtime.developerApi ||
       !runtime.developerApi.hasTaskWorkflowCapability(kind) ||
@@ -1857,9 +1861,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       () => null,
     );
     if (preflight.kind === "response") return preflight.response;
-    const candidateRuntime = this.requireRuntime();
-    await this.indexState(candidateRuntime);
-    const runtime = this.requireTaskWorkflowRuntime(kind);
+    const runtime = await this.requireTaskWorkflowRuntime(kind);
     const native = await runtime.developerApi!.recoverTaskWorkflow(
       kind,
       recoveryRef,
@@ -1959,9 +1961,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       };
     }
     const canonicalTargetPath = targetPath as string;
-    const candidateRuntime = this.requireRuntime();
-    await this.indexState(candidateRuntime);
-    const runtime = this.requireMutationRuntime("adopt");
+    const runtime = await this.requireMutationRuntime("adopt");
     const legacyFile = runtime.developerApi
       ? null
       : this.app.vault.getAbstractFileByPath(canonicalTargetPath);
@@ -2265,9 +2265,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         payload: errorPayload(new Error(preflight.message), "validation_error"),
       };
     }
-    const candidateRuntime = this.requireRuntime();
-    await this.indexState(candidateRuntime);
-    const runtime = this.requireTaskWorkflowRuntime("periodic-create");
+    const runtime = await this.requireTaskWorkflowRuntime("periodic-create");
     const native = await runtime.developerApi!.executeTaskWorkflow(
       "periodic-create",
       requested,
@@ -2332,9 +2330,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ),
       };
     }
-    const candidateRuntime = this.requireRuntime();
-    await this.indexState(candidateRuntime);
-    const runtime = this.requireTaskWorkflowRuntime("periodic-update");
+    const runtime = await this.requireTaskWorkflowRuntime("periodic-update");
     const before = (await this.oneTask(operonId, true)).task;
     if (!before) {
       return {
@@ -2823,7 +2819,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       };
     }
 
-    const runtime = this.requireMutationRuntime(capability);
+    const runtime = await this.requireMutationRuntime(capability);
     const beforeRead = await this.oneTask(operonId, true);
     if (!beforeRead.task) {
       return {
@@ -3146,7 +3142,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         payload: errorPayload(new Error(preflight.message), "validation_error"),
       };
     }
-    const runtime = this.requireMutationRuntime("create");
+    const runtime = await this.requireMutationRuntime("create");
     const operationId = this.mutationOperationId();
     if (runtime.developerApi) {
       await this.indexState(runtime);

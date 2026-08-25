@@ -1015,13 +1015,46 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     const fake = {
       settings: { mutationsEnabled: true },
       requireRuntime: () => runtime,
+      indexState: async () => ({ ready: true }),
     };
     assert.equal(
-      guard.call(fake, ...args),
+      await guard.call(fake, ...args),
       runtime,
       `${label} must remain available for a future version with the negotiated contract`,
     );
   }
+
+  let negotiated = false;
+  const coldRuntime = {
+    version: "99.0.0",
+    compatible: true,
+    developerApi: {
+      hasMutationCapability: () => negotiated,
+      hasTaskWorkflowCapability: () => negotiated,
+      hasRecoverySupport: () => negotiated,
+      hasTaskWorkflowRecoverySupport: () => negotiated,
+    },
+  };
+  const cold = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => coldRuntime,
+    indexState: async () => {
+      negotiated = true;
+      return { ready: true };
+    },
+  };
+  assert.equal(
+    await BridgePlugin.prototype.requireMutationRuntime.call(cold, "create"),
+    coldRuntime,
+  );
+  negotiated = false;
+  assert.equal(
+    await BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+      cold,
+      "periodic-create",
+    ),
+    coldRuntime,
+  );
 
   const missingCapabilityRuntime = {
     version: "99.0.0",
@@ -1036,17 +1069,18 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
   const missingCapability = {
     settings: { mutationsEnabled: true },
     requireRuntime: () => missingCapabilityRuntime,
+    indexState: async () => ({ ready: true }),
   };
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       BridgePlugin.prototype.requireMutationRuntime.call(
         missingCapability,
         "update",
       ),
     /mutation or recovery capability is unavailable: update/u,
   );
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
         missingCapability,
         "periodic-update",
@@ -1067,17 +1101,18 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
   const missingRecovery = {
     settings: { mutationsEnabled: true },
     requireRuntime: () => missingRecoveryRuntime,
+    indexState: async () => ({ ready: true }),
   };
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       BridgePlugin.prototype.requireMutationRuntime.call(
         missingRecovery,
         "update",
       ),
     /mutation or recovery capability is unavailable: update/u,
   );
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
         missingRecovery,
         "periodic-create",
@@ -1096,7 +1131,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     requireRuntime: () => legacyRuntime,
   };
   assert.equal(
-    BridgePlugin.prototype.requireMutationRuntime.call(legacy, "update"),
+    await BridgePlugin.prototype.requireMutationRuntime.call(legacy, "update"),
     legacyRuntime,
   );
 });
