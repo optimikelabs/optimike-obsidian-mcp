@@ -1040,6 +1040,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       bridge: {
         id: this.manifest.id,
         version: this.manifest.version,
+        mutationsEnabled: this.settings.mutationsEnabled,
         mode:
           capabilities.update ||
           capabilities.transition ||

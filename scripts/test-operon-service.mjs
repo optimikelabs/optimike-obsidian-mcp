@@ -173,6 +173,7 @@ const state = {
   recoveryCalls: 0,
   lastTaskWorkflowRecoveryBody: null,
   mutations: false,
+  bridgeModeOverride: null,
   workflowCold: false,
   filterCold: false,
   workflowGrantPending: false,
@@ -190,7 +191,10 @@ function statusPayload() {
     bridge: {
       id: "optimike-operon-bridge",
       version: "0.1.0",
-      mode: state.mutations ? "read-write" : "read-only",
+      mode:
+        state.bridgeModeOverride ??
+        (state.mutations ? "read-write" : "read-only"),
+      mutationsEnabled: state.mutations,
     },
     operon: {
       present: state.mode !== "absent",
@@ -1628,6 +1632,24 @@ try {
     mutationCallsBeforeConcurrent + 1,
     "concurrent identical requests must share one Bridge operation",
   );
+
+  const fullyColdInput = {
+    idempotencyKey: "test-fully-cold-enabled-bridge",
+    dryRun: true,
+    periodic: {
+      description: "Fully cold enabled Bridge",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  };
+  const callsBeforeFullyCold = state.mutationCalls;
+  state.workflowCold = true;
+  state.bridgeModeOverride = "read-only";
+  const fullyColdResult = await service.createPeriodicTask(fullyColdInput);
+  assert.equal(fullyColdResult.status, "planned");
+  assert.equal(state.mutationCalls, callsBeforeFullyCold + 1);
+  state.workflowCold = false;
+  state.bridgeModeOverride = null;
 
   const pendingGrantInput = {
     idempotencyKey: "test-pending-grant-same-key-retry",

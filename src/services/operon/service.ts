@@ -817,7 +817,8 @@ export class OperonService {
       action === "periodic-update";
     if (
       !status.capabilities[capability] &&
-      (!taskWorkflowAction || status.bridge.mode !== "read-write")
+      (!taskWorkflowAction ||
+        !(status.bridge.mutationsEnabled ?? status.bridge.mode === "read-write"))
     ) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
