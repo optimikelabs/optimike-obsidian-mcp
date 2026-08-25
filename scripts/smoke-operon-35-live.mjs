@@ -776,7 +776,7 @@ function sameOptionalFileState(left, right) {
   );
 }
 
-function assertLiveStatus(status) {
+function assertLiveStatus(status, requireTaskWorkflowCapabilities = true) {
   assert.equal(status?.ok, true, "Operon status is not healthy.");
   assert.equal(status?.source, "operon-runtime");
   assert.equal(status?.stale, false);
@@ -789,20 +789,25 @@ function assertLiveStatus(status) {
   assert.equal(Number.isInteger(status?.index?.generation), true);
   assert.ok(status.index.generation > 0);
   assert.equal(status?.index?.duplicateConflictCount, 0);
-  for (const capability of [
+  const requiredCapabilities = [
     "status",
     "configuration",
     "list",
     "get",
     "query",
     "validate",
-    "adopt",
     "create",
     "update",
-    "periodicCreate",
-    "periodicUpdate",
-    "taskWorkflowRecovery",
-  ]) {
+  ];
+  if (requireTaskWorkflowCapabilities) {
+    requiredCapabilities.push(
+      "adopt",
+      "periodicCreate",
+      "periodicUpdate",
+      "taskWorkflowRecovery",
+    );
+  }
+  for (const capability of requiredCapabilities) {
     assert.equal(
       status?.capabilities?.[capability],
       true,
@@ -1135,7 +1140,10 @@ async function main() {
       if (!observed.isError) {
         try {
           const liveStatus = observed.payload?.live;
-          assertLiveStatus(liveStatus);
+          // A cold status must prove the core runtime only. Optional workflows
+          // are deliberately negotiated by the exact first operation rather
+          // than by this readiness poll.
+          assertLiveStatus(liveStatus, false);
           return { status: liveStatus, attempts };
         } catch {
           // The same stdio connection remains alive while the live runtime settles.

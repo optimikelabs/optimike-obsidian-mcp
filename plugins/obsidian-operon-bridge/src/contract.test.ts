@@ -1117,6 +1117,17 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     "the first exact task-workflow operation must negotiate its additive grant",
   );
   assert.equal(exactWorkflowNegotiation, "periodic-create");
+  workflowNegotiated = false;
+  exactWorkflowNegotiation = null;
+  assert.equal(
+    await BridgePlugin.prototype.requireMutationRuntime.call(
+      workflowCold,
+      "adopt",
+    ),
+    workflowColdRuntime,
+    "adoption must negotiate only its exact task-workflow grant on first use",
+  );
+  assert.equal(exactWorkflowNegotiation, "adopt");
 
   const unsettled = {
     ...cold,

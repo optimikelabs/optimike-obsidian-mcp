@@ -1213,10 +1213,14 @@ export class OperonDeveloperApiRuntimeAdapter {
     return this.contractState;
   }
 
-  async refresh(includeMutationCapabilities = false): Promise<boolean> {
+  async refresh(
+    includeMutationCapabilities = false,
+    includeTaskWorkflowCapabilities = includeMutationCapabilities,
+  ): Promise<boolean> {
     if (this.refreshInFlight) return this.refreshInFlight;
     this.refreshInFlight = this.refreshWithStartupRetry(
       includeMutationCapabilities,
+      includeTaskWorkflowCapabilities,
     ).finally(() => {
       this.refreshInFlight = null;
     });
@@ -1225,13 +1229,20 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   private async refreshWithStartupRetry(
     includeMutationCapabilities: boolean,
+    includeTaskWorkflowCapabilities: boolean,
   ): Promise<boolean> {
     for (
       let attempt = 0;
       attempt <= STARTUP_REFRESH_RETRY_LIMIT;
       attempt += 1
     ) {
-      if (await this.refreshInternal(includeMutationCapabilities)) return true;
+      if (
+        await this.refreshInternal(
+          includeMutationCapabilities,
+          includeTaskWorkflowCapabilities,
+        )
+      )
+        return true;
       const retryAfterMs = this.startupRetryDelayMs();
       if (retryAfterMs === null || attempt === STARTUP_REFRESH_RETRY_LIMIT)
         return false;
@@ -1260,6 +1271,7 @@ export class OperonDeveloperApiRuntimeAdapter {
 
   private async refreshInternal(
     includeMutationCapabilities: boolean,
+    includeTaskWorkflowCapabilities: boolean,
   ): Promise<boolean> {
     this.readApi = null;
     this.optionalReadApis.clear();
@@ -1382,7 +1394,7 @@ export class OperonDeveloperApiRuntimeAdapter {
         // down the already-verified core Developer API session.
         this.filterQueryApi = null;
       }
-      if (includeMutationCapabilities) {
+      if (includeMutationCapabilities && includeTaskWorkflowCapabilities) {
         this.taskWorkflowApis.clear();
         for (const workflowKind of Object.keys(
           TASK_WORKFLOW_CAPABILITIES,

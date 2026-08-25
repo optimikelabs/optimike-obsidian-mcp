@@ -890,7 +890,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     if (!runtime?.compatible)
       return { ready: false, generation: null, diagnostics: null };
     if (runtime.developerApi) {
-      await runtime.developerApi.refresh(this.settings.mutationsEnabled);
+      // Index settlement may refresh core mutation sessions, but optional
+      // task-workflow consent stays operation-scoped. Only the invoked workflow
+      // is negotiated by its mutation guard below.
+      await runtime.developerApi.refresh(this.settings.mutationsEnabled, false);
       const generation = runtime.indexer.getGeneration();
       const diagnostics = await runtime.indexer.getIndexV8Diagnostics();
       return {
@@ -1723,6 +1726,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
       await this.requireSettledMutationIndex(runtime);
+      if (
+        capability === "adopt" &&
+        (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||
+          !runtime.developerApi.hasTaskWorkflowRecoverySupport("adopt"))
+      ) {
+        await runtime.developerApi.refreshTaskWorkflow("adopt");
+      }
       if (
         capability === "adopt" &&
         (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||

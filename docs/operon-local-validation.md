@@ -262,8 +262,10 @@ PASS when:
 
 ## 8a. Exact Operon 3.5 live canary
 
-Run only after the exact release Bridge is installed and the Pilot 2 status,
-grants, index and validation gates above are green. The recommended mode proves
+Run only after the exact release Bridge is installed and the Pilot 2 core
+status, index and validation gates above are green. Optional task-workflow
+capabilities may still be cold: the canary lets the exact invoked operation
+negotiate them. The recommended mode proves
 the real startup order: MCP connects first while Pilot 2 is closed, the same MCP
 connection survives a degraded status, then the CLI opens only Pilot 2 and that
 same client becomes live.
@@ -298,7 +300,9 @@ The script refuses to start unless all of these gates hold:
   canary, with the expected vault name;
 - Local REST uses exactly `http://127.0.0.1:27233` and a non-empty API key;
 - `OPERON_MUTATIONS_ENABLED=true`, the Bridge mutation setting is enabled, and
-  all required Developer API/task-workflow grants and capabilities are live;
+  the required core Developer API capabilities are live; each task-workflow
+  route must negotiate its exact grant when first invoked and fail closed if
+  that grant is absent or refused;
 - `Canary/Operon-3.5-Live-Canary.md` does not already exist;
 - the explicit mutation confirmation is exact; startup-order mode additionally
   requires the exact open-vault confirmation;

@@ -1796,6 +1796,24 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
       persistedTaskWorkflowIdentities.set(key, operonId);
     },
   };
+  requestedCapabilitySets.length = 0;
+  const coldAdapter = new OperonDeveloperApiRuntimeAdapter(
+    consumer,
+    operon,
+    taskWorkflowIdentityStore,
+  );
+  assert.equal(await coldAdapter.refresh(true, false), true);
+  assert.equal(coldAdapter.indexer.getGeneration(), 350);
+  assert.equal(coldAdapter.hasTaskWorkflowCapability("adopt"), false);
+  assert.equal(coldAdapter.hasTaskWorkflowCapability("periodic-create"), false);
+  assert.deepEqual(requestedCapabilitySets, [["tasks.filter-query"]]);
+  assert.equal(await coldAdapter.refreshTaskWorkflow("periodic-create"), true);
+  assert.deepEqual(requestedCapabilitySets.at(-1), [
+    "tasks.create.periodic-note.preview",
+    "tasks.create.periodic-note.apply",
+  ]);
+
+  requestedCapabilitySets.length = 0;
   const adapter = new OperonDeveloperApiRuntimeAdapter(
     consumer,
     operon,
