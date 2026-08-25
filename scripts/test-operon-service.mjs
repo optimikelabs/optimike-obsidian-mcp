@@ -174,6 +174,7 @@ const state = {
   lastTaskWorkflowRecoveryBody: null,
   mutations: false,
   bridgeModeOverride: null,
+  omitMutationsEnabled: false,
   workflowCold: false,
   filterCold: false,
   workflowGrantPending: false,
@@ -194,7 +195,9 @@ function statusPayload() {
       mode:
         state.bridgeModeOverride ??
         (state.mutations ? "read-write" : "read-only"),
-      mutationsEnabled: state.mutations,
+      ...(state.omitMutationsEnabled
+        ? {}
+        : { mutationsEnabled: state.mutations }),
     },
     operon: {
       present: state.mode !== "absent",
@@ -1650,6 +1653,32 @@ try {
   assert.equal(state.mutationCalls, callsBeforeFullyCold + 1);
   state.workflowCold = false;
   state.bridgeModeOverride = null;
+
+  const legacyColdInput = {
+    idempotencyKey: "test-legacy-bridge-cold-workflow",
+    dryRun: true,
+    periodic: {
+      description: "Legacy Bridge cold workflow",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  };
+  const callsBeforeLegacyCold = state.mutationCalls;
+  state.workflowCold = true;
+  state.bridgeModeOverride = "read-write";
+  state.omitMutationsEnabled = true;
+  await assert.rejects(
+    service.createPeriodicTask(legacyColdInput),
+    (error) => error?.code === "SERVICE_UNAVAILABLE",
+  );
+  assert.equal(
+    state.mutationCalls,
+    callsBeforeLegacyCold,
+    "an older Bridge without the explicit global gate must keep its cold capability block",
+  );
+  state.workflowCold = false;
+  state.bridgeModeOverride = null;
+  state.omitMutationsEnabled = false;
 
   const pendingGrantInput = {
     idempotencyKey: "test-pending-grant-same-key-retry",

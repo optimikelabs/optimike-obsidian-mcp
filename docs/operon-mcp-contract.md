@@ -209,7 +209,9 @@ adoption or periodic operation reaches the Bridge, which requests only that
 workflow's exact additive grant, but only when status still proves the global
 Bridge mutation setting is enabled. That setting is reported separately from
 the currently warm write capabilities, so a fully cold session is not mistaken
-for a globally read-only Bridge. Pending, refused or malformed grants fail
+for a globally read-only Bridge. Bridges that predate this explicit field keep
+their advertised capability gate and do not receive the new cold-grant bypass.
+Pending, refused or malformed grants fail
 closed without revoking established core sessions. Periodic creation persists
 no idempotency reservation before that negotiation succeeds, so the same request
 and key can be retried after manual approval. The MCP journal likewise releases

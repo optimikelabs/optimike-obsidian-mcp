@@ -2459,4 +2459,12 @@ test("a rejected Operon 3.5 workflow grant does not revoke another workflow or c
   assert.equal(await adapter.refreshTaskWorkflow("periodic-create"), true);
   assert.equal(adapter.hasTaskWorkflowCapability("periodic-create"), true);
   assert.equal(adapter.hasTaskWorkflowRecoverySupport("periodic-create"), true);
+  periodicGrantApproved = false;
+  assert.equal(await adapter.refreshTaskWorkflowRecovery("periodic-create"), false);
+  assert.equal(
+    adapter.hasTaskWorkflowCapability("periodic-create"),
+    true,
+    "a failed concurrent recovery negotiation must preserve the established mutation session",
+  );
+  assert.equal(adapter.hasTaskWorkflowRecoverySupport("periodic-create"), true);
 });

@@ -321,7 +321,9 @@ première adoption ou opération périodique atteint le Bridge, qui ne demande q
 le grant additif exact de ce workflow, mais seulement si le statut prouve encore
 que le réglage global de mutation du Bridge est activé. Ce réglage est exposé
 séparément des capacités d’écriture déjà négociées, afin qu’une session entièrement
-froide ne soit pas prise pour un Bridge globalement en lecture seule. Un grant en attente, refusé ou malformé
+froide ne soit pas prise pour un Bridge globalement en lecture seule. Les Bridges
+antérieurs à ce champ explicite conservent leur gate par capacité annoncée et ne
+bénéficient pas du nouveau passage à froid. Un grant en attente, refusé ou malformé
 échoue fermé sans révoquer les sessions principales déjà établies. La création
 périodique ne persiste aucune réservation d’idempotence avant la réussite de
 cette négociation : la même requête et la même clé peuvent être rejouées après

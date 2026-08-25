@@ -1506,12 +1506,11 @@ export class OperonDeveloperApiRuntimeAdapter {
       api = this.connectTaskWorkflowRecovery(kind);
     } catch {
       // A failed exact negotiation must fail closed without depending on, or
-      // mutating, the live task index.
+      // mutating, the live task index. Preserve any already-negotiated session:
+      // a concurrent recovery poll must not revoke the API that an active
+      // mutation obtained before entering its durable preflight.
     }
-    if (!api) {
-      this.taskWorkflowApis.delete(kind);
-      return false;
-    }
+    if (!api) return false;
     this.taskWorkflowApis.set(kind, api);
     return true;
   }
