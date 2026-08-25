@@ -209,4 +209,9 @@ adoption or periodic operation reaches the Bridge, which requests only that
 workflow's exact additive grant. Pending, refused or malformed grants fail
 closed without revoking established core sessions. Periodic creation persists
 no idempotency reservation before that negotiation succeeds, so the same request
-and key can be retried after manual approval.
+and key can be retried after manual approval. The MCP journal likewise releases
+only a Bridge-certified pre-dispatch reservation (`mutationMayHaveApplied: false`);
+all ambiguous transport or post-dispatch failures remain durable and fail closed.
+Ordinary healthy or degraded status polls never negotiate additive filter,
+workflow, or recovery grants; only the exact operation or dedicated recovery
+surface may do so.

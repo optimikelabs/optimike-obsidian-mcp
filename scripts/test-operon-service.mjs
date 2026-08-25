@@ -175,6 +175,7 @@ const state = {
   mutations: false,
   workflowCold: false,
   filterCold: false,
+  workflowGrantPending: false,
 };
 
 function statusPayload() {
@@ -569,13 +570,26 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "POST" && url.pathname.endsWith("/tasks/periodic")) {
-    state.mutationCalls += 1;
     let body = "";
     request.on("data", (chunk) => {
       body += chunk;
     });
     request.on("end", () => {
       const params = body ? JSON.parse(body) : {};
+      if (state.workflowGrantPending) {
+        sendJson(response, 503, {
+          ok: false,
+          contractVersion: "1",
+          error: {
+            code: "task_workflow_capability_unavailable",
+            message: "The exact periodic-create grant is pending.",
+          },
+          retryable: true,
+          mutationMayHaveApplied: false,
+        });
+        return;
+      }
+      state.mutationCalls += 1;
       sendJson(response, 200, {
         ok: true,
         contractVersion: "1",
@@ -1613,6 +1627,33 @@ try {
     state.mutationCalls,
     mutationCallsBeforeConcurrent + 1,
     "concurrent identical requests must share one Bridge operation",
+  );
+
+  const pendingGrantInput = {
+    idempotencyKey: "test-pending-grant-same-key-retry",
+    dryRun: true,
+    periodic: {
+      description: "Pending grant retry",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  };
+  const callsBeforePendingGrant = state.mutationCalls;
+  state.workflowGrantPending = true;
+  await assert.rejects(
+    service.createPeriodicTask(pendingGrantInput),
+    (error) =>
+      error?.code === "SERVICE_UNAVAILABLE" &&
+      /grant is pending/u.test(error.message),
+  );
+  assert.equal(state.mutationCalls, callsBeforePendingGrant);
+  state.workflowGrantPending = false;
+  const approvedSameKey = await service.createPeriodicTask(pendingGrantInput);
+  assert.equal(approvedSameKey.status, "planned");
+  assert.equal(
+    state.mutationCalls,
+    callsBeforePendingGrant + 1,
+    "manual approval must allow the exact same key to reach the Bridge once",
   );
 
   const interruptedInput = {

@@ -322,4 +322,9 @@ le grant additif exact de ce workflow. Un grant en attente, refusé ou malformé
 échoue fermé sans révoquer les sessions principales déjà établies. La création
 périodique ne persiste aucune réservation d’idempotence avant la réussite de
 cette négociation : la même requête et la même clé peuvent être rejouées après
-l’approbation manuelle.
+l’approbation manuelle. Le journal MCP ne libère lui aussi qu’une réservation
+certifiée pré-dispatch par le Bridge (`mutationMayHaveApplied: false`) ; toute
+erreur ambiguë de transport ou post-dispatch reste durable et échoue fermé. Un
+statut ordinaire, sain ou dégradé, ne négocie jamais les grants additifs de
+filtre, workflow ou recovery ; seules l’opération exacte ou la surface de
+récupération dédiée peuvent le faire.

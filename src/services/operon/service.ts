@@ -435,6 +435,32 @@ export class OperonService {
     }
   }
 
+  private releasePreDispatchMutationReservation(
+    action: string,
+    idempotencyKey: string,
+    requested: unknown,
+  ): boolean {
+    const db = this.openDb();
+    try {
+      const deleted = db
+        .prepare(
+          `DELETE FROM operon_mutation_journal
+           WHERE idempotency_key = ? AND action = ? AND requested_json = ?
+             AND operation_id = ? AND status = 'in_progress'
+             AND result_json = 'null'`,
+        )
+        .run(
+          idempotencyKey,
+          action,
+          stableJson(requested),
+          `pending:${idempotencyKey}`,
+        ) as { changes: number | bigint };
+      return Number(deleted.changes) === 1;
+    } finally {
+      db.close();
+    }
+  }
+
   private writeMutationJournal(
     action: string,
     operonId: string | null,
@@ -865,6 +891,49 @@ export class OperonService {
     const response = await this.getClient().post(path, payload, {
       validateStatus: () => true,
     });
+    const responseRecord =
+      response.data &&
+      typeof response.data === "object" &&
+      !Array.isArray(response.data)
+        ? (response.data as Record<string, unknown>)
+        : {};
+    const responseError =
+      responseRecord.error &&
+      typeof responseRecord.error === "object" &&
+      !Array.isArray(responseRecord.error)
+        ? (responseRecord.error as Record<string, unknown>)
+        : {};
+    if (
+      taskWorkflowAction &&
+      response.status === 503 &&
+      responseError.code === "task_workflow_capability_unavailable" &&
+      responseRecord.mutationMayHaveApplied === false
+    ) {
+      const released = this.releasePreDispatchMutationReservation(
+        action,
+        idempotencyKey,
+        payload,
+      );
+      if (!released) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "The pre-dispatch Operon reservation could not be released safely; inspect the journal before retrying.",
+          this.requestContext(operation, { operonId, idempotencyKey }),
+        );
+      }
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        typeof responseError.message === "string"
+          ? responseError.message
+          : "The exact Operon task-workflow grant is pending or unavailable.",
+        this.requestContext(operation, {
+          operonId,
+          idempotencyKey,
+          bridgeCode: responseError.code,
+          mutationMayHaveApplied: false,
+        }),
+      );
+    }
     const parsed = OperonMutationResultSchema.safeParse(response.data);
     if (!parsed.success) {
       throw new McpError(

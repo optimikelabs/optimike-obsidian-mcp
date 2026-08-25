@@ -311,6 +311,58 @@ test("periodic-create negotiates its exact grant before durable reservation", as
   assert.equal(nativeDispatches, 1);
 });
 
+test("a pending exact workflow grant is marked as a proven pre-dispatch failure", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const requireTaskWorkflowRuntime = BridgePlugin.prototype
+    .requireTaskWorkflowRuntime as Function;
+  const sendMutationFailure = BridgePlugin.prototype
+    .sendMutationFailure as Function;
+  const runtime = {
+    compatible: true,
+    indexer: { getAllTasks: () => [] },
+    developerApi: {
+      hasTaskWorkflowCapability: () => false,
+      hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflow: async () => false,
+    },
+  };
+  const guard = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => runtime,
+    requireSettledMutationIndex: async () => undefined,
+  };
+  let pendingError: unknown;
+  try {
+    await requireTaskWorkflowRuntime.call(guard, "periodic-create");
+  } catch (error) {
+    pendingError = error;
+  }
+  assert.ok(pendingError instanceof Error);
+
+  let statusCode = 0;
+  let payload: Record<string, any> | undefined;
+  const response = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(value: Record<string, any>) {
+      payload = value;
+    },
+  };
+  await sendMutationFailure.call(
+    { failReservedMutation: () => null },
+    response,
+    {},
+    pendingError,
+    "mutation_unavailable",
+  );
+  assert.equal(statusCode, 503);
+  assert.equal(payload?.error?.code, "task_workflow_capability_unavailable");
+  assert.equal(payload?.retryable, true);
+  assert.equal(payload?.mutationMayHaveApplied, false);
+});
+
 test("periodic update validates lookup and revision before durable reservation", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
   const executePeriodicUpdateMutation = BridgePlugin.prototype
@@ -1386,26 +1438,11 @@ test("future contract-compatible Operon releases project read-write capabilities
     true,
     "workflow recovery must remain advertised while the live index is unsettled",
   );
-  await BridgePlugin.prototype.refreshRecoveryCapabilities.call(
-    fake,
-    runtime,
-    false,
-  );
-  assert.equal(recoveryRefreshes, 1);
-  assert.deepEqual(workflowRecoveryRefreshes, [
-    "adopt",
-    "periodic-create",
-    "periodic-update",
-  ]);
-  await BridgePlugin.prototype.refreshRecoveryCapabilities.call(
-    fake,
-    runtime,
-    true,
-  );
-  assert.equal(
-    recoveryRefreshes,
-    1,
-    "a settled status refresh already negotiated recovery with the full contract",
+  assert.equal(recoveryRefreshes, 0);
+  assert.deepEqual(
+    workflowRecoveryRefreshes,
+    [],
+    "ordinary status must not negotiate optional recovery grants",
   );
   const recoveryStatus = await BridgePlugin.prototype.recoveryStatusPayload.call(
     {
@@ -1423,9 +1460,14 @@ test("future contract-compatible Operon releases project read-write capabilities
   });
   assert.equal(
     recoveryRefreshes,
-    2,
+    1,
     "the recovery-only status must negotiate without invoking indexState",
   );
+  assert.deepEqual(workflowRecoveryRefreshes, [
+    "adopt",
+    "periodic-create",
+    "periodic-update",
+  ]);
 
   const disabledRecoveryCapabilities = BridgePlugin.prototype.capabilities.call(
     { settings: { mutationsEnabled: false } },

@@ -303,6 +303,15 @@ function errorPayload(
   };
 }
 
+class TaskWorkflowCapabilityUnavailableError extends Error {
+  constructor(kind: DeveloperApiTaskWorkflowKind) {
+    super(
+      `Operon task-workflow Developer API capability or recovery support is unavailable: ${kind}; no Markdown or private-API fallback is used.`,
+    );
+    this.name = "TaskWorkflowCapabilityUnavailableError";
+  }
+}
+
 function sanitizeQuery(input: unknown): OperonTaskQuery {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
   const source = input as Record<string, unknown>;
@@ -844,28 +853,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
-  private async refreshRecoveryCapabilities(
-    runtime: OperonRuntime | null,
-    ready: boolean,
-  ): Promise<void> {
-    if (
-      ready ||
-      !runtime?.developerApi ||
-      !runtime.compatible ||
-      !this.settings.mutationsEnabled
-    ) {
-      return;
-    }
-    await runtime.developerApi.refreshRecovery();
-    for (const kind of [
-      "adopt",
-      "periodic-create",
-      "periodic-update",
-    ] as const) {
-      await runtime.developerApi.refreshTaskWorkflowRecovery(kind);
-    }
-  }
-
   private limitations(runtime: OperonRuntime | null, ready: boolean): string[] {
     const capabilities = this.capabilities(runtime, ready);
     return capabilities.create ||
@@ -1024,7 +1011,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const ready = Boolean(
       runtime && this.isSettledRuntimeIndex(runtime, indexState),
     );
-    await this.refreshRecoveryCapabilities(runtime, ready);
     const capabilities = this.capabilities(runtime, ready);
     const contractInvalid =
       runtime?.developerApi?.negotiatedContractState === "invalid";
@@ -1712,7 +1698,17 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       await this.sendDurableMutationResponse(res, failed);
       return;
     }
-    sendJson(res, 503, errorPayload(error, fallbackCode));
+    sendJson(
+      res,
+      503,
+      error instanceof TaskWorkflowCapabilityUnavailableError
+        ? {
+            ...errorPayload(error, "task_workflow_capability_unavailable"),
+            retryable: true,
+            mutationMayHaveApplied: false,
+          }
+        : errorPayload(error, fallbackCode),
+    );
   }
 
   private async requireMutationRuntime(
@@ -1738,9 +1734,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         (!runtime.developerApi.hasTaskWorkflowCapability("adopt") ||
           !runtime.developerApi.hasTaskWorkflowRecoverySupport("adopt"))
       ) {
-        throw new Error(
-          "Operon task-workflow Developer API adoption or recovery grant is unavailable; the Bridge will not use a Markdown or private-API fallback.",
-        );
+        throw new TaskWorkflowCapabilityUnavailableError("adopt");
       }
       if (capability !== "adopt") {
         const blocked = (
@@ -1798,9 +1792,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       !runtime.developerApi.hasTaskWorkflowCapability(kind) ||
       !runtime.developerApi.hasTaskWorkflowRecoverySupport(kind)
     ) {
-      throw new Error(
-        `Operon task-workflow Developer API capability or recovery support is unavailable: ${kind}; no Markdown or private-API fallback is used.`,
-      );
+      throw new TaskWorkflowCapabilityUnavailableError(kind);
     }
     return runtime;
   }
