@@ -1080,6 +1080,44 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
     coldRuntime,
   );
 
+  let exactWorkflowNegotiation: string | null = null;
+  let workflowNegotiated = false;
+  const workflowColdRuntime = {
+    version: "99.0.0",
+    compatible: true,
+    indexer: { getAllTasks: () => [] },
+    developerApi: {
+      hasTaskWorkflowCapability: () => workflowNegotiated,
+      hasTaskWorkflowRecoverySupport: () => workflowNegotiated,
+      refreshTaskWorkflow: async (kind: string) => {
+        exactWorkflowNegotiation = kind;
+        workflowNegotiated = true;
+        return true;
+      },
+    },
+  };
+  const workflowCold = {
+    settings: { mutationsEnabled: true },
+    requireRuntime: () => workflowColdRuntime,
+    indexState: async () => ({
+      ready: true,
+      diagnostics: { taskCount: 0 },
+    }),
+    runtimeTaskCount: BridgePlugin.prototype.runtimeTaskCount,
+    isSettledRuntimeIndex: BridgePlugin.prototype.isSettledRuntimeIndex,
+    requireSettledMutationIndex:
+      BridgePlugin.prototype.requireSettledMutationIndex,
+  };
+  assert.equal(
+    await BridgePlugin.prototype.requireTaskWorkflowRuntime.call(
+      workflowCold,
+      "periodic-create",
+    ),
+    workflowColdRuntime,
+    "the first exact task-workflow operation must negotiate its additive grant",
+  );
+  assert.equal(exactWorkflowNegotiation, "periodic-create");
+
   const unsettled = {
     ...cold,
     indexState: async () => ({
@@ -1125,6 +1163,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       hasTaskWorkflowCapability: () => false,
       hasRecoverySupport: () => false,
       hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflow: async () => false,
       refreshTaskWorkflowRecovery: async () => false,
     },
   };
@@ -1166,6 +1205,7 @@ test("direct mutation guards rely on negotiated capabilities instead of product 
       hasTaskWorkflowCapability: () => true,
       hasRecoverySupport: () => false,
       hasTaskWorkflowRecoverySupport: () => false,
+      refreshTaskWorkflow: async () => false,
       refreshTaskWorkflowRecovery: async () => false,
     },
   };
@@ -1302,7 +1342,7 @@ test("future contract-compatible Operon releases project read-write capabilities
     {
       getOperonRuntime: () => runtime,
       app: { plugins: {} },
-      manifest: { id: "optimike-operon-bridge", version: "0.8.1" },
+      manifest: { id: "optimike-operon-bridge", version: "0.8.2" },
       settings: { mutationsEnabled: true },
       capabilities: BridgePlugin.prototype.capabilities,
     },
@@ -1373,7 +1413,7 @@ test("normalization and filtering preserve ordered list fields without scalar co
       { canonicalKey: "taskGallery", visiblePropertyName: "Task Gallery" },
     ],
     operonVersion: "3.5.3",
-    bridgeVersion: "0.8.1",
+    bridgeVersion: "0.8.2",
     includeProperties: false,
   });
   assert.deepEqual(normalized.fields.taskGallery, [

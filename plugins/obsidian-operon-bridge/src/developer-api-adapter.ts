@@ -1450,6 +1450,22 @@ export class OperonDeveloperApiRuntimeAdapter {
     return Boolean(methods?.recover && methods.pendingRecoveries);
   }
 
+  async refreshTaskWorkflow(
+    kind: DeveloperApiTaskWorkflowKind,
+  ): Promise<boolean> {
+    let api: TaskWorkflowDeveloperApiV1 | null = null;
+    try {
+      api = this.connectTaskWorkflow(kind);
+    } catch {
+      // First-use negotiation is exact and additive. A pending or malformed
+      // optional grant fails closed without invalidating any established core
+      // Developer API session.
+    }
+    if (!api) return false;
+    this.taskWorkflowApis.set(kind, api);
+    return true;
+  }
+
   async refreshTaskWorkflowRecovery(
     kind: DeveloperApiTaskWorkflowKind,
   ): Promise<boolean> {

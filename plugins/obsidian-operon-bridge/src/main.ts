@@ -1776,6 +1776,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const runtime = this.requireRuntime();
     if (runtime.developerApi) {
       await this.requireSettledMutationIndex(runtime);
+      if (
+        !runtime.developerApi.hasTaskWorkflowCapability(kind) ||
+        !runtime.developerApi.hasTaskWorkflowRecoverySupport(kind)
+      ) {
+        await runtime.developerApi.refreshTaskWorkflow(kind);
+      }
     }
     if (
       !runtime.developerApi ||

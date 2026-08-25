@@ -5,10 +5,12 @@ English version: [operon-cli-audit.md](operon-cli-audit.md)
 Mise à jour : 2026-08-25
 
 Release courante : Operon officiel `3.5.3`, Operon CLI `1.2.0`, Bridge
-`0.8.1`, Developer API V1 et API task-workflow additive. Operon 3.5.3 embarque
+`0.8.2`, Developer API V1 et API task-workflow additive. Operon 3.5.3 embarque
 des implémentations qui remplacent les PR upstream `#182`, `#183` et `#184`.
 `compatible-provisional` décrit le niveau de certification, pas une allowlist de
 mutation : l’admission dépend du contrat et des capacités live exactes.
+Les workflows additifs négocient leur grant exact au premier usage après un
+démarrage à froid ; un grant absent, refusé ou malformé échoue toujours fermé.
 
 Operon CLI `1.2.0` ajoute la surface opérateur pour le routage Daily/Weekly et
 les champs typés Task Type, Task Image et Task Gallery ordonnée. Le MCP ne

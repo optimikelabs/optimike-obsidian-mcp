@@ -300,9 +300,9 @@ La suppression reste une action opérateur dans la CLI. Un futur
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
 
-## Admission de la release 3.1.1
+## Admission de la release 3.1.2
 
-Optimike MCP `3.1.1`, Bridge `0.8.1`, Operon `3.5.3` et Operon CLI `1.2.0`
+Optimike MCP `3.1.2`, Bridge `0.8.2`, Operon `3.5.3` et Operon CLI `1.2.0`
 forment l’ensemble publié courant. Operon `3.5.3` reste
 `compatible-provisional` jusqu’à son entrée dans l’ensemble explicite de preuves
 certifiées, mais ce libellé ne masque plus les mutations valides. La version
@@ -310,3 +310,8 @@ produit reste une métadonnée diagnostique pouvant sélectionner un refus ou un
 exception bornée ; elle n’est pas une allowlist positive de mutation. Contrat,
 grants exacts, schémas, santé live, index stabilisé, politique d’écriture et
 recovery restent obligatoires.
+
+Le statut task-workflow est un diagnostic, pas une liste de refus préalable. La
+première adoption ou opération périodique atteint le Bridge, qui ne demande que
+le grant additif exact de ce workflow. Un grant en attente, refusé ou malformé
+échoue fermé sans révoquer les sessions principales déjà établies.

@@ -173,6 +173,7 @@ const state = {
   recoveryCalls: 0,
   lastTaskWorkflowRecoveryBody: null,
   mutations: false,
+  workflowCold: false,
 };
 
 function statusPayload() {
@@ -214,10 +215,10 @@ function statusPayload() {
     capabilities: state.mutations
       ? {
           ...capabilities,
-          adopt: true,
-          periodicCreate: true,
-          periodicUpdate: true,
-          taskWorkflowRecovery: true,
+          adopt: !state.workflowCold,
+          periodicCreate: !state.workflowCold,
+          periodicUpdate: !state.workflowCold,
+          taskWorkflowRecovery: !state.workflowCold,
           create: true,
           update: true,
           transition: true,
@@ -1071,6 +1072,24 @@ try {
   });
   assert.equal(periodicPlanned.status, "planned");
   assert.equal(state.mutationCalls, 3);
+
+  state.workflowCold = true;
+  const coldPeriodicPlanned = await service.createPeriodicTask({
+    idempotencyKey: "test-periodic-create-cold-idempotency",
+    dryRun: true,
+    periodic: {
+      description: "Cold Daily grant negotiation",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  });
+  assert.equal(coldPeriodicPlanned.status, "planned");
+  assert.equal(
+    state.mutationCalls,
+    4,
+    "an additive task-workflow route must reach the Bridge when status is cold",
+  );
+  state.workflowCold = false;
   const replayed = await service.createTask({
     idempotencyKey: "test-create-idempotency",
     dryRun: true,
@@ -1084,7 +1103,7 @@ try {
   assert.equal(replayed.operationId, planned.operationId);
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "journal replay must not call the Bridge twice",
   );
 
@@ -1102,7 +1121,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "mismatched idempotency reuse must be rejected locally",
   );
 
@@ -1166,7 +1185,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "scope rejection must happen before the Bridge call",
   );
 
@@ -1184,7 +1203,7 @@ try {
   );
   assert.equal(
     state.mutationCalls,
-    3,
+    4,
     "non-canonical paths must be rejected before any Bridge request",
   );
 
@@ -1200,7 +1219,7 @@ try {
   assert.equal(scopedInline.status, "planned");
   assert.equal(
     state.mutationCalls,
-    4,
+    5,
     "explicit allowed inline target must reach the Bridge",
   );
 

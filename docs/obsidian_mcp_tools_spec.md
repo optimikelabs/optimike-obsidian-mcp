@@ -217,10 +217,12 @@ Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`
 Operon/Bridge versions, capabilities, and limitations.
 
 Mutations require a live Bridge and the loaded engine's official contract.
-Operon 3.5.3 plus CLI 1.2.0 is the 3.1.1 released target through Bridge 0.8.1
+Operon 3.5.3 plus CLI 1.2.0 is the 3.1.2 released target through Bridge 0.8.2
 and remains `compatible-provisional` as certification metadata. Valid mutations
 are admitted by the negotiated contract and exact live gates rather than a
-product-version allowlist.
+product-version allowlist. Additive task-workflow operations may reach the
+Bridge when their cached capability is cold so the exact grant can be negotiated
+on first use; the Bridge still fails closed if negotiation fails.
 Task Type and Task Image are scalar, Task Gallery is a lossless ordered array, and
 `__taskDataType` is read-only. Optional adoption and Daily/Weekly grants are
 negotiated independently from core reads. Operon 3.2.0 uses Developer API V1

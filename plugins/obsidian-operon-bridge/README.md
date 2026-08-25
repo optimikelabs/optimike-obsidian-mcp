@@ -37,9 +37,10 @@ Project Serial transition edge. Uncertain outcomes
 remain fail-closed; the Bridge never retries blindly or falls back to
 Markdown/private APIs.
 
-Bridge `0.8.1` supports Operon `3.5.3`'s separate
+Bridge `0.8.2` supports Operon `3.5.3`'s separate
 task-workflow Developer API sessions. Adoption, daily/weekly periodic-note
-creation, and periodic-note-aware updates each negotiate their own exact grant;
+creation, and periodic-note-aware updates each negotiate their own exact grant
+on first use, even when the last status snapshot reported the capability cold;
 a pending or malformed optional grant cannot revoke the established core read
 or mutation sessions. Apply receives the exact opaque plan handle returned by
 preview, and recovery accepts only the matching durable `recoveryRef` and

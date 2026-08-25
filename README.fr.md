@@ -114,7 +114,7 @@ N’activer que les surfaces utilisées :
 - **Bases Bridge** inclus pour Bases live et le CAS de formules gouvernées ;
 - **Optimike Atomic Write Bridge** inclus pour les cycles Note, Frontmatter et Canvas `plan → apply → status → recover` ;
 - **Smart Connections** pour l’index sémantique local ;
-- **Operon Developer API V1** et **Optimike Operon Bridge 0.8.1** pour les tâches gouvernées. Operon 3.5.3 et CLI 1.2.0 forment la cible live courante. Une release Operon inconnue mais non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ;
+- **Operon Developer API V1** et **Optimike Operon Bridge 0.8.2** pour les tâches gouvernées. Operon 3.5.3 et CLI 1.2.0 forment la cible live courante. Une release Operon inconnue mais non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ;
 - **Obsidian Tasks** pour le parsing Markdown Tasks-compatible.
 
 Les mutations Operon exigent le réglage de mutation du Bridge plus :
@@ -123,7 +123,7 @@ Les mutations Operon exigent le réglage de mutation du Bridge plus :
 OPERON_MUTATIONS_ENABLED=true
 ```
 
-Les snapshots Operon obsolètes restent read-only. Aucune route Operon ne retombe sur du Markdown brut ou des API privées. L’adoption officielle et le routage Daily/Weekly ne sont exposés qu’après leurs grants additifs exacts. Operon reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan. Task Type et Task Image restent scalaires, Task Gallery reste un tableau ordonné et `__taskDataType` est read-only. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
+Les snapshots Operon obsolètes restent read-only. Aucune route Operon ne retombe sur du Markdown brut ou des API privées. L’adoption officielle et le routage Daily/Weekly négocient leur grant additif exact au premier usage, y compris après un démarrage MCP à froid ; un grant en attente ou refusé échoue toujours fermé. Operon reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan. Task Type et Task Image restent scalaires, Task Gallery reste un tableau ordonné et `__taskDataType` est read-only. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
 
 ## Opérations gouvernées
 

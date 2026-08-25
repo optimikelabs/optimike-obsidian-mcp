@@ -190,12 +190,17 @@ operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.1.1 release admission
+## 3.1.2 release admission
 
-Optimike MCP `3.1.1`, Bridge `0.8.1`, Operon `3.5.3` and Operon CLI `1.2.0`
+Optimike MCP `3.1.2`, Bridge `0.8.2`, Operon `3.5.3` and Operon CLI `1.2.0`
 form the current released set. Operon `3.5.3` remains
 `compatible-provisional` until it joins the explicit certified evidence set,
 but that label no longer masks valid mutation capabilities. Product version is
 diagnostic metadata and may select an explicit deny or narrowly blocked path;
 it is not a positive mutation allowlist. Contract negotiation, exact grants,
 schemas, live health, settled index, write policy and recovery remain mandatory.
+
+Task-workflow status is advisory rather than a preflight denylist. The first
+adoption or periodic operation reaches the Bridge, which requests only that
+workflow's exact additive grant. Pending, refused or malformed grants fail
+closed without revoking established core sessions.

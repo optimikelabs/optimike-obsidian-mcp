@@ -6,7 +6,7 @@ const consumer = {
   manifest: {
     id: "optimike-operon-bridge",
     name: "Optimike Operon Bridge",
-    version: "0.8.1",
+    version: "0.8.2",
   },
 };
 
@@ -2329,6 +2329,7 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
 });
 
 test("a rejected Operon 3.5 workflow grant does not revoke another workflow or core reads", async () => {
+  let periodicGrantApproved = false;
   const api = {
     hasCapability: (name: string) =>
       [
@@ -2371,6 +2372,15 @@ test("a rejected Operon 3.5 workflow grant does not revoke another workflow or c
     }),
     apply: async () => ({ status: "applied" }),
   };
+  const periodicCreation = {
+    preview: async () => ({
+      ok: true,
+      plan: { recoveryRef: "periodic-r", planDigest: "periodic-p" },
+    }),
+    apply: async () => ({ status: "applied" }),
+    recover: async () => ({ code: "already-applied" }),
+    pendingRecoveries: async () => ({ records: [] }),
+  };
   const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, {
     getDeveloperApiV1: () => ({ ok: true, status: readyStatus(), api }),
     getTaskWorkflowDeveloperApiV1: (
@@ -2393,7 +2403,17 @@ test("a rejected Operon 3.5 workflow grant does not revoke another workflow or c
         request.requestedCapabilities[0] ===
         "tasks.create.periodic-note.preview"
       ) {
-        throw new Error("periodic grant pending");
+        if (!periodicGrantApproved) throw new Error("periodic grant pending");
+        return {
+          contractVersion: 1,
+          kind: "task-workflow-developer-api-access-result",
+          ok: true,
+          api: {
+            contractVersion: 1,
+            runtimeApi: 1,
+            tasks: { createPeriodicNote: periodicCreation },
+          },
+        };
       }
       return {
         contractVersion: 1,
@@ -2407,4 +2427,10 @@ test("a rejected Operon 3.5 workflow grant does not revoke another workflow or c
   assert.equal(adapter.indexer.getGeneration(), 351);
   assert.equal(adapter.hasTaskWorkflowCapability("adopt"), true);
   assert.equal(adapter.hasTaskWorkflowCapability("periodic-create"), false);
+  assert.equal(await adapter.refreshTaskWorkflow("periodic-create"), false);
+  assert.equal(adapter.hasTaskWorkflowCapability("adopt"), true);
+  periodicGrantApproved = true;
+  assert.equal(await adapter.refreshTaskWorkflow("periodic-create"), true);
+  assert.equal(adapter.hasTaskWorkflowCapability("periodic-create"), true);
+  assert.equal(adapter.hasTaskWorkflowRecoverySupport("periodic-create"), true);
 });
