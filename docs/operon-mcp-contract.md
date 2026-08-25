@@ -190,10 +190,10 @@ operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.1.1 candidate admission
+## 3.1.1 release admission
 
 Optimike MCP `3.1.1`, Bridge `0.8.1`, Operon `3.5.3` and Operon CLI `1.2.0`
-form the current candidate set. Operon `3.5.3` remains
+form the current released set. Operon `3.5.3` remains
 `compatible-provisional` until it joins the explicit certified evidence set,
 but that label no longer masks valid mutation capabilities. Product version is
 diagnostic metadata and may select an explicit deny or narrowly blocked path;

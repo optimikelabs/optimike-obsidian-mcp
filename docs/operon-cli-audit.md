@@ -3,7 +3,7 @@
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
 Updated: 2026-08-25
-Current candidate: official Operon `3.5.3`, Operon CLI `1.2.0`, Bridge `0.8.1`, Developer API V1 and the additive task-workflow API. Operon 3.5.3 ships superseding implementations of upstream PRs `#182`, `#183` and `#184`. `compatible-provisional` describes certification evidence only; mutation admission follows the negotiated contract and exact live capabilities rather than a product-version allowlist.
+Current release: official Operon `3.5.3`, Operon CLI `1.2.0`, Bridge `0.8.1`, Developer API V1 and the additive task-workflow API. Operon 3.5.3 ships superseding implementations of upstream PRs `#182`, `#183` and `#184`. `compatible-provisional` describes certification evidence only; mutation admission follows the negotiated contract and exact live capabilities rather than a product-version allowlist.
 
 Operon CLI `1.2.0` adds operator access to Daily/Weekly routing and the typed
 Task Type, Task Image and ordered Task Gallery fields. The MCP does not relay

@@ -4,7 +4,7 @@ English version: [operon-cli-audit.md](operon-cli-audit.md)
 
 Mise à jour : 2026-08-25
 
-Candidate courante : Operon officiel `3.5.3`, Operon CLI `1.2.0`, Bridge
+Release courante : Operon officiel `3.5.3`, Operon CLI `1.2.0`, Bridge
 `0.8.1`, Developer API V1 et API task-workflow additive. Operon 3.5.3 embarque
 des implémentations qui remplacent les PR upstream `#182`, `#183` et `#184`.
 `compatible-provisional` décrit le niveau de certification, pas une allowlist de
