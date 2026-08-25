@@ -162,6 +162,7 @@ test("continuous snapshot churn fails not-ready before native dispatch", async (
   };
   const fake: Record<string, any> = {
     mutationResults: { get: () => undefined },
+    activeMutationReservationResponse: async () => null,
     mutationPreflight: async () => ({ kind: "continue" }),
     requireMutationRuntime: () => runtime,
     requireRuntime: () => runtime,
@@ -222,6 +223,7 @@ test("lookup and revision validation happen before durable reservation", async (
         : { operonId: "task-1", revision: "revision-1" };
     const fake = {
       mutationResults: { get: () => undefined },
+      activeMutationReservationResponse: async () => null,
       mutationPreflight: async () => {
         reservationCalls += 1;
         return { kind: "continue" };
@@ -270,6 +272,7 @@ test("periodic-create negotiates its exact grant before durable reservation", as
   };
   const fake: Record<string, any> = {
     mutationResults: { get: () => undefined },
+    activeMutationReservationResponse: async () => null,
     mutationOperationId: () => "periodic-operation",
     requireTaskWorkflowRuntime: async () => {
       if (!grantAvailable) throw new Error("exact grant pending");
@@ -351,7 +354,11 @@ test("a pending exact workflow grant is marked as a proven pre-dispatch failure"
     },
   };
   await sendMutationFailure.call(
-    { failReservedMutation: () => null },
+    {
+      failReservedMutation: () => {
+        throw new Error("a pre-dispatch grant failure must not touch another reservation");
+      },
+    },
     response,
     {},
     pendingError,
@@ -361,6 +368,61 @@ test("a pending exact workflow grant is marked as a proven pre-dispatch failure"
   assert.equal(payload?.error?.code, "task_workflow_capability_unavailable");
   assert.equal(payload?.retryable, true);
   assert.equal(payload?.mutationMayHaveApplied, false);
+});
+
+test("an active periodic-create reservation is joined before grant negotiation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executePeriodicCreateMutation = BridgePlugin.prototype
+    .executePeriodicCreateMutation as Function;
+  const activeMutationReservationResponse = BridgePlugin.prototype
+    .activeMutationReservationResponse as Function;
+  const requested = {
+    description: "Concurrent periodic create",
+    periodicKind: "daily",
+  };
+  const signature = JSON.stringify({
+    capability: "periodic-create",
+    dryRun: true,
+    requested,
+  });
+  const activePayload = {
+    ok: true,
+    contractVersion: "1",
+    operationId: "active-operation",
+    idempotencyKey: "active-periodic-key",
+    status: "planned",
+    before: null,
+    requested,
+    after: null,
+    source: "operon-live",
+    stale: false,
+  };
+  let grantNegotiations = 0;
+  const fake: Record<string, any> = {
+    mutationResults: { get: () => undefined },
+    mutationReservations: {
+      get: () => ({
+        signature,
+        promise: Promise.resolve(activePayload),
+      }),
+    },
+    mutationOperationId: () => "unused-operation",
+    mutationHttpStatus: () => 200,
+    requireTaskWorkflowRuntime: async () => {
+      grantNegotiations += 1;
+      throw new Error("must not negotiate while an operation is active");
+    },
+  };
+  fake.activeMutationReservationResponse = (...args: unknown[]) =>
+    activeMutationReservationResponse.call(fake, ...args);
+
+  const result = await executePeriodicCreateMutation.call(fake, {
+    idempotencyKey: "active-periodic-key",
+    dryRun: true,
+    periodic: requested,
+  });
+  assert.equal(result.payload.operationId, "active-operation");
+  assert.equal(grantNegotiations, 0);
 });
 
 test("periodic update validates lookup and revision before durable reservation", async () => {
@@ -377,6 +439,7 @@ test("periodic update validates lookup and revision before durable reservation",
         : { operonId: "task-1", revision: "revision-1" };
     const fake = {
       mutationResults: { get: () => undefined },
+      activeMutationReservationResponse: async () => null,
       mutationPreflight: async () => {
         reservationCalls += 1;
         return { kind: "continue" };
@@ -410,6 +473,7 @@ test("legacy adoption validates the source file before durable reservation", asy
   let reservationCalls = 0;
   const fake = {
     mutationResults: { get: () => undefined },
+    activeMutationReservationResponse: async () => null,
     mutationPreflight: async () => {
       reservationCalls += 1;
       return { kind: "continue" };

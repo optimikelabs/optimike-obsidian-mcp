@@ -190,7 +190,7 @@ function statusPayload() {
     bridge: {
       id: "optimike-operon-bridge",
       version: "0.1.0",
-      mode: "read-only",
+      mode: state.mutations ? "read-write" : "read-only",
     },
     operon: {
       present: state.mode !== "absent",
@@ -1654,6 +1654,31 @@ try {
     state.mutationCalls,
     callsBeforePendingGrant + 1,
     "manual approval must allow the exact same key to reach the Bridge once",
+  );
+
+  const globallyDisabledInput = {
+    idempotencyKey: "test-globally-disabled-same-key-retry",
+    dryRun: true,
+    periodic: {
+      description: "Globally disabled mutation surface",
+      periodicKind: "daily",
+      routeDate: "2026-08-23",
+    },
+  };
+  const callsBeforeDisabledSurface = state.mutationCalls;
+  state.mutations = false;
+  await assert.rejects(
+    service.createPeriodicTask(globallyDisabledInput),
+    (error) => error?.code === "SERVICE_UNAVAILABLE",
+  );
+  assert.equal(state.mutationCalls, callsBeforeDisabledSurface);
+  state.mutations = true;
+  const enabledSameKey = await service.createPeriodicTask(globallyDisabledInput);
+  assert.equal(enabledSameKey.status, "planned");
+  assert.equal(
+    state.mutationCalls,
+    callsBeforeDisabledSurface + 1,
+    "global mutation disablement must not poison the same-key retry journal",
   );
 
   const interruptedInput = {

@@ -206,7 +206,8 @@ schemas, live health, settled index, write policy and recovery remain mandatory.
 
 Task-workflow status is advisory rather than a preflight denylist. The first
 adoption or periodic operation reaches the Bridge, which requests only that
-workflow's exact additive grant. Pending, refused or malformed grants fail
+workflow's exact additive grant, but only when status still proves the global
+Bridge mutation surface is `read-write`. Pending, refused or malformed grants fail
 closed without revoking established core sessions. Periodic creation persists
 no idempotency reservation before that negotiation succeeds, so the same request
 and key can be retried after manual approval. The MCP journal likewise releases

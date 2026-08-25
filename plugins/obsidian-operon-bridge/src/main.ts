@@ -1630,6 +1630,31 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     return terminal;
   }
 
+  private async activeMutationReservationResponse(
+    idempotencyKey: string,
+    signature: string,
+    requested: Record<string, unknown>,
+  ): Promise<{
+    httpStatus: number;
+    payload: Record<string, unknown>;
+  } | null> {
+    const active = this.mutationReservations.get(idempotencyKey);
+    if (!active) return null;
+    if (active.signature !== signature) {
+      const conflict = resolveMutationPreflight({
+        cached: { signature: active.signature, payload: {} },
+        idempotencyKey,
+        signature,
+        requested,
+        validate: () => null,
+        operationId: () => this.mutationOperationId(),
+      });
+      return conflict.kind === "response" ? conflict.response : null;
+    }
+    const payload = await active.promise;
+    return { httpStatus: this.mutationHttpStatus(payload), payload };
+  }
+
   private failReservedMutation(
     body: Record<string, unknown>,
     error: unknown,
@@ -1693,22 +1718,20 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     error: unknown,
     fallbackCode: string,
   ): Promise<void> {
+    if (error instanceof TaskWorkflowCapabilityUnavailableError) {
+      sendJson(res, 503, {
+        ...errorPayload(error, "task_workflow_capability_unavailable"),
+        retryable: true,
+        mutationMayHaveApplied: false,
+      });
+      return;
+    }
     const failed = this.failReservedMutation(body, error);
     if (failed) {
       await this.sendDurableMutationResponse(res, failed);
       return;
     }
-    sendJson(
-      res,
-      503,
-      error instanceof TaskWorkflowCapabilityUnavailableError
-        ? {
-            ...errorPayload(error, "task_workflow_capability_unavailable"),
-            retryable: true,
-            mutationMayHaveApplied: false,
-          }
-        : errorPayload(error, fallbackCode),
-    );
+    sendJson(res, 503, errorPayload(error, fallbackCode));
   }
 
   private async requireMutationRuntime(
@@ -2102,6 +2125,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ),
       };
     }
+    const activeReservation = await this.activeMutationReservationResponse(
+      idempotencyKey,
+      signature,
+      requested,
+    );
+    if (activeReservation) return activeReservation;
     const canonicalTargetPath = targetPath as string;
     const runtime = await this.requireMutationRuntime("adopt");
     const legacyFile = runtime.developerApi
@@ -2409,6 +2438,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         payload: errorPayload(new Error(validation.message), "validation_error"),
       };
     }
+    const activeReservation = await this.activeMutationReservationResponse(
+      idempotencyKey,
+      signature,
+      requested,
+    );
+    if (activeReservation) return activeReservation;
     const runtime = await this.requireTaskWorkflowRuntime("periodic-create");
     const preflight = await this.mutationPreflight(
       idempotencyKey,
@@ -2487,6 +2522,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ),
       };
     }
+    const activeReservation = await this.activeMutationReservationResponse(
+      idempotencyKey,
+      signature,
+      requested,
+    );
+    if (activeReservation) return activeReservation;
     const runtime = await this.requireTaskWorkflowRuntime("periodic-update");
     const before = (await this.oneTask(operonId, true)).task;
     if (!before) {

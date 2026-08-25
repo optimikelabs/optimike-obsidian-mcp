@@ -318,7 +318,8 @@ recovery restent obligatoires.
 
 Le statut task-workflow est un diagnostic, pas une liste de refus préalable. La
 première adoption ou opération périodique atteint le Bridge, qui ne demande que
-le grant additif exact de ce workflow. Un grant en attente, refusé ou malformé
+le grant additif exact de ce workflow, mais seulement si le statut prouve encore
+que la surface globale de mutation du Bridge est `read-write`. Un grant en attente, refusé ou malformé
 échoue fermé sans révoquer les sessions principales déjà établies. La création
 périodique ne persiste aucune réservation d’idempotence avant la réussite de
 cette négociation : la même requête et la même clé peuvent être rejouées après

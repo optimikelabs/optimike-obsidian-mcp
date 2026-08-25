@@ -815,7 +815,10 @@ export class OperonService {
       action === "adopt" ||
       action === "periodic-create" ||
       action === "periodic-update";
-    if (!status.capabilities[capability] && !taskWorkflowAction) {
+    if (
+      !status.capabilities[capability] &&
+      (!taskWorkflowAction || status.bridge.mode !== "read-write")
+    ) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
         `Operon Bridge capability is unavailable: ${action}.`,
