@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with later non-denied releases such as `3.5.3` when the Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use official opaque preview/apply/recovery plans; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
+The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with later non-denied releases such as `3.6.0` when the Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use official opaque preview/apply/recovery plans; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
 
 Prefix:
 
@@ -15,7 +15,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 ## Compatibility and capabilities
 
 - Bridge contract: `1`
-- Certified compatibility through official Operon `3.2.1`; completed provisional live pilot: `3.3.2` with CLI `1.1.2`; current provisional release: `3.5.3` with CLI `1.2.0` and Bridge `0.8.2`
+- Certified compatibility through official Operon `3.2.1`; completed provisional live pilot: `3.3.2` with CLI `1.1.2`; Optimike MCP `3.2.0` target behind an exact-SHA Pilot 2 release gate: Operon `3.6.0`, CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.8.3`
 - Official Operon legacy read allowlist: `2.4.0`, `2.5.0`
 - Official Operon Developer API V1 allowlist: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, `3.2.1`
 - Kairélys read allowlist: `2.5.1`, `2.5.2`, `2.5.3`, `2.6.1`, `2.6.2`, `2.6.3`
@@ -26,7 +26,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 
 `GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future non-denied Operon version is admitted provisionally when its Developer API V1 accessor is present; Markdown similarity is irrelevant. Reads and new writes remain independently gated by successful negotiation, `developerApi`, top-level `ok`, `index.ready`, and the exact advertised capability. Recovery is the deliberate exception: `GET /recovery-status` negotiates only exact core and task-workflow recovery sessions without awaiting health, catalog or task-index reads, allowing same-plan recovery when those surfaces are degraded or hung.
 
-The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The released `3.5.3` / CLI `1.2.0` integration adds official adoption, periodic-note routing and typed task media fields; Bridge `0.8.2` also negotiates the exact additive workflow grant on first use when the cached capability is cold. Product-version certification remains explicit, but valid mutations are admitted by negotiated contract, exact capabilities, schemas, live health, settled index and recovery support rather than a second version allowlist. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
+The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The `3.5.3` / CLI `1.2.0` integration historically added official adoption, periodic-note routing and typed task media fields; Bridge `0.8.2` also negotiated the exact additive workflow grant on first use when the cached capability was cold. Working-tree Pilot 2 runs exercised Optimike MCP `3.2.0`, Bridge `0.8.3`, Operon `3.6.0` and Local REST API `5.1.0`; release admission still requires the same gate on the clean final SHA. The Developer API V1 contract did not drift. Product-version certification remains explicit, but valid mutations are admitted by negotiated contract, exact capabilities, schemas, live health, settled index and recovery support rather than a second version allowlist. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
 
 A future non-denied product version remains `compatible-provisional` until it
 joins the certified evidence set, but it may advertise mutations when every
@@ -202,13 +202,13 @@ Adoption upgrades one existing checkbox in place through Operon. `line` is one-b
 }
 ```
 
-Creation uses Operon's Task Creator paths, template resolution, identity generation, indexing, dependency reconciliation, aggregates, and workflow transition logic. Official Operon 3.2.0 maps the MCP payload to its typed create plan; unmanaged properties and arbitrary `targetFolder` placement are rejected because they are not part of the official Developer API contract.
+Creation uses Operon's Task Creator paths, template resolution, identity generation, indexing, dependency reconciliation, aggregates, and workflow transition logic. The direct REST boundary rejects `fields.dateScheduled` before it creates an idempotency reservation or requests a native preview/apply. It also rejects `dateScheduled` in every other generic create payload position, including top-level, nested and array values. Before validation, it creates one bounded JSON snapshot from own enumerable data descriptors; only plain/null-prototype objects, arrays and finite JSON primitives survive. Getters, hostile or changing proxies, cycles, repeated references, symbols, unsupported primitives, over-deep and over-budget input fail closed. Generic `task`, `patch`, `fields`, and recurrence `changes` containers are then read only from that snapshot. The adapter repeats this boundary for direct internal generic calls. The typed mapping remains available only to `POST /tasks/periodic` for an initial scheduled date; unmanaged properties and arbitrary `targetFolder` placement are also rejected because they are not part of the official Developer API contract.
 
 `statusId` is preferred over `fields.status`: it remains stable when a vault translates the displayed pipeline and status labels. Supplying both is rejected. `targetDateKey` is projected to the official `dateDue` field; destination selection remains governed by the configured Operon target policy. An explicit inline `targetPath` remains available for vault-specific layouts.
 
 ### `POST /tasks/periodic`
 
-Creates exactly one task through Operon's Daily/Weekly Note workflow. `priorityId` is checked against the stable priority projected by the postflight task, not only the display label. If native apply succeeds but periodic creation cannot identify one unique created task, the Bridge preserves `outcome-unknown`; it does not turn an ambiguous creation into success or retry it.
+Creates exactly one task through Operon's Daily/Weekly Note workflow. `routeDate` selects the periodic note, while `fields.dateScheduled` may set the initial scheduled date through the same native create workflow. Use `POST /tasks/:operonId/periodic-update` for every later set or clear. `priorityId` is checked against the stable priority projected by the postflight task, not only the display label. If native apply succeeds but periodic creation cannot identify one unique created task, the Bridge preserves `outcome-unknown`; it does not turn an ambiguous creation into success or retry it.
 
 ### `POST /tasks/:operonId/periodic-update`
 
@@ -237,7 +237,7 @@ One request must contain exactly one mutation group:
 This rule prevents false atomicity across Obsidian rename, managed-field, and raw-property write paths.
 
 Status is not accepted by `update`; use the transition route.
-Relationship and recurrence fields are also rejected here; use their dedicated routes.
+The direct REST boundary rejects `patch.fields.dateScheduled` before it creates an idempotency reservation or requests a native preview/apply. It also rejects `dateScheduled` anywhere else in the generic update payload; use `POST /tasks/:operonId/periodic-update` instead. Relationship and recurrence fields are also rejected here; use their dedicated routes.
 
 ### `POST /tasks/:operonId/transition`
 
@@ -286,7 +286,7 @@ Every supplied field is a complete replacement; `null`/an empty array clears it.
 }
 ```
 
-Scope is mandatory and must be `this-task` or `this-and-following`. Supported fields are `repeat`, `datetimeRepeatEnd`, `dateScheduled`, `dateStarted`, `dateDue`, `datetimeStart`, `datetimeEnd`, and `estimate`; `null` is an explicit clear. Apply requires `MCP_WRITE_MODE=full`.
+Scope is mandatory and must be `this-task` or `this-and-following`. Supported fields are `repeat`, `datetimeRepeatEnd`, `dateStarted`, `dateDue`, `datetimeStart`, `datetimeEnd`, and `estimate`; `null` is an explicit clear. The direct REST boundary rejects `changes.dateScheduled` before it creates an idempotency reservation or requests a native preview/apply. It also rejects `dateScheduled` anywhere else in the generic recurrence payload; use `POST /tasks/:operonId/periodic-update`. Apply requires `MCP_WRITE_MODE=full`.
 
 ### `POST /tasks/:operonId/convert`
 

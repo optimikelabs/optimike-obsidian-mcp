@@ -76,6 +76,14 @@ import type { z } from "zod";
 const BRIDGE_PREFIX = "/extensions/optimike-operon-bridge/v1";
 const PAGE_SIZE = 500;
 const MAX_PAGES = 10_000;
+const PRE_DISPATCH_MUTATION_CODES = new Set([
+  "task_workflow_capability_unavailable",
+  "operon_index_not_settled",
+  "operon_mutation_capability_unavailable",
+  "mutation_unavailable",
+  "recovery_unavailable",
+  "task_workflow_recovery_unavailable",
+]);
 const canonicalVaultRelativePathOrNull = (value: string): string | null => {
   return isCanonicalOperonVaultRelativePath(value) ? value : null;
 };
@@ -219,6 +227,23 @@ interface MutationJournalEntry {
   operonId: string | null;
   requestedJson: string;
   result: OperonMutationResult;
+}
+
+function matchesMutationJournalOperonId(
+  action: string,
+  requestedOperonId: string | null,
+  persistedOperonId: string | null,
+): boolean {
+  if (persistedOperonId === requestedOperonId) return true;
+  // Older create/adopt journals replaced the null request target with the
+  // resulting task id at completion. Keep those terminal replays compatible:
+  // these actions have no caller-selected task identity to confuse with a
+  // different task mutation.
+  return (
+    requestedOperonId === null &&
+    persistedOperonId !== null &&
+    (action === "create" || action === "adopt" || action === "periodic-create")
+  );
 }
 
 export class OperonService {
@@ -436,6 +461,11 @@ export class OperonService {
       if (
         !row ||
         row.action !== action ||
+        !matchesMutationJournalOperonId(
+          action,
+          operonId,
+          row.operonId ?? null,
+        ) ||
         row.requestedJson !== requestedJson
       ) {
         throw new McpError(
@@ -466,6 +496,7 @@ export class OperonService {
 
   private releasePreDispatchMutationReservation(
     action: string,
+    operonId: string | null,
     idempotencyKey: string,
     requested: unknown,
   ): boolean {
@@ -474,12 +505,14 @@ export class OperonService {
       const deleted = db
         .prepare(
           `DELETE FROM operon_mutation_journal
-           WHERE idempotency_key = ? AND action = ? AND requested_json = ?
+           WHERE idempotency_key = ? AND operon_id IS ?
+             AND action = ? AND requested_json = ?
              AND operation_id = ? AND status = 'in_progress'
              AND result_json = 'null'`,
         )
         .run(
           idempotencyKey,
+          operonId,
           action,
           stableJson(requested),
           `pending:${idempotencyKey}`,
@@ -488,6 +521,52 @@ export class OperonService {
     } finally {
       db.close();
     }
+  }
+
+  /**
+   * The sole proof that an HTTP 503 happened before native dispatch. Keep this
+   * stricter than the general mutation-result schema: a stale/misrouted 503
+   * must never delete an MCP in-progress journal row.
+   */
+  private preDispatchReasonFromReceipt(
+    receipt: unknown,
+    idempotencyKey: string,
+  ): string | null {
+    const parsed = OperonMutationResultSchema.safeParse(receipt);
+    if (!parsed.success || parsed.data.ok !== false) return null;
+    const result = parsed.data;
+    if (
+      result.status !== "not-ready" ||
+      result.idempotencyKey !== idempotencyKey ||
+      result.retryable !== true ||
+      result.mutationMayHaveApplied !== false ||
+      !PRE_DISPATCH_MUTATION_CODES.has(result.error.code) ||
+      result.recoveryRef !== undefined ||
+      result.recoveryRequired !== undefined ||
+      result.planDigest !== undefined
+    ) {
+      return null;
+    }
+    return result.error.code;
+  }
+
+  private claimsPreDispatch(receipt: unknown): boolean {
+    return Boolean(
+      receipt &&
+        typeof receipt === "object" &&
+        !Array.isArray(receipt) &&
+        (receipt as Record<string, unknown>).mutationMayHaveApplied === false,
+    );
+  }
+
+  private preDispatchUnavailableMessage(reason: string): string {
+    return reason === "task_workflow_capability_unavailable"
+      ? "The exact Operon task-workflow grant is pending; retry the same idempotency key."
+      : reason === "operon_index_not_settled"
+        ? "The Operon live index is not settled yet; retry the same idempotency key."
+        : reason === "operon_mutation_capability_unavailable"
+          ? "The required Operon mutation capability is unavailable; retry the same idempotency key."
+          : "The Operon mutation was unavailable before native dispatch; retry the same idempotency key.";
   }
 
   private writeMutationJournal(
@@ -502,18 +581,22 @@ export class OperonService {
       const updated = db
         .prepare(
           `UPDATE operon_mutation_journal
-         SET operation_id = ?, operon_id = ?, result_json = ?, status = ?, completed_at = ?
-         WHERE idempotency_key = ? AND action = ? AND requested_json = ?`,
+         SET operation_id = ?, result_json = ?, status = ?, completed_at = ?
+         WHERE idempotency_key = ? AND operon_id IS ?
+           AND action = ? AND requested_json = ?
+           AND operation_id = ? AND status = 'in_progress'
+           AND result_json = 'null'`,
         )
         .run(
           result.operationId,
-          operonId,
           JSON.stringify(result),
           result.status,
           now,
           result.idempotencyKey,
+          operonId,
           action,
           stableJson(requested),
+          `pending:${result.idempotencyKey}`,
         ) as { changes: number | bigint };
       if (Number(updated.changes) !== 1) {
         throw new McpError(
@@ -544,6 +627,7 @@ export class OperonService {
     if (existing) {
       if (
         existing.action !== action ||
+        !matchesMutationJournalOperonId(action, operonId, existing.operonId) ||
         existing.requestedJson !== requestedJson
       ) {
         throw new McpError(
@@ -923,26 +1007,14 @@ export class OperonService {
     const response = await this.getClient().post(path, payload, {
       validateStatus: () => true,
     });
-    const responseRecord =
-      response.data &&
-      typeof response.data === "object" &&
-      !Array.isArray(response.data)
-        ? (response.data as Record<string, unknown>)
-        : {};
-    const responseError =
-      responseRecord.error &&
-      typeof responseRecord.error === "object" &&
-      !Array.isArray(responseRecord.error)
-        ? (responseRecord.error as Record<string, unknown>)
-        : {};
-    if (
-      taskWorkflowAction &&
-      response.status === 503 &&
-      responseError.code === "task_workflow_capability_unavailable" &&
-      responseRecord.mutationMayHaveApplied === false
-    ) {
+    const preDispatchReason =
+      response.status === 503
+        ? this.preDispatchReasonFromReceipt(response.data, idempotencyKey)
+        : null;
+    if (preDispatchReason) {
       const released = this.releasePreDispatchMutationReservation(
         action,
+        operonId,
         idempotencyKey,
         payload,
       );
@@ -955,12 +1027,27 @@ export class OperonService {
       }
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
-        "The exact Operon task-workflow grant is pending or unavailable.",
+        this.preDispatchUnavailableMessage(preDispatchReason),
         this.requestContext(operation, {
           operonId,
           idempotencyKey,
-          hasBridgeCode: typeof responseError.code === "string",
+          responseStatus: response.status,
+          preDispatch: true,
+          preDispatchReason,
+          hasBridgeCode: true,
           mutationMayHaveApplied: false,
+        }),
+      );
+    }
+    if (response.status === 503 && this.claimsPreDispatch(response.data)) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        "Invalid pre-dispatch Operon mutation receipt.",
+        this.requestContext(operation, {
+          operonId,
+          responseStatus: response.status,
+          responseShapeValid: false,
+          preDispatchClaimed: true,
         }),
       );
     }
@@ -1001,6 +1088,16 @@ export class OperonService {
           }),
         );
       }
+      if (operonId !== null && result.after.operonId !== operonId) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Operon mutation outcome could not be proven: Final task identity does not match the request.",
+          this.requestContext(operation, {
+            operonId,
+            operationId: result.operationId,
+          }),
+        );
+      }
       const configuration = await this.fetchLiveConfiguration();
       const mismatch = this.mutationOutcomeMismatch(
         action,
@@ -1021,12 +1118,7 @@ export class OperonService {
       }
       this.assertAllowedMutationPath(result.after.path, `${action} result`);
     }
-    this.writeMutationJournal(
-      action,
-      operonId ?? ("after" in result ? result.after?.operonId : null) ?? null,
-      payload,
-      result,
-    );
+    this.writeMutationJournal(action, operonId, payload, result);
     if (result.status === "applied") {
       try {
         await this.ensureSnapshot(true);
@@ -2373,6 +2465,7 @@ export class OperonService {
     if (existing) {
       if (
         existing.action !== "recover" ||
+        !matchesMutationJournalOperonId("recover", null, existing.operonId) ||
         (existing.requestedJson !== requestedJson &&
           existing.requestedJson !== flatCandidateRequestedJson &&
           existing.requestedJson !== legacyDeveloperApiRequestedJson)
@@ -2461,6 +2554,57 @@ export class OperonService {
           },
       { validateStatus: () => true },
     );
+    const preDispatchReason =
+      response.status === 503
+        ? this.preDispatchReasonFromReceipt(
+            response.data,
+            params.idempotencyKey,
+          )
+        : null;
+    if (preDispatchReason) {
+      const released = this.releasePreDispatchMutationReservation(
+        "recover",
+        null,
+        params.idempotencyKey,
+        requested,
+      );
+      if (!released) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "The pre-dispatch Operon recovery reservation could not be released safely; inspect the journal before retrying.",
+          this.requestContext("operon_recover_mutation", {
+            recoveryRef: params.recoveryRef,
+            idempotencyKey: params.idempotencyKey,
+          }),
+        );
+      }
+      throw new McpError(
+        BaseErrorCode.SERVICE_UNAVAILABLE,
+        this.preDispatchUnavailableMessage(preDispatchReason),
+        this.requestContext("operon_recover_mutation", {
+          recoveryRef: params.recoveryRef,
+          idempotencyKey: params.idempotencyKey,
+          responseStatus: response.status,
+          preDispatch: true,
+          preDispatchReason,
+          hasBridgeCode: true,
+          mutationMayHaveApplied: false,
+        }),
+      );
+    }
+    if (response.status === 503 && this.claimsPreDispatch(response.data)) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        "Invalid pre-dispatch Operon recovery receipt.",
+        this.requestContext("operon_recover_mutation", {
+          recoveryRef: params.recoveryRef,
+          idempotencyKey: params.idempotencyKey,
+          responseStatus: response.status,
+          responseShapeValid: false,
+          preDispatchClaimed: true,
+        }),
+      );
+    }
     const parsed = OperonMutationResultSchema.safeParse(response.data);
     if (!parsed.success) {
       throw new McpError(

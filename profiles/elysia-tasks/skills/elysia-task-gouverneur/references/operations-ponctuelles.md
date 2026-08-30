@@ -22,11 +22,11 @@ Utiliser `operon_create_periodic_task` seulement si `periodicCreate: true`. Four
 
 ### Réaligner le scheduling périodique
 
-Utiliser `operon_update_periodic_scheduling` seulement si `periodicUpdate: true`, avec `expectedRevision`. Operon décide retain, detach ou realign sans déplacement du Markdown source. Un changement de note exige une autre opération explicite.
+Utiliser `operon_update_periodic_scheduling` pour tout changement de `dateScheduled`, seulement si `periodicUpdate: true`, avec `expectedRevision`. Ne jamais envoyer ce champ à `operon_update_task` : Operon peut avoir besoin du workflow périodique pour décider retain, detach ou realign. Aucun déplacement du Markdown source n’est implicite ; un changement de note exige une autre opération explicite.
 
 ### Modifier
 
-Utiliser `operon_update_task` et envoyer seulement les champs intentionnellement modifiés. Préserver les propriétés inconnues. Envoyer `taskGallery` comme tableau ordonné, jamais comme chaîne ; ne jamais écrire `__taskDataType`.
+Utiliser `operon_update_task` et envoyer seulement les champs ordinaires intentionnellement modifiés. Pour `dateScheduled`, les relations ou la récurrence, utiliser l’outil dédié. Préserver les propriétés inconnues. Envoyer `taskGallery` comme tableau ordonné, jamais comme chaîne ; ne jamais écrire `__taskDataType`.
 
 ### Changer d’état
 

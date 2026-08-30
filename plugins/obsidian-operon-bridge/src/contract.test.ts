@@ -5,13 +5,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import {
-	OPERON_BRIDGE_BLOCKED_MUTATIONS,
-	OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS,
-	OPERON_BRIDGE_DEVELOPER_API_VERSIONS,
-	filterTasks,
-	isCanonicalVaultMarkdownPath,
-	isCanonicalVaultRelativePath,
-	isCertifiedDeveloperApiVersion,
+  OPERON_BRIDGE_BLOCKED_MUTATIONS,
+  OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS,
+  OPERON_BRIDGE_DEVELOPER_API_VERSIONS,
+  filterTasks,
+  isCanonicalVaultMarkdownPath,
+  isCanonicalVaultRelativePath,
+  isCertifiedDeveloperApiVersion,
   isIndexReady,
   managedFieldOutcomeMatches,
   MutationReservationRegistry,
@@ -26,7 +26,7 @@ import {
   workflowStatusMatches,
   settingsSignature,
   stablePriorityOutcomeMatches,
-	shouldAttemptIndexValidation,
+  shouldAttemptIndexValidation,
   mutationPathValidationError,
   normalizeExpectedManagedFieldValue,
   resolveMutationPreflight,
@@ -69,13 +69,47 @@ function loadBridgePluginClassForTest(): Promise<any> {
   return bridgePluginClassPromise;
 }
 
+function attachPassThroughCoordination(fake: Record<string, any>): void {
+  fake.coordinatedMutationPreflight = async (options: {
+    idempotencyKey: string;
+    signature: string;
+    requested: Record<string, unknown>;
+    failureScope?: Record<string, unknown>;
+    prepare: () => Promise<
+      | { kind: "ready"; value: unknown }
+      | { kind: "response"; response: Record<string, unknown> }
+    >;
+  }) => {
+    const active = fake.activeMutationReservationResponse
+      ? await fake.activeMutationReservationResponse(
+          options.idempotencyKey,
+          options.signature,
+          options.requested,
+        )
+      : null;
+    if (active) return { kind: "response", response: active };
+    const prepared = await options.prepare();
+    if (prepared.kind === "response") return prepared;
+    const preflight = await fake.mutationPreflight(
+      options.idempotencyKey,
+      options.signature,
+      options.requested,
+      () => null,
+      options.failureScope,
+    );
+    if (preflight.kind === "response") {
+      return { kind: "response", response: await preflight.response };
+    }
+    return { kind: "leader", value: prepared.value };
+  };
+}
+
 test("stable task reads retry one transient generation or settings change", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
   const oneTask = BridgePlugin.prototype.oneTask as Function;
 
   for (const scenario of ["generation", "settings"] as const) {
-    const generations =
-      scenario === "generation" ? [1, 2, 2, 2] : [1, 1, 1, 1];
+    const generations = scenario === "generation" ? [1, 2, 2, 2] : [1, 1, 1, 1];
     const signatures =
       scenario === "settings" ? ["a", "b", "b", "b"] : ["a", "a", "a", "a"];
     let taskReads = 0;
@@ -176,6 +210,7 @@ test("continuous snapshot churn fails not-ready before native dispatch", async (
     cacheMutation: () => undefined,
   };
   fake.oneTask = (...args: unknown[]) => oneTask.call(fake, ...args);
+  attachPassThroughCoordination(fake);
 
   let churnError: unknown;
   try {
@@ -199,14 +234,18 @@ test("continuous snapshot churn fails not-ready before native dispatch", async (
 
   const failed = failReservedMutation.call(
     fake,
-    { idempotencyKey: "key-1" },
+    {
+      idempotencyKey: "key-1",
+      signature: "signature-1",
+      reservationOperationId: "operation-1",
+    },
     churnError,
   );
-  assert.equal(failed.httpStatus, 503);
-  assert.equal(failed.payload.status, "not-ready");
-  assert.equal(failed.payload.error.code, "mutation_unavailable");
-  assert.equal(failed.payload.retryable, true);
-  assert.equal(failed.payload.mutationMayHaveApplied, false);
+  assert.equal(failed.httpStatus, 500);
+  assert.equal(failed.payload.status, "outcome-unknown");
+  assert.equal(failed.payload.error.code, "outcome_unverified");
+  assert.equal(failed.payload.retryable, false);
+  assert.equal(failed.payload.mutationMayHaveApplied, true);
 });
 
 test("lookup and revision validation happen before durable reservation", async () => {
@@ -235,6 +274,7 @@ test("lookup and revision validation happen before durable reservation", async (
       },
       mutationOperationId: () => "fallback-operation",
     };
+    attachPassThroughCoordination(fake);
     const result = await executeExistingMutation.call(
       fake,
       "update",
@@ -252,6 +292,542 @@ test("lookup and revision validation happen before durable reservation", async (
     assert.equal(result.httpStatus, scenario === "missing-task" ? 404 : 400);
     assert.equal(reservationCalls, 0);
     assert.equal(taskReads, scenario === "missing-task" ? 1 : 0);
+  }
+});
+
+test("an in-flight identical existing mutation joins before transient runtime probes", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executeExistingMutation = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const activeMutationReservationResponse = BridgePlugin.prototype
+    .activeMutationReservationResponse as Function;
+  const reservations = new MutationReservationRegistry();
+  const idempotencyKey = "in-flight-existing-key";
+  const requested = { description: "updated" };
+  const signature =
+    '{"capability":"update","dryRun":false,"expectedRevision":"revision-1","operonId":"task-1","requested":{"description":"updated"}}';
+  const activePayload = {
+    ok: true,
+    contractVersion: "1",
+    operationId: "dispatched-operation",
+    idempotencyKey,
+    status: "applied",
+    requested,
+    mutationMayHaveApplied: true,
+  };
+  const reserved = reservations.reserve({
+    idempotencyKey,
+    signature,
+    operationId: "dispatched-operation",
+    requested,
+    startedAt: "2026-08-30T00:00:00.000Z",
+  });
+  assert.equal(reserved.kind, "reserved");
+
+  let finishNative: (() => void) | undefined;
+  let nativeCalls = 0;
+  const nativeExecution = (async () => {
+    nativeCalls += 1;
+    await new Promise<void>((resolve) => {
+      finishNative = resolve;
+    });
+    return activePayload;
+  })();
+  void nativeExecution.then((payload) => {
+    reservations.complete(idempotencyKey, signature, payload);
+  });
+
+  let runtimeProbes = 0;
+  const fake: Record<string, any> = {
+    mutationResults: { get: () => undefined },
+    mutationReservations: reservations,
+    mutationHttpStatus: () => 200,
+    mutationOperationId: () => "unexpected-operation",
+    requireMutationRuntime: () => {
+      runtimeProbes += 1;
+      throw new Error("runtime became unavailable after dispatch");
+    },
+    oneTask: () => {
+      throw new Error("an in-flight replay must not re-read the task");
+    },
+  };
+  fake.activeMutationReservationResponse = (...args: unknown[]) =>
+    activeMutationReservationResponse.call(fake, ...args);
+  fake.mutationPreflight = async () => ({ kind: "continue" });
+  attachPassThroughCoordination(fake);
+
+  const joined = executeExistingMutation.call(
+    fake,
+    "update",
+    "task-1",
+    {
+      idempotencyKey,
+      expectedRevision: "revision-1",
+      dryRun: false,
+    },
+    requested,
+    async () => {
+      throw new Error(
+        "a joined mutation must not dispatch a second native call",
+      );
+    },
+  );
+  await Promise.resolve();
+  assert.equal(nativeCalls, 1);
+  assert.equal(runtimeProbes, 0);
+
+  const conflicting = await executeExistingMutation.call(
+    fake,
+    "update",
+    "task-1",
+    {
+      idempotencyKey,
+      expectedRevision: "revision-1",
+      dryRun: false,
+    },
+    { description: "different" },
+    async () => {
+      throw new Error("a conflicting key must not dispatch a native call");
+    },
+  );
+  assert.equal(conflicting.httpStatus, 409);
+  assert.equal(runtimeProbes, 0);
+
+  const malformed = await executeExistingMutation.call(
+    fake,
+    "update",
+    "task-1",
+    { idempotencyKey, dryRun: false },
+    requested,
+    async () => {
+      throw new Error("a malformed replay must not dispatch a native call");
+    },
+  );
+  assert.equal(malformed.httpStatus, 400);
+  assert.equal(runtimeProbes, 0);
+
+  finishNative?.();
+  const result = await joined;
+  assert.equal(result.httpStatus, 200);
+  assert.equal(result.payload, activePayload);
+  assert.equal(runtimeProbes, 0);
+});
+
+test("same-key callers atomically cross asynchronous preflight into one durable reservation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const coordinated = BridgePlugin.prototype
+    .coordinatedMutationPreflight as Function;
+  const active = BridgePlugin.prototype
+    .activeMutationReservationResponse as Function;
+  const preflight = BridgePlugin.prototype.mutationPreflight as Function;
+  const replay = BridgePlugin.prototype.mutationReplayOrValidation as Function;
+  const settle = BridgePlugin.prototype
+    .settleMutationPreflightFlight as Function;
+  const promote = BridgePlugin.prototype
+    .promoteMutationPreflightFlight as Function;
+
+  for (const route of [
+    "update",
+    "create",
+    "recovery",
+    "workflow-recovery",
+    "adopt",
+    "periodic-create",
+    "periodic-update",
+  ]) {
+    const reservations = new MutationReservationRegistry();
+    let operationSequence = 0;
+    const fake: Record<string, any> = {
+      mutationResults: new Map(),
+      mutationResultTimes: new Map(),
+      mutationReservations: reservations,
+      mutationPreflightFlights: new Map(),
+      dataWriteChain: Promise.resolve(),
+      dataWriteFailed: false,
+      mutationOperationId: () => `${route}-operation-${++operationSequence}`,
+      mutationHttpStatus: () => 200,
+      queuePersistPluginData() {
+        this.dataWriteChain = Promise.resolve();
+      },
+    };
+    fake.activeMutationReservationResponse = (...args: unknown[]) =>
+      active.call(fake, ...args);
+    fake.mutationReplayOrValidation = (...args: unknown[]) =>
+      replay.call(fake, ...args);
+    fake.mutationPreflight = (...args: unknown[]) =>
+      preflight.call(fake, ...args);
+    fake.settleMutationPreflightFlight = (...args: unknown[]) =>
+      settle.call(fake, ...args);
+    fake.promoteMutationPreflightFlight = (...args: unknown[]) =>
+      promote.call(fake, ...args);
+
+    let releaseGate!: () => void;
+    let reportGateEntered!: () => void;
+    const gateEntered = new Promise<void>((resolve) => {
+      reportGateEntered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    let prepareCalls = 0;
+    const idempotencyKey = `${route}-same-key`;
+    const signature = `${route}-same-signature`;
+    const requested = { route };
+    const prepare = async () => {
+      prepareCalls += 1;
+      reportGateEntered();
+      await gate;
+      return { kind: "ready" as const, value: { route } };
+    };
+
+    const leader = coordinated.call(fake, {
+      idempotencyKey,
+      signature,
+      requested,
+      failureScope: {},
+      prepare,
+    });
+    await gateEntered;
+    const follower = coordinated.call(fake, {
+      idempotencyKey,
+      signature,
+      requested,
+      failureScope: {},
+      prepare,
+    });
+    const conflict = await coordinated.call(fake, {
+      idempotencyKey,
+      signature: `${route}-different-signature`,
+      requested: { route, different: true },
+      failureScope: {},
+      prepare: async () => {
+        throw new Error("a conflicting request must not enter readiness");
+      },
+    });
+    assert.equal(conflict.kind, "response");
+    assert.equal(conflict.response.httpStatus, 409);
+    assert.equal(prepareCalls, 1, `${route} must have one preflight leader`);
+
+    releaseGate();
+    const leaderResult = await leader;
+    assert.equal(leaderResult.kind, "leader");
+    assert.equal(prepareCalls, 1);
+    const reservation = reservations.get(idempotencyKey);
+    assert.ok(reservation, `${route} must promote to a durable reservation`);
+
+    const terminal = {
+      ok: true,
+      operationId: reservation.operationId,
+      idempotencyKey,
+      status: "applied",
+    };
+    reservations.complete(idempotencyKey, signature, terminal);
+    const followerResult = await follower;
+    assert.equal(followerResult.kind, "response");
+    assert.equal(followerResult.response.payload, terminal);
+    assert.equal(fake.mutationPreflightFlights.size, 0);
+  }
+});
+
+test("an existing-task replay arriving inside the runtime await joins the leader", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executeExisting = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const coordinated = BridgePlugin.prototype
+    .coordinatedMutationPreflight as Function;
+  const active = BridgePlugin.prototype
+    .activeMutationReservationResponse as Function;
+  const preflight = BridgePlugin.prototype.mutationPreflight as Function;
+  const replay = BridgePlugin.prototype.mutationReplayOrValidation as Function;
+  const settle = BridgePlugin.prototype
+    .settleMutationPreflightFlight as Function;
+  const promote = BridgePlugin.prototype
+    .promoteMutationPreflightFlight as Function;
+  const reservations = new MutationReservationRegistry();
+  let operationSequence = 0;
+  let runtimeCalls = 0;
+  let nativeCalls = 0;
+  let reportRuntimeEntered!: () => void;
+  let releaseRuntime!: () => void;
+  let reportNativeEntered!: () => void;
+  let releaseNative!: () => void;
+  const runtimeEntered = new Promise<void>((resolve) => {
+    reportRuntimeEntered = resolve;
+  });
+  const runtimeGate = new Promise<void>((resolve) => {
+    releaseRuntime = resolve;
+  });
+  const nativeEntered = new Promise<void>((resolve) => {
+    reportNativeEntered = resolve;
+  });
+  const nativeGate = new Promise<void>((resolve) => {
+    releaseNative = resolve;
+  });
+  const runtime = {
+    developerApi: {
+      executeMutation: async () => {
+        nativeCalls += 1;
+        reportNativeEntered();
+        await nativeGate;
+        return { ok: true, code: "planned", planDigest: "digest" };
+      },
+    },
+  };
+  const fake: Record<string, any> = {
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: reservations,
+    mutationPreflightFlights: new Map(),
+    dataWriteChain: Promise.resolve(),
+    dataWriteFailed: false,
+    mutationOperationId: () => `existing-${++operationSequence}`,
+    mutationHttpStatus: () => 200,
+    queuePersistPluginData() {
+      this.dataWriteChain = Promise.resolve();
+    },
+    requireMutationRuntime: async () => {
+      runtimeCalls += 1;
+      reportRuntimeEntered();
+      await runtimeGate;
+      return runtime;
+    },
+    oneTask: async () => ({
+      task: { operonId: "task-1", revision: "revision-1" },
+    }),
+    cacheMutation(
+      idempotencyKey: string,
+      signature: string,
+      payload: Record<string, unknown>,
+    ) {
+      this.mutationResults.set(idempotencyKey, { signature, payload });
+      reservations.complete(idempotencyKey, signature, payload);
+    },
+  };
+  fake.activeMutationReservationResponse = (...args: unknown[]) =>
+    active.call(fake, ...args);
+  fake.mutationReplayOrValidation = (...args: unknown[]) =>
+    replay.call(fake, ...args);
+  fake.mutationPreflight = (...args: unknown[]) =>
+    preflight.call(fake, ...args);
+  fake.settleMutationPreflightFlight = (...args: unknown[]) =>
+    settle.call(fake, ...args);
+  fake.promoteMutationPreflightFlight = (...args: unknown[]) =>
+    promote.call(fake, ...args);
+  fake.coordinatedMutationPreflight = (...args: unknown[]) =>
+    coordinated.call(fake, ...args);
+
+  const body = {
+    idempotencyKey: "interleaving-key",
+    expectedRevision: "revision-1",
+    dryRun: true,
+  };
+  const requested = { description: "updated" };
+  const leader = executeExisting.call(
+    fake,
+    "update",
+    "task-1",
+    body,
+    requested,
+    async () => ({ ok: true }),
+    {},
+  );
+  await runtimeEntered;
+  const follower = executeExisting.call(
+    fake,
+    "update",
+    "task-1",
+    body,
+    requested,
+    async () => {
+      throw new Error("the follower must not dispatch a fallback mutation");
+    },
+    {},
+  );
+  await Promise.resolve();
+  assert.equal(runtimeCalls, 1);
+  assert.equal(nativeCalls, 0);
+
+  releaseRuntime();
+  await nativeEntered;
+  assert.equal(runtimeCalls, 1);
+  assert.equal(nativeCalls, 1);
+  releaseNative();
+
+  const [leaderResult, followerResult] = await Promise.all([leader, follower]);
+  assert.equal(leaderResult.httpStatus, 200);
+  assert.equal(followerResult.httpStatus, 200);
+  assert.equal(followerResult.payload, leaderResult.payload);
+  assert.equal(runtimeCalls, 1);
+  assert.equal(nativeCalls, 1);
+});
+
+test("a rejected ephemeral preflight releases the key without durable uncertainty", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const coordinated = BridgePlugin.prototype
+    .coordinatedMutationPreflight as Function;
+  const active = BridgePlugin.prototype
+    .activeMutationReservationResponse as Function;
+  const preflight = BridgePlugin.prototype.mutationPreflight as Function;
+  const replay = BridgePlugin.prototype.mutationReplayOrValidation as Function;
+  const settle = BridgePlugin.prototype
+    .settleMutationPreflightFlight as Function;
+  const promote = BridgePlugin.prototype
+    .promoteMutationPreflightFlight as Function;
+  const reservations = new MutationReservationRegistry();
+  let operationSequence = 0;
+  const fake: Record<string, any> = {
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: reservations,
+    mutationPreflightFlights: new Map(),
+    dataWriteChain: Promise.resolve(),
+    dataWriteFailed: false,
+    mutationOperationId: () => `pre-dispatch-${++operationSequence}`,
+    mutationHttpStatus: () => 200,
+    queuePersistPluginData() {
+      this.dataWriteChain = Promise.resolve();
+    },
+  };
+  fake.activeMutationReservationResponse = (...args: unknown[]) =>
+    active.call(fake, ...args);
+  fake.mutationReplayOrValidation = (...args: unknown[]) =>
+    replay.call(fake, ...args);
+  fake.mutationPreflight = (...args: unknown[]) =>
+    preflight.call(fake, ...args);
+  fake.settleMutationPreflightFlight = (...args: unknown[]) =>
+    settle.call(fake, ...args);
+  fake.promoteMutationPreflightFlight = (...args: unknown[]) =>
+    promote.call(fake, ...args);
+
+  let releaseGate!: () => void;
+  let reportGateEntered!: () => void;
+  const gateEntered = new Promise<void>((resolve) => {
+    reportGateEntered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  const safeFailure = new Error("runtime unavailable before dispatch");
+  const request = {
+    idempotencyKey: "safe-retry-key",
+    signature: "safe-retry-signature",
+    requested: { route: "create" },
+    failureScope: {},
+  };
+  const prepareFailure = async () => {
+    reportGateEntered();
+    await gate;
+    throw safeFailure;
+  };
+  const leader = coordinated.call(fake, {
+    ...request,
+    prepare: prepareFailure,
+  });
+  await gateEntered;
+  const follower = coordinated.call(fake, {
+    ...request,
+    prepare: prepareFailure,
+  });
+  releaseGate();
+  await assert.rejects(leader, /runtime unavailable before dispatch/u);
+  await assert.rejects(follower, /runtime unavailable before dispatch/u);
+  assert.equal(reservations.get(request.idempotencyKey), undefined);
+  assert.equal(fake.mutationPreflightFlights.size, 0);
+
+  const retry = await coordinated.call(fake, {
+    ...request,
+    prepare: async () => ({ kind: "ready", value: "runtime-restored" }),
+  });
+  assert.equal(retry.kind, "leader");
+  const reservation = reservations.get(request.idempotencyKey);
+  assert.ok(
+    reservation,
+    "the same key must be safely reservable after recovery",
+  );
+  reservations.complete(request.idempotencyKey, request.signature, {
+    ok: true,
+    status: "applied",
+  });
+  await Promise.resolve();
+  assert.equal(fake.mutationPreflightFlights.size, 0);
+});
+
+test("every replayable native mutation route coordinates before asynchronous readiness gates", () => {
+  const mainSource = readFileSync(
+    new URL("./main.ts", import.meta.url),
+    "utf8",
+  );
+  const routes = [
+    [
+      "executeRecoveryMutation",
+      "private taskWorkflowKind(",
+      "requireDeveloperApiMutationRuntime()",
+    ],
+    [
+      "executeTaskWorkflowRecoveryMutation",
+      "private async executeAdoptMutation(",
+      "requireTaskWorkflowRecoveryRuntime(kind)",
+    ],
+    [
+      "executeAdoptMutation",
+      "private async executePeriodicCreateMutation(",
+      'requireMutationRuntime("adopt")',
+    ],
+    [
+      "executePeriodicCreateMutation",
+      "private async executePeriodicUpdateMutation(",
+      'requireTaskWorkflowRuntime("periodic-create")',
+    ],
+    [
+      "executePeriodicUpdateMutation",
+      "private async taskWorkflowMutationPayload(",
+      "requireTaskWorkflowRuntime(",
+    ],
+    [
+      "executeExistingMutation",
+      "private async executeCreateMutation(",
+      "requireMutationRuntime(capability)",
+    ],
+    [
+      "executeCreateMutation",
+      "private tryMountRestExtension(",
+      'requireMutationRuntime("create")',
+    ],
+  ] as const;
+
+  for (const [method, nextMethod, runtimeGate] of routes) {
+    const start = mainSource.indexOf(`private async ${method}(`);
+    const end = mainSource.indexOf(nextMethod, start);
+    assert.notEqual(start, -1, `${method} must exist`);
+    assert.notEqual(end, -1, `${method} must have a bounded source slice`);
+    const source = mainSource.slice(start, end);
+    const coordination = source.indexOf("coordinatedMutationPreflight");
+    const readiness = source.indexOf(runtimeGate);
+    assert.notEqual(
+      coordination,
+      -1,
+      `${method} must coordinate its asynchronous preflight`,
+    );
+    assert.notEqual(readiness, -1, `${method} must retain its runtime gate`);
+    assert.ok(
+      coordination < readiness,
+      `${method} must claim the same-key preflight before readiness`,
+    );
+    assert.equal(
+      source.includes("activeMutationReservationResponse("),
+      false,
+      `${method} must not reopen a check-then-await race outside coordination`,
+    );
+    assert.equal(
+      source.includes("this.mutationPreflight("),
+      false,
+      `${method} must not create a durable reservation outside coordination`,
+    );
+    assert.match(
+      source,
+      /coordinatedMutationPreflight[\s\S]+failureScope,[\s\S]+prepare: async/u,
+      `${method} must pass its route failure scope and asynchronous gates to coordination`,
+    );
   }
 });
 
@@ -287,6 +863,7 @@ test("periodic-create negotiates its exact grant before durable reservation", as
       payload: { status: "planned" },
     }),
   };
+  attachPassThroughCoordination(fake);
   const request = {
     idempotencyKey: "periodic-first-use",
     dryRun: true,
@@ -356,13 +933,35 @@ test("a pending exact workflow grant is marked as a proven pre-dispatch failure"
   await sendMutationFailure.call(
     {
       failReservedMutation: () => {
-        throw new Error("a pre-dispatch grant failure must not touch another reservation");
+        throw new Error(
+          "a pre-dispatch grant failure must not touch another reservation",
+        );
       },
+      preDispatchMutationFailure: (
+        _body: Record<string, unknown>,
+        code: string,
+      ) => ({
+        httpStatus: 503,
+        payload: {
+          ok: false,
+          contractVersion: "1",
+          operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+          idempotencyKey: "workflow-pre-dispatch-key",
+          status: "not-ready",
+          requested: {},
+          retryable: true,
+          mutationMayHaveApplied: false,
+          source: "operon-live",
+          stale: false,
+          error: { code, message: "unavailable" },
+        },
+      }),
     },
     response,
-    {},
+    { idempotencyKey: "workflow-pre-dispatch-key" },
     pendingError,
     "mutation_unavailable",
+    {},
   );
   assert.equal(statusCode, 503);
   assert.equal(payload?.error?.code, "task_workflow_capability_unavailable");
@@ -415,6 +1014,8 @@ test("an active periodic-create reservation is joined before grant negotiation",
   };
   fake.activeMutationReservationResponse = (...args: unknown[]) =>
     activeMutationReservationResponse.call(fake, ...args);
+  fake.mutationPreflight = async () => ({ kind: "continue" });
+  attachPassThroughCoordination(fake);
 
   const result = await executePeriodicCreateMutation.call(fake, {
     idempotencyKey: "active-periodic-key",
@@ -453,6 +1054,7 @@ test("periodic update validates lookup and revision before durable reservation",
         return { task };
       },
     };
+    attachPassThroughCoordination(fake);
     const result = await executePeriodicUpdateMutation.call(fake, "task-1", {
       idempotencyKey: `periodic-${scenario}`,
       ...(scenario === "missing-task"
@@ -469,7 +1071,8 @@ test("periodic update validates lookup and revision before durable reservation",
 
 test("legacy adoption validates the source file before durable reservation", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
-  const executeAdoptMutation = BridgePlugin.prototype.executeAdoptMutation as Function;
+  const executeAdoptMutation = BridgePlugin.prototype
+    .executeAdoptMutation as Function;
   let reservationCalls = 0;
   const fake = {
     mutationResults: { get: () => undefined },
@@ -488,6 +1091,7 @@ test("legacy adoption validates the source file before durable reservation", asy
       },
     },
   };
+  attachPassThroughCoordination(fake);
   const result = await executeAdoptMutation.call(fake, {
     idempotencyKey: "legacy-adoption-missing-file",
     adoption: {
@@ -503,9 +1107,12 @@ test("legacy adoption validates the source file before durable reservation", asy
 
 test("task-workflow replay identities survive plugin-data persistence", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
-  const restore = BridgePlugin.prototype.restoreTaskWorkflowIdentities as Function;
-  const entries = BridgePlugin.prototype.taskWorkflowIdentityEntries as Function;
-  const identityStore = BridgePlugin.prototype.taskWorkflowIdentityStore as Function;
+  const restore = BridgePlugin.prototype
+    .restoreTaskWorkflowIdentities as Function;
+  const entries = BridgePlugin.prototype
+    .taskWorkflowIdentityEntries as Function;
+  const identityStore = BridgePlugin.prototype
+    .taskWorkflowIdentityStore as Function;
   const persist = BridgePlugin.prototype.persistPluginData as Function;
   const key = `periodic-create:${"a".repeat(64)}`;
   const updatedAt = new Date().toISOString();
@@ -541,7 +1148,10 @@ test("task-workflow replay identities survive plugin-data persistence", async ()
 });
 
 test("generic REST mutations expose only the adapter's bounded native proof", () => {
-  const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  const mainSource = readFileSync(
+    new URL("./main.ts", import.meta.url),
+    "utf8",
+  );
   const executeStart = mainSource.indexOf(
     "private async executeExistingMutation(",
   );
@@ -559,16 +1169,24 @@ test("generic REST mutations expose only the adapter's bounded native proof", ()
   // response all use the same already-validated, closed adapter projection.
   assert.equal([...executeSource.matchAll(proofProjection)].length, 3);
 
-  const dryRunEnd = executeSource.indexOf("if (!native.ok || !native.operonId)");
+  const dryRunEnd = executeSource.indexOf(
+    "if (!native.ok || !native.operonId)",
+  );
   const postDispatchStart = executeSource.indexOf(
     "if (!native.ok || !native.operonId)",
   );
-  const postDispatchEnd = executeSource.indexOf("let afterRead:", postDispatchStart);
+  const postDispatchEnd = executeSource.indexOf(
+    "let afterRead:",
+    postDispatchStart,
+  );
   const finalPayloadStart = executeSource.indexOf(
     "const payload = {",
     executeSource.indexOf("const applied ="),
   );
-  assert.equal(executeSource.slice(0, dryRunEnd).includes("nativeProof"), false);
+  assert.equal(
+    executeSource.slice(0, dryRunEnd).includes("nativeProof"),
+    false,
+  );
   assert.match(
     executeSource.slice(postDispatchStart, postDispatchEnd),
     /recoveryRef[\s\S]+planDigest[\s\S]+nativeProof/,
@@ -630,7 +1248,11 @@ test("concurrent identical mutations join one atomic reservation", async () => {
   assert.equal(second.kind, "join");
   assert.equal(conflict.kind, "conflict");
   assert.equal(second.reservation.operationId, "operation-one");
-  const terminal = { ok: true, operationId: "operation-one", status: "applied" };
+  const terminal = {
+    ok: true,
+    operationId: "operation-one",
+    status: "applied",
+  };
   registry.complete("same-key", "same-signature", terminal);
   assert.equal(await second.reservation.promise, terminal);
 });
@@ -639,7 +1261,11 @@ test("durable terminal replay preserves HTTP and interrupted reservations recove
   const replay = resolveMutationPreflight({
     cached: {
       signature: "signature",
-      payload: { ok: false, operationId: "operation-one", status: "outcome-unknown" },
+      payload: {
+        ok: false,
+        operationId: "operation-one",
+        status: "outcome-unknown",
+      },
       httpStatus: 500,
     },
     idempotencyKey: "same-key",
@@ -696,13 +1322,26 @@ test("resolves bare workflow labels for postflight status matching", () => {
     pipelineId: "pl_project",
   };
   assert.equal(workflowStatusMatches(after, "Done", workflowPipelines), true);
-  assert.equal(workflowStatusMatches(after, "st_project_done", workflowPipelines), true);
-  assert.equal(workflowStatusMatches(after, "Project.Done", workflowPipelines), true);
-  assert.equal(workflowStatusMatches(after, "Planned", workflowPipelines), false);
+  assert.equal(
+    workflowStatusMatches(after, "st_project_done", workflowPipelines),
+    true,
+  );
+  assert.equal(
+    workflowStatusMatches(after, "Project.Done", workflowPipelines),
+    true,
+  );
+  assert.equal(
+    workflowStatusMatches(after, "Planned", workflowPipelines),
+    false,
+  );
 
   const ambiguousPipelines = [
     ...workflowPipelines,
-    { id: "pl_pipeline", name: "Pipeline", statuses: [{ id: "st_pipeline_done", label: "Done" }] },
+    {
+      id: "pl_pipeline",
+      name: "Pipeline",
+      statuses: [{ id: "st_pipeline_done", label: "Done" }],
+    },
   ];
   assert.equal(resolveWorkflowStatus("Done", ambiguousPipelines), null);
   assert.equal(workflowStatusMatches(after, "Done", ambiguousPipelines), false);
@@ -750,7 +1389,11 @@ const semanticConfiguration = {
     fileRepeatDestination: "same-folder",
     fileRepeatCustomFolder: "",
   },
-  indexing: { excludedFolders: [], fullReindexOnStartup: false, indexEventDebounceMs: 250 },
+  indexing: {
+    excludedFolders: [],
+    fullReindexOnStartup: false,
+    indexEventDebounceMs: 250,
+  },
   docs: { folder: "Operon/Docs", autoUpdateEnabled: false },
   views: { filters: [] },
 };
@@ -768,7 +1411,11 @@ const task: RuntimeIndexedTask = {
     custom: "signal",
   },
   tags: ["#elysia", "bridge"],
-  primary: { filePath: "Efforts/Projets/Bridge.md", lineNumber: 4, format: "inline" },
+  primary: {
+    filePath: "Efforts/Projets/Bridge.md",
+    lineNumber: 4,
+    format: "inline",
+  },
   datetimeModified: "2026-07-20T10:00:00",
   tier: "hot",
 };
@@ -787,7 +1434,12 @@ function normalized(): OperonBridgeTask {
         visiblePropertyName: "priority",
       },
     ],
-    frontmatter: { status: "Project.InProgress", priority: "A", rang: 4, north_star: true },
+    frontmatter: {
+      status: "Project.InProgress",
+      priority: "A",
+      rang: 4,
+      north_star: true,
+    },
     sourceMtime: 1234,
     operonVersion: "2.4.0",
     bridgeVersion: "0.1.0",
@@ -846,195 +1498,198 @@ test("legacy version compatibility remains an explicit tested-version allowlist"
 });
 
 test("certified Developer API versions and known mutation exceptions remain explicit", () => {
-	assert.deepEqual(OPERON_BRIDGE_DEVELOPER_API_VERSIONS, [
-		"3.0.1",
-		"3.1.0",
-		"3.1.1",
-		"3.2.0",
-		"3.2.1",
-	]);
-	assert.equal(isCertifiedDeveloperApiVersion("3.0.1"), true);
-	assert.equal(isCertifiedDeveloperApiVersion("3.1.0"), true);
-	assert.equal(isCertifiedDeveloperApiVersion("3.1.1"), true);
-	assert.equal(isCertifiedDeveloperApiVersion("3.2.0"), true);
-	assert.equal(isCertifiedDeveloperApiVersion("3.2.1"), true);
-	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.0.1"], ["transition"]);
-	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.0"], []);
-	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.1"], []);
-	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.0"], []);
-	assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.1"], []);
+  assert.deepEqual(OPERON_BRIDGE_DEVELOPER_API_VERSIONS, [
+    "3.0.1",
+    "3.1.0",
+    "3.1.1",
+    "3.2.0",
+    "3.2.1",
+  ]);
+  assert.equal(isCertifiedDeveloperApiVersion("3.0.1"), true);
+  assert.equal(isCertifiedDeveloperApiVersion("3.1.0"), true);
+  assert.equal(isCertifiedDeveloperApiVersion("3.1.1"), true);
+  assert.equal(isCertifiedDeveloperApiVersion("3.2.0"), true);
+  assert.equal(isCertifiedDeveloperApiVersion("3.2.1"), true);
+  assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.0.1"], ["transition"]);
+  assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.0"], []);
+  assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.1"], []);
+  assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.0"], []);
+  assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.1"], []);
 });
 
 test("unknown Operon versions are admitted provisionally by the Developer API V1 contract", () => {
-	assert.deepEqual(
-		resolveOperonCompatibility({
-			pluginId: "operon",
-			version: "3.3.0",
-			hasDeveloperApiV1: true,
-		}),
-		{
-			state: "compatible-provisional",
-			admission: "developer-api-v1",
-			reason:
-				"The loaded Operon version is not yet certified, but it exposes the negotiated Developer API V1 boundary; runtime capability and schema checks remain mandatory.",
-		},
-	);
-	assert.equal(
-		resolveOperonCompatibility({
-			pluginId: "operon",
-			version: "3.3.0",
-			hasDeveloperApiV1: false,
-		}).state,
-		"incompatible",
-	);
+  assert.deepEqual(
+    resolveOperonCompatibility({
+      pluginId: "operon",
+      version: "3.3.0",
+      hasDeveloperApiV1: true,
+    }),
+    {
+      state: "compatible-provisional",
+      admission: "developer-api-v1",
+      reason:
+        "The loaded Operon version is not yet certified, but it exposes the negotiated Developer API V1 boundary; runtime capability and schema checks remain mandatory.",
+    },
+  );
+  assert.equal(
+    resolveOperonCompatibility({
+      pluginId: "operon",
+      version: "3.3.0",
+      hasDeveloperApiV1: false,
+    }).state,
+    "incompatible",
+  );
 });
 
 test("certified and denied Developer API versions keep deterministic admission", () => {
-	assert.equal(
-		resolveOperonCompatibility({
-			pluginId: "operon",
-			version: "3.2.1",
-			hasDeveloperApiV1: true,
-		}).state,
-		"certified",
-	);
-	assert.match(OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS["3.0.0"] ?? "", /predates/u);
-	assert.equal(
-		resolveOperonCompatibility({
-			pluginId: "operon",
-			version: "3.0.0",
-			hasDeveloperApiV1: true,
-		}).state,
-		"incompatible",
-	);
+  assert.equal(
+    resolveOperonCompatibility({
+      pluginId: "operon",
+      version: "3.2.1",
+      hasDeveloperApiV1: true,
+    }).state,
+    "certified",
+  );
+  assert.match(
+    OPERON_BRIDGE_DENIED_DEVELOPER_API_VERSIONS["3.0.0"] ?? "",
+    /predates/u,
+  );
+  assert.equal(
+    resolveOperonCompatibility({
+      pluginId: "operon",
+      version: "3.0.0",
+      hasDeveloperApiV1: true,
+    }).state,
+    "incompatible",
+  );
 });
 
 test("mutation paths are rejected instead of normalized at the Bridge boundary", () => {
-	assert.equal(isCanonicalVaultRelativePath("Efforts/Projets"), true);
-	assert.equal(isCanonicalVaultMarkdownPath("Efforts/Projets/Test.md"), true);
-	for (const invalidPath of [
-		" Efforts/Projets/Test.md",
-		"Efforts/Projets/Test.md ",
-		"Efforts\\Projets\\Test.md",
-		"/Efforts/Projets/Test.md",
-		"C:/Efforts/Projets/Test.md",
-		"Efforts//Projets/Test.md",
-		"Efforts/./Projets/Test.md",
-		"Efforts/Projets/../Atlas/Test.md",
-	]) {
-		assert.equal(isCanonicalVaultMarkdownPath(invalidPath), false);
-	}
-	assert.match(
-		mutationPathValidationError("create", {
-			source: "inline",
-			targetPath: "Efforts/Projets/Test.md ",
-		}) ?? "",
-		/targetPath/u,
-	);
-	assert.match(
-		mutationPathValidationError("convert", {
-			target: "file",
-			targetFolder: "Efforts/Projets/ ",
-		}) ?? "",
-		/targetFolder/u,
-	);
-	assert.match(
-		mutationPathValidationError("convert", { target: "inline" }) ?? "",
-		/required/u,
-	);
-	assert.match(
-		mutationPathValidationError("create", {
-			source: "file",
-			targetPath: "Efforts/Projets/Test.md",
-		}) ?? "",
-		/only for inline/u,
-	);
-	assert.match(
-		mutationPathValidationError("convert", {
-			target: "file",
-			targetPath: "Efforts/Projets/Test.md",
-		}) ?? "",
-		/only for file-to-inline/u,
-	);
-	assert.match(
-		mutationPathValidationError("relocate", {
-			targetPath: "Efforts/Projets/Test.md ",
-		}) ?? "",
-		/targetPath/u,
-	);
-	assert.equal(
-		mutationPathValidationError("create", {
-			source: "inline",
-			targetPath: "Efforts/Projets/Test.md",
-		}),
-		null,
-	);
-	assert.equal(
-		mutationPathValidationError("convert", {
-			target: "inline",
-			targetPath: "Efforts/Projets/Test.md",
-		}),
-		null,
-	);
+  assert.equal(isCanonicalVaultRelativePath("Efforts/Projets"), true);
+  assert.equal(isCanonicalVaultMarkdownPath("Efforts/Projets/Test.md"), true);
+  for (const invalidPath of [
+    " Efforts/Projets/Test.md",
+    "Efforts/Projets/Test.md ",
+    "Efforts\\Projets\\Test.md",
+    "/Efforts/Projets/Test.md",
+    "C:/Efforts/Projets/Test.md",
+    "Efforts//Projets/Test.md",
+    "Efforts/./Projets/Test.md",
+    "Efforts/Projets/../Atlas/Test.md",
+  ]) {
+    assert.equal(isCanonicalVaultMarkdownPath(invalidPath), false);
+  }
+  assert.match(
+    mutationPathValidationError("create", {
+      source: "inline",
+      targetPath: "Efforts/Projets/Test.md ",
+    }) ?? "",
+    /targetPath/u,
+  );
+  assert.match(
+    mutationPathValidationError("convert", {
+      target: "file",
+      targetFolder: "Efforts/Projets/ ",
+    }) ?? "",
+    /targetFolder/u,
+  );
+  assert.match(
+    mutationPathValidationError("convert", { target: "inline" }) ?? "",
+    /required/u,
+  );
+  assert.match(
+    mutationPathValidationError("create", {
+      source: "file",
+      targetPath: "Efforts/Projets/Test.md",
+    }) ?? "",
+    /only for inline/u,
+  );
+  assert.match(
+    mutationPathValidationError("convert", {
+      target: "file",
+      targetPath: "Efforts/Projets/Test.md",
+    }) ?? "",
+    /only for file-to-inline/u,
+  );
+  assert.match(
+    mutationPathValidationError("relocate", {
+      targetPath: "Efforts/Projets/Test.md ",
+    }) ?? "",
+    /targetPath/u,
+  );
+  assert.equal(
+    mutationPathValidationError("create", {
+      source: "inline",
+      targetPath: "Efforts/Projets/Test.md",
+    }),
+    null,
+  );
+  assert.equal(
+    mutationPathValidationError("convert", {
+      target: "inline",
+      targetPath: "Efforts/Projets/Test.md",
+    }),
+    null,
+  );
 });
 
 test("consumed idempotency keys take precedence over replacement validation", () => {
-	const cached = {
-		signature: "original-signature",
-		payload: { ok: true, status: "planned", operationId: "original-operation" },
-	};
-	let validationCalled = false;
-	const conflict = resolveMutationPreflight({
-		cached,
-		idempotencyKey: "stable-idempotency-key",
-		signature: "different-signature",
-		requested: { targetPath: "Efforts/Projets/Test.md " },
-		validate: () => {
-			validationCalled = true;
-			return "invalid path";
-		},
-		operationId: () => "conflict-operation",
-	});
-	assert.equal(conflict.kind, "response");
-	if (conflict.kind === "response") {
-		assert.equal(conflict.response.httpStatus, 409);
-		assert.equal(
-			(conflict.response.payload.error as { code?: string }).code,
-			"idempotency_key_reused",
-		);
-	}
-	assert.equal(validationCalled, false);
+  const cached = {
+    signature: "original-signature",
+    payload: { ok: true, status: "planned", operationId: "original-operation" },
+  };
+  let validationCalled = false;
+  const conflict = resolveMutationPreflight({
+    cached,
+    idempotencyKey: "stable-idempotency-key",
+    signature: "different-signature",
+    requested: { targetPath: "Efforts/Projets/Test.md " },
+    validate: () => {
+      validationCalled = true;
+      return "invalid path";
+    },
+    operationId: () => "conflict-operation",
+  });
+  assert.equal(conflict.kind, "response");
+  if (conflict.kind === "response") {
+    assert.equal(conflict.response.httpStatus, 409);
+    assert.equal(
+      (conflict.response.payload.error as { code?: string }).code,
+      "idempotency_key_reused",
+    );
+  }
+  assert.equal(validationCalled, false);
 
-	const replay = resolveMutationPreflight({
-		cached,
-		idempotencyKey: "stable-idempotency-key",
-		signature: "original-signature",
-		requested: { targetPath: "Efforts/Projets/Test.md" },
-		validate: () => {
-			validationCalled = true;
-			return "must not run";
-		},
-		operationId: () => "unused-operation",
-	});
-	assert.equal(replay.kind, "response");
-	if (replay.kind === "response") {
-		assert.equal(replay.response.httpStatus, 200);
-		assert.equal(replay.response.payload.replayed, true);
-	}
-	assert.equal(validationCalled, false);
+  const replay = resolveMutationPreflight({
+    cached,
+    idempotencyKey: "stable-idempotency-key",
+    signature: "original-signature",
+    requested: { targetPath: "Efforts/Projets/Test.md" },
+    validate: () => {
+      validationCalled = true;
+      return "must not run";
+    },
+    operationId: () => "unused-operation",
+  });
+  assert.equal(replay.kind, "response");
+  if (replay.kind === "response") {
+    assert.equal(replay.response.httpStatus, 200);
+    assert.equal(replay.response.payload.replayed, true);
+  }
+  assert.equal(validationCalled, false);
 
-	const invalidFreshRequest = resolveMutationPreflight({
-		cached: undefined,
-		idempotencyKey: "fresh-idempotency-key",
-		signature: "fresh-signature",
-		requested: { targetPath: "Efforts/Projets/Test.md " },
-		validate: () => "invalid path",
-		operationId: () => "unused-operation",
-	});
-	assert.deepEqual(invalidFreshRequest, {
-		kind: "validation-error",
-		message: "invalid path",
-	});
+  const invalidFreshRequest = resolveMutationPreflight({
+    cached: undefined,
+    idempotencyKey: "fresh-idempotency-key",
+    signature: "fresh-signature",
+    requested: { targetPath: "Efforts/Projets/Test.md " },
+    validate: () => "invalid path",
+    operationId: () => "unused-operation",
+  });
+  assert.deepEqual(invalidFreshRequest, {
+    kind: "validation-error",
+    message: "invalid path",
+  });
 });
 
 test("index readiness refuses startup, recovery, sync, and dirty states", () => {
@@ -1044,8 +1699,14 @@ test("index readiness refuses startup, recovery, sync, and dirty states", () => 
     verifiedThisSession: true,
     dirtySourceCount: 0,
   };
-  assert.equal(isIndexReady({ compatible: true, generation: 1, diagnostics: healthy }), true);
-  assert.equal(isIndexReady({ compatible: true, generation: 0, diagnostics: healthy }), false);
+  assert.equal(
+    isIndexReady({ compatible: true, generation: 1, diagnostics: healthy }),
+    true,
+  );
+  assert.equal(
+    isIndexReady({ compatible: true, generation: 0, diagnostics: healthy }),
+    false,
+  );
   assert.equal(
     isIndexReady({
       compatible: true,
@@ -1062,7 +1723,10 @@ test("index readiness refuses startup, recovery, sync, and dirty states", () => 
     }),
     false,
   );
-  assert.equal(isIndexReady({ compatible: true, generation: 1, diagnostics: null }), false);
+  assert.equal(
+    isIndexReady({ compatible: true, generation: 1, diagnostics: null }),
+    false,
+  );
 });
 
 test("index validation is attempted only for a settled unverified snapshot", () => {
@@ -1508,15 +2172,14 @@ test("future contract-compatible Operon releases project read-write capabilities
     [],
     "ordinary status must not negotiate optional recovery grants",
   );
-  const recoveryStatus = await BridgePlugin.prototype.recoveryStatusPayload.call(
-    {
+  const recoveryStatus =
+    await BridgePlugin.prototype.recoveryStatusPayload.call({
       getOperonRuntime: () => runtime,
       app: { plugins: {} },
-      manifest: { id: "optimike-operon-bridge", version: "0.8.2" },
+      manifest: { id: "optimike-operon-bridge", version: "0.8.3" },
       settings: { mutationsEnabled: true },
       capabilities: BridgePlugin.prototype.capabilities,
-    },
-  );
+    });
   assert.equal(recoveryStatus.ok, true);
   assert.deepEqual(recoveryStatus.capabilities, {
     recovery: true,
@@ -1588,7 +2251,7 @@ test("normalization and filtering preserve ordered list fields without scalar co
       { canonicalKey: "taskGallery", visiblePropertyName: "Task Gallery" },
     ],
     operonVersion: "3.5.3",
-    bridgeVersion: "0.8.2",
+    bridgeVersion: "0.8.3",
     includeProperties: false,
   });
   assert.deepEqual(normalized.fields.taskGallery, [
@@ -1618,14 +2281,30 @@ test("normalization and filtering preserve ordered list fields without scalar co
 test("filtering supports paths, tags, fields, properties, dates, and search", () => {
   const value = normalized();
   const tasks = [value];
-  assert.equal(filterTasks(tasks, { pathIncludes: ["Efforts/Projets"] }).length, 1);
+  assert.equal(
+    filterTasks(tasks, { pathIncludes: ["Efforts/Projets"] }).length,
+    1,
+  );
   assert.equal(filterTasks(tasks, { tagsAll: ["elysia", "bridge"] }).length, 1);
-  assert.equal(filterTasks(tasks, { fieldEquals: { custom: "signal" } }).length, 1);
-  assert.equal(filterTasks(tasks, { propertyEquals: { north_star: true } }).length, 1);
-  assert.equal(filterTasks(tasks, { dates: [{ field: "due", before: "2026-08-01" }] }).length, 1);
+  assert.equal(
+    filterTasks(tasks, { fieldEquals: { custom: "signal" } }).length,
+    1,
+  );
+  assert.equal(
+    filterTasks(tasks, { propertyEquals: { north_star: true } }).length,
+    1,
+  );
+  assert.equal(
+    filterTasks(tasks, { dates: [{ field: "due", before: "2026-08-01" }] })
+      .length,
+    1,
+  );
   assert.equal(filterTasks(tasks, { search: "ship bridge" }).length, 1);
   assert.equal(filterTasks(tasks, { statuses: ["Project.Planned"] }).length, 0);
-  assert.equal(filterTasks(tasks, { statusIds: ["st_project_in_progress"] }).length, 1);
+  assert.equal(
+    filterTasks(tasks, { statusIds: ["st_project_in_progress"] }).length,
+    1,
+  );
   assert.equal(filterTasks(tasks, { pipelineIds: ["pl_project"] }).length, 1);
 });
 
@@ -1637,7 +2316,10 @@ test("pagination and stable default sorting are deterministic", () => {
   assert.equal(result.count, 1);
   assert.equal(result.tasks[0].operonId, "zzz9999");
   assert.equal(result.nextCursor, "1");
-  const next = paginateTasks([second, first], { cursor: result.nextCursor, limit: 1 });
+  const next = paginateTasks([second, first], {
+    cursor: result.nextCursor,
+    limit: 1,
+  });
   assert.equal(next.tasks[0].operonId, "abc1234");
 });
 
@@ -1645,7 +2327,10 @@ test("settings signature changes when the workflow contract changes", () => {
   const before = settingsSignature(semanticConfiguration);
   const after = settingsSignature({
     ...semanticConfiguration,
-    workflow: { ...semanticConfiguration.workflow, defaultPipelineName: "ÉLYSIA" },
+    workflow: {
+      ...semanticConfiguration.workflow,
+      defaultPipelineName: "ÉLYSIA",
+    },
   });
   assert.notEqual(before, after);
 });

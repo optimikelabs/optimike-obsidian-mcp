@@ -316,6 +316,45 @@ function settlementPolicy(
       { reason: "atomic_write_settlement_delay_missing" },
     );
   }
+  const dateProtections =
+    status.protection?.frontmatterDateProperties.integrations ?? [];
+  // A settlement property is safe only when it is exclusively a modified
+  // property across the complete supported integration set.  Comparing the
+  // plugin id here would allow two plugins to claim the same normalized key
+  // with different roles, making the observed post-CAS change ambiguous.
+  const createdOrViewedPropertyNames = new Set(
+    dateProtections.flatMap((protection) =>
+      [protection.createdPropertyName, protection.viewedPropertyName]
+        .filter((name): name is string => Boolean(name))
+        .map(normalizedKey),
+    ),
+  );
+  const hasExactModifiedRoleBinding = (
+    settlementIntegration: (typeof advertised.integrations)[number],
+  ): boolean => {
+    const settlementPropertyName = normalizedKey(
+      settlementIntegration.propertyName,
+    );
+    const matchingModifiedRoles = dateProtections.filter(
+      (protection) =>
+        protection.pluginId === settlementIntegration.pluginId &&
+        normalizedKey(protection.modifiedPropertyName ?? "") ===
+          settlementPropertyName,
+    );
+    if (matchingModifiedRoles.length !== 1) return false;
+    return !createdOrViewedPropertyNames.has(settlementPropertyName);
+  };
+  if (
+    advertised.integrations.some(
+      (integration) => !hasExactModifiedRoleBinding(integration),
+    )
+  ) {
+    throw new McpError(
+      BaseErrorCode.FORBIDDEN,
+      "The Atomic Write Bridge did not provide an unambiguous modified-time settlement role binding.",
+      { reason: "atomic_write_settlement_role_binding_missing" },
+    );
+  }
   const protectedSet = new Set(
     effectiveProtectedFrontmatterKeysFromStatus(status, protectedKeys)
       .map(normalizedKey)
@@ -383,7 +422,9 @@ function operationIdFromRef(
   }
   const operationId = reference.slice(profile.planRefPrefix.length);
   if (!z.string().uuid().safeParse(operationId).success) {
-    throw new Error(`The ${profile.operationKind} plan reference is malformed.`);
+    throw new Error(
+      `The ${profile.operationKind} plan reference is malformed.`,
+    );
   }
   return operationId;
 }
@@ -818,7 +859,8 @@ export class ObsidianNoteReplaceOperationAdapter
     idempotencyKey?: string,
   ): ObsidianNoteReplacePlan {
     const plan = this.journal.get(operationIdFromRef(this.profile, reference));
-    if (!plan) throw new Error(`Unknown ${this.profile.operationKind} operation plan.`);
+    if (!plan)
+      throw new Error(`Unknown ${this.profile.operationKind} operation plan.`);
     if (
       idempotencyKey !== undefined &&
       plan.idempotencyKey !== idempotencyKey

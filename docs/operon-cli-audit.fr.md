@@ -2,15 +2,18 @@
 
 English version: [operon-cli-audit.md](operon-cli-audit.md)
 
-Mise à jour : 2026-08-25
+Mise à jour : 2026-08-30
 
-Release courante : Operon officiel `3.5.3`, Operon CLI `1.2.0`, Bridge
-`0.8.2`, Developer API V1 et API task-workflow additive. Operon 3.5.3 embarque
-des implémentations qui remplacent les PR upstream `#182`, `#183` et `#184`.
-`compatible-provisional` décrit le niveau de certification, pas une allowlist de
-mutation : l’admission dépend du contrat et des capacités live exactes.
-Les workflows additifs négocient leur grant exact au premier usage après un
-démarrage à froid ; un grant absent, refusé ou malformé échoue toujours fermé.
+Cible candidate : Optimike MCP `3.2.0` utilise le Bridge `0.8.3` avec Operon
+officiel `3.6.0`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1
+et API task-workflow additive. Des runs Pilot 2 sur le worktree ont exercé cette
+stack ; l’admission de la release exige encore la même gate sur le SHA final
+propre. Le contrat public Developer API V1 n’a pas dérivé entre Operon
+`3.5.3` et `3.6.0`. `compatible-provisional` décrit le niveau de certification,
+pas une allowlist de mutation : l’admission dépend du contrat et des capacités
+live exactes. Les workflows additifs négocient leur grant exact au premier usage
+après un démarrage à froid ; un grant absent, refusé ou malformé échoue toujours
+fermé.
 
 Operon CLI `1.2.0` ajoute la surface opérateur pour le routage Daily/Weekly et
 les champs typés Task Type, Task Image et Task Gallery ordonnée. Le MCP ne
@@ -19,6 +22,21 @@ périodiques bornées et l’adoption officielle après leurs grants exacts. Ope
 reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan.
 `taskType` et `taskImage` restent scalaires, `taskGallery` reste un tableau
 ordonné et `__taskDataType` est read-only.
+
+Operon `3.6.0` modifie trois comportements produit qui restent hors du contrat
+d’écriture générique du MCP : la suppression via Task Editor nettoie les
+relations enfant directes et de blocage ; une tâche bloquée peut recevoir une
+Scheduled Date ; et l’automatisation opt-in des dates parent peut étendre la
+plage de dates d’un parent après la mutation d’un enfant. La gate comportementale
+Pilot 2 sur le worktree a exercé la Scheduled Date via `operon_update_periodic_scheduling` : la
+relation de blocage et son arête inverse sont préservées, puis le parent
+périodique créé par ce run est supprimé pendant la restauration exacte. La
+suppression Task Editor reste `SKIP` faute de surface publique MCP ; l’expansion
+des dates parent reste `SKIP` car la configuration publique de Pilot 2 n’annonce
+pas cette automatisation opt-in active. Les opérateurs qui activent ces fonctions
+doivent tester ces deux comportements avant de s’y appuyer. Un postflight
+n’accepte jamais une dérive non liée du parent ou des relations comme une
+écriture validée.
 
 ## Acceptation historique 3.3.2
 

@@ -231,7 +231,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_create_periodic_task",
-    "Create exactly one inline Operon task in the configured Daily or Weekly Note through Operon's sealed periodic-note workflow. Operon owns routing, templates, container identity and receipts; routeDate is optional and dryRun defaults to true. Apply requires the live Bridge, idempotency and the periodicCreate capability.",
+    "Create exactly one inline Operon task in the configured Daily or Weekly Note through Operon's sealed periodic-note workflow. Operon owns routing, templates, container identity and receipts; routeDate is optional and distinct from an initial fields.dateScheduled value. Later dateScheduled changes must use operon_update_periodic_scheduling. dryRun defaults to true. Apply requires the live Bridge, idempotency and the periodicCreate capability.",
     OperonCreatePeriodicTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonCreatePeriodicTaskSchema>) =>
@@ -242,7 +242,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_update_periodic_scheduling",
-    "Set or clear dateScheduled for one exact Operon task through the sealed periodic-update workflow. Operon decides retain, detach or realign without moving the source Markdown. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    "Set or clear dateScheduled for one exact Operon task through the sealed periodic-update workflow. Use this tool, not operon_update_task, for every dateScheduled change: Operon decides retain, detach or realign without moving the source Markdown. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
     OperonUpdatePeriodicSchedulingSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonUpdatePeriodicSchedulingSchema>) =>
@@ -253,7 +253,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_create_task",
-    "Create an Operon inline or file task through the loaded engine's supported official API. dryRun defaults to true. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
+    "Create an Operon inline or file task through the loaded engine's supported official API. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
     OperonCreateTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonCreateTaskSchema>) =>
@@ -262,7 +262,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_update_task",
-    "Update exactly one Operon mutation group through the full Operon domain path: description, managed fields/tags, or one unmanaged file property. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    "Update exactly one ordinary Operon mutation group: description, managed fields/tags, or one unmanaged file property. Do not use this tool for dateScheduled (use operon_update_periodic_scheduling), relationships (use operon_set_relationships), or recurrence fields (use operon_update_recurrence). expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
     OperonUpdateTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonUpdateTaskSchema>) =>
@@ -313,7 +313,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
 
   server.tool(
     "operon_update_recurrence",
-    "Set or explicitly clear an Operon recurrence rule and its official temporal fields for this-task or this-and-following. This apply is reserved for full write policy; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+    "Set or explicitly clear an Operon recurrence rule and its official temporal fields, except dateScheduled, for this-task or this-and-following. dateScheduled is reserved for operon_update_periodic_scheduling. This apply is reserved for full write policy; expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
     OperonUpdateRecurrenceSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonUpdateRecurrenceSchema>) =>

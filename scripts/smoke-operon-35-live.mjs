@@ -5,12 +5,17 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   access,
+  link,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  realpath,
+  rename,
   rm,
   rmdir,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
@@ -27,10 +32,13 @@ const EXPECTED_VAULT = path.resolve(
 );
 const EXPECTED_VAULT_NAME = "operon-bridge-pilot-vault-2.5.0";
 const EXPECTED_OPERON_VERSION = (
-  process.env.OPERON_35_CANARY_EXPECTED_OPERON_VERSION ?? "3.5.3"
+  process.env.OPERON_35_CANARY_EXPECTED_OPERON_VERSION ?? "3.6.0"
 ).trim();
 const EXPECTED_BRIDGE_VERSION = (
-  process.env.OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.8.2"
+  process.env.OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.8.3"
+).trim();
+const EXPECTED_MCP_VERSION = (
+  process.env.OPERON_35_CANARY_EXPECTED_MCP_VERSION ?? "3.2.0"
 ).trim();
 const EXPECTED_BASE_URL = "http://127.0.0.1:27233";
 const FIXTURE_PATH = "Canary/Operon-3.5-Live-Canary.md";
@@ -75,6 +83,11 @@ const CLI_TIMEOUT_MS = boundedInteger(
   5_000,
   120_000,
 );
+
+// This is deliberately process-local. All destructive vault helpers require a
+// root identity verified at live-canary entry, rather than re-resolving the
+// user-supplied string at each call.
+let activeVaultIdentity = null;
 
 function boundedInteger(raw, fallback, minimum, maximum) {
   const value = raw === undefined ? fallback : Number(raw);
@@ -130,20 +143,289 @@ function canonicalRelativeMarkdownPath(value) {
     );
 }
 
+function normalizedPathIdentity(value) {
+  const normalized = path.resolve(value).replace(/^\\\\\\?\\/u, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function samePathIdentity(left, right) {
+  return normalizedPathIdentity(left) === normalizedPathIdentity(right);
+}
+
+function isStrictDescendant(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return (
+    relative.length > 0 &&
+    !relative.startsWith(`..${path.sep}`) &&
+    relative !== ".." &&
+    !path.isAbsolute(relative)
+  );
+}
+
+function sealPhysicalDirectoryIdentity(metadata) {
+  assert.equal(
+    typeof metadata.dev,
+    "bigint",
+    "Pilot vault root stable filesystem identity is unavailable or ambiguous.",
+  );
+  assert.equal(
+    typeof metadata.ino,
+    "bigint",
+    "Pilot vault root stable filesystem identity is unavailable or ambiguous.",
+  );
+  assert.equal(
+    metadata.dev > 0n && metadata.ino > 0n,
+    true,
+    "Pilot vault root stable filesystem identity is unavailable or ambiguous.",
+  );
+  return Object.freeze({
+    device: metadata.dev.toString(),
+    file: metadata.ino.toString(),
+  });
+}
+
+async function assertVaultRootIdentity(requestedRoot) {
+  const requested = path.resolve(requestedRoot);
+  const metadata = await lstat(requested, { bigint: true });
+  assert.equal(
+    metadata.isDirectory(),
+    true,
+    "Pilot vault root is not a directory.",
+  );
+  assert.equal(
+    metadata.isSymbolicLink(),
+    false,
+    "Pilot vault root must not be a symlink or junction.",
+  );
+  const resolved = await realpath(requested);
+  assert.equal(
+    samePathIdentity(resolved, requested),
+    true,
+    "Pilot vault root must resolve to its requested path (no junction).",
+  );
+  return Object.freeze({
+    requestedRoot: requested,
+    realRoot: resolved,
+    // Node maps these to volume serial + file ID on Windows and device +
+    // inode on Unix. Strings keep the process-local seal serialization-safe.
+    physicalIdentity: sealPhysicalDirectoryIdentity(metadata),
+  });
+}
+
+function currentVaultIdentity() {
+  assert.ok(activeVaultIdentity, "Pilot vault identity was not initialized.");
+  return activeVaultIdentity;
+}
+
+async function assertVaultRootStillSame(label) {
+  const sealed = currentVaultIdentity();
+  const observed = await assertVaultRootIdentity(sealed.requestedRoot);
+  assert.equal(
+    observed.physicalIdentity.device === sealed.physicalIdentity.device &&
+      observed.physicalIdentity.file === sealed.physicalIdentity.file,
+    true,
+    `${label}: Pilot vault root physical identity changed after preflight.`,
+  );
+}
+
+async function assertSafeVaultDirectory(absolutePath, label) {
+  await assertVaultRootStillSame(label);
+  const identity = currentVaultIdentity();
+  assert.equal(
+    samePathIdentity(absolutePath, identity.realRoot) ||
+      isStrictDescendant(identity.realRoot, absolutePath),
+    true,
+    `${label} escaped the verified Pilot vault root.`,
+  );
+  const metadata = await lstat(absolutePath);
+  assert.equal(metadata.isDirectory(), true, `${label} is not a directory.`);
+  assert.equal(
+    metadata.isSymbolicLink(),
+    false,
+    `${label} must not be a symlink or junction.`,
+  );
+  const resolved = await realpath(absolutePath);
+  assert.equal(
+    samePathIdentity(resolved, absolutePath),
+    true,
+    `${label} must not resolve through a symlink or junction.`,
+  );
+  return metadata;
+}
+
+async function assertSafeVaultParentChain(absolutePath, label) {
+  const identity = currentVaultIdentity();
+  const relative = path.relative(identity.realRoot, absolutePath);
+  assert.equal(
+    isStrictDescendant(identity.realRoot, absolutePath),
+    true,
+    `${label} escaped the verified Pilot vault root.`,
+  );
+  await assertSafeVaultDirectory(identity.realRoot, "Pilot vault root");
+  const segments = relative.split(path.sep);
+  let current = identity.realRoot;
+  for (const segment of segments.slice(0, -1)) {
+    current = path.join(current, segment);
+    await assertSafeVaultDirectory(current, `${label} parent`);
+  }
+}
+
+async function ensureSafeVaultParentChain(absolutePath, label) {
+  const identity = currentVaultIdentity();
+  const relative = path.relative(identity.realRoot, absolutePath);
+  assert.equal(
+    isStrictDescendant(identity.realRoot, absolutePath),
+    true,
+    `${label} escaped the verified Pilot vault root.`,
+  );
+  await assertSafeVaultDirectory(identity.realRoot, "Pilot vault root");
+  let current = identity.realRoot;
+  for (const segment of relative.split(path.sep).slice(0, -1)) {
+    current = path.join(current, segment);
+    try {
+      await assertSafeVaultDirectory(current, `${label} parent`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      await assertSafeVaultDirectory(
+        path.dirname(current),
+        `${label} parent before creation`,
+      );
+      await mkdir(current);
+      await assertSafeVaultDirectory(current, `${label} created parent`);
+    }
+  }
+}
+
 function absoluteVaultPath(relativePath) {
   assert.equal(
     canonicalRelativeMarkdownPath(relativePath),
     true,
     `Unsafe vault-relative Markdown path: ${relativePath}`,
   );
-  const absolute = path.resolve(EXPECTED_VAULT, ...relativePath.split("/"));
-  const vaultPrefix = `${EXPECTED_VAULT}${path.sep}`.toLowerCase();
+  const identity = currentVaultIdentity();
+  const absolute = path.resolve(identity.realRoot, ...relativePath.split("/"));
   assert.equal(
-    absolute.toLowerCase().startsWith(vaultPrefix),
+    isStrictDescendant(identity.realRoot, absolute),
     true,
     "Resolved path escaped the Pilot 2 vault.",
   );
   return absolute;
+}
+
+async function safeVaultRegularFile(relativePath, label, options = {}) {
+  const { allowMissing = false } = options;
+  const absolute = absoluteVaultPath(relativePath);
+  await assertSafeVaultParentChain(absolute, label);
+  let metadata;
+  try {
+    metadata = await lstat(absolute);
+  } catch (error) {
+    if (allowMissing && error?.code === "ENOENT") {
+      return { absolute, exists: false, metadata: null };
+    }
+    throw error;
+  }
+  assert.equal(metadata.isFile(), true, `${label} is not a regular file.`);
+  assert.equal(
+    metadata.isSymbolicLink(),
+    false,
+    `${label} must not be a symlink or reparse point.`,
+  );
+  assert.equal(metadata.nlink, 1, `${label} must not be a hardlinked file.`);
+  const resolved = await realpath(absolute);
+  assert.equal(
+    samePathIdentity(resolved, absolute),
+    true,
+    `${label} must not resolve through a symlink or junction.`,
+  );
+  // Repeat the path checks after lstat/realpath. Node does not expose openat
+  // across supported platforms; this is the narrowest useful TOCTOU fence.
+  await assertSafeVaultParentChain(absolute, label);
+  const finalMetadata = await lstat(absolute);
+  assert.equal(finalMetadata.isFile(), true, `${label} stopped being a file.`);
+  assert.equal(
+    finalMetadata.isSymbolicLink(),
+    false,
+    `${label} became a symlink or reparse point.`,
+  );
+  assert.equal(finalMetadata.nlink, 1, `${label} became a hardlinked file.`);
+  return { absolute, exists: true, metadata: finalMetadata };
+}
+
+async function assertSafeMissingVaultTarget(relativePath, label) {
+  const checked = await safeVaultRegularFile(relativePath, label, {
+    allowMissing: true,
+  });
+  assert.equal(checked.exists, false, `${label} already exists.`);
+  return checked.absolute;
+}
+
+function plannedTaskSourcePaths(plan) {
+  const paths = new Set(
+    [
+      plan?.periodicRoute?.notePath,
+      plan?.periodicUpdate?.notePath,
+      ...(plan?.periodicUpdate?.sourceTransitions ?? []).map(
+        (transition) => transition?.filePath,
+      ),
+    ].filter((value) => typeof value === "string"),
+  );
+  const seen = new WeakSet();
+  const visit = (value, key = "") => {
+    if (!value || typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    for (const [childKey, child] of Object.entries(value)) {
+      if (
+        typeof child === "string" &&
+        ["filePath", "notePath", "targetPath", "path"].includes(childKey)
+      ) {
+        paths.add(child);
+      } else if (child && typeof child === "object") {
+        visit(child, childKey);
+      }
+    }
+    void key;
+  };
+  visit(plan);
+  return paths;
+}
+
+async function assertSafePlannedTaskSourceArtifacts(
+  plan,
+  label,
+  { requirePaths = true } = {},
+) {
+  const paths = plannedTaskSourcePaths(plan);
+  if (requirePaths) {
+    assert.ok(
+      paths.size > 0,
+      `${label} did not seal every task-source path; refusing a physically unbounded mutation.`,
+    );
+  }
+  for (const relativePath of paths) {
+    // Existing sources must be regular, unlinked files; absent targets are
+    // accepted only below an already-existing, non-reparse parent chain.
+    await safeVaultRegularFile(relativePath, `${label} planned task source`, {
+      allowMissing: true,
+    });
+  }
+  return paths;
+}
+
+async function removeRunOwnedVaultArtifact(relativePath, exactMarker, label) {
+  const checked = await safeVaultRegularFile(relativePath, label);
+  const content = await readFile(checked.absolute, "utf8");
+  assert.equal(
+    content.includes(exactMarker),
+    true,
+    `${label} has no exact run marker; refusing deletion.`,
+  );
+  // Revalidate at the last possible point before the non-recursive delete.
+  const finalCheck = await safeVaultRegularFile(relativePath, label);
+  await assertVaultRootStillSame(`${label} deletion`);
+  await rm(finalCheck.absolute);
+  await safeVaultRegularFile(relativePath, label, { allowMissing: true });
 }
 
 async function exists(target) {
@@ -153,6 +435,293 @@ async function exists(target) {
   } catch {
     return false;
   }
+}
+
+async function runProjectCommand(args, label) {
+  const child = spawn("git", args, {
+    cwd: PROJECT_ROOT,
+    env: process.env,
+    shell: false,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  let diagnostic = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk.toString("utf8");
+  });
+  child.stderr.on("data", (chunk) => {
+    diagnostic += chunk.toString("utf8");
+  });
+  const exitCode = await withTimeout(
+    new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => resolve(code));
+    }),
+    label,
+    15_000,
+  );
+  if (exitCode !== 0) {
+    throw new Error(`${label} failed (${String(exitCode)}).`);
+  }
+  // Keep diagnostics intentionally unused: command output may include a local
+  // path and must never be carried into a redacted live-canary proof.
+  void diagnostic;
+  return output.trim();
+}
+
+async function runNpmCommand(args, label) {
+  // Node 24 on Windows can reject a direct .cmd spawn with EINVAL. Invoke the
+  // npm CLI through this same Node binary so the offline attestation is as
+  // portable and deterministic as the live rebuild.
+  const npmCli = path.join(
+    path.dirname(process.execPath),
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  );
+  const child = spawn(process.execPath, [npmCli, ...args], {
+    cwd: PROJECT_ROOT,
+    env: process.env,
+    shell: false,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  // Build diagnostics are intentionally not evidence, but the pipes still
+  // need draining so a verbose compiler cannot deadlock this gate.
+  child.stdout.resume();
+  child.stderr.resume();
+  const exitCode = await withTimeout(
+    new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => resolve(code));
+    }),
+    label,
+    120_000,
+  );
+  if (exitCode !== 0) throw new Error(`${label} failed (${String(exitCode)}).`);
+}
+
+async function assertRegularNonLinkFile(absolutePath, label) {
+  const metadata = await lstat(absolutePath);
+  assert.equal(metadata.isFile(), true, `${label} is not a file.`);
+  assert.equal(
+    metadata.isSymbolicLink(),
+    false,
+    `${label} must not be a symlink or reparse point.`,
+  );
+  assert.equal(metadata.nlink, 1, `${label} must not be hardlinked.`);
+  assert.equal(
+    samePathIdentity(await realpath(absolutePath), absolutePath),
+    true,
+    `${label} must not resolve through a symlink or junction.`,
+  );
+}
+
+function expectedBuiltBridgeManifest(sourceManifest) {
+  assert.equal(
+    sourceManifest !== null &&
+      typeof sourceManifest === "object" &&
+      !Array.isArray(sourceManifest),
+    true,
+    "Local Bridge source manifest is not an object.",
+  );
+  // esbuild deliberately appends this runtime entry to the distributable
+  // manifest. The source manifest remains the canonical authoring surface.
+  return { ...sourceManifest, main: "main.js" };
+}
+
+function assertBuiltBridgeManifest(
+  sourceManifestBytes,
+  buildManifestBytes,
+  label,
+) {
+  const sourceManifest = JSON.parse(sourceManifestBytes.toString("utf8"));
+  const buildManifest = JSON.parse(buildManifestBytes.toString("utf8"));
+  assert.deepEqual(
+    buildManifest,
+    expectedBuiltBridgeManifest(sourceManifest),
+    `${label} does not equal the normalized source manifest plus main.js.`,
+  );
+}
+
+async function attestLiveCandidate(releaseCandidate) {
+  // `build/` and `dist/` are ignored. Rebuild both artifacts from this exact
+  // checkout before they influence the Git identity or installed-artifact
+  // comparison; otherwise two equally stale files could falsely attest.
+  await runNpmCommand(["run", "build"], "MCP candidate rebuild");
+  await runNpmCommand(
+    ["--prefix", "plugins/obsidian-operon-bridge", "run", "build"],
+    "Operon Bridge candidate rebuild",
+  );
+  const packageJson = JSON.parse(
+    await readFile(path.join(PROJECT_ROOT, "package.json"), "utf8"),
+  );
+  assert.match(
+    packageJson?.version ?? "",
+    /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u,
+    "package.json has no valid MCP version.",
+  );
+  assert.equal(
+    packageJson.version,
+    EXPECTED_MCP_VERSION,
+    "package.json MCP version differs from the expected live candidate.",
+  );
+  const gitHead = await runProjectCommand(["rev-parse", "HEAD"], "git HEAD");
+  assert.match(gitHead, /^[a-f0-9]{40}$/u, "git HEAD is not an exact SHA.");
+  const porcelain = await runProjectCommand(
+    ["status", "--porcelain=v1"],
+    "git worktree status",
+  );
+  const worktreeClean = porcelain.length === 0;
+  assert.equal(
+    worktreeClean,
+    true,
+    "Live canary requires a clean worktree so its evidence names one exact candidate.",
+  );
+
+  const bridgeRoot = path.join(
+    PROJECT_ROOT,
+    "plugins",
+    "obsidian-operon-bridge",
+  );
+  const sourceBuild = path.join(bridgeRoot, "build", "main.js");
+  const sourceBuildManifest = path.join(bridgeRoot, "build", "manifest.json");
+  const sourceManifest = path.join(bridgeRoot, "manifest.json");
+  const rootBuild = path.join(PROJECT_ROOT, "dist", "index.js");
+  const installedPluginRoot = path.join(
+    currentVaultIdentity().realRoot,
+    ".obsidian",
+    "plugins",
+    "optimike-operon-bridge",
+  );
+  const installedBuild = path.join(installedPluginRoot, "main.js");
+  const installedManifest = path.join(installedPluginRoot, "manifest.json");
+  await Promise.all([
+    assertRegularNonLinkFile(rootBuild, "MCP candidate build"),
+    assertRegularNonLinkFile(sourceBuild, "Local Bridge candidate build"),
+    assertRegularNonLinkFile(
+      sourceBuildManifest,
+      "Local Bridge candidate manifest",
+    ),
+    assertRegularNonLinkFile(sourceManifest, "Local Bridge source manifest"),
+    assertRegularNonLinkFile(installedBuild, "Installed Bridge build"),
+    assertRegularNonLinkFile(installedManifest, "Installed Bridge manifest"),
+  ]);
+  const sourceHash = sha256(await readFile(sourceBuild));
+  const installedHash = sha256(await readFile(installedBuild));
+  const rootBuildHash = sha256(await readFile(rootBuild));
+  const sourceBuildManifestBytes = await readFile(sourceBuildManifest);
+  const sourceManifestBytes = await readFile(sourceManifest);
+  const installedManifestBytes = await readFile(installedManifest);
+  assertBuiltBridgeManifest(
+    sourceManifestBytes,
+    sourceBuildManifestBytes,
+    "Generated Bridge manifest",
+  );
+  assert.equal(
+    installedHash,
+    sourceHash,
+    "Installed Operon Bridge build does not match the local candidate build.",
+  );
+  assert.deepEqual(
+    JSON.parse(installedManifestBytes.toString("utf8")),
+    JSON.parse(sourceBuildManifestBytes.toString("utf8")),
+    "Installed Operon Bridge manifest does not match the local candidate manifest.",
+  );
+  return {
+    mcpVersion: packageJson.version,
+    gitHead,
+    worktreeClean,
+    releaseCandidate,
+    expectedBridgeVersion: EXPECTED_BRIDGE_VERSION,
+    mcpBuildSha256: rootBuildHash,
+    bridgeBuildSha256: sourceHash,
+    installedBridgeSha256: installedHash,
+    bridgeManifestSha256: sha256(sourceBuildManifestBytes),
+    installedBridgeManifestSha256: sha256(installedManifestBytes),
+    bridgeBuildMatchesInstalled: true,
+    bridgeManifestMatchesInstalled: true,
+  };
+}
+
+async function assertCandidateStillExact(candidate) {
+  const [gitHead, porcelain] = await Promise.all([
+    runProjectCommand(["rev-parse", "HEAD"], "git HEAD recheck"),
+    runProjectCommand(["status", "--porcelain=v1"], "git worktree recheck"),
+  ]);
+  assert.equal(
+    gitHead,
+    candidate.gitHead,
+    "Candidate HEAD changed after attestation.",
+  );
+  assert.equal(
+    porcelain.length,
+    0,
+    "Candidate worktree changed after attestation and before native dispatch.",
+  );
+  assert.equal(
+    sha256(await readFile(path.join(PROJECT_ROOT, "dist", "index.js"))),
+    candidate.mcpBuildSha256,
+    "MCP build changed after candidate attestation.",
+  );
+  assert.equal(
+    sha256(
+      await readFile(
+        path.join(
+          PROJECT_ROOT,
+          "plugins",
+          "obsidian-operon-bridge",
+          "build",
+          "main.js",
+        ),
+      ),
+    ),
+    candidate.bridgeBuildSha256,
+    "Bridge build changed after candidate attestation.",
+  );
+  const installedPluginRoot = path.join(
+    currentVaultIdentity().realRoot,
+    ".obsidian",
+    "plugins",
+    "optimike-operon-bridge",
+  );
+  const installedBuild = path.join(installedPluginRoot, "main.js");
+  const installedManifest = path.join(installedPluginRoot, "manifest.json");
+  const sourceBuildManifest = path.join(
+    PROJECT_ROOT,
+    "plugins",
+    "obsidian-operon-bridge",
+    "build",
+    "manifest.json",
+  );
+  await Promise.all([
+    assertRegularNonLinkFile(
+      sourceBuildManifest,
+      "Local Bridge candidate manifest recheck",
+    ),
+    assertRegularNonLinkFile(installedBuild, "Installed Bridge build recheck"),
+    assertRegularNonLinkFile(
+      installedManifest,
+      "Installed Bridge manifest recheck",
+    ),
+  ]);
+  assert.equal(
+    sha256(await readFile(sourceBuildManifest)),
+    candidate.bridgeManifestSha256,
+    "Generated Bridge manifest changed after candidate attestation.",
+  );
+  assert.equal(
+    sha256(await readFile(installedBuild)),
+    candidate.installedBridgeSha256,
+    "Installed Bridge build changed after candidate attestation.",
+  );
+  assert.equal(
+    sha256(await readFile(installedManifest)),
+    candidate.installedBridgeManifestSha256,
+    "Installed Bridge manifest changed after candidate attestation.",
+  );
 }
 
 async function withTimeout(promise, label, timeoutMs) {
@@ -347,6 +916,7 @@ function assertCollisionFree(snapshot, markers) {
 async function captureMarkdownSnapshot(backupRoot) {
   const inventory = new Map();
   async function walk(absoluteFolder, relativeFolder) {
+    await assertSafeVaultDirectory(absoluteFolder, "Markdown inventory folder");
     const entries = await readdir(absoluteFolder, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.name === ".obsidian") continue;
@@ -354,9 +924,18 @@ async function captureMarkdownSnapshot(backupRoot) {
       const relative = relativeFolder
         ? `${relativeFolder}/${entry.name}`
         : entry.name;
-      if (entry.isDirectory()) {
+      const metadata = await lstat(absolute);
+      // Never traverse a symlink/reparse point while building the inventory.
+      // A live artifact must pass the stricter file identity checks below.
+      if (metadata.isSymbolicLink()) {
+        continue;
+      }
+      if (metadata.isDirectory()) {
         await walk(absolute, relative);
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+      } else if (
+        metadata.isFile() &&
+        entry.name.toLowerCase().endsWith(".md")
+      ) {
         const content = await readFile(absolute);
         inventory.set(relative, {
           sha256: sha256(content),
@@ -597,6 +1176,315 @@ async function offlineStartupOrderContract() {
   }
 }
 
+async function createSymlinkOrReport(target, linkPath, type) {
+  try {
+    await symlink(target, linkPath, type);
+    return true;
+  } catch (error) {
+    // Windows may deny unprivileged file symlink creation. A skipped optional
+    // symlink fixture is safe only because every production helper still fails
+    // closed when it encounters one.
+    if (["EPERM", "EACCES", "ENOTSUP", "EINVAL"].includes(error?.code)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function offlinePathSafetyContract() {
+  const tempRoot = await mkdtemp(
+    path.join(os.tmpdir(), "operon-path-safety-offline-"),
+  );
+  const previousIdentity = activeVaultIdentity;
+  try {
+    await runNpmCommand(
+      ["--prefix", "plugins/obsidian-operon-bridge", "run", "build"],
+      "Offline Bridge manifest rebuild",
+    );
+    const bridgeRoot = path.join(
+      PROJECT_ROOT,
+      "plugins",
+      "obsidian-operon-bridge",
+    );
+    const [sourceManifestBytes, buildManifestBytes] = await Promise.all([
+      readFile(path.join(bridgeRoot, "manifest.json")),
+      readFile(path.join(bridgeRoot, "build", "manifest.json")),
+    ]);
+    assertBuiltBridgeManifest(
+      sourceManifestBytes,
+      buildManifestBytes,
+      "Offline rebuilt Bridge manifest",
+    );
+    const vaultRoot = path.join(tempRoot, "vault");
+    const outsideRoot = path.join(tempRoot, "outside");
+    await mkdir(vaultRoot);
+    await mkdir(outsideRoot);
+    activeVaultIdentity = await assertVaultRootIdentity(vaultRoot);
+    assert.throws(
+      () => sealPhysicalDirectoryIdentity({ dev: 0n, ino: 0n }),
+      /unavailable or ambiguous/u,
+    );
+
+    const normalPath = "Canary/normal.md";
+    const normalAbsolute = absoluteVaultPath(normalPath);
+    await ensureSafeVaultParentChain(normalAbsolute, "Offline normal artifact");
+    await assertSafeMissingVaultTarget(normalPath, "Offline normal artifact");
+    await writeFile(normalAbsolute, "offline-run-marker\n", {
+      encoding: "utf8",
+      flag: "wx",
+    });
+    await safeVaultRegularFile(normalPath, "Offline normal artifact");
+
+    const outsideFile = path.join(outsideRoot, "outside.md");
+    await writeFile(outsideFile, "outside-content-must-survive\n", "utf8");
+
+    const plannedCreatePath = "Canary/planned-create.md";
+    const plannedCreatePaths = await assertSafePlannedTaskSourceArtifacts(
+      { periodicRoute: { notePath: plannedCreatePath } },
+      "Offline periodic create pre-apply",
+    );
+    assert.equal(plannedCreatePaths.has(plannedCreatePath), true);
+    await assert.rejects(
+      assertSafePlannedTaskSourceArtifacts(
+        { periodicRoute: {} },
+        "Offline unbounded periodic create",
+      ),
+      /did not seal every task-source path/u,
+    );
+
+    const plannedParent = path.join(vaultRoot, "Canary", "planned-parent");
+    const plannedOutside = path.join(outsideRoot, "planned-outside");
+    await mkdir(plannedParent);
+    await mkdir(plannedOutside);
+    const plannedJunction = await createSymlinkOrReport(
+      plannedOutside,
+      plannedParent,
+      process.platform === "win32" ? "junction" : "dir",
+    ).catch(async (error) => {
+      // A directory must first be absent before the junction is placed. Keep
+      // this in the contract rather than relying on platform-specific shell
+      // junction primitives.
+      if (error?.code !== "EEXIST") throw error;
+      await rm(plannedParent, { recursive: true, force: false });
+      return createSymlinkOrReport(
+        plannedOutside,
+        plannedParent,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    });
+    if (plannedJunction) {
+      await assert.rejects(
+        assertSafePlannedTaskSourceArtifacts(
+          { periodicRoute: { notePath: "Canary/planned-parent/created.md" } },
+          "Offline periodic create junction swap before apply",
+        ),
+        /symlink|junction|resolve|parent/iu,
+      );
+    }
+
+    const plannedUpdatePath = "Canary/planned-update.md";
+    const plannedUpdateAbsolute = absoluteVaultPath(plannedUpdatePath);
+    await writeFile(plannedUpdateAbsolute, "local-update-target\n", "utf8");
+    await safeVaultRegularFile(plannedUpdatePath, "Offline periodic update");
+    await rm(plannedUpdateAbsolute);
+    await link(outsideFile, plannedUpdateAbsolute);
+    await assert.rejects(
+      assertSafePlannedTaskSourceArtifacts(
+        { periodicUpdate: { notePath: plannedUpdatePath } },
+        "Offline periodic update hardlink swap before apply",
+      ),
+      /hardlinked/u,
+    );
+
+    const hardlinkSource = path.join(vaultRoot, "Canary", "hardlink-source.md");
+    const hardlinkAlias = path.join(vaultRoot, "Canary", "hardlink-alias.md");
+    await writeFile(hardlinkSource, "hardlink fixture\n", "utf8");
+    await link(hardlinkSource, hardlinkAlias);
+    await assert.rejects(
+      safeVaultRegularFile(
+        "Canary/hardlink-source.md",
+        "Offline hardlink source",
+      ),
+      /hardlinked/u,
+    );
+
+    const swappedPath = "Canary/swapped.md";
+    const swappedAbsolute = absoluteVaultPath(swappedPath);
+    await writeFile(swappedAbsolute, "offline-run-marker\n", "utf8");
+    await safeVaultRegularFile(swappedPath, "Offline swapped artifact");
+    await rm(swappedAbsolute);
+    await link(outsideFile, swappedAbsolute);
+    await assert.rejects(
+      removeRunOwnedVaultArtifact(
+        swappedPath,
+        "offline-run-marker",
+        "Offline swapped artifact",
+      ),
+      /hardlinked/u,
+    );
+    assert.equal(
+      await readFile(outsideFile, "utf8"),
+      "outside-content-must-survive\n",
+      "Hardlink swap altered the outside file.",
+    );
+
+    const rootLink = path.join(tempRoot, "vault-link");
+    const rootLinkCreated = await createSymlinkOrReport(
+      vaultRoot,
+      rootLink,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    if (rootLinkCreated) {
+      await assert.rejects(
+        assertVaultRootIdentity(rootLink),
+        /symlink|junction|resolve|not a directory/iu,
+      );
+    }
+
+    const fileLink = path.join(vaultRoot, "Canary", "file-link.md");
+    const fileLinkCreated = await createSymlinkOrReport(
+      outsideFile,
+      fileLink,
+      "file",
+    );
+    if (fileLinkCreated) {
+      await assert.rejects(
+        safeVaultRegularFile("Canary/file-link.md", "Offline file link"),
+        /symlink|reparse|not a regular file/iu,
+      );
+    }
+
+    const source = await readFile(fileURLToPath(import.meta.url), "utf8");
+    const mcpBuildIndex = source.indexOf(
+      'await runNpmCommand(["run", "build"], "MCP candidate rebuild")',
+    );
+    const bridgeBuildIndex = source.indexOf("Operon Bridge candidate rebuild");
+    const gitHeadIndex = source.indexOf(
+      'runProjectCommand(["rev-parse", "HEAD"], "git HEAD")',
+    );
+    const backupIndex = source.indexOf(
+      'path.join(os.tmpdir(), "operon-35-live-backup-")',
+    );
+    assert.ok(mcpBuildIndex > 0, "MCP rebuild attestation is missing.");
+    assert.ok(bridgeBuildIndex > mcpBuildIndex, "Bridge rebuild is missing.");
+    assert.ok(
+      bridgeBuildIndex < gitHeadIndex,
+      "Generated artifacts must be rebuilt before Git identity is read.",
+    );
+    assert.ok(
+      gitHeadIndex < backupIndex,
+      "Candidate identity must be attested before private backup creation.",
+    );
+    assert.ok(
+      source.includes("bridgeManifestMatchesInstalled: true"),
+      "Installed Bridge manifest equality is missing.",
+    );
+    assert.ok(
+      source.includes("await assertCandidateStillExact(candidate);"),
+      "Native dispatch must recheck the attested candidate.",
+    );
+    const callMutationIndex = source.indexOf("async function callMutation");
+    const mutationRootFenceIndex = source.indexOf(
+      "await assertVaultRootStillSame(`${label} native apply`);",
+      callMutationIndex,
+    );
+    const mutationDispatchIndex = source.indexOf(
+      "observed = await callRaw(name, args",
+      callMutationIndex,
+    );
+    assert.ok(
+      mutationRootFenceIndex > callMutationIndex &&
+        mutationRootFenceIndex < mutationDispatchIndex,
+      "Every MCP native apply must revalidate the sealed physical vault root immediately before dispatch.",
+    );
+    const directPreviewIndex = source.indexOf(
+      '"Bridge concurrency physical preview"',
+    );
+    const directPathFenceIndex = source.indexOf(
+      '"Bridge concurrency physical apply pre-dispatch"',
+    );
+    const directCandidateRecheckIndex = source.indexOf(
+      "await assertCandidateStillExact(candidate);",
+      directPathFenceIndex,
+    );
+    const directRootFenceIndex = source.indexOf(
+      'await assertVaultRootStillSame("Bridge concurrency native apply");',
+      directCandidateRecheckIndex,
+    );
+    const directFetchIndex = source.indexOf(
+      "const response = await fetchWithAbortTimeout",
+      directRootFenceIndex,
+    );
+    const directDispatchIndex = source.indexOf(
+      "const bridgeSettled = await Promise.allSettled",
+    );
+    assert.ok(
+      directPreviewIndex > 0,
+      "Direct Bridge concurrency route has no physical preview.",
+    );
+    assert.ok(
+      directPathFenceIndex > directPreviewIndex,
+      "Direct Bridge concurrency route has no post-preview path revalidation.",
+    );
+    assert.ok(
+      directCandidateRecheckIndex > directPathFenceIndex,
+      "Direct Bridge concurrency route has no final candidate recheck.",
+    );
+    assert.ok(
+      directRootFenceIndex > directCandidateRecheckIndex &&
+        directRootFenceIndex < directFetchIndex,
+      "Direct Bridge native apply must revalidate the sealed physical vault root immediately before dispatch.",
+    );
+    assert.ok(
+      directDispatchIndex > directCandidateRecheckIndex,
+      "Direct Bridge concurrency route dispatches before its physical and candidate gates.",
+    );
+    assert.ok(
+      source.includes(
+        "Concurrent Bridge result source was not sealed by the physical pre-dispatch plan.",
+      ),
+      "Direct Bridge concurrency result is not tied to its sealed physical plan.",
+    );
+
+    const displacedVaultRoot = path.join(tempRoot, "vault-attested-original");
+    await rename(vaultRoot, displacedVaultRoot);
+    await mkdir(vaultRoot);
+    await assert.rejects(
+      assertVaultRootStillSame("Offline hostile root replacement"),
+      /physical identity changed after preflight/u,
+    );
+
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          regularFileAccepted: true,
+          plannedCreatePathAttested: true,
+          unboundedPlanRefused: true,
+          periodicCreateJunctionSwapRefused: plannedJunction,
+          periodicUpdateHardlinkSwapRefused: true,
+          candidateBuildOrderAttested: true,
+          bridgeBuildManifestMatchesNormalizedSource: true,
+          directBridgeConcurrencyPreDispatchAttested: true,
+          hardlinkRefused: true,
+          swappedHardlinkDeleteRefused: true,
+          outsideFilePreserved: true,
+          rootReplacementRefused: true,
+          rootLinkRefused: rootLinkCreated,
+          rootLinkFixture: rootLinkCreated ? "executed" : "safe-skip",
+          fileLinkRefused: fileLinkCreated,
+          fileLinkFixture: fileLinkCreated ? "executed" : "safe-skip",
+        },
+        null,
+        2,
+      ),
+    );
+  } finally {
+    activeVaultIdentity = previousIdentity;
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
 async function inspectPendingLive() {
   const apiKey = (process.env.OBSIDIAN_API_KEY ?? "").trim();
   const baseUrl = (process.env.OBSIDIAN_BASE_URL ?? "").replace(/\/$/u, "");
@@ -606,6 +1494,7 @@ async function inspectPendingLive() {
     EXPECTED_VAULT.toLowerCase(),
     "OBSIDIAN_VAULT must be the exact disposable Pilot 2 path.",
   );
+  activeVaultIdentity = await assertVaultRootIdentity(requestedVault);
   assert.equal(baseUrl, EXPECTED_BASE_URL);
   assert.ok(apiKey, "OBSIDIAN_API_KEY is required and is never logged.");
   assert.equal(
@@ -660,7 +1549,9 @@ async function inspectPendingLive() {
     );
     assert.equal(statusResult.isError, false, "operon_status failed.");
     const status = parseMcpPayload(statusResult, "operon_status");
-    assertLiveStatus(status?.live);
+    // A read-only pending-recovery inspection must not require optional
+    // task-workflow grants before the operation that needs them negotiates.
+    assertLiveStatus(status?.live, false);
 
     const pendingResult = await withTimeout(
       client.callTool({
@@ -842,6 +1733,7 @@ async function main() {
     EXPECTED_VAULT.toLowerCase(),
     "OBSIDIAN_VAULT must be the exact disposable Pilot 2 path.",
   );
+  activeVaultIdentity = await assertVaultRootIdentity(requestedVault);
   assert.equal(
     baseUrl,
     EXPECTED_BASE_URL,
@@ -853,7 +1745,6 @@ async function main() {
     true,
     "OPERON_MUTATIONS_ENABLED=true is required.",
   );
-  assert.equal(await exists(EXPECTED_VAULT), true, "Pilot 2 vault is missing.");
   assert.equal(
     path.basename(EXPECTED_VAULT),
     EXPECTED_VAULT_NAME,
@@ -873,11 +1764,12 @@ async function main() {
     );
   }
 
-  const fixtureAbsolutePath = absoluteVaultPath(FIXTURE_PATH);
-  assert.equal(
-    await exists(fixtureAbsolutePath),
-    false,
-    `Dedicated fixture already exists: ${FIXTURE_PATH}. Recover or remove it before rerunning.`,
+  const fixtureAbsolutePath = await assertSafeMissingVaultTarget(
+    FIXTURE_PATH,
+    "Dedicated fixture",
+  );
+  const candidate = await attestLiveCandidate(
+    envTrue("OPERON_35_CANARY_RELEASE_CANDIDATE"),
   );
 
   const runId = randomUUID();
@@ -921,6 +1813,7 @@ async function main() {
     startedAt: new Date().toISOString(),
     vaultName: EXPECTED_VAULT_NAME,
     fixturePath: FIXTURE_PATH,
+    candidate,
     startupOrder: { enabled: startupOrder, degradedObserved: false },
     routeDates: dates,
     runtime: null,
@@ -953,7 +1846,8 @@ async function main() {
   let success = false;
   let shutdownSignal = null;
   const activeRequests = new Set();
-  const artifactPaths = new Set([FIXTURE_PATH]);
+  const runOwnedArtifacts = new Map();
+  const physicalPreflightByIdempotencyKey = new Map();
 
   const onSignal = (signal) => {
     shutdownSignal ??= signal;
@@ -1096,6 +1990,17 @@ async function main() {
   }
 
   async function callMutation(name, args, label) {
+    const physicalPreflight =
+      args?.dryRun === false
+        ? await assertPhysicalPreDispatch(name, args, label)
+        : null;
+    if (args?.dryRun === false) {
+      // This is intentionally immediately before every native dispatch. The
+      // live proof must never describe a checkout that changed after its build
+      // attestation, even between two canary steps.
+      await assertCandidateStillExact(candidate);
+      await assertVaultRootStillSame(`${label} native apply`);
+    }
     let observed;
     try {
       observed = await callRaw(name, args, {
@@ -1124,6 +2029,9 @@ async function main() {
       throw new Error(
         `${label} returned outcome-unknown; no recovery or blind retry was attempted.`,
       );
+    }
+    if (physicalPreflight) {
+      await assertPhysicalPostDispatch(result, physicalPreflight, label);
     }
     return result;
   }
@@ -1154,6 +2062,35 @@ async function main() {
     }
     throw new Error(
       `Pilot 2 did not become live on the same MCP client within ${STARTUP_TIMEOUT_MS}ms.`,
+    );
+  }
+
+  async function waitForRefreshedSnapshotStatus(label) {
+    const deadline = Date.now() + Math.max(READ_TIMEOUT_MS, 30_000);
+    let attempts = 0;
+    let lastSource = null;
+    while (Date.now() < deadline) {
+      attempts += 1;
+      const observed = await callRaw(
+        "operon_status",
+        { forceRefresh: true },
+        { allowError: true, timeoutMs: READ_TIMEOUT_MS },
+      );
+      if (!observed.isError) {
+        lastSource = boundedDiagnosticToken(observed.payload?.source);
+        try {
+          assertRefreshedSnapshotStatus(observed.payload);
+          return { status: observed.payload, attempts };
+        } catch {
+          // Operon may briefly serve the last durable snapshot while its index
+          // and post-write automations settle. Only an eventual live snapshot
+          // satisfies this gate.
+        }
+      }
+      await sleep(750);
+    }
+    throw new Error(
+      `${label} did not produce an operon-live refreshed snapshot; lastSource=${lastSource ?? "unknown"}.`,
     );
   }
 
@@ -1202,6 +2139,155 @@ async function main() {
     );
   }
 
+  async function assertKnownMutationTaskSource(operonId, label) {
+    const task = await stableTask(operonId);
+    assert.equal(
+      canonicalRelativeMarkdownPath(task?.path),
+      true,
+      `${label} resolved an unsafe task source path.`,
+    );
+    await safeVaultRegularFile(task.path, `${label} physical task source`);
+    return task.path;
+  }
+
+  async function assertPhysicalPreDispatch(name, args, label) {
+    // A sealed Developer API plan is logical evidence, not filesystem
+    // containment. Every native mutation gets a fresh dry-run and an immediate
+    // physical source/target proof; no unresolved or ambiguous target may
+    // reach the subsequent apply dispatch.
+    assert.equal(
+      typeof args?.idempotencyKey,
+      "string",
+      `${label} has no idempotency key for physical pre-dispatch attestation.`,
+    );
+    const previous = physicalPreflightByIdempotencyKey.get(args.idempotencyKey);
+    if (previous) {
+      // A same-key replay is already bound to the original sealed plan. Do not
+      // issue a different-key dry-run that could be rejected because the first
+      // apply has intentionally changed the source; re-attest the exact prior
+      // paths immediately before the replay dispatch instead.
+      for (const relativePath of previous.paths) {
+        await safeVaultRegularFile(
+          relativePath,
+          `${label} replay physical pre-dispatch`,
+        );
+      }
+      return {
+        paths: new Set(previous.paths),
+        inventory: await markdownInventory(),
+      };
+    }
+    const expectedPaths = new Set();
+    const explicitPaths = [
+      args?.adoption?.targetPath,
+      args?.task?.targetPath,
+      args?.targetPath,
+    ].filter((value) => typeof value === "string");
+    for (const relativePath of explicitPaths) {
+      assert.equal(
+        canonicalRelativeMarkdownPath(relativePath),
+        true,
+        `${label} has an unsafe explicit task source path.`,
+      );
+      await safeVaultRegularFile(relativePath, `${label} explicit task source`);
+      expectedPaths.add(relativePath);
+    }
+    const taskIds = new Set(
+      [
+        args?.operonId,
+        args?.relationships?.parentTask,
+        ...(args?.relationships?.blockedBy ?? []),
+        ...(args?.relationships?.blocking ?? []),
+      ].filter((value) => typeof value === "string"),
+    );
+    for (const operonId of taskIds) {
+      expectedPaths.add(await assertKnownMutationTaskSource(operonId, label));
+    }
+    const observed = await callRaw(
+      name,
+      {
+        ...args,
+        idempotencyKey: `${args.idempotencyKey}:physical-path-preflight`,
+        dryRun: true,
+      },
+      { allowError: true, timeoutMs: READ_TIMEOUT_MS },
+    );
+    const preflightConflict =
+      !observed.isError && observed.payload?.status === "conflict";
+    assert.equal(
+      observed.isError,
+      false,
+      `${label} physical preflight was rejected; refusing native dispatch.`,
+    );
+    assert.equal(
+      observed.payload?.status === "planned" || preflightConflict,
+      true,
+      `${label} physical preflight did not return a sealed plan or expected stale conflict.`,
+    );
+    const projectedPaths = preflightConflict
+      ? new Set()
+      : await assertSafePlannedTaskSourceArtifacts(
+          observed.payload?.plan,
+          label,
+          { requirePaths: true },
+        );
+    assert.equal(
+      preflightConflict && expectedPaths.size === 0,
+      false,
+      `${label} stale preflight has no previously resolved task source; refusing native dispatch.`,
+    );
+    const paths = new Set([...expectedPaths, ...projectedPaths]);
+    assert.ok(
+      paths.size > 0,
+      `${label} has no physically resolved task source; refusing native dispatch.`,
+    );
+    for (const relativePath of paths) {
+      await safeVaultRegularFile(
+        relativePath,
+        `${label} physical pre-dispatch`,
+        {
+          allowMissing:
+            projectedPaths.has(relativePath) &&
+            !expectedPaths.has(relativePath),
+        },
+      );
+    }
+    const preflight = { paths, inventory: await markdownInventory() };
+    physicalPreflightByIdempotencyKey.set(args.idempotencyKey, {
+      paths: new Set(paths),
+    });
+    return preflight;
+  }
+
+  async function assertPhysicalPostDispatch(result, preflight, label) {
+    if (typeof result?.after?.path === "string") {
+      assert.equal(
+        preflight.paths.has(result.after.path),
+        true,
+        `${label} returned a task source not sealed by the physical pre-dispatch proof.`,
+      );
+      await safeVaultRegularFile(
+        result.after.path,
+        `${label} physical post-dispatch`,
+      );
+    }
+    const changes = inventoryDiff(
+      preflight.inventory,
+      await markdownInventory(),
+    );
+    for (const change of changes) {
+      assert.equal(
+        preflight.paths.has(change.path),
+        true,
+        `${label} changed a Markdown source absent from the physical pre-dispatch proof.`,
+      );
+      await safeVaultRegularFile(
+        change.path,
+        `${label} changed physical source`,
+      );
+    }
+  }
+
   async function periodicCreateViaMcp(kind, routeDate, label) {
     const description = `Operon 3.5 ${kind} canary ${runId}`;
     const before = await markdownInventory();
@@ -1230,13 +2316,23 @@ async function main() {
     );
     assert.equal(preview.plan?.mutationKind, "task.create");
     assert.equal(preview.plan?.planDigest, preview.planDigest);
-    trackPlannedTaskSourceArtifacts(preview.plan, `${label} preview`);
+    const plannedSourcePaths = await assertSafePlannedTaskSourceArtifacts(
+      preview.plan,
+      `${label} preview`,
+    );
     assert.deepEqual(
       redactedInventoryChanges(
         inventoryDiff(before, await markdownInventory()),
       ),
       [],
       `${label} preview changed the vault inventory.`,
+    );
+    // A plan is not a physical containment proof: revalidate immediately
+    // before dispatch so a parent junction or a target hardlink swap aborts
+    // before Operon can write through it.
+    await assertSafePlannedTaskSourceArtifacts(
+      preview.plan,
+      `${label} apply pre-dispatch`,
     );
     const result = mutationStatus(
       await callMutation(
@@ -1258,7 +2354,12 @@ async function main() {
       true,
       `${label} returned an unsafe source path.`,
     );
-    artifactPaths.add(result.after.path);
+    assert.equal(
+      plannedSourcePaths.has(result.after.path),
+      true,
+      `${label} returned a source path not sealed by its physical pre-dispatch plan.`,
+    );
+    await recordRunOwnedArtifact(result.after.path, `${label} result`);
     const after = await markdownInventory();
     const changes = inventoryDiff(before, after);
     const sourceBefore = before.get(result.after.path);
@@ -1297,25 +2398,23 @@ async function main() {
     return result.after;
   }
 
-  function trackPlannedTaskSourceArtifacts(plan, label) {
-    const candidates = [
-      plan?.periodicRoute?.notePath,
-      plan?.periodicUpdate?.notePath,
-      ...(plan?.periodicUpdate?.sourceTransitions ?? []).map(
-        (transition) => transition?.filePath,
-      ),
-    ].filter((value) => typeof value === "string");
-    for (const relativePath of new Set(candidates)) {
-      assert.equal(
-        canonicalRelativeMarkdownPath(relativePath),
-        true,
-        `${label} returned an unsafe planned task-source path.`,
-      );
-      artifactPaths.add(relativePath);
-    }
+  async function recordRunOwnedArtifact(relativePath, label) {
+    assert.equal(
+      baselineSnapshot?.has(relativePath),
+      false,
+      `${label} tried to claim a pre-existing Markdown path as canary-owned.`,
+    );
+    const checked = await safeVaultRegularFile(relativePath, label);
+    const content = await readFile(checked.absolute, "utf8");
+    assert.equal(
+      content.includes(runId),
+      true,
+      `${label} has no exact canary marker and cannot be removed by this run.`,
+    );
+    runOwnedArtifacts.set(relativePath, runId);
   }
 
-  function trackNativeTaskSourceArtifacts(result, label) {
+  async function trackNativeTaskSourceArtifacts(result, label) {
     for (const group of result?.nativeProof?.groupResults ?? []) {
       for (const revision of group.resourceRevisions ?? []) {
         if (revision.resourceKind !== "task-source") continue;
@@ -1324,16 +2423,20 @@ async function main() {
           true,
           `${label} returned an unsafe task-source resource key.`,
         );
-        artifactPaths.add(revision.resourceKey);
+        if (!baselineSnapshot?.has(revision.resourceKey)) {
+          await recordRunOwnedArtifact(revision.resourceKey, label);
+        }
       }
     }
   }
 
   async function removeEmptyArtifactParents(relativePath) {
     let current = path.dirname(absoluteVaultPath(relativePath));
-    const vaultRoot = EXPECTED_VAULT.toLowerCase();
-    while (current.toLowerCase() !== vaultRoot) {
+    const vaultRoot = currentVaultIdentity().realRoot;
+    while (!samePathIdentity(current, vaultRoot)) {
       try {
+        await assertSafeVaultDirectory(current, "Canary artifact parent");
+        await assertVaultRootStillSame("Canary artifact parent deletion");
         await rmdir(current);
       } catch (error) {
         if (error?.code === "ENOENT") return;
@@ -1353,28 +2456,35 @@ async function main() {
       };
       return;
     }
+    await assertVaultRootStillSame("Canary artifact restoration");
 
     const current = await captureMarkdownSnapshot();
     const changes = inventoryDiff(baselineSnapshot, current);
     const restorable = [];
     const unexpected = [];
     for (const change of changes) {
+      const recordedMarker = runOwnedArtifacts.get(change.path);
       const currentContent = current.get(change.path)?.content;
       const belongsToRun =
-        artifactPaths.has(change.path) ||
-        change.path === FIXTURE_PATH ||
-        currentContent?.includes(Buffer.from(runId, "utf8"));
+        !baselineSnapshot.has(change.path) &&
+        recordedMarker === runId &&
+        (!currentContent ||
+          currentContent.includes(Buffer.from(recordedMarker, "utf8")));
       (belongsToRun ? restorable : unexpected).push(change);
     }
 
     for (const change of restorable) {
-      const original = baselineSnapshot.get(change.path);
-      const absolute = absoluteVaultPath(change.path);
-      if (original) {
-        await mkdir(path.dirname(absolute), { recursive: true });
-        await writeFile(absolute, original.content, { mode: 0o600 });
-      } else {
-        await rm(absolute, { force: true });
+      const checked = await safeVaultRegularFile(
+        change.path,
+        "Run-owned canary artifact",
+        { allowMissing: true },
+      );
+      if (checked.exists) {
+        await removeRunOwnedVaultArtifact(
+          change.path,
+          runId,
+          "Run-owned canary artifact",
+        );
         await removeEmptyArtifactParents(change.path);
       }
     }
@@ -1382,7 +2492,11 @@ async function main() {
     const after = await captureMarkdownSnapshot();
     const remaining = inventoryDiff(baselineSnapshot, after);
     const restored = remaining.length === 0 && unexpected.length === 0;
-    fixtureRestored = !(await exists(fixtureAbsolutePath));
+    fixtureRestored = !(
+      await safeVaultRegularFile(FIXTURE_PATH, "Dedicated fixture", {
+        allowMissing: true,
+      })
+    ).exists;
     evidence.fixtureRestoration = {
       restored: fixtureRestored,
       expectedState: "absent",
@@ -1681,7 +2795,8 @@ async function main() {
     assert.equal(dateManagerSettings.enableAutoUpdate, true);
     assert.equal(dateManagerSettings.enableModifiedTime, true);
 
-    await mkdir(path.dirname(fixtureAbsolutePath), { recursive: true });
+    await ensureSafeVaultParentChain(fixtureAbsolutePath, "Dedicated fixture");
+    await assertSafeMissingVaultTarget(FIXTURE_PATH, "Dedicated fixture");
     const expectedLine = `- [ ] Operon adoption canary ${runId}`;
     const initialFixture = [
       "---",
@@ -1698,6 +2813,8 @@ async function main() {
       mode: 0o600,
       flag: "wx",
     });
+    await safeVaultRegularFile(FIXTURE_PATH, "Dedicated fixture");
+    await recordRunOwnedArtifact(FIXTURE_PATH, "Dedicated fixture");
     fixtureCreated = true;
     const fixtureBeforeAdoption = await waitForFileStable(
       fixtureAbsolutePath,
@@ -1727,15 +2844,24 @@ async function main() {
       "adoption apply",
       "applied",
     );
-    const postAdoptionStatus = await call("operon_status", {
-      forceRefresh: true,
-    });
+    const adoptionStatusGate = await waitForRefreshedSnapshotStatus(
+      "post-adoption status",
+    );
+    const postAdoptionStatus = adoptionStatusGate.status;
     assertRefreshedSnapshotStatus(postAdoptionStatus);
     assert.equal(postAdoptionStatus.snapshot.capabilities.adopt, true);
-    assert.equal(postAdoptionStatus.snapshot.capabilities.periodicCreate, false);
-    assert.equal(postAdoptionStatus.snapshot.capabilities.periodicUpdate, false);
+    assert.equal(
+      postAdoptionStatus.snapshot.capabilities.periodicCreate,
+      false,
+    );
+    assert.equal(
+      postAdoptionStatus.snapshot.capabilities.periodicUpdate,
+      false,
+    );
     assert.equal(postAdoptionStatus.snapshot.capabilities.filterQuery, false);
     evidence.firstUseNegotiation.adoptionOnly = true;
+    evidence.firstUseNegotiation.adoptionStatusAttempts =
+      adoptionStatusGate.attempts;
     evidence.nativeProofs.push(
       assertNativeMutationProof(adopted, "adoption apply"),
     );
@@ -1883,9 +3009,10 @@ async function main() {
       dates.daily,
       "Daily periodic create",
     );
-    const postPeriodicCreateStatus = await call("operon_status", {
-      forceRefresh: true,
-    });
+    const periodicCreateStatusGate = await waitForRefreshedSnapshotStatus(
+      "post-periodic-create status",
+    );
+    const postPeriodicCreateStatus = periodicCreateStatusGate.status;
     assertRefreshedSnapshotStatus(postPeriodicCreateStatus);
     assert.equal(
       postPeriodicCreateStatus.snapshot.capabilities.periodicCreate,
@@ -1895,8 +3022,13 @@ async function main() {
       postPeriodicCreateStatus.snapshot.capabilities.periodicUpdate,
       false,
     );
-    assert.equal(postPeriodicCreateStatus.snapshot.capabilities.filterQuery, false);
+    assert.equal(
+      postPeriodicCreateStatus.snapshot.capabilities.filterQuery,
+      false,
+    );
     evidence.firstUseNegotiation.periodicCreateOnly = true;
+    evidence.firstUseNegotiation.periodicCreateStatusAttempts =
+      periodicCreateStatusGate.attempts;
     const weekly = await periodicCreateViaMcp(
       "weekly",
       dates.weekly,
@@ -1904,9 +3036,10 @@ async function main() {
     );
     assert.notEqual(daily.path, weekly.path);
 
-    const schedulingCapabilityStatus = await call("operon_status", {
-      forceRefresh: true,
-    });
+    const schedulingStatusGate = await waitForRefreshedSnapshotStatus(
+      "pre-periodic-update status",
+    );
+    const schedulingCapabilityStatus = schedulingStatusGate.status;
     assertRefreshedSnapshotStatus(schedulingCapabilityStatus);
     assert.equal(
       schedulingCapabilityStatus.snapshot.capabilities.periodicUpdate,
@@ -1952,20 +3085,27 @@ async function main() {
     );
     assert.equal(schedulePreview.plan?.mutationKind, "task.update");
     assert.equal(schedulePreview.plan?.planDigest, schedulePreview.planDigest);
-    const postPeriodicUpdateStatus = await call("operon_status", {
-      forceRefresh: true,
-    });
+    const periodicUpdateStatusGate = await waitForRefreshedSnapshotStatus(
+      "post-periodic-update status",
+    );
+    const postPeriodicUpdateStatus = periodicUpdateStatusGate.status;
     assertRefreshedSnapshotStatus(postPeriodicUpdateStatus);
     assert.equal(
       postPeriodicUpdateStatus.snapshot.capabilities.periodicUpdate,
       true,
     );
-    assert.equal(postPeriodicUpdateStatus.snapshot.capabilities.filterQuery, false);
-    evidence.firstUseNegotiation.periodicUpdateOnly = true;
-    trackPlannedTaskSourceArtifacts(
-      schedulePreview.plan,
-      "Periodic scheduling set preview",
+    assert.equal(
+      postPeriodicUpdateStatus.snapshot.capabilities.filterQuery,
+      false,
     );
+    evidence.firstUseNegotiation.periodicUpdateOnly = true;
+    evidence.firstUseNegotiation.periodicUpdateStatusAttempts =
+      periodicUpdateStatusGate.attempts;
+    const schedulePlannedSourcePaths =
+      await assertSafePlannedTaskSourceArtifacts(
+        schedulePreview.plan,
+        "Periodic scheduling set preview",
+      );
     const beforeScheduleApply = await stableTask(daily.operonId);
     assert.equal(
       beforeScheduleApply.revision,
@@ -1973,6 +3113,10 @@ async function main() {
       "The Daily fixture changed after periodic scheduling preview.",
     );
     const beforeSchedulingMutationInventory = await markdownInventory();
+    await assertSafePlannedTaskSourceArtifacts(
+      schedulePreview.plan,
+      "Periodic scheduling set apply pre-dispatch",
+    );
     const scheduledResult = await callMutation(
       "operon_update_periodic_scheduling",
       {
@@ -1994,14 +3138,25 @@ async function main() {
         path.basename(change.path, ".md") === dates.scheduled
       ) {
         assert.equal(
+          schedulePlannedSourcePaths.has(change.path),
+          true,
+          "Periodic scheduling created a source path not sealed by the pre-dispatch plan.",
+        );
+        assert.equal(
           canonicalRelativeMarkdownPath(change.path),
           true,
           "Periodic scheduling created an unsafe task-source path.",
         );
-        artifactPaths.add(change.path);
+        await recordRunOwnedArtifact(
+          change.path,
+          "Periodic scheduling generated source",
+        );
       }
     }
-    trackNativeTaskSourceArtifacts(scheduledResult, "Periodic scheduling set");
+    await trackNativeTaskSourceArtifacts(
+      scheduledResult,
+      "Periodic scheduling set",
+    );
     const scheduled = mutationStatus(
       scheduledResult,
       "periodic scheduling set",
@@ -2011,6 +3166,10 @@ async function main() {
       assertNativeMutationProof(scheduled, "periodic scheduling set"),
     );
     assert.equal(scheduled.after.path, sourceLocator.path);
+    await safeVaultRegularFile(
+      scheduled.after.path,
+      "Periodic scheduling updated source",
+    );
     assert.equal(scheduled.after.operonId, daily.operonId);
     assert.equal(Number.isInteger(scheduled.after.line), true);
     assert.equal(scheduled.after.dates.scheduled, dates.scheduled);
@@ -2045,7 +3204,7 @@ async function main() {
     );
     assert.equal(clearPreview.plan?.mutationKind, "task.update");
     assert.equal(clearPreview.plan?.planDigest, clearPreview.planDigest);
-    trackPlannedTaskSourceArtifacts(
+    const clearPlannedSourcePaths = await assertSafePlannedTaskSourceArtifacts(
       clearPreview.plan,
       "Periodic scheduling clear preview",
     );
@@ -2054,6 +3213,10 @@ async function main() {
       beforeClearApply.revision,
       beforeClear.revision,
       "The Daily fixture changed after periodic scheduling clear preview.",
+    );
+    await assertSafePlannedTaskSourceArtifacts(
+      clearPreview.plan,
+      "Periodic scheduling clear apply pre-dispatch",
     );
     const clearedResult = await callMutation(
       "operon_update_periodic_scheduling",
@@ -2066,11 +3229,23 @@ async function main() {
       },
       "periodic scheduling clear",
     );
-    trackNativeTaskSourceArtifacts(clearedResult, "Periodic scheduling clear");
+    await trackNativeTaskSourceArtifacts(
+      clearedResult,
+      "Periodic scheduling clear",
+    );
     const cleared = mutationStatus(
       clearedResult,
       "periodic scheduling clear",
       "applied",
+    );
+    assert.equal(
+      clearPlannedSourcePaths.has(cleared.after.path),
+      true,
+      "Periodic scheduling clear returned a source path not sealed by the pre-dispatch plan.",
+    );
+    await safeVaultRegularFile(
+      cleared.after.path,
+      "Periodic scheduling cleared source",
     );
     evidence.nativeProofs.push(
       assertNativeMutationProof(cleared, "periodic scheduling clear"),
@@ -2098,20 +3273,58 @@ async function main() {
       sourcePathHash: shortHash(sourceLocator.path),
     };
 
+    const beforeConcurrent = await markdownInventory();
     const concurrentDescription = `Operon 3.5 concurrent periodic canary ${runId}`;
+    const concurrentPeriodic = {
+      description: concurrentDescription,
+      periodicKind: "daily",
+      routeDate: dates.concurrent,
+      fields: { taskType: "canary-concurrent-periodic" },
+    };
+    // The direct Bridge route below intentionally tests HTTP same-key joining.
+    // It must nevertheless receive the same physical containment gate as an
+    // MCP mutation: a distinct non-mutating preview seals every task source.
+    const concurrentPreview = mutationStatus(
+      await callMutation(
+        "operon_create_periodic_task",
+        {
+          idempotencyKey: `${runId}:bridge:periodic-concurrent:physical-preview`,
+          dryRun: true,
+          periodic: concurrentPeriodic,
+        },
+        "Bridge concurrency physical preview",
+      ),
+      "Bridge concurrency physical preview",
+      "planned",
+    );
+    const concurrentPlannedSourcePaths =
+      await assertSafePlannedTaskSourceArtifacts(
+        concurrentPreview.plan,
+        "Bridge concurrency physical preview",
+      );
+    assert.deepEqual(
+      redactedInventoryChanges(
+        inventoryDiff(beforeConcurrent, await markdownInventory()),
+      ),
+      [],
+      "Bridge concurrency physical preview changed the vault inventory.",
+    );
     const concurrentBody = JSON.stringify({
       idempotencyKey: `${runId}:bridge:periodic-concurrent`,
       dryRun: false,
-      periodic: {
-        description: concurrentDescription,
-        periodicKind: "daily",
-        routeDate: dates.concurrent,
-        fields: { taskType: "canary-concurrent-periodic" },
-      },
+      periodic: concurrentPeriodic,
     });
-    const beforeConcurrent = await markdownInventory();
     const bridgeUrl = `${baseUrl}${BRIDGE_PREFIX}/tasks/periodic`;
     const bridgePost = async () => {
+      // The two same-key calls are intentionally concurrent, but each HTTP
+      // dispatch owns its own final physical and candidate re-attestation.
+      // They are not treated as one atomic batch by this client process.
+      await assertSafePlannedTaskSourceArtifacts(
+        concurrentPreview.plan,
+        "Bridge concurrency physical apply pre-dispatch",
+      );
+      await assertCandidateStillExact(candidate);
+      await assertVaultRootStillSame("Bridge concurrency native apply");
       const response = await fetchWithAbortTimeout(
         bridgeUrl,
         {
@@ -2189,9 +3402,37 @@ async function main() {
     const concurrentTask = bridgeA.payload.after;
     assert.equal(concurrentTask?.source, "inline");
     assert.equal(canonicalRelativeMarkdownPath(concurrentTask?.path), true);
-    artifactPaths.add(concurrentTask.path);
+    assert.equal(
+      concurrentPlannedSourcePaths.has(concurrentTask.path),
+      true,
+      "Concurrent Bridge result source was not sealed by the physical pre-dispatch plan.",
+    );
+    await safeVaultRegularFile(
+      concurrentTask.path,
+      "Concurrent Bridge result source",
+    );
     const afterConcurrent = await markdownInventory();
     const concurrentChanges = inventoryDiff(beforeConcurrent, afterConcurrent);
+    for (const change of concurrentChanges) {
+      assert.equal(
+        change.change,
+        "created",
+        "Concurrent Bridge request changed a pre-existing Markdown source.",
+      );
+      assert.equal(
+        concurrentPlannedSourcePaths.has(change.path),
+        true,
+        "Concurrent Bridge request created a source not sealed by the physical pre-dispatch plan.",
+      );
+      await safeVaultRegularFile(
+        change.path,
+        "Concurrent Bridge created planned source",
+      );
+    }
+    await recordRunOwnedArtifact(
+      concurrentTask.path,
+      "Concurrent Bridge periodic result",
+    );
     assert.equal(beforeConcurrent.has(concurrentTask.path), false);
     assert.equal(
       concurrentChanges.some(
@@ -2406,16 +3647,22 @@ const inspectPendingMode = process.argv.includes("--inspect-pending-live");
 const offlineContractMode = process.argv.includes(
   "--offline-startup-order-contract",
 );
-assert.equal(
-  inspectPendingMode && offlineContractMode,
-  false,
+const pathSafetyContractMode = process.argv.includes(
+  "--offline-path-safety-contract",
+);
+assert.ok(
+  [inspectPendingMode, offlineContractMode, pathSafetyContractMode].filter(
+    Boolean,
+  ).length <= 1,
   "Select only one canary mode.",
 );
 const selectedMain = inspectPendingMode
   ? inspectPendingLive
   : offlineContractMode
     ? offlineStartupOrderContract
-    : main;
+    : pathSafetyContractMode
+      ? offlinePathSafetyContract
+      : main;
 
 selectedMain().catch((error) => {
   if (inspectPendingMode) {
@@ -2441,7 +3688,9 @@ selectedMain().catch((error) => {
       error: error instanceof Error ? error.message : String(error),
       note: offlineContractMode
         ? "The deterministic offline startup-order contract failed."
-        : "The canary refused before its guarded live workflow started.",
+        : pathSafetyContractMode
+          ? "The deterministic offline path-safety contract failed."
+          : "The canary refused before its guarded live workflow started.",
     }),
   );
   process.exitCode = 1;

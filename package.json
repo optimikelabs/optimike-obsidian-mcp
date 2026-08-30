@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "3.1.2",
+  "version": "3.2.0",
   "description": "Unified Obsidian MCP server with shared local cache, Operon and Tasks tools, Bases support, semantic search, runtime observability, and degraded read mode for durable agent workflows.",
   "main": "dist/index.js",
   "files": [
@@ -133,11 +133,14 @@
     "test:governed-canvas": "npm run build && node scripts/test-canvas-p3-compiler.mjs && node scripts/test-governed-canvas-operation.mjs && node scripts/test-governed-canvas-mcp.mjs && node scripts/test-governed-canvas-http.mjs && npm --prefix plugins/obsidian-atomic-write-bridge run check",
     "smoke:governed-canvas-live": "npm run build && node scripts/smoke-governed-canvas-live.mjs",
     "smoke:governed-base-live": "npm run build && node scripts/smoke-governed-base-formula-live.mjs",
-    "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && npm --prefix plugins/obsidian-operon-bridge run check",
+    "check:operon": "npm run build && npm run test:operon-contract && npm run test:operon-service && npm run test:operon-canary-path-safety && npm run test:operon-36-behavior-contract && npm --prefix plugins/obsidian-operon-bridge run check",
     "check:atomic-write": "npm run build && node scripts/test-modified-time-settlement.mjs && node scripts/test-modified-time-canary-helpers.mjs && node scripts/test-obsidian-note-replace-operation.mjs && npm --prefix plugins/obsidian-atomic-write-bridge run check",
     "smoke:operon-mutations": "node scripts/smoke-operon-mutations.mjs",
     "smoke:operon-rich-mutations": "node scripts/smoke-operon-rich-mutations.mjs",
     "smoke:operon-35-live": "node scripts/smoke-operon-35-live.mjs",
+    "test:operon-canary-path-safety": "node scripts/smoke-operon-35-live.mjs --offline-path-safety-contract",
+    "smoke:operon-36-behaviors-live": "node scripts/smoke-operon-36-behaviors-live.mjs",
+    "test:operon-36-behavior-contract": "node scripts/test-operon-36-behavior-contract.mjs",
     "test:operon-startup-order-offline": "node scripts/smoke-operon-35-live.mjs --offline-startup-order-contract",
     "test:profiles": "node scripts/test-elysia-task-profile.mjs",
     "test:tool-annotations": "node scripts/test-tool-annotations.mjs",

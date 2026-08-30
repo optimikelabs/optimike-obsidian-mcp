@@ -223,6 +223,21 @@ class FakeAtomicWriteBackend {
   beforeWrite = undefined;
   afterWriteBeforeReturn = undefined;
   settlement = undefined;
+  protection = undefined;
+
+  defaultProtection() {
+    return {
+      contractVersion: 1,
+      frontmatterDateProperties: {
+        integrations: (
+          this.settlement?.modifiedTimeFrontmatter.integrations ?? []
+        ).map((integration) => ({
+          pluginId: integration.pluginId,
+          modifiedPropertyName: integration.propertyName,
+        })),
+      },
+    };
+  }
 
   async status() {
     const response = {
@@ -237,6 +252,7 @@ class FakeAtomicWriteBackend {
       },
       limits: { markdownOnly: true },
       ...(this.settlement ? { settlement: this.settlement } : {}),
+      protection: this.protection ?? this.defaultProtection(),
     };
     if (this.afterStatus) {
       const afterStatus = this.afterStatus;
@@ -652,6 +668,101 @@ try {
     assert.equal(result.afterProof.details.sha256, sha256(backend.content));
     assert.equal(result.afterProof.details.sealedSha256, sha256(expected));
     assert.equal(result.afterProof.details.settlementPropertyName, "changedAt");
+  }
+
+  {
+    let now = Date.parse("2026-08-17T09:59:58.000Z");
+    const clock = () => now;
+    const { backend, adapter } = fixture(
+      "lost-response-modified-time-property-inserted",
+      { now: clock },
+    );
+    backend.content = "---\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "update-time-on-edit",
+            propertyName: "editedAt",
+            settlementObservationDelayMs: 0,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "lost-response-modified-time-property-inserted",
+    });
+    now = Date.parse("2026-08-17T10:00:00.000Z");
+    backend.loseResponseAfterWriteOnce = true;
+    backend.afterWriteBeforeReturn = async () => {
+      backend.content = backend.content.replace(
+        "statut: actif\n",
+        "statut: actif\neditedAt: 2026-08-17T10:00:01\n",
+      );
+      now = Date.parse("2026-08-17T10:00:02.000Z");
+    };
+    const result = await adapter.apply(
+      planned.planRef,
+      "lost-response-modified-time-property-inserted",
+    );
+    assert.equal(result.outcome, "committed");
+    assert.equal(result.postflight.status, "verified");
+    assert.equal(result.afterProof.details.sha256, sha256(backend.content));
+    assert.equal(result.afterProof.details.sealedSha256, sha256(expected));
+    assert.notEqual(
+      result.afterProof.details.sha256,
+      result.afterProof.details.sealedSha256,
+      "the observed settled revision must remain distinct from the sealed revision",
+    );
+    assert.equal(result.afterProof.details.settlementPropertyName, "editedAt");
+  }
+
+  {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    const clock = () => now;
+    const { backend, adapter } = fixture(
+      "inserted-modified-time-plus-real-drift",
+      { now: clock },
+    );
+    backend.content = "---\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "customModified",
+            settlementObservationDelayMs: 0,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "inserted-modified-time-plus-real-drift",
+    });
+    backend.loseResponseAfterWriteOnce = true;
+    backend.afterWriteBeforeReturn = async () => {
+      backend.content = backend.content.replace(
+        "statut: actif\n",
+        "statut: concurrent\ncustomModified: 2026-08-17T10:00\n",
+      );
+      now = Date.parse("2026-08-17T10:00:02.000Z");
+    };
+    const result = await adapter.apply(
+      planned.planRef,
+      "inserted-modified-time-plus-real-drift",
+    );
+    assert.equal(result.outcome, "outcome_unknown");
+    assert.equal(result.recoveryAllowed, true);
   }
 
   {
@@ -1096,6 +1207,153 @@ try {
     assert.equal(backend.replaceCalls, 0);
   }
 
+  for (const [name, integrations] of [
+    [
+      "settlement-role-viewed-only",
+      [
+        {
+          pluginId: "frontmatter-date-manager",
+          viewedPropertyName: "settlementModified",
+        },
+      ],
+    ],
+    [
+      "settlement-role-created-only",
+      [
+        {
+          pluginId: "frontmatter-date-manager",
+          createdPropertyName: "settlementModified",
+        },
+      ],
+    ],
+    [
+      "settlement-role-ambiguous",
+      [
+        {
+          pluginId: "frontmatter-date-manager",
+          modifiedPropertyName: "settlementModified",
+          viewedPropertyName: "settlementModified",
+        },
+      ],
+    ],
+    [
+      "settlement-role-plugin-mismatch",
+      [
+        {
+          pluginId: "update-time",
+          modifiedPropertyName: "settlementModified",
+        },
+      ],
+    ],
+  ]) {
+    const { backend, adapter } = fixture(name);
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "settlementModified",
+            settlementObservationDelayMs: 0,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    backend.protection = {
+      contractVersion: 1,
+      frontmatterDateProperties: { integrations },
+    };
+    await assert.rejects(
+      adapter.plan({
+        path: backend.path,
+        nextContent: "replacement",
+        idempotencyKey: name,
+      }),
+      (error) => {
+        assert.ok(error instanceof McpError);
+        assert.equal(error.code, BaseErrorCode.FORBIDDEN);
+        assert.equal(
+          error.details?.reason,
+          "atomic_write_settlement_role_binding_missing",
+        );
+        assert.equal(error.message.includes("settlementModified"), false);
+        assert.equal(
+          JSON.stringify(error.details).includes("settlementModified"),
+          false,
+        );
+        return true;
+      },
+    );
+    assert.equal(
+      backend.replaceCalls,
+      0,
+      `${name} must fail before dispatching CAS`,
+    );
+  }
+
+  {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    const { backend, adapter } = fixture(
+      "settlement-role-cross-plugin-not-ambiguous",
+      { now: () => now },
+    );
+    backend.content =
+      "---\neditedAt: 2026-08-17T09:59\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            propertyName: "editedAt",
+            settlementObservationDelayMs: 0,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    backend.protection = {
+      contractVersion: 1,
+      frontmatterDateProperties: {
+        integrations: [
+          {
+            pluginId: "frontmatter-date-manager",
+            modifiedPropertyName: "editedAt",
+          },
+          {
+            pluginId: "update-time",
+            viewedPropertyName: "editedAt",
+          },
+        ],
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    await assert.rejects(
+      adapter.plan({
+        path: backend.path,
+        nextContent: expected,
+        idempotencyKey: "settlement-role-cross-plugin-not-ambiguous",
+      }),
+      (error) => {
+        assert.ok(error instanceof McpError);
+        assert.equal(error.code, BaseErrorCode.FORBIDDEN);
+        assert.equal(
+          error.details?.reason,
+          "atomic_write_settlement_role_binding_missing",
+        );
+        assert.equal(error.message.includes("editedAt"), false);
+        assert.equal(JSON.stringify(error.details).includes("editedAt"), false);
+        return true;
+      },
+    );
+    assert.equal(
+      backend.replaceCalls,
+      0,
+      "cross-plugin role collisions must fail before dispatching CAS",
+    );
+  }
+
   {
     const now = Date.parse("2026-08-17T10:00:00.000Z");
     const { backend, adapter } = fixture("settlement-policy-changed", {
@@ -1221,6 +1479,190 @@ try {
     );
     assert.equal(recovered.outcome, "committed");
     assert.equal(recovered.afterProof.details.sha256, sha256(backend.content));
+  }
+
+  {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    const clock = () => now;
+    const { backend, databasePath, journal, adapter } = fixture(
+      "restart-inserted-modified-time-settlement-status",
+      { now: clock },
+    );
+    backend.content = "---\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "update-time-on-edit",
+            propertyName: "editedAt",
+            settlementObservationDelayMs: 0,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "restart-inserted-modified-time-settlement-status",
+    });
+    const applying = journal.transition(
+      planned.operationId,
+      ["planned"],
+      "applying",
+    );
+    journal.beginModifiedTimeSettlementObservation(
+      planned.operationId,
+      ["applying"],
+      applying.executionOwner.attemptId,
+    );
+    backend.content = expected.replace(
+      "statut: actif\n",
+      "statut: actif\neditedAt: 2026-08-17T10:00:01\n",
+    );
+    now = Date.parse("2026-08-17T10:00:02.000Z");
+    journal.close();
+    const restartedJournal = new ObsidianNoteReplaceJournal(databasePath, {
+      now: clock,
+    });
+    journals.push(restartedJournal);
+    const restartedAdapter = new ObsidianNoteReplaceOperationAdapter(
+      backend,
+      restartedJournal,
+      undefined,
+      { now: clock },
+    );
+    const observed = await restartedAdapter.status(planned.planRef);
+    assert.equal(observed.outcome, "committed");
+    assert.equal(observed.afterProof.details.sha256, sha256(backend.content));
+    assert.equal(backend.replaceCalls, 0);
+  }
+
+  {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    const clock = () => now;
+    const { backend, databasePath, journal, adapter } = fixture(
+      "restart-inserted-modified-time-settlement-recover",
+      { now: clock },
+    );
+    backend.content = "---\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "update-time-on-edit",
+            propertyName: "editedAt",
+            settlementObservationDelayMs: 0,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "restart-inserted-modified-time-settlement-recover",
+    });
+    const applying = journal.transition(
+      planned.operationId,
+      ["planned"],
+      "applying",
+    );
+    journal.beginModifiedTimeSettlementObservation(
+      planned.operationId,
+      ["applying"],
+      applying.executionOwner.attemptId,
+    );
+    backend.content = expected.replace(
+      "statut: actif\n",
+      "statut: actif\neditedAt: 2026-08-17T10:00:01\n",
+    );
+    now = Date.parse("2026-08-17T10:00:02.000Z");
+    journal.close();
+    const restartedJournal = new ObsidianNoteReplaceJournal(databasePath, {
+      now: clock,
+    });
+    journals.push(restartedJournal);
+    const restartedAdapter = new ObsidianNoteReplaceOperationAdapter(
+      backend,
+      restartedJournal,
+      undefined,
+      { now: clock },
+    );
+    const recovered = await restartedAdapter.recover(
+      planned.planRef,
+      "restart-inserted-modified-time-settlement-recover",
+    );
+    assert.equal(recovered.outcome, "committed");
+    assert.equal(recovered.afterProof.details.sha256, sha256(backend.content));
+    assert.equal(backend.replaceCalls, 0);
+  }
+
+  {
+    let now = Date.parse("2026-08-17T10:00:00.000Z");
+    const clock = () => now;
+    const { backend, databasePath, journal, adapter } = fixture(
+      "restart-inserted-modified-time-plus-real-drift",
+      { now: clock },
+    );
+    backend.content = "---\nstatut: actif\n---\navant\n";
+    backend.settlement = {
+      contractVersion: 1,
+      modifiedTimeFrontmatter: {
+        integrations: [
+          {
+            pluginId: "update-time-on-edit",
+            propertyName: "editedAt",
+            settlementObservationDelayMs: 0,
+          },
+        ],
+        utcOffsetMinutes: 0,
+      },
+    };
+    const expected = backend.content.replace("avant", "après");
+    const planned = await adapter.plan({
+      path: backend.path,
+      nextContent: expected,
+      idempotencyKey: "restart-inserted-modified-time-plus-real-drift",
+    });
+    const applying = journal.transition(
+      planned.operationId,
+      ["planned"],
+      "applying",
+    );
+    journal.beginModifiedTimeSettlementObservation(
+      planned.operationId,
+      ["applying"],
+      applying.executionOwner.attemptId,
+    );
+    backend.content = expected.replace(
+      "statut: actif\n",
+      "statut: concurrent\neditedAt: 2026-08-17T10:00:01\n",
+    );
+    now = Date.parse("2026-08-17T10:00:02.000Z");
+    journal.close();
+    const restartedJournal = new ObsidianNoteReplaceJournal(databasePath, {
+      now: clock,
+    });
+    journals.push(restartedJournal);
+    const restartedAdapter = new ObsidianNoteReplaceOperationAdapter(
+      backend,
+      restartedJournal,
+      undefined,
+      { now: clock },
+    );
+    const observed = await restartedAdapter.status(planned.planRef);
+    assert.equal(observed.outcome, "outcome_unknown");
+    const recovered = await restartedAdapter.recover(
+      planned.planRef,
+      "restart-inserted-modified-time-plus-real-drift",
+    );
+    assert.equal(recovered.outcome, "outcome_unknown");
+    assert.equal(backend.replaceCalls, 0);
   }
 
   {

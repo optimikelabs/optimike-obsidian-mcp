@@ -135,17 +135,17 @@ Conversion remains classified as destructive because file-to-inline moves the so
 
 `operon_adopt_task` uses the official additive task-workflow API only after the exact `tasks.adopt.preview` and `tasks.adopt.apply` grants. Product-version membership is not a second mutation gate. The tool upgrades one exact checkbox through Operon's opaque sealed plan. The target file, one-based line, and exact source line must match; otherwise the operation returns `conflict` without writing. A compatible legacy engine may still advertise its bounded adoption contract, but a missing official grant returns a structured unavailable result and the MCP never simulates adoption with a Markdown edit.
 
-`operon_create_task` creates inline or file tasks through Operon's creator services. On official Operon 3.2.0, typed fields, tags, stable `statusId`, relationships, exact inline `targetPath`, and configured/default file templates are supported. Unmanaged YAML properties and arbitrary `targetFolder` placement are legacy-only; the official Developer API path rejects them instead of using a fallback.
+`operon_create_task` creates inline or file tasks through Operon's creator services. On official Operon 3.2.0, typed fields, tags, stable `statusId`, relationships, exact inline `targetPath`, and configured/default file templates are supported. `dateScheduled` is not accepted during creation: set or clear it only afterwards with `operon_update_periodic_scheduling`. Unmanaged YAML properties and arbitrary `targetFolder` placement are legacy-only; the official Developer API path rejects them instead of using a fallback.
 
-`operon_create_periodic_task` creates exactly one inline task in Operon's configured Daily or Weekly Note after the exact periodic preview/apply grants. Operon owns date routing, templates, container identity and receipts; the MCP cannot supply an arbitrary target path or parent. `priorityId` postflight is verified against the stable projected priority. If apply may have succeeded but no unique created identity can be proven, the result remains `outcome-unknown`; the MCP never retries the ambiguous creation. `operon_update_periodic_scheduling` sets or clears the scheduled date of one exact task. Operon decides whether the task is retained, detached or realigned, and never moves the source Markdown as a side effect of that route.
+`operon_create_periodic_task` creates exactly one inline task in Operon's configured Daily or Weekly Note after the exact periodic preview/apply grants. Operon owns date routing, templates, container identity and receipts; the MCP cannot supply an arbitrary target path or parent. `routeDate` selects the Daily/Weekly Note, while `fields.dateScheduled` may set the task's initial scheduled date through the same native workflow. `priorityId` postflight is verified against the stable projected priority. If apply may have succeeded but no unique created identity can be proven, the result remains `outcome-unknown`; the MCP never retries the ambiguous creation. `operon_update_periodic_scheduling` is the only MCP tool that sets or clears `dateScheduled` on an existing task: Operon may need its additive periodic workflow to retain, detach, or realign the task, and the route never moves the source Markdown as a side effect.
 
 Managed fields preserve their official shape. `taskType` and `taskImage` are scalar strings. `taskGallery` is a lossless ordered string array and delimiter-based strings are rejected. The derived `__taskDataType` field is read-only and cannot enter create or update input.
 
-`operon_update_task` accepts exactly one group per call: description, managed fields/tags, or one unmanaged file property. Status transitions use the dedicated tool. Unmanaged file properties are supported only by the legacy Public API path; official Operon 3.2.0 rejects them explicitly.
+`operon_update_task` accepts exactly one ordinary group per call: description, managed fields/tags, or one unmanaged file property. It rejects `dateScheduled`, relationship fields, and recurrence fields; callers must use `operon_update_periodic_scheduling`, `operon_set_relationships`, or `operon_update_recurrence` respectively. Status transitions use the dedicated tool. Unmanaged file properties are supported only by the legacy Public API path; official Operon 3.2.0 rejects them explicitly.
 
 `operon_set_relationships` replaces or explicitly clears `parentTask`, `blocking`, and `blockedBy`. It rejects duplicate targets, self-reference, and a target present in both dependency directions before preview. Operon seals the complete affected-resource set and performs graph/cycle validation; after apply the Bridge verifies the source and every changed inverse dependency edge.
 
-`operon_update_recurrence` changes only the official recurrence surface with an explicit `this-task` or `this-and-following` scope. `null` clears a field. Recurrence is not simulated through `operon_update_task`; apply requires full mode, and the Bridge rereads every requested normalized field after the sealed plan completes.
+`operon_update_recurrence` changes only the official recurrence surface with an explicit `this-task` or `this-and-following` scope. It does not accept `dateScheduled`; set or clear that field only with `operon_update_periodic_scheduling`. `null` clears a supported recurrence field. Recurrence is not simulated through `operon_update_task`; apply requires full mode, and the Bridge rereads every requested normalized field after the sealed plan completes.
 
 `operon_transition_task` prefers a stable status ID from `operon_get_configuration`, while still accepting exactly one current configured workflow value for compatibility. Operon 3.2.0 transition preview/apply is available through the Bridge. Elevated transitions require fresh host-owned consent: the confirmation modal is constructed in the owning vault window and an unattended request fails closed after 45 seconds. The CLI/native official path remains an operator diagnostic surface, not a bypass; no Markdown/private fallback is introduced.
 
@@ -194,10 +194,11 @@ operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.1.2 release admission
+## 3.2.0 admission
 
-Optimike MCP `3.1.2`, Bridge `0.8.2`, Operon `3.5.3` and Operon CLI `1.2.0`
-form the current released set. Operon `3.5.3` remains
+Optimike MCP `3.2.0`, Bridge `0.8.3`, Operon `3.6.0`,
+Operon CLI `1.2.0` and Local REST API `5.1.0` form the current validation set;
+they do not claim a published `3.2.0` tag. Operon `3.6.0` remains
 `compatible-provisional` until it joins the explicit certified evidence set,
 but that label no longer masks valid mutation capabilities. Product version is
 diagnostic metadata and may select an explicit deny or narrowly blocked path;
@@ -220,3 +221,9 @@ all ambiguous transport or post-dispatch failures remain durable and fail closed
 Ordinary healthy or degraded status polls never negotiate additive filter,
 workflow, or recovery grants; only the exact operation or dedicated recovery
 surface may do so.
+
+The public Developer API V1 contract did not drift from Operon `3.5.3` to
+`3.6.0`. The latter nevertheless changes Task Editor relation cleanup, permits
+Scheduled Date on a blocked task, and optionally expands a parent's date range
+after a child mutation. These behaviors must be tested in the enabled vault
+configuration; they never authorize accepting unrelated postflight drift.

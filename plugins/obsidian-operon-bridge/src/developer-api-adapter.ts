@@ -11,6 +11,154 @@ import {
   resolvePriorityStableId,
 } from "./contract";
 
+const GENERIC_MUTATION_INSPECTION_MAX_DEPTH = 32;
+const GENERIC_MUTATION_INSPECTION_MAX_NODES = 10_000;
+
+/**
+ * Generic create, update and recurrence are deliberately unable to carry a
+ * scheduled date. Inspect descriptors instead of reading caller values: a
+ * direct internal caller can otherwise bypass REST validation with a getter,
+ * a Proxy, an array or an unknown nested object. The public routes receive
+ * JSON, so an input that cannot be completely inspected is invalid rather
+ * than a reason to risk reaching the native preview/apply boundary.
+ */
+export type GenericMutationSnapshotResult =
+  | { ok: true; snapshot: unknown }
+  | { ok: false; message: string };
+
+/**
+ * Snapshots untrusted generic mutation input before it reaches any validation
+ * or native adapter gate. Only JSON data survives: every value comes from one
+ * own data descriptor, and no caller object is reread after this returns.
+ */
+export function genericMutationSnapshot(
+  value: unknown,
+): GenericMutationSnapshotResult {
+  const seen = new Set<object>();
+  let entries = 0;
+  const restricted =
+    "dateScheduled is accepted only through POST /tasks/periodic for initial creation or POST /tasks/:operonId/periodic-update for an existing task.";
+  const unsafe =
+    "Generic mutation input must be a bounded JSON value without accessors, unstable object traps, cycles, or unsupported primitives.";
+
+  const clone = (
+    candidate: unknown,
+    depth: number,
+  ): { ok: true; value: unknown } | { ok: false; message: string } => {
+    if (candidate === null) return { ok: true, value: null };
+    if (
+      typeof candidate === "string" ||
+      typeof candidate === "boolean" ||
+      (typeof candidate === "number" && Number.isFinite(candidate))
+    ) {
+      return { ok: true, value: candidate };
+    }
+    if (typeof candidate !== "object") return { ok: false, message: unsafe };
+    if (depth > GENERIC_MUTATION_INSPECTION_MAX_DEPTH)
+      return { ok: false, message: unsafe };
+    const object = candidate as object;
+    if (seen.has(object)) return { ok: false, message: unsafe };
+    seen.add(object);
+    try {
+      const prototype = Object.getPrototypeOf(object);
+      const array = Array.isArray(object);
+      if (
+        (array && prototype !== Array.prototype) ||
+        (!array && prototype !== Object.prototype && prototype !== null)
+      ) {
+        return { ok: false, message: unsafe };
+      }
+      const ownKeys = Reflect.ownKeys(object);
+      // A changing ownKeys trap is not a stable JSON snapshot. Descriptors are
+      // deliberately still read only once below.
+      const verifiedOwnKeys = Reflect.ownKeys(object);
+      if (
+        ownKeys.length !== verifiedOwnKeys.length ||
+        ownKeys.some((key, index) => key !== verifiedOwnKeys[index])
+      ) {
+        return { ok: false, message: unsafe };
+      }
+      if (array) {
+        if (ownKeys.some((key) => key === "dateScheduled")) {
+          return { ok: false, message: restricted };
+        }
+        const lengthDescriptor = Object.getOwnPropertyDescriptor(
+          object,
+          "length",
+        );
+        if (
+          !lengthDescriptor ||
+          !("value" in lengthDescriptor) ||
+          !Number.isSafeInteger(lengthDescriptor.value) ||
+          lengthDescriptor.value < 0 ||
+          lengthDescriptor.value > GENERIC_MUTATION_INSPECTION_MAX_NODES
+        ) {
+          return { ok: false, message: unsafe };
+        }
+        const length = lengthDescriptor.value;
+        const output: unknown[] = [];
+        for (let index = 0; index < length; index += 1) {
+          const key = String(index);
+          if (++entries > GENERIC_MUTATION_INSPECTION_MAX_NODES)
+            return { ok: false, message: unsafe };
+          const descriptor = Object.getOwnPropertyDescriptor(object, key);
+          if (
+            !descriptor ||
+            !descriptor.enumerable ||
+            !("value" in descriptor)
+          ) {
+            return { ok: false, message: unsafe };
+          }
+          const nested = clone(descriptor.value, depth + 1);
+          if (!nested.ok) return nested;
+          output.push(nested.value);
+        }
+        if (
+          ownKeys.length !== length + 1 ||
+          ownKeys.some(
+            (key) => key !== "length" && !/^(?:0|[1-9]\d*)$/u.test(String(key)),
+          )
+        ) {
+          return { ok: false, message: unsafe };
+        }
+        return { ok: true, value: output };
+      }
+      const output: Record<string, unknown> = Object.create(null);
+      for (const key of ownKeys) {
+        if (typeof key !== "string") return { ok: false, message: unsafe };
+        if (key === "dateScheduled") return { ok: false, message: restricted };
+        if (++entries > GENERIC_MUTATION_INSPECTION_MAX_NODES)
+          return { ok: false, message: unsafe };
+        const descriptor = Object.getOwnPropertyDescriptor(object, key);
+        if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) {
+          return { ok: false, message: unsafe };
+        }
+        const nested = clone(descriptor.value, depth + 1);
+        if (!nested.ok) return nested;
+        Object.defineProperty(output, key, {
+          configurable: true,
+          enumerable: true,
+          value: nested.value,
+          writable: true,
+        });
+      }
+      return { ok: true, value: output };
+    } catch {
+      return { ok: false, message: unsafe };
+    }
+  };
+
+  const result = clone(value, 0);
+  return result.ok ? { ok: true, snapshot: result.value } : result;
+}
+
+export function genericDateScheduledBoundaryError(
+  value: unknown,
+): string | null {
+  const result = genericMutationSnapshot(value);
+  return result.ok ? null : result.message;
+}
+
 /**
  * Minimal structural view of the official Operon Developer API V1.
  *
@@ -2046,6 +2194,25 @@ export class OperonDeveloperApiRuntimeAdapter {
     requested: Record<string, unknown>,
     dryRun: boolean,
   ): Promise<DeveloperApiMutationResult> {
+    if (
+      capability === "create" ||
+      capability === "update" ||
+      capability === "recurrence"
+    ) {
+      const snapshot = genericMutationSnapshot(requested);
+      if (!snapshot.ok || !isRecord(snapshot.snapshot)) {
+        return this.mutationFailure(
+          "invalid-input",
+          snapshot.ok
+            ? "Generic mutation input must be a JSON object."
+            : snapshot.message,
+          operonId,
+          false,
+          { mutationMayHaveApplied: false },
+        );
+      }
+      requested = snapshot.snapshot;
+    }
     const api = this.mutationApis.get(capability);
     const mutations = api?.mutations;
     if (
@@ -4160,7 +4327,6 @@ export class OperonDeveloperApiRuntimeAdapter {
       > = {
         repeat: "text",
         datetimeRepeatEnd: "datetime",
-        dateScheduled: "date",
         dateStarted: "date",
         dateDue: "date",
         datetimeStart: "datetime",

@@ -98,7 +98,7 @@ Tous les modes enregistrent aussi les 25 outils du contrat Operon :
 `operon_relocate_task`, `operon_list_pending_recoveries` et
 `operon_recover_mutation`. Hors mode live, ils restent limités aux snapshots
 validés en lecture seule ; toute mutation échoue fermée. L’enregistrement ne
-garantit pas la disponibilité runtime : Operon officiel `3.5.3` expose
+garantit pas la disponibilité runtime : Operon officiel `3.6.0` conserve
 l’exécution des filtres, l’adoption et les workflows Daily/Weekly après leurs
 grants exacts. Une future version non refusée ne bascule pas en lecture seule
 uniquement parce que son numéro est inconnu : le Bridge n’admet chaque mutation
@@ -110,6 +110,11 @@ filtres sauvegardés après un grant exact `tasks.filter-query`, mais ne publie 
 leur catalogue ; l’adoption reste indisponible. Les relations et la récurrence
 ont passé le pilote live dédié 3.2.0. Les limites bornées #99/#101 et #139
 restent ouvertes. Le renderer Settings manquant en 3.2.1 est suivi dans #145/#146.
+Operon `3.5.3` reste une preuve historique du déploiement de l’adoption et des
+workflows périodiques ; il n’est pas la cible candidate actuelle. Le candidat
+Des runs Pilot 2 sur le worktree ont exercé Optimike MCP `3.2.0` avec Operon
+`3.6.0`, CLI `1.2.0`, Local REST API `5.1.0` et Bridge `0.8.3` ; l’admission de
+la release exige la même gate sur le SHA final propre.
 Voir le [contrat MCP Operon](operon-mcp-contract.fr.md) et
 l’[audit CLI/API](operon-cli-audit.fr.md).
 

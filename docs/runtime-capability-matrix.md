@@ -102,7 +102,7 @@ Every mode also registers the 25 Operon contract tools:
 `operon_relocate_task`, `operon_list_pending_recoveries`, and
 `operon_recover_mutation`. In non-live modes they remain limited to validated
 read-only snapshots; mutation calls fail closed. Registration does not imply
-runtime availability: official Operon `3.5.3` exposes saved-filter evaluation,
+runtime availability: official Operon `3.6.0` retains saved-filter evaluation,
 adoption and Daily/Weekly workflows after their exact grants. A non-denied
 future release is not forced into read-only mode solely because its product
 version is unknown: the Bridge admits each mutation only after Developer API V1
@@ -113,6 +113,11 @@ recovery. Earlier official Operon `3.2.x` exposes saved-filter evaluation
 after an exact `tasks.filter-query` grant, but not catalog discovery; adoption
 remains unavailable. Relationship and recurrence apply passed the dedicated
 3.2.0 live pilot. The bounded upstream limits in #99/#101 and #139 remain.
+Operon `3.5.3` is retained as historical evidence for the adoption and
+periodic-workflow rollout; it is not the current candidate target. The
+Working-tree Pilot 2 runs exercised Optimike MCP `3.2.0` with Operon `3.6.0`,
+CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.8.3`; release admission
+requires the same gate on the clean final SHA.
 The missing 3.2.1 Settings renderer is tracked in #145/#146. Elevated transitions require fresh
 confirmation in the owning Obsidian vault window; unattended consent fails
 closed after 45 seconds. See the [Operon MCP contract](operon-mcp-contract.md)

@@ -26,7 +26,8 @@ const PROTECTED_LINE = "création: 2026-08-13";
 const INITIAL_CONTENT = `---\n${PROTECTED_LINE}\nstatut: actif\n---\nbefore\n`;
 const DEFAULT_BINDING = sha256("governed-note-replace-fixture-vault");
 const SECRET = "sealed-next-content-MUST-NOT-LEAK-47f5108a";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const PUBLIC_MESSAGES = {
   VALIDATION_ERROR: "The request could not be validated.",
   FORBIDDEN: "This request is not authorized.",
@@ -386,18 +387,43 @@ function assertNoSecret(value, label) {
 
 function assertPublicError(payload, code, forbiddenMarker, label) {
   assert.equal(payload.error.code, code, `${label} error code`);
-  assert.equal(payload.error.message, PUBLIC_MESSAGES[code], `${label} catalog message`);
+  assert.equal(
+    payload.error.message,
+    PUBLIC_MESSAGES[code],
+    `${label} catalog message`,
+  );
   const requestId = payload.requestId ?? payload.error.details?.requestId;
   assert.match(requestId ?? "", UUID, `${label} request id`);
-  assert.equal(payload.error.details?.requestId, requestId, `${label} request id details`);
-  assert.doesNotMatch(JSON.stringify(payload), new RegExp(forbiddenMarker, "u"), `${label} leaked marker`);
+  assert.equal(
+    payload.error.details?.requestId,
+    requestId,
+    `${label} request id details`,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(payload),
+    new RegExp(forbiddenMarker, "u"),
+    `${label} leaked marker`,
+  );
   for (const field of ["reasonCode", "phase", "outcome"]) {
     if (field in (payload.error.details ?? {})) {
       const value = payload.error.details[field];
       assert.equal(typeof value, "string");
       if (field === "reasonCode") assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
-      if (field === "phase") assert.ok(["planned", "applying", "recovering", "terminal"].includes(value));
-      if (field === "outcome") assert.ok(["committed", "compensated", "conflict", "rejected", "failed", "outcome_unknown"].includes(value));
+      if (field === "phase")
+        assert.ok(
+          ["planned", "applying", "recovering", "terminal"].includes(value),
+        );
+      if (field === "outcome")
+        assert.ok(
+          [
+            "committed",
+            "compensated",
+            "conflict",
+            "rejected",
+            "failed",
+            "outcome_unknown",
+          ].includes(value),
+        );
     }
   }
 }
@@ -637,7 +663,12 @@ try {
     },
     true,
   );
-  assertPublicError(protectedAttempt.payload, "FORBIDDEN", "protected frontmatter", "protected frontmatter");
+  assertPublicError(
+    protectedAttempt.payload,
+    "FORBIDDEN",
+    "protected frontmatter",
+    "protected frontmatter",
+  );
   assert.equal(fake.casRequests, 0);
 
   fake.reset(
@@ -675,7 +706,12 @@ try {
     },
     true,
   );
-  assertPublicError(customCreatedAttempt.payload, "FORBIDDEN", "protected frontmatter", "custom created protection");
+  assertPublicError(
+    customCreatedAttempt.payload,
+    "FORBIDDEN",
+    "protected frontmatter",
+    "custom created protection",
+  );
   assert.equal(fake.casRequests, 0);
 
   const customModifiedAttempt = await call(
@@ -689,7 +725,12 @@ try {
     },
     true,
   );
-  assertPublicError(customModifiedAttempt.payload, "FORBIDDEN", "protected frontmatter", "custom modified protection");
+  assertPublicError(
+    customModifiedAttempt.payload,
+    "FORBIDDEN",
+    "protected frontmatter",
+    "custom modified protection",
+  );
   assert.equal(fake.casRequests, 0);
 
   const customViewedAttempt = await call(
@@ -703,7 +744,139 @@ try {
     },
     true,
   );
-  assertPublicError(customViewedAttempt.payload, "FORBIDDEN", "protected frontmatter", "custom viewed protection");
+  assertPublicError(
+    customViewedAttempt.payload,
+    "FORBIDDEN",
+    "protected frontmatter",
+    "custom viewed protection",
+  );
+  assert.equal(fake.casRequests, 0);
+
+  // A modified key claimed by one integration is not settleable if another
+  // supported integration uses the same normalized key for creation or view.
+  // This must fail before any CAS request, regardless of plugin ownership or
+  // casing of the configured property names.
+  fake.reset("---\nchangedAt: 2026-08-17T10:00\n---\nbefore\n");
+  fake.dateProtection = [
+    {
+      pluginId: "update-time-on-edit",
+      modifiedPropertyName: "changedAt",
+    },
+    {
+      pluginId: "frontmatter-date-manager",
+      createdPropertyName: "CHANGEDAT",
+    },
+  ];
+  fake.settlement = {
+    contractVersion: 1,
+    modifiedTimeFrontmatter: {
+      integrations: [
+        {
+          pluginId: "update-time-on-edit",
+          propertyName: "changedAt",
+          settlementObservationDelayMs: 250,
+        },
+      ],
+      utcOffsetMinutes: 0,
+    },
+  };
+  const crossIntegrationCreatedCollision = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: "---\nchangedAt: 2026-08-17T10:00\n---\nafter\n",
+      idempotencyKey: "cross-integration-created-settlement-collision",
+    },
+    true,
+  );
+  assertPublicError(
+    crossIntegrationCreatedCollision.payload,
+    "FORBIDDEN",
+    "unambiguous modified-time settlement role binding",
+    "cross-integration created settlement collision",
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset("---\nchangedAt: 2026-08-17T10:00\n---\nbefore\n");
+  fake.dateProtection = [
+    {
+      pluginId: "update-time-on-edit",
+      modifiedPropertyName: "ChangedAt",
+    },
+    {
+      pluginId: "frontmatter-date-manager",
+      viewedPropertyName: "CHANGEDAT",
+    },
+  ];
+  fake.settlement = {
+    contractVersion: 1,
+    modifiedTimeFrontmatter: {
+      integrations: [
+        {
+          pluginId: "update-time-on-edit",
+          propertyName: "changedAT",
+          settlementObservationDelayMs: 250,
+        },
+      ],
+      utcOffsetMinutes: 0,
+    },
+  };
+  const crossIntegrationViewedCollision = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: "---\nchangedAt: 2026-08-17T10:00\n---\nafter\n",
+      idempotencyKey: "cross-integration-viewed-settlement-collision",
+    },
+    true,
+  );
+  assertPublicError(
+    crossIntegrationViewedCollision.payload,
+    "FORBIDDEN",
+    "unambiguous modified-time settlement role binding",
+    "cross-integration viewed settlement collision",
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset(
+    "---\nbornAt: 2026-08-13\nchangedAt: 2026-08-17T10:00\n---\nbefore\n",
+  );
+  fake.dateProtection = [
+    {
+      pluginId: "update-time-on-edit",
+      modifiedPropertyName: "changedAt",
+    },
+    {
+      pluginId: "frontmatter-date-manager",
+      createdPropertyName: "bornAt",
+    },
+  ];
+  fake.settlement = {
+    contractVersion: 1,
+    modifiedTimeFrontmatter: {
+      integrations: [
+        {
+          pluginId: "update-time-on-edit",
+          propertyName: "changedAt",
+          settlementObservationDelayMs: 250,
+        },
+      ],
+      utcOffsetMinutes: 0,
+    },
+  };
+  const unrelatedDateRolePlan = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent:
+        "---\nbornAt: 2026-08-13\nchangedAt: 2026-08-17T10:00\n---\nafter\n",
+      idempotencyKey: "unrelated-date-role-settlement",
+    },
+  );
+  assert.ok(unrelatedDateRolePlan.payload.planRef);
   assert.equal(fake.casRequests, 0);
 
   fake.reset("---\nstatut: actif\n---\nbefore\n");
@@ -723,7 +896,12 @@ try {
     },
     true,
   );
-  assertPublicError(missingCreatedAttempt.payload, "FORBIDDEN", "creation-date properties to exist", "missing creation date");
+  assertPublicError(
+    missingCreatedAttempt.payload,
+    "FORBIDDEN",
+    "creation-date properties to exist",
+    "missing creation date",
+  );
   assert.equal(fake.casRequests, 0);
 
   fake.reset("---\nchangedAt: 2026-08-17T10:00\n---\nbefore\n");
@@ -743,7 +921,12 @@ try {
     },
     true,
   );
-  assertPublicError(unsupportedSettlementAttempt.payload, "FORBIDDEN", "cannot safely settle", "unsupported settlement");
+  assertPublicError(
+    unsupportedSettlementAttempt.payload,
+    "FORBIDDEN",
+    "cannot safely settle",
+    "unsupported settlement",
+  );
   assert.equal(fake.casRequests, 0);
 
   fake.reset("---\nstatut: actif\n---\nbefore\n");
@@ -767,7 +950,12 @@ try {
     },
     true,
   );
-  assertPublicError(unrepresentableDateConfigurationAttempt.payload, "FORBIDDEN", "cannot safely represent active date-property settings|frontmatter-date-manager", "unrepresentable date configuration");
+  assertPublicError(
+    unrepresentableDateConfigurationAttempt.payload,
+    "FORBIDDEN",
+    "cannot safely represent active date-property settings|frontmatter-date-manager",
+    "unrepresentable date configuration",
+  );
   assert.equal(fake.casRequests, 0);
 
   fake.reset("---\nstatut: actif\n---\nbefore\n");
@@ -839,7 +1027,12 @@ try {
     },
     true,
   );
-  assertPublicError(invalidMarkdown.payload, "VALIDATION_ERROR", "not valid", "invalid markdown");
+  assertPublicError(
+    invalidMarkdown.payload,
+    "VALIDATION_ERROR",
+    "not valid",
+    "invalid markdown",
+  );
 
   const invalidSecretFrontmatter = await call(
     session,
@@ -851,7 +1044,12 @@ try {
     },
     true,
   );
-  assertPublicError(invalidSecretFrontmatter.payload, "VALIDATION_ERROR", "not valid|cannot be compared safely", "invalid frontmatter");
+  assertPublicError(
+    invalidSecretFrontmatter.payload,
+    "VALIDATION_ERROR",
+    "not valid|cannot be compared safely",
+    "invalid frontmatter",
+  );
   assertNoSecret(invalidSecretFrontmatter.result, "invalid frontmatter error");
 
   fake.reset();
@@ -879,7 +1077,12 @@ try {
     },
     true,
   );
-  assertPublicError(rebound.payload, "CONFLICT", "different note replacement", "idempotency rebound");
+  assertPublicError(
+    rebound.payload,
+    "CONFLICT",
+    "different note replacement",
+    "idempotency rebound",
+  );
 
   const casBeforeNominal = fake.casRequests;
   const writesBeforeNominal = fake.successfulWrites;
@@ -1180,7 +1383,12 @@ try {
     },
     true,
   );
-  assertPublicError(blockedApply.payload, "FORBIDDEN", "read-only mode", "read-only apply policy");
+  assertPublicError(
+    blockedApply.payload,
+    "FORBIDDEN",
+    "read-only mode",
+    "read-only apply policy",
+  );
   const blockedPlan = await call(
     session,
     "obsidian_note_replace_plan",
@@ -1191,7 +1399,12 @@ try {
     },
     true,
   );
-  assertPublicError(blockedPlan.payload, "FORBIDDEN", "read-only mode", "read-only plan policy");
+  assertPublicError(
+    blockedPlan.payload,
+    "FORBIDDEN",
+    "read-only mode",
+    "read-only plan policy",
+  );
   assert.equal(fake.casRequests, policyCasBefore);
   await session.close();
   session = await startClient("full", "live");

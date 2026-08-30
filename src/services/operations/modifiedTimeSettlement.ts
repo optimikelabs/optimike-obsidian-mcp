@@ -93,6 +93,33 @@ function propertyOccurrences(
   return count;
 }
 
+function frontmatterClosingDelimiter(lines: readonly string[]): number {
+  return lines.findIndex(
+    (line, index) => index > 0 && lineWithoutCarriageReturn(line) === "---",
+  );
+}
+
+function timestampIsWithinSettlementWindow(
+  raw: string,
+  applyStarted: string,
+  settlementObserved: string,
+): string | undefined {
+  const canonical = validLocalDatetime(raw);
+  if (!canonical) return undefined;
+  const hasSeconds = STRICT_LOCAL_DATETIME.exec(raw)?.[6];
+  if (
+    hasSeconds
+      ? canonical.localeCompare(applyStarted) < 0 ||
+        canonical.localeCompare(settlementObserved) > 0
+      : canonical.slice(0, 16).localeCompare(applyStarted.slice(0, 16)) < 0 ||
+        canonical.slice(0, 16).localeCompare(settlementObserved.slice(0, 16)) >
+          0
+  ) {
+    return undefined;
+  }
+  return canonical;
+}
+
 export function resolveModifiedTimeSettlement(
   expectedContent: string,
   observedContent: string,
@@ -116,35 +143,17 @@ export function resolveModifiedTimeSettlement(
 
   const expectedLines = expectedContent.split("\n");
   const observedLines = observedContent.split("\n");
-  if (expectedLines.length !== observedLines.length) return undefined;
   if (
     lineWithoutCarriageReturn(expectedLines[0] ?? "") !== "---" ||
     lineWithoutCarriageReturn(observedLines[0] ?? "") !== "---"
   ) {
     return undefined;
   }
-  const closingDelimiter = expectedLines.findIndex(
-    (line, index) => index > 0 && lineWithoutCarriageReturn(line) === "---",
-  );
-  if (
-    closingDelimiter < 0 ||
-    lineWithoutCarriageReturn(observedLines[closingDelimiter] ?? "") !== "---"
-  ) {
+  const expectedClosingDelimiter = frontmatterClosingDelimiter(expectedLines);
+  const observedClosingDelimiter = frontmatterClosingDelimiter(observedLines);
+  if (expectedClosingDelimiter < 0 || observedClosingDelimiter < 0) {
     return undefined;
   }
-  const drift = expectedLines
-    .map((line, index) => (line === observedLines[index] ? -1 : index))
-    .filter((index) => index >= 0);
-  if (
-    drift.length !== 1 ||
-    drift[0] === undefined ||
-    drift[0] <= 0 ||
-    drift[0] >= closingDelimiter
-  ) {
-    return undefined;
-  }
-
-  const driftLine = drift[0];
   const applyStarted = localDatetimeAt(
     window.applyStartedAtEpochMs,
     policy.utcOffsetMinutes,
@@ -154,51 +163,98 @@ export function resolveModifiedTimeSettlement(
     policy.utcOffsetMinutes,
   );
   for (const integration of policy.integrations) {
-    if (
-      propertyOccurrences(
-        expectedLines,
-        closingDelimiter,
-        integration.propertyName,
-      ) !== 1 ||
-      propertyOccurrences(
-        observedLines,
-        closingDelimiter,
-        integration.propertyName,
-      ) !== 1
-    ) {
-      continue;
-    }
-    const expectedRaw = propertyValue(
-      expectedLines[driftLine] ?? "",
+    const expectedOccurrences = propertyOccurrences(
+      expectedLines,
+      expectedClosingDelimiter,
       integration.propertyName,
     );
-    const observedRaw = propertyValue(
-      observedLines[driftLine] ?? "",
+    const observedOccurrences = propertyOccurrences(
+      observedLines,
+      observedClosingDelimiter,
       integration.propertyName,
     );
-    if (!expectedRaw || !observedRaw) continue;
-    const expectedCanonical = validLocalDatetime(expectedRaw);
-    const observedCanonical = validLocalDatetime(observedRaw);
-    const observedHasSeconds = STRICT_LOCAL_DATETIME.exec(observedRaw)?.[6];
+    let observedRaw: string | undefined;
+
     if (
-      !expectedCanonical ||
-      !observedCanonical ||
-      observedCanonical.localeCompare(expectedCanonical) <= 0 ||
-      (observedHasSeconds
-        ? observedCanonical.localeCompare(applyStarted) < 0 ||
-          observedCanonical.localeCompare(settlementObserved) > 0
-        : observedCanonical
-            .slice(0, 16)
-            .localeCompare(applyStarted.slice(0, 16)) < 0 ||
-          observedCanonical
-            .slice(0, 16)
-            .localeCompare(settlementObserved.slice(0, 16)) > 0)
+      expectedOccurrences === 1 &&
+      observedOccurrences === 1 &&
+      expectedLines.length === observedLines.length &&
+      expectedClosingDelimiter === observedClosingDelimiter
     ) {
+      const drift = expectedLines
+        .map((line, index) => (line === observedLines[index] ? -1 : index))
+        .filter((index) => index >= 0);
+      const driftLine = drift[0];
+      if (
+        drift.length !== 1 ||
+        driftLine === undefined ||
+        driftLine <= 0 ||
+        driftLine >= expectedClosingDelimiter
+      ) {
+        continue;
+      }
+      const expectedRaw = propertyValue(
+        expectedLines[driftLine] ?? "",
+        integration.propertyName,
+      );
+      observedRaw = propertyValue(
+        observedLines[driftLine] ?? "",
+        integration.propertyName,
+      );
+      const expectedCanonical = expectedRaw
+        ? validLocalDatetime(expectedRaw)
+        : undefined;
+      const observedCanonical = observedRaw
+        ? timestampIsWithinSettlementWindow(
+            observedRaw,
+            applyStarted,
+            settlementObserved,
+          )
+        : undefined;
+      if (
+        !expectedCanonical ||
+        !observedCanonical ||
+        observedCanonical.localeCompare(expectedCanonical) <= 0
+      ) {
+        continue;
+      }
+      const restored = [...observedLines];
+      restored[driftLine] = expectedLines[driftLine] ?? "";
+      if (restored.join("\n") !== expectedContent) continue;
+    } else if (
+      expectedOccurrences === 0 &&
+      observedOccurrences === 1 &&
+      observedLines.length === expectedLines.length + 1 &&
+      observedClosingDelimiter === expectedClosingDelimiter + 1
+    ) {
+      const insertedLine = observedLines.findIndex(
+        (line, index) =>
+          index > 0 &&
+          index < observedClosingDelimiter &&
+          propertyValue(line, integration.propertyName) !== undefined,
+      );
+      if (insertedLine < 0) continue;
+      observedRaw = propertyValue(
+        observedLines[insertedLine] ?? "",
+        integration.propertyName,
+      );
+      if (
+        !observedRaw ||
+        !timestampIsWithinSettlementWindow(
+          observedRaw,
+          applyStarted,
+          settlementObserved,
+        )
+      ) {
+        continue;
+      }
+      const restored = [...observedLines];
+      restored.splice(insertedLine, 1);
+      if (restored.join("\n") !== expectedContent) continue;
+    } else {
       continue;
     }
-    const restored = [...observedLines];
-    restored[driftLine] = expectedLines[driftLine] ?? "";
-    if (restored.join("\n") !== expectedContent) continue;
+
     return {
       contractVersion: 1,
       kind: "modified-time-frontmatter",

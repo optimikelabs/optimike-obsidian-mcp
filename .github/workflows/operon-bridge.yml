@@ -15,6 +15,8 @@ on:
       - "scripts/test-operon-contract.mjs"
       - "scripts/test-operon-service.mjs"
       - "scripts/smoke-operon-35-live.mjs"
+      - "scripts/smoke-operon-36-behaviors-live.mjs"
+      - "scripts/test-operon-36-behavior-contract.mjs"
       - "docs/operon-*.md"
       - "docs/adr/ADR-Operon-Bridge.md"
       - "profiles/elysia-tasks/**"
@@ -48,6 +50,8 @@ jobs:
       - run: npm run test:runtime
       - run: npm run test:operon-contract
       - run: npm run test:operon-service
+      - run: npm run test:operon-canary-path-safety
+      - run: npm run test:operon-36-behavior-contract
       - run: npm run test:docs
       - run: npm pack --dry-run
 

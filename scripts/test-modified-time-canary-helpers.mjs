@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import {
   assertAtomicNoteCanaryDateIsolation,
+  assertByteExactCanaryDateIsolation,
   isSafeModifiedTimePropertyName,
   modifiedTimeFrontmatterPropertyValue,
   nextRepresentableTimestampReadyAt,
+  optionalModifiedTimeFrontmatterPropertyValue,
   supportsModifiedTimeSettlementBridgeVersion,
 } from "./modified-time-canary-helpers.mjs";
 
@@ -38,6 +40,25 @@ assert.throws(
 );
 assert.throws(
   () =>
+    assertByteExactCanaryDateIsolation(
+      {
+        settlement: {
+          modifiedTimeFrontmatter: {
+            integrations: [
+              {
+                pluginId: "update-time",
+                propertyName: "updated",
+              },
+            ],
+          },
+        },
+      },
+      "byte-exact governed-frontmatter canary",
+    ),
+  /byte-exact governed-frontmatter canary requires active modified-time integrations/u,
+);
+assert.throws(
+  () =>
     assertAtomicNoteCanaryDateIsolation({
       settlement: { modifiedTimeFrontmatter: { integrations: [] } },
       protection: {
@@ -54,6 +75,14 @@ assert.throws(
     }),
   /frontmatter-date-manager:last modified/u,
   "a protection-only modified role must block the byte-exact canary",
+);
+assert.equal(
+  optionalModifiedTimeFrontmatterPropertyValue(
+    "---\ntitle: missing\n---\nmodification: body only\n",
+    "modification",
+  ),
+  undefined,
+  "the settlement canary must be able to exercise a missing configured property",
 );
 assert.throws(
   () =>
@@ -127,7 +156,7 @@ assert.throws(
       "---\nmodification: first\nmodification: second\n---\n",
       "modification",
     ),
-  /exactly one top-level modification frontmatter property/u,
+  /at most one top-level modification frontmatter property/u,
 );
 assert.throws(
   () =>

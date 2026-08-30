@@ -2,8 +2,8 @@
 
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
-Updated: 2026-08-25
-Current release: official Operon `3.5.3`, Operon CLI `1.2.0`, Bridge `0.8.2`, Developer API V1 and the additive task-workflow API. Operon 3.5.3 ships superseding implementations of upstream PRs `#182`, `#183` and `#184`. `compatible-provisional` describes certification evidence only; mutation admission follows the negotiated contract and exact live capabilities rather than a product-version allowlist. Additive task workflows negotiate their exact grant on first use after a cold start.
+Updated: 2026-08-30
+Candidate target: Optimike MCP `3.2.0` uses Bridge `0.8.3` with official Operon `3.6.0`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1 and the additive task-workflow API. Working-tree Pilot 2 runs exercised that stack; release admission still requires the same gate on the clean final SHA. The public Developer API V1 contract did not drift between Operon `3.5.3` and `3.6.0`. `compatible-provisional` describes certification evidence only; mutation admission follows the negotiated contract and exact live capabilities rather than a product-version allowlist. Additive task workflows negotiate their exact grant on first use after a cold start.
 
 Operon CLI `1.2.0` adds operator access to Daily/Weekly routing and the typed
 Task Type, Task Image and ordered Task Gallery fields. The MCP does not relay
@@ -11,6 +11,20 @@ the CLI generically: it exposes only the two bounded periodic operations and
 official adoption after their exact grants. Operon owns every opaque sealed
 plan and same-plan recovery. `taskType` and `taskImage` remain scalar,
 `taskGallery` remains an ordered array, and `__taskDataType` is read-only.
+
+Operon `3.6.0` changes three product behaviors that stay outside the generic MCP
+write contract: Task Editor deletion cleans direct child and blocking
+relationships; a blocked task may receive a Scheduled Date; and its opt-in
+parent-date automation can expand a parent's date range after a child mutation.
+The working-tree Pilot 2 behavior gate exercised the Scheduled Date case through
+`operon_update_periodic_scheduling`: the blocked relationship and inverse edge
+were preserved, and the run-owned periodic parent artifact was removed during
+exact restoration. Task Editor deletion remains `SKIP` because no public MCP
+delete surface exists. Parent-date expansion remains `SKIP` because Pilot 2's
+public configuration does not announce that opt-in automation as active.
+Operators enabling those features should test the two skipped behaviors before
+depending on them. A postflight never treats unrelated parent or relationship
+drift as an accepted write.
 
 ## Historical 3.3.2 acceptance
 

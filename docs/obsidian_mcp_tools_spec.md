@@ -200,14 +200,14 @@ The authoritative English guarantees and compatibility matrix are in the
 - `operon_get_relationships`: bounded explicit, derived, and inferred relationship graph for one stable task.
 - `operon_build_context`: bounded exact-task, neighborhood, project, planning, or creation context with a strict hydration allowlist.
 - `operon_get_timer_state`: read active and transitioning timer state without exposing timer control.
-- `operon_adopt_task`: adopt one exact checkbox only when the loaded engine grants the official task-workflow preview/apply pair. Operon 3.5.3 owns the opaque sealed plan and same-plan recovery; no Markdown fallback exists.
-- `operon_create_task`: create inline/file tasks through the loaded engine's official Developer API V1 or bounded legacy Public API v1 surface.
-- `operon_create_periodic_task`: create one inline task in the configured Daily or Weekly Note through Operon's additive periodic workflow; Operon owns routing, template, container identity and receipt.
-- `operon_update_periodic_scheduling`: set or clear one task's scheduled date through Operon's periodic workflow; Operon decides retain, detach or realign without moving source Markdown.
-- `operon_update_task`: update one mutation group with expected revision.
+- `operon_adopt_task`: adopt one exact checkbox only when the loaded engine grants the official task-workflow preview/apply pair. Operon `3.5.3` introduced this public task-workflow boundary and the current `3.6.0` target retains it; Operon owns the opaque sealed plan and same-plan recovery, with no Markdown fallback.
+- `operon_create_task`: create inline/file tasks through the loaded engine's official Developer API V1 or bounded legacy Public API v1 surface; it rejects `dateScheduled`.
+- `operon_create_periodic_task`: create one inline task in the configured Daily or Weekly Note through Operon's additive periodic workflow; Operon owns routing, template, container identity and receipt. `routeDate` selects the periodic note, while `fields.dateScheduled` may set the task's initial scheduled date.
+- `operon_update_periodic_scheduling`: set or clear an existing task's `dateScheduled` through Operon's periodic workflow; use this tool for every subsequent scheduled-date change because Operon may need to retain, detach, or realign the task without moving source Markdown.
+- `operon_update_task`: update one ordinary mutation group with expected revision; it rejects `dateScheduled`, relationships, and recurrence fields in favor of their dedicated tools.
 - `operon_transition_task`: apply a stable status-ID or exact workflow transition through Operon's guards when the live Developer API advertises the capability; the Bridge bounds uncertain stock-runtime applies and never retries blindly.
 - `operon_set_relationships`: replace or clear parent/blocker edges with revision locking, graph validation, and inverse-edge postflight; apply is allowed in `guarded`.
-- `operon_update_recurrence`: set or clear official recurrence fields with explicit series scope; apply requires `full`.
+- `operon_update_recurrence`: set or clear official recurrence fields, except `dateScheduled`, with explicit series scope; apply requires `full`.
 - `operon_convert_task`: convert inline/file shape in `MCP_WRITE_MODE=full`.
 - `operon_relocate_task`: move an inline task to another Markdown note while preserving `operonId`.
 - `operon_list_pending_recoveries`: list durable official recovery references without applying them; fails closed when a path allowlist is configured because no canonical recovery route can be proved.
@@ -217,7 +217,8 @@ Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`
 Operon/Bridge versions, capabilities, and limitations.
 
 Mutations require a live Bridge and the loaded engine's official contract.
-Operon 3.5.3 plus CLI 1.2.0 is the 3.1.2 released target through Bridge 0.8.2
+Optimike MCP 3.2.0 targets Bridge 0.8.3 with Operon 3.6.0, CLI 1.2.0 and Local
+REST API 5.1.0, subject to the repository's exact-SHA Pilot 2 release gate,
 and remains `compatible-provisional` as certification metadata. Valid mutations
 are admitted by the negotiated contract and exact live gates rather than a
 product-version allowlist. Additive task-workflow operations may reach the
@@ -228,8 +229,9 @@ status/index refreshes request no optional grants. Periodic creation creates no
 durable idempotency reservation until its exact grant is available.
 Task Type and Task Image are scalar, Task Gallery is a lossless ordered array, and
 `__taskDataType` is read-only. Optional adoption and Daily/Weekly grants are
-negotiated independently from core reads. Operon 3.2.0 uses Developer API V1
-typed preview/apply/recovery for the earlier surface; legacy
+negotiated independently from core reads. Operon `3.2.0` introduced the
+historical Developer API V1 typed preview/apply/recovery surface retained by
+the current `3.6.0` target; legacy
 Kairélys uses Public API v1. Dry-run is the default, idempotency is mandatory,
 existing tasks require `expectedRevision`, and there is no direct Markdown
 fallback.
