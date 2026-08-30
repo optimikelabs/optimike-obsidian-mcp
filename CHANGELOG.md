@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `obsidian_runtime_status` now includes the versioned, read-only
+  `capabilityManifest` contract. It distinguishes tool discoverability,
+  backend availability and authorization for Local REST, vault reads,
+  semantic search, governed Note/Frontmatter/Canvas/Base operations and
+  Operon reads/writes, without adding another MCP tool.
+
+### Changed
+
+- Capability probes run concurrently with a bounded 2.5-second request
+  timeout. Profile policy, runtime-mode support and concrete runtime
+  registration have separate stable reason codes; the doctor never repairs a
+  runtime or grants a capability.
+- HTTP admission diagnostics expose aggregate counters only. Raw errors,
+  paths, URLs, credentials, binding fingerprints, configuration hashes and
+  vault/task content remain outside the public manifest.
+
+### Validation
+
+- Deterministic fixtures cover profile hiding, runtime-mode absence, failed
+  runtime initialization, cache fallback, missing Operon grants, cold index,
+  duplicate identities, incompatible Bridges, admission pressure and privacy.
+- The exact tool call is exercised through in-memory MCP and immutable HTTP
+  profile routes; bounded Local REST, Atomic Write, Bases and Operon probes are
+  verified independently.
+
+## [3.3.0] - 2026-08-30
+
 ### Changed
 
 - The Operon, Atomic Write and Bases Bridges now share a permanent Local REST

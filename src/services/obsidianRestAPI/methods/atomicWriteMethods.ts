@@ -17,9 +17,10 @@ const PREFIX = "/extensions/obsidian-atomic-write-bridge";
 export async function getAtomicWriteStatus(
   request: RequestFunction,
   context: RequestContext,
+  timeoutMs?: number,
 ): Promise<AtomicWriteStatusResponse> {
   return request<AtomicWriteStatusResponse>(
-    { method: "GET", url: `${PREFIX}/status` },
+    { method: "GET", url: `${PREFIX}/status`, timeout: timeoutMs },
     context,
     "getAtomicWriteStatus",
   );

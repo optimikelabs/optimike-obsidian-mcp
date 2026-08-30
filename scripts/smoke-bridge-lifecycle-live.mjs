@@ -21,7 +21,7 @@ const EXPECTED_VAULT_NAME = "operon-bridge-pilot-vault-2.5.0";
 const EXPECTED_BASE_URL = "http://127.0.0.1:27233";
 const CONFIRMATION = "I_CONFIRM_PILOT_2_LOCAL_REST_RELOAD";
 const EXPECTED_MCP_VERSION =
-  process.env.BRIDGE_LIFECYCLE_EXPECTED_MCP_VERSION?.trim() || "3.3.0";
+  process.env.BRIDGE_LIFECYCLE_EXPECTED_MCP_VERSION?.trim() || "3.4.0";
 const BRIDGES = [
   {
     id: "optimike-operon-bridge",

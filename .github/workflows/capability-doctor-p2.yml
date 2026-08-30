@@ -1,0 +1,46 @@
+name: Capability Doctor P2
+
+on:
+  pull_request:
+    paths:
+      - "src/services/capabilityManifest.ts"
+      - "src/services/obsidianRestAPI/service.ts"
+      - "src/services/obsidianRestAPI/methods/atomicWriteMethods.ts"
+      - "src/services/obsidianRestAPI/methods/baseAtomicWriteMethods.ts"
+      - "src/services/operon/service.ts"
+      - "src/mcp-server/tools/runtimeTools/registration.ts"
+      - "src/mcp-server/server.ts"
+      - "scripts/test-capability-*.mjs"
+      - "scripts/smoke-capability-doctor-live.mjs"
+      - "scripts/test-http-tool-profiles.mjs"
+      - "scripts/smoke-headless-status.mjs"
+      - "docs/capability-doctor*.md"
+      - "package.json"
+      - ".github/workflows/capability-doctor-p2.yml"
+  push:
+    branches:
+      - main
+      - "feat/3.4-p2-capability-doctor"
+
+permissions:
+  contents: read
+
+jobs:
+  capability-doctor:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:capability-doctor
+      - run: node scripts/test-capability-doctor-doc-contract.mjs
+      - run: npm run smoke:headless-status

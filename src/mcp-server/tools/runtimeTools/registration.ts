@@ -11,6 +11,13 @@ import {
   runRuntimeMaintenance,
 } from "../../../services/runtimeState.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
+import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/service.js";
+import {
+  collectCapabilityManifest,
+  resolveToolRegistrationMode,
+  type CapabilityProbeDependencies,
+} from "../../../services/capabilityManifest.js";
+import { resolveToolProfile } from "../../toolProfileRuntime.js";
 import {
   registerGovernedNoteReplaceTools,
   type GovernedNoteReplaceRuntime,
@@ -49,35 +56,55 @@ const RuntimeStatusInputSchema = z
 
 export async function registerRuntimeTools(
   server: McpServer,
+  obsidianService: ObsidianRestApiService | undefined,
   vaultCacheService: VaultCacheService | undefined,
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
   governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
   governedCanvasRuntime: GovernedCanvasRuntime | undefined,
+  capabilityProbes?: CapabilityProbeDependencies,
 ): Promise<void> {
+  const profile = resolveToolProfile();
+  const registrationMode = resolveToolRegistrationMode(obsidianService);
   server.tool(
     "obsidian_runtime_status",
-    "Returns redacted local runtime status for cache, semantic, degraded-mode, and process health diagnostics. Physical paths, URLs, secrets, and raw configuration are never returned.",
+    "Returns redacted runtime diagnostics plus the versioned capability manifest. The manifest distinguishes tool discoverability, backend availability, and authorization, with stable reason codes and safe next actions. Physical paths, URLs, secrets, note content, and raw configuration are never returned.",
     RuntimeStatusInputSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof RuntimeStatusInputSchema>) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            projectPublicRuntimeStatus(
-              await collectRuntimeStatus(vaultCacheService),
-              {
-                expectedDestructiveVaultAttestation:
-                  params.expectedDestructiveVaultAttestation,
-              },
-            ),
-            null,
-            2,
-          ),
+    async (params: z.infer<typeof RuntimeStatusInputSchema>) => {
+      const runtimeStatus = await collectRuntimeStatus(vaultCacheService);
+      const capabilityManifest = await collectCapabilityManifest({
+        profile,
+        registrationMode,
+        runtimeStatus,
+        obsidianService,
+        vaultCacheAvailable: Boolean(vaultCacheService),
+        probes: capabilityProbes,
+        governedRuntimes: {
+          note: Boolean(governedNoteReplaceRuntime),
+          base: Boolean(governedBaseFormulaRuntime),
+          canvas: Boolean(governedCanvasRuntime),
         },
-      ],
-      isError: false,
-    }),
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ...projectPublicRuntimeStatus(runtimeStatus, {
+                  expectedDestructiveVaultAttestation:
+                    params.expectedDestructiveVaultAttestation,
+                }),
+                capabilityManifest,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    },
   );
 
   server.tool(

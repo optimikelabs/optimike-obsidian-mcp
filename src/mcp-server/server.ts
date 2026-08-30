@@ -1881,6 +1881,7 @@ async function createMcpServerInstance(
     await registerQueryTasksTool(server, vaultCacheService);
     await registerRuntimeTools(
       server,
+      obsidianService,
       vaultCacheService,
       governedNoteReplaceRuntime,
       governedBaseFormulaRuntime,

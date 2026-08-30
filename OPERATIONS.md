@@ -454,6 +454,12 @@ authenticated MCP runtime tools for:
 - `obsidian_runtime_status`
 - `obsidian_runtime_maintenance`
 
+`obsidian_runtime_status` is also the canonical read-only capability doctor.
+Its versioned `capabilityManifest` separates tool discoverability, backend
+availability and authorization, then returns one stable reason code and safe
+next action. It never repairs a runtime or grants a capability. See
+[Runtime Capability Doctor](docs/capability-doctor.md).
+
 Supported maintenance actions:
 
 - `integrity_check`

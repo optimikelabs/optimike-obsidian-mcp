@@ -289,7 +289,10 @@ export class ObsidianRestApiService {
    * @param context - The request context for logging and correlation.
    * @returns {Promise<ApiStatusResponse>} - The status object from the API.
    */
-  async checkStatus(context: RequestContext): Promise<ApiStatusResponse> {
+  async checkStatus(
+    context: RequestContext,
+    timeoutMs?: number,
+  ): Promise<ApiStatusResponse> {
     // Note: This is the only endpoint that doesn't strictly require auth,
     // but sending the key helps check if it's valid.
     // This one is simple enough to keep inline or could be extracted too.
@@ -297,6 +300,7 @@ export class ObsidianRestApiService {
       {
         method: "GET",
         url: "/",
+        timeout: timeoutMs,
       },
       context,
       "checkStatus",
@@ -305,10 +309,12 @@ export class ObsidianRestApiService {
 
   async getAtomicWriteStatus(
     context: RequestContext,
+    timeoutMs?: number,
   ): Promise<AtomicWriteStatusResponse> {
     return atomicWriteMethods.getAtomicWriteStatus(
       this._request.bind(this),
       context,
+      timeoutMs,
     );
   }
 
@@ -358,10 +364,12 @@ export class ObsidianRestApiService {
 
   async getBaseAtomicStatus(
     context: RequestContext,
+    timeoutMs?: number,
   ): Promise<BaseAtomicStatusResponse> {
     return baseAtomicWriteMethods.getBaseAtomicStatus(
       this._request.bind(this),
       context,
+      timeoutMs,
     );
   }
 
