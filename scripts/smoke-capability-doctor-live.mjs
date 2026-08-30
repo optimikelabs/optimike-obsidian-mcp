@@ -71,6 +71,23 @@ async function waitForHealth(url, child) {
   throw new Error("Timed out waiting for the candidate MCP health endpoint.");
 }
 
+async function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out after ${timeoutMs} ms.`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function parseToolResult(result) {
   const text = result.content
     .filter((block) => block.type === "text")
@@ -97,8 +114,17 @@ async function startClient(baseUrl, profile, token) {
     { name: `capability-doctor-${profile}`, version: "1" },
     { capabilities: {} },
   );
-  await client.connect(transport);
-  return client;
+  try {
+    await withTimeout(client.connect(transport), 10_000, `${profile} connect`);
+    return client;
+  } catch (error) {
+    await withTimeout(
+      client.close(),
+      2_000,
+      `${profile} failed connect close`,
+    ).catch(() => undefined);
+    throw error;
+  }
 }
 
 const privateRoot = mkdtempSync(
@@ -183,7 +209,11 @@ try {
   for (const profile of profiles) {
     const client = await startClient(baseUrl, profile, token);
     clients.push(client);
-    const tools = await client.listTools();
+    const tools = await withTimeout(
+      client.listTools(),
+      10_000,
+      `${profile} tool listing`,
+    );
     assert.equal(
       tools.tools.filter((tool) => tool.name === "obsidian_runtime_status")
         .length,
@@ -191,10 +221,14 @@ try {
       `${profile} must expose exactly one canonical doctor`,
     );
     statuses[profile] = parseToolResult(
-      await client.callTool({
-        name: "obsidian_runtime_status",
-        arguments: {},
-      }),
+      await withTimeout(
+        client.callTool({
+          name: "obsidian_runtime_status",
+          arguments: {},
+        }),
+        15_000,
+        `${profile} capability doctor`,
+      ),
     );
     assert.equal(statuses[profile].runtime.packageVersion, "3.5.0");
     assert.equal(statuses[profile].capabilityManifest.contractVersion, 1);
@@ -283,13 +317,22 @@ try {
   );
 } finally {
   for (const client of clients) {
-    await client.close().catch(() => undefined);
+    await withTimeout(client.close(), 2_000, "MCP client close").catch(
+      () => undefined,
+    );
   }
   child.kill();
   if (child.exitCode === null) {
     await Promise.race([
       new Promise((resolve) => child.once("exit", resolve)),
-      new Promise((resolve) => setTimeout(resolve, 1_000)),
+      new Promise((resolve) => setTimeout(resolve, 2_000)),
+    ]).catch(() => undefined);
+  }
+  if (child.exitCode === null) {
+    child.kill("SIGKILL");
+    await Promise.race([
+      new Promise((resolve) => child.once("exit", resolve)),
+      new Promise((resolve) => setTimeout(resolve, 2_000)),
     ]).catch(() => undefined);
   }
   rmSync(logsPath, { recursive: true, force: true });
