@@ -80,6 +80,8 @@ for (const profile of ["standard", "authoring", "tasks"]) {
       "external_runtime_status",
       "external_read",
       "external_move_plan",
+      "external_move_apply",
+      "external_move_rollback",
     ]) {
       assert.ok(
         !names.includes(hidden),

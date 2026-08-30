@@ -80,9 +80,9 @@ Initial capability vocabulary:
 are not implemented by the core service.
 
 `writable` remains excluded as a generic capability. The later reference
-integrity amendment adds only the narrower `move` capability for one same-root
-regular file, with a separate threat model, journal, optimistic preconditions,
-explicit apply gate and rollback evidence.
+integrity amendment adds only the narrower `move` capability for diagnostic
+planning of one same-root regular file, with a separate threat model, journal
+and optimistic-precondition evidence. It does not enable mutation.
 
 The absence of a capability denies the corresponding file operation; root
 discovery remains available as described above.
@@ -172,8 +172,12 @@ Read and handoff surface:
 These tools are implemented on `main` and carry read-only MCP annotations. The
 later local-stdio amendment adds `external_references_scan`,
 `external_move_plan`, `external_move_status`, `external_move_apply` and
-`external_move_rollback`. Its first three operations are read-only; apply and
-rollback are destructive, separately gated, and refused over direct HTTP.
+`external_move_rollback`. Scan, plan and status are diagnostic/read-only.
+Apply, rollback and automatic mutating recovery are disabled on every platform
+until an audited native handle-relative mutation primitive exists; the runtime
+reason is `native_handle_relative_mutation_unavailable`. Redacted receipts,
+private SQLite snapshots, legacy-binding/stale session checks and exact-CAS
+evidence remain part of the contract. Direct HTTP refuses all five operations.
 
 ## Runtime and deployment policy
 
@@ -245,13 +249,13 @@ The promoted implementation provides:
 - stale/hash semantics;
 - no automatic startup crawl.
 
-### Phase 5 — Same-root file move with reference integrity — local pilot
+### Phase 5 — Same-root file move with reference integrity — diagnostic pilot
 
 - canonical adjacent logical identity;
 - read-only inventory and durable plan/status;
-- one no-clobber regular-file move through local stdio;
-- exact conditional ÉLYSIA note repair;
-- journal, compensation and rollback;
+- no-clobber and exact-repair evidence sealed for a future audited primitive;
+- diagnostic journal, binding/session checks and redacted receipts;
+- apply, rollback and automatic mutating recovery disabled on every platform;
 - direct HTTP mutation denied.
 
 ### Deferred

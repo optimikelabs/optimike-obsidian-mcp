@@ -145,7 +145,13 @@ External roots are disabled by default. They are an authorization broker, not an
 - authenticated direct HTTP may return an opt-in, identity-bound, single-use `http_ticket`;
 - neither delivery mode authorizes mutation or reveals the physical source path.
 
-A separate local-stdio transaction can move one regular file within the same configured root and repair exact ÉLYSIA references. It requires inventory, a durable plan, explicit write gates, hash/CAS preconditions, journaling and rollback. It is not exposed over direct HTTP and does not add generic create, replace, delete, upload or sync.
+`external_references_scan`, `external_move_plan` and `external_move_status` are
+diagnostic only. `external_move_apply`, `external_move_rollback` and any
+automatic mutating recovery are disabled on every platform until an audited
+native handle-relative mutation primitive exists; the runtime reason is
+`native_handle_relative_mutation_unavailable`. The contract still preserves
+redacted receipts, private SQLite snapshots, legacy-binding and stale
+session/binding checks, and exact-CAS evidence for a future implementation.
 
 The MCP core does not embed PDF, Office or OCR engines. The caller owns binary extraction and verifies size and SHA-256.
 

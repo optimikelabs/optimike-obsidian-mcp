@@ -2,17 +2,18 @@
 
 ## Status
 
-Accepted and implemented for two internal adapter pilots. The implementations
-bind the existing `external_move` transaction and an atomic Markdown note
-replacement to this contract; they do not add a generic public write tool or
-widen any write permission.
+Accepted and implemented for the atomic Markdown note-replacement adapter. The
+external-move adapter remains diagnostic-only while external mutation is
+fail-closed; it does not add a generic public write tool or widen any write
+permission.
 
 ## Context
 
 Operon already provides sealed mutation plans, durable receipts, idempotent
 replay, postflight verification, and same-plan recovery. The MCP's
 `external_move` path independently provides immutable inventory, CAS
-preconditions, a SQLite WAL journal, and compensation. Other Obsidian writes do
+preconditions and a SQLite WAL journal as diagnostic evidence. Its former
+compensation path is disabled with external mutation. Other Obsidian writes do
 not all share those guarantees, especially when Local REST cannot atomically
 enforce `If-Match`.
 
@@ -86,19 +87,20 @@ semantics without weakening their domain contracts.
 ## First adapter: external move
 
 `ExternalMoveOperationAdapter` reuses the existing `external_move` coordinator
-and journal as the sole durable authority. It maps the existing plan ID to an
-opaque versioned plan reference, binds the plan digest to source CAS, complete
-reference inventory, backend/vault/root identity, target, and repair set, and
-maps rollback to exact-plan recovery/compensation.
+and journal as the sole durable diagnostic authority. It maps the existing plan
+ID to an opaque versioned plan reference and binds the plan digest to source CAS,
+complete reference inventory, backend/vault/root identity, target, and repair
+set. Apply and recovery report unavailable until an audited native
+handle-relative primitive exists.
 
 The disposable fixture covers:
 
 - planning and stable status replay;
-- source drift rejected before any move;
-- commit and idempotent apply replay;
-- completed apply with a lost caller response reconciled through `status`;
-- an interrupted move recovered from the persisted intermediate state;
-- verified compensation back to the original file placement.
+- source drift and ambiguous references rejected before any mutation;
+- stable diagnostic receipt replay across status;
+- apply and recovery unavailable without opening a backend session or mutating
+  filesystem/note state;
+- preserved journal/binding/session evidence for a future audited primitive.
 
 ## Second adapter: atomic note replacement
 

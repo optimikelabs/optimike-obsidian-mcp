@@ -290,14 +290,36 @@ try {
   };
   await registerExternalRootsTools(fakeServer, service, false);
   assert.equal(handlers.size, 11);
+  const runtimeStatus = await handlers.get("external_runtime_status")(
+    {},
+    {
+      authInfo: {
+        token: "external-roots-test-token",
+        clientId: "external-roots-test-client",
+        scopes: ["external:read"],
+      },
+    },
+  );
+  assert.equal(runtimeStatus.isError, false);
+  const runtimePayload = JSON.parse(runtimeStatus.content[0].text);
+  assert.equal(runtimePayload.mode, "read-only");
+  assert.deepEqual(runtimePayload.externalMove, {
+    available: false,
+    planningAvailable: false,
+    planningUnavailableReason: "stdio_only",
+    mutationAvailable: false,
+    mutationUnavailableReason: "native_handle_relative_mutation_unavailable",
+  });
+  // These retained endpoints only return a stable unsupported result while
+  // native mutation is unavailable. Re-enabling a native primitive must
+  // intentionally update this contract and the public annotations together.
   for (const [name, value] of annotations) {
-    if (name === "external_move_apply" || name === "external_move_rollback") {
-      assert.equal(value.readOnlyHint, false);
-      assert.equal(value.destructiveHint, true);
-    } else {
-      assert.equal(value.readOnlyHint, true);
-      assert.equal(value.destructiveHint, false);
-    }
+    assert.equal(value.readOnlyHint, true, `${name} must be read-only`);
+    assert.equal(
+      value.destructiveHint,
+      false,
+      `${name} must not be destructive`,
+    );
   }
   const deniedHttpHandoff = await handlers.get("external_handoff")({
     rootId: "pilot.docs",

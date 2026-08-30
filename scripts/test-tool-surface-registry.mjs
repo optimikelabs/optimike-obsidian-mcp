@@ -101,6 +101,14 @@ assert.equal(
   "whole-Base replacement must have its own compatibility group",
 );
 
+for (const name of ["external_move_apply", "external_move_rollback"]) {
+  assert.equal(
+    getToolSurfaceEntry(name)?.annotationClass,
+    "read-only",
+    `${name} is a retained fail-closed endpoint; native mutation reactivation must explicitly update this metadata contract`,
+  );
+}
+
 const expectedLifecycleRoles = ["apply", "plan", "recover", "status"];
 const governedFamilies = new Map();
 for (const entry of TOOL_SURFACE_REGISTRY) {

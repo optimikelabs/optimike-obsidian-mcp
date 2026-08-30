@@ -31,7 +31,7 @@ surface complète et d’administration explicite. Voir
 | Workflows Operon ou Markdown Tasks                                          | Profil `tasks`                                  | Contrat Operon complet + outils Markdown compatibles Tasks.             |
 | Authoring Bases, tags ou Canvas                                             | Profil `authoring`                              | Ajoute les surfaces d’authoring sans toute l’administration.            |
 | Lire un document explicitement configuré hors du coffre                     | `full` + outils external-roots                  | Les racines externes sont spécialisées et default-deny.                 |
-| Déplacer un fichier externe sans casser silencieusement ses liens ÉLYSIA    | `full` en stdio local sur copie ou coffre dédié | Inventaire, plan durable, réparations CAS exactes, reçu et rollback.    |
+| Diagnostiquer un move externe planifié sans casser les liens ÉLYSIA         | `full` en stdio local                           | Inventaire, plan durable et reçu redacted ; mutation désactivée.        |
 | Comportement Obsidian complet, commandes, active file, Bases via plugin     | `live` ou `hybrid` avec Obsidian Desktop ouvert | Seul runtime avec sémantique Desktop/plugin.                            |
 | Serveur backend sûr au-dessus d’un coffre synchronisé                       | `headless-readonly` d’abord                     | Pas besoin de Desktop et aucun risque d’écriture.                       |
 | Écritures Markdown/frontmatter/tags/admin bornées sur copie ou coffre dédié | `headless-filesystem`                           | Sécurité de chemins, dry-run par défaut et préconditions.               |
@@ -116,15 +116,20 @@ Pour un move gouverné par ÉLYSIA :
 1. vérifier que le lien `file:///` cliquable possède l’identité canonique adjacente `external-ref:<rootId>::<chemin-relatif-encode>` ;
 2. employer `external_references_scan`, puis `external_move_plan` ;
 3. s’arrêter si `manualReview` n’est pas vide ; ne jamais réparer automatiquement une occurrence historique ou ambiguë ;
-4. examiner `external_move_status`, puis appeler `external_move_apply` uniquement avec les gates write locaux explicites et la même clé d’idempotence ;
-5. vérifier le fichier cible et les notes réparées ; employer `external_move_rollback` seulement tant que ses préconditions persistées tiennent encore.
+4. examiner `external_move_status` comme diagnostic ; tant que la frontière
+   fail-closed est active, il retourne `readyToApply: false` et
+   `native_handle_relative_mutation_unavailable` ;
+5. ne pas appeler `external_move_apply` ni `external_move_rollback` : apply,
+   rollback et récupération mutante automatique sont désactivés sur toutes les
+   plateformes jusqu’à l’existence d’une primitive native handle-relative
+   auditée.
 
-Cette transaction est réservée au stdio local. Elle accepte un fichier régulier,
-une cible absente dans un dossier parent existant et un move sans écrasement dans
-la même racine et sur le même volume. Les éditions concurrentes de notes sont
-protégées par une précondition SHA-256 exacte en `headless-filesystem` sur une
-copie ou un coffre dédié. L’apply live via Local REST échoue fermé tant que les
-remplacements de note complète n’imposent pas `If-Match`.
+Ce workflow diagnostique est réservé au stdio local. Il planifie un fichier
+régulier et une cible absente dans un dossier parent existant. Une future
+primitive auditée devra établir ses propres garanties de move sans écrasement et
+de réparation de note par hash exact ; le design hard-link/unlink retiré n’est
+pas exécutable. Les remplacements de note complète via Local REST n’imposent pas
+`If-Match` et ne peuvent pas autoriser une mutation externe.
 
 Toute opération external-root en HTTP direct exige `external:read`. Le HTTP
 distant reste pilote derrière un proxy TLS et des contrôles réseau revus. Le

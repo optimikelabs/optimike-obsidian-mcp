@@ -64,6 +64,18 @@ if (missing.length > 0) {
   );
 }
 
+const forbiddenFiles = [
+  ".github/security-contracts/external-move-native-mutation-contract.mjs",
+];
+const publishedSecurityContracts = forbiddenFiles.filter((file) =>
+  files.has(file),
+);
+if (publishedSecurityContracts.length > 0) {
+  throw new Error(
+    `Package must not ship dormant native-mutation security contracts: ${publishedSecurityContracts.join(", ")}`,
+  );
+}
+
 console.log(
   `PASS: package contains ${requiredFiles.length} runnable server, governed-operation, documentation and Bridge artifacts`,
 );

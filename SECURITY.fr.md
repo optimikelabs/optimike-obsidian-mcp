@@ -163,18 +163,24 @@ par défaut.
 - L’apply Operon exige le réglage Bridge et
   `OPERON_MUTATIONS_ENABLED=true`.
 - Utiliser dry-run, révisions/hashes attendus et preuve après écriture.
-- Les racines externes sont read-only par défaut. L’unique mutation est un move
-  stdio local d’un fichier régulier dans la même racine, avec réparation exacte
-  des références ÉLYSIA.
-- Apply et rollback exigent `MCP_WRITE_MODE=full`,
-  `MCP_EXTERNAL_MOVE_ENABLED=true` et une racine portant la capacité `move`.
-- La cible doit être absente sous un dossier parent réel existant. La séquence
-  hard-link/unlink sans écrasement échoue fermée sur un filesystem non supporté
-  ou cross-volume.
-- Toute référence ambiguë, historique, legacy ou non supportée bloque l’apply.
-  Les réparations par hash exact sont limitées à `headless-filesystem` sur une
-  copie ou un coffre dédié. L’apply live échoue fermé, car les remplacements de
-  note complète via Local REST n’imposent pas `If-Match`.
+- Les racines externes sont read-only par défaut. Le scan, le plan et le status
+  du move externe restent uniquement diagnostiques.
+- L’apply, le rollback et toute récupération mutante automatique du move
+  externe sont désactivés sur toutes les plateformes jusqu’à l’existence d’un
+  primitive native handle-relative auditée. La raison runtime est
+  `native_handle_relative_mutation_unavailable`.
+- Le contrat désactivé conserve les reçus redacted, les snapshots SQLite
+  privés, le rejet des bindings legacy et des sessions/bindings stale, ainsi
+  que les preuves CAS exactes avant toute future activation.
+- L’absence de cible, la classification exacte des références, le rejet de
+  binding/session et les preuves CAS exactes restent des exigences d’une future
+  primitive. Le design hard-link/unlink est retiré : ce n’est plus un mécanisme
+  de mutation actuel.
+- Toute référence ambiguë, historique, legacy ou non supportée bloque toute
+  mutation future. La réparation par hash exact reste une exigence future de
+  `headless-filesystem` sur copie ou coffre dédié ; Local REST n’impose pas
+  `If-Match` pour les remplacements de note complète et ne peut pas autoriser
+  une mutation externe.
 - `MCP_EXTERNAL_MOVE_JOURNAL_PATH` contient l’état durable des plans et les
   préimages de notes. Le conserver local à la machine, à accès restreint, hors
   dépôts, dossiers synchronisés et diagnostics publics.
