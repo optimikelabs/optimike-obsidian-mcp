@@ -811,9 +811,7 @@ export default class BasesBridgePlugin extends Plugin {
       if (this.settings.engineEnabled) {
         this.maybeRegisterHeadlessView();
       } else {
-        this.headlessLifecycle?.stop();
-        this.headlessLifecycle = null;
-        this.headlessMounted = false;
+        this.stopHeadlessLifecycle();
       }
     };
     (this as any).getEngineState = () => ({
@@ -882,8 +880,7 @@ export default class BasesBridgePlugin extends Plugin {
   }
 
   onunload(): void {
-    this.headlessLifecycle?.stop();
-    this.headlessLifecycle = null;
+    this.stopHeadlessLifecycle();
     this.restLifecycle?.stop();
     this.restLifecycle = null;
     console.log("[bases-bridge] unloaded");
@@ -902,7 +899,10 @@ export default class BasesBridgePlugin extends Plugin {
   }
 
   private maybeRegisterHeadlessView(): void {
-    if (this.headlessLifecycle) return;
+    if (this.headlessLifecycle) {
+      this.headlessLifecycle.start();
+      return;
+    }
     this.headlessLifecycle = new RestExtensionLifecycle({
       probe: () => {
         const selfRegister: any = (this as any).registerBasesView;
@@ -942,11 +942,22 @@ export default class BasesBridgePlugin extends Plugin {
         console.warn("[bases-bridge] Headless view cleanup failed."),
     });
     this.register(() => {
-      this.headlessLifecycle?.stop();
-      this.headlessLifecycle = null;
-      this.headlessMounted = false;
+      this.stopHeadlessLifecycle();
     });
     this.headlessLifecycle.start();
+  }
+
+  private stopHeadlessLifecycle(): void {
+    const lifecycle = this.headlessLifecycle;
+    if (!lifecycle) {
+      this.headlessMounted = false;
+      return;
+    }
+    lifecycle.stop();
+    if (lifecycle.snapshot().state !== "degraded") {
+      this.headlessLifecycle = null;
+      this.headlessMounted = false;
+    }
   }
 
   private makeHeadlessSpec() {

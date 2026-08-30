@@ -829,3 +829,48 @@ test("Bases headless lifecycle follows Bases API disable and reload", async () =
   bridge.headlessLifecycle.stop();
   assert.equal(providers[1].cleanups, 1);
 });
+
+test("Bases engine toggle retains a failed headless cleanup fence", async () => {
+  const { loadedModule } = await loadBridgeModule();
+  const Bridge = loadedModule.exports.default;
+  let cleanupAttempts = 0;
+  let mounts = 0;
+  const provider = {
+    api: {
+      registerBasesView() {
+        mounts += 1;
+        return () => {
+          cleanupAttempts += 1;
+          if (cleanupAttempts === 1) {
+            throw new Error("fixture cleanup failure");
+          }
+        };
+      },
+    },
+  };
+  const bridge = new Bridge();
+  bridge.register = () => undefined;
+  bridge.app = {
+    plugins: {
+      plugins: { bases: provider },
+      getPlugin: (id) => (id === "bases" ? provider : null),
+    },
+  };
+
+  bridge.maybeRegisterHeadlessView();
+  const fencedLifecycle = bridge.headlessLifecycle;
+  bridge.stopHeadlessLifecycle();
+  assert.equal(bridge.headlessLifecycle, fencedLifecycle);
+  assert.equal(fencedLifecycle.snapshot().state, "degraded");
+  assert.equal(fencedLifecycle.snapshot().unloadGeneration, 0);
+  assert.equal(mounts, 1);
+
+  bridge.maybeRegisterHeadlessView();
+  assert.equal(bridge.headlessLifecycle, fencedLifecycle);
+  assert.equal(cleanupAttempts, 2);
+  assert.equal(fencedLifecycle.snapshot().unloadGeneration, 1);
+  assert.equal(fencedLifecycle.snapshot().mountGeneration, 2);
+  assert.equal(fencedLifecycle.snapshot().state, "ready");
+  assert.equal(mounts, 2);
+  fencedLifecycle.stop();
+});

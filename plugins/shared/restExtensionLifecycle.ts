@@ -46,6 +46,7 @@ export class RestExtensionLifecycle<Provider extends object> {
   private timer: unknown | null = null;
   private provider: Provider | null = null;
   private cleanup: (() => void) | null = null;
+  private cleanupPending = false;
   private running = false;
   private probing = false;
   private state: RestExtensionLifecycleState = "unavailable";
@@ -126,7 +127,7 @@ export class RestExtensionLifecycle<Provider extends object> {
         return;
       }
 
-      if (provider === this.provider && this.cleanup) {
+      if (provider === this.provider && this.cleanup && !this.cleanupPending) {
         this.state = "ready";
         this.consecutiveFailures = 0;
         this.scheduleNext(this.readyProbeMs);
@@ -150,6 +151,7 @@ export class RestExtensionLifecycle<Provider extends object> {
 
       this.provider = provider;
       this.cleanup = cleanup;
+      this.cleanupPending = false;
       this.mountGeneration += 1;
       this.consecutiveFailures = 0;
       this.state = "ready";
@@ -179,15 +181,18 @@ export class RestExtensionLifecycle<Provider extends object> {
     const cleanup = this.cleanup;
     if (!cleanup) {
       this.provider = null;
+      this.cleanupPending = false;
       return true;
     }
     try {
       cleanup();
       this.cleanup = null;
       this.provider = null;
+      this.cleanupPending = false;
       this.unloadGeneration += 1;
       return true;
     } catch {
+      this.cleanupPending = true;
       this.onCleanupError();
       return false;
     }
