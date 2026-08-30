@@ -329,9 +329,7 @@ export const OperonRecoveryStatusSchema = z.object({
   stale: z.literal(false),
 });
 
-export type OperonRecoveryStatus = z.infer<
-  typeof OperonRecoveryStatusSchema
->;
+export type OperonRecoveryStatus = z.infer<typeof OperonRecoveryStatusSchema>;
 
 export const OperonBridgePageSchema = z.object({
   ok: z.literal(true),
@@ -726,8 +724,17 @@ function normalizeTaskGalleryFields<
   return { ...fields, taskGallery } as T;
 }
 
+const OperonIdempotencyKeySchema = z
+  .string()
+  .min(8)
+  .max(200)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/u,
+    "Idempotency key must be an opaque correlation token.",
+  );
+
 const MutationControlSchema = z.object({
-  idempotencyKey: z.string().min(8).max(200),
+  idempotencyKey: OperonIdempotencyKeySchema,
   dryRun: z.boolean().optional().default(true),
 });
 
@@ -810,13 +817,13 @@ const OperonDateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, {
   message: "Date keys must use the YYYY-MM-DD format.",
 });
 
-const OperonNormalizedTagsSchema = z.array(z.string()).transform((tags) => [
-  ...new Set(
-    tags
-      .map((tag) => tag.trim().replace(/^#/u, "").trim())
-      .filter(Boolean),
-  ),
-]);
+const OperonNormalizedTagsSchema = z
+  .array(z.string())
+  .transform((tags) => [
+    ...new Set(
+      tags.map((tag) => tag.trim().replace(/^#/u, "").trim()).filter(Boolean),
+    ),
+  ]);
 
 export const OperonAdoptTaskSchema = MutationControlSchema.extend({
   adoption: z.object({
@@ -1299,23 +1306,30 @@ export const OperonNativeMutationProofSchema = z
   })
   .strict();
 
-export const OperonMutationResultSchema = z.object({
-  ok: z.boolean(),
+const OperonMutationStatusSchema = z.enum([
+  "planned",
+  "applied",
+  "already-applied",
+  "outcome-unknown",
+  "conflict",
+  "not-ready",
+  "not-found",
+  "invalid-input",
+  "rejected",
+  "failed",
+]);
+
+const OperonMutationReceiptBaseSchema = z.object({
   contractVersion: z.literal(OPERON_CONTRACT_VERSION),
-  operationId: z.string(),
-  idempotencyKey: z.string(),
-  status: z.enum([
-    "planned",
-    "applied",
-    "already-applied",
-    "outcome-unknown",
-    "conflict",
-    "not-ready",
-    "not-found",
-    "invalid-input",
-    "rejected",
-    "failed",
-  ]),
+  operationId: z.string().min(1).max(128),
+  idempotencyKey: OperonIdempotencyKeySchema,
+  source: z.literal("operon-live"),
+  stale: z.literal(false),
+});
+
+const OperonMutationSuccessSchema = OperonMutationReceiptBaseSchema.extend({
+  ok: z.literal(true),
+  status: z.enum(["planned", "applied", "already-applied"]),
   before: OperonTaskSchema.nullable().optional(),
   requested: z.record(z.unknown()),
   after: OperonTaskSchema.nullable().optional(),
@@ -1327,10 +1341,49 @@ export const OperonMutationResultSchema = z.object({
   mutationMayHaveApplied: z.boolean().optional(),
   nativeStatus: z.string().optional(),
   nativeProof: OperonNativeMutationProofSchema.optional(),
-  source: z.literal("operon-live"),
-  stale: z.literal(false),
   replayed: z.boolean().optional(),
 });
+
+/**
+ * The only `ok: false` mutation shape accepted across the Bridge/MCP boundary.
+ * It intentionally carries durable correlation and recovery evidence, while an
+ * empty requested object proves that task, path, content, field, and plan data
+ * were not reflected from the failed request.
+ */
+export const OperonMutationFailureReceiptSchema =
+  OperonMutationReceiptBaseSchema.extend({
+    ok: z.literal(false),
+    status: z.enum([
+      "outcome-unknown",
+      "conflict",
+      // Kept explicit for older v1 Developer API mutation results as well as
+      // the current public Bridge projection.
+      "not-found",
+      "invalid-input",
+      "not-ready",
+      "rejected",
+      "failed",
+    ]),
+    requested: z.object({}).strict(),
+    error: z
+      .object({
+        code: z.string().min(1).max(128),
+        reasonCode: z.string().min(1).max(128).optional(),
+        message: z.string().min(1).max(512),
+      })
+      .strict(),
+    retryable: z.boolean(),
+    planDigest: OperonPlanDigestSchema.optional(),
+    recoveryRef: z.string().min(1).max(256).optional(),
+    mutationMayHaveApplied: z.boolean().optional(),
+    recoveryRequired: z.boolean().optional(),
+    replayed: z.boolean().optional(),
+  }).strict();
+
+export const OperonMutationResultSchema = z.union([
+  OperonMutationSuccessSchema,
+  OperonMutationFailureReceiptSchema,
+]);
 
 export type OperonCreateTask = z.infer<typeof OperonCreateTaskSchema>;
 export type OperonTaskFinder = z.infer<typeof OperonTaskFinderSchema>;

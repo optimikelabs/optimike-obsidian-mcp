@@ -9,7 +9,7 @@ import type {
   GovernedCanvasPlanInput,
   GovernedCanvasRuntime,
 } from "../../../services/canvasProjectionRuntime.js";
-import { McpError } from "../../../types-global/errors.js";
+import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 
 const Id = z.string().min(1).max(256);
 const Side = z.enum(["top", "right", "bottom", "left"]);
@@ -91,18 +91,11 @@ const StatusSchema = z.object({
     .describe("Opaque reference returned by obsidian_canvas_patch_plan."),
 });
 
-function errorPayload(error: unknown): Record<string, unknown> {
-  return {
-    ok: false,
-    error: {
-      code: error instanceof McpError ? error.code : "INTERNAL_ERROR",
-      message: error instanceof Error ? error.message : String(error),
-      details: error instanceof McpError ? error.details : undefined,
-    },
-  };
-}
-
-async function runTool(operation: () => Promise<unknown>) {
+async function runTool(
+  toolName: string,
+  params: unknown,
+  operation: () => Promise<unknown>,
+) {
   try {
     return {
       content: [
@@ -118,7 +111,15 @@ async function runTool(operation: () => Promise<unknown>) {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(errorPayload(error), null, 2),
+          text: JSON.stringify(
+            publicMcpToolErrorPayload(error, {
+              operation: toolName,
+              toolName,
+              params,
+            }),
+            null,
+            2,
+          ),
         },
       ],
       isError: true,
@@ -137,7 +138,7 @@ export async function registerGovernedCanvasTools(
     PlanSchema.shape,
     GOVERNED_PLAN_TOOL_ANNOTATIONS,
     async (params: GovernedCanvasPlanInput) =>
-      runTool(() => runtime.plan(params)),
+      runTool("obsidian_canvas_patch_plan", params, () => runtime.plan(params)),
   );
   server.tool(
     "obsidian_canvas_patch_apply",
@@ -145,7 +146,9 @@ export async function registerGovernedCanvasTools(
     ApplySchema.shape,
     GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ApplySchema>) =>
-      runTool(() => runtime.apply(params.planRef, params.idempotencyKey)),
+      runTool("obsidian_canvas_patch_apply", params, () =>
+        runtime.apply(params.planRef, params.idempotencyKey),
+      ),
   );
   server.tool(
     "obsidian_canvas_patch_status",
@@ -153,7 +156,9 @@ export async function registerGovernedCanvasTools(
     StatusSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof StatusSchema>) =>
-      runTool(() => runtime.status(params.planRef)),
+      runTool("obsidian_canvas_patch_status", params, () =>
+        runtime.status(params.planRef),
+      ),
   );
   server.tool(
     "obsidian_canvas_patch_recover",
@@ -161,6 +166,8 @@ export async function registerGovernedCanvasTools(
     ApplySchema.shape,
     GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ApplySchema>) =>
-      runTool(() => runtime.recover(params.planRef, params.idempotencyKey)),
+      runTool("obsidian_canvas_patch_recover", params, () =>
+        runtime.recover(params.planRef, params.idempotencyKey),
+      ),
   );
 }

@@ -93,7 +93,7 @@ Le mode hybride suit la même règle de preuve : sans observation vérifiée de 
 
 Chaque requête HTTP émet un événement de fin lorsque le corps de sa réponse est terminé, annulé par le client ou en erreur. La simple création d’une `Response` streamée n’est pas considérée comme une fin. L’événement contient :
 
-- `requestId` ;
+- `requestId` (un UUID généré, également renvoyé dans `X-Request-Id`) ;
 - l’identité client vérifiée pseudonymisée lorsque l’authentification a réussi ;
 - le transport ;
 - la méthode et la route HTTP ;
@@ -104,7 +104,9 @@ Chaque requête HTTP émet un événement de fin lorsque le corps de sa réponse
 - le résultat d’admission ou de backpressure ;
 - la classe d’opération et le temps d’attente ;
 - la provenance courante et le statut stale ;
-- un `correlationId` ou `incidentId` facultatif et nettoyé.
+- une empreinte HMAC par processus, facultative, des valeurs fournies par
+  l’appelant pour `correlationId` et `incidentId`. Les valeurs brutes ne sont
+  jamais conservées en clair.
 
 Les erreurs applicatives mappées utilisent le statut de la vraie réponse
 d’erreur et ne sont journalisées qu’après la fin de son corps. Si le corps
@@ -112,16 +114,42 @@ d’erreur et ne sont journalisées qu’après la fin de son corps. Si le corps
 sur le réseau et indique `result: exception` au lieu d’inventer ensuite un
 HTTP `500`.
 
+## Enveloppe d’erreur HTTP publique
+
+Chaque rejet HTTP, y compris la limite pré-authentification, l’authentification,
+le refus d’origin, la capacité de session, le backpressure d’admission, le
+routage de profil invalide et le fallback Hono, utilise une même enveloppe
+JSON-RPC. `error.data.requestId` est le même UUID que `X-Request-Id` et que
+l’entrée structurée d’ErrorHandler. Le champ protocolaire `error.code` est
+toujours un entier JSON-RPC. La catégorie applicative fermée reste disponible
+uniquement dans `error.data.applicationCode`. L’enveloppe ne contient sinon
+qu’un message de catalogue et des diagnostics serveur autorisés ; elle ne
+reflète jamais un corps de requête, un chemin de profil, un token ou un message
+d’exception.
+
+Les mappages stables du transport sont `503` pour `SERVICE_UNAVAILABLE` et
+`504` pour `TIMEOUT`. Un identifiant JSON-RPC n’est reflété que depuis une
+enveloppe de requête `2.0` valide et uniquement s’il vaut `null`, une chaîne ou
+un nombre fini (y compris `0`) ; une enveloppe invalide, un objet ou un tableau
+produit `null`.
+
 Les méthodes JSON-RPC et noms d’outils contrôlés par l’appelant ne sont journalisés que s’ils respectent une grammaire stricte d’identifiant de 128 caractères. Les autres valeurs sont remplacées par le libellé HTTP contrôlé, ce qui empêche caractères de contrôle, contenu documentaire et valeurs démesurées d’entrer dans le champ d’opération.
 
-Les clients peuvent envoyer :
+Les clients peuvent envoyer des indications de corrélation :
 
 ```http
 X-Correlation-Id: incident-42:retry.1
 X-Incident-Id: inc_2026-07-29_001
 ```
 
-Seuls 1 à 128 caractères de `[A-Za-z0-9._:-]` sont acceptés. Une valeur invalide est ignorée au lieu d’être journalisée. Ces headers servent uniquement à la corrélation, jamais à l’authentification ou à l’autorisation.
+Seuls 1 à 128 caractères de `[A-Za-z0-9._:-]` sont acceptés. Une valeur
+invalide est ignorée au lieu d’être journalisée. Les valeurs acceptées sont
+empreintes par HMAC avec un secret généré pour le processus en cours ;
+L’empreinte permet donc de corréler les événements pendant la durée de vie de
+ce processus, mais elle n’est pas stable après un redémarrage. L’UUID
+`X-Request-Id` reste l’identifiant public en clair pour corréler une requête
+individuelle. Ces headers servent uniquement à la corrélation, jamais à
+l’authentification ou à l’autorisation.
 
 Les logs n’incluent pas par défaut :
 

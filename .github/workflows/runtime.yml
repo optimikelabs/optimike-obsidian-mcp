@@ -20,6 +20,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: npm run test:log-privacy
       - run: node scripts/test-governed-frontmatter-model.mjs
       - run: npm run test:runtime
       - run: npm run test:external-roots
@@ -36,6 +37,34 @@ jobs:
       - run: npm run test:launchers
       - if: runner.os == 'Windows'
         run: npm run test:migrations:windows
+
+  bridge-privacy:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install Bases Bridge dependencies
+        working-directory: plugins/obsidian-bases-bridge
+        run: npm ci
+      - name: Install Operon Bridge dependencies
+        working-directory: plugins/obsidian-operon-bridge
+        run: npm ci
+      - name: Install Atomic Write Bridge dependencies
+        working-directory: plugins/obsidian-atomic-write-bridge
+        run: npm ci
+      - name: Test Bases Bridge privacy boundary
+        run: npm --prefix plugins/obsidian-bases-bridge run check
+      - name: Test Operon Bridge privacy boundary
+        run: npm --prefix plugins/obsidian-operon-bridge run check
+      - name: Test Atomic Write Bridge privacy boundary
+        run: npm --prefix plugins/obsidian-atomic-write-bridge run check
 
   http-external-handoff:
     strategy:
@@ -155,6 +184,8 @@ jobs:
         run: npm ci
       - name: Test Bases Bridge
         run: npm run check:bases-bridge
+      - name: Test Operon Bridge privacy boundary
+        run: npm --prefix plugins/obsidian-operon-bridge run check
       - name: Test Atomic Write runtime and Bridge
         run: npm run check:atomic-write
       - name: Build MCP server

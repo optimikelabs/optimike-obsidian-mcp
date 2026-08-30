@@ -161,14 +161,11 @@ try {
           name: "external_read",
           arguments: { rootId: "missing", relativePath: "missing.txt" },
         });
-        const text = hidden.content.map((item) => item.text ?? "").join("\n");
-        rejected =
-          hidden.isError === true &&
-          /disabled|not found|not exposed/iu.test(text);
-      } catch (error) {
-        rejected = /disabled|not found|not exposed/iu.test(
-          error instanceof Error ? error.message : String(error),
-        );
+        // P0 deliberately keeps the public message value-free. The stable
+        // contract here is the failed tool result, not its former prose.
+        rejected = hidden.isError === true;
+      } catch {
+        rejected = true;
       }
       assert.ok(rejected, "a hidden direct-server tool call must be rejected");
     } finally {
@@ -185,7 +182,7 @@ try {
       const names = await listedNames(client);
       assert.equal(
         names.length,
-        46,
+        48,
         "explicit full must retain the complete runtime surface",
       );
       assert.ok(names.includes("smart_semantic_search"));
@@ -194,14 +191,14 @@ try {
       assert.ok(names.includes("external_read"));
 
       const removedAlias = await client.callTool({
-          name: "smart_search",
-          arguments: { query: "removed alias" },
+        name: "smart_search",
+        arguments: { query: "removed alias" },
       });
       assert.equal(removedAlias.isError, true);
-      assert.match(
+      assert.doesNotMatch(
         removedAlias.content.map((item) => item.text ?? "").join("\n"),
-        /not found|not exposed/iu,
-        "removed semantic aliases must not remain callable through explicit full",
+        /removed alias/iu,
+        "a removed semantic alias must fail without reflecting its request",
       );
     } finally {
       await client.close().catch(() => undefined);

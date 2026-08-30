@@ -12,6 +12,8 @@ import {
   GovernedCanvasAtomicServer,
 } from "./fixtures/governed-canvas-atomic-server.mjs";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
 async function unusedPort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -49,6 +51,15 @@ function parsed(result) {
       .map((item) => item.text)
       .join("\n"),
   );
+}
+
+function assertPublicError(payload, code, forbiddenMarker, label) {
+  assert.equal(payload.error.code, code, `${label} error code`);
+  assert.equal(payload.error.message, "The request could not be completed. Use the request id to inspect server diagnostics.", `${label} catalog message`);
+  const requestId = payload.requestId ?? payload.error.details?.requestId;
+  assert.match(requestId ?? "", UUID, `${label} request id`);
+  assert.equal(payload.error.details?.requestId, requestId, `${label} request id details`);
+  assert.doesNotMatch(JSON.stringify(payload), new RegExp(forbiddenMarker, "u"), `${label} leaked marker`);
 }
 
 const parent = path.join(process.cwd(), ".tmp");
@@ -140,10 +151,7 @@ try {
     },
   });
   assert.equal(blocked.isError, true);
-  assert.match(
-    parsed(blocked).error.message,
-    /Canvas file writes are disabled/u,
-  );
+  assertPublicError(parsed(blocked), "INTERNAL_ERROR", "Canvas file writes are disabled", "disabled canvas writes");
 } catch (error) {
   throw new Error(
     `${error instanceof Error ? error.stack : String(error)}\nstdout:\n${stdout}\nstderr:\n${stderr}`,

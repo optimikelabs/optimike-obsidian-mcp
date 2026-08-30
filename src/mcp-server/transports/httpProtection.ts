@@ -88,10 +88,10 @@ const HttpProtectionEnvSchema = z
 
 const parsedProtectionEnv = HttpProtectionEnvSchema.safeParse(process.env);
 if (!parsedProtectionEnv.success) {
-  const details = parsedProtectionEnv.error.flatten().fieldErrors;
-  throw new Error(
-    `Invalid HTTP protection configuration: ${JSON.stringify(details)}`,
-  );
+  // Zod issues may embed the rejected environment value (notably custom
+  // trusted-proxy parsing messages). Startup diagnostics are intentionally
+  // value-free; the operator can inspect the documented schema instead.
+  throw new Error("Invalid HTTP protection configuration.");
 }
 
 const protectionEnv = parsedProtectionEnv.data;

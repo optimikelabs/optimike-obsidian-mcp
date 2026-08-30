@@ -83,8 +83,9 @@ export const processObsidianManageFrontmatter = async (
   logger.debug(`Processing obsidian_manage_frontmatter request`, {
     ...context,
     operation: params.operation,
-    filePath: params.filePath,
-    key: params.key,
+    hasFilePath: Boolean(params.filePath),
+    hasKey: Boolean(params.key),
+    hasValue: params.value !== undefined,
   });
 
   const { filePath, operation, key, value } = params;

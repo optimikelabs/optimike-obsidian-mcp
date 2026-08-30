@@ -8,6 +8,7 @@
 
 import { generateUUID } from "../index.js";
 import { logger } from "./logger.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
  * Defines the core structure for context information associated with a request or operation.
@@ -118,6 +119,23 @@ const requestContextServiceInstance = {
     return context;
   },
 };
+
+// Transport adapters may establish a server-owned request correlation before
+// the SDK invokes application handlers. Keep that value in async-local state
+// so every public error boundary (including handlers which return an error
+// result instead of throwing) can reuse it without accepting a caller header.
+const requestCorrelation = new AsyncLocalStorage<string>();
+
+export function withRequestCorrelationId<T>(
+  requestId: string,
+  operation: () => T,
+): T {
+  return requestCorrelation.run(requestId, operation);
+}
+
+export function activeRequestCorrelationId(): string | undefined {
+  return requestCorrelation.getStore();
+}
 
 /**
  * Primary export for request context functionalities.

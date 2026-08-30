@@ -16,6 +16,7 @@ import {
   RequestContext,
   requestContextService,
 } from "../../../utils/index.js";
+import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 // Import necessary types, schema, and logic function from the logic file
 import type {
   ObsidianListNotesInput,
@@ -85,58 +86,57 @@ export const registerObsidianListNotesTool = async (
               operation: "HandleObsidianListNotesRequest",
               toolName: toolName,
               params: {
-                // Log all relevant parameters for debugging
-                dirPath: params.dirPath,
-                fileExtensionFilter: params.fileExtensionFilter,
-                nameRegexFilter: params.nameRegexFilter,
+                hasDirPath: Boolean(params.dirPath),
+                hasFileExtensionFilter: Boolean(params.fileExtensionFilter),
+                hasNameRegexFilter: Boolean(params.nameRegexFilter),
                 recursionDepth: params.recursionDepth,
               },
             });
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
-          // Wrap the core logic execution in a tryCatch block.
-          return await ErrorHandler.tryCatch(
-            async () => {
-              // Delegate the actual file listing and filtering logic to the processing function.
-              const response: ObsidianListNotesResponse =
-                await processObsidianListNotes(
-                  params,
-                  handlerContext,
-                  obsidianService,
-                  vaultCacheService,
-                );
-              logger.debug(
-                `'${toolName}' processed successfully`,
+          try {
+            // Delegate the actual file listing and filtering logic to the processing function.
+            const response: ObsidianListNotesResponse =
+              await processObsidianListNotes(
+                params,
                 handlerContext,
+                obsidianService,
+                vaultCacheService,
               );
+            logger.debug(
+              `'${toolName}' processed successfully`,
+              handlerContext,
+            );
 
-              // Format the successful response object from the logic function into the required MCP CallToolResult structure.
-              return {
-                content: [
-                  {
-                    type: "text", // Standard content type for structured JSON data
-                    text: JSON.stringify(response, null, 2), // Pretty-print JSON
-                  },
-                ],
-                isError: false, // Indicate successful execution
-              };
-            },
-            {
-              // Configuration for the inner error handler (processing logic).
-              operation: `processing ${toolName} handler`,
-              context: handlerContext,
-              input: params, // Log the full input parameters if an error occurs.
-              // Custom error mapping for consistent error reporting.
-              errorMapper: (error: unknown) =>
-                new McpError(
-                  error instanceof McpError
-                    ? error.code
-                    : BaseErrorCode.INTERNAL_ERROR,
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext }, // Include context
-                ),
-            },
-          ); // End of inner ErrorHandler.tryCatch
+            // Format the successful response object from the logic function into the required MCP CallToolResult structure.
+            return {
+              content: [
+                {
+                  type: "text", // Standard content type for structured JSON data
+                  text: JSON.stringify(response, null, 2), // Pretty-print JSON
+                },
+              ],
+              isError: false, // Indicate successful execution
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    publicMcpToolErrorPayload(error, {
+                      operation: `processing ${toolName} handler`,
+                      toolName,
+                      params,
+                    }),
+                    null,
+                    2,
+                  ),
+                },
+              ],
+              isError: true,
+            };
+          }
         },
       ); // End of server.tool call
 
@@ -154,7 +154,7 @@ export const registerObsidianListNotesTool = async (
       errorMapper: (error: unknown) =>
         new McpError(
           error instanceof McpError ? error.code : BaseErrorCode.INTERNAL_ERROR,
-          `Failed to register tool '${toolName}': ${error instanceof Error ? error.message : "Unknown error"}`,
+          `Failed to register tool '${toolName}'.`,
           { ...registrationContext }, // Include context
         ),
       critical: true, // Treat registration failure as critical.

@@ -419,10 +419,55 @@ MCP_EXTERNAL_MOVE_PROFILE_ID=<identifiant-stable-du-profil-coffre>
 MCP_EXTERNAL_MOVE_JOURNAL_PATH=<chemin-sqlite-local-absolu-optionnel>
 ```
 
-L’identifiant de profil est requis lorsque le backend live ne peut pas prouver
-un chemin de coffre configuré. Il est hashé dans le binding
-backend/coffre/racines et doit changer si le coffre sélectionné change. Le nom
-du journal est automatiquement profilé avec ce binding.
+L’identifiant de profil est obligatoire lorsque scan/plan initialisent le
+coordinateur de move external, indépendamment de `MCP_WRITE_MODE` et de
+`MCP_EXTERNAL_MOVE_ENABLED`. Read/list/stat/handoff fonctionnent sans lui et
+n’initialisent pas de journal de move. Le profil est un libellé opérateur, pas
+l’identité destructive à lui seul : le proxy et son backend déjà lancé doivent
+tous deux être en `headless-filesystem` sur le même `OBSIDIAN_VAULT` configuré
+et résoluble. Avant le plan, l’apply et le rollback, le backend relit son dossier coffre et compare
+sa preuve filesystem SHA-256 stricte (device/inode) à un challenge opaque de 64
+hex fourni par le proxy. Il retourne uniquement
+`destructiveVaultIdentityVerified: true|false` et une version de schéma : aucun
+digest d’un côté ou de l’autre n’est retourné par le statut runtime. Le proxy
+échoue fermé si la preuve est absente ou ne correspond pas.
+
+La preuve et le challenge ne contiennent ni chemin, ni URL, ni device, ni
+inode. Le challenge n’est ni loggé, ni réfléchi, ni stocké dans un plan ou un
+receipt. `external_runtime_status` expose seulement `identityVerified` et le
+libellé source. Le journal ne persiste que son binding dérivé privé et est
+automatiquement profilé par ce binding. Le démarrage attesté, le statut runtime,
+le scan et un statut fichier inconnu ne créent pas et n’ouvrent pas de journal
+en écriture. Le plan ouvre le journal à la demande. Un reçu existant fiable est
+lu depuis un snapshot privé temporaire DB/WAL vérifié, avec un SHM privé
+reconstruit. Ce dossier privé est supprimé après la requête ; SQLite n’ouvre pas
+le journal original. Status n’ouvre le journal en écriture que lorsqu’il peut
+prouver le binding courant mais constate une session stale sur un reçu partiel :
+cette réconciliation gardée persiste `recovery_required` avec le code stable
+`backend_session_changed`. Sans coordinateur, si le binding stocké diffère, ou
+pour un état actionnable non partiel, status n’écrit pas le journal : il renvoie
+une projection éphémère en revue manuelle, avec `readyToApply: false` et sans
+continuation apply ou rollback.
+
+Le payload du journal reste une entrée non fiable, même si son fichier SQLite
+est privé. Un reçu dont le binding est legacy ou incomplet mais dont les chemins
+et champs d’intégrité restent canoniques demeure inspectable en status-only : il
+conserve ses champs logiques sûrs, rapporte `legacyBinding: true`, puis projette
+`external_root_non_verifiable` avec revue manuelle. Un reçu malformé (par
+exemple chemin absolu, traversal ou backslash, reason de revue inconnue, hashes
+ou tokens incohérents) n’est jamais normalisé ni réécrit par status : il devient
+un incident de revue manuelle sans écriture et entièrement redacted. Apply et
+rollback refusent ces deux cas avant d’ouvrir une session backend destructive ou
+de consulter un chemin stocké.
+
+Un apply ou un rollback capture aussi la génération de connexion backend du
+proxy juste après cette preuve. Toute la séquence destructive est clôturée sur
+cette session live unique : une reconnexion ou un swap backend à n’importe quel
+moment invalide l’opération. Elle ne continue pas, ne répare pas les notes, ne
+compense pas et ne rollback pas via le backend de remplacement ; le journal
+durable consigne alors un état de récupération manuelle. Le statut runtime
+public n’expose volontairement aucun fingerprint de configuration stable ni
+autre corrélateur de connexion.
 
 Les trois autorisations write sont nécessaires pour l’apply et le rollback :
 mode write complet, feature flag et capacité `move` de la racine. Scan, plan et
@@ -468,6 +513,17 @@ et la fenêtre vérifiée où source et cible sont deux hard-links du même obje
 Le HTTP direct refuse scan, plan, status, apply et rollback. Les tickets HTTP
 restent des handoffs en lecture seule.
 
+### Les journaux legacy restent en status-only
+
+Un journal pré-attestation existant à l’ancien
+`MCP_EXTERNAL_MOVE_JOURNAL_PATH` n’est jamais adopté dans un nouveau binding.
+S’il est toujours présent, `external_move_status` peut lire son reçu redacted et
+le marque `legacyBinding: true` ; apply et rollback le refusent. Conserver le
+journal privé et ses préimages pour une récupération manuelle, puis créer un
+nouveau plan avec une nouvelle clé d’idempotence après vérification de la cible
+backend/proxy. Ne jamais copier ou renommer une base legacy pour la faire passer
+pour authentifiée.
+
 Il n’existe toujours aucun upload, create, replace, déplacement de dossier,
 move entre racines/volumes, overwrite, delete, corbeille ou sync external-root.
 
@@ -492,20 +548,21 @@ Désactiver toutes les racines externes :
 
 Erreurs fréquentes :
 
-| Erreur/état              | Vérification                                                                                                    |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `configuration_invalid`  | Chemin de config absolu, JSON valide, version `1`, champs connus et règles d’identifiant.                       |
-| `root_unavailable`       | Le dossier existe et le processus MCP peut y accéder.                                                           |
-| `capability_denied`      | La racine déclare la capacité exigée ; le mode ticket HTTP est activé et utilise une vraie authentification.    |
-| `path_not_allowed`       | Le chemin relatif correspond à `include` et pas à `exclude`.                                                    |
-| `path_link_unsupported`  | Retirer les symlinks ou jonctions du chemin demandé.                                                            |
-| `target_exists`          | Choisir une cible absente ; l’overwrite n’est jamais autorisé.                                                  |
-| `precondition_failed`    | Refaire scan et plan après modification de source, note ou état de plan.                                        |
-| `too_large`              | Limites de racine et budget agrégé du handoff local ou HTTP.                                                    |
-| `unsupported`            | Employer un texte UTF-8 avec `external_read`, ou un mode de handoff supporté pour le binaire.                   |
-| Ticket HTTP indisponible | Vérifier feature flag, auth, identité bearer, TTL, usage unique et redémarrage du service.                      |
-| Port inattendu           | Garder `MCP_HTTP_PORT_RETRIES=0` ou examiner le repli borné configuré.                                          |
-| Échec client distant     | Vérifier proxy TLS, allowlist Origin, métadonnées auth, confiance forwarding, firewall et compatibilité client. |
+| Erreur/état              | Vérification                                                                                                                                                           |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `configuration_invalid`  | Chemin de config absolu, JSON valide, version `1`, champs connus et règles d’identifiant.                                                                              |
+| `root_unavailable`       | Le dossier existe et le processus MCP peut y accéder.                                                                                                                  |
+| `capability_denied`      | La racine déclare la capacité exigée ; le mode ticket HTTP est activé et utilise une vraie authentification.                                                           |
+| `path_not_allowed`       | Le chemin relatif correspond à `include` et pas à `exclude`.                                                                                                           |
+| `path_link_unsupported`  | Retirer les symlinks ou jonctions du chemin demandé.                                                                                                                   |
+| `target_exists`          | Choisir une cible absente ; l’overwrite n’est jamais autorisé.                                                                                                         |
+| `precondition_failed`    | Refaire scan et plan après modification de source, note ou état de plan.                                                                                               |
+| Cible move indisponible  | Vérifier que proxy et backend sont en `headless-filesystem`, visent le même coffre résoluble, que l’identifiant de profil est présent, puis redémarrer le proxy local. |
+| `too_large`              | Limites de racine et budget agrégé du handoff local ou HTTP.                                                                                                           |
+| `unsupported`            | Employer un texte UTF-8 avec `external_read`, ou un mode de handoff supporté pour le binaire.                                                                          |
+| Ticket HTTP indisponible | Vérifier feature flag, auth, identité bearer, TTL, usage unique et redémarrage du service.                                                                             |
+| Port inattendu           | Garder `MCP_HTTP_PORT_RETRIES=0` ou examiner le repli borné configuré.                                                                                                 |
+| Échec client distant     | Vérifier proxy TLS, allowlist Origin, métadonnées auth, confiance forwarding, firewall et compatibilité client.                                                        |
 
 Le serveur ne déduit jamais une nouvelle racine à partir d’un chemin trouvé dans
 une note Obsidian.

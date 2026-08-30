@@ -61,7 +61,9 @@ export const processObsidianManageTags = async (
 ): Promise<ObsidianManageTagsResponse> => {
   logger.debug(`Processing obsidian_manage_tags request`, {
     ...context,
-    ...params,
+    operation: params.operation,
+    hasFilePath: Boolean(params.filePath),
+    tagCount: params.tags.length,
   });
 
   const { filePath, operation, tags: inputTags } = params;

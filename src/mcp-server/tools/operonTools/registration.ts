@@ -26,7 +26,7 @@ import {
   OperonUpdateRecurrenceSchema,
 } from "../../../services/operon/contract.js";
 import { OperonService } from "../../../services/operon/service.js";
-import { McpError } from "../../../types-global/errors.js";
+import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 
 const ForceRefreshSchema = z.object({
   forceRefresh: z.boolean().optional().default(false),
@@ -57,18 +57,11 @@ const DESTRUCTIVE_MUTATION_ANNOTATIONS = {
   destructiveHint: true,
 } as const;
 
-function errorPayload(error: unknown): Record<string, unknown> {
-  return {
-    ok: false,
-    error: {
-      code: error instanceof McpError ? error.code : "INTERNAL_ERROR",
-      message: error instanceof Error ? error.message : String(error),
-      details: error instanceof McpError ? error.details : undefined,
-    },
-  };
-}
-
-async function runTool(operation: () => Promise<unknown>) {
+async function runTool(
+  toolName: string,
+  params: unknown,
+  operation: () => Promise<unknown>,
+) {
   try {
     const result = await operation();
     return {
@@ -82,7 +75,15 @@ async function runTool(operation: () => Promise<unknown>) {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(errorPayload(error), null, 2),
+          text: JSON.stringify(
+            publicMcpToolErrorPayload(error, {
+              operation: toolName,
+              toolName,
+              params,
+            }),
+            null,
+            2,
+          ),
         },
       ],
       isError: true,
@@ -99,7 +100,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     ForceRefreshSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof ForceRefreshSchema>) =>
-      runTool(() => service.status(params.forceRefresh)),
+      runTool("operon_status", params, () =>
+        service.status(params.forceRefresh),
+      ),
   );
 
   server.tool(
@@ -108,7 +111,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     ForceRefreshSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof ForceRefreshSchema>) =>
-      runTool(() => service.configuration(params.forceRefresh)),
+      runTool("operon_get_configuration", params, () =>
+        service.configuration(params.forceRefresh),
+      ),
   );
 
   server.tool(
@@ -117,7 +122,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonQuerySchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonQuerySchema>) =>
-      runTool(() => service.query(params)),
+      runTool("operon_list_tasks", params, () => service.query(params)),
   );
 
   server.tool(
@@ -126,7 +131,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonQuerySchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonQuerySchema>) =>
-      runTool(() => service.query(params)),
+      runTool("operon_query_tasks", params, () => service.query(params)),
   );
 
   server.tool(
@@ -135,7 +140,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonFilterQuerySchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonFilterQuerySchema>) =>
-      runTool(() => service.querySavedFilter(params)),
+      runTool("operon_query_saved_filter", params, () =>
+        service.querySavedFilter(params),
+      ),
   );
 
   server.tool(
@@ -144,7 +151,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     GetTaskSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof GetTaskSchema>) =>
-      runTool(() => service.getTask(params)),
+      runTool("operon_get_task", params, () => service.getTask(params)),
   );
 
   server.tool(
@@ -153,7 +160,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     ForceRefreshSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof ForceRefreshSchema>) =>
-      runTool(() => service.validate(params.forceRefresh)),
+      runTool("operon_validate", params, () =>
+        service.validate(params.forceRefresh),
+      ),
   );
 
   server.tool(
@@ -161,7 +170,8 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "Read Operon 3.2 native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault.",
     {},
     READ_ONLY_ANNOTATIONS,
-    async () => runTool(() => service.diagnostics()),
+    async () =>
+      runTool("operon_get_diagnostics", {}, () => service.diagnostics()),
   );
 
   server.tool(
@@ -170,7 +180,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonTaskFinderSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonTaskFinderSchema>) =>
-      runTool(() => service.findTasks(params)),
+      runTool("operon_find_tasks", params, () => service.findTasks(params)),
   );
 
   server.tool(
@@ -179,7 +189,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonResolveTaskSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonResolveTaskSchema>) =>
-      runTool(() => service.resolveTask(params)),
+      runTool("operon_resolve_task", params, () => service.resolveTask(params)),
   );
 
   server.tool(
@@ -188,7 +198,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonRelationshipsSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonRelationshipsSchema>) =>
-      runTool(() => service.relationships(params)),
+      runTool("operon_get_relationships", params, () =>
+        service.relationships(params),
+      ),
   );
 
   server.tool(
@@ -197,7 +209,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonContextInputSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonContextSchema>) =>
-      runTool(() => service.context(params)),
+      runTool("operon_build_context", params, () => service.context(params)),
   );
 
   server.tool(
@@ -205,7 +217,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "Read Operon's native active timer and in-flight timer transition state. This is observation only; timer start, stop, and session edits remain operator-controlled outside MCP.",
     {},
     READ_ONLY_ANNOTATIONS,
-    async () => runTool(() => service.timers()),
+    async () => runTool("operon_get_timer_state", {}, () => service.timers()),
   );
 
   server.tool(
@@ -214,7 +226,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonAdoptTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonAdoptTaskSchema>) =>
-      runTool(() => service.adoptTask(params)),
+      runTool("operon_adopt_task", params, () => service.adoptTask(params)),
   );
 
   server.tool(
@@ -223,7 +235,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonCreatePeriodicTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonCreatePeriodicTaskSchema>) =>
-      runTool(() => service.createPeriodicTask(params)),
+      runTool("operon_create_periodic_task", params, () =>
+        service.createPeriodicTask(params),
+      ),
   );
 
   server.tool(
@@ -232,7 +246,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonUpdatePeriodicSchedulingSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonUpdatePeriodicSchedulingSchema>) =>
-      runTool(() => service.updatePeriodicScheduling(params)),
+      runTool("operon_update_periodic_scheduling", params, () =>
+        service.updatePeriodicScheduling(params),
+      ),
   );
 
   server.tool(
@@ -241,7 +257,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonCreateTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonCreateTaskSchema>) =>
-      runTool(() => service.createTask(params)),
+      runTool("operon_create_task", params, () => service.createTask(params)),
   );
 
   server.tool(
@@ -250,7 +266,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonUpdateTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonUpdateTaskSchema>) =>
-      runTool(() => service.updateTask(params)),
+      runTool("operon_update_task", params, () => service.updateTask(params)),
   );
 
   server.tool(
@@ -259,7 +275,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonTransitionTaskInputSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonTransitionTaskSchema>) =>
-      runTool(() => service.transitionTask(params)),
+      runTool("operon_transition_task", params, () =>
+        service.transitionTask(params),
+      ),
   );
 
   server.tool(
@@ -268,7 +286,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonConvertTaskInputSchema.shape,
     DESTRUCTIVE_MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonConvertTaskSchema>) =>
-      runTool(() => service.convertTask(params)),
+      runTool("operon_convert_task", params, () => service.convertTask(params)),
   );
 
   server.tool(
@@ -277,7 +295,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonRelocateTaskSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonRelocateTaskSchema>) =>
-      runTool(() => service.relocateTask(params)),
+      runTool("operon_relocate_task", params, () =>
+        service.relocateTask(params),
+      ),
   );
 
   server.tool(
@@ -286,7 +306,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonSetRelationshipsInputSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonSetRelationshipsSchema>) =>
-      runTool(() => service.setRelationships(params)),
+      runTool("operon_set_relationships", params, () =>
+        service.setRelationships(params),
+      ),
   );
 
   server.tool(
@@ -295,7 +317,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonUpdateRecurrenceSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonUpdateRecurrenceSchema>) =>
-      runTool(() => service.updateRecurrence(params)),
+      runTool("operon_update_recurrence", params, () =>
+        service.updateRecurrence(params),
+      ),
   );
 
   server.tool(
@@ -304,7 +328,9 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonPendingRecoveriesInputSchema.shape,
     READ_ONLY_ANNOTATIONS,
     async (params: z.infer<typeof OperonPendingRecoveriesInputSchema>) =>
-      runTool(() => service.pendingRecoveries(params)),
+      runTool("operon_list_pending_recoveries", params, () =>
+        service.pendingRecoveries(params),
+      ),
   );
 
   server.tool(
@@ -313,6 +339,8 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     OperonRecoverMutationInputSchema.shape,
     MUTATION_ANNOTATIONS,
     async (params: z.infer<typeof OperonRecoverMutationSchema>) =>
-      runTool(() => service.recoverMutation(params)),
+      runTool("operon_recover_mutation", params, () =>
+        service.recoverMutation(params),
+      ),
   );
 }

@@ -60,6 +60,11 @@ import {
 } from "./httpObservability.js";
 import { httpErrorHandler } from "./httpErrorHandler.js";
 import {
+  earlyJsonRpcErrorResponse,
+  jsonRpcErrorResponse,
+  jsonRpcIdFromBody,
+} from "./httpJsonRpcError.js";
+import {
   authenticatedIdentityLimiter,
   deriveVerifiedHttpIdentity,
   httpProtectionConfig,
@@ -71,6 +76,7 @@ import {
 } from "./httpProtection.js";
 import {
   getHttpRequestState,
+  withActiveHttpRequestState,
   type HttpQuotaState,
   type VerifiedHttpIdentity,
 } from "./httpRequestState.js";
@@ -198,12 +204,6 @@ function quotaState(
   };
 }
 
-function jsonRpcIdFromBody(body: unknown): string | number | null {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
-  const id = (body as { id?: unknown }).id;
-  return typeof id === "string" || typeof id === "number" ? id : null;
-}
-
 async function rateLimitResponse(
   c: Context,
   scope: HttpQuotaState["scope"],
@@ -238,19 +238,14 @@ async function rateLimitResponse(
     }),
   );
 
-  return c.json(
+  return jsonRpcErrorResponse(
+    c,
+    new McpError(BaseErrorCode.RATE_LIMITED, "Rate limit rejected."),
     {
-      jsonrpc: "2.0",
-      error: {
-        code: BaseErrorCode.RATE_LIMITED,
-        message:
-          decision.outcome === "capacity"
-            ? "Rate-limit state capacity is temporarily exhausted."
-            : "Rate limit exceeded.",
-      },
-      id: null,
+      operation: "httpRateLimitRejected",
+      status: 429,
+      details: { retryable: true },
     },
-    429,
   );
 }
 
@@ -524,20 +519,19 @@ async function handleWithSessionActivity(
 }
 
 function sessionCapacityResponse(c: Context, body: unknown): Response {
-  const state = getHttpRequestState(c.req.raw);
   c.header("Retry-After", "1");
-  c.header("X-Request-Id", state.requestId);
-  c.header("Cache-Control", "no-store");
-  return c.json(
+  return jsonRpcErrorResponse(
+    c,
+    new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      "HTTP session capacity is temporarily exhausted.",
+    ),
     {
-      jsonrpc: "2.0",
-      error: {
-        code: BaseErrorCode.SERVICE_UNAVAILABLE,
-        message: "HTTP session capacity is temporarily exhausted.",
-      },
+      operation: "httpSessionCapacityRejected",
       id: jsonRpcIdFromBody(body),
+      status: 503,
+      details: { retryable: true },
     },
-    503,
   );
 }
 
@@ -595,20 +589,27 @@ function startHttpServerWithRetry(
         const fetch: typeof app.fetch = (request, env, executionCtx) => {
           const routed = rewriteProfiledMcpRequest(request);
           return routed instanceof Response
-            ? routed
+            ? earlyJsonRpcErrorResponse(
+                request,
+                new McpError(
+                  BaseErrorCode.NOT_FOUND,
+                  "The requested tool profile was not found.",
+                ),
+                { operation: "rewriteProfiledMcpRequest", status: 404 },
+              )
             : app.fetch(routed, env, executionCtx);
         };
         const serverInstance = serve(
           { fetch, port: currentPort, hostname: host },
-          (info: { address: string; port: number }) => {
-            const serverAddress = `http://${info.address}:${info.port}${MCP_ENDPOINT_PATH}`;
-            logger.info(`HTTP transport listening at ${serverAddress}`, {
+          (_info: { address: string; port: number }) => {
+            // Keep listener startup useful without exposing a bind URL or
+            // server address to console/log transports.
+            logger.info("HTTP transport listening.", {
               ...attemptContext,
-              address: serverAddress,
               toolProfiles: ["standard", "authoring", "tasks", "full"],
             });
             if (process.stdout.isTTY) {
-              console.log(`\n🚀 MCP Server running at: ${serverAddress}\n`);
+              console.log("\n🚀 MCP Server running.\n");
             }
           },
         );
@@ -663,9 +664,10 @@ export async function startHttpTransport(
   app.use("*", async (c: Context, next: Next) => {
     const origin = c.req.header("origin");
     if (origin && !originAllowed(origin)) {
-      return c.json(
-        { error: "origin_not_allowed", message: "Origin is not allowed." },
-        403,
+      return jsonRpcErrorResponse(
+        c,
+        new McpError(BaseErrorCode.FORBIDDEN, "Origin is not allowed."),
+        { operation: "httpOriginDenied", status: 403 },
       );
     }
     await next();
@@ -734,12 +736,13 @@ export async function startHttpTransport(
     const authInfo = c.env.incoming.auth as AuthInfo | undefined;
     const state = getHttpRequestState(c.req.raw);
     if (!ticket || !authInfo) {
-      return c.json(
-        {
-          error: "not_found",
-          message: "Artifact transfer is invalid or unavailable.",
-        },
-        404,
+      return jsonRpcErrorResponse(
+        c,
+        new McpError(
+          BaseErrorCode.NOT_FOUND,
+          "Artifact transfer is invalid or unavailable.",
+        ),
+        { operation: "consumeExternalHandoffTicket", status: 404 },
       );
     }
 
@@ -765,12 +768,13 @@ export async function startHttpTransport(
         errorCode:
           error instanceof ExternalRootError ? error.code : "non_verifiable",
       });
-      return c.json(
-        {
-          error: "not_found",
-          message: "Artifact transfer is invalid or unavailable.",
-        },
-        404,
+      return jsonRpcErrorResponse(
+        c,
+        new McpError(
+          BaseErrorCode.NOT_FOUND,
+          "Artifact transfer is invalid or unavailable.",
+        ),
+        { operation: "consumeExternalHandoffTicket", status: 404 },
       );
     }
   });
@@ -786,13 +790,31 @@ export async function startHttpTransport(
       clientIdentity: identity.pseudonym,
       toolProfile,
     });
-    const body = await c.req.raw.clone().json();
+    let body: unknown;
+    try {
+      body = await c.req.raw.clone().json();
+    } catch {
+      return jsonRpcErrorResponse(
+        c,
+        new McpError(
+          BaseErrorCode.PARSING_ERROR,
+          "The JSON-RPC request body is not valid JSON.",
+        ),
+        {
+          operation: "httpJsonRpcParse",
+          status: 400,
+          protocolCode: -32700,
+        },
+      );
+    }
+    state.rpcId = jsonRpcIdFromBody(body);
     const sessionId = c.req.header("mcp-session-id");
     const session = sessionForRequest(c, sessionId);
     let transport = session?.transport;
     let initializationReservation: SessionCapacityReservation | undefined;
     let initializingTransport:
-      WebStandardStreamableHTTPServerTransport | undefined;
+      | WebStandardStreamableHTTPServerTransport
+      | undefined;
     let initializedSession: HttpSession | undefined;
 
     if (isInitializeRequest(body)) {
@@ -891,18 +913,22 @@ export async function startHttpTransport(
         return await handleWithSessionActivity(
           initializedSession,
           () =>
-            transport!.handleRequest(c.req.raw, {
-              authInfo: c.env.incoming.auth,
-              parsedBody: body,
-            }),
+            withActiveHttpRequestState(c.req.raw, () =>
+              transport!.handleRequest(c.req.raw, {
+                authInfo: c.env.incoming.auth,
+                parsedBody: body,
+              }),
+            ),
           true,
         );
       }
       if (isInitializeRequest(body)) {
-        const response = await transport.handleRequest(c.req.raw, {
-          authInfo: c.env.incoming.auth,
-          parsedBody: body,
-        });
+        const response = await withActiveHttpRequestState(c.req.raw, () =>
+          transport.handleRequest(c.req.raw, {
+            authInfo: c.env.incoming.auth,
+            parsedBody: body,
+          }),
+        );
         if (!initializedSession) {
           await initializingTransport?.close().catch(() => undefined);
           throw new McpError(
@@ -913,10 +939,12 @@ export async function startHttpTransport(
         return wrapSessionResponse(initializedSession, response);
       }
       return await handleWithSessionActivity(session!, () =>
-        transport!.handleRequest(c.req.raw, {
-          authInfo: c.env.incoming.auth,
-          parsedBody: body,
-        }),
+        withActiveHttpRequestState(c.req.raw, () =>
+          transport!.handleRequest(c.req.raw, {
+            authInfo: c.env.incoming.auth,
+            parsedBody: body,
+          }),
+        ),
       );
     } catch (error) {
       if (initializingTransport) {
@@ -945,9 +973,11 @@ export async function startHttpTransport(
     }
 
     return await handleWithSessionActivity(session, () =>
-      session.transport.handleRequest(c.req.raw, {
-        authInfo: c.env.incoming.auth,
-      }),
+      withActiveHttpRequestState(c.req.raw, () =>
+        session.transport.handleRequest(c.req.raw, {
+          authInfo: c.env.incoming.auth,
+        }),
+      ),
     );
   };
 

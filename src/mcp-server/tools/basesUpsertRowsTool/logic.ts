@@ -28,6 +28,30 @@ const FALLBACK_RECOMMENDATION =
 const BUSY_RECOMMENDATION =
   "Obsidian or Bases Bridge looks busy, indexing, locked, or slow while processFrontMatter is running. Retry failed operations alone after a short backoff; keep chunkSize low until the vault is idle.";
 const PROTECTED_UPSERT_KEYS = new Set(["création", "creation", "modification"]);
+const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
+  base_not_found:
+    "The requested Base was not found. Verify it with bases_list before retrying.",
+  bases_bridge_unreachable:
+    "The Bases Bridge could not be reached. Verify runtime status before retrying.",
+  bases_bridge_unreachable_or_rejected:
+    "The Bases Bridge could not process the request. Verify runtime status before retrying.",
+  forbidden_key:
+    "Protected or virtual frontmatter keys cannot be modified through bases_upsert_rows.",
+  local_rest_unreachable:
+    "Local REST could not be reached. Verify runtime status before retrying.",
+  missing_bridge_result:
+    "The Bases Bridge did not return a result for this operation; its outcome is unknown.",
+  missing_result:
+    "The operation did not produce a result; its outcome is unknown.",
+  request_failed_outcome_unknown:
+    "The request failed and the individual write outcome is unknown.",
+  request_timeout_outcome_unknown:
+    "The request timed out and the individual write outcome is unknown.",
+  skipped_after_error:
+    "The operation was skipped because a previous operation failed and continueOnError is false.",
+  write_timeout:
+    "The write timed out and its final outcome may require verification.",
+};
 
 type IndexedOperation = {
   index: number;
@@ -75,39 +99,24 @@ function validateOperationKeys(
         mtime: 0,
         error: {
           code: "forbidden_key",
-          message: `Keys cannot be modified through bases_upsert_rows: ${forbiddenKeys.join(", ")}`,
+          message: PUBLIC_ERROR_MESSAGES.forbidden_key,
         },
       },
     ];
   });
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function errorCode(error: unknown): string {
   if (error instanceof McpError) return error.code;
-  if (error && typeof error === "object" && "code" in error) {
-    return String((error as { code?: unknown }).code);
-  }
   return "unknown_error";
 }
 
 function classifyLiveError(error: unknown): string {
-  const message = errorMessage(error);
-  if (message.includes("Network Error") || message.includes("No response")) {
-    return "local_rest_unreachable";
-  }
-  if (
-    message.includes("/bases") ||
-    message.includes("Bases") ||
-    message.includes("Bridge")
-  ) {
-    return "bases_bridge_unreachable_or_rejected";
-  }
-  if (message.includes("timeout") || message.includes("timed out")) {
-    return "request_timeout_outcome_unknown";
+  if (error instanceof McpError) {
+    if (error.code === "TIMEOUT") return "request_timeout_outcome_unknown";
+    if (error.code === "SERVICE_UNAVAILABLE") {
+      return "local_rest_unreachable";
+    }
   }
   return errorCode(error).toLowerCase();
 }
@@ -115,23 +124,50 @@ function classifyLiveError(error: unknown): string {
 function classifyResultError(result: BaseUpsertResult): string {
   const code = result.error?.code;
   if (code) return code;
-  const message = result.error?.message ?? "";
-  if (message.includes("timeout") || message.includes("timed out")) {
-    return "write_timeout";
-  }
   return "unknown_error";
 }
 
-function isRetryableError(code: string, message = ""): boolean {
+function publicErrorMessage(code: string): string {
+  return (
+    PUBLIC_ERROR_MESSAGES[code] ??
+    "The Bases row operation could not be completed. Inspect the stable error code before retrying."
+  );
+}
+
+function publicResultError(result: BaseUpsertResult): BaseUpsertResult {
+  if (!result.error) return result;
+  const code = classifyResultError(result);
+  return {
+    ...result,
+    error: {
+      code,
+      message: publicErrorMessage(code),
+    },
+  };
+}
+
+/**
+ * The Bases Bridge deliberately omits caller paths from failed HTTP payloads.
+ * Its response is positional, so bind each row back to the already validated
+ * request operation here rather than trusting a reflected bridge `file` field.
+ */
+function bindBridgeResultToOperation(
+  operation: BaseUpsertOperation,
+  result: BaseUpsertResult,
+): BaseUpsertResult {
+  return {
+    ...publicResultError(result),
+    file: operation.file,
+  };
+}
+
+function isRetryableError(code: string): boolean {
   const normalized = code.toLowerCase();
-  const text = message.toLowerCase();
   return (
     normalized === "write_timeout" ||
     normalized === "request_timeout_outcome_unknown" ||
     normalized === "local_rest_unreachable" ||
-    normalized === "service_unavailable" ||
-    (normalized === "write_error" &&
-      (text.includes("timeout") || text.includes("timed out")))
+    normalized === "service_unavailable"
   );
 }
 
@@ -162,7 +198,7 @@ function buildSummary(
       file: result.file,
       code: result.error!.code,
       message: result.error!.message,
-      retryable: isRetryableError(result.error!.code, result.error!.message),
+      retryable: isRetryableError(result.error!.code),
       attempts: result.attempts,
     }));
 
@@ -196,13 +232,13 @@ async function runLivePreflight(
       }),
     );
   } catch (error) {
-    const message = `Local REST preflight failed before bases_upsert_rows: ${errorMessage(error)}`;
-    logger.error(message, { ...context, error: errorMessage(error) });
+    const message =
+      "Local REST preflight could not verify availability before bases_upsert_rows.";
+    logger.error(message, { ...context, reasonCode: "local_rest_unreachable" });
     return {
       ok: false,
       diagnostics: {
         source: "preflight",
-        base_id: params.base_id,
         phase: "local_rest",
         message,
         recommendation: FALLBACK_RECOMMENDATION,
@@ -229,7 +265,7 @@ async function runLivePreflight(
     );
     const baseExists = list.bases.some((base) => base.id === params.base_id);
     if (!baseExists) {
-      const message = `Base not found during bases_upsert_rows preflight: ${params.base_id}`;
+      const message = publicErrorMessage("base_not_found");
       const results = makeFailedResults(
         params.operations,
         "base_not_found",
@@ -239,7 +275,6 @@ async function runLivePreflight(
         ok: false,
         diagnostics: {
           source: "preflight",
-          base_id: params.base_id,
           phase: "base_exists",
           message,
           recommendation:
@@ -250,8 +285,12 @@ async function runLivePreflight(
       };
     }
   } catch (error) {
-    const message = `Bases Bridge preflight failed before bases_upsert_rows: ${errorMessage(error)}`;
-    logger.error(message, { ...context, error: errorMessage(error) });
+    const message =
+      "Bases Bridge preflight could not verify availability before bases_upsert_rows.";
+    logger.error(message, {
+      ...context,
+      reasonCode: "bases_bridge_unreachable",
+    });
     const results = makeFailedResults(
       params.operations,
       "bases_bridge_unreachable",
@@ -261,7 +300,6 @@ async function runLivePreflight(
       ok: false,
       diagnostics: {
         source: "preflight",
-        base_id: params.base_id,
         phase: "bases_bridge",
         message,
         recommendation: FALLBACK_RECOMMENDATION,
@@ -304,7 +342,9 @@ export const BasesUpsertRowsInputSchema = z
     base_id: z
       .string()
       .min(1)
-      .describe("Identifiant (chemin) de la base utilisée pour contextualiser la mise à jour."),
+      .describe(
+        "Identifiant (chemin) de la base utilisée pour contextualiser la mise à jour.",
+      ),
     operations: z
       .array(OperationSchema)
       .min(1)
@@ -312,7 +352,9 @@ export const BasesUpsertRowsInputSchema = z
     continueOnError: z
       .boolean()
       .default(false)
-      .describe("Quand true, poursuit les opérations malgré les erreurs individuelles."),
+      .describe(
+        "Quand true, poursuit les opérations malgré les erreurs individuelles.",
+      ),
     chunkSize: z
       .number()
       .int()
@@ -328,32 +370,42 @@ export const BasesUpsertRowsInputSchema = z
       .min(0)
       .max(30000)
       .default(DEFAULT_BATCH_DELAY_MS)
-      .describe("Pause entre deux requêtes bridge, utile quand Obsidian indexe ou verrouille le coffre."),
+      .describe(
+        "Pause entre deux requêtes bridge, utile quand Obsidian indexe ou verrouille le coffre.",
+      ),
     maxRetries: z
       .number()
       .int()
       .min(0)
       .max(3)
       .default(DEFAULT_MAX_RETRIES)
-      .describe("Nombre de retries automatiques pour les erreurs retryables comme write_timeout."),
+      .describe(
+        "Nombre de retries automatiques pour les erreurs retryables comme write_timeout.",
+      ),
     retryBackoffMs: z
       .number()
       .int()
       .min(100)
       .max(60000)
       .default(DEFAULT_RETRY_BACKOFF_MS)
-      .describe("Backoff de base avant retry. Le délai est multiplié par le numéro de tentative."),
+      .describe(
+        "Backoff de base avant retry. Le délai est multiplié par le numéro de tentative.",
+      ),
     requestTimeoutMs: z
       .number()
       .int()
       .min(10000)
       .max(300000)
       .default(DEFAULT_REQUEST_TIMEOUT_MS)
-      .describe("Timeout HTTP client pour chaque requête vers le bridge Bases."),
+      .describe(
+        "Timeout HTTP client pour chaque requête vers le bridge Bases.",
+      ),
     dryRun: z
       .boolean()
       .default(false)
-      .describe("Valide les fichiers, les mtime et le payload via le bridge sans écrire."),
+      .describe(
+        "Valide les fichiers, les mtime et le payload via le bridge sans écrire.",
+      ),
   })
   .describe(
     "Met à jour en lot les propriétés de notes référencées par une base (.base). Respecte le verrou mtime et interdit les clés formula.* / file.* côté bridge.",
@@ -392,7 +444,7 @@ export async function processBasesUpsertRows(
     parentContext,
     operation: "BasesUpsertRows",
     params: {
-      base_id: params.base_id,
+      hasBaseId: Boolean(params.base_id),
       operations: params.operations.length,
       continueOnError: params.continueOnError,
       chunkSize: params.chunkSize,
@@ -402,12 +454,14 @@ export async function processBasesUpsertRows(
     },
   });
 
-  const operations: BaseUpsertOperation[] = params.operations.map((operation) => ({
-    file: operation.file,
-    set: operation.set,
-    unset: operation.unset,
-    expected_mtime: operation.expected_mtime,
-  }));
+  const operations: BaseUpsertOperation[] = params.operations.map(
+    (operation) => ({
+      file: operation.file,
+      set: operation.set,
+      unset: operation.unset,
+      expected_mtime: operation.expected_mtime,
+    }),
+  );
   const validationErrors = validateOperationKeys(operations);
   if (validationErrors.length > 0) {
     return {
@@ -416,7 +470,6 @@ export async function processBasesUpsertRows(
       summary: buildSummary(operations.length, validationErrors, params.dryRun),
       diagnostics: {
         source: "preflight",
-        base_id: params.base_id,
         phase: "validation",
         message:
           "bases_upsert_rows refused protected or virtual frontmatter keys before writing.",
@@ -425,10 +478,12 @@ export async function processBasesUpsertRows(
       },
     };
   }
-  const indexedOperations: IndexedOperation[] = operations.map((operation, index) => ({
-    index,
-    operation,
-  }));
+  const indexedOperations: IndexedOperation[] = operations.map(
+    (operation, index) => ({
+      index,
+      operation,
+    }),
+  );
   const effectiveChunkSize = params.continueOnError ? params.chunkSize : 1;
   const allResultsByIndex = new Map<number, BaseUpsertResult>();
   let retriedCount = 0;
@@ -471,7 +526,7 @@ export async function processBasesUpsertRows(
       parentContext: context,
       operation: "BasesUpsertRowsChunk",
       params: {
-        base_id: params.base_id,
+        hasBaseId: Boolean(params.base_id),
         attempt,
         chunkIndex,
         chunkCount,
@@ -518,7 +573,7 @@ export async function processBasesUpsertRows(
 
         if (result.error) {
           const code = classifyResultError(result);
-          const retryable = isRetryableError(code, result.error.message);
+          const retryable = isRetryableError(code);
           if (retryable) {
             retryableErrorCount++;
           }
@@ -528,19 +583,21 @@ export async function processBasesUpsertRows(
           }
         }
 
-        recordResult(item, result, attempt + 1);
+        recordResult(
+          item,
+          bindBridgeResultToOperation(item.operation, result),
+          attempt + 1,
+        );
       }
 
       return retryItems;
     } catch (error) {
-      const message = errorMessage(error);
       const code = classifyLiveError(error);
-      logger.error("bases_upsert_rows chunk failed after retries", {
+      logger.error("bases_upsert_rows chunk request failed", {
         ...chunkContext,
-        error: message,
-        code,
+        reasonCode: code,
       });
-      if (isRetryableError(code, message) && attempt < params.maxRetries) {
+      if (isRetryableError(code) && attempt < params.maxRetries) {
         retryableErrorCount += chunk.length;
         return chunk;
       }
@@ -552,7 +609,11 @@ export async function processBasesUpsertRows(
             code === "request_timeout_outcome_unknown"
               ? code
               : "request_failed_outcome_unknown",
-            `Chunk request failed during bases_upsert_rows; individual write outcomes are unknown. Classified as ${code}. ${message}`,
+            publicErrorMessage(
+              code === "request_timeout_outcome_unknown"
+                ? code
+                : "request_failed_outcome_unknown",
+            ),
           )[0]!,
           attempt + 1,
         );
@@ -563,7 +624,11 @@ export async function processBasesUpsertRows(
 
   if (params.continueOnError) {
     let pending = indexedOperations;
-    for (let attempt = 0; attempt <= params.maxRetries && pending.length > 0; attempt++) {
+    for (
+      let attempt = 0;
+      attempt <= params.maxRetries && pending.length > 0;
+      attempt++
+    ) {
       if (attempt > 0) {
         retriedCount += pending.length;
         await sleep(params.retryBackoffMs * attempt);
@@ -573,7 +638,12 @@ export async function processBasesUpsertRows(
       const nextPending: IndexedOperation[] = [];
       for (let index = 0; index < chunks.length; index++) {
         nextPending.push(
-          ...(await executeChunk(chunks[index]!, attempt, index + 1, chunks.length)),
+          ...(await executeChunk(
+            chunks[index]!,
+            attempt,
+            index + 1,
+            chunks.length,
+          )),
         );
         if (index < chunks.length - 1) {
           await sleep(params.delayMs);
@@ -584,7 +654,11 @@ export async function processBasesUpsertRows(
   } else {
     for (const item of indexedOperations) {
       let pending: IndexedOperation[] = [item];
-      for (let attempt = 0; attempt <= params.maxRetries && pending.length > 0; attempt++) {
+      for (
+        let attempt = 0;
+        attempt <= params.maxRetries && pending.length > 0;
+        attempt++
+      ) {
         if (attempt > 0) {
           retriedCount += pending.length;
           await sleep(params.retryBackoffMs * attempt);
@@ -609,8 +683,7 @@ export async function processBasesUpsertRows(
           mtime: 0,
           error: {
             code: "skipped_after_error",
-            message:
-              "Operation skipped because continueOnError=false and a previous operation failed after retries.",
+            message: PUBLIC_ERROR_MESSAGES.skipped_after_error,
           },
         },
         0,
@@ -625,7 +698,7 @@ export async function processBasesUpsertRows(
         mtime: 0,
         error: {
           code: "missing_result",
-          message: "Operation did not produce a result.",
+          message: PUBLIC_ERROR_MESSAGES.missing_result,
         },
       },
   );
@@ -636,7 +709,7 @@ export async function processBasesUpsertRows(
   const hasBusyErrors = failedOperations.some(
     (operation) =>
       operation.code === "write_timeout" ||
-      operation.message.toLowerCase().includes("processfrontmatter"),
+      operation.code === "request_timeout_outcome_unknown",
   );
 
   return {
@@ -645,7 +718,6 @@ export async function processBasesUpsertRows(
     summary,
     diagnostics: {
       source: "bases-bridge-rest",
-      base_id: params.base_id,
       phase: "upsert",
       message: hasBusyErrors ? BUSY_RECOMMENDATION : undefined,
       recommendation: allResults.some((result) => result.error)

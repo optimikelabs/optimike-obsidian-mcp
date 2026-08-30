@@ -23,7 +23,12 @@ Add a local-stdio-only workflow:
 1. `external_references_scan` inventories references to one external file.
 2. `external_move_plan` verifies the source and target, inventories the vault
    and persists a plan.
-3. `external_move_status` returns the durable, path-redacted receipt.
+3. `external_move_status` returns a path-redacted receipt. It durably marks a
+   stale partial receipt only when the current binding is proven; otherwise it
+   returns a no-write manual-review projection. Structurally canonical legacy
+   receipts remain inspectable status-only; malformed stored paths, tokens,
+   hashes or review reasons are wholly redacted and can never drive a backend
+   read or write.
 4. `external_move_apply` moves the file and conditionally repairs exact notes.
 5. `external_move_rollback` restores both surfaces when every precondition still
    holds.

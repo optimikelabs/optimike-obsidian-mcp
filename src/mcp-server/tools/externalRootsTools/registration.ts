@@ -10,6 +10,8 @@ import {
   DESTRUCTIVE_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
+import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 
 export const ExternalRootPathSchema = z
   .object({
@@ -137,14 +139,69 @@ async function deliverExternalHandoff(
   return externalTransferBroker.issue(prepared, authInfo);
 }
 
-export function externalRootsResult(operation: () => Promise<unknown>) {
+function externalReasonCode(error: unknown): ExternalRootError["code"] {
+  return error instanceof ExternalRootError ? error.code : "non_verifiable";
+}
+
+function externalPublicMessage(
+  reasonCode: ExternalRootError["code"],
+): string | undefined {
+  if (reasonCode === "non_verifiable") {
+    return "The external path could not be verified.";
+  }
+  return undefined;
+}
+
+function publicExternalRootError(error: unknown): McpError {
+  const reasonCode = externalReasonCode(error);
+
+  const codeByReason: Record<ExternalRootError["code"], BaseErrorCode> = {
+    configuration_invalid: BaseErrorCode.CONFIGURATION_ERROR,
+    root_unknown: BaseErrorCode.NOT_FOUND,
+    root_unavailable: BaseErrorCode.SERVICE_UNAVAILABLE,
+    capability_denied: BaseErrorCode.FORBIDDEN,
+    path_invalid: BaseErrorCode.VALIDATION_ERROR,
+    path_outside_root: BaseErrorCode.FORBIDDEN,
+    path_not_allowed: BaseErrorCode.FORBIDDEN,
+    path_link_unsupported: BaseErrorCode.VALIDATION_ERROR,
+    not_found: BaseErrorCode.NOT_FOUND,
+    not_a_file: BaseErrorCode.VALIDATION_ERROR,
+    not_a_directory: BaseErrorCode.VALIDATION_ERROR,
+    target_exists: BaseErrorCode.CONFLICT,
+    precondition_failed: BaseErrorCode.CONFLICT,
+    too_large: BaseErrorCode.VALIDATION_ERROR,
+    unsupported: BaseErrorCode.VALIDATION_ERROR,
+    encrypted: BaseErrorCode.VALIDATION_ERROR,
+    inaccessible: BaseErrorCode.SERVICE_UNAVAILABLE,
+    non_verifiable: BaseErrorCode.SERVICE_UNAVAILABLE,
+    timeout: BaseErrorCode.TIMEOUT,
+  };
+  return new McpError(
+    codeByReason[reasonCode],
+    "The external-root operation could not be completed. Review the reason code and retry only after resolving it.",
+    { reasonCode: `EXTERNAL_ROOT_${reasonCode.toUpperCase()}` },
+  );
+}
+
+export function externalRootsResult(
+  toolNameOrOperation: string | (() => Promise<unknown>),
+  params?: unknown,
+  operation?: () => Promise<unknown>,
+) {
+  const toolName =
+    typeof toolNameOrOperation === "string"
+      ? toolNameOrOperation
+      : "external_roots";
+  const safeParams = typeof toolNameOrOperation === "string" ? params : {};
+  const invoke =
+    typeof toolNameOrOperation === "function" ? toolNameOrOperation : operation;
   return async () => {
     try {
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(await operation(), null, 2),
+            text: JSON.stringify(await invoke!(), null, 2),
           },
         ],
         isError: false,
@@ -155,19 +212,31 @@ export function externalRootsResult(operation: () => Promise<unknown>) {
           "[external-roots] Unexpected filesystem error; details redacted.",
         );
       }
-      const externalError =
-        error instanceof ExternalRootError
-          ? error
-          : new ExternalRootError(
-              "non_verifiable",
-              "The external path could not be verified.",
-            );
+      const payload = publicMcpToolErrorPayload(
+        publicExternalRootError(error),
+        {
+          operation: toolName,
+          toolName,
+          params: safeParams,
+        },
+      );
+      const publicError = payload.error as {
+        code: string;
+        message: string;
+        details?: { reasonCode?: string };
+      };
       return {
         content: [
           {
             type: "text" as const,
             text: JSON.stringify(
-              { error: externalError.code, message: externalError.message },
+              {
+                error: externalReasonCode(error),
+                message:
+                  externalPublicMessage(externalReasonCode(error)) ??
+                  publicError.message,
+                details: publicError.details,
+              },
               null,
               2,
             ),
@@ -190,7 +259,7 @@ export async function registerExternalRootsTools(
     {},
     READ_ONLY_TOOL_ANNOTATIONS,
     async (_params, extra) =>
-      externalRootsResult(async () => {
+      externalRootsResult("external_runtime_status", {}, async () => {
         assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
         return {
           enabled: Boolean(service),
@@ -220,7 +289,7 @@ export async function registerExternalRootsTools(
     {},
     READ_ONLY_TOOL_ANNOTATIONS,
     async (_params, extra) =>
-      externalRootsResult(async () => {
+      externalRootsResult("external_roots_list", {}, async () => {
         assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
         return {
           roots: service ? await service.listRoots() : [],
@@ -234,7 +303,7 @@ export async function registerExternalRootsTools(
     ExternalListSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ExternalListSchema>, extra) =>
-      externalRootsResult(() => {
+      externalRootsResult("external_list", params, () => {
         assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
         return service
           ? service.list(
@@ -253,7 +322,7 @@ export async function registerExternalRootsTools(
     ExternalStatSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ExternalStatSchema>, extra) =>
-      externalRootsResult(() => {
+      externalRootsResult("external_stat", params, () => {
         assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
         return service
           ? service.getStat(
@@ -271,7 +340,7 @@ export async function registerExternalRootsTools(
     ExternalReadSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ExternalReadSchema>, extra) =>
-      externalRootsResult(() => {
+      externalRootsResult("external_read", params, () => {
         assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
         return service
           ? service.readText(
@@ -289,7 +358,7 @@ export async function registerExternalRootsTools(
     ExternalHandoffSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ExternalHandoffSchema>, extra) =>
-      externalRootsResult(() =>
+      externalRootsResult("external_handoff", params, () =>
         deliverExternalHandoff(
           service,
           localHandoffAllowed,
@@ -341,7 +410,7 @@ export async function registerExternalRootsTools(
       definition.description,
       definition.schema,
       definition.annotations,
-      externalRootsResult(() =>
+      externalRootsResult(definition.name, {}, () =>
         Promise.reject(
           new ExternalRootError(
             "capability_denied",

@@ -505,9 +505,21 @@ try {
   for (const call of wrongScopeCalls) {
     const denied = await wrongScopeClient.callTool(call);
     assert.equal(denied.isError, true, `${call.name} accepted wrong scope`);
+    const denial = jsonOf(denied);
+    assert.equal(denial.error, "capability_denied");
+    assert.equal(denial.message, "This request is not authorized.");
+    assert.equal(
+      denial.details?.reasonCode,
+      "EXTERNAL_ROOT_CAPABILITY_DENIED",
+    );
     assert.match(
-      denied.content?.map((item) => item.text ?? "").join("\n") ?? "",
-      /external:read/u,
+      denial.details?.requestId ?? "",
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+    );
+    assert.equal(
+      JSON.stringify(denial).includes("external:read"),
+      false,
+      "authorization failures must not reveal policy internals",
     );
   }
 

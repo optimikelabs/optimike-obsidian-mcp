@@ -79,24 +79,25 @@ export const registerObsidianSearchReplaceTool = async (
          *   containing either the successful response data (serialized JSON) or an error indication.
          */
         async (params: ObsidianSearchReplaceRegistrationInput) => {
+          const inputMetadata = {
+            targetType: params.targetType,
+            hasTargetIdentifier: Boolean(params.targetIdentifier),
+            replacementCount: params.replacements?.length ?? 0,
+            useRegex: params.useRegex,
+            replaceAll: params.replaceAll,
+            caseSensitive: params.caseSensitive,
+            flexibleWhitespace: params.flexibleWhitespace,
+            wholeWord: params.wholeWord,
+            returnContent: params.returnContent,
+            hasExpectedSha256: Boolean(params.expectedSha256),
+          };
           // Create a specific context for this handler invocation, linked to the registration context.
           const handlerContext: RequestContext =
             requestContextService.createRequestContext({
               parentContext: registrationContext,
               operation: "HandleObsidianSearchReplaceRequest",
               toolName: toolName,
-              params: {
-                // Log key parameters for debugging (excluding potentially large replacements array)
-                targetType: params.targetType,
-                targetIdentifier: params.targetIdentifier,
-                replacementCount: params.replacements?.length ?? 0, // Log count instead of full array
-                useRegex: params.useRegex,
-                replaceAll: params.replaceAll,
-                caseSensitive: params.caseSensitive,
-                flexibleWhitespace: params.flexibleWhitespace,
-                wholeWord: params.wholeWord,
-                returnContent: params.returnContent,
-              },
+              params: inputMetadata,
             });
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
@@ -143,7 +144,7 @@ export const registerObsidianSearchReplaceTool = async (
               // Configuration for the inner error handler (processing logic).
               operation: `processing ${toolName} handler`,
               context: handlerContext,
-              input: params, // Log the full raw input parameters if an error occurs during processing.
+              input: inputMetadata,
               // Custom error mapping to ensure consistent McpError format is returned to the client.
               errorMapper: (error: unknown) =>
                 new McpError(
@@ -151,8 +152,8 @@ export const registerObsidianSearchReplaceTool = async (
                   error instanceof McpError
                     ? error.code
                     : BaseErrorCode.INTERNAL_ERROR,
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext }, // Include context in the error details
+                  `Error processing ${toolName} tool.`,
+                  handlerContext,
                 ),
             },
           ); // End of inner ErrorHandler.tryCatch

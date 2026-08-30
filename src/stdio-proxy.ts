@@ -1,9 +1,20 @@
 #!/usr/bin/env node
 
 import "./config/toolProfileCli.js";
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
@@ -40,10 +51,29 @@ import {
   ExternalRootError,
   ExternalRootsService,
 } from "./services/externalRootsService.js";
-import { BackendVaultAdapter } from "./services/externalReferences/backendVaultAdapter.js";
+import {
+  attestVaultFilesystemTarget,
+  BackendVaultTargetUnverifiedError,
+  BackendVaultAdapter,
+} from "./services/externalReferences/backendVaultAdapter.js";
 import type { ExternalMoveBindingIdentity } from "./services/externalReferences/backendVaultAdapter.js";
-import { ExternalMoveCoordinator } from "./services/externalReferences/externalMoveCoordinator.js";
-import { ExternalMoveJournal } from "./services/externalReferences/externalMoveJournal.js";
+import {
+  ExternalMoveCoordinator,
+  projectExternalMovePlanForUnavailableDestructiveSession,
+} from "./services/externalReferences/externalMoveCoordinator.js";
+import {
+  ExternalMoveJournal,
+  isExternalMoveJournalObservationConsistent,
+} from "./services/externalReferences/externalMoveJournal.js";
+import type {
+  ExternalMoveJournalObservation,
+  ExternalMovePlan,
+  ExternalMovePlanStatus,
+} from "./services/externalReferences/externalMoveJournal.js";
+import {
+  safelyReadUntrustedErrorField,
+  safelySnapshotUntrustedErrorArray,
+} from "./utils/security/safeErrorField.js";
 
 type PackageInfo = { name?: string; version?: string };
 type BackendClient = {
@@ -52,6 +82,7 @@ type BackendClient = {
 };
 type BackendConnection = BackendClient & {
   generation: number;
+  sessionId: string;
   inFlight: number;
   retired: boolean;
   retiredTimer?: NodeJS.Timeout;
@@ -114,6 +145,11 @@ const retiredConnections = new Set<BackendConnection>();
 let externalRootsService: ExternalRootsService | undefined;
 let externalMoveCoordinator: ExternalMoveCoordinator | undefined;
 let externalMoveBindingIdentity: ExternalMoveBindingIdentity | undefined;
+let externalMoveUnavailableReason:
+  | "not_requested"
+  | "profile_required"
+  | "target_unverified"
+  | "backend_attestation_unavailable" = "not_requested";
 
 function boundedDurationFromEnvironment(
   name: string,
@@ -163,10 +199,246 @@ function disabledExternalRoots(): Promise<never> {
   );
 }
 
-function invalidExternalArguments(
-  toolName: string,
-  message: string,
-): {
+function unavailableExternalMove(): Promise<never> {
+  return Promise.reject(
+    new ExternalRootError(
+      "configuration_invalid",
+      "External move is unavailable because its destructive target could not be verified.",
+    ),
+  );
+}
+
+function disabledExternalMoveMutation(): Promise<never> {
+  return Promise.reject(
+    new ExternalRootError(
+      "capability_denied",
+      "External move apply and rollback require full write mode, an enabled move feature, and a verified target binding.",
+    ),
+  );
+}
+
+function unknownExternalMovePlan(): Promise<never> {
+  return Promise.reject(
+    new ExternalRootError("not_found", "Unknown external move plan."),
+  );
+}
+
+function externalMoveDestructiveAvailable(): boolean {
+  return (
+    Boolean(externalMoveCoordinator) &&
+    externalMoveBindingIdentity?.verifiable === true &&
+    config.externalMoveEnabled &&
+    config.mcpWriteMode === "full"
+  );
+}
+
+const EXTERNAL_MOVE_JOURNAL_SUFFIXES = ["", "-wal"] as const;
+
+function removePrivateJournalSnapshot(directory: string): void {
+  try {
+    rmSync(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 50,
+    });
+  } catch {
+    throw new Error("Private external move status snapshot cleanup failed.");
+  }
+}
+
+function externalMoveJournalSnapshotSignature(
+  journalPath: string,
+): Array<{ suffix: string; size: string; mtimeNs: string }> {
+  return EXTERNAL_MOVE_JOURNAL_SUFFIXES.flatMap((suffix) => {
+    const filePath = `${journalPath}${suffix}`;
+    if (!existsSync(filePath)) return [];
+    const metadata = statSync(filePath, { bigint: true });
+    return [
+      {
+        suffix,
+        size: metadata.size.toString(),
+        mtimeNs: metadata.mtimeNs.toString(),
+      },
+    ];
+  });
+}
+
+function sha256File(filePath: string): string {
+  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+/**
+ * Copies a stable DB/WAL generation outside the repository before SQLite
+ * opens it. SQLite rebuilds a private SHM and may checkpoint the private copy,
+ * but never touches the operator's durable journal merely to serve status.
+ */
+function snapshotExternalMoveJournal(journalPath: string): {
+  directory: string;
+  databasePath: string;
+} {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const directory = mkdtempSync(
+      path.join(os.tmpdir(), "optimike-external-status-"),
+    );
+    try {
+      chmodSync(directory, 0o700);
+    } catch {
+      // Windows ACLs remain authoritative when POSIX modes are unavailable.
+    }
+    const databasePath = path.join(directory, path.basename(journalPath));
+    try {
+      const before = externalMoveJournalSnapshotSignature(journalPath);
+      if (!before.some((item) => item.suffix === "")) {
+        throw new Error("The external move journal is absent.");
+      }
+      for (const { suffix } of before) {
+        const copiedPath = `${databasePath}${suffix}`;
+        copyFileSync(`${journalPath}${suffix}`, copiedPath);
+        try {
+          chmodSync(copiedPath, 0o600);
+        } catch {
+          // Windows ACLs remain authoritative when POSIX modes are unavailable.
+        }
+      }
+      const afterCopy = externalMoveJournalSnapshotSignature(journalPath);
+      const copiedGenerationIsStable =
+        JSON.stringify(afterCopy) === JSON.stringify(before) &&
+        afterCopy.every(
+          ({ suffix }) =>
+            sha256File(`${journalPath}${suffix}`) ===
+            sha256File(`${databasePath}${suffix}`),
+        ) &&
+        JSON.stringify(externalMoveJournalSnapshotSignature(journalPath)) ===
+          JSON.stringify(afterCopy);
+      if (copiedGenerationIsStable) return { directory, databasePath };
+    } catch {
+      // A concurrent writer may rotate or append the WAL during the copy.
+      // Retry from a fresh private directory; never open an unstable snapshot.
+    }
+    removePrivateJournalSnapshot(directory);
+  }
+  throw new Error("The external move journal changed during status snapshot.");
+}
+
+function readExternalMovePlanFromJournal(
+  journalPath: string,
+  planId: string,
+): ExternalMovePlan | undefined {
+  if (!existsSync(journalPath)) return undefined;
+  let db: DatabaseSync | undefined;
+  let snapshotDirectory: string | undefined;
+  try {
+    const snapshot = snapshotExternalMoveJournal(journalPath);
+    snapshotDirectory = snapshot.directory;
+    db = new DatabaseSync(snapshot.databasePath);
+    db.exec("PRAGMA busy_timeout=5000");
+    db.exec("PRAGMA query_only=ON");
+    const row = db
+      .prepare(
+        `SELECT plan_id, idempotency_key, status, payload_json, updated_at
+         FROM external_move_plans WHERE plan_id = ?`,
+      )
+      .get(planId) as
+      | {
+          plan_id?: unknown;
+          idempotency_key?: unknown;
+          status?: unknown;
+          payload_json?: unknown;
+          updated_at?: unknown;
+        }
+      | undefined;
+    if (
+      typeof row?.plan_id !== "string" ||
+      typeof row.idempotency_key !== "string" ||
+      typeof row.status !== "string" ||
+      typeof row.payload_json !== "string" ||
+      typeof row.updated_at !== "string"
+    ) {
+      return undefined;
+    }
+    const parsed = JSON.parse(row.payload_json) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const observed: ExternalMoveJournalObservation = {
+      plan: parsed as ExternalMovePlan,
+      planId: row.plan_id,
+      idempotencyKey: row.idempotency_key,
+      status: row.status as ExternalMovePlanStatus,
+      rawPayload: row.payload_json,
+      updatedAt: row.updated_at,
+    };
+    return isExternalMoveJournalObservationConsistent(observed)
+      ? observed.plan
+      : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // Cleanup of the sensitive private copy remains mandatory even if the
+      // temporary SQLite handle itself reports a close failure.
+    } finally {
+      if (snapshotDirectory) {
+        removePrivateJournalSnapshot(snapshotDirectory);
+      }
+    }
+  }
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/**
+ * Returns only already-existing durable journal paths. Current journals are
+ * namespaced by the first 24 hex characters of their private binding digest;
+ * older pre-attestation journals used the configured base filename directly.
+ * Discovery never creates or opens a writable database.
+ */
+function externalMoveJournalCandidates(): string[] {
+  const basePath = config.externalMoveJournalPath;
+  if (basePath === ":memory:") return [];
+  const parsed = path.parse(basePath);
+  const directory = parsed.dir || ".";
+  const extension = parsed.ext || ".sqlite";
+  const stem = parsed.ext ? parsed.name : parsed.base;
+  const profiledName = new RegExp(
+    `^${escapeRegularExpression(stem)}\\.[a-f0-9]{24}${escapeRegularExpression(extension)}$`,
+    "u",
+  );
+  let profiledPaths: string[] = [];
+  try {
+    profiledPaths = readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && profiledName.test(entry.name))
+      .map((entry) => path.join(directory, entry.name))
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    // The journal directory may not exist yet. Status remains read-only and
+    // must not create it merely to report that no receipt is available.
+  }
+  return [...new Set([basePath, ...profiledPaths])];
+}
+
+/**
+ * Reads legacy and current profiled journals without constructing a new
+ * destructive binding. A duplicate plan ID across journals is ambiguous and
+ * therefore fails closed instead of selecting an arbitrary vault/profile.
+ */
+function getStoredExternalMovePlan(
+  planId: string,
+): ExternalMovePlan | undefined {
+  let match: ExternalMovePlan | undefined;
+  for (const journalPath of externalMoveJournalCandidates()) {
+    const candidate = readExternalMovePlanFromJournal(journalPath, planId);
+    if (!candidate) continue;
+    if (match) return undefined;
+    match = candidate;
+  }
+  return match;
+}
+
+function invalidExternalArguments(toolName: string): {
   content: Array<{ type: "text"; text: string }>;
   isError: true;
 } {
@@ -177,7 +449,7 @@ function invalidExternalArguments(
         text: JSON.stringify(
           {
             error: "path_invalid",
-            message: `Invalid ${toolName} arguments: ${message}`,
+            message: `Invalid ${toolName} arguments.`,
           },
           null,
           2,
@@ -188,7 +460,7 @@ function invalidExternalArguments(
   };
 }
 
-function hiddenToolResult(toolName: string) {
+function hiddenToolResult() {
   return {
     content: [
       {
@@ -196,7 +468,8 @@ function hiddenToolResult(toolName: string) {
         text: JSON.stringify(
           {
             error: "tool_not_exposed",
-            message: `Tool ${toolName} is not exposed by MCP tool profile ${toolProfile}.`,
+            message:
+              "The requested tool is not exposed by the active MCP tool profile.",
             toolProfile,
           },
           null,
@@ -237,23 +510,21 @@ function errorHasNetworkCause(
     return false;
   }
   seen.add(error);
-  const candidate = error as {
-    code?: unknown;
-    cause?: unknown;
-    errors?: unknown;
-  };
-  if (
-    typeof candidate.code === "string" &&
-    NETWORK_ERROR_CODES.has(candidate.code)
-  ) {
+  const code = safelyReadUntrustedErrorField(error, "code");
+  if (typeof code === "string" && NETWORK_ERROR_CODES.has(code)) {
     return true;
   }
-  if (Array.isArray(candidate.errors)) {
-    return candidate.errors.some((nested) =>
-      errorHasNetworkCause(nested, seen),
-    );
+  const errors = safelyReadUntrustedErrorField(error, "errors");
+  const nestedErrors = safelySnapshotUntrustedErrorArray(errors);
+  if (nestedErrors) {
+    for (const nested of nestedErrors) {
+      if (errorHasNetworkCause(nested, seen)) return true;
+    }
   }
-  return errorHasNetworkCause(candidate.cause, seen);
+  return errorHasNetworkCause(
+    safelyReadUntrustedErrorField(error, "cause"),
+    seen,
+  );
 }
 
 function streamableHttpApplicationMessage(
@@ -293,11 +564,7 @@ function classifyBackendFailure(error: unknown): BackendFailureKind {
 }
 
 function redactedBackendFailureDetail(error: unknown): string {
-  const candidate =
-    typeof error === "object" && error !== null
-      ? (error as { code?: unknown })
-      : undefined;
-  const rawCode = candidate?.code;
+  const rawCode = safelyReadUntrustedErrorField(error, "code");
   const safeCode =
     (typeof rawCode === "string" && /^[A-Z0-9_.-]{1,64}$/u.test(rawCode)) ||
     (typeof rawCode === "number" && Number.isInteger(rawCode))
@@ -306,36 +573,48 @@ function redactedBackendFailureDetail(error: unknown): string {
   return `kind=${classifyBackendFailure(error)}, code=${safeCode}, message=[REDACTED]`;
 }
 
-function backendOutcomeUnknownError(
-  operationName: string,
-  originalError: unknown,
-  reconnectError?: unknown,
-): Error {
+function backendOutcomeUnknownError(reconnectError?: unknown): Error {
   const reconnectDetail =
     reconnectError === undefined
       ? "reconnect=succeeded for future calls"
       : `reconnect=failed (${redactedBackendFailureDetail(reconnectError)})`;
   return new Error(
-    `MCP backend_outcome_unknown for ${operationName}: the network failed after a non-read-only call may have reached the backend; the proxy did not replay it. ${reconnectDetail}; original_failure=${redactedBackendFailureDetail(originalError)}`,
+    `MCP backend_outcome_unknown: the network failed after a non-read-only call may have reached the backend; the proxy did not replay it. ${reconnectDetail}.`,
   );
 }
 
-function backendReplayNotAuthorizedError(
-  operationName: string,
-  originalError: unknown,
-): Error {
+function backendReplayNotAuthorizedError(): Error {
   return new Error(
-    `MCP backend_outcome_unknown for ${operationName}: the network failed and the replacement backend generation did not prove the tool read-only; the proxy did not replay it. reconnect=succeeded for future calls; original_failure=${redactedBackendFailureDetail(originalError)}`,
+    "MCP backend_outcome_unknown: the network failed and the replacement backend generation did not prove the tool read-only; the proxy did not replay it. reconnect=succeeded for future calls.",
   );
 }
 
-function backendOutcomeUnknownAfterRetryError(
-  operationName: string,
-  retryError: unknown,
-): Error {
+function backendOutcomeUnknownAfterRetryError(): Error {
   return new Error(
-    `MCP backend_outcome_unknown for ${operationName}: the network failed after the one permitted retry of a request that may have reached the backend; the proxy did not replay it again. reconnect=not-attempted after retry; retry_failure=${redactedBackendFailureDetail(retryError)}`,
+    "MCP backend_outcome_unknown: the network failed after the one permitted retry of a request that may have reached the backend; the proxy did not replay it again. reconnect=not-attempted after retry.",
   );
+}
+
+function backendApplicationError(error: unknown): Error {
+  const rawCode = safelyReadUntrustedErrorField(error, "code");
+  const numericCode =
+    typeof rawCode === "number"
+      ? rawCode
+      : typeof rawCode === "string" && /^[0-9]{3}$/u.test(rawCode)
+        ? Number(rawCode)
+        : undefined;
+  const safeStatus =
+    numericCode !== undefined &&
+    Number.isInteger(numericCode) &&
+    numericCode >= 100 &&
+    numericCode <= 599
+      ? String(numericCode)
+      : "unknown";
+  return new Error(`MCP backend rejected the request (status=${safeStatus}).`);
+}
+
+function backendUnreachableError(): Error {
+  return new Error("MCP backend is unreachable after retry.");
 }
 
 function closeBackendConnection(
@@ -434,6 +713,7 @@ async function createBackendConnection(): Promise<BackendConnection> {
     client,
     transport,
     generation: ++backendGeneration,
+    sessionId: randomUUID(),
     inFlight: 0,
     retired: false,
   };
@@ -595,32 +875,26 @@ async function withBackendRetry<T>(
         : false;
     const failureKind = classifyBackendFailure(originalError);
     if (failureKind === "application") {
-      throw originalError;
+      throw backendApplicationError(originalError);
     }
 
     console.error(
       `[${packageName}] ${operationName} failed against backend (${redactedBackendFailureDetail(originalError)}); reconnecting once`,
     );
 
-    if (failedGeneration === undefined) throw originalError;
+    if (failedGeneration === undefined) throw backendUnreachableError();
 
     try {
       await reconnectBackend(failedGeneration);
     } catch (retryError) {
       if (failureKind === "network" && !networkReplayAuthorized) {
-        throw backendOutcomeUnknownError(
-          operationName,
-          originalError,
-          retryError,
-        );
+        throw backendOutcomeUnknownError(retryError);
       }
-      throw new Error(
-        `MCP backend_unreachable after retry for ${operationName}. Backend ${backendUrl.toString()} did not complete the request: ${redactedBackendFailureDetail(retryError)}`,
-      );
+      throw backendUnreachableError();
     }
 
     if (failureKind === "network" && !networkReplayAuthorized) {
-      throw backendOutcomeUnknownError(operationName, originalError);
+      throw backendOutcomeUnknownError();
     }
 
     try {
@@ -629,7 +903,7 @@ async function withBackendRetry<T>(
       return retried.value;
     } catch (retryError) {
       if (retryError instanceof BackendReplayNotAuthorizedError) {
-        throw backendReplayNotAuthorizedError(operationName, originalError);
+        throw backendReplayNotAuthorizedError();
       }
       const retryOriginal =
         retryError instanceof BackendOperationError
@@ -637,21 +911,16 @@ async function withBackendRetry<T>(
           : retryError;
       const retryFailureKind = classifyBackendFailure(retryOriginal);
       if (retryFailureKind === "application") {
-        throw retryOriginal;
+        throw backendApplicationError(retryOriginal);
       }
       if (
         retryError instanceof BackendOperationError &&
         retryFailureKind === "network" &&
         !retryError.networkReplayAuthorized
       ) {
-        throw backendOutcomeUnknownAfterRetryError(
-          operationName,
-          retryOriginal,
-        );
+        throw backendOutcomeUnknownAfterRetryError();
       }
-      throw new Error(
-        `MCP backend_unreachable after retry for ${operationName}. Backend ${backendUrl.toString()} did not complete the request: ${redactedBackendFailureDetail(retryOriginal)}`,
-      );
+      throw backendUnreachableError();
     }
   }
 }
@@ -731,37 +1000,86 @@ async function start() {
     : undefined;
 
   await ensureBackendConnected();
+  // Scan, plan and status are read/planning operations. Initialize their
+  // profiled, attested dependencies independently from the feature flag and
+  // write mode; apply and rollback enforce those destructive gates themselves.
   if (externalRootsService) {
+    const moveRootsService = externalRootsService;
     const rootsFingerprint = rootConfigFingerprint(
       process.env.MCP_EXTERNAL_ROOTS_FILE!,
     );
-    const vault = new BackendVaultAdapter(
-      async (name, args) =>
-        withBackendRetry(
-          `external reference backend adapter: ${name}`,
-          (client) =>
-            client.callTool(
-              { name, arguments: args },
-              CompatibilityCallToolResultSchema,
-            ),
-          { replayNetworkFailure: { toolName: name } },
-        ),
-      {
-        backendEndpoint: backendUrl.toString(),
-        rootConfigFingerprint: rootsFingerprint,
-        profileId: config.externalMoveProfileId,
-      },
-    );
-    externalMoveBindingIdentity = await vault.getBindingIdentity();
-    const profiledJournalPath = profileExternalMoveJournalPath(
-      config.externalMoveJournalPath,
-      externalMoveBindingIdentity.bindingFingerprint,
-    );
-    externalMoveCoordinator = new ExternalMoveCoordinator(
-      externalRootsService,
-      vault,
-      new ExternalMoveJournal(profiledJournalPath),
-    );
+    const expectedTargetAttestation =
+      config.obsidianRuntimeMode === "headless-filesystem"
+        ? attestVaultFilesystemTarget(config.obsidianVaultPath)
+        : undefined;
+    if (!config.externalMoveProfileId) {
+      externalMoveUnavailableReason = "profile_required";
+    } else if (!expectedTargetAttestation) {
+      externalMoveUnavailableReason = "target_unverified";
+    } else {
+      try {
+        const vault = new BackendVaultAdapter(
+          async (name, args) => {
+            let generation: number | undefined;
+            const result = await withBackendRetry(
+              `external reference backend adapter: ${name}`,
+              (client) =>
+                client.callTool(
+                  { name, arguments: args },
+                  CompatibilityCallToolResultSchema,
+                ),
+              {
+                replayNetworkFailure: { toolName: name },
+                onSuccess: ({ generation: completedGeneration }) => {
+                  generation = completedGeneration;
+                },
+              },
+            );
+            const completedConnection = backend;
+            return {
+              result,
+              generation,
+              sessionId:
+                generation === completedConnection?.generation
+                  ? completedConnection?.sessionId
+                  : undefined,
+            };
+          },
+          {
+            backendEndpoint: backendUrl.toString(),
+            rootConfigFingerprint: rootsFingerprint,
+            profileId: config.externalMoveProfileId,
+            expectedTargetAttestation,
+            getActiveBackendSession: () =>
+              backend
+                ? {
+                    generation: backend.generation,
+                    sessionId: backend.sessionId,
+                  }
+                : undefined,
+          },
+        );
+        externalMoveBindingIdentity = await vault.getBindingIdentity();
+        if (externalMoveBindingIdentity.verifiable) {
+          const profiledJournalPath = profileExternalMoveJournalPath(
+            config.externalMoveJournalPath,
+            externalMoveBindingIdentity.bindingFingerprint,
+          );
+          externalMoveCoordinator = new ExternalMoveCoordinator(
+            moveRootsService!,
+            vault,
+            () => new ExternalMoveJournal(profiledJournalPath),
+          );
+        } else {
+          externalMoveUnavailableReason = "target_unverified";
+        }
+      } catch (error) {
+        externalMoveUnavailableReason =
+          error instanceof BackendVaultTargetUnverifiedError
+            ? "target_unverified"
+            : "backend_attestation_unavailable";
+      }
+    }
   }
 
   proxyServer.setRequestHandler(ListToolsRequestSchema, async (request) =>
@@ -770,7 +1088,7 @@ async function start() {
 
   proxyServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (!(await toolIsExposed(request.params.name))) {
-      return hiddenToolResult(request.params.name);
+      return hiddenToolResult();
     }
 
     if (request.params.name === "external_runtime_status") {
@@ -782,16 +1100,16 @@ async function start() {
             : "read-only",
         localHandoffAllowed: true,
         externalMove: {
-          available:
-            Boolean(externalMoveCoordinator) &&
-            externalMoveBindingIdentity?.verifiable === true &&
-            config.externalMoveEnabled &&
-            config.mcpWriteMode === "full",
+          available: externalMoveDestructiveAvailable(),
           transport: "stdio-only",
           requiresRootCapability: "move",
-          identityVerified: externalMoveBindingIdentity?.verifiable ?? false,
-          identitySource: externalMoveBindingIdentity?.vaultIdentitySource,
-          profileFingerprint: externalMoveBindingIdentity?.bindingFingerprint,
+          identityVerified: Boolean(externalMoveCoordinator),
+          ...(externalMoveCoordinator
+            ? {
+                identitySource:
+                  externalMoveBindingIdentity?.vaultIdentitySource,
+              }
+            : { unavailableReason: externalMoveUnavailableReason }),
         },
         roots: externalRootsService
           ? await externalRootsService.listRoots()
@@ -812,10 +1130,7 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
         externalRootsService
@@ -825,7 +1140,7 @@ async function start() {
               parsed.data.depth,
               parsed.data.maxEntries,
             )
-          : disabledExternalRoots(),
+          : unavailableExternalMove(),
       )();
     }
 
@@ -834,10 +1149,7 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
         externalRootsService
@@ -846,7 +1158,7 @@ async function start() {
               parsed.data.relativePath,
               parsed.data.includeHash,
             )
-          : disabledExternalRoots(),
+          : unavailableExternalMove(),
       )();
     }
 
@@ -855,10 +1167,7 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
         externalRootsService
@@ -867,7 +1176,7 @@ async function start() {
               parsed.data.relativePath,
               parsed.data.maxChars,
             )
-          : disabledExternalRoots(),
+          : unavailableExternalMove(),
       )();
     }
 
@@ -876,10 +1185,7 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
 
       return externalRootsResult(() =>
@@ -889,7 +1195,7 @@ async function start() {
               parsed.data.relativePath,
               parsed.data.includeHash,
             )
-          : disabledExternalRoots(),
+          : unavailableExternalMove(),
       )();
     }
 
@@ -898,10 +1204,7 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
         externalMoveCoordinator
@@ -909,7 +1212,7 @@ async function start() {
               parsed.data.rootId,
               parsed.data.relativePath,
             )
-          : disabledExternalRoots(),
+          : unavailableExternalMove(),
       )();
     }
 
@@ -918,15 +1221,12 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
         externalMoveCoordinator
           ? externalMoveCoordinator.plan(parsed.data)
-          : disabledExternalRoots(),
+          : unavailableExternalMove(),
       )();
     }
 
@@ -935,16 +1235,31 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
-      return externalRootsResult(async () =>
-        externalMoveCoordinator
-          ? externalMoveCoordinator.status(parsed.data.planId)
-          : disabledExternalRoots(),
-      )();
+      return externalRootsResult(async () => {
+        if (
+          config.externalMoveJournalPath === ":memory:" &&
+          externalMoveCoordinator
+        ) {
+          return externalMoveCoordinator.status(parsed.data.planId);
+        }
+        const stored = getStoredExternalMovePlan(parsed.data.planId);
+        if (!stored) return unknownExternalMovePlan();
+        const storedBinding = stored.bindingIdentity?.bindingFingerprint;
+        if (
+          externalMoveCoordinator &&
+          typeof storedBinding === "string" &&
+          storedBinding === externalMoveBindingIdentity?.bindingFingerprint
+        ) {
+          return externalMoveCoordinator.status(parsed.data.planId, stored);
+        }
+        // A journal may be readable after restart or from another binding, but
+        // this process cannot authenticate the session that sealed it. Project
+        // all actionable receipts as manual review without opening or changing
+        // the durable journal.
+        return projectExternalMovePlanForUnavailableDestructiveSession(stored);
+      })();
     }
 
     if (request.params.name === "external_move_apply") {
@@ -952,18 +1267,15 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
-        externalMoveCoordinator
+        externalMoveDestructiveAvailable() && externalMoveCoordinator
           ? externalMoveCoordinator.apply(
               parsed.data.planId,
               parsed.data.idempotencyKey,
             )
-          : disabledExternalRoots(),
+          : disabledExternalMoveMutation(),
       )();
     }
 
@@ -972,18 +1284,15 @@ async function start() {
         request.params.arguments ?? {},
       );
       if (!parsed.success) {
-        return invalidExternalArguments(
-          request.params.name,
-          parsed.error.message,
-        );
+        return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
-        externalMoveCoordinator
+        externalMoveDestructiveAvailable() && externalMoveCoordinator
           ? externalMoveCoordinator.rollback(
               parsed.data.planId,
               parsed.data.idempotencyKey,
             )
-          : disabledExternalRoots(),
+          : disabledExternalMoveMutation(),
       )();
     }
 
@@ -998,14 +1307,14 @@ async function start() {
   const stdioTransport = new StdioServerTransport();
   await proxyServer.connect(stdioTransport);
   console.error(
-    `[${packageName}] stdio proxy connected to ${backendUrl.toString()} with tool profile ${toolProfile}`,
+    `[${packageName}] stdio proxy connected with tool profile ${toolProfile}`,
   );
 }
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-start().catch((error) => {
-  console.error(`[${packageName}] stdio proxy failed:`, error);
+start().catch(() => {
+  console.error(`[${packageName}] stdio proxy failed to start.`);
   process.exit(1);
 });

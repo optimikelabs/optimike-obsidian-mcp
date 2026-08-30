@@ -43,7 +43,7 @@ une garde transport ne lit jamais plus que la taille configurée avant que
 l’authentification ou le quota d’identité puisse lire l’id JSON-RPC. Un corps
 déclaré ou streamé au-delà de la limite est refusé en HTTP `413`. Un corps
 chunked qui ne se termine pas avant le deadline serveur est annulé et refusé en
-HTTP `408`.
+HTTP `504`.
 
 Les gardes de corps bruts partagent un pool global anonyme distinct, borné par
 les mêmes grandeurs globales de concurrence, file et timeout. Une rafale venant
@@ -165,7 +165,8 @@ node scripts/smoke-stdio-backpressure-live.mjs
 ```
 
 Le canary ne passe que si au moins une lecture réussit, au moins un appel est
-refusé par le contrat d’admission JSON-RPC exact `SERVICE_UNAVAILABLE`, aucun
+refusé par le contrat d’admission JSON-RPC exact avec
+`data.applicationCode: SERVICE_UNAVAILABLE`, aucun
 appel frère ne renvoie `Connection closed`, puis une nouvelle lecture réussit.
 Il n’accepte que `queue-full`, `identity-queue-full`, `timeout` ou `cancelled`
 dans `data.admission`, avec le message et la valeur `data.retryable`

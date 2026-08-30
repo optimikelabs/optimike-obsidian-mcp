@@ -38,12 +38,12 @@ try {
   // For ESM, __dirname is not available directly.
   const currentModuleDir = dirname(fileURLToPath(import.meta.url));
   projectRoot = findProjectRoot(currentModuleDir);
-} catch (error: any) {
-  console.error(`FATAL: Error determining project root: ${error.message}`);
+} catch {
+  // Bootstrap diagnostics must never echo exception text: module paths and
+  // process details can be embedded in filesystem errors.
+  console.error("FATAL: Unable to determine the application root.");
   projectRoot = process.cwd();
-  console.warn(
-    `Warning: Using process.cwd() (${projectRoot}) as fallback project root.`,
-  );
+  console.warn("Warning: Falling back to the process working directory.");
 }
 // --- End Determine Project Root ---
 
@@ -52,11 +52,10 @@ let pkg = { name: "optimike-obsidian-mcp", version: "0.0.0" };
 
 try {
   pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-} catch (error) {
+} catch {
   if (process.stderr.isTTY) {
     console.error(
       "Warning: Could not read package.json for default config values. Using hardcoded defaults.",
-      error,
     );
   }
 }
@@ -308,11 +307,13 @@ const EnvSchema = z
 const parsedEnv = EnvSchema.safeParse(process.env);
 
 if (!parsedEnv.success) {
-  const errorDetails = parsedEnv.error.flatten().fieldErrors;
-  console.error("❌ Invalid environment variables:", errorDetails);
-  throw new Error(
-    `Invalid environment configuration. Please check your .env file or environment variables. Details: ${JSON.stringify(errorDetails)}`,
+  // Zod issue messages may contain caller-provided values (for example a
+  // rejected path prefix). Keep the bootstrap output value-free.
+  console.error("❌ Invalid environment configuration.");
+  console.error(
+    `❌ Environment validation failed for ${parsedEnv.error.issues.length} setting(s).`,
   );
+  throw new Error("Invalid environment configuration.");
 }
 
 const env = parsedEnv.data;
@@ -351,7 +352,7 @@ const ensureDirectory = (
   ) {
     if (process.stderr.isTTY) {
       console.error(
-        `Error: ${dirName} path "${dirPath}" resolves to "${resolvedDirPath}", which is outside the project boundary "${rootDir}".`,
+        `Error: Configured ${dirName} directory is outside the allowed boundary.`,
       );
     }
     return null;
@@ -360,11 +361,9 @@ const ensureDirectory = (
   if (!existsSync(resolvedDirPath)) {
     try {
       mkdirSync(resolvedDirPath, { recursive: true });
-    } catch (err: unknown) {
+    } catch {
       if (process.stderr.isTTY) {
-        console.error(
-          `Error creating ${dirName} directory at ${resolvedDirPath}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        console.error(`Error creating the configured ${dirName} directory.`);
       }
       return null;
     }
@@ -373,16 +372,14 @@ const ensureDirectory = (
       if (!statSync(resolvedDirPath).isDirectory()) {
         if (process.stderr.isTTY) {
           console.error(
-            `Error: ${dirName} path ${resolvedDirPath} exists but is not a directory.`,
+            `Error: Configured ${dirName} path is not a directory.`,
           );
         }
         return null;
       }
-    } catch (statError: any) {
+    } catch {
       if (process.stderr.isTTY) {
-        console.error(
-          `Error accessing ${dirName} path ${resolvedDirPath}: ${statError.message}`,
-        );
+        console.error(`Error accessing the configured ${dirName} directory.`);
       }
       return null;
     }
@@ -455,7 +452,7 @@ export const config = {
     env.MCP_EXTERNAL_MOVE_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-        process.env.XDG_STATE_HOME ||
+      process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       "external-moves.sqlite",
@@ -484,7 +481,7 @@ export const config = {
     env.MCP_OBSIDIAN_CANVAS_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       `obsidian-canvas-${noteReplaceProfileId}.sqlite`,

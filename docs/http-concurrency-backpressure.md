@@ -42,7 +42,7 @@ body, and cancels the incoming stream. After that source check, a transport
 guard reads at most the configured body limit before authentication or the
 identity quota can inspect a JSON-RPC id. Declared and streamed bodies above the
 limit are rejected with HTTP `413`. A chunked body that does not complete
-before the server deadline is cancelled and rejected with HTTP `408`.
+before the server deadline is cancelled and rejected with HTTP `504`.
 
 Raw body guards share a separate anonymous global admission pool using the
 configured global in-flight, queue and timeout magnitudes. A burst across many
@@ -160,7 +160,8 @@ node scripts/smoke-stdio-backpressure-live.mjs
 ```
 
 The canary passes only when at least one read succeeds, at least one call is
-rejected by the exact JSON-RPC `SERVICE_UNAVAILABLE` admission contract, no
+rejected by the exact JSON-RPC admission contract with
+`data.applicationCode: SERVICE_UNAVAILABLE`, no
 sibling reports `Connection closed`, and a following read still succeeds. It
 accepts only `queue-full`, `identity-queue-full`, `timeout` or `cancelled` in
 `data.admission`, with the matching message and `data.retryable` value. A

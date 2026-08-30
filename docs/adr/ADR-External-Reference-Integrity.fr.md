@@ -25,7 +25,13 @@ Ajouter un workflow réservé au stdio local :
 1. `external_references_scan` inventorie les références vers un fichier externe.
 2. `external_move_plan` vérifie source et cible, inventorie le coffre et
    persiste un plan.
-3. `external_move_status` retourne le reçu durable sans chemin physique.
+3. `external_move_status` retourne un reçu sans chemin physique. Il marque
+   durablement un reçu partiel stale uniquement si le binding courant est
+   prouvé ; sinon il retourne une projection sans écriture en revue manuelle.
+   Les reçus legacy structurellement canoniques restent inspectables en
+   status-only ; les chemins, tokens, hashes ou reasons stockés malformés sont
+   entièrement redacted et ne peuvent jamais déclencher une lecture ou écriture
+   backend.
 4. `external_move_apply` déplace le fichier et répare conditionnellement les
    notes exactes.
 5. `external_move_rollback` restaure les deux surfaces si toutes les

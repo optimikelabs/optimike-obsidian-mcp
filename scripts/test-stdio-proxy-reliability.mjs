@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -9,6 +10,35 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const { safelyReadUntrustedErrorField, safelySnapshotUntrustedErrorArray } =
+  await import("../dist/utils/security/safeErrorField.js");
+
+// The stdio proxy's backend failure redaction uses this boundary for code,
+// causes and aggregate errors. A hostile thrown value must be classified as
+// unknown, never crash the proxy while it tries to log a redacted failure.
+const hostileBackendFailure = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error("stdio-proxy-hostile-backend-marker");
+    },
+  },
+);
+for (const field of ["code", "cause", "errors"]) {
+  assert.equal(
+    safelyReadUntrustedErrorField(hostileBackendFailure, field),
+    undefined,
+  );
+}
+
+const { proxy: revokedAggregateErrors, revoke } = Proxy.revocable([], {});
+revoke();
+assert.equal(
+  safelySnapshotUntrustedErrorArray(revokedAggregateErrors),
+  undefined,
+  "a revoked aggregate-errors Proxy must be treated as opaque, not crash classification",
+);
 
 function deferred() {
   let resolve;
@@ -77,6 +107,8 @@ const releaseDrainTimeoutSibling = deferred();
 const drainTimeoutConnectionClosed = deferred();
 const RECONNECT_FAILURE_SECRET = "fixture-reconnect-secret";
 const SESSION_REPLAY_SECRET = "fixture-session-replay-secret";
+const APPLICATION_404_BODY_MARKER = "fixture-application-404-body-marker";
+const APPLICATION_503_BODY_MARKER = "fixture-application-503-body-marker";
 const state = {
   initializeAttempts: 0,
   initializeCount: 0,
@@ -230,7 +262,7 @@ const backend = createServer(async (request, response) => {
       return;
     }
     response.writeHead(503, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: "application-after-session-retry" }));
+    response.end(JSON.stringify({ error: APPLICATION_503_BODY_MARKER }));
     return;
   }
   if (args.admissionError) {
@@ -269,7 +301,7 @@ const backend = createServer(async (request, response) => {
     return;
   }
   if (args.application404) {
-    response.writeHead(404).end("application endpoint missing");
+    response.writeHead(404).end(APPLICATION_404_BODY_MARKER);
     return;
   }
   if (args.networkLossRead) {
@@ -406,6 +438,12 @@ try {
   client = new Client({ name: "stdio-proxy-reliability-test", version: "0" });
   fixtureStage = "initial client connection";
   await client.connect(transport);
+  const backendEndpointMarker = `http://127.0.0.1:${address.port}/mcp/full`;
+  assert.equal(
+    proxyStderr.join("").includes(backendEndpointMarker),
+    false,
+    "stdio proxy connection stderr must not publish the backend endpoint",
+  );
   fixtureStage = "initial tools/list";
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 3);
@@ -488,12 +526,24 @@ try {
   await client.callTool({ name: "read_probe", arguments: {} });
 
   const initializeBeforeApplication404 = state.initializeCount;
-  await assert.rejects(
-    client.callTool({
+  let application404Failure;
+  try {
+    await client.callTool({
       name: "read_probe",
       arguments: { application404: true },
-    }),
-    /application endpoint missing/u,
+    });
+    assert.fail("the application 404 must reject");
+  } catch (error) {
+    application404Failure = error;
+  }
+  assert.match(
+    String(application404Failure),
+    /MCP backend rejected the request \(status=404\)/u,
+  );
+  assert.doesNotMatch(
+    String(application404Failure),
+    /fixture-application-404-body-marker/u,
+    "an HTTP 404 body must not be reflected to the stdio client",
   );
   assert.equal(
     state.initializeCount,
@@ -616,7 +666,12 @@ try {
   }
   assert.match(
     String(sessionInvalidApplicationFailure),
-    /application-after-session-retry/u,
+    /MCP backend rejected the request \(status=503\)/u,
+  );
+  assert.doesNotMatch(
+    String(sessionInvalidApplicationFailure),
+    /fixture-application-503-body-marker/u,
+    "an HTTP 503 body must not be reflected after session retry",
   );
   assert.doesNotMatch(
     String(sessionInvalidApplicationFailure),
@@ -667,14 +722,16 @@ try {
   } catch (error) {
     readReconnectFailure = error;
   }
-  assert.match(String(readReconnectFailure), /backend_unreachable/u);
+  assert.match(
+    String(readReconnectFailure),
+    /MCP backend is unreachable after retry/u,
+  );
   assert.doesNotMatch(String(readReconnectFailure), /backend_outcome_unknown/u);
   assert.equal(
     String(readReconnectFailure).includes(RECONNECT_FAILURE_SECRET),
     false,
     "read-only reconnect failures must redact backend response details",
   );
-  assert.match(String(readReconnectFailure), /message=\[REDACTED\]/u);
   assert.equal(state.readReconnectFailureRequests, 1);
   assert.equal(state.failedReplacementInitializations, 2);
   await client.callTool({ name: "read_probe", arguments: {} });
@@ -708,7 +765,7 @@ try {
   releaseDrainTimeoutSibling.resolve();
   await assert.rejects(
     drainTimeoutSibling,
-    /Connection closed|backend_outcome_unknown/u,
+    /MCP backend rejected the request \(status=unknown\)/u,
   );
   assert.equal(
     state.drainTimeoutMutationRequests,
@@ -716,6 +773,40 @@ try {
     "the blocked mutation must not replay after forced retirement",
   );
   await client.callTool({ name: "read_probe", arguments: {} });
+
+  // Bootstrap failures must not dump the caught error, which can contain a
+  // private configured path. The deliberately missing config path is the
+  // sentinel; the only accepted stderr is the fixed bootstrap category.
+  const bootstrapSentinel = "stdio-proxy-bootstrap-private-sentinel";
+  const bootstrapProbe = spawn(process.execPath, [proxyEntryPath], {
+    cwd: fixtureVault,
+    env: {
+      ...process.env,
+      OBSIDIAN_RUNTIME_MODE: "headless-readonly",
+      OBSIDIAN_VAULT: fixtureVault,
+      OBSIDIAN_ENABLE_CACHE: "false",
+      MCP_WRITE_MODE: "readonly",
+      MCP_TOOL_PROFILE: "full",
+      MCP_EXTERNAL_ROOTS_FILE: join(
+        fixtureVault,
+        bootstrapSentinel,
+        "external-roots.json",
+      ),
+    },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  const bootstrapStderr = [];
+  bootstrapProbe.stderr.on("data", (chunk) =>
+    bootstrapStderr.push(String(chunk)),
+  );
+  const [bootstrapExitCode] = await once(bootstrapProbe, "exit");
+  assert.equal(bootstrapExitCode, 1);
+  assert.match(bootstrapStderr.join(""), /stdio proxy failed to start\./u);
+  assert.equal(
+    bootstrapStderr.join("").includes(bootstrapSentinel),
+    false,
+    "stdio proxy bootstrap stderr must not reflect the caught configuration error",
+  );
 
   console.log("stdio proxy reliability fixture passed");
 } catch (error) {

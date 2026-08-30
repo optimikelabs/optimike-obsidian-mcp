@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Canonicalized MCP and Bridge error envelopes now expose only closed error
+  codes, stable public messages and allowlisted diagnostics. Request-scoped
+  UUIDs remain correlable across MCP/backend observations, while caller input
+  and backend responses are excluded from cleartext logs. Caller-derived
+  correlation values use a per-process HMAC fingerprint; recovery diagnostics
+  are limited to schema-validated IDs, references, digests and closed codes.
+  Batch-item failures may retain their ordinal and the exact validated
+  vault-relative request path already supplied by the caller, but never an
+  untrusted Bridge/backend path, an absolute path or backend error text. The
+  privacy contract is tested on Linux and Windows, including the Bases, Operon
+  and Atomic Write Bridge checks in CI. `@modelcontextprotocol/sdk` is pinned
+  exactly to `1.30.0`; CI rejects drift while the ultimate SDK error fallback
+  relies on its private `createToolError` hook.
+
 ## [3.1.1] - 2026-08-25
 
 ### Fixed

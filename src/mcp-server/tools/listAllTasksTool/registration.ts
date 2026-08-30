@@ -8,6 +8,7 @@ import {
   RequestContext,
   requestContextService,
 } from "../../../utils/index.js";
+import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import {
   ListAllTasksInput,
   ListAllTasksInputSchemaShape,
@@ -43,35 +44,38 @@ export const registerListAllTasksTool = async (
             parentContext: registrationContext,
             operation: "HandleListAllTasksRequest",
             toolName,
-            params,
+            params: { hasInput: true },
           });
 
-          return await ErrorHandler.tryCatch(
-            async () => {
-              const text = await processListAllTasks(
-                params,
-                handlerContext,
-                vaultCacheService,
-              );
-              return {
-                content: [{ type: "text", text }],
-                isError: false,
-              };
-            },
-            {
-              operation: `processing ${toolName} handler`,
-              context: handlerContext,
-              input: params,
-              errorMapper: (error: unknown) =>
-                new McpError(
-                  error instanceof McpError
-                    ? error.code
-                    : BaseErrorCode.INTERNAL_ERROR,
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext },
-                ),
-            },
-          );
+          try {
+            const text = await processListAllTasks(
+              params,
+              handlerContext,
+              vaultCacheService,
+            );
+            return {
+              content: [{ type: "text", text }],
+              isError: false,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    publicMcpToolErrorPayload(error, {
+                      operation: `processing ${toolName} handler`,
+                      toolName,
+                      params,
+                    }),
+                    null,
+                    2,
+                  ),
+                },
+              ],
+              isError: true,
+            };
+          }
         },
       );
 
@@ -87,7 +91,7 @@ export const registerListAllTasksTool = async (
       errorMapper: (error: unknown) =>
         new McpError(
           error instanceof McpError ? error.code : BaseErrorCode.INTERNAL_ERROR,
-          `Failed to register tool '${toolName}': ${error instanceof Error ? error.message : "Unknown error"}`,
+          `Failed to register tool '${toolName}'.`,
           { ...registrationContext },
         ),
       critical: true,

@@ -4,14 +4,24 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Hono } from "hono";
-import {
+
+process.env.OBSIDIAN_RUNTIME_MODE ??= "headless-readonly";
+process.env.OBSIDIAN_VAULT ??= process.cwd();
+process.env.OBSIDIAN_CACHE_SOURCE ??= "filesystem";
+process.env.OBSIDIAN_ENABLE_CACHE ??= "false";
+process.env.MCP_WRITE_MODE ??= "readonly";
+process.env.SEMANTIC_SEARCH_PREWARM ??= "false";
+
+const {
   AdmissionRejectedError,
   FairAdmissionController,
   createHttpBackpressureMiddleware,
   createHttpRequestBodyGuardMiddleware,
   httpBackpressureConfig,
-} from "../dist/mcp-server/transports/httpBackpressure.js";
-import { getHttpRequestState } from "../dist/mcp-server/transports/httpRequestState.js";
+} = await import("../dist/mcp-server/transports/httpBackpressure.js");
+const { getHttpRequestState } = await import(
+  "../dist/mcp-server/transports/httpRequestState.js"
+);
 
 function controller(overrides = {}) {
   return new FairAdmissionController({
@@ -406,6 +416,8 @@ async function testRealMiddlewareResponses() {
     "identity-queue-full",
   );
   const rejectedBody = await rejected.json();
+  assert.equal(rejectedBody.error.code, -32015);
+  assert.equal(rejectedBody.error.data.applicationCode, "SERVICE_UNAVAILABLE");
   assert.equal(rejectedBody.error.data.retryable, true);
   const admittedFirst = await first;
   assert.equal(admittedFirst.status, 200);
@@ -478,6 +490,71 @@ async function testOperonPeriodicToolsUseMutationSaturation() {
     await completed.arrayBuffer();
     assert.equal(admission.getSnapshot().mutationInFlight, 0);
   }
+}
+
+async function testInvalidEnvelopeIdIsNotReflectedAfterReclassification() {
+  const admission = controller({
+    maxInFlight: 2,
+    maxInFlightPerIdentity: 2,
+    mutationMaxInFlight: 1,
+    mutationMaxInFlightPerIdentity: 1,
+    maxQueued: 0,
+    maxQueuedPerIdentity: 0,
+  });
+  const app = new Hono();
+  let signalFirstHandler;
+  const firstHandlerEntered = new Promise((resolve) => {
+    signalFirstHandler = resolve;
+  });
+  let releaseFirstHandler;
+  const firstHandlerGate = new Promise((resolve) => {
+    releaseFirstHandler = resolve;
+  });
+  app.use("*", async (c, next) => {
+    attachTestIdentity(c, "invalid-envelope-client");
+    await next();
+  });
+  app.use("/mcp", createHttpBackpressureMiddleware(admission));
+  app.post("/mcp", async (c) => {
+    signalFirstHandler();
+    await firstHandlerGate;
+    return c.json({ ok: true });
+  });
+
+  const validMutation = app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 101,
+      method: "tools/call",
+      params: { name: "obsidian_update_note", arguments: {} },
+    }),
+  });
+  await firstHandlerEntered;
+
+  const secretId = "INVALID-JSONRPC-ID-MUST-NOT-BE-REFLECTED";
+  const rejected = await app.request("http://test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "1.0",
+      id: secretId,
+      method: "tools/call",
+      params: { name: "obsidian_update_note", arguments: {} },
+    }),
+  });
+  assert.equal(rejected.status, 503);
+  assert.equal(rejected.headers.get("x-optimike-operation-class"), "mutation");
+  const rejectedBody = await rejected.json();
+  assert.equal(rejectedBody.id, null);
+  assert.equal(JSON.stringify(rejectedBody).includes(secretId), false);
+  assert.equal(rejectedBody.error.code, -32015);
+
+  releaseFirstHandler();
+  const completed = await validMutation;
+  assert.equal(completed.status, 200);
+  await completed.arrayBuffer();
 }
 
 async function testDownstreamAdmissionErrorIsNotReclassified() {
@@ -661,9 +738,11 @@ function testOneSidedZeroQueueConfigurationIsRejected() {
     },
   );
   assert.notEqual(result.status, 0);
-  assert.match(
+  assert.match(result.stderr, /Invalid HTTP backpressure configuration/u);
+  assert.doesNotMatch(
     result.stderr,
-    /MCP_HTTP_MAX_QUEUED_PER_IDENTITY must be positive/u,
+    /MCP_HTTP_MAX_QUEUED_PER_IDENTITY/u,
+    "bootstrap validation must not echo configuration field names or values",
   );
 }
 
@@ -712,8 +791,10 @@ async function testStalledRequestBodyTimesOutAndReleasesLease() {
   });
 
   const response = await app.request(stalledJsonRequest());
-  assert.equal(response.status, 408);
+  assert.equal(response.status, 504);
   const body = await response.json();
+  assert.equal(body.error.code, -32001);
+  assert.equal(body.error.data.applicationCode, "TIMEOUT");
   assert.equal(body.error.data.readTimeoutMs, 40);
   assert.equal(body.error.data.retryable, true);
   assert.equal(handlerCalls, 0);
@@ -763,7 +844,7 @@ async function testBodyGuardRunsBeforeBodyReadingRejections() {
   assert.equal(rejectionMiddlewareCalls, 0);
 
   const stalled = await app.request(stalledJsonRequest());
-  assert.equal(stalled.status, 408);
+  assert.equal(stalled.status, 504);
   assert.equal(rejectionMiddlewareCalls, 0);
 
   const bounded = await app.request("http://test/mcp", {
@@ -809,9 +890,11 @@ async function testJsonRpcBatchesAreRejectedFailClosed() {
   });
   assert.equal(response.status, 400);
   const body = await response.json();
+  assert.equal(body.error.code, -32600);
+  assert.equal(body.error.data.applicationCode, "VALIDATION_ERROR");
   assert.equal(body.error.data.batchSupported, false);
   assert.equal(body.error.data.maxEnvelopesPerRequest, 1);
-  assert.match(body.error.message, /one envelope per POST/u);
+  assert.equal(body.error.message, "The request could not be validated.");
   assert.equal(handlerCalls, 0);
   assert.equal(admission.getSnapshot().inFlight, 0);
 }
@@ -965,6 +1048,7 @@ await testReleaseAfterError();
 await testDeterministicLoad();
 await testRealMiddlewareResponses();
 await testOperonPeriodicToolsUseMutationSaturation();
+await testInvalidEnvelopeIdIsNotReflectedAfterReclassification();
 await testDownstreamAdmissionErrorIsNotReclassified();
 await testRequestBodyParsingIsBoundedAndAdmitted();
 await testBodyGuardHasBoundedGlobalAdmission();

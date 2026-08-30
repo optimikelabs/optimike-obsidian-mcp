@@ -11,8 +11,18 @@ const {
   sanitizeLoggedOperationName,
   wrapResponseForCompletion,
 } = await import("../dist/mcp-server/transports/httpObservability.js");
-const { liveApiProbeIntervalMs } =
-  await import("../dist/mcp-server/transports/httpTransport.js");
+const { jsonRpcCodeForErrorCode, jsonRpcIdFromBody } = await import(
+  "../dist/mcp-server/transports/httpJsonRpcError.js"
+);
+const { BaseErrorCode, McpError } = await import(
+  "../dist/types-global/errors.js"
+);
+const { JSONRPCErrorResponseSchema } = await import(
+  "@modelcontextprotocol/sdk/types.js"
+);
+const { liveApiProbeIntervalMs } = await import(
+  "../dist/mcp-server/transports/httpTransport.js"
+);
 
 const now = Date.parse("2026-07-29T12:00:00.000Z");
 const vaultPath = process.cwd();
@@ -21,6 +31,147 @@ const missingVault = path.join(
   ".tmp",
   "observability-missing-vault",
 );
+
+const requestEnvelope = (id, extras = {}) => ({
+  jsonrpc: "2.0",
+  method: "tools/list",
+  id,
+  ...extras,
+});
+assert.equal(jsonRpcIdFromBody(requestEnvelope(0)), 0);
+assert.equal(jsonRpcIdFromBody(requestEnvelope("request-1")), "request-1");
+assert.equal(jsonRpcIdFromBody(requestEnvelope(null)), null);
+assert.equal(
+  jsonRpcIdFromBody(requestEnvelope({ marker: "do-not-reflect" })),
+  null,
+);
+assert.equal(jsonRpcIdFromBody(requestEnvelope(["do-not-reflect"])), null);
+assert.equal(jsonRpcIdFromBody({ id: "malformed-missing-version" }), null);
+assert.equal(
+  jsonRpcIdFromBody({ jsonrpc: "1.0", method: "tools/list", id: 7 }),
+  null,
+);
+assert.equal(jsonRpcIdFromBody({ jsonrpc: "2.0", id: 8 }), null);
+assert.equal(
+  jsonRpcIdFromBody(requestEnvelope(9, { params: "not-structured" })),
+  null,
+);
+assert.equal(jsonRpcIdFromBody([requestEnvelope(10)]), null);
+
+for (const applicationCode of Object.values(BaseErrorCode)) {
+  assert.equal(
+    Number.isInteger(jsonRpcCodeForErrorCode(applicationCode)),
+    true,
+    `${applicationCode} must map to an integer JSON-RPC code`,
+  );
+}
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.PARSING_ERROR), -32602);
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.VALIDATION_ERROR), -32602);
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.INTERNAL_ERROR), -32603);
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.TIMEOUT), -32001);
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.UNAUTHORIZED), -32010);
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.FORBIDDEN), -32011);
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.NOT_FOUND), -32012);
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.CONFLICT), -32013);
+assert.equal(jsonRpcCodeForErrorCode(BaseErrorCode.RATE_LIMITED), -32014);
+assert.equal(
+  jsonRpcCodeForErrorCode(BaseErrorCode.SERVICE_UNAVAILABLE),
+  -32015,
+);
+
+const { earlyJsonRpcErrorResponse } = await import(
+  "../dist/mcp-server/transports/httpJsonRpcError.js"
+);
+const boundarySecret = "HTTP-JSON-RPC-DETAIL-MUST-STAY-PRIVATE";
+let hostileDetailTrapCount = 0;
+const hostileDetails = new Proxy(
+  { privatePath: boundarySecret },
+  {
+    getOwnPropertyDescriptor() {
+      hostileDetailTrapCount += 1;
+      throw new Error(boundarySecret);
+    },
+  },
+);
+const hostileResponse = earlyJsonRpcErrorResponse(
+  new Request("http://test/mcp", {
+    method: "POST",
+    body: JSON.stringify(requestEnvelope(11)),
+  }),
+  new McpError(BaseErrorCode.CONFLICT, boundarySecret, {
+    privatePath: boundarySecret,
+    retryable: true,
+  }),
+  {
+    operation: "httpJsonRpcHostileDetails",
+    id: 11,
+    details: hostileDetails,
+  },
+);
+const hostileBody = await hostileResponse.json();
+assert.equal(JSONRPCErrorResponseSchema.safeParse(hostileBody).success, true);
+assert.equal(hostileBody.error.code, -32013);
+assert.equal(hostileBody.error.data.applicationCode, "CONFLICT");
+assert.equal(hostileBody.error.data.privatePath, undefined);
+assert.equal(hostileBody.error.data.retryable, undefined);
+assert.equal(JSON.stringify(hostileBody).includes(boundarySecret), false);
+assert.ok(hostileDetailTrapCount > 0);
+
+const revokedDetails = Proxy.revocable({}, {});
+revokedDetails.revoke();
+const revokedResponse = earlyJsonRpcErrorResponse(
+  new Request("http://test/mcp"),
+  new McpError(BaseErrorCode.CONFLICT, boundarySecret),
+  {
+    operation: "httpJsonRpcRevokedDetails",
+    id: 12,
+    details: revokedDetails.proxy,
+  },
+);
+const revokedBody = await revokedResponse.json();
+assert.equal(JSONRPCErrorResponseSchema.safeParse(revokedBody).success, true);
+assert.equal(JSON.stringify(revokedBody).includes(boundarySecret), false);
+
+let hostileGetterCalls = 0;
+const getterDetails = {};
+Object.defineProperty(getterDetails, "retryable", {
+  enumerable: true,
+  get() {
+    hostileGetterCalls += 1;
+    throw new Error(boundarySecret);
+  },
+});
+const getterResponse = earlyJsonRpcErrorResponse(
+  new Request("http://test/mcp"),
+  new McpError(BaseErrorCode.CONFLICT, boundarySecret),
+  {
+    operation: "httpJsonRpcGetterDetails",
+    id: 13,
+    details: getterDetails,
+  },
+);
+const getterBody = await getterResponse.json();
+assert.equal(JSONRPCErrorResponseSchema.safeParse(getterBody).success, true);
+assert.equal(getterBody.error.data.retryable, undefined);
+assert.equal(hostileGetterCalls, 0);
+assert.equal(JSON.stringify(getterBody).includes(boundarySecret), false);
+
+const { Hono } = await import("hono");
+const { httpErrorHandler } = await import(
+  "../dist/mcp-server/transports/httpErrorHandler.js"
+);
+const unexpectedSecret = "HONO-UNEXPECTED-ERROR-MUST-STAY-PRIVATE";
+const errorApp = new Hono();
+errorApp.onError(httpErrorHandler);
+errorApp.get("/unexpected", () => {
+  throw new Error(unexpectedSecret);
+});
+const unexpectedResponse = await errorApp.request("http://test/unexpected");
+assert.equal(unexpectedResponse.status, 500);
+const unexpectedBody = await unexpectedResponse.json();
+assert.equal(unexpectedBody.error.code, -32603);
+assert.equal(unexpectedBody.error.data.applicationCode, "INTERNAL_ERROR");
+assert.equal(JSON.stringify(unexpectedBody).includes(unexpectedSecret), false);
 
 function cache(stats) {
   return { getStats: () => stats };

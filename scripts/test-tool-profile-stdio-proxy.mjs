@@ -174,7 +174,7 @@ try {
   try {
     const result = await full.listTools();
     const names = result.tools.map((tool) => tool.name);
-    assert.equal(names.length, 46);
+    assert.equal(names.length, 48);
     assert.ok(names.includes("smart_semantic_search"));
     assert.ok(!names.includes("smart_search"));
     assert.ok(!names.includes("smart-search"));

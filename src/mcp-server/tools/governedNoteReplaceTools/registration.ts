@@ -5,7 +5,7 @@ import {
   GOVERNED_PLAN_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
-import { McpError } from "../../../types-global/errors.js";
+import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import type { GovernedNoteReplaceRuntime } from "./runtime.js";
 
 const PlanSchema = z.object({
@@ -16,7 +16,9 @@ const PlanSchema = z.object({
     .describe("Vault-relative path of an existing Markdown note."),
   nextContent: z
     .string()
-    .describe("Complete next Markdown content. It is sealed in the private journal and never returned."),
+    .describe(
+      "Complete next Markdown content. It is sealed in the private journal and never returned.",
+    ),
   idempotencyKey: z
     .string()
     .min(1)
@@ -43,18 +45,11 @@ const StatusSchema = z.object({
     .describe("Opaque plan reference returned by obsidian_note_replace_plan."),
 });
 
-function errorPayload(error: unknown): Record<string, unknown> {
-  return {
-    ok: false,
-    error: {
-      code: error instanceof McpError ? error.code : "INTERNAL_ERROR",
-      message: error instanceof Error ? error.message : String(error),
-      details: error instanceof McpError ? error.details : undefined,
-    },
-  };
-}
-
-async function runTool(operation: () => Promise<unknown>) {
+async function runTool(
+  toolName: string,
+  params: unknown,
+  operation: () => Promise<unknown>,
+) {
   try {
     const result = await operation();
     return {
@@ -68,7 +63,15 @@ async function runTool(operation: () => Promise<unknown>) {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(errorPayload(error), null, 2),
+          text: JSON.stringify(
+            publicMcpToolErrorPayload(error, {
+              operation: toolName,
+              toolName,
+              params,
+            }),
+            null,
+            2,
+          ),
         },
       ],
       isError: true,
@@ -88,7 +91,9 @@ export async function registerGovernedNoteReplaceTools(
     PlanSchema.shape,
     GOVERNED_PLAN_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof PlanSchema>) =>
-      runTool(() => runtime.planPublicDirect(params)),
+      runTool("obsidian_note_replace_plan", params, () =>
+        runtime.planPublicDirect(params),
+      ),
   );
 
   server.tool(
@@ -97,7 +102,7 @@ export async function registerGovernedNoteReplaceTools(
     ApplySchema.shape,
     GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ApplySchema>) =>
-      runTool(() =>
+      runTool("obsidian_note_replace_apply", params, () =>
         runtime.applyPublicDirectPlan(params.planRef, params.idempotencyKey),
       ),
   );
@@ -108,7 +113,9 @@ export async function registerGovernedNoteReplaceTools(
     StatusSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof StatusSchema>) =>
-      runTool(() => runtime.statusPublicDirectPlan(params.planRef)),
+      runTool("obsidian_note_replace_status", params, () =>
+        runtime.statusPublicDirectPlan(params.planRef),
+      ),
   );
 
   server.tool(
@@ -117,7 +124,7 @@ export async function registerGovernedNoteReplaceTools(
     ApplySchema.shape,
     GOVERNED_MUTATION_TOOL_ANNOTATIONS,
     async (params: z.infer<typeof ApplySchema>) =>
-      runTool(() =>
+      runTool("obsidian_note_replace_recover", params, () =>
         runtime.recoverPublicDirectPlan(params.planRef, params.idempotencyKey),
       ),
   );

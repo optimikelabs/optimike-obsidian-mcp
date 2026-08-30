@@ -12,11 +12,22 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-  ExternalRootError,
-  ExternalRootsService,
-} from "../dist/services/externalRootsService.js";
-import { registerExternalRootsTools } from "../dist/mcp-server/tools/externalRootsTools/index.js";
+
+// This unit fixture must not inherit an operator's live runtime (which may
+// correctly require a private API key) before it imports the tool registry.
+process.env.OBSIDIAN_RUNTIME_MODE = "headless-readonly";
+process.env.OBSIDIAN_ENABLE_CACHE = "false";
+process.env.MCP_WRITE_MODE = "readonly";
+// Headless runtime validation requires a vault root even though this fixture
+// exercises only disposable external roots and imports no Obsidian content.
+process.env.OBSIDIAN_VAULT = os.tmpdir();
+
+const { ExternalRootError, ExternalRootsService } = await import(
+  "../dist/services/externalRootsService.js"
+);
+const { registerExternalRootsTools } = await import(
+  "../dist/mcp-server/tools/externalRootsTools/index.js"
+);
 
 const sandbox = await mkdtemp(
   path.join(os.tmpdir(), "optimike-external-roots-"),

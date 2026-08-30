@@ -115,11 +115,9 @@ const ObservabilityEnvSchema = z.object({
 
 const parsedObservabilityEnv = ObservabilityEnvSchema.safeParse(process.env);
 if (!parsedObservabilityEnv.success) {
-  throw new Error(
-    `Invalid HTTP observability configuration: ${JSON.stringify(
-      parsedObservabilityEnv.error.flatten().fieldErrors,
-    )}`,
-  );
+  // Do not serialize Zod issues: coercion/validation errors may include raw
+  // environment values in process startup output.
+  throw new Error("Invalid HTTP observability configuration.");
 }
 const observabilityEnv = parsedObservabilityEnv.data;
 export const HTTP_OBSERVABILITY_STALE_AFTER_MS =

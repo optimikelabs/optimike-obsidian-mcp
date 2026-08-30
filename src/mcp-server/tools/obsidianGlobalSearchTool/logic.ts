@@ -165,11 +165,11 @@ function findMatchesInContent(
       ? new RegExp(query, flags)
       : new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
   } catch (e) {
-    const errorMsg = `[${operation}] Invalid regex pattern: ${query}`;
-    logger.error(errorMsg, e instanceof Error ? e : undefined, opContext);
+    const errorMsg = `[${operation}] Invalid regex pattern.`;
+    logger.error(errorMsg, opContext);
     throw new McpError(
       BaseErrorCode.VALIDATION_ERROR,
-      `Invalid regex pattern: ${query}`,
+      "Invalid regex pattern.",
       opContext,
     );
   }
@@ -213,10 +213,10 @@ export const processObsidianGlobalSearch = async (
 ): Promise<ObsidianGlobalSearchResponse> => {
   const operation = "processObsidianGlobalSearch";
   const opContext = { ...context, operation };
-  logger.info(
-    `Processing obsidian_global_search request: "${params.query}" (API-first)`,
-    { ...opContext, params: sanitizeInputForLogging(params) },
-  );
+  logger.info("Processing obsidian_global_search request (API-first).", {
+    ...opContext,
+    params: sanitizeInputForLogging(params),
+  });
 
   let sinceDate: Date | null = null;
   let untilDate: Date | null = null;
@@ -245,11 +245,7 @@ export const processObsidianGlobalSearch = async (
       );
   } catch (error) {
     const errMsg = `Invalid date format provided`;
-    logger.error(
-      errMsg,
-      error instanceof Error ? error : undefined,
-      dateParseContext,
-    );
+    logger.error(errMsg, dateParseContext);
     throw new McpError(
       BaseErrorCode.VALIDATION_ERROR,
       errMsg,
@@ -276,10 +272,7 @@ export const processObsidianGlobalSearch = async (
 
     const apiResults: SimpleSearchResult[] = await retryWithDelay(
       async () => {
-        logger.info(
-          `Calling obsidianService.searchSimple for query: "${params.query}"`,
-          apiSearchContext,
-        );
+        logger.info("Calling obsidianService.searchSimple.", apiSearchContext);
 
         const apiCallPromise = obsidianService.searchSimple(
           params.query,
@@ -308,9 +301,9 @@ export const processObsidianGlobalSearch = async (
         delayMs: 500,
         shouldRetry: (err: unknown) => {
           // Retry on any error during the API call phase
-          logger.warning(`API search attempt failed. Retrying...`, {
+          logger.warning("API search attempt failed. Retrying...", {
             ...apiSearchContext,
-            error: err instanceof Error ? err.message : String(err),
+            failureCategory: err instanceof McpError ? err.code : "unknown",
           });
           return true;
         },
@@ -358,10 +351,11 @@ export const processObsidianGlobalSearch = async (
           continue; // Skip due to date filter
         }
       } catch (statError) {
-        logger.warning(
-          `Failed to fetch stats for file ${filePathFromApi}. Skipping file. Error: ${statError instanceof Error ? statError.message : String(statError)}`,
-          fetchStatsContext,
-        );
+        logger.warning("Failed to fetch file stats. Skipping file.", {
+          ...fetchStatsContext,
+          failureCategory:
+            statError instanceof McpError ? statError.code : "unknown",
+        });
         continue; // Skip if stats cannot be fetched
       }
 
@@ -396,14 +390,15 @@ export const processObsidianGlobalSearch = async (
         processedCount++;
       }
     }
-    strategyMessage += `Processed ${processedCount} files matching all filters (including path: '${searchPathPrefix || "entire vault"}'). `;
+    strategyMessage += `Processed ${processedCount} files matching all filters. `;
   } catch (apiError) {
     // API call failed or timed out internally
     apiFailedOrTimedOut = true;
-    strategyMessage += `API search failed or timed out (${apiError instanceof Error ? apiError.message : String(apiError)}). `;
-    logger.warning(strategyMessage, {
+    strategyMessage += "API search failed or timed out. ";
+    logger.warning("API search failed or timed out.", {
       ...opContext,
       subOperation: "apiSearchFailedOrTimedOut",
+      failureCategory: apiError instanceof McpError ? apiError.code : "unknown",
     });
   }
 
@@ -473,13 +468,14 @@ export const processObsidianGlobalSearch = async (
             processedCount++;
           }
         } catch (matchError) {
-          logger.warning(
-            `Error matching content in cached file ${entry.path} during fallback: ${matchError instanceof Error ? matchError.message : String(matchError)}`,
-            cacheSearchContext,
-          );
+          logger.warning("Cached file matching failed. Skipping file.", {
+            ...cacheSearchContext,
+            failureCategory:
+              matchError instanceof McpError ? matchError.code : "unknown",
+          });
         }
       }
-      strategyMessage += `Searched ${entries.length} cached files, processed ${processedCount} matching all filters (including path: '${searchPathPrefix || "entire vault"}'). `;
+      strategyMessage += `Searched ${entries.length} cached files, processed ${processedCount} matching all filters. `;
     } else {
       // This block now handles both "cache disabled" and "cache not ready"
       const stats = vaultCacheService?.getStats();

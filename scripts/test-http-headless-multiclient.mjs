@@ -543,10 +543,16 @@ try {
     },
   );
   assert.equal(deniedOperonWrite.result?.isError, true);
-  assertToolIncludes(
-    deniedOperonWrite,
-    "require the live Obsidian Desktop Bridge",
-    "Operon write denial",
+  const operonDenial = JSON.parse(toolText(deniedOperonWrite));
+  assert.equal(operonDenial.ok, false);
+  assert.equal(operonDenial.error?.code, "SERVICE_UNAVAILABLE");
+  assert.equal(
+    operonDenial.error?.message,
+    "The service is temporarily unavailable. Retry later.",
+  );
+  assert.match(
+    operonDenial.error?.details?.requestId ?? "",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
   );
 
   const runtime = await callTool(

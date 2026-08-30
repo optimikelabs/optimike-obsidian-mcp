@@ -57,6 +57,41 @@ import {
   SimpleSearchResult,
 } from "./types.js"; // Import types from the new file
 
+const STRICT_SHA256 = /^[a-f0-9]{64}$/u;
+
+function strictConflictActualSha256(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+  const error = (payload as Record<string, unknown>).error;
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return undefined;
+  }
+  const errorRecord = error as Record<string, unknown>;
+  if (errorRecord.code !== "hash_conflict") return undefined;
+  const details = errorRecord.details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return undefined;
+  }
+  const actualSha256 = (details as Record<string, unknown>).actualSha256;
+  return typeof actualSha256 === "string" && STRICT_SHA256.test(actualSha256)
+    ? actualSha256
+    : undefined;
+}
+
+/** Internal-only CAS conflict carrying one validated, content-free proof. */
+export class ObsidianRestConflictError extends McpError {
+  constructor(readonly actualSha256: string) {
+    super(
+      BaseErrorCode.CONFLICT,
+      "Obsidian API reported a conflict (HTTP 409).",
+      { actualSha256 },
+    );
+    this.name = "ObsidianRestConflictError";
+    Object.setPrototypeOf(this, ObsidianRestConflictError.prototype);
+  }
+}
+
 export class ObsidianRestApiService {
   private axiosInstance: AxiosInstance;
   private apiKey: string;
@@ -87,12 +122,12 @@ export class ObsidianRestApiService {
       httpsAgent,
     });
 
-    logger.info(
-      `ObsidianRestApiService initialized with base URL: ${this.axiosInstance.defaults.baseURL}, Verify SSL: ${config.obsidianVerifySsl}`,
-      requestContextService.createRequestContext({
+    logger.info("Obsidian REST API service initialized.", {
+      ...requestContextService.createRequestContext({
         operation: "ObsidianServiceInit",
       }),
-    );
+      verifySsl: config.obsidianVerifySsl,
+    });
   }
 
   /**
@@ -112,121 +147,139 @@ export class ObsidianRestApiService {
       ...context,
       operation: `ObsidianAPI_${operationName}`,
     };
-    logger.debug(
-      `Making Obsidian API request: ${requestConfig.method} ${requestConfig.url}`,
-      operationContext,
-    );
+    logger.debug("Making Obsidian API request.", {
+      ...operationContext,
+      ...requestLogMetadata(requestConfig),
+    });
 
-    return await ErrorHandler.tryCatch(
-      async () => {
-        try {
-          const response = await this.axiosInstance.request<T>(requestConfig);
-          logger.debug(
-            `Obsidian API request successful: ${requestConfig.method} ${requestConfig.url}`,
-            { ...operationContext, status: response.status },
-          );
-          // For HEAD requests, we need the headers, so return the whole response.
-          // For other requests, returning response.data is fine.
-          if (requestConfig.method === "HEAD") {
-            return response as T;
-          }
-          return response.data;
-        } catch (error) {
-          const axiosError = error as AxiosError;
-          let errorCode = BaseErrorCode.INTERNAL_ERROR;
-          let errorMessage = `Obsidian API request failed: ${axiosError.message}`;
-          const errorDetails: Record<string, any> = {
-            requestUrl: requestConfig.url,
-            requestMethod: requestConfig.method,
-            responseStatus: axiosError.response?.status,
-            responseData: axiosError.response?.data,
-          };
-
-          if (axiosError.response) {
-            // Handle specific HTTP status codes
-            switch (axiosError.response.status) {
-              case 400:
-                errorCode = BaseErrorCode.VALIDATION_ERROR;
-                errorMessage = `Obsidian API Bad Request: ${JSON.stringify(axiosError.response.data)}`;
-                break;
-              case 401:
-                errorCode = BaseErrorCode.UNAUTHORIZED;
-                errorMessage = "Obsidian API Unauthorized: Invalid API Key.";
-                break;
-              case 403:
-                errorCode = BaseErrorCode.FORBIDDEN;
-                errorMessage = "Obsidian API Forbidden: Check permissions.";
-                break;
-              case 404:
-                errorCode = BaseErrorCode.NOT_FOUND;
-                errorMessage = `Obsidian API Not Found: ${requestConfig.url}`;
-                // Log 404s at debug level, as they might be expected (e.g., checking existence)
-                logger.debug(errorMessage, {
-                  ...operationContext,
-                  ...errorDetails,
-                });
-                throw new McpError(errorCode, errorMessage, operationContext);
-              // NOTE: We throw immediately after logging debug for 404, skipping the general error log below.
-              case 405:
-                errorCode = BaseErrorCode.VALIDATION_ERROR; // Method not allowed often implies incorrect usage
-                errorMessage = `Obsidian API Method Not Allowed: ${requestConfig.method} on ${requestConfig.url}`;
-                break;
-              case 409:
-                errorCode = BaseErrorCode.CONFLICT;
-                errorMessage = `Obsidian API Conflict: ${JSON.stringify(axiosError.response.data)}`;
-                break;
-              case 412:
-                errorCode = BaseErrorCode.CONFLICT;
-                errorMessage =
-                  "Obsidian API Precondition Failed: the note changed after it was read.";
-                break;
-              case 422:
-                errorCode = BaseErrorCode.VALIDATION_ERROR;
-                errorMessage = `Obsidian API Unprocessable Entity: ${JSON.stringify(axiosError.response.data)}`;
-                break;
-              case 503:
-                errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;
-                errorMessage = "Obsidian API Service Unavailable.";
-                break;
+    let conflictActualSha256: string | undefined;
+    try {
+      return await ErrorHandler.tryCatch(
+        async () => {
+          try {
+            const response = await this.axiosInstance.request<T>(requestConfig);
+            logger.debug("Obsidian API request succeeded.", {
+              ...operationContext,
+              ...requestLogMetadata(requestConfig, response.status),
+            });
+            // For HEAD requests, we need the headers, so return the whole response.
+            // For other requests, returning response.data is fine.
+            if (requestConfig.method === "HEAD") {
+              return response as T;
             }
-            // General error logging for non-404 client/server errors handled above
-            logger.error(errorMessage, {
-              ...operationContext,
-              ...errorDetails,
-            });
-            throw new McpError(errorCode, errorMessage, operationContext);
-          } else if (axiosError.request) {
-            // Network error (no response received)
-            errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;
-            errorMessage = `Obsidian API Network Error: No response received from ${requestConfig.url}. This may be due to Obsidian not running, the Local REST API plugin being disabled, or a network issue.`;
-            logger.error(errorMessage, {
-              ...operationContext,
-              ...errorDetails,
-            });
-            throw new McpError(errorCode, errorMessage, operationContext);
-          } else {
-            // Other errors (e.g., setup issues)
-            // Pass error object correctly if it's an Error instance
-            logger.error(
-              errorMessage,
-              error instanceof Error ? error : undefined,
-              {
+            return response.data;
+          } catch (error) {
+            const axiosError = error as AxiosError;
+            let errorCode = BaseErrorCode.INTERNAL_ERROR;
+            let errorMessage = "Obsidian API request failed.";
+            const errorDetails = requestLogMetadata(
+              requestConfig,
+              axiosError.response?.status,
+            );
+
+            if (axiosError.response) {
+              // Handle specific HTTP status codes
+              switch (axiosError.response.status) {
+                case 400:
+                  errorCode = BaseErrorCode.VALIDATION_ERROR;
+                  errorMessage =
+                    "Obsidian API rejected the request (HTTP 400).";
+                  break;
+                case 401:
+                  errorCode = BaseErrorCode.UNAUTHORIZED;
+                  errorMessage = "Obsidian API Unauthorized: Invalid API Key.";
+                  break;
+                case 403:
+                  errorCode = BaseErrorCode.FORBIDDEN;
+                  errorMessage = "Obsidian API Forbidden: Check permissions.";
+                  break;
+                case 404:
+                  errorCode = BaseErrorCode.NOT_FOUND;
+                  errorMessage =
+                    "Obsidian API could not find the requested resource (HTTP 404).";
+                  // Log 404s at debug level, as they might be expected (e.g., checking existence)
+                  logger.debug(errorMessage, {
+                    ...operationContext,
+                    ...errorDetails,
+                  });
+                  throw new McpError(errorCode, errorMessage, operationContext);
+                // NOTE: We throw immediately after logging debug for 404, skipping the general error log below.
+                case 405:
+                  errorCode = BaseErrorCode.VALIDATION_ERROR; // Method not allowed often implies incorrect usage
+                  errorMessage =
+                    "Obsidian API rejected this method (HTTP 405).";
+                  break;
+                case 409:
+                  errorCode = BaseErrorCode.CONFLICT;
+                  errorMessage = "Obsidian API reported a conflict (HTTP 409).";
+                  conflictActualSha256 = strictConflictActualSha256(
+                    axiosError.response.data,
+                  );
+                  break;
+                case 412:
+                  errorCode = BaseErrorCode.CONFLICT;
+                  errorMessage =
+                    "Obsidian API Precondition Failed: the note changed after it was read.";
+                  break;
+                case 422:
+                  errorCode = BaseErrorCode.VALIDATION_ERROR;
+                  errorMessage =
+                    "Obsidian API could not process the request (HTTP 422).";
+                  break;
+                case 503:
+                  errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;
+                  errorMessage = "Obsidian API Service Unavailable.";
+                  break;
+              }
+              // General error logging for non-404 client/server errors handled above
+              logger.error(errorMessage, {
                 ...operationContext,
                 ...errorDetails,
-                originalError: String(error),
-              },
-            );
-            throw new McpError(errorCode, errorMessage, operationContext);
+              });
+              throw new McpError(errorCode, errorMessage, operationContext);
+            } else if (axiosError.request) {
+              // Network error (no response received)
+              errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;
+              errorMessage =
+                "Obsidian API did not respond. Check that Obsidian and Local REST API are available.";
+              logger.error(errorMessage, {
+                ...operationContext,
+                ...errorDetails,
+              });
+              throw new McpError(errorCode, errorMessage, operationContext);
+            } else {
+              // Other errors (e.g., setup issues)
+              // Pass error object correctly if it's an Error instance
+              logger.error(
+                errorMessage,
+                error instanceof Error ? error : undefined,
+                {
+                  ...operationContext,
+                  ...errorDetails,
+                  failureCategory: "request_setup",
+                },
+              );
+              throw new McpError(errorCode, errorMessage, operationContext);
+            }
           }
-        }
-      },
-      {
-        operation: `ObsidianAPI_${operationName}_Wrapper`,
-        context: context,
-        input: requestLogMetadata(requestConfig),
-        errorCode: BaseErrorCode.INTERNAL_ERROR, // Default if wrapper itself fails
-      },
-    );
+        },
+        {
+          operation: `ObsidianAPI_${operationName}_Wrapper`,
+          context: context,
+          input: requestLogMetadata(requestConfig),
+          errorCode: BaseErrorCode.INTERNAL_ERROR, // Default if wrapper itself fails
+        },
+      );
+    } catch (error) {
+      if (
+        conflictActualSha256 &&
+        error instanceof McpError &&
+        error.code === BaseErrorCode.CONFLICT
+      ) {
+        throw new ObsidianRestConflictError(conflictActualSha256);
+      }
+      throw error;
+    }
   }
 
   // --- API Methods ---

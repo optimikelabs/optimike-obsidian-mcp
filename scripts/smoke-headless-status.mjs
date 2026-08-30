@@ -70,6 +70,10 @@ async function main() {
     "shared-cache.sqlite",
   );
   const authSecret = "smoke-status-secret-for-runtime-checks";
+  const privateBaseUrl =
+    "https://p0-runtime-base.private.example.test/obsidian";
+  const privateOpenAiBaseUrl =
+    "https://p0-runtime-openai.private.example.test/embeddings";
   const child = spawn(process.execPath, ["dist/index.js"], {
     cwd: process.cwd(),
     env: {
@@ -79,6 +83,8 @@ async function main() {
       OBSIDIAN_CACHE_SOURCE: "filesystem",
       OBSIDIAN_SHARED_CACHE_DB_PATH: cachePath,
       OBSIDIAN_ENABLE_CACHE: "true",
+      OBSIDIAN_BASE_URL: privateBaseUrl,
+      OPENAI_BASE_URL: privateOpenAiBaseUrl,
       MCP_WRITE_MODE: "readonly",
       MCP_TRANSPORT_TYPE: "http",
       MCP_HTTP_HOST: "127.0.0.1",
@@ -153,6 +159,20 @@ async function main() {
     }
     if (runtimeStatus.runtime?.dist?.isNewerThanProcess) {
       throw new Error("backend process is older than dist files");
+    }
+    const serializedRuntimeStatus = JSON.stringify(runtimeStatus);
+    for (const privateValue of [
+      vaultRoot,
+      cachePath,
+      privateBaseUrl,
+      privateOpenAiBaseUrl,
+      process.cwd(),
+    ]) {
+      if (serializedRuntimeStatus.includes(privateValue)) {
+        throw new Error(
+          `runtime status disclosed private runtime detail: ${privateValue}`,
+        );
+      }
     }
     writeSync(
       1,

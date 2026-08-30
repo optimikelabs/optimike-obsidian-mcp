@@ -290,10 +290,7 @@ const server = http.createServer((request, response) => {
     return;
   }
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
-  if (
-    request.method === "GET" &&
-    url.pathname.endsWith("/recovery-status")
-  ) {
+  if (request.method === "GET" && url.pathname.endsWith("/recovery-status")) {
     const status = statusPayload();
     sendJson(response, 200, {
       ok:
@@ -675,6 +672,33 @@ const server = http.createServer((request, response) => {
       const params = body ? JSON.parse(body) : {};
       const operonId =
         /\/tasks\/([^/]+)\/update$/u.exec(url.pathname)?.[1] ?? "abc1234";
+      if (params.idempotencyKey === "test-public-outcome-unknown") {
+        sendJson(response, 500, {
+          // This is the exact safe shape produced by the Bridge's public
+          // mutation-failure projection: correlations/recovery survive, while
+          // the failed request itself is deliberately opaque.
+          ok: false,
+          contractVersion: "1",
+          operationId: "9db2462c-3fc1-4e68-8e10-2a119dd9bd4f",
+          idempotencyKey: params.idempotencyKey,
+          status: "outcome-unknown",
+          requested: {},
+          retryable: false,
+          mutationMayHaveApplied: true,
+          recoveryRequired: true,
+          recoveryRef: `dvr1_${"f".repeat(48)}`,
+          planDigest: "e".repeat(64),
+          source: "operon-live",
+          stale: false,
+          error: {
+            code: "outcome_unverified",
+            reasonCode: "outcome_unverified",
+            message:
+              "The mutation outcome could not be verified. Use the recovery reference before retrying.",
+          },
+        });
+        return;
+      }
       const requestedFields = params.patch.fields ?? {};
       const fields = { ...tasks[0].fields, ...requestedFields };
       if (
@@ -994,13 +1018,20 @@ try {
     () => service.querySavedFilter({ filterSetId: "missing-filter", limit: 1 }),
     (error) =>
       error?.code === "NOT_FOUND" &&
-      error?.message === "Saved filter was not found.",
+      error?.message ===
+        "The requested Operon Bridge resource was not found." &&
+      error?.details?.httpStatus === 404 &&
+      error?.details?.reasonCode === "OPERON_BRIDGE_RESOURCE_NOT_FOUND" &&
+      error?.details?.hasBridgeCode === true,
   );
   await assert.rejects(
     () => service.querySavedFilter({ filterSetId: "invalid-filter", limit: 1 }),
     (error) =>
       error?.code === "VALIDATION_ERROR" &&
-      error?.message === "Saved filter request is invalid.",
+      error?.message === "The Operon Bridge rejected the request." &&
+      error?.details?.httpStatus === 422 &&
+      error?.details?.reasonCode === "OPERON_BRIDGE_REQUEST_INVALID" &&
+      error?.details?.hasBridgeCode === true,
   );
 
   state.mode = "offline";
@@ -1337,6 +1368,50 @@ try {
   );
 
   config.mcpWriteMode = "full";
+
+  // A public Bridge failure must remain a terminal MCP receipt (not a parsing
+  // error), replay by its original mutation key, and retain enough evidence
+  // for a separate durable recovery request.
+  config.operonMutationAllowedPathPrefixes = [];
+  const publicFailureInput = {
+    idempotencyKey: "test-public-outcome-unknown",
+    dryRun: false,
+    operonId: "abc1234",
+    expectedRevision: tasks[0].revision,
+    patch: { fields: { priority: "B" } },
+  };
+  const mutationCallsBeforePublicFailure = state.mutationCalls;
+  const publicFailure = await service.updateTask(publicFailureInput);
+  assert.equal(publicFailure.ok, false);
+  assert.equal(publicFailure.status, "outcome-unknown");
+  assert.equal(publicFailure.idempotencyKey, publicFailureInput.idempotencyKey);
+  assert.deepEqual(publicFailure.requested, {});
+  assert.equal(publicFailure.mutationMayHaveApplied, true);
+  assert.equal(publicFailure.recoveryRequired, true);
+  assert.equal(publicFailure.planDigest, "e".repeat(64));
+  assert.equal(publicFailure.recoveryRef, `dvr1_${"f".repeat(48)}`);
+  const publicFailureReplay = await new OperonService().updateTask(
+    publicFailureInput,
+  );
+  assert.equal(publicFailureReplay.replayed, true);
+  assert.equal(publicFailureReplay.status, "outcome-unknown");
+  assert.equal(
+    state.mutationCalls,
+    mutationCallsBeforePublicFailure + 1,
+    "an outcome-unknown failure must replay from the durable MCP journal",
+  );
+  const publicFailureRecovery = await service.recoverMutation({
+    idempotencyKey: "test-public-outcome-recovery",
+    recoveryRef: publicFailure.recoveryRef,
+    recovery: { kind: "developer-api" },
+  });
+  assert.equal(publicFailureRecovery.status, "already-applied");
+  assert.equal(
+    publicFailureRecovery.recoveryRef,
+    publicFailure.recoveryRef,
+    "the public failure recovery reference must reach the recovery route",
+  );
+  config.operonMutationAllowedPathPrefixes = configuredMutationPrefixes;
 
   const orderedGallery = ["media/a,b.png", "media\\c;d.png", "media/a,b.png"];
   const normalizedOrderedGallery = ["media/a,b.png", "media\\c;d.png"];
@@ -1724,7 +1799,9 @@ try {
   );
   assert.equal(state.mutationCalls, callsBeforeDisabledSurface);
   state.mutations = true;
-  const enabledSameKey = await service.createPeriodicTask(globallyDisabledInput);
+  const enabledSameKey = await service.createPeriodicTask(
+    globallyDisabledInput,
+  );
   assert.equal(enabledSameKey.status, "planned");
   assert.equal(
     state.mutationCalls,
