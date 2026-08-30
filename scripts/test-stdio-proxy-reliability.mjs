@@ -112,26 +112,23 @@ const APPLICATION_404_BODY_MARKER = "fixture-application-404-body-marker";
 const APPLICATION_503_BODY_MARKER = "fixture-application-503-body-marker";
 const ADMISSION_REQUEST_ID = "fd369d0a-631a-4d48-8a8a-dba7f9a3ed19";
 const ADMISSION_REQUEST_ID_SECRET = "fixture-admission-request-id-secret";
+const ADMISSION_MESSAGE =
+  "The service is temporarily unavailable. Retry later.";
 const ADMISSION_CASES = [
   {
     reason: "queue-full",
-    message: "The HTTP operation queue is full.",
     retryable: true,
   },
   {
     reason: "identity-queue-full",
-    message:
-      "This client identity already has the maximum number of queued operations.",
     retryable: true,
   },
   {
     reason: "timeout",
-    message: "The operation was not admitted before its queue timeout.",
     retryable: true,
   },
   {
     reason: "cancelled",
-    message: "The operation was cancelled before admission.",
     retryable: false,
   },
 ];
@@ -139,7 +136,7 @@ const ADMISSION_CASES = [
 function assertProjectedAdmission(error, admission) {
   assert.ok(error instanceof McpError);
   assert.equal(error.code, -32015);
-  assert.equal(error.message, `MCP error -32015: ${admission.message}`);
+  assert.equal(error.message, `MCP error -32015: ${ADMISSION_MESSAGE}`);
   assert.deepEqual(error.data, {
     applicationCode: "SERVICE_UNAVAILABLE",
     admission: admission.reason,
@@ -314,7 +311,7 @@ const backend = createServer(async (request, response) => {
       jsonrpc: "2.0",
       error: {
         code: -32015,
-        message: admission.message,
+        message: ADMISSION_MESSAGE,
         data: {
           applicationCode: "SERVICE_UNAVAILABLE",
           admission: admission.reason,
@@ -333,7 +330,7 @@ const backend = createServer(async (request, response) => {
         jsonrpc: "2.0",
         error: {
           code: -32015,
-          message: "The HTTP operation queue is full.",
+          message: ADMISSION_MESSAGE,
           data: {
             applicationCode: "SERVICE_UNAVAILABLE",
             admission: "queue-full",

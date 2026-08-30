@@ -520,15 +520,14 @@ const SESSION_INVALID_MESSAGES = new Set([
 ]);
 const HTTP_ADMISSION_ERROR_CODE = -32015;
 const MAX_HTTP_ADMISSION_ERROR_BODY_BYTES = 8 * 1024;
-const HTTP_ADMISSION_MESSAGES = new Map([
-  ["queue-full", "The HTTP operation queue is full."],
-  [
-    "identity-queue-full",
-    "This client identity already has the maximum number of queued operations.",
-  ],
-  ["timeout", "The operation was not admitted before its queue timeout."],
-  ["cancelled", "The operation was cancelled before admission."],
-] as const);
+const HTTP_ADMISSION_MESSAGE =
+  "The service is temporarily unavailable. Retry later.";
+const HTTP_ADMISSION_REASONS = new Set<HttpAdmissionReason>([
+  "queue-full",
+  "identity-queue-full",
+  "timeout",
+  "cancelled",
+]);
 const HTTP_ADMISSION_REQUEST_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -604,13 +603,10 @@ function parseHttpAdmissionError(
       ]) ||
       body.error.data.applicationCode !== "SERVICE_UNAVAILABLE" ||
       typeof body.error.data.admission !== "string" ||
-      !HTTP_ADMISSION_MESSAGES.has(
+      !HTTP_ADMISSION_REASONS.has(
         body.error.data.admission as HttpAdmissionReason,
       ) ||
-      body.error.message !==
-        HTTP_ADMISSION_MESSAGES.get(
-          body.error.data.admission as HttpAdmissionReason,
-        ) ||
+      body.error.message !== HTTP_ADMISSION_MESSAGE ||
       typeof body.error.data.retryable !== "boolean" ||
       body.error.data.retryable !==
         (body.error.data.admission !== "cancelled") ||
@@ -728,10 +724,10 @@ function backendApplicationError(error: unknown): Error {
     // The server transport adds a JSON-RPC envelope around thrown errors. Keep
     // this local error message catalogued so clients receive it once, then
     // construct their normal SDK McpError from the structured response.
-    return Object.assign(
-      new Error(HTTP_ADMISSION_MESSAGES.get(admission.admission)!),
-      { code: HTTP_ADMISSION_ERROR_CODE, data: admission },
-    );
+    return Object.assign(new Error(HTTP_ADMISSION_MESSAGE), {
+      code: HTTP_ADMISSION_ERROR_CODE,
+      data: admission,
+    });
   }
   const rawCode = safelyReadUntrustedErrorField(error, "code");
   const numericCode =

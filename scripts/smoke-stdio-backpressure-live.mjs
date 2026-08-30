@@ -65,15 +65,8 @@ const ADMISSION_REASONS = new Set([
   "timeout",
   "cancelled",
 ]);
-const ADMISSION_MESSAGES = new Map([
-  ["queue-full", "The HTTP operation queue is full."],
-  [
-    "identity-queue-full",
-    "This client identity already has the maximum number of queued operations.",
-  ],
-  ["timeout", "The operation was not admitted before its queue timeout."],
-  ["cancelled", "The operation was cancelled before admission."],
-]);
+const ADMISSION_MESSAGE =
+  "The service is temporarily unavailable. Retry later.";
 function admissionReason(error) {
   const data = error?.data;
   if (
@@ -89,8 +82,7 @@ function admissionReason(error) {
     data.applicationCode === "SERVICE_UNAVAILABLE" &&
     typeof data.admission === "string" &&
     ADMISSION_REASONS.has(data.admission) &&
-    error.message ===
-      `MCP error -32015: ${ADMISSION_MESSAGES.get(data.admission)}` &&
+    error.message === `MCP error -32015: ${ADMISSION_MESSAGE}` &&
     data.retryable === (data.admission !== "cancelled")
   ) {
     return data.admission;
