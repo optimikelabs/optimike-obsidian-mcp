@@ -163,6 +163,10 @@ const bilingualPairs = [
     "docs/http-concurrency-backpressure.md",
     "docs/http-concurrency-backpressure.fr.md",
   ],
+  [
+    "docs/http-observability-contract.md",
+    "docs/http-observability-contract.fr.md",
+  ],
 ];
 for (const pair of bilingualPairs) {
   for (const file of pair) await access(path.join(root, file));
@@ -301,14 +305,8 @@ assert.match(
   operonContractFr,
   /version produit[\s\S]*n’est pas une allowlist positive de mutation/iu,
 );
-assert.doesNotMatch(
-  operonContract,
-  /stock `3\.5\.3` remains read-only/iu,
-);
-assert.doesNotMatch(
-  operonContractFr,
-  /3\.5\.3` stock[\s\S]*lecture seule/iu,
-);
+assert.doesNotMatch(operonContract, /stock `3\.5\.3` remains read-only/iu);
+assert.doesNotMatch(operonContractFr, /3\.5\.3` stock[\s\S]*lecture seule/iu);
 
 const profilesEn = await text("docs/tool-surface-profiles.md");
 const profilesFr = await text("docs/tool-surface-profiles.fr.md");
@@ -334,6 +332,20 @@ for (const content of [backpressureContract, backpressureContractFr]) {
   assert.match(content, /identity-queue-full/u);
   assert.match(content, /429/u);
   assert.match(content, /Connection closed/u);
+  assert.match(content, /HTTP `504`/u);
+  assert.doesNotMatch(content, /HTTP `408`/u);
+  assert.match(content, /data\.applicationCode: SERVICE_UNAVAILABLE/u);
+}
+for (const content of [
+  await text("SECURITY.md"),
+  await text("SECURITY.fr.md"),
+  await text("docs/http-observability-contract.md"),
+  await text("docs/http-observability-contract.fr.md"),
+]) {
+  assert.match(content, /`error\.code`[\s\S]{0,100}(?:integer|entier)/iu);
+  assert.match(content, /`error\.data\.applicationCode`/u);
+  assert.match(content, /`error\.data\.requestId`/u);
+  assert.match(content, /`X-Request-Id`/u);
 }
 for (const content of [
   await text("OPERATIONS.md"),

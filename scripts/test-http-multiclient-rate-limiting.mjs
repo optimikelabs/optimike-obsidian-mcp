@@ -320,6 +320,10 @@ async function testIdentityIsolation(sandbox) {
       a3.headers.get("x-optimike-rate-limit-scope"),
       "client-identity",
     );
+    const a3Body = await a3.json();
+    assert.equal(a3Body.error.code, -32014);
+    assert.equal(a3Body.error.data.applicationCode, "RATE_LIMITED");
+    assert.equal(JSON.stringify(a3Body).includes("a-3"), false);
 
     // Client B remains isolated even though every request came from 127.0.0.1.
     const b2 = await mcpPost(instance.baseUrl, {
@@ -404,7 +408,11 @@ async function testUntrustedProxyHeaders(sandbox) {
       second.headers.get("x-optimike-rate-limit-scope"),
       "loopback-source-ip",
     );
-    assert.equal((await second.json()).id, null);
+    const secondBody = await second.json();
+    assert.equal(secondBody.id, null);
+    assert.equal(secondBody.error.code, -32014);
+    assert.equal(secondBody.error.data.applicationCode, "RATE_LIMITED");
+    assert.equal(JSON.stringify(secondBody).includes("missing-auth-b"), false);
   } finally {
     await stopBackend(instance);
     await rm(instance.logDir, { recursive: true, force: true });

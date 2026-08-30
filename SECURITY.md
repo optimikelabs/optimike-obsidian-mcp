@@ -78,8 +78,11 @@ The P0 boundary is implemented at the shared MCP error and logger sinks:
   public diagnostic envelope and structured logs so an operator can correlate
   that failure across MCP and server observations.
 - HTTP rejection paths use the same closed JSON-RPC envelope. Its
-  `error.data.requestId`, `X-Request-Id` header and ErrorHandler log entry are
-  one UUID; `SERVICE_UNAVAILABLE` and `TIMEOUT` map to `503` and `504`.
+  `error.code` is an integer JSON-RPC protocol code, while the closed
+  application category is retained in `error.data.applicationCode`.
+  `error.data.requestId`, the `X-Request-Id` header and the ErrorHandler log
+  entry are one UUID; `SERVICE_UNAVAILABLE` and `TIMEOUT` map to `503` and
+  `504`.
 - Caller input and backend responses are never logged in cleartext. Bodies,
   vault content, paths, headers, tokens, exception names/messages and arbitrary
   context fields are omitted or reduced to structural metadata. Caller-derived

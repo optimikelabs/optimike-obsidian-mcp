@@ -115,14 +115,16 @@ Every HTTP rejection, including pre-auth rate limits, authentication, origin
 denial, session capacity, admission backpressure, invalid profile routing and
 the Hono fallback, uses one JSON-RPC envelope. `error.data.requestId` is the
 same UUID as `X-Request-Id` and as the structured ErrorHandler entry. The
-envelope contains only a closed error code, catalog message and server-owned
-diagnostic fields; it never reflects a request body, a profile path, a token or
-an exception message.
+protocol field `error.code` is always an integer JSON-RPC code. The closed
+application category remains available only as
+`error.data.applicationCode`. The envelope otherwise contains only a catalog
+message and allowlisted server-owned diagnostics; it never reflects a request
+body, a profile path, a token or an exception message.
 
 The stable transport mappings are `503` for `SERVICE_UNAVAILABLE` and `504`
-for `TIMEOUT`. JSON-RPC identifiers are reflected only when they are `null`, a
-string or a finite number (including `0`); objects and arrays are replaced by
-`null`.
+for `TIMEOUT`. A JSON-RPC identifier is reflected only from a valid `2.0`
+request envelope and only when it is `null`, a string or a finite number
+(including `0`); invalid envelopes, objects and arrays produce `null`.
 
 Caller-controlled JSON-RPC methods and tool names are logged only when they match a strict 128-character identifier grammar. Other values are replaced by the controlled HTTP route label, preventing control characters, document content and oversized values from entering the operation field.
 

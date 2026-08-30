@@ -79,9 +79,11 @@ partagés :
   de diagnostic publique et les logs structurés afin de corréler cette erreur
   entre MCP et le serveur.
 - Les rejets HTTP utilisent la même enveloppe JSON-RPC fermée. Son
+  `error.code` est un entier du protocole JSON-RPC, tandis que la catégorie
+  applicative fermée reste dans `error.data.applicationCode`.
   `error.data.requestId`, le header `X-Request-Id` et l’entrée ErrorHandler
-  sont un seul UUID ; `SERVICE_UNAVAILABLE` et `TIMEOUT` sont mappés vers
-  `503` et `504`.
+  portent un seul et même UUID ; `SERVICE_UNAVAILABLE` et `TIMEOUT` sont
+  mappés vers `503` et `504`.
 - Les entrées du caller et les réponses backend ne sont jamais journalisées en
   clair. Corps, contenu du coffre, chemins, headers, tokens, noms/messages
   d’exception et champs de contexte arbitraires sont omis ou réduits à des

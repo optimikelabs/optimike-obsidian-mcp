@@ -428,7 +428,8 @@ try {
     },
   });
   assert.equal(mismatchPost.response.status, 404, mismatchPost.text);
-  assert.equal(mismatchPost.payload?.error?.code, "NOT_FOUND");
+  assert.equal(mismatchPost.payload?.error?.code, -32012);
+  assert.equal(mismatchPost.payload?.error?.data?.applicationCode, "NOT_FOUND");
   assert.equal(
     mismatchPost.payload?.error?.data?.requestId,
     mismatchPost.response.headers.get("x-request-id"),
@@ -443,7 +444,11 @@ try {
     method: "DELETE",
   });
   assert.equal(mismatchDelete.response.status, 404, mismatchDelete.text);
-  assert.equal(mismatchDelete.payload?.error?.code, "NOT_FOUND");
+  assert.equal(mismatchDelete.payload?.error?.code, -32012);
+  assert.equal(
+    mismatchDelete.payload?.error?.data?.applicationCode,
+    "NOT_FOUND",
+  );
   assert.equal(
     mismatchDelete.payload?.error?.data?.requestId,
     mismatchDelete.response.headers.get("x-request-id"),
@@ -472,7 +477,8 @@ try {
   });
   assert.equal(unknown.status, 404);
   const unknownPayload = await unknown.json();
-  assert.equal(unknownPayload.error?.code, "NOT_FOUND");
+  assert.equal(unknownPayload.error?.code, -32012);
+  assert.equal(unknownPayload.error?.data?.applicationCode, "NOT_FOUND");
   assert.equal(
     unknownPayload.error?.data?.requestId,
     unknown.headers.get("x-request-id"),

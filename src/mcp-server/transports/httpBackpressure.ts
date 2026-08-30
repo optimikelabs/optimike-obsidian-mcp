@@ -6,7 +6,7 @@ import {
   getHttpRequestState,
   type HttpOperationClass,
 } from "./httpRequestState.js";
-import { jsonRpcErrorResponse } from "./httpJsonRpcError.js";
+import { jsonRpcErrorResponse, jsonRpcIdFromBody } from "./httpJsonRpcError.js";
 
 const DEFAULT_EXPENSIVE_TOOLS = [
   "smart_semantic_search",
@@ -744,10 +744,7 @@ async function readBoundedJsonBody(
 }
 
 function classifyEnvelope(envelope: JsonRpcEnvelope): HttpOperationDescriptor {
-  const rpcId =
-    typeof envelope.id === "string" || typeof envelope.id === "number"
-      ? envelope.id
-      : null;
+  const rpcId = jsonRpcIdFromBody(envelope);
   const method =
     typeof envelope.method === "string" ? envelope.method : "invalid-jsonrpc";
   if (method !== "tools/call") {
@@ -864,6 +861,7 @@ function batchUnsupportedResponse(
     {
       operation: "httpJsonRpcBatchRejected",
       status: 400,
+      protocolCode: -32600,
       details: { batchSupported: false, maxEnvelopesPerRequest: 1 },
     },
   );

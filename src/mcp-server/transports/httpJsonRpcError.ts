@@ -66,10 +66,81 @@ export function httpStatusForErrorCode(code: BaseErrorCode): number {
   }
 }
 
+/**
+ * JSON-RPC 2.0 requires an integer error code. Keep application categories in
+ * `error.data.applicationCode`; never overload the protocol field with the
+ * string-valued BaseErrorCode contract.
+ */
+export function jsonRpcCodeForErrorCode(code: BaseErrorCode): number {
+  switch (code) {
+    case BaseErrorCode.TIMEOUT:
+      return -32001;
+    case BaseErrorCode.UNAUTHORIZED:
+      return -32010;
+    case BaseErrorCode.FORBIDDEN:
+      return -32011;
+    case BaseErrorCode.NOT_FOUND:
+      return -32012;
+    case BaseErrorCode.CONFLICT:
+      return -32013;
+    case BaseErrorCode.RATE_LIMITED:
+      return -32014;
+    case BaseErrorCode.SERVICE_UNAVAILABLE:
+      return -32015;
+    case BaseErrorCode.VALIDATION_ERROR:
+    case BaseErrorCode.PARSING_ERROR:
+      return -32602;
+    case BaseErrorCode.INTERNAL_ERROR:
+    case BaseErrorCode.UNKNOWN_ERROR:
+    case BaseErrorCode.CONFIGURATION_ERROR:
+      return -32603;
+  }
+}
+
+function normalizedPublicDetails(value: unknown) {
+  if (!value || typeof value !== "object") return {};
+  try {
+    if (Array.isArray(value)) return {};
+  } catch {
+    return {};
+  }
+
+  const details: Record<string, string | number | boolean> = {};
+  for (const field of ["retryable", "batchSupported"] as const) {
+    const candidate = ownDataProperty(value, field);
+    if (typeof candidate === "boolean") details[field] = candidate;
+  }
+  for (const field of [
+    "maxBytes",
+    "readTimeoutMs",
+    "maxEnvelopesPerRequest",
+  ] as const) {
+    const candidate = ownDataProperty(value, field);
+    if (
+      typeof candidate === "number" &&
+      Number.isSafeInteger(candidate) &&
+      candidate >= 0
+    ) {
+      details[field] = candidate;
+    }
+  }
+  const admission = ownDataProperty(value, "admission");
+  if (
+    admission === "queue-full" ||
+    admission === "identity-queue-full" ||
+    admission === "timeout" ||
+    admission === "cancelled"
+  ) {
+    details.admission = admission;
+  }
+  return details;
+}
+
 type PublicHttpErrorOptions = {
   operation: string;
   id?: JsonRpcId;
   status?: number;
+  protocolCode?: -32700 | -32600;
   details?: Record<string, string | number | boolean>;
 };
 
@@ -93,17 +164,20 @@ function publicErrorBody(
     Object.values(BaseErrorCode).includes(formatted.code as BaseErrorCode)
       ? (formatted.code as BaseErrorCode)
       : BaseErrorCode.INTERNAL_ERROR;
-  const details =
-    formatted.details && typeof formatted.details === "object"
-      ? (formatted.details as Record<string, string | number | boolean>)
-      : {};
+  // Error details can originate below this boundary and are therefore not a
+  // public source. Only explicitly supplied, server-owned transport metadata
+  // passes through a closed field/value normalizer.
+  const details = normalizedPublicDetails(options.details);
 
   return {
     status: options.status ?? httpStatusForErrorCode(code),
     body: {
       jsonrpc: "2.0" as const,
       error: {
-        code,
+        code:
+          options.protocolCode === -32700 || options.protocolCode === -32600
+            ? options.protocolCode
+            : jsonRpcCodeForErrorCode(code),
         message:
           typeof formatted.message === "string"
             ? formatted.message
@@ -113,7 +187,7 @@ function publicErrorBody(
         // the request-state UUID used for the ErrorHandler log entry.
         data: {
           ...details,
-          ...options.details,
+          applicationCode: code,
           requestId: state.requestId,
         },
       },

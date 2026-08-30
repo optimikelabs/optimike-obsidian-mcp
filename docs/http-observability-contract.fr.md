@@ -120,15 +120,18 @@ Chaque rejet HTTP, y compris la limite pré-authentification, l’authentificati
 le refus d’origin, la capacité de session, le backpressure d’admission, le
 routage de profil invalide et le fallback Hono, utilise une même enveloppe
 JSON-RPC. `error.data.requestId` est le même UUID que `X-Request-Id` et que
-l’entrée structurée d’ErrorHandler. L’enveloppe ne contient qu’un code fermé,
-un message de catalogue et des diagnostics produits par le serveur ; elle ne
+l’entrée structurée d’ErrorHandler. Le champ protocolaire `error.code` est
+toujours un entier JSON-RPC. La catégorie applicative fermée reste disponible
+uniquement dans `error.data.applicationCode`. L’enveloppe ne contient sinon
+qu’un message de catalogue et des diagnostics serveur autorisés ; elle ne
 reflète jamais un corps de requête, un chemin de profil, un token ou un message
 d’exception.
 
 Les mappages stables du transport sont `503` pour `SERVICE_UNAVAILABLE` et
-`504` pour `TIMEOUT`. Un identifiant JSON-RPC n’est reflété que s’il vaut
-`null`, une chaîne ou un nombre fini (y compris `0`) ; les objets et tableaux
-sont remplacés par `null`.
+`504` pour `TIMEOUT`. Un identifiant JSON-RPC n’est reflété que depuis une
+enveloppe de requête `2.0` valide et uniquement s’il vaut `null`, une chaîne ou
+un nombre fini (y compris `0`) ; une enveloppe invalide, un objet ou un tableau
+produit `null`.
 
 Les méthodes JSON-RPC et noms d’outils contrôlés par l’appelant ne sont journalisés que s’ils respectent une grammaire stricte d’identifiant de 128 caractères. Les autres valeurs sont remplacées par le libellé HTTP contrôlé, ce qui empêche caractères de contrôle, contenu documentaire et valeurs démesurées d’entrer dans le champ d’opération.
 

@@ -230,6 +230,12 @@ try {
       unauthenticated.headers.get("x-request-id");
     const unauthenticatedBody = await unauthenticated.json();
     assert.equal(unauthenticatedBody.jsonrpc, "2.0");
+    assert.equal(typeof unauthenticatedBody.error.code, "number");
+    assert.equal(unauthenticatedBody.error.code, -32010);
+    assert.equal(
+      unauthenticatedBody.error.data.applicationCode,
+      "UNAUTHORIZED",
+    );
     assert.equal(
       unauthenticatedBody.error.data.requestId,
       unauthenticatedRequestId,
@@ -298,6 +304,8 @@ try {
     );
     const mappedErrorBody = await mappedError.json();
     assert.equal(mappedErrorBody.id, 8);
+    assert.equal(mappedErrorBody.error.code, -32012);
+    assert.equal(mappedErrorBody.error.data.applicationCode, "NOT_FOUND");
     assert.equal(mappedErrorBody.error.data.requestId, mappedErrorRequestId);
 
     const zeroIdError = await fetch(new URL("/mcp", headless.baseUrl), {
@@ -334,6 +342,24 @@ try {
       "an id from a malformed JSON-RPC envelope must not be reflected",
     );
 
+    const malformedJsonSecret = "MALFORMED-JSON-MUST-STAY-PRIVATE";
+    const malformedJsonError = await fetch(new URL("/mcp", headless.baseUrl), {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: `{"jsonrpc":"2.0","method":"${malformedJsonSecret}`,
+    });
+    assert.equal(malformedJsonError.status, 400);
+    const malformedJsonBody = await malformedJsonError.json();
+    assert.equal(malformedJsonBody.error.code, -32700);
+    assert.equal(
+      JSON.stringify(malformedJsonBody).includes(malformedJsonSecret),
+      false,
+    );
+
     const rejectedOrigin = await fetch(new URL("/healthz", headless.baseUrl), {
       headers: {
         Origin: "https://blocked-origin.example",
@@ -343,6 +369,8 @@ try {
     assert.equal(rejectedOrigin.status, 403);
     const rejectedOriginBody = await rejectedOrigin.json();
     assert.equal(rejectedOriginBody.jsonrpc, "2.0");
+    assert.equal(rejectedOriginBody.error.code, -32011);
+    assert.equal(rejectedOriginBody.error.data.applicationCode, "FORBIDDEN");
     assert.equal(
       rejectedOriginBody.error.data.requestId,
       rejectedOrigin.headers.get("x-request-id"),
@@ -354,6 +382,8 @@ try {
     assert.equal(invalidProfile.status, 404);
     const invalidProfileBody = await invalidProfile.json();
     assert.equal(invalidProfileBody.jsonrpc, "2.0");
+    assert.equal(invalidProfileBody.error.code, -32012);
+    assert.equal(invalidProfileBody.error.data.applicationCode, "NOT_FOUND");
     assert.equal(
       invalidProfileBody.error.data.requestId,
       invalidProfile.headers.get("x-request-id"),

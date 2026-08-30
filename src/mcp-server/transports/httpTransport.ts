@@ -790,7 +790,23 @@ export async function startHttpTransport(
       clientIdentity: identity.pseudonym,
       toolProfile,
     });
-    const body = await c.req.raw.clone().json();
+    let body: unknown;
+    try {
+      body = await c.req.raw.clone().json();
+    } catch {
+      return jsonRpcErrorResponse(
+        c,
+        new McpError(
+          BaseErrorCode.PARSING_ERROR,
+          "The JSON-RPC request body is not valid JSON.",
+        ),
+        {
+          operation: "httpJsonRpcParse",
+          status: 400,
+          protocolCode: -32700,
+        },
+      );
+    }
     state.rpcId = jsonRpcIdFromBody(body);
     const sessionId = c.req.header("mcp-session-id");
     const session = sessionForRequest(c, sessionId);
