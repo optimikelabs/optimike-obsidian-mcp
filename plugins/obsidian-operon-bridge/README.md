@@ -37,7 +37,7 @@ Project Serial transition edge. Uncertain outcomes
 remain fail-closed; the Bridge never retries blindly or falls back to
 Markdown/private APIs.
 
-Bridge `0.8.3` supports the separate task-workflow Developer API sessions
+Bridge `0.9.0` supports the separate task-workflow Developer API sessions
 introduced by Operon `3.5.3` and retained by the current `3.6.0` target.
 Adoption, daily/weekly periodic-note
 creation, and periodic-note-aware updates each negotiate their own exact grant
@@ -73,6 +73,12 @@ is a nonblocking follow-up, and no full periodic certification is claimed. The
 release still requires the applicable gate on the clean final SHA. Operon
 therefore remains `compatible-provisional`, admitted by the same contract-first
 checks rather than by a positive product-version allowlist.
+
+Bridge `0.9.0` permanently supervises its Local REST extension registration.
+It mounts after late Local REST startup, detects a disabled/reloaded provider,
+unregisters the previous generation and remounts without requiring an MCP
+restart. The additive `lifecycle` status is route readiness only: Operon index,
+grant and mutation gates remain independent and fail closed.
 
 Compatibility is reported explicitly:
 

@@ -38,6 +38,11 @@ Version 0.4.0 adds the separate Canvas read/CAS capability and write gate. It
 does not make the legacy filesystem Canvas helper durable or governed; the MCP
 must still compile a bounded graph intent and seal it before calling CAS.
 
+Version 0.5.0 permanently supervises Local REST registration. Late startup or
+a Local REST reload remounts exactly one route generation without restarting
+the MCP. The status `lifecycle` field reports registration only and never
+changes the independent Note/Frontmatter or Canvas write gates.
+
 The protection contract reports each configured active creation, modification
 and last-viewed property. Optimike MCP automatically adds those names to its
 structural frontmatter protection; `MCP_PROTECTED_FRONTMATTER_KEYS` remains an

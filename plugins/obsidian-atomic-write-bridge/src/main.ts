@@ -15,6 +15,10 @@ import {
   sha256,
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
+import {
+  RestExtensionLifecycle,
+  RestExtensionPartialMountError,
+} from "../../shared/restExtensionLifecycle.js";
 
 type PluginData = {
   instanceId: string;
@@ -205,6 +209,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   private instanceId = "";
   private bindingFingerprint = "";
   private readonly missingResources = new WeakMap<object, AtomicResource>();
+  private restLifecycle: RestExtensionLifecycle<object> | null = null;
   allowWrites = false;
   allowCanvasWrites = false;
 
@@ -287,20 +292,21 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     await new Promise<void>((resolve) =>
       this.app.workspace.onLayoutReady(() => resolve()),
     );
-    let mounted = false;
-    const tryMount = () => {
-      if (mounted) return;
-      const restPlugin: any =
+    this.restLifecycle = new RestExtensionLifecycle({
+      probe: () =>
         (this.app as any).plugins?.plugins?.["obsidian-local-rest-api"] ??
-        (this.app as any).plugins?.getPlugin?.("obsidian-local-rest-api");
+        (this.app as any).plugins?.getPlugin?.("obsidian-local-rest-api") ??
+        null,
+      mount: (restPlugin: any) => {
       const getPublicApi =
         typeof restPlugin?.getPublicApi === "function"
           ? restPlugin.getPublicApi.bind(restPlugin)
           : undefined;
-      if (!getPublicApi) return;
+      if (!getPublicApi) return null;
       const api = getPublicApi(this.manifest);
-      if (!api || typeof api.addRoute !== "function") return;
+      if (!api || typeof api.addRoute !== "function") return null;
 
+      try {
       api
         .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/status`)
         .get((_req: any, res: any) => {
@@ -312,6 +318,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               id: this.manifest.id,
               version: this.manifest.version,
             },
+            lifecycle: this.restLifecycle?.snapshot() ?? null,
             backend: {
               kind: "obsidian-vault-process",
               bindingFingerprint: this.bindingFingerprint,
@@ -575,32 +582,27 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
           }
         });
 
-      this.register(() => {
+      return () => api.unregister?.();
+      } catch {
+        const rollback = () => api.unregister?.();
         try {
-          api.unregister?.();
+          rollback();
         } catch {
-          // Local REST API owns the route registry lifecycle.
+          throw new RestExtensionPartialMountError(rollback);
         }
-      });
-      mounted = true;
-    };
-
-    tryMount();
-    if (!mounted) {
-      const interval = window.setInterval(tryMount, 500);
-      const timeout = window.setTimeout(() => {
-        window.clearInterval(interval);
-        if (!mounted) {
-          console.warn(
-            "[atomic-write-bridge] Local REST API extension API unavailable.",
-          );
-        }
-      }, 30_000);
-      this.register(() => {
-        window.clearInterval(interval);
-        window.clearTimeout(timeout);
-      });
-    }
+        throw new Error("Local REST API route registration failed.");
+      }
+      },
+      onCleanupError: () =>
+        console.warn(
+          "[atomic-write-bridge] Local REST API extension cleanup failed.",
+        ),
+    });
+    this.register(() => {
+      this.restLifecycle?.stop();
+      this.restLifecycle = null;
+    });
+    this.restLifecycle.start();
   }
 }
 

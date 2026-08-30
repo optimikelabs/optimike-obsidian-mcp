@@ -25,6 +25,10 @@ import {
   parseBaseReadRequest,
   sha256,
 } from "./atomic-contract.mjs";
+import {
+  RestExtensionLifecycle,
+  RestExtensionPartialMountError,
+} from "../../shared/restExtensionLifecycle.js";
 
 /** -------- Engine V2 (flag + cache) -------- */
 type EngineRow = Record<string, any>;
@@ -777,7 +781,21 @@ function splitTopLevelCommas(input: string): string[] {
 export default class BasesBridgePlugin extends Plugin {
   settings: BridgeSettings = { ...DEFAULT_SETTINGS };
   private headlessMounted = false;
+  private headlessRegistrationCollector:
+    | ((cleanup: () => void) => void)
+    | null = null;
   private bindingFingerprint = "";
+  private restLifecycle: RestExtensionLifecycle<object> | null = null;
+  private headlessLifecycle: RestExtensionLifecycle<object> | null = null;
+
+  register(cleanup: () => void): void {
+    const collector = this.headlessRegistrationCollector;
+    if (collector) {
+      collector(cleanup);
+      return;
+    }
+    super.register(cleanup);
+  }
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -807,6 +825,8 @@ export default class BasesBridgePlugin extends Plugin {
       console.log("[bases-bridge] Engine setting updated.");
       if (this.settings.engineEnabled) {
         this.maybeRegisterHeadlessView();
+      } else {
+        this.stopHeadlessLifecycle();
       }
     };
     (this as any).getEngineState = () => ({
@@ -875,6 +895,9 @@ export default class BasesBridgePlugin extends Plugin {
   }
 
   onunload(): void {
+    this.stopHeadlessLifecycle();
+    this.restLifecycle?.stop();
+    this.restLifecycle = null;
     console.log("[bases-bridge] unloaded");
   }
 
@@ -891,66 +914,120 @@ export default class BasesBridgePlugin extends Plugin {
   }
 
   private maybeRegisterHeadlessView(): void {
-    if (this.headlessMounted) return;
-    this.headlessMounted = true;
-    this.registerHeadlessView().catch(() => {
-      console.error("[bases-bridge] Headless view registration failed.");
-      this.headlessMounted = false;
+    if (this.headlessLifecycle) {
+      this.headlessLifecycle.start();
+      return;
+    }
+    this.headlessLifecycle = new RestExtensionLifecycle({
+      probe: () => {
+        const selfRegister: any = (this as any).registerBasesView;
+        const coreBases = (this.app as any).internalPlugins
+          ?.getEnabledPluginById?.("bases");
+        if (
+          typeof selfRegister === "function" &&
+          coreBases &&
+          typeof coreBases === "object"
+        ) {
+          // Plugin.registerBasesView() resolves this exact enabled core
+          // provider internally. Its object/registry survives a fast OFF/ON;
+          // a genuine provider replacement changes the lifecycle fence.
+          return coreBases;
+        }
+        const basesPlugin =
+          (this.app as any).plugins?.plugins?.bases ??
+          (this.app as any).plugins?.plugins?.["obsidian-bases"] ??
+          (this.app as any).plugins?.getPlugin?.("bases") ??
+          (this.app as any).plugins?.getPlugin?.("obsidian-bases");
+        const basesApi: any =
+          basesPlugin?.api ??
+          (this.app as any).bases ??
+          (this.app as any).plugins?.api?.bases;
+        return typeof basesApi?.registerBasesView === "function"
+          ? basesApi
+          : null;
+      },
+      mount: (provider: any) => {
+        const selfRegister: any = (this as any).registerBasesView;
+        const activeCoreBases = (this.app as any).internalPlugins
+          ?.getEnabledPluginById?.("bases");
+        let cleanup: (() => void) | null = null;
+        if (
+          typeof selfRegister === "function" &&
+          provider === activeCoreBases
+        ) {
+          cleanup = this.registerHeadlessThroughPublicApi(selfRegister);
+        } else {
+          const registration = provider.registerBasesView(
+            this,
+            VIEW_TYPE,
+            this.makeHeadlessSpec(),
+          );
+          if (registration === false) return null;
+          cleanup = cleanupOf(registration);
+        }
+        if (!cleanup) return null;
+        this.headlessMounted = true;
+        console.log("[bases-bridge] Headless view mounted.");
+        return () => {
+          cleanup();
+          this.headlessMounted = false;
+        };
+      },
+      onCleanupError: () =>
+        console.warn("[bases-bridge] Headless view cleanup failed."),
     });
+    this.register(() => {
+      this.stopHeadlessLifecycle();
+    });
+    this.headlessLifecycle.start();
   }
 
-  private async registerHeadlessView(): Promise<void> {
-    let mounted = false;
-    const tryMount = async () => {
-      if (mounted) return;
-      const selfRegister: any = (this as any).registerBasesView;
-      if (typeof selfRegister === "function") {
-        const disp = selfRegister.call(
-          this,
-          VIEW_TYPE,
-          this.makeHeadlessSpec(),
-        );
-        this.register(cleanupOf(disp));
-        console.log("[bases-bridge] Headless view registered via self API");
-        mounted = true;
-        return;
+  private registerHeadlessThroughPublicApi(
+    registerBasesView: (viewType: string, spec: unknown) => boolean,
+  ): (() => void) | null {
+    let capturedCleanup: (() => void) | null = null;
+    this.headlessRegistrationCollector = (cleanup) => {
+      if (capturedCleanup) {
+        throw new Error("Bases view registration returned multiple cleanups.");
       }
-      const basesPlugin =
-        (this.app as any).plugins?.plugins?.bases ??
-        (this.app as any).plugins?.plugins?.["obsidian-bases"] ??
-        (this.app as any).plugins?.getPlugin?.("bases") ??
-        (this.app as any).plugins?.getPlugin?.("obsidian-bases");
-      const basesApi: any =
-        basesPlugin?.api ??
-        (this.app as any).bases ??
-        (this.app as any).plugins?.api?.bases;
-      const externalRegister: any = basesApi?.registerBasesView;
-      if (typeof externalRegister === "function") {
-        const disp = externalRegister.call(
-          basesApi,
-          this,
-          VIEW_TYPE,
-          this.makeHeadlessSpec(),
-        );
-        this.register(cleanupOf(disp));
-        console.log("[bases-bridge] Headless view registered via Bases API");
-        mounted = true;
-      }
+      capturedCleanup = cleanup;
     };
-    await tryMount();
-    if (!mounted) {
-      const interval = window.setInterval(tryMount, 500);
-      const timeout = window.setTimeout(() => {
-        if (!mounted)
-          console.warn(
-            "[bases-bridge] Bases API still unavailable; headless view not mounted",
-          );
-        window.clearInterval(interval);
-      }, 30000);
-      this.register(() => {
-        window.clearInterval(interval);
-        window.clearTimeout(timeout);
-      });
+    try {
+      const accepted = registerBasesView.call(
+        this,
+        VIEW_TYPE,
+        this.makeHeadlessSpec(),
+      );
+      if (!accepted) {
+        if (capturedCleanup) {
+          throw new RestExtensionPartialMountError(capturedCleanup);
+        }
+        return null;
+      }
+      if (!capturedCleanup) {
+        throw new Error("Bases view registration did not expose cleanup.");
+      }
+      return capturedCleanup;
+    } catch (error) {
+      if (capturedCleanup) {
+        throw new RestExtensionPartialMountError(capturedCleanup);
+      }
+      throw error;
+    } finally {
+      this.headlessRegistrationCollector = null;
+    }
+  }
+
+  private stopHeadlessLifecycle(): void {
+    const lifecycle = this.headlessLifecycle;
+    if (!lifecycle) {
+      this.headlessMounted = false;
+      return;
+    }
+    lifecycle.stop();
+    if (lifecycle.snapshot().state !== "degraded") {
+      this.headlessLifecycle = null;
+      this.headlessMounted = false;
     }
   }
 
@@ -1611,13 +1688,12 @@ export default class BasesBridgePlugin extends Plugin {
     await new Promise<void>((resolve) =>
       this.app.workspace.onLayoutReady(() => resolve()),
     );
-    let mounted = false;
-    const tryMount = () => {
-      if (mounted) return;
-      const restPlugin: any =
+    this.restLifecycle = new RestExtensionLifecycle({
+      probe: () =>
         (this.app as any).plugins?.plugins?.["obsidian-local-rest-api"] ??
-        (this.app as any).plugins?.getPlugin?.("obsidian-local-rest-api");
-
+        (this.app as any).plugins?.getPlugin?.("obsidian-local-rest-api") ??
+        null,
+      mount: (restPlugin: any) => {
       const getPublicApi =
         typeof restPlugin?.getPublicApi === "function"
           ? restPlugin.getPublicApi.bind(restPlugin)
@@ -1625,8 +1701,9 @@ export default class BasesBridgePlugin extends Plugin {
 
       if (typeof getPublicApi === "function") {
         const api = getPublicApi(this.manifest);
-        if (!api || typeof api.addRoute !== "function") return;
+        if (!api || typeof api.addRoute !== "function") return null;
 
+        try {
         console.log(
           `[bases-bridge] Registered API extension via Local REST API (prefix=${REST_PREFIX})`,
         );
@@ -1636,6 +1713,8 @@ export default class BasesBridgePlugin extends Plugin {
             ok: true,
             id: this.manifest.id,
             version: this.manifest.version,
+            lifecycle: this.restLifecycle?.snapshot() ?? null,
+            headlessLifecycle: this.headlessLifecycle?.snapshot() ?? null,
             engineEnabled: this.settings.engineEnabled,
             engineReady: this.settings.engineEnabled && ENGINE_CACHE.size > 0,
             cacheSize: ENGINE_CACHE.size,
@@ -1649,6 +1728,7 @@ export default class BasesBridgePlugin extends Plugin {
               ok: true,
               contractVersion: BASE_ATOMIC_CONTRACT_VERSION,
               plugin: { id: this.manifest.id, version: this.manifest.version },
+              lifecycle: this.restLifecycle?.snapshot() ?? null,
               backend: {
                 kind: "obsidian-vault-process-base",
                 bindingFingerprint: this.bindingFingerprint,
@@ -2358,34 +2438,27 @@ export default class BasesBridgePlugin extends Plugin {
           .addRoute(`/bases/:id(*)/upsert`)
           .post(withPublicLegacyBaseBoundary(upsertBase));
 
-        this.register(() => {
+        return () => api.unregister?.();
+        } catch {
+          const rollback = () => api.unregister?.();
           try {
-            api.unregister?.();
-          } catch {}
-        });
-
-        mounted = true;
-      }
-    };
-    tryMount();
-    if (!mounted) {
-      const interval = window.setInterval(tryMount, 500);
-      const timeout = window.setTimeout(() => {
-        if (!mounted) {
-          console.warn(
-            "[bases-bridge] Local REST API extension API not available; skipping extension mount",
-          );
-          console.warn(
-            "[bases-bridge] Conseil: vérifiez que 'obsidian-local-rest-api' est actif (v3.x) et relancez Obsidian.",
-          );
+            rollback();
+          } catch {
+            throw new RestExtensionPartialMountError(rollback);
+          }
+          throw new Error("Local REST API route registration failed.");
         }
-        window.clearInterval(interval);
-      }, 30000);
-      this.register(() => {
-        window.clearInterval(interval);
-        window.clearTimeout(timeout);
-      });
-    }
+      }
+      return null;
+      },
+      onCleanupError: () =>
+        console.warn("[bases-bridge] Local REST API extension cleanup failed."),
+    });
+    this.register(() => {
+      this.restLifecycle?.stop();
+      this.restLifecycle = null;
+    });
+    this.restLifecycle.start();
   }
 }
 

@@ -267,9 +267,19 @@ export function resolveOperonPriorityStableId(
   return unique.length === 1 ? (unique[0] ?? null) : null;
 }
 
+export const BridgeLifecycleStatusSchema = z.object({
+  state: z.enum(["unavailable", "probing", "mounting", "ready", "degraded"]),
+  running: z.boolean(),
+  mountGeneration: z.number().int().nonnegative(),
+  unloadGeneration: z.number().int().nonnegative(),
+  consecutiveFailures: z.number().int().nonnegative(),
+  nextProbeDelayMs: z.number().int().nonnegative().nullable(),
+});
+
 export const OperonStatusSchema = z.object({
   ok: z.boolean(),
   contractVersion: z.literal(OPERON_CONTRACT_VERSION),
+  lifecycle: BridgeLifecycleStatusSchema.optional(),
   bridge: z.object({
     id: z.string(),
     version: z.string(),

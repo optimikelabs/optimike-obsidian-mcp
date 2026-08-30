@@ -28,6 +28,7 @@ question.
 | Quels outils existent ?                                                       | [Surface des outils](obsidian_mcp_tools_spec.md)                                        |
 | Quels outils sont disponibles dans chaque runtime ?                           | [Matrice des capacités](runtime-capability-matrix.fr.md)                                |
 | Comment lancer et maintenir le service ?                                      | [Exploitation](../OPERATIONS.fr.md)                                                     |
+| Comment les Bridges récupèrent-ils après un démarrage ou reload Local REST ?  | [Récupération du lifecycle](bridge-lifecycle.fr.md)                                     |
 | Quel outil un agent doit-il choisir dans son profil ?                         | [Guide de routage](mcp-routing-guide.fr.md)                                             |
 | Comment fonctionner sans Obsidian Desktop ?                                   | [Profil serveur headless](headless-server-profile.fr.md)                                |
 | Comment fonctionnent lecture, handoff, move et réparation de liens externes ? | [Configuration des racines](external-roots-setup.fr.md)                                 |

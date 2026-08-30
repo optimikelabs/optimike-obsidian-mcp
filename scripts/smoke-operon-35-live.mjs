@@ -1792,7 +1792,11 @@ async function waitForFileStable(absolutePath, predicate, label) {
 }
 
 async function runCli(command, args) {
-  const child = spawn(command, args, {
+  const normalizedArgs =
+    args.length >= 2 && String(args[0]).startsWith("vault=")
+      ? [args[1], args[0], ...args.slice(2)]
+      : args;
+  const child = spawn(command, normalizedArgs, {
     cwd: process.cwd(),
     env: process.env,
     shell: false,

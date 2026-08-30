@@ -28,6 +28,7 @@ French operator guides are linked alongside their English equivalents.
 | Which tools exist?                                               | [Tool Surface](obsidian_mcp_tools_spec.md)                                            |
 | Which tools are available in each runtime?                       | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
 | How do I run and maintain the service?                           | [Operations](../OPERATIONS.md)                                                        |
+| How do Bridges recover after Local REST starts or reloads?       | [Bridge Lifecycle Recovery](bridge-lifecycle.md)                                     |
 | Which tool should an agent choose inside its profile?            | [MCP Routing Guide](mcp-routing-guide.md)                                             |
 | How do I run without Obsidian Desktop?                           | [Headless Server Profile](headless-server-profile.md)                                 |
 | How do external reads, handoff, move and link repair work?       | [External Roots Setup](external-roots-setup.md)                                       |

@@ -454,6 +454,14 @@ const task = OperonTaskSchema.parse({
 const status = OperonStatusSchema.parse({
   ok: true,
   contractVersion: OPERON_CONTRACT_VERSION,
+  lifecycle: {
+    state: "ready",
+    running: true,
+    mountGeneration: 2,
+    unloadGeneration: 1,
+    consecutiveFailures: 0,
+    nextProbeDelayMs: 1000,
+  },
   bridge: { id: "optimike-operon-bridge", version: "0.1.0", mode: "read-only" },
   operon: {
     present: true,
@@ -500,6 +508,14 @@ const status = OperonStatusSchema.parse({
   limitations: ["read-only"],
 });
 assert.equal(status.index.generation, 42);
+assert.equal(status.lifecycle?.state, "ready");
+assert.equal(status.lifecycle?.mountGeneration, 2);
+const { lifecycle: _legacyLifecycle, ...statusWithoutLifecycle } = status;
+assert.equal(
+  OperonStatusSchema.parse(statusWithoutLifecycle).lifecycle,
+  undefined,
+  "older compatible Bridges may omit lifecycle projection during upgrade",
+);
 const {
   compatibilityState: _legacyCompatibilityState,
   compatibilityAdmission: _legacyCompatibilityAdmission,

@@ -45,12 +45,14 @@ import {
   type DeveloperApiTaskWorkflowKind,
   type TaskWorkflowIdentityStore,
 } from "./developer-api-adapter";
+import {
+  RestExtensionLifecycle,
+  RestExtensionPartialMountError,
+} from "../../shared/restExtensionLifecycle";
 
 const EXTENSION_ID = "optimike-operon-bridge";
 const REST_PREFIX = `/extensions/${EXTENSION_ID}/v1`;
 const LOCAL_REST_PLUGIN_ID = "obsidian-local-rest-api";
-const MAX_MOUNT_WAIT_MS = 30_000;
-const MOUNT_RETRY_MS = 500;
 const MUTATION_JOURNAL_VERSION = 2;
 const MUTATION_JOURNAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MUTATION_JOURNAL_LIMIT = 500;
@@ -587,6 +589,14 @@ function safeRecord(value: unknown): Record<string, unknown> | null {
   }
 }
 
+function sendStatusJson(res: any, status: number, payload: unknown): void {
+  const target = responseStatus(res, status);
+  if (typeof target?.json !== "function") {
+    throw new Error("Local REST API response does not expose json().");
+  }
+  target.json(payload);
+}
+
 /** Generic mutation bodies are JSON records, never class instances. The
  * immutable clone in `genericMutationSnapshot` has already
  * rejected getters, cycles and uninspectable proxies; this keeps the route
@@ -972,8 +982,7 @@ function pickDefined(
 export default class OptimikeOperonBridgePlugin extends Plugin {
   settings: OptimikeOperonBridgeSettings = { ...DEFAULT_BRIDGE_SETTINGS };
   private restCleanup: (() => void) | null = null;
-  private mountInterval: number | null = null;
-  private mountTimeout: number | null = null;
+  private restLifecycle: RestExtensionLifecycle<object> | null = null;
   private indexValidationInFlight: Promise<void> | null = null;
   private mutationResults = new Map<string, CachedMutation>();
   private mutationResultTimes = new Map<string, string>();
@@ -1005,25 +1014,39 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     this.restoreTaskWorkflowIdentities(stored?.taskWorkflowIdentities);
     this.addSettingTab(new OptimikeOperonBridgeSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
-      this.tryMountRestExtension();
-      if (this.restCleanup) return;
-      this.mountInterval = window.setInterval(
-        () => this.tryMountRestExtension(),
-        MOUNT_RETRY_MS,
-      );
-      this.mountTimeout = window.setTimeout(() => {
-        if (!this.restCleanup) {
+      this.restLifecycle = new RestExtensionLifecycle({
+        probe: () => this.getCommunityPlugin(LOCAL_REST_PLUGIN_ID),
+        mount: (provider) => {
+          const cleanup = this.mountRestExtension(provider);
+          if (!cleanup) return null;
+          this.restCleanup = cleanup;
+          return () => {
+            cleanup();
+            if (this.restCleanup === cleanup) this.restCleanup = null;
+          };
+        },
+        onCleanupError: () =>
           console.warn(
-            `[${EXTENSION_ID}] Local REST API extension surface unavailable after ${MAX_MOUNT_WAIT_MS}ms; routes were not mounted.`,
-          );
-        }
-        this.clearMountTimers();
-      }, MAX_MOUNT_WAIT_MS);
+            `[${EXTENSION_ID}] Failed to unregister Local REST API routes.`,
+          ),
+      });
+      this.restLifecycle.start();
     });
 
     this.register(() => {
-      this.clearMountTimers();
-      this.restCleanup?.();
+      const lifecycle = this.restLifecycle;
+      if (lifecycle) {
+        lifecycle.stop();
+      } else if (this.restCleanup) {
+        try {
+          this.restCleanup();
+        } catch {
+          console.warn(
+            `[${EXTENSION_ID}] Failed to unregister Local REST API routes.`,
+          );
+        }
+      }
+      this.restLifecycle = null;
       this.restCleanup = null;
     });
   }
@@ -1033,13 +1056,6 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     this.queuePersistPluginData();
     await this.dataWriteChain;
   }
-  private clearMountTimers(): void {
-    if (this.mountInterval !== null) window.clearInterval(this.mountInterval);
-    if (this.mountTimeout !== null) window.clearTimeout(this.mountTimeout);
-    this.mountInterval = null;
-    this.mountTimeout = null;
-  }
-
   private getCommunityPlugin(id: string): any {
     const manager = (this.app as any).plugins;
     return manager?.plugins?.[id] ?? manager?.getPlugin?.(id) ?? null;
@@ -1616,9 +1632,17 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       : (runtime?.compatibilityReason ??
         unavailableCompatibility?.reason ??
         compatibilityReason);
-    return {
+    const payload: Record<string, any> = {
       ok: Boolean(runtime?.compatible && !contractInvalid && ready),
       contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+      lifecycle: this.restLifecycle?.snapshot() ?? {
+        state: this.restCleanup ? "ready" : "unavailable",
+        running: false,
+        mountGeneration: this.restCleanup ? 1 : 0,
+        unloadGeneration: 0,
+        consecutiveFailures: 0,
+        nextProbeDelayMs: null,
+      },
       bridge: {
         id: this.manifest.id,
         version: this.manifest.version,
@@ -1666,6 +1690,16 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       stale: false,
       limitations: this.limitations(runtime, ready),
     };
+    if (!payload.ok) {
+      // A degraded status remains diagnostic without reopening the P0 privacy
+      // boundary: runtime diagnostics and user-defined workflow taxonomy are
+      // intentionally absent until the same payload is live and validated.
+      payload.developerApi = null;
+      payload.index.diagnostics = null;
+      payload.taxonomy = null;
+      payload.limitations = ["Operon runtime is not ready."];
+    }
+    return payload;
   }
 
   private async recoveryStatusPayload(): Promise<Record<string, unknown>> {
@@ -4604,17 +4638,23 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private tryMountRestExtension(): void {
     if (this.restCleanup) return;
     const restPlugin = this.getCommunityPlugin(LOCAL_REST_PLUGIN_ID);
+    const cleanup = this.mountRestExtension(restPlugin);
+    if (cleanup) this.restCleanup = cleanup;
+  }
+
+  private mountRestExtension(restPlugin: any): (() => void) | null {
     const getPublicApi =
       typeof restPlugin?.getPublicApi === "function"
         ? restPlugin.getPublicApi.bind(restPlugin)
         : null;
-    if (!getPublicApi) return;
+    if (!getPublicApi) return null;
     const api = getPublicApi(this.manifest);
-    if (!api || typeof api.addRoute !== "function") return;
+    if (!api || typeof api.addRoute !== "function") return null;
 
+    try {
     api.addRoute(`${REST_PREFIX}/status`).get(async (_req: any, res: any) => {
       try {
-        sendJson(res, 200, await this.statusPayload());
+        sendStatusJson(res, 200, await this.statusPayload());
       } catch (error) {
         sendJson(res, 503, errorPayload(error, "operon_unavailable"));
       }
@@ -5600,18 +5640,19 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
-    this.restCleanup = () => {
-      try {
-        api.unregister?.();
-      } catch {
-        console.warn(
-          `[${EXTENSION_ID}] Failed to unregister Local REST API routes.`,
-        );
-      }
-    };
-    this.clearMountTimers();
+    const cleanup = () => api.unregister?.();
     console.info(
       `[${EXTENSION_ID}] REST contract v${OPERON_BRIDGE_CONTRACT_VERSION} mounted at ${REST_PREFIX}.`,
     );
+    return cleanup;
+    } catch {
+      const rollback = () => api.unregister?.();
+      try {
+        rollback();
+      } catch {
+        throw new RestExtensionPartialMountError(rollback);
+      }
+      throw new Error("Local REST API route registration failed.");
+    }
   }
 }

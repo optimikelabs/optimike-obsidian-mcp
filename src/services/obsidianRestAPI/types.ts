@@ -25,6 +25,15 @@ export type RequestFunction = <T = any>(
   operationName: string,
 ) => Promise<T>;
 
+export type BridgeLifecycleStatus = {
+  state: "unavailable" | "probing" | "mounting" | "ready" | "degraded";
+  running: boolean;
+  mountGeneration: number;
+  unloadGeneration: number;
+  consecutiveFailures: number;
+  nextProbeDelayMs: number | null;
+};
+
 export type AtomicWriteReadRequest = {
   contractVersion: 1;
   path: string;
@@ -40,6 +49,7 @@ export type AtomicWriteStatusResponse = {
   ok: true;
   contractVersion: 1;
   plugin: { id: string; version: string };
+  lifecycle?: BridgeLifecycleStatus;
   backend: {
     kind: "obsidian-vault-process";
     bindingFingerprint: string;
@@ -126,6 +136,7 @@ export type BaseAtomicStatusResponse = {
   ok: true;
   contractVersion: 1;
   plugin: { id: string; version: string };
+  lifecycle?: BridgeLifecycleStatus;
   backend: {
     kind: "obsidian-vault-process-base";
     bindingFingerprint: string;

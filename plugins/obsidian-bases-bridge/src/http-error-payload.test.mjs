@@ -152,10 +152,7 @@ test("Base HTTP error projectors contain revoked Proxies and throwing getters", 
     );
     assert.equal(atomicPayload.error.code, "hash_conflict");
     assert.equal("details" in atomicPayload.error, false);
-    assert.doesNotMatch(
-      JSON.stringify(atomicPayload),
-      /private|PROXY_SECRET/u,
-    );
+    assert.doesNotMatch(JSON.stringify(atomicPayload), /private|PROXY_SECRET/u);
   }
 });
 
@@ -552,7 +549,8 @@ test("registered Base atomic and legacy routes contain hostile thrown values", a
   };
 
   const atomic = await invoke(
-    routes.get("/extensions/obsidian-bases-bridge/atomic/bases/cas").postHandler,
+    routes.get("/extensions/obsidian-bases-bridge/atomic/bases/cas")
+      .postHandler,
     {
       body: {
         contractVersion: 1,
@@ -566,7 +564,10 @@ test("registered Base atomic and legacy routes contain hostile thrown values", a
   assert.equal(atomic.statusCode, 500);
   assert.equal(atomic.responseCount, 1);
   assert.equal(atomic.responseBody.error.code, "write_error");
-  assert.doesNotMatch(JSON.stringify(atomic.responseBody), /private|HOSTILE_SECRET/u);
+  assert.doesNotMatch(
+    JSON.stringify(atomic.responseBody),
+    /private|HOSTILE_SECRET/u,
+  );
 
   const legacy = await invoke(
     routes.get("/extensions/obsidian-bases-bridge/bases").getHandler,
@@ -575,7 +576,10 @@ test("registered Base atomic and legacy routes contain hostile thrown values", a
   assert.equal(legacy.statusCode, 500);
   assert.equal(legacy.responseCount, 1);
   assert.equal(legacy.responseBody.error.code, "read_error");
-  assert.doesNotMatch(JSON.stringify(legacy.responseBody), /private|HOSTILE_SECRET/u);
+  assert.doesNotMatch(
+    JSON.stringify(legacy.responseBody),
+    /private|HOSTILE_SECRET/u,
+  );
 });
 
 test("legacy Base routes contain thrown Vault errors behind a value-free boundary", async () => {
@@ -701,4 +705,222 @@ test("Base query missing-view warning does not echo the caller value", () => {
   assert.match(source, /["']Vue introuvable\.["']/u);
   assert.doesNotMatch(source, /Filter non reconnu:\s*\$\{raw\}/u);
   assert.match(source, /["']Filter non reconnu\.["']/u);
+});
+
+test("Bases Bridge remounts one Local REST provider generation without duplicate routes", async () => {
+  const { loadedModule } = await loadBridgeModule();
+  const Bridge = loadedModule.exports.default;
+  const plugins = {};
+  const providers = [];
+  const makeProvider = () => {
+    const record = { handlers: new Map(), routeCount: 0, unregisters: 0 };
+    const api = {
+      addRoute(path) {
+        record.routeCount += 1;
+        const route = {
+          get(handler) {
+            record.handlers.set(`GET ${path}`, handler);
+            return route;
+          },
+          post(handler) {
+            record.handlers.set(`POST ${path}`, handler);
+            return route;
+          },
+          put(handler) {
+            record.handlers.set(`PUT ${path}`, handler);
+            return route;
+          },
+        };
+        return route;
+      },
+      unregister() {
+        record.unregisters += 1;
+      },
+    };
+    providers.push(record);
+    return { getPublicApi: () => api };
+  };
+  const bridge = new Bridge();
+  bridge.register = () => undefined;
+  bridge.manifest = { id: "obsidian-bases-bridge", version: "test" };
+  bridge.settings = {
+    engineEnabled: false,
+    instanceId: "instance",
+    allowAtomicBaseWrites: false,
+    allowLegacyConfigWrites: false,
+  };
+  bridge.app = {
+    workspace: { onLayoutReady: (callback) => callback() },
+    plugins: { plugins, getPlugin: (id) => plugins[id] ?? null },
+  };
+
+  await bridge.registerRestExtension();
+  assert.equal(bridge.restLifecycle.snapshot().state, "unavailable");
+  plugins["obsidian-local-rest-api"] = makeProvider();
+  bridge.restLifecycle.probeNow();
+  const firstRouteCount = providers[0].routeCount;
+  assert.ok(firstRouteCount > 0);
+  bridge.restLifecycle.probeNow();
+  assert.equal(providers[0].routeCount, firstRouteCount);
+  assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 1);
+  let statusBody;
+  providers[0].handlers.get(
+    "GET /extensions/obsidian-bases-bridge/atomic/status",
+  )?.(
+    {},
+    {
+      status() {
+        return this;
+      },
+      json(value) {
+        statusBody = value;
+      },
+    },
+  );
+  assert.equal(statusBody.lifecycle.state, "ready");
+  assert.equal(
+    statusBody.backend.writeEnabled,
+    false,
+    "route readiness must not enable Base writes",
+  );
+  delete plugins["obsidian-local-rest-api"];
+  bridge.restLifecycle.probeNow();
+  assert.equal(providers[0].unregisters, 1);
+  plugins["obsidian-local-rest-api"] = makeProvider();
+  bridge.restLifecycle.probeNow();
+  assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 2);
+  bridge.restLifecycle.stop();
+  assert.equal(providers[1].unregisters, 1);
+});
+
+test("Bases headless lifecycle follows Bases API disable and reload", async () => {
+  const { loadedModule } = await loadBridgeModule();
+  const Bridge = loadedModule.exports.default;
+  const plugins = {};
+  const providers = [];
+  const makeProvider = () => {
+    const record = { mounts: 0, cleanups: 0 };
+    const api = {
+      registerBasesView() {
+        record.mounts += 1;
+        return () => {
+          record.cleanups += 1;
+        };
+      },
+    };
+    providers.push(record);
+    return { api };
+  };
+  const bridge = new Bridge();
+  bridge.register = () => undefined;
+  bridge.app = { plugins: { plugins, getPlugin: (id) => plugins[id] ?? null } };
+  plugins.bases = makeProvider();
+
+  bridge.maybeRegisterHeadlessView();
+  assert.equal(bridge.headlessLifecycle.snapshot().mountGeneration, 1);
+  bridge.headlessLifecycle.probeNow();
+  assert.equal(providers[0].mounts, 1);
+  delete plugins.bases;
+  bridge.headlessLifecycle.probeNow();
+  assert.equal(providers[0].cleanups, 1);
+  plugins.bases = makeProvider();
+  bridge.headlessLifecycle.probeNow();
+  assert.equal(bridge.headlessLifecycle.snapshot().mountGeneration, 2);
+  bridge.headlessLifecycle.stop();
+  assert.equal(providers[1].cleanups, 1);
+});
+
+test("Bases public headless lifecycle fences the active core provider generation", async () => {
+  const { loadedModule } = await loadBridgeModule();
+  const Bridge = loadedModule.exports.default;
+  const records = [];
+  const makeProvider = () => {
+    const record = { registrations: new Map(), mounts: 0, cleanups: 0 };
+    records.push(record);
+    return record;
+  };
+  let activeProvider = makeProvider();
+  const bridge = new Bridge();
+  bridge.app = {
+    internalPlugins: {
+      getEnabledPluginById: (id) =>
+        id === "bases" ? activeProvider : null,
+    },
+  };
+  bridge.registerBasesView = function (viewType, spec) {
+    const provider = this.app.internalPlugins.getEnabledPluginById("bases");
+    if (!provider) return false;
+    provider.mounts += 1;
+    provider.registrations.set(viewType, spec);
+    this.register(() => {
+      provider.cleanups += 1;
+      provider.registrations.delete(viewType);
+    });
+    return true;
+  };
+
+  bridge.maybeRegisterHeadlessView();
+  assert.equal(bridge.headlessLifecycle.snapshot().mountGeneration, 1);
+  assert.equal(records[0].mounts, 1);
+  assert.equal(records[0].registrations.has("bases-bridge-headless"), true);
+
+  bridge.headlessLifecycle.probeNow();
+  assert.equal(records[0].mounts, 1, "same provider must not remount");
+
+  activeProvider = makeProvider();
+  bridge.headlessLifecycle.probeNow();
+  assert.equal(records[0].cleanups, 1);
+  assert.equal(records[0].registrations.size, 0);
+  assert.equal(records[1].mounts, 1);
+  assert.equal(bridge.headlessLifecycle.snapshot().mountGeneration, 2);
+  assert.equal(bridge.headlessLifecycle.snapshot().unloadGeneration, 1);
+
+  bridge.headlessLifecycle.stop();
+  assert.equal(records[1].cleanups, 1);
+  assert.equal(records[1].registrations.size, 0);
+});
+
+test("Bases engine toggle retains a failed headless cleanup fence", async () => {
+  const { loadedModule } = await loadBridgeModule();
+  const Bridge = loadedModule.exports.default;
+  let cleanupAttempts = 0;
+  let mounts = 0;
+  const provider = {
+    api: {
+      registerBasesView() {
+        mounts += 1;
+        return () => {
+          cleanupAttempts += 1;
+          if (cleanupAttempts === 1) {
+            throw new Error("fixture cleanup failure");
+          }
+        };
+      },
+    },
+  };
+  const bridge = new Bridge();
+  bridge.register = () => undefined;
+  bridge.app = {
+    plugins: {
+      plugins: { bases: provider },
+      getPlugin: (id) => (id === "bases" ? provider : null),
+    },
+  };
+
+  bridge.maybeRegisterHeadlessView();
+  const fencedLifecycle = bridge.headlessLifecycle;
+  bridge.stopHeadlessLifecycle();
+  assert.equal(bridge.headlessLifecycle, fencedLifecycle);
+  assert.equal(fencedLifecycle.snapshot().state, "degraded");
+  assert.equal(fencedLifecycle.snapshot().unloadGeneration, 0);
+  assert.equal(mounts, 1);
+
+  bridge.maybeRegisterHeadlessView();
+  assert.equal(bridge.headlessLifecycle, fencedLifecycle);
+  assert.equal(cleanupAttempts, 2);
+  assert.equal(fencedLifecycle.snapshot().unloadGeneration, 1);
+  assert.equal(fencedLifecycle.snapshot().mountGeneration, 2);
+  assert.equal(fencedLifecycle.snapshot().state, "ready");
+  assert.equal(mounts, 2);
+  fencedLifecycle.stop();
 });

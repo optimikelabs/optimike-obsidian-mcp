@@ -191,6 +191,14 @@ function statusPayload() {
   return {
     ok: state.mode !== "incompatible" && state.mode !== "initializing",
     contractVersion: "1",
+    lifecycle: {
+      state: "ready",
+      running: true,
+      mountGeneration: 2,
+      unloadGeneration: 1,
+      consecutiveFailures: 0,
+      nextProbeDelayMs: 1_000,
+    },
     bridge: {
       id: "optimike-operon-bridge",
       version: "0.1.0",
@@ -223,23 +231,26 @@ function statusPayload() {
       duplicateConflictCount: state.mode === "duplicate" ? 1 : 0,
     },
     settingsSignature: "fnv1a32:settings",
-    capabilities: state.mutations
-      ? {
-          ...capabilities,
-          filterQuery: !state.filterCold,
-          adopt: !state.workflowCold,
-          periodicCreate: !state.workflowCold,
-          periodicUpdate: !state.workflowCold,
-          taskWorkflowRecovery: !state.workflowCold,
-          create: true,
-          update: true,
-          transition: true,
-          relationshipMutation: true,
-          recurrenceMutation: true,
-          convert: true,
-          recovery: true,
-        }
-      : { ...capabilities, filterQuery: !state.filterCold },
+    capabilities:
+      state.mode === "missing-read-capability"
+        ? { ...capabilities, list: false }
+        : state.mutations
+          ? {
+              ...capabilities,
+              filterQuery: !state.filterCold,
+              adopt: !state.workflowCold,
+              periodicCreate: !state.workflowCold,
+              periodicUpdate: !state.workflowCold,
+              taskWorkflowRecovery: !state.workflowCold,
+              create: true,
+              update: true,
+              transition: true,
+              relationshipMutation: true,
+              recurrenceMutation: true,
+              convert: true,
+              recovery: true,
+            }
+          : { ...capabilities, filterQuery: !state.filterCold },
     source: "operon-runtime",
     stale: false,
     limitations: ["read-only"],
@@ -957,6 +968,29 @@ const { config } = await import("../dist/config/index.js");
 
 try {
   const service = new OperonService();
+
+  state.mode = "initializing";
+  const initializingStatus = await service.status();
+  assert.equal(initializingStatus.ok, false);
+  assert.equal(initializingStatus.source, "operon-live");
+  assert.equal(initializingStatus.live.lifecycle.state, "ready");
+  assert.equal(initializingStatus.live.index.ready, false);
+
+  state.mode = "duplicate";
+  const duplicateStatus = await service.status();
+  assert.equal(duplicateStatus.ok, false);
+  assert.equal(duplicateStatus.source, "operon-live");
+  assert.equal(duplicateStatus.stale, false);
+  assert.equal(duplicateStatus.live.ok, true);
+  assert.equal(duplicateStatus.live.index.duplicateConflictCount, 1);
+
+  state.mode = "missing-read-capability";
+  const missingReadCapabilityStatus = await service.status();
+  assert.equal(missingReadCapabilityStatus.ok, false);
+  assert.equal(missingReadCapabilityStatus.source, "operon-live");
+  assert.equal(missingReadCapabilityStatus.stale, false);
+  assert.equal(missingReadCapabilityStatus.live.capabilities.list, false);
+  state.mode = "normal";
 
   const first = await service.ensureSnapshot(true);
   assert.equal(first.source, "operon-live");
