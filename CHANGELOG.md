@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interrupted rollback, preserved settings and refusal to overwrite
   post-install drift or a live transaction owner.
 - A dedicated Windows/Linux workflow builds and verifies the bundle; the live
-  gate upgrades Pilot 2, restarts Obsidian, checks the capability doctor,
+  gate starts from a closed Pilot 2, upgrades it, checks the capability doctor,
   rolls back byte for byte while Obsidian remains closed, and then reinstalls
   the exact candidate before restart so Operon never observes a transient
   Bridge downgrade.

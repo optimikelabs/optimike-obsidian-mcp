@@ -34,6 +34,7 @@ for (const source of [english, french]) {
   assert.match(source, /backupPath/);
   assert.match(source, /applying/);
   assert.match(source, /rollback_in_progress/);
+  assert.match(source, /closed Pilot 2|Pilot 2 fermé/);
   assert.match(source, /40/);
 }
 assert.match(builder, /status", "--porcelain", "--untracked-files=no"/);
@@ -43,6 +44,7 @@ assert.doesNotMatch(
   builder.match(/const managedFiles = \[[^\]]+\]/s)?.[0] ?? "",
   /data\.json/,
 );
+assert.match(liveCanary, /waitForLocalRest\(false, 5_000\)/);
 assert.match(installer, /Bundle must never contain data\.json/);
 assert.match(installer, /explicit confirmation that Obsidian is closed/);
 assert.match(installer, /Rollback fence rejected/);

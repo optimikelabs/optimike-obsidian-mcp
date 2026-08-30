@@ -91,11 +91,13 @@ It refuses a dirty tracked worktree. CI runs the transaction tests on Windows
 and Linux. Release admission additionally requires an exact-SHA Pilot 2 cycle:
 
 ```text
-attest → close Obsidian → upgrade → restart → doctor
-       → close → rollback → verify hashes
-       → reinstall candidate → restart → doctor → clean private test backup
+attest closed Pilot 2 → upgrade → restart → doctor
+                      → close → rollback → verify hashes
+                      → reinstall candidate → restart → doctor → clean private test backup
 ```
 
 The canary owns no note mutation. Its restoration authority is the recorded
 pre-install managed-file hashes plus unchanged hashes for every Bridge
-`data.json` that existed at the start.
+`data.json` that existed at the start. On failure it restores those bytes and
+leaves Pilot 2 closed, so an intentionally rolled-back Bridge version is never
+observed by Operon's Developer API grant policy.

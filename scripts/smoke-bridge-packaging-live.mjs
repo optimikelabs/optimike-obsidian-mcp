@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -261,22 +262,13 @@ function runDoctor() {
 }
 
 async function main() {
-  const activeVault = runObsidian(
-    ["vault", "info=path"],
-    "attest active Obsidian vault",
-  );
+  const attestedVault = realpathSync(expectedVault);
   assert.equal(
-    path.resolve(activeVault).toLowerCase(),
+    path.resolve(attestedVault).toLowerCase(),
     expectedVault.toLowerCase(),
   );
-  const targetedVault = runObsidian(
-    [`vault=${expectedVaultName}`, "vault", "info=path"],
-    "attest Pilot 2 vault",
-  );
-  assert.equal(
-    path.resolve(targetedVault).toLowerCase(),
-    expectedVault.toLowerCase(),
-  );
+  assert.equal(path.basename(attestedVault), expectedVaultName);
+  await waitForLocalRest(false, 5_000);
 
   const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: projectRoot,
@@ -330,14 +322,12 @@ async function main() {
     restoredOnFailure: false,
     ok: false,
   };
-  let pilotClosed = false;
+  let pilotClosed = true;
   let currentState = "baseline";
   let firstReceipt;
   let secondReceipt;
 
   try {
-    await closePilot();
-    pilotClosed = true;
     firstReceipt = install(bundleRoot, candidateSha, privateRoot);
     currentState = "candidate-first";
     evidence.upgrade = firstReceipt.outcome === "committed";
@@ -381,8 +371,6 @@ async function main() {
           rollback(firstReceipt.backupPath);
           currentState = "baseline";
         }
-        await openPilot();
-        pilotClosed = false;
         assert.deepEqual(snapshotInstalled(), baseline);
         evidence.restoredOnFailure = true;
       } catch {
