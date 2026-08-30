@@ -108,10 +108,11 @@ test("HTTP error payloads survive hostile codes, details, and error objects", as
   );
 
   for (const details of [throwingDetails, revoked.proxy]) {
-    const payload = payloadFactory(throwingCode, revoked.proxy, details) as Record<
-      string,
-      any
-    >;
+    const payload = payloadFactory(
+      throwingCode,
+      revoked.proxy,
+      details,
+    ) as Record<string, any>;
     assert.equal(payload.error.code, "invalid_request");
     assert.equal(payload.error.details, undefined);
     assert.doesNotMatch(JSON.stringify(payload), /Private|HOSTILE_SECRET/u);
@@ -325,7 +326,7 @@ test("Atomic note CAS route emits one safe conflict and backend failure", async 
   assert.doesNotMatch(JSON.stringify(responseBody), /private|HOSTILE_SECRET/u);
 });
 
-test("Atomic Write runtime warning is fixed and value-free", async () => {
+test("Atomic Write lifecycle keeps a value-free bounded retry alive", async () => {
   const bundle = await build({
     entryPoints: [fileURLToPath(new URL("./main.ts", import.meta.url))],
     bundle: true,
@@ -354,21 +355,20 @@ test("Atomic Write runtime warning is fixed and value-free", async () => {
     testRequire,
   );
   const Bridge = loadedModule.exports.default as any;
-  const originalWindow = (globalThis as any).window;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
   const originalWarn = console.warn;
   const warnings: unknown[][] = [];
-  (globalThis as any).window = {
-    setInterval: () => 1,
-    setTimeout: (callback: () => void) => {
-      callback();
-      return 2;
-    },
-    clearInterval() {},
-    clearTimeout() {},
-  };
+  let scheduledDelay: number | undefined;
+  globalThis.setTimeout = ((_callback: () => void, delay?: number) => {
+    scheduledDelay = delay;
+    return 2 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = (() => undefined) as typeof clearTimeout;
   console.warn = (...args: unknown[]) => warnings.push(args);
+  let plugin: any;
   try {
-    const plugin = new Bridge();
+    plugin = new Bridge();
     plugin.app = {
       workspace: { onLayoutReady: (callback: () => void) => callback() },
       plugins: { plugins: {} },
@@ -376,11 +376,123 @@ test("Atomic Write runtime warning is fixed and value-free", async () => {
     plugin.manifest = { id: "obsidian-atomic-write-bridge", version: "test" };
     await (plugin as any).registerRestExtension();
   } finally {
+    plugin?.restLifecycle?.stop();
     console.warn = originalWarn;
-    (globalThis as any).window = originalWindow;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
   }
-  assert.deepEqual(warnings, [
-    ["[atomic-write-bridge] Local REST API extension API unavailable."],
-  ]);
+  assert.equal(scheduledDelay, 250);
+  assert.equal(plugin.restLifecycle.snapshot().state, "unavailable");
+  assert.deepEqual(warnings, []);
   assert.doesNotMatch(JSON.stringify(warnings), /secret|vault|path/u);
+});
+
+test("Atomic Write Bridge remounts exactly once after Local REST reload", async () => {
+  const bundle = await build({
+    entryPoints: [fileURLToPath(new URL("./main.ts", import.meta.url))],
+    bundle: true,
+    format: "cjs",
+    platform: "node",
+    target: "node22",
+    external: ["obsidian"],
+    write: false,
+    logLevel: "silent",
+  });
+  const loadedModule = { exports: {} as Record<string, unknown> };
+  const nativeRequire = createRequire(import.meta.url);
+  const obsidianStub = {
+    Plugin: class {},
+    PluginSettingTab: class {},
+    Setting: class {},
+    TFile: class {},
+  };
+  const testRequire = (id: string) =>
+    id === "obsidian" ? obsidianStub : nativeRequire(id);
+  new Function("module", "exports", "require", bundle.outputFiles[0].text)(
+    loadedModule,
+    loadedModule.exports,
+    testRequire,
+  );
+  const Bridge = loadedModule.exports.default as new () => any;
+  const plugins: Record<string, unknown> = {};
+  const providers: Array<{
+    handlers: Map<string, Function>;
+    unregisters: number;
+  }> = [];
+  const makeProvider = (failAtRoute?: number) => {
+    const record = { handlers: new Map<string, Function>(), unregisters: 0 };
+    let routeCount = 0;
+    const api = {
+      addRoute: (path: string) => {
+        routeCount += 1;
+        if (routeCount === failAtRoute) {
+          throw new Error("private partial registration failure");
+        }
+        const route = {
+          get: (handler: Function) => {
+            record.handlers.set(`GET ${path}`, handler);
+            return route;
+          },
+          post: (handler: Function) => {
+            record.handlers.set(`POST ${path}`, handler);
+            return route;
+          },
+        };
+        return route;
+      },
+      unregister: () => {
+        record.unregisters += 1;
+      },
+    };
+    providers.push(record);
+    return { getPublicApi: () => api };
+  };
+  const bridge = new Bridge();
+  bridge.register = () => undefined;
+  bridge.manifest = { id: "obsidian-atomic-write-bridge", version: "test" };
+  bridge.app = {
+    workspace: { onLayoutReady: (callback: () => void) => callback() },
+    plugins: { plugins, getPlugin: (id: string) => plugins[id] ?? null },
+  };
+
+  await bridge.registerRestExtension();
+  assert.equal(bridge.restLifecycle.snapshot().state, "unavailable");
+  plugins["obsidian-local-rest-api"] = makeProvider(2);
+  bridge.restLifecycle.probeNow();
+  assert.equal(bridge.restLifecycle.snapshot().state, "degraded");
+  assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 0);
+  assert.equal(
+    providers[0].unregisters,
+    1,
+    "a partial route generation must roll back before retry",
+  );
+  plugins["obsidian-local-rest-api"] = makeProvider();
+  bridge.restLifecycle.probeNow();
+  bridge.restLifecycle.probeNow();
+  assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 1);
+  let statusBody: any;
+  providers[1].handlers.get(
+    "GET /extensions/obsidian-atomic-write-bridge/status",
+  )?.(
+    {},
+    {
+      json(value: unknown) {
+        statusBody = value;
+      },
+    },
+  );
+  assert.equal(statusBody.lifecycle.state, "ready");
+  assert.equal(
+    statusBody.backend.writeEnabled,
+    false,
+    "route readiness must not enable writes",
+  );
+  delete plugins["obsidian-local-rest-api"];
+  bridge.restLifecycle.probeNow();
+  assert.equal(providers[1].unregisters, 1);
+  plugins["obsidian-local-rest-api"] = makeProvider();
+  bridge.restLifecycle.probeNow();
+  assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 2);
+  bridge.restLifecycle.stop();
+  assert.equal(providers[2].unregisters, 1);
 });

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Operon, Atomic Write and Bases Bridges now share a permanent Local REST
+  lifecycle supervisor. It replaces the former 30-second registration window
+  with one bounded recursive retry, detects provider replacement, cleans up the
+  old generation and remounts without restarting the MCP.
+- Bridge status envelopes expose an additive lifecycle projection. Route
+  readiness remains separate from Operon index/grant readiness and from every
+  existing write switch; reattachment never enables a mutation.
+
+### Validation
+
+- Deterministic tests cover late startup beyond the former timeout, one-timer
+  and no-duplicate invariants, provider replacement, cleanup, failed mounts,
+  Bases headless reload and status visibility while Operon is still cold.
+- The exact-SHA Pilot 2 gate disables and re-enables Local REST API inside one
+  Obsidian process, keeps the same MCP client connected, requires all three
+  Bridge generations to advance, and proves unchanged write projections.
+
 ## [3.2.0] - 2026-08-30
 
 ### Fixed

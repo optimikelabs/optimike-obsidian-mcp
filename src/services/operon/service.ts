@@ -1951,7 +1951,7 @@ export class OperonService {
     const cached = this.loadSnapshot("operon-cache");
     if (liveModeConfigured()) {
       try {
-        const live = await this.fetchLiveStatus();
+        const live = await this.fetchBridgeStatus("operonStatus");
         return {
           ok: live.ok,
           source: "operon-live",

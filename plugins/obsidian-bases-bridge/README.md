@@ -1,6 +1,6 @@
 # Obsidian Bases Bridge
 
-Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « Bridge (Headless) » et étend **Obsidian Local REST API** avec des routes spécialisées pour les fichiers `.base`. Depuis 1.1.0, il fournit aussi un CAS typé lié au coffre pour la surface gouvernée de formules.
+Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « Bridge (Headless) » et étend **Obsidian Local REST API** avec des routes spécialisées pour les fichiers `.base`. Depuis 1.1.0, il fournit aussi un CAS typé lié au coffre pour la surface gouvernée de formules. La version 1.2.0 supervise durablement Local REST et la vue headless : un démarrage tardif ou un reload remonte une seule génération sans redémarrer le MCP et sans modifier les gates d’écriture.
 
 ## Installation rapide
 

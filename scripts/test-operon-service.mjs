@@ -191,6 +191,14 @@ function statusPayload() {
   return {
     ok: state.mode !== "incompatible" && state.mode !== "initializing",
     contractVersion: "1",
+    lifecycle: {
+      state: "ready",
+      running: true,
+      mountGeneration: 2,
+      unloadGeneration: 1,
+      consecutiveFailures: 0,
+      nextProbeDelayMs: 1_000,
+    },
     bridge: {
       id: "optimike-operon-bridge",
       version: "0.1.0",
@@ -957,6 +965,14 @@ const { config } = await import("../dist/config/index.js");
 
 try {
   const service = new OperonService();
+
+  state.mode = "initializing";
+  const initializingStatus = await service.status();
+  assert.equal(initializingStatus.ok, false);
+  assert.equal(initializingStatus.source, "operon-live");
+  assert.equal(initializingStatus.live.lifecycle.state, "ready");
+  assert.equal(initializingStatus.live.index.ready, false);
+  state.mode = "normal";
 
   const first = await service.ensureSnapshot(true);
   assert.equal(first.source, "operon-live");

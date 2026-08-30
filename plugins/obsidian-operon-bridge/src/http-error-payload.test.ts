@@ -46,6 +46,97 @@ async function exported(name: string): Promise<Function> {
   return value as Function;
 }
 
+test("Operon Bridge lifecycle remounts one Local REST provider generation", async () => {
+  const Bridge = (await bridgeModule()).default as new () => any;
+  const registeredCleanups: Array<() => void> = [];
+  const providers: Array<{
+    api: any;
+    handlers: Map<string, Function>;
+    unregisters: number;
+  }> = [];
+  const makeProvider = () => {
+    const record = {
+      api: undefined as any,
+      handlers: new Map<string, Function>(),
+      unregisters: 0,
+    };
+    record.api = {
+      addRoute: (path: string) => {
+        const route = {
+          get: (handler: Function) => {
+            record.handlers.set(`GET ${path}`, handler);
+            return route;
+          },
+          post: (handler: Function) => {
+            record.handlers.set(`POST ${path}`, handler);
+            return route;
+          },
+        };
+        return route;
+      },
+      unregister: () => {
+        record.unregisters += 1;
+      },
+    };
+    providers.push(record);
+    return { getPublicApi: () => record.api };
+  };
+  const plugins: Record<string, unknown> = {};
+  const bridge = new Bridge();
+  bridge.loadData = async () => null;
+  bridge.addSettingTab = () => undefined;
+  bridge.register = (cleanup: () => void) => registeredCleanups.push(cleanup);
+  bridge.manifest = { id: "optimike-operon-bridge", version: "test" };
+  bridge.app = {
+    workspace: { onLayoutReady: (callback: () => void) => callback() },
+    plugins: { plugins, getPlugin: (id: string) => plugins[id] ?? null },
+  };
+
+  await bridge.onload();
+  assert.equal(bridge.restLifecycle.snapshot().state, "unavailable");
+  plugins["obsidian-local-rest-api"] = makeProvider();
+  bridge.restLifecycle.probeNow();
+  assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 1);
+  let statusBody: any;
+  await providers[0].handlers.get(
+    "GET /extensions/optimike-operon-bridge/v1/status",
+  )?.(
+    {},
+    {
+      status() {
+        return this;
+      },
+      json(value: unknown) {
+        statusBody = value;
+      },
+    },
+  );
+  assert.equal(statusBody.lifecycle.state, "ready");
+  assert.equal(statusBody.ok, false, "route readiness is not Operon readiness");
+  assert.equal(statusBody.bridge.mode, "read-only");
+  assert.equal(statusBody.developerApi, null);
+  assert.equal(statusBody.index.diagnostics, null);
+  assert.equal(statusBody.taxonomy, null);
+  assert.deepEqual(statusBody.limitations, ["Operon runtime is not ready."]);
+  bridge.restLifecycle.probeNow();
+  assert.equal(
+    bridge.restLifecycle.snapshot().mountGeneration,
+    1,
+    "the same provider must not duplicate Operon routes",
+  );
+
+  delete plugins["obsidian-local-rest-api"];
+  bridge.restLifecycle.probeNow();
+  assert.equal(providers[0].unregisters, 1);
+  assert.equal(bridge.restLifecycle.snapshot().unloadGeneration, 1);
+  plugins["obsidian-local-rest-api"] = makeProvider();
+  bridge.restLifecycle.probeNow();
+  assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 2);
+  bridge.restLifecycle.stop();
+  assert.equal(providers[1].unregisters, 1);
+  for (const cleanup of registeredCleanups) cleanup();
+});
+
 test("Operon HTTP errors redact arbitrary task fields, paths, and backend messages", async () => {
   const payloadFactory = await exported("publicOperonErrorPayload");
   const secret =

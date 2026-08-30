@@ -114,7 +114,7 @@ N’activer que les surfaces utilisées :
 - **Bases Bridge** inclus pour Bases live et le CAS de formules gouvernées ;
 - **Optimike Atomic Write Bridge** inclus pour les cycles Note, Frontmatter et Canvas `plan → apply → status → recover` ;
 - **Smart Connections** pour l’index sémantique local ;
-- **Operon Developer API V1** et **Optimike Operon Bridge 0.8.3** pour les tâches gouvernées. Optimike MCP `3.2.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture.
+- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.0** pour les tâches gouvernées. Optimike MCP `3.3.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Les trois Bridges inclus [récupèrent désormais leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture.
 - **Obsidian Tasks** pour le parsing Markdown Tasks-compatible.
 
 Les mutations Operon exigent le réglage de mutation du Bridge plus :
