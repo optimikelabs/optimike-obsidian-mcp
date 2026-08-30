@@ -407,12 +407,13 @@ MCP_EXTERNAL_MOVE_PROFILE_ID=<stable-lowercase-vault-profile-id>
 MCP_EXTERNAL_MOVE_JOURNAL_PATH=<optional-absolute-local-sqlite-path>
 ```
 
-The profile ID is mandatory only when the external-move coordinator starts
-(`MCP_WRITE_MODE=full` and `MCP_EXTERNAL_MOVE_ENABLED=true`). Read/list/stat/
-handoff work without it and do not initialize a move journal. The profile is an
-operator label, not the destructive identity on its own: both the proxy and its
-already-running backend must be in `headless-filesystem` against the same
-configured, resolvable `OBSIDIAN_VAULT`. Before plan, apply and rollback, the
+The profile ID is mandatory when scan/plan initialize the external-move
+coordinator, independently of `MCP_WRITE_MODE` and
+`MCP_EXTERNAL_MOVE_ENABLED`. Read/list/stat/handoff work without it and do not
+initialize a move journal. The profile is an operator label, not the
+destructive identity on its own: both the proxy and its already-running backend
+must be in `headless-filesystem` against the same configured, resolvable
+`OBSIDIAN_VAULT`. Before plan, apply and rollback, the
 backend re-reads its vault directory and compares its strict SHA-256 filesystem
 proof (device/inode) to an opaque 64-hex challenge supplied by the proxy. It
 returns only `destructiveVaultIdentityVerified: true|false` plus a scheme
@@ -423,7 +424,13 @@ The proof and challenge never contain a path, URL, device or inode. The
 challenge is not logged, reflected, stored in a plan or placed in a receipt.
 `external_runtime_status` exposes only `identityVerified` and the source label.
 The journal persists its private derived binding only and is automatically
-namespaced by that binding.
+namespaced by that binding. Attested startup, runtime status, scan and an
+unknown file-backed status do not create or open a writable journal. Plan opens
+the journal lazily. An existing receipt, including one still held in a WAL, is
+read from a verified private temporary DB/WAL snapshot with a freshly rebuilt
+private SHM. That private directory is deleted after the query; the original
+journal is not opened by SQLite. Status opens the writable journal only when it
+must durably reconcile an interrupted state to `recovery_required`.
 
 An apply or rollback also captures the proxy's current backend connection
 generation immediately after that proof. The complete destructive sequence is

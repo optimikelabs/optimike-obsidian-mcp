@@ -419,13 +419,13 @@ MCP_EXTERNAL_MOVE_PROFILE_ID=<identifiant-stable-du-profil-coffre>
 MCP_EXTERNAL_MOVE_JOURNAL_PATH=<chemin-sqlite-local-absolu-optionnel>
 ```
 
-L’identifiant de profil est obligatoire seulement au démarrage du coordinateur
-de move external (`MCP_WRITE_MODE=full` et `MCP_EXTERNAL_MOVE_ENABLED=true`).
-Read/list/stat/handoff fonctionnent sans lui et n’initialisent pas de journal de
-move. Le profil est un libellé opérateur, pas l’identité destructive à lui seul :
-le proxy et son backend déjà lancé doivent tous deux être en
-`headless-filesystem` sur le même `OBSIDIAN_VAULT` configuré et résoluble. Avant
-le plan, l’apply et le rollback, le backend relit son dossier coffre et compare
+L’identifiant de profil est obligatoire lorsque scan/plan initialisent le
+coordinateur de move external, indépendamment de `MCP_WRITE_MODE` et de
+`MCP_EXTERNAL_MOVE_ENABLED`. Read/list/stat/handoff fonctionnent sans lui et
+n’initialisent pas de journal de move. Le profil est un libellé opérateur, pas
+l’identité destructive à lui seul : le proxy et son backend déjà lancé doivent
+tous deux être en `headless-filesystem` sur le même `OBSIDIAN_VAULT` configuré
+et résoluble. Avant le plan, l’apply et le rollback, le backend relit son dossier coffre et compare
 sa preuve filesystem SHA-256 stricte (device/inode) à un challenge opaque de 64
 hex fourni par le proxy. Il retourne uniquement
 `destructiveVaultIdentityVerified: true|false` et une version de schéma : aucun
@@ -436,7 +436,13 @@ La preuve et le challenge ne contiennent ni chemin, ni URL, ni device, ni
 inode. Le challenge n’est ni loggé, ni réfléchi, ni stocké dans un plan ou un
 receipt. `external_runtime_status` expose seulement `identityVerified` et le
 libellé source. Le journal ne persiste que son binding dérivé privé et est
-automatiquement profilé par ce binding.
+automatiquement profilé par ce binding. Le démarrage attesté, le statut runtime,
+le scan et un statut fichier inconnu ne créent pas et n’ouvrent pas de journal
+en écriture. Le plan ouvre le journal à la demande. Un reçu existant fiable est
+lu depuis un snapshot privé temporaire DB/WAL vérifié, avec un SHM privé
+reconstruit. Ce dossier privé est supprimé après la requête ; SQLite n’ouvre pas
+le journal original. Status n’ouvre le journal en écriture que lorsqu’il doit
+réconcilier durablement un état interrompu vers `recovery_required`.
 
 Un apply ou un rollback capture aussi la génération de connexion backend du
 proxy juste après cette preuve. Toute la séquence destructive est clôturée sur

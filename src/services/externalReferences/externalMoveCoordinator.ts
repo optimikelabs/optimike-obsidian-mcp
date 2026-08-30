@@ -280,10 +280,7 @@ function safeStoredFailureCode(
   ) {
     return value;
   }
-  if (
-    typeof value === "string" &&
-    EXTERNAL_ROOT_ERROR_CODE_SET.has(value)
-  ) {
+  if (typeof value === "string" && EXTERNAL_ROOT_ERROR_CODE_SET.has(value)) {
     return value as ExternalMoveFailureCode;
   }
   return undefined;
@@ -380,11 +377,26 @@ function preserveCurrentProtectedFrontmatter(
 }
 
 export class ExternalMoveCoordinator {
+  private journalInstance: ExternalMoveJournal | undefined;
+  private readonly journalFactory: () => ExternalMoveJournal;
+
   constructor(
     private readonly roots: ExternalRootsService,
     private readonly vault: BackendVaultAdapter,
-    private readonly journal: ExternalMoveJournal,
-  ) {}
+    journal: ExternalMoveJournal | (() => ExternalMoveJournal),
+  ) {
+    if (typeof journal === "function") {
+      this.journalFactory = journal;
+    } else {
+      this.journalInstance = journal;
+      this.journalFactory = () => journal;
+    }
+  }
+
+  private get journal(): ExternalMoveJournal {
+    this.journalInstance ??= this.journalFactory();
+    return this.journalInstance;
+  }
 
   async scan(
     rootId: string,
@@ -469,8 +481,11 @@ export class ExternalMoveCoordinator {
     return projectExternalMovePlanForStatus(plan);
   }
 
-  status(planId: string): Record<string, unknown> {
-    let plan = this.journal.get(planId);
+  status(
+    planId: string,
+    preloadedPlan?: ExternalMovePlan,
+  ): Record<string, unknown> {
+    let plan = preloadedPlan ?? this.journal.get(planId);
     if (!plan) {
       throw new ExternalRootError("not_found", "Unknown external move plan.");
     }
@@ -482,6 +497,19 @@ export class ExternalMoveCoordinator {
       needsSessionFence(plan.status) &&
       !this.vault.isDestructiveSessionCurrent(plan.destructiveSession)
     ) {
+      // A preloaded file-backed receipt came from a read-only SQLite handle.
+      // Open the writable journal only when durable reconciliation is needed,
+      // and re-read it before transitioning stale state.
+      if (preloadedPlan) {
+        const durablePlan = this.journal.get(planId);
+        if (!durablePlan) {
+          throw new ExternalRootError(
+            "not_found",
+            "Unknown external move plan.",
+          );
+        }
+        plan = durablePlan;
+      }
       plan = this.markRecoveryRequired(plan, "backend_session_changed");
     }
     return projectExternalMovePlanForStatus(plan);

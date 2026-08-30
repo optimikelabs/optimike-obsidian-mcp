@@ -2,9 +2,18 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { DatabaseSync } from "node:sqlite";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -12,10 +21,50 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const LEGACY_FAILURE_SENTINEL = "external_root_private_legacy_sentinel";
+const testWatchdog = setTimeout(() => {
+  console.error("FAIL: stdio external-roots fixture exceeded 120 seconds");
+  process.exit(1);
+}, 120_000);
+testWatchdog.unref();
 
 function jsonOf(result) {
   return JSON.parse(
     result.content?.map((item) => item.text ?? "").join("\n") ?? "{}",
+  );
+}
+
+async function snapshotProfiledMoveJournals(directory) {
+  const names = (await readdir(directory, { withFileTypes: true }))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        /^move\.[a-f0-9]{24}\.sqlite(?:-(?:shm|wal))?$/u.test(entry.name),
+    )
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+  return Promise.all(
+    names.map(async (name) => {
+      const filePath = path.join(directory, name);
+      const metadata = await stat(filePath, { bigint: true });
+      return {
+        name,
+        size: metadata.size.toString(),
+        mtimeNs: metadata.mtimeNs.toString(),
+        sha256: createHash("sha256")
+          .update(await readFile(filePath))
+          .digest("hex"),
+      };
+    }),
+  );
+}
+
+async function assertNoPrivateStatusSnapshots(directory, message) {
+  assert.deepEqual(
+    (await readdir(directory)).filter((name) =>
+      name.startsWith("optimike-external-status-"),
+    ),
+    [],
+    message,
   );
 }
 
@@ -58,9 +107,11 @@ const vaultPath = path.join(sandbox, "vault");
 const vaultBPath = path.join(sandbox, "vault-b");
 const externalPath = path.join(sandbox, "external");
 const backendExternalPath = path.join(sandbox, "backend-external");
+const privateTempPath = path.join(sandbox, "private-temp");
 const configPath = path.join(sandbox, "external-roots.json");
 const backendConfigPath = path.join(sandbox, "backend-external-roots.json");
 const legacyJournalPath = path.join(sandbox, "legacy-external-moves.sqlite");
+const profiledJournalBasePath = path.join(sandbox, "move.sqlite");
 const port = await unusedPort();
 const httpUrl = new URL(`http://127.0.0.1:${port}/mcp/full`);
 const healthUrl = new URL(`http://127.0.0.1:${port}/healthz`);
@@ -69,6 +120,7 @@ await mkdir(path.join(vaultPath, ".obsidian"), { recursive: true });
 await mkdir(path.join(vaultBPath, ".obsidian"), { recursive: true });
 await mkdir(externalPath, { recursive: true });
 await mkdir(backendExternalPath, { recursive: true });
+await mkdir(privateTempPath, { recursive: true });
 await writeFile(path.join(vaultPath, "Smoke.md"), "# Smoke\n", "utf8");
 await writeFile(
   path.join(externalPath, "hello.txt"),
@@ -88,7 +140,7 @@ await writeFile(
       {
         id: "proxy.pilot",
         path: externalPath,
-        capabilities: ["visible", "readable", "handoff"],
+        capabilities: ["visible", "readable", "handoff", "move"],
         include: ["**/*.txt"],
         limits: {
           maxDepth: 2,
@@ -185,6 +237,8 @@ await writeFile(
 
 const commonEnv = {
   ...process.env,
+  TEMP: privateTempPath,
+  TMP: privateTempPath,
   OBSIDIAN_RUNTIME_MODE: "headless-readonly",
   OBSIDIAN_VAULT: vaultPath,
   OBSIDIAN_CACHE_SOURCE: "filesystem",
@@ -206,6 +260,7 @@ const commonEnv = {
 const backendEnv = {
   ...commonEnv,
   OBSIDIAN_RUNTIME_MODE: "headless-filesystem",
+  OBSIDIAN_ENABLE_CACHE: "true",
   MCP_WRITE_MODE: "full",
   MCP_EXTERNAL_MOVE_ENABLED: "true",
   MCP_EXTERNAL_MOVE_PROFILE_ID: "stdio-proxy-move-test",
@@ -236,6 +291,10 @@ const proxyClient = new Client({
 });
 let moveProxyTransport;
 let moveProxyClient;
+let disabledMoveProxyTransport;
+let disabledMoveProxyClient;
+let profiledStatusProxyTransport;
+let profiledStatusProxyClient;
 let mismatchedMoveProxyTransport;
 let mismatchedMoveProxyClient;
 
@@ -264,9 +323,9 @@ try {
   );
   assert.equal(JSON.stringify(status).includes(externalPath), false);
 
-  // This process runs on the same Windows/CI filesystem as production. It
-  // proves that a full, explicitly enabled move coordinator accepts the opaque
-  // filesystem identity without publishing its binding digest.
+  // Planning requires an attested profile but not destructive write mode. A
+  // readonly stdio process must retain scan/plan/status while apply/rollback
+  // remain closed at the handler boundary.
   moveProxyTransport = new StdioClientTransport({
     command: process.execPath,
     args: ["dist/stdio-proxy.js"],
@@ -275,10 +334,10 @@ try {
       ...commonEnv,
       OBSIDIAN_RUNTIME_MODE: "headless-filesystem",
       MCP_EXTERNAL_ROOTS_FILE: configPath,
-      MCP_WRITE_MODE: "full",
+      MCP_WRITE_MODE: "readonly",
       MCP_EXTERNAL_MOVE_ENABLED: "true",
       MCP_EXTERNAL_MOVE_PROFILE_ID: "stdio-proxy-move-test",
-      MCP_EXTERNAL_MOVE_JOURNAL_PATH: path.join(sandbox, "move.sqlite"),
+      MCP_EXTERNAL_MOVE_JOURNAL_PATH: profiledJournalBasePath,
       MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
       MCP_PROXY_START_TIMEOUT_MS: "20000",
     },
@@ -288,13 +347,18 @@ try {
     version: "0",
   });
   await moveProxyClient.connect(moveProxyTransport);
+  assert.deepEqual(
+    await snapshotProfiledMoveJournals(sandbox),
+    [],
+    "attested readonly startup must not create a journal or WAL sidecar",
+  );
   const moveStatus = jsonOf(
     await moveProxyClient.callTool({
       name: "external_runtime_status",
       arguments: {},
     }),
   );
-  assert.equal(moveStatus.externalMove.available, true);
+  assert.equal(moveStatus.externalMove.available, false);
   assert.equal(moveStatus.externalMove.identityVerified, true);
   assert.equal(
     moveStatus.externalMove.identitySource,
@@ -305,6 +369,287 @@ try {
     false,
     "the private destructive binding must not be published in runtime status",
   );
+  assert.deepEqual(
+    await snapshotProfiledMoveJournals(sandbox),
+    [],
+    "external_runtime_status must not create a journal or WAL sidecar",
+  );
+  const readonlyScan = await moveProxyClient.callTool({
+    name: "external_references_scan",
+    arguments: { rootId: "proxy.pilot", relativePath: "hello.txt" },
+  });
+  assert.equal(readonlyScan.isError, false, JSON.stringify(readonlyScan));
+  assert.deepEqual(
+    await snapshotProfiledMoveJournals(sandbox),
+    [],
+    "external_references_scan must not create a journal or WAL sidecar",
+  );
+  const unknownReadonlyStatus = await moveProxyClient.callTool({
+    name: "external_move_status",
+    arguments: { planId: "22222222-2222-4222-8222-222222222222" },
+  });
+  assert.equal(unknownReadonlyStatus.isError, true);
+  assert.equal(jsonOf(unknownReadonlyStatus).error, "not_found");
+  assert.deepEqual(
+    await snapshotProfiledMoveJournals(sandbox),
+    [],
+    "unknown file-backed status must not create a journal or WAL sidecar",
+  );
+  const readonlyPlan = jsonOf(
+    await moveProxyClient.callTool({
+      name: "external_move_plan",
+      arguments: {
+        rootId: "proxy.pilot",
+        sourceRelativePath: "hello.txt",
+        targetRelativePath: "moved.txt",
+        idempotencyKey: "readonly-planning-remains-available",
+      },
+    }),
+  );
+  assert.equal(readonlyPlan.status, "planned");
+  assert.equal(readonlyPlan.readyToApply, true);
+  assert.equal(
+    (await snapshotProfiledMoveJournals(sandbox)).some((entry) =>
+      /^move\.[a-f0-9]{24}\.sqlite$/u.test(entry.name),
+    ),
+    true,
+    "external_move_plan must create its durable profiled journal",
+  );
+  const readonlyApply = await moveProxyClient.callTool({
+    name: "external_move_apply",
+    arguments: {
+      planId: readonlyPlan.planId,
+      idempotencyKey: readonlyPlan.idempotencyKey,
+    },
+  });
+  assert.equal(readonlyApply.isError, true);
+  assert.equal(jsonOf(readonlyApply).error, "capability_denied");
+  const readonlyRollback = await moveProxyClient.callTool({
+    name: "external_move_rollback",
+    arguments: {
+      planId: readonlyPlan.planId,
+      idempotencyKey: readonlyPlan.idempotencyKey,
+    },
+  });
+  assert.equal(readonlyRollback.isError, true);
+  assert.equal(jsonOf(readonlyRollback).error, "capability_denied");
+  assert.equal(
+    await readFile(path.join(externalPath, "hello.txt"), "utf8"),
+    "Bonjour depuis le proxy",
+  );
+
+  // Close the planning process before inspecting its journal: this models a
+  // restart and proves the durable receipt is in a fingerprint-suffixed file,
+  // not the configured base filename.
+  await moveProxyClient.close();
+  await moveProxyTransport.close().catch(() => undefined);
+  moveProxyClient = undefined;
+  moveProxyTransport = undefined;
+  const profiledJournalNames = (await readdir(sandbox)).filter((name) =>
+    /^move\.[a-f0-9]{24}\.sqlite$/u.test(name),
+  );
+  assert.equal(profiledJournalNames.length, 1);
+  const profiledJournalPath = path.join(sandbox, profiledJournalNames[0]);
+
+  // The process was interrupted without closing its journal, so the new plan
+  // remains in a non-checkpointed WAL. Status must read that generation from a
+  // private snapshot without changing the original DB/WAL/SHM inventory,
+  // bytes or mtimes.
+  const reliableJournalSnapshot = await snapshotProfiledMoveJournals(sandbox);
+  assert.equal(
+    reliableJournalSnapshot.some((entry) => entry.name.endsWith("-wal")),
+    true,
+    "the discriminant requires a non-checkpointed WAL",
+  );
+  profiledStatusProxyTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["dist/stdio-proxy.js"],
+    cwd: process.cwd(),
+    env: {
+      ...commonEnv,
+      OBSIDIAN_RUNTIME_MODE: "headless-filesystem",
+      OBSIDIAN_VAULT: vaultBPath,
+      MCP_EXTERNAL_ROOTS_FILE: configPath,
+      MCP_WRITE_MODE: "readonly",
+      MCP_EXTERNAL_MOVE_ENABLED: "false",
+      MCP_EXTERNAL_MOVE_PROFILE_ID: "stdio-proxy-move-test",
+      MCP_EXTERNAL_MOVE_JOURNAL_PATH: profiledJournalBasePath,
+      MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
+      MCP_PROXY_START_TIMEOUT_MS: "20000",
+    },
+  });
+  profiledStatusProxyClient = new Client({
+    name: "optimike-external-roots-reliable-status-test",
+    version: "0",
+  });
+  await profiledStatusProxyClient.connect(profiledStatusProxyTransport);
+  assert.deepEqual(
+    await snapshotProfiledMoveJournals(sandbox),
+    reliableJournalSnapshot,
+    "readonly restart must not alter an existing reliable journal",
+  );
+  const reliableProfiledStatus = jsonOf(
+    await profiledStatusProxyClient.callTool({
+      name: "external_move_status",
+      arguments: { planId: readonlyPlan.planId },
+    }),
+  );
+  assert.equal(reliableProfiledStatus.status, "planned");
+  assert.deepEqual(
+    await snapshotProfiledMoveJournals(sandbox),
+    reliableJournalSnapshot,
+    "reliable file-backed status must preserve journal bytes and mtimes",
+  );
+  await assertNoPrivateStatusSnapshots(
+    privateTempPath,
+    "successful status must remove its private DB/WAL snapshot",
+  );
+  const corruptProfiledJournalPath = path.join(
+    sandbox,
+    "move.ffffffffffffffffffffffff.sqlite",
+  );
+  await writeFile(corruptProfiledJournalPath, "not-a-sqlite-journal", "utf8");
+  const corruptSnapshotStatus = await profiledStatusProxyClient.callTool({
+    name: "external_move_status",
+    arguments: { planId: "33333333-3333-4333-8333-333333333333" },
+  });
+  assert.equal(corruptSnapshotStatus.isError, true);
+  assert.equal(jsonOf(corruptSnapshotStatus).error, "not_found");
+  await assertNoPrivateStatusSnapshots(
+    privateTempPath,
+    "failed status must remove its private DB/WAL snapshot",
+  );
+  await rm(corruptProfiledJournalPath, { force: true });
+  await profiledStatusProxyClient.close();
+  await profiledStatusProxyTransport.close().catch(() => undefined);
+  profiledStatusProxyClient = undefined;
+  profiledStatusProxyTransport = undefined;
+
+  {
+    const db = new DatabaseSync(profiledJournalPath);
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    db.close();
+  }
+
+  {
+    const db = new DatabaseSync(profiledJournalPath);
+    const row = db
+      .prepare("SELECT payload_json FROM external_move_plans WHERE plan_id = ?")
+      .get(readonlyPlan.planId);
+    const payload = JSON.parse(row.payload_json);
+    payload.status = "recovery_required";
+    payload.failure = "backend_session_changed";
+    payload.recoveryErrors = ["backend_session_changed"];
+    payload.updatedAt = "2026-08-30T01:00:00.000Z";
+    db.prepare(
+      `UPDATE external_move_plans
+       SET status = ?, payload_json = ?, updated_at = ?
+       WHERE plan_id = ?`,
+    ).run(
+      payload.status,
+      JSON.stringify(payload),
+      payload.updatedAt,
+      readonlyPlan.planId,
+    );
+    db.close();
+  }
+
+  // The feature flag is a destructive gate only. With full write mode but the
+  // flag disabled, planning and status still work while apply stays closed.
+  disabledMoveProxyTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["dist/stdio-proxy.js"],
+    cwd: process.cwd(),
+    env: {
+      ...commonEnv,
+      OBSIDIAN_RUNTIME_MODE: "headless-filesystem",
+      MCP_EXTERNAL_ROOTS_FILE: configPath,
+      MCP_WRITE_MODE: "full",
+      MCP_EXTERNAL_MOVE_ENABLED: "false",
+      MCP_EXTERNAL_MOVE_PROFILE_ID: "stdio-proxy-move-test",
+      MCP_EXTERNAL_MOVE_JOURNAL_PATH: profiledJournalBasePath,
+      MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
+      MCP_PROXY_START_TIMEOUT_MS: "20000",
+    },
+  });
+  disabledMoveProxyClient = new Client({
+    name: "optimike-external-roots-disabled-move-test",
+    version: "0",
+  });
+  await disabledMoveProxyClient.connect(disabledMoveProxyTransport);
+  const disabledStatus = jsonOf(
+    await disabledMoveProxyClient.callTool({
+      name: "external_runtime_status",
+      arguments: {},
+    }),
+  );
+  assert.equal(disabledStatus.externalMove.available, false);
+  assert.equal(disabledStatus.externalMove.identityVerified, true);
+  const disabledPlanReplay = jsonOf(
+    await disabledMoveProxyClient.callTool({
+      name: "external_move_plan",
+      arguments: {
+        rootId: "proxy.pilot",
+        sourceRelativePath: "hello.txt",
+        targetRelativePath: "moved.txt",
+        idempotencyKey: "readonly-planning-remains-available",
+      },
+    }),
+  );
+  assert.equal(disabledPlanReplay.planId, readonlyPlan.planId);
+  assert.equal(disabledPlanReplay.recoveryRequired, true);
+  const disabledApply = await disabledMoveProxyClient.callTool({
+    name: "external_move_apply",
+    arguments: {
+      planId: readonlyPlan.planId,
+      idempotencyKey: readonlyPlan.idempotencyKey,
+    },
+  });
+  assert.equal(disabledApply.isError, true);
+  assert.equal(jsonOf(disabledApply).error, "capability_denied");
+  await disabledMoveProxyClient.close();
+  await disabledMoveProxyTransport.close().catch(() => undefined);
+  disabledMoveProxyClient = undefined;
+  disabledMoveProxyTransport = undefined;
+
+  // On the next restart the local proxy points at another vault, so target
+  // attestation deliberately fails and no coordinator exists. Status must
+  // still discover the current profiled journal read-only.
+  profiledStatusProxyTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["dist/stdio-proxy.js"],
+    cwd: process.cwd(),
+    env: {
+      ...commonEnv,
+      OBSIDIAN_RUNTIME_MODE: "headless-filesystem",
+      OBSIDIAN_VAULT: vaultBPath,
+      MCP_EXTERNAL_ROOTS_FILE: configPath,
+      MCP_WRITE_MODE: "readonly",
+      MCP_EXTERNAL_MOVE_ENABLED: "false",
+      MCP_EXTERNAL_MOVE_PROFILE_ID: "stdio-proxy-move-test",
+      MCP_EXTERNAL_MOVE_JOURNAL_PATH: profiledJournalBasePath,
+      MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
+      MCP_PROXY_START_TIMEOUT_MS: "20000",
+    },
+  });
+  profiledStatusProxyClient = new Client({
+    name: "optimike-external-roots-profiled-status-test",
+    version: "0",
+  });
+  await profiledStatusProxyClient.connect(profiledStatusProxyTransport);
+  const profiledRecoveryStatus = jsonOf(
+    await profiledStatusProxyClient.callTool({
+      name: "external_move_status",
+      arguments: { planId: readonlyPlan.planId },
+    }),
+  );
+  assert.equal(profiledRecoveryStatus.planId, readonlyPlan.planId);
+  assert.equal(profiledRecoveryStatus.legacyBinding, false);
+  assert.equal(profiledRecoveryStatus.recoveryRequired, true);
+  assert.equal(profiledRecoveryStatus.nextAction, "manual_review");
+  assert.deepEqual(profiledRecoveryStatus.recoveryErrors, [
+    "backend_session_changed",
+  ]);
 
   // The backend remains on Vault A while this proxy expects Vault B. A
   // full-write process must retain harmless external reads but never create a
@@ -529,11 +874,15 @@ try {
   }
 
   console.log(
-    "PASS: stdio proxy owns one external-roots configuration for status/list/stat/read/handoff, read-only startup needs no move profile, HTTP denies handoff, and responses remain path-redacted",
+    "PASS: stdio proxy keeps scan/plan/status available behind readonly or disabled destructive gates, recovers profiled status after restart, denies HTTP handoff, and keeps responses path-redacted",
   );
 } finally {
   await moveProxyClient?.close().catch(() => undefined);
   await moveProxyTransport?.close().catch(() => undefined);
+  await disabledMoveProxyClient?.close().catch(() => undefined);
+  await disabledMoveProxyTransport?.close().catch(() => undefined);
+  await profiledStatusProxyClient?.close().catch(() => undefined);
+  await profiledStatusProxyTransport?.close().catch(() => undefined);
   await mismatchedMoveProxyClient?.close().catch(() => undefined);
   await mismatchedMoveProxyTransport?.close().catch(() => undefined);
   await proxyClient.close().catch(() => undefined);
@@ -544,4 +893,5 @@ try {
     setTimeout(resolve, 3000);
   });
   await rm(sandbox, { recursive: true, force: true });
+  clearTimeout(testWatchdog);
 }

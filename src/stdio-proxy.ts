@@ -2,7 +2,17 @@
 
 import "./config/toolProfileCli.js";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -191,21 +201,132 @@ function unavailableExternalMove(): Promise<never> {
   );
 }
 
+function disabledExternalMoveMutation(): Promise<never> {
+  return Promise.reject(
+    new ExternalRootError(
+      "capability_denied",
+      "External move apply and rollback require full write mode, an enabled move feature, and a verified target binding.",
+    ),
+  );
+}
+
+function unknownExternalMovePlan(): Promise<never> {
+  return Promise.reject(
+    new ExternalRootError("not_found", "Unknown external move plan."),
+  );
+}
+
+function externalMoveDestructiveAvailable(): boolean {
+  return (
+    Boolean(externalMoveCoordinator) &&
+    externalMoveBindingIdentity?.verifiable === true &&
+    config.externalMoveEnabled &&
+    config.mcpWriteMode === "full"
+  );
+}
+
+const EXTERNAL_MOVE_JOURNAL_SUFFIXES = ["", "-wal"] as const;
+
+function removePrivateJournalSnapshot(directory: string): void {
+  try {
+    rmSync(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 50,
+    });
+  } catch {
+    throw new Error("Private external move status snapshot cleanup failed.");
+  }
+}
+
+function externalMoveJournalSnapshotSignature(
+  journalPath: string,
+): Array<{ suffix: string; size: string; mtimeNs: string }> {
+  return EXTERNAL_MOVE_JOURNAL_SUFFIXES.flatMap((suffix) => {
+    const filePath = `${journalPath}${suffix}`;
+    if (!existsSync(filePath)) return [];
+    const metadata = statSync(filePath, { bigint: true });
+    return [
+      {
+        suffix,
+        size: metadata.size.toString(),
+        mtimeNs: metadata.mtimeNs.toString(),
+      },
+    ];
+  });
+}
+
+function sha256File(filePath: string): string {
+  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
 /**
- * Pre-attestation journals used the un-namespaced configured filename. Read
- * them only when they already exist, through a read-only handle. This gives an
- * operator a status receipt for manual recovery without constructing a new
- * destructive binding, creating a file, or silently re-binding its plan.
+ * Copies a stable DB/WAL generation outside the repository before SQLite
+ * opens it. SQLite rebuilds a private SHM and may checkpoint the private copy,
+ * but never touches the operator's durable journal merely to serve status.
  */
-function getLegacyExternalMovePlan(
+function snapshotExternalMoveJournal(journalPath: string): {
+  directory: string;
+  databasePath: string;
+} {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const directory = mkdtempSync(
+      path.join(os.tmpdir(), "optimike-external-status-"),
+    );
+    try {
+      chmodSync(directory, 0o700);
+    } catch {
+      // Windows ACLs remain authoritative when POSIX modes are unavailable.
+    }
+    const databasePath = path.join(directory, path.basename(journalPath));
+    try {
+      const before = externalMoveJournalSnapshotSignature(journalPath);
+      if (!before.some((item) => item.suffix === "")) {
+        throw new Error("The external move journal is absent.");
+      }
+      for (const { suffix } of before) {
+        const copiedPath = `${databasePath}${suffix}`;
+        copyFileSync(`${journalPath}${suffix}`, copiedPath);
+        try {
+          chmodSync(copiedPath, 0o600);
+        } catch {
+          // Windows ACLs remain authoritative when POSIX modes are unavailable.
+        }
+      }
+      const afterCopy = externalMoveJournalSnapshotSignature(journalPath);
+      const copiedGenerationIsStable =
+        JSON.stringify(afterCopy) === JSON.stringify(before) &&
+        afterCopy.every(
+          ({ suffix }) =>
+            sha256File(`${journalPath}${suffix}`) ===
+            sha256File(`${databasePath}${suffix}`),
+        ) &&
+        JSON.stringify(externalMoveJournalSnapshotSignature(journalPath)) ===
+          JSON.stringify(afterCopy);
+      if (copiedGenerationIsStable) return { directory, databasePath };
+    } catch {
+      // A concurrent writer may rotate or append the WAL during the copy.
+      // Retry from a fresh private directory; never open an unstable snapshot.
+    }
+    removePrivateJournalSnapshot(directory);
+  }
+  throw new Error("The external move journal changed during status snapshot.");
+}
+
+function readExternalMovePlanFromJournal(
+  journalPath: string,
   planId: string,
 ): ExternalMovePlan | undefined {
-  const journalPath = config.externalMoveJournalPath;
-  if (journalPath === ":memory:" || !existsSync(journalPath)) return undefined;
+  if (!existsSync(journalPath)) return undefined;
   let db: DatabaseSync | undefined;
+  let snapshotDirectory: string | undefined;
   try {
-    db = new DatabaseSync(journalPath, { readOnly: true });
+    const snapshot = snapshotExternalMoveJournal(journalPath);
+    snapshotDirectory = snapshot.directory;
+    db = new DatabaseSync(snapshot.databasePath);
     db.exec("PRAGMA busy_timeout=5000");
+    db.exec("PRAGMA query_only=ON");
     const row = db
       .prepare("SELECT payload_json FROM external_move_plans WHERE plan_id = ?")
       .get(planId) as { payload_json?: unknown } | undefined;
@@ -217,8 +338,69 @@ function getLegacyExternalMovePlan(
   } catch {
     return undefined;
   } finally {
-    db?.close();
+    try {
+      db?.close();
+    } catch {
+      // Cleanup of the sensitive private copy remains mandatory even if the
+      // temporary SQLite handle itself reports a close failure.
+    } finally {
+      if (snapshotDirectory) {
+        removePrivateJournalSnapshot(snapshotDirectory);
+      }
+    }
   }
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/**
+ * Returns only already-existing durable journal paths. Current journals are
+ * namespaced by the first 24 hex characters of their private binding digest;
+ * older pre-attestation journals used the configured base filename directly.
+ * Discovery never creates or opens a writable database.
+ */
+function externalMoveJournalCandidates(): string[] {
+  const basePath = config.externalMoveJournalPath;
+  if (basePath === ":memory:") return [];
+  const parsed = path.parse(basePath);
+  const directory = parsed.dir || ".";
+  const extension = parsed.ext || ".sqlite";
+  const stem = parsed.ext ? parsed.name : parsed.base;
+  const profiledName = new RegExp(
+    `^${escapeRegularExpression(stem)}\\.[a-f0-9]{24}${escapeRegularExpression(extension)}$`,
+    "u",
+  );
+  let profiledPaths: string[] = [];
+  try {
+    profiledPaths = readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && profiledName.test(entry.name))
+      .map((entry) => path.join(directory, entry.name))
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    // The journal directory may not exist yet. Status remains read-only and
+    // must not create it merely to report that no receipt is available.
+  }
+  return [...new Set([basePath, ...profiledPaths])];
+}
+
+/**
+ * Reads legacy and current profiled journals without constructing a new
+ * destructive binding. A duplicate plan ID across journals is ambiguous and
+ * therefore fails closed instead of selecting an arbitrary vault/profile.
+ */
+function getStoredExternalMovePlan(
+  planId: string,
+): ExternalMovePlan | undefined {
+  let match: ExternalMovePlan | undefined;
+  for (const journalPath of externalMoveJournalCandidates()) {
+    const candidate = readExternalMovePlanFromJournal(journalPath, planId);
+    if (!candidate) continue;
+    if (match) return undefined;
+    match = candidate;
+  }
+  return match;
 }
 
 function invalidExternalArguments(toolName: string): {
@@ -783,11 +965,10 @@ async function start() {
     : undefined;
 
   await ensureBackendConnected();
-  const externalMoveRequested =
-    Boolean(externalRootsService) &&
-    config.externalMoveEnabled &&
-    config.mcpWriteMode === "full";
-  if (externalMoveRequested) {
+  // Scan, plan and status are read/planning operations. Initialize their
+  // profiled, attested dependencies independently from the feature flag and
+  // write mode; apply and rollback enforce those destructive gates themselves.
+  if (externalRootsService) {
     const moveRootsService = externalRootsService;
     const rootsFingerprint = rootConfigFingerprint(
       process.env.MCP_EXTERNAL_ROOTS_FILE!,
@@ -852,7 +1033,7 @@ async function start() {
           externalMoveCoordinator = new ExternalMoveCoordinator(
             moveRootsService!,
             vault,
-            new ExternalMoveJournal(profiledJournalPath),
+            () => new ExternalMoveJournal(profiledJournalPath),
           );
         } else {
           externalMoveUnavailableReason = "target_unverified";
@@ -884,11 +1065,7 @@ async function start() {
             : "read-only",
         localHandoffAllowed: true,
         externalMove: {
-          available:
-            Boolean(externalMoveCoordinator) &&
-            externalMoveBindingIdentity?.verifiable === true &&
-            config.externalMoveEnabled &&
-            config.mcpWriteMode === "full",
+          available: externalMoveDestructiveAvailable(),
           transport: "stdio-only",
           requiresRootCapability: "move",
           identityVerified: Boolean(externalMoveCoordinator),
@@ -1025,16 +1202,25 @@ async function start() {
       if (!parsed.success) {
         return invalidExternalArguments(request.params.name);
       }
-      return externalRootsResult(async () =>
-        externalMoveCoordinator
-          ? externalMoveCoordinator.status(parsed.data.planId)
-          : (() => {
-              const legacy = getLegacyExternalMovePlan(parsed.data.planId);
-              return legacy
-                ? projectExternalMovePlanForStatus(legacy)
-                : unavailableExternalMove();
-            })(),
-      )();
+      return externalRootsResult(async () => {
+        if (
+          config.externalMoveJournalPath === ":memory:" &&
+          externalMoveCoordinator
+        ) {
+          return externalMoveCoordinator.status(parsed.data.planId);
+        }
+        const stored = getStoredExternalMovePlan(parsed.data.planId);
+        if (!stored) return unknownExternalMovePlan();
+        const storedBinding = stored.bindingIdentity?.bindingFingerprint;
+        if (
+          externalMoveCoordinator &&
+          typeof storedBinding === "string" &&
+          storedBinding === externalMoveBindingIdentity?.bindingFingerprint
+        ) {
+          return externalMoveCoordinator.status(parsed.data.planId, stored);
+        }
+        return projectExternalMovePlanForStatus(stored);
+      })();
     }
 
     if (request.params.name === "external_move_apply") {
@@ -1045,12 +1231,12 @@ async function start() {
         return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
-        externalMoveCoordinator
+        externalMoveDestructiveAvailable() && externalMoveCoordinator
           ? externalMoveCoordinator.apply(
               parsed.data.planId,
               parsed.data.idempotencyKey,
             )
-          : unavailableExternalMove(),
+          : disabledExternalMoveMutation(),
       )();
     }
 
@@ -1062,12 +1248,12 @@ async function start() {
         return invalidExternalArguments(request.params.name);
       }
       return externalRootsResult(() =>
-        externalMoveCoordinator
+        externalMoveDestructiveAvailable() && externalMoveCoordinator
           ? externalMoveCoordinator.rollback(
               parsed.data.planId,
               parsed.data.idempotencyKey,
             )
-          : unavailableExternalMove(),
+          : disabledExternalMoveMutation(),
       )();
     }
 
