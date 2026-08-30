@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const projectRoot = path.dirname(
   fileURLToPath(new URL("../package.json", import.meta.url)),
@@ -75,6 +76,73 @@ assert.equal(physicalSafety.rootReplacementRefused, true);
 assert.equal(physicalSafety.bridgeBuildManifestMatchesNormalizedSource, true);
 
 const source = await readFile(scriptPath, "utf8");
+const sourceFile = ts.createSourceFile(
+  scriptPath,
+  source,
+  ts.ScriptTarget.Latest,
+  true,
+  ts.ScriptKind.JS,
+);
+
+function containsSamePathIdentityCall(node) {
+  let found = false;
+  function visit(candidate) {
+    if (found) return;
+    if (
+      ts.isCallExpression(candidate) &&
+      ts.isIdentifier(candidate.expression) &&
+      candidate.expression.text === "samePathIdentity"
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(candidate, visit);
+  }
+  visit(node);
+  return found;
+}
+
+function auditPathIdentityAssertions(root) {
+  let count = 0;
+  function visit(node) {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "assert" &&
+      node.expression.name.text === "equal" &&
+      node.arguments[0] &&
+      containsSamePathIdentityCall(node.arguments[0])
+    ) {
+      count += 1;
+      assert.equal(
+        node.arguments[1]?.kind,
+        ts.SyntaxKind.TrueKeyword,
+        "Path-identity assertions must compare against true before their diagnostic message.",
+      );
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(root);
+  return count;
+}
+const pathIdentityAssertionCount = auditPathIdentityAssertions(sourceFile);
+assert.ok(
+  pathIdentityAssertionCount >= 7,
+  "The live behavior canary must retain every path-identity assertion.",
+);
+const nestedOmissionFixture = ts.createSourceFile(
+  "nested-path-identity-omission.mjs",
+  'assert.equal(samePathIdentity(await realpath(candidate), expected), "diagnostic");',
+  ts.ScriptTarget.Latest,
+  true,
+  ts.ScriptKind.JS,
+);
+assert.throws(
+  () => auditPathIdentityAssertions(nestedOmissionFixture),
+  /Path-identity assertions must compare against true/u,
+  "The contract must reject an omitted boolean expectation even when path arguments contain nested calls.",
+);
 for (const requiredTool of [
   "operon_status",
   "operon_get_configuration",

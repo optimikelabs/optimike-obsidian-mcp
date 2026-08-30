@@ -1733,6 +1733,7 @@ async function main() {
     const currentVaultReal = currentVaultIdentity().realRoot;
     assert.equal(
       samePathIdentity(currentVaultReal, vaultReal),
+      true,
       "Pilot 2 vault real path changed after preflight.",
     );
     const checked = await safeVaultRegularFile(
@@ -1749,6 +1750,7 @@ async function main() {
     const currentReal = await realpath(checked.absolute);
     assert.equal(
       samePathIdentity(currentReal, originalFixtureIdentity.realPath),
+      true,
       "Fixture path was replaced by a junction, link, or another real target.",
     );
     assert.equal(
