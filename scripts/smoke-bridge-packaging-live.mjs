@@ -352,12 +352,8 @@ async function main() {
     assert.equal(rollback(firstReceipt.backupPath).outcome, "rolled_back");
     currentState = "baseline";
     evidence.rollback = true;
-    await openPilot();
-    pilotClosed = false;
     assert.deepEqual(snapshotInstalled(), baseline);
 
-    await closePilot();
-    pilotClosed = true;
     secondReceipt = install(bundleRoot, candidateSha, privateRoot);
     currentState = "candidate-second";
     evidence.reinstall = secondReceipt.outcome === "committed";

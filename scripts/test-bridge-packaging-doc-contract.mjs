@@ -9,6 +9,7 @@ const installer = read("scripts/install-bridge-bundle.mjs");
 const builder = read("scripts/build-bridge-bundle.mjs");
 const archive = read("scripts/archive-bridge-bundle.ps1");
 const workflow = read(".github/workflows/bridge-packaging-p3.yml");
+const liveCanary = read("scripts/smoke-bridge-packaging-live.mjs");
 
 assert.equal(rootPackage.version, "3.5.0");
 for (const script of [
@@ -54,6 +55,17 @@ assert.match(workflow, /ubuntu-latest/);
 assert.match(workflow, /windows-latest/);
 assert.match(workflow, /npm run test:bridge-package/);
 assert.match(workflow, /npm run package:bridge-bundle/);
+const rollbackCheckpoint = liveCanary.indexOf("evidence.rollback = true");
+const reinstallCheckpoint = liveCanary.indexOf(
+  "secondReceipt = install",
+  rollbackCheckpoint,
+);
+assert.ok(rollbackCheckpoint > 0 && reinstallCheckpoint > rollbackCheckpoint);
+assert.doesNotMatch(
+  liveCanary.slice(rollbackCheckpoint, reinstallCheckpoint),
+  /openPilot/,
+  "Pilot 2 must not observe the downgraded Bridge between rollback and reinstall",
+);
 
 console.log(
   "PASS: Bridge packaging docs, release scripts, privacy boundary and Windows/Linux gate remain aligned",
