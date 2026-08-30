@@ -1585,6 +1585,17 @@ export class OperonService {
     return parsed.data;
   }
 
+  private isLiveStatusUsable(status: OperonStatus): boolean {
+    return (
+      status.ok &&
+      status.operon.compatible &&
+      status.index.ready &&
+      status.capabilities.list &&
+      status.capabilities.query &&
+      status.index.duplicateConflictCount === 0
+    );
+  }
+
   private async fetchLiveStatus(): Promise<OperonStatus> {
     const status = await this.fetchBridgeStatus("fetchLiveOperonStatus");
     if (!status.ok || !status.operon.compatible || !status.index.ready) {
@@ -1953,7 +1964,7 @@ export class OperonService {
       try {
         const live = await this.fetchBridgeStatus("operonStatus");
         return {
-          ok: live.ok,
+          ok: this.isLiveStatusUsable(live),
           source: "operon-live",
           stale: false,
           live,
