@@ -13,9 +13,10 @@ const PREFIX = "/extensions/obsidian-bases-bridge/atomic";
 export function getBaseAtomicStatus(
   request: RequestFunction,
   context: RequestContext,
+  timeoutMs?: number,
 ): Promise<BaseAtomicStatusResponse> {
   return request<BaseAtomicStatusResponse>(
-    { method: "GET", url: `${PREFIX}/status` },
+    { method: "GET", url: `${PREFIX}/status`, timeout: timeoutMs },
     context,
     "getBaseAtomicStatus",
   );

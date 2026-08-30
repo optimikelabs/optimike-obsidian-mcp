@@ -380,8 +380,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.3.0",
-  "package metadata must match the 3.3.0 Bridge lifecycle candidate",
+  "3.4.0",
+  "package metadata must match the 3.4.0 capability doctor candidate",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
@@ -405,6 +405,7 @@ const bilingualPairs = [
   ["docs/external-roots-setup.md", "docs/external-roots-setup.fr.md"],
   ["docs/runtime-capability-matrix.md", "docs/runtime-capability-matrix.fr.md"],
   ["docs/bridge-lifecycle.md", "docs/bridge-lifecycle.fr.md"],
+  ["docs/capability-doctor.md", "docs/capability-doctor.fr.md"],
   ["docs/governed-note-replacement.md", "docs/governed-note-replacement.fr.md"],
   ["docs/mcp-routing-guide.md", "docs/mcp-routing-guide.fr.md"],
   ["docs/headless-server-profile.md", "docs/headless-server-profile.fr.md"],

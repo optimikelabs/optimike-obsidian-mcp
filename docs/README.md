@@ -27,6 +27,7 @@ French operator guides are linked alongside their English equivalents.
 | Which server tool profile should a client expose?                | [Tool Surface Profiles](tool-surface-profiles.md)                                     |
 | Which tools exist?                                               | [Tool Surface](obsidian_mcp_tools_spec.md)                                            |
 | Which tools are available in each runtime?                       | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
+| Why is a capability hidden, unavailable, or unauthorized?        | [Runtime Capability Doctor](capability-doctor.md)                                     |
 | How do I run and maintain the service?                           | [Operations](../OPERATIONS.md)                                                        |
 | How do Bridges recover after Local REST starts or reloads?       | [Bridge Lifecycle Recovery](bridge-lifecycle.md)                                     |
 | Which tool should an agent choose inside its profile?            | [MCP Routing Guide](mcp-routing-guide.md)                                             |
@@ -67,6 +68,7 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 - public exposure profiles: [Tool Surface Profiles](tool-surface-profiles.md);
 - semantic search and providers: [Operations](../OPERATIONS.md#semantic-search-what-is-persisted-and-what-is-not);
 - runtime modes: [Runtime Capability Matrix](runtime-capability-matrix.md);
+- live profile/backend/grant diagnosis: [Runtime Capability Doctor](capability-doctor.md);
 - cache, health and maintenance: [Operations](../OPERATIONS.md).
 
 ### External documents

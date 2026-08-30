@@ -289,9 +289,13 @@ properties, plugin-specific filters, or exact UI view semantics.
 ## Runtime
 
 - `obsidian_runtime_status`: redacted process, cache, semantic, degraded-mode,
-  and write-policy status. It returns modes, booleans, versions, hashes, and
-  counts only; never physical paths, URLs, secrets, raw configuration, or
-  local content.
+  and write-policy status plus the versioned `capabilityManifest` doctor. The
+  manifest separates discoverability, backend availability, and authorization
+  with closed reason/next-action codes, including exact Operon mutation
+  projections. It returns bounded modes, booleans, versions and counts only;
+  never physical paths, URLs, secrets, raw configuration, binding fingerprints,
+  backend errors, or local content. See
+  [Runtime Capability Doctor](capability-doctor.md).
 - `obsidian_runtime_maintenance`: integrity checks and cache refresh actions;
   its public result uses the same redacted runtime diagnostics.
 

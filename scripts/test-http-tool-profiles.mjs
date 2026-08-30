@@ -194,6 +194,16 @@ function publicToolFailure(payload, label) {
   return failure;
 }
 
+function successfulToolPayload(payload, label) {
+  const text = payload?.result?.content
+    ?.filter((block) => block?.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+  assert.ok(text, `${label} must return an MCP text result`);
+  assert.notEqual(payload?.result?.isError, true, label);
+  return JSON.parse(text);
+}
+
 async function completionEntries(logDir) {
   const files = await readdir(logDir);
   const lines = (
@@ -307,6 +317,61 @@ try {
   assert.ok(fullNames.includes("smart_semantic_search"));
   assert.ok(!fullNames.includes("smart_search"));
   assert.ok(!fullNames.includes("smart-search"));
+
+  const [standardStatus, tasksStatus, fullStatus, legacyStatus] =
+    await Promise.all(
+      [standard, tasks, full, legacy].map((client) =>
+        call(client, baseUrl, "tools/call", {
+          name: "obsidian_runtime_status",
+          arguments: {},
+        }),
+      ),
+    );
+  const profileStatuses = [
+    [standardStatus, "standard"],
+    [tasksStatus, "tasks"],
+    [fullStatus, "full"],
+    [legacyStatus, "standard"],
+  ];
+  for (const [statusEnvelope, expectedProfile] of profileStatuses) {
+    const status = successfulToolPayload(
+      statusEnvelope,
+      `${expectedProfile} capability doctor`,
+    );
+    assert.equal(status.capabilityManifest.contractVersion, 1);
+    assert.equal(status.capabilityManifest.profile, expectedProfile);
+    assert.equal(
+      status.capabilityManifest.registrationMode,
+      "headless-readonly",
+    );
+    assert.equal(status.capabilityManifest.admission.transport, "http");
+    assert.equal(Array.isArray(status.capabilityManifest.capabilities), true);
+    assert.equal(
+      JSON.stringify(status).includes(vault),
+      false,
+      `${expectedProfile} capability doctor leaked the vault path`,
+    );
+  }
+  const standardDoctor = successfulToolPayload(
+    standardStatus,
+    "standard capability doctor",
+  );
+  const tasksDoctor = successfulToolPayload(
+    tasksStatus,
+    "tasks capability doctor",
+  );
+  assert.equal(
+    standardDoctor.capabilityManifest.capabilities.find(
+      (item) => item.id === "operon-read",
+    ).state,
+    "hidden",
+  );
+  assert.notEqual(
+    tasksDoctor.capabilityManifest.capabilities.find(
+      (item) => item.id === "operon-read",
+    ).state,
+    "hidden",
+  );
 
   // A real authenticated HTTP path must retain one server-owned request id
   // across the response header, public tool error envelope, and completion

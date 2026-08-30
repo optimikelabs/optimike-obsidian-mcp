@@ -160,6 +160,25 @@ async function main() {
     if (runtimeStatus.runtime?.dist?.isNewerThanProcess) {
       throw new Error("backend process is older than dist files");
     }
+    if (runtimeStatus.capabilityManifest?.contractVersion !== 1) {
+      throw new Error("runtime status lost capability manifest contract v1");
+    }
+    if (
+      runtimeStatus.capabilityManifest.profile !== "standard" ||
+      runtimeStatus.capabilityManifest.registrationMode !== "headless-readonly"
+    ) {
+      throw new Error(
+        `unexpected capability doctor binding: ${JSON.stringify(runtimeStatus.capabilityManifest)}`,
+      );
+    }
+    const governedNote = runtimeStatus.capabilityManifest.capabilities.find(
+      (capability) => capability.id === "governed-note-write",
+    );
+    if (governedNote?.reasonCode !== "runtime_mode_unavailable") {
+      throw new Error(
+        `headless doctor misclassified governed note writes: ${JSON.stringify(governedNote)}`,
+      );
+    }
     const serializedRuntimeStatus = JSON.stringify(runtimeStatus);
     for (const privateValue of [
       vaultRoot,

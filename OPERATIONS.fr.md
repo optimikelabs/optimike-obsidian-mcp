@@ -468,6 +468,13 @@ les outils MCP authentifiés pour obtenir :
 - `obsidian_runtime_status`
 - `obsidian_runtime_maintenance`
 
+`obsidian_runtime_status` est aussi le doctor canonique en lecture seule. Son
+`capabilityManifest` versionné sépare la découvrabilité de l’outil, la
+disponibilité du backend et l’autorisation, puis retourne un code de cause
+stable et une prochaine action sûre. Il ne répare jamais le runtime et
+n’accorde aucune capacité. Voir le
+[Doctor des capacités runtime](docs/capability-doctor.fr.md).
+
 Actions de maintenance supportées :
 
 - `integrity_check`

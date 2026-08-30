@@ -1570,8 +1570,13 @@ export class OperonService {
     }
   }
 
-  private async fetchBridgeStatus(operation: string): Promise<OperonStatus> {
-    const response = await this.getClient().get(`${BRIDGE_PREFIX}/status`);
+  private async fetchBridgeStatus(
+    operation: string,
+    timeoutMs?: number,
+  ): Promise<OperonStatus> {
+    const response = await this.getClient().get(`${BRIDGE_PREFIX}/status`, {
+      timeout: timeoutMs,
+    });
     const parsed = OperonStatusSchema.safeParse(response.data);
     if (!parsed.success) {
       throw new McpError(
@@ -1948,7 +1953,10 @@ export class OperonService {
     }
   }
 
-  async status(forceRefresh = false): Promise<Record<string, unknown>> {
+  async status(
+    forceRefresh = false,
+    probeTimeoutMs?: number,
+  ): Promise<Record<string, unknown>> {
     if (forceRefresh) {
       const snapshot = await this.ensureSnapshot(true);
       return {
@@ -1962,7 +1970,10 @@ export class OperonService {
     const cached = this.loadSnapshot("operon-cache");
     if (liveModeConfigured()) {
       try {
-        const live = await this.fetchBridgeStatus("operonStatus");
+        const live = await this.fetchBridgeStatus(
+          "operonStatus",
+          probeTimeoutMs,
+        );
         return {
           ok: this.isLiveStatusUsable(live),
           source: "operon-live",
