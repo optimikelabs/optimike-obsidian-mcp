@@ -102,6 +102,7 @@ function input({
   transport = "stdio",
   cacheReady = true,
   semanticEnabled = true,
+  queryEmbeddingEnabled = true,
   operonMutationsEnabled = true,
   writeMode = "full",
   operonAllowedPathPrefixesConfigured = false,
@@ -125,6 +126,7 @@ function input({
     transport,
     cacheReady,
     semanticEnabled,
+    queryEmbeddingEnabled,
     operonMutationsEnabled,
     writeMode,
     operonAllowedPathPrefixesConfigured,
@@ -281,6 +283,34 @@ assert.equal(
 const readonlyOperon = projectCapabilityManifest(
   input({ profile: "tasks", writeMode: "readonly" }),
 );
+
+const readonlyGoverned = projectCapabilityManifest(
+  input({ writeMode: "readonly" }),
+);
+for (const id of [
+  "governed-note-write",
+  "governed-frontmatter-write",
+  "governed-canvas-write",
+  "governed-base-write",
+]) {
+  assert.deepEqual(
+    {
+      available: capability(readonlyGoverned, id).available,
+      authorized: capability(readonlyGoverned, id).authorized,
+      state: capability(readonlyGoverned, id).state,
+      reasonCode: capability(readonlyGoverned, id).reasonCode,
+      nextAction: capability(readonlyGoverned, id).nextAction,
+    },
+    {
+      available: true,
+      authorized: false,
+      state: "blocked",
+      reasonCode: "write_policy_blocked",
+      nextAction: "enable_write_policy",
+    },
+    id,
+  );
+}
 assert.equal(
   capability(readonlyOperon, "operon-write").reasonCode,
   "write_policy_blocked",
@@ -338,6 +368,44 @@ assert.equal(capability(operonConflict, "operon-read").available, false);
 assert.equal(
   capability(operonConflict, "operon-read").reasonCode,
   "operon_duplicate_conflicts",
+);
+assert.equal(capability(operonConflict, "operon-write").available, false);
+assert.equal(capability(operonConflict, "operon-write").authorized, false);
+assert.equal(
+  capability(operonConflict, "operon-write").reasonCode,
+  "operon_duplicate_conflicts",
+);
+assert.ok(
+  capability(operonConflict, "operon-write").operations.every(
+    (operation) =>
+      operation.available === false &&
+      operation.authorized === false &&
+      operation.reasonCode === "operon_duplicate_conflicts",
+  ),
+);
+
+const semanticQueryEmbeddingDisabled = projectCapabilityManifest(
+  input({ queryEmbeddingEnabled: false }),
+);
+assert.deepEqual(
+  {
+    available: capability(semanticQueryEmbeddingDisabled, "semantic-search")
+      .available,
+    authorized: capability(semanticQueryEmbeddingDisabled, "semantic-search")
+      .authorized,
+    state: capability(semanticQueryEmbeddingDisabled, "semantic-search").state,
+    reasonCode: capability(semanticQueryEmbeddingDisabled, "semantic-search")
+      .reasonCode,
+    nextAction: capability(semanticQueryEmbeddingDisabled, "semantic-search")
+      .nextAction,
+  },
+  {
+    available: false,
+    authorized: false,
+    state: "unavailable",
+    reasonCode: "semantic_query_embedding_disabled",
+    nextAction: "enable_query_embedding",
+  },
 );
 
 const snapshotFallbackInput = input({

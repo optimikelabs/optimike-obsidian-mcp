@@ -39,7 +39,11 @@ Chaque entrée fournit également :
 
 Le manifeste couvre Local REST, les lectures du coffre, la recherche
 sémantique, les lifecycles gouvernés Note, Frontmatter, Canvas et Base, ainsi
-que les lectures et écritures Operon. Les lectures issues du cache Operon sont
+que les lectures et écritures Operon. La recherche sémantique n’est utilisable
+que si son runtime d’index et l’embedder de requête sont tous deux activés.
+`semantic_query_embedding_disabled` signale donc un switch
+`ENABLE_QUERY_EMBEDDING` volontairement coupé au lieu d’annoncer l’outil prêt.
+Les lectures issues du cache Operon sont
 signalées `degraded` avec `operon_snapshot_fallback` ; un snapshot n’est jamais
 présenté comme preuve qu’une mutation peut s’exécuter ou a été appliquée.
 
@@ -49,7 +53,11 @@ Bridge est coupé. `mcp_operon_mutations_disabled` signifie que l’opt-in apply
 séparé du MCP reste coupé, tandis que `write_policy_blocked` et
 `operation_policy_blocked` préservent la frontière globale ou propre à
 l’opération de `MCP_WRITE_MODE`. Les dry-runs peuvent rester disponibles sans
-faire croire qu’apply est autorisé. `operon_capability_not_advertised` signifie
+faire croire qu’apply est autorisé. La même frontière `write_policy_blocked`
+s’applique aux écritures gouvernées Note, Frontmatter, Canvas et Base.
+`operon_duplicate_conflicts` rend les lectures et écritures Operon
+indisponibles jusqu’à résolution des identités dupliquées.
+`operon_capability_not_advertised` signifie
 que le dernier
 snapshot de statut n’annonce pas cette opération exacte ; l’étape sûre consiste
 à appeler son chemin exact de dry-run/plan afin qu’Operon ne négocie que cette

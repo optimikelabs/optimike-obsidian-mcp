@@ -46,6 +46,7 @@ export type CapabilityReasonCode =
   | "cache_fallback"
   | "vault_backend_unavailable"
   | "semantic_search_disabled"
+  | "semantic_query_embedding_disabled"
   | "bridge_unavailable"
   | "bridge_lifecycle_not_ready"
   | "bridge_contract_incompatible"
@@ -75,6 +76,7 @@ export type CapabilityNextAction =
   | "verify_local_rest_credentials"
   | "refresh_vault_cache"
   | "enable_semantic_search"
+  | "enable_query_embedding"
   | "install_or_enable_bridge"
   | "wait_for_bridge"
   | "update_bridge_contract"
@@ -150,6 +152,7 @@ export interface CapabilityManifestProjectionInput {
   transport: "stdio" | "http";
   cacheReady: boolean;
   semanticEnabled: boolean;
+  queryEmbeddingEnabled: boolean;
   operonMutationsEnabled: boolean;
   writeMode: "readonly" | "guarded" | "full";
   operonAllowedPathPrefixesConfigured: boolean;
@@ -426,9 +429,11 @@ function atomicCapability(
   const available = canvas
     ? contractReady && lifecycleReady && backend.canvasAtomicCas === true
     : contractReady && lifecycleReady;
-  const authorized = canvas
+  const bridgeAuthorized = canvas
     ? backend.canvasWriteEnabled === true
     : backend.writeEnabled === true;
+  const writePolicyAllows = input.writeMode !== "readonly";
+  const authorized = bridgeAuthorized && writePolicyAllows;
   return entry(
     input,
     id,
@@ -438,16 +443,20 @@ function atomicCapability(
       ? "bridge_lifecycle_not_ready"
       : !available
         ? "bridge_contract_incompatible"
-        : authorized
-          ? "ready"
-          : "bridge_write_disabled",
+        : !writePolicyAllows
+          ? "write_policy_blocked"
+          : bridgeAuthorized
+            ? "ready"
+            : "bridge_write_disabled",
     !lifecycleReady
       ? "wait_for_bridge"
       : !available
         ? "update_bridge_contract"
-        : authorized
-          ? "none"
-          : "enable_bridge_writes",
+        : !writePolicyAllows
+          ? "enable_write_policy"
+          : bridgeAuthorized
+            ? "none"
+            : "enable_bridge_writes",
   );
 }
 
@@ -478,7 +487,9 @@ function baseCapability(
     status.contractVersion === 1 &&
     backend.atomicCas === true &&
     lifecycleReady;
-  const authorized = available && backend.writeEnabled === true;
+  const bridgeAuthorized = backend.writeEnabled === true;
+  const writePolicyAllows = input.writeMode !== "readonly";
+  const authorized = available && bridgeAuthorized && writePolicyAllows;
   return entry(
     input,
     "governed-base-write",
@@ -488,16 +499,20 @@ function baseCapability(
       ? "bridge_lifecycle_not_ready"
       : !available
         ? "bridge_contract_incompatible"
-        : authorized
-          ? "ready"
-          : "bridge_write_disabled",
+        : !writePolicyAllows
+          ? "write_policy_blocked"
+          : bridgeAuthorized
+            ? "ready"
+            : "bridge_write_disabled",
     !lifecycleReady
       ? "wait_for_bridge"
       : !available
         ? "update_bridge_contract"
-        : authorized
-          ? "none"
-          : "enable_bridge_writes",
+        : !writePolicyAllows
+          ? "enable_write_policy"
+          : bridgeAuthorized
+            ? "none"
+            : "enable_bridge_writes",
   );
 }
 
@@ -598,7 +613,12 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
       ? index.duplicateConflictCount
       : 0;
   const reads = boolean(capabilities.list) && boolean(capabilities.query);
-  const readAvailable = present && compatible && indexReady && reads;
+  const readAvailable =
+    present &&
+    compatible &&
+    indexReady &&
+    duplicateConflictCount === 0 &&
+    reads;
   let readReason: CapabilityReasonCode = "ready";
   let readAction: CapabilityNextAction = "none";
   if (!present) {
@@ -732,8 +752,8 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
     read: entry(
       input,
       "operon-read",
-      readAvailable && duplicateConflictCount === 0,
-      readAvailable && duplicateConflictCount === 0,
+      readAvailable,
+      readAvailable,
       readReason,
       readAction,
     ),
@@ -768,10 +788,18 @@ export function projectCapabilityManifest(
     entry(
       input,
       "semantic-search",
-      input.semanticEnabled,
-      input.semanticEnabled,
-      input.semanticEnabled ? "ready" : "semantic_search_disabled",
-      input.semanticEnabled ? "none" : "enable_semantic_search",
+      input.semanticEnabled && input.queryEmbeddingEnabled,
+      input.semanticEnabled && input.queryEmbeddingEnabled,
+      !input.semanticEnabled
+        ? "semantic_search_disabled"
+        : input.queryEmbeddingEnabled
+          ? "ready"
+          : "semantic_query_embedding_disabled",
+      !input.semanticEnabled
+        ? "enable_semantic_search"
+        : input.queryEmbeddingEnabled
+          ? "none"
+          : "enable_query_embedding",
     ),
     atomicCapability(input, "governed-note-write"),
     atomicCapability(input, "governed-frontmatter-write"),
@@ -957,6 +985,7 @@ export async function collectCapabilityManifest(options: {
       "semanticCache",
       "enabled",
     ),
+    queryEmbeddingEnabled: config.enableQueryEmbedding,
     operonMutationsEnabled: config.operonMutationsEnabled,
     writeMode: config.mcpWriteMode,
     operonAllowedPathPrefixesConfigured:

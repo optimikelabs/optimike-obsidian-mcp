@@ -101,11 +101,19 @@ async function startClient(baseUrl, profile, token) {
   return client;
 }
 
-const projectTemp = path.join(process.cwd(), ".tmp");
-mkdirSync(projectTemp, { recursive: true });
-const privateRoot = mkdtempSync(path.join(projectTemp, "doctor-live-"));
-const logsPath = path.join(privateRoot, "logs");
-mkdirSync(logsPath, { recursive: true });
+const privateRoot = mkdtempSync(
+  path.join(os.tmpdir(), "optimike-capability-doctor-live-"),
+);
+// The runtime constrains LOGS_DIR to the project boundary. Keep only its
+// redacted transient logs under the gitignored logs/ tree; all journals and
+// cache state remain in the OS temporary directory.
+const transientLogsParent = path.join(
+  process.cwd(),
+  "logs",
+  "capability-doctor-live",
+);
+mkdirSync(transientLogsParent, { recursive: true });
+const logsPath = mkdtempSync(path.join(transientLogsParent, "run-"));
 const port = await unusedPort();
 const authSecret = `capability-doctor-${randomUUID()}-${randomUUID()}`;
 const token = await new SignJWT({ cid: "pilot-2-doctor", scp: ["vault:read"] })
@@ -284,5 +292,6 @@ try {
       new Promise((resolve) => setTimeout(resolve, 1_000)),
     ]).catch(() => undefined);
   }
+  rmSync(logsPath, { recursive: true, force: true });
   rmSync(privateRoot, { recursive: true, force: true });
 }

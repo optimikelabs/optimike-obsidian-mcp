@@ -38,6 +38,10 @@ Each entry also provides:
 
 The manifest covers Local REST, vault reads, semantic search, the governed
 Note, Frontmatter, Canvas and Base lifecycles, and Operon reads and writes.
+Semantic search is usable only when both its index runtime and query embedder
+are enabled. `semantic_query_embedding_disabled` therefore reports an
+intentionally disabled `ENABLE_QUERY_EMBEDDING` switch instead of claiming the
+tool is ready.
 Operon cached reads are reported as `degraded` with
 `operon_snapshot_fallback`; cached state is never presented as proof that a
 mutation can run or was applied.
@@ -48,6 +52,10 @@ mutation can run or was applied.
 off, while `write_policy_blocked` and `operation_policy_blocked` preserve the
 global or operation-specific `MCP_WRITE_MODE` boundary. Dry-runs can remain
 available without claiming that apply is authorized.
+The same `write_policy_blocked` boundary applies to governed Note,
+Frontmatter, Canvas and Base writes. `operon_duplicate_conflicts` makes both
+Operon read and write readiness unavailable until duplicate identities are
+resolved.
 `operon_capability_not_advertised` means the latest status snapshot does not
 advertise that exact operation; the safe next step is to invoke its exact
 dry-run/plan path so Operon can negotiate only that capability. The doctor does
