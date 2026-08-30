@@ -453,15 +453,20 @@ export class ExternalMoveCoordinator {
       snapshot.rootId,
       snapshot.targetRelativePath,
     );
-    await this.vault.refreshInventory();
+    await this.vault.refreshInventory(destructiveSession);
     const inventory = await this.inventoryInternal(
       snapshot,
       locations.sourceFileUri,
       locations.targetFileUri,
       sourceToken,
       targetToken,
+      destructiveSession,
     );
     const digest = inventoryDigest(inventory);
+    // No backend observation after capture may escape the session fence. A
+    // reconnect between the final read and durable create rejects the plan
+    // instead of sealing a mixed-generation inventory.
+    this.vault.assertDestructiveSession(destructiveSession);
     const plan = this.journal.create({
       idempotencyKey: input.idempotencyKey,
       snapshot,

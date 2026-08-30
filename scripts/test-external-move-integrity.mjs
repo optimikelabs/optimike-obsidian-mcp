@@ -63,6 +63,13 @@ async function expectExternalCode(operation, expectedCode) {
   });
 }
 
+async function expectSessionChanged(operation) {
+  await assert.rejects(
+    operation,
+    (error) => error instanceof BackendVaultSessionChangedError,
+  );
+}
+
 function createRootService(
   rootPath,
   capabilities = ["visible", "readable", "move"],
@@ -102,6 +109,10 @@ class FakeVault {
     this.failConditionalReplaceAt = undefined;
     this.failConditionalReplaceError = undefined;
     this.beforeConditionalReplace = undefined;
+    this.beforeRefreshInventory = undefined;
+    this.beforeSearchPaths = undefined;
+    this.beforeRead = undefined;
+    this.afterRead = undefined;
   }
 
   async getBindingIdentity() {
@@ -152,6 +163,9 @@ class FakeVault {
   }
 
   async refreshInventory(session) {
+    const hook = this.beforeRefreshInventory;
+    this.beforeRefreshInventory = undefined;
+    hook?.();
     if (session) this.assertDestructiveSession(session);
   }
 
@@ -163,6 +177,9 @@ class FakeVault {
   }
 
   async searchPaths(query, searchInPath = "", caseSensitive = true, session) {
+    const hook = this.beforeSearchPaths;
+    this.beforeSearchPaths = undefined;
+    hook?.();
     if (session) this.assertDestructiveSession(session);
     const normalizedQuery = caseSensitive ? query : query.toLowerCase();
     return [...this.notes.entries()]
@@ -178,11 +195,18 @@ class FakeVault {
   }
 
   async read(filePath, session) {
+    const beforeHook = this.beforeRead;
+    this.beforeRead = undefined;
+    beforeHook?.();
     if (session) this.assertDestructiveSession(session);
     const content = this.notes.get(filePath);
     if (content === undefined)
       throw new Error(`Missing fake note: ${filePath}`);
-    return { filePath, content, sha256: hashText(content) };
+    const result = { filePath, content, sha256: hashText(content) };
+    const afterHook = this.afterRead;
+    this.afterRead = undefined;
+    afterHook?.();
+    return result;
   }
 
   async conditionalReplace(filePath, before, after, expectedSha256, session) {
@@ -613,6 +637,50 @@ try {
   assert.equal(await readFile(bindingSource, "utf8"), "binding");
   assert.equal(await exists(bindingTarget), false);
 
+  // Every backend observation after planning captures its session is fenced.
+  // Reconnects during refresh, search, read, or immediately after the final
+  // read reject the plan without sealing a mixed-generation receipt.
+  for (const [stage, hookName] of [
+    ["refresh", "beforeRefreshInventory"],
+    ["search", "beforeSearchPaths"],
+    ["read", "beforeRead"],
+    ["before-create", "afterRead"],
+  ]) {
+    const sourceRelativePath = `planning-swap-${stage}.txt`;
+    const targetRelativePath = `archive/planning-swap-${stage}.txt`;
+    const sourcePath = path.join(rootPath, sourceRelativePath);
+    const targetPath = path.join(rootPath, targetRelativePath);
+    await writeFile(sourcePath, `planning swap ${stage}`, "utf8");
+    const sourceUri = pathToFileURL(sourcePath).href;
+    const vault = new FakeVault({
+      [`Efforts/Projets/Planning swap ${stage}.md`]:
+        `[Planning swap](${sourceUri}) ` +
+        `\`external-ref:pilot.move::${sourceRelativePath}\`\n`,
+    });
+    const journal = new ExternalMoveJournal(":memory:");
+    const coordinator = new ExternalMoveCoordinator(service, vault, journal);
+    vault[hookName] = () => {
+      vault.backendGeneration = 2;
+      vault.backendSessionId = `replacement-${stage}`;
+    };
+    const idempotencyKey = `coordinator-planning-swap-${stage}`;
+    await expectSessionChanged(() =>
+      coordinator.plan({
+        rootId: "pilot.move",
+        sourceRelativePath,
+        targetRelativePath,
+        idempotencyKey,
+      }),
+    );
+    assert.equal(
+      journal.getByIdempotencyKey(idempotencyKey),
+      undefined,
+      `a ${stage} reconnect must not create a durable plan`,
+    );
+    assert.equal(await readFile(sourcePath, "utf8"), `planning swap ${stage}`);
+    assert.equal(await exists(targetPath), false);
+  }
+
   // The plan is not transferable to a restarted proxy/backend session, even
   // if it presents the same attested target and binding identity.
   const restartSource = path.join(rootPath, "generation-restart.txt");
@@ -747,9 +815,7 @@ try {
     "legacy journal replay must redact raw historical failure text",
   );
   assert.equal(
-    JSON.stringify(legacyStatus).includes(
-      PRIVATE_CODE_SHAPED_LEGACY_SENTINEL,
-    ),
+    JSON.stringify(legacyStatus).includes(PRIVATE_CODE_SHAPED_LEGACY_SENTINEL),
     false,
     "legacy journal replay must reject code-shaped values outside the finite failure-code allowlist",
   );
