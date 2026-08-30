@@ -49,6 +49,8 @@ for (const [label, document] of [
     "mcp_operon_mutations_disabled",
     "write_policy_blocked",
     "semantic_query_embedding_disabled",
+    "semantic_index_unavailable",
+    "refresh_semantic_index",
     "ENABLE_QUERY_EMBEDDING",
     "operon_duplicate_conflicts",
     "npm run test:capability-doctor",

@@ -13,6 +13,7 @@ import type {
   BaseAtomicStatusResponse,
 } from "./obsidianRestAPI/types.js";
 import { OperonService } from "./operon/service.js";
+import { getSemanticCacheService } from "./semanticCache.js";
 
 export const CAPABILITY_MANIFEST_CONTRACT_VERSION = 1 as const;
 export const CAPABILITY_PROBE_TIMEOUT_MS = 2_500;
@@ -47,6 +48,7 @@ export type CapabilityReasonCode =
   | "vault_backend_unavailable"
   | "semantic_search_disabled"
   | "semantic_query_embedding_disabled"
+  | "semantic_index_unavailable"
   | "bridge_unavailable"
   | "bridge_lifecycle_not_ready"
   | "bridge_contract_incompatible"
@@ -77,6 +79,7 @@ export type CapabilityNextAction =
   | "refresh_vault_cache"
   | "enable_semantic_search"
   | "enable_query_embedding"
+  | "refresh_semantic_index"
   | "install_or_enable_bridge"
   | "wait_for_bridge"
   | "update_bridge_contract"
@@ -153,6 +156,7 @@ export interface CapabilityManifestProjectionInput {
   cacheReady: boolean;
   semanticEnabled: boolean;
   queryEmbeddingEnabled: boolean;
+  semanticIndex: NormalizedProbe<{ vectorCount: number }>;
   operonMutationsEnabled: boolean;
   writeMode: "readonly" | "guarded" | "full";
   operonAllowedPathPrefixesConfigured: boolean;
@@ -172,6 +176,7 @@ export interface CapabilityManifestProjectionInput {
 
 export interface CapabilityProbeDependencies {
   localRest?: () => Promise<{ authenticated: boolean }>;
+  semanticIndex?: () => Promise<{ vectorCount: number }>;
   atomicWrite?: () => Promise<AtomicWriteStatusResponse>;
   baseAtomicWrite?: () => Promise<BaseAtomicStatusResponse>;
   operon?: () => Promise<Record<string, unknown>>;
@@ -392,6 +397,43 @@ function vaultReadCapability(
     false,
     "vault_backend_unavailable",
     "start_obsidian_and_retry",
+  );
+}
+
+function semanticCapability(
+  input: CapabilityManifestProjectionInput,
+): CapabilityManifestEntry {
+  if (!input.semanticEnabled) {
+    return entry(
+      input,
+      "semantic-search",
+      false,
+      false,
+      "semantic_search_disabled",
+      "enable_semantic_search",
+    );
+  }
+  if (!input.queryEmbeddingEnabled) {
+    return entry(
+      input,
+      "semantic-search",
+      false,
+      false,
+      "semantic_query_embedding_disabled",
+      "enable_query_embedding",
+    );
+  }
+  const validated =
+    input.semanticIndex.state === "ready" &&
+    Number.isFinite(input.semanticIndex.value.vectorCount) &&
+    input.semanticIndex.value.vectorCount > 0;
+  return entry(
+    input,
+    "semantic-search",
+    validated,
+    validated,
+    validated ? "ready" : "semantic_index_unavailable",
+    validated ? "none" : "refresh_semantic_index",
   );
 }
 
@@ -799,22 +841,7 @@ export function projectCapabilityManifest(
   const capabilities: CapabilityManifestEntry[] = [
     localRestCapability(input),
     vaultReadCapability(input),
-    entry(
-      input,
-      "semantic-search",
-      input.semanticEnabled && input.queryEmbeddingEnabled,
-      input.semanticEnabled && input.queryEmbeddingEnabled,
-      !input.semanticEnabled
-        ? "semantic_search_disabled"
-        : input.queryEmbeddingEnabled
-          ? "ready"
-          : "semantic_query_embedding_disabled",
-      !input.semanticEnabled
-        ? "enable_semantic_search"
-        : input.queryEmbeddingEnabled
-          ? "none"
-          : "enable_query_embedding",
-    ),
+    semanticCapability(input),
     atomicCapability(input, "governed-note-write"),
     atomicCapability(input, "governed-frontmatter-write"),
     atomicCapability(input, "governed-canvas-write"),
@@ -877,10 +904,22 @@ function normalizeProbeError<T>(error: unknown): NormalizedProbe<T> {
 async function probe<T>(
   operation: () => Promise<T>,
 ): Promise<NormalizedProbe<T>> {
+  let timeout: NodeJS.Timeout | undefined;
+  const bounded = new Promise<NormalizedProbe<T>>((resolve) => {
+    timeout = setTimeout(
+      () => resolve({ state: "unavailable" }),
+      CAPABILITY_PROBE_TIMEOUT_MS,
+    );
+    timeout.unref();
+  });
+  const attempted = Promise.resolve()
+    .then(operation)
+    .then<NormalizedProbe<T>>((value) => ({ state: "ready", value }))
+    .catch((error: unknown) => normalizeProbeError<T>(error));
   try {
-    return { state: "ready", value: await operation() };
-  } catch (error) {
-    return normalizeProbeError<T>(error);
+    return await Promise.race([attempted, bounded]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -915,6 +954,24 @@ export async function collectCapabilityManifest(options: {
     operation: "collectCapabilityManifest",
   });
   const operonService = new OperonService();
+  const staticRequirements = options.vaultCacheAvailable
+    ? (["vault-cache"] as const)
+    : [];
+  const profileToolNames = compileToolProfileNames({
+    profile: options.profile,
+    registrationMode: "live",
+    availableStaticRequirements: staticRequirements,
+  });
+  const modeToolNames = compileToolProfileNames({
+    profile: options.profile,
+    registrationMode: options.registrationMode,
+    availableStaticRequirements: staticRequirements,
+  });
+  const semanticEnabled = runtimeBoolean(
+    options.runtimeStatus,
+    "semanticCache",
+    "enabled",
+  );
   const localRestProbe =
     options.probes?.localRest ??
     (options.obsidianService
@@ -945,29 +1002,24 @@ export async function collectCapabilityManifest(options: {
   const operonProbe =
     options.probes?.operon ??
     (() => operonService.status(false, CAPABILITY_PROBE_TIMEOUT_MS));
+  const semanticIndexProbe =
+    semanticEnabled &&
+    config.enableQueryEmbedding &&
+    modeToolNames.includes("smart_semantic_search")
+      ? (options.probes?.semanticIndex ??
+        (() => getSemanticCacheService().probeReadiness()))
+      : undefined;
   const unavailable = Promise.resolve<NormalizedProbe<never>>({
     state: "unavailable",
   });
-  const [localRest, atomicWrite, baseAtomicWrite, operon] = await Promise.all([
-    localRestProbe ? probe(localRestProbe) : unavailable,
-    atomicWriteProbe ? probe(atomicWriteProbe) : unavailable,
-    baseAtomicWriteProbe ? probe(baseAtomicWriteProbe) : unavailable,
-    probe(operonProbe),
-  ]);
-  const profileToolNames = compileToolProfileNames({
-    profile: options.profile,
-    registrationMode: "live",
-    availableStaticRequirements: options.vaultCacheAvailable
-      ? ["vault-cache"]
-      : [],
-  });
-  const modeToolNames = compileToolProfileNames({
-    profile: options.profile,
-    registrationMode: options.registrationMode,
-    availableStaticRequirements: options.vaultCacheAvailable
-      ? ["vault-cache"]
-      : [],
-  });
+  const [localRest, semanticIndex, atomicWrite, baseAtomicWrite, operon] =
+    await Promise.all([
+      localRestProbe ? probe(localRestProbe) : unavailable,
+      semanticIndexProbe ? probe(semanticIndexProbe) : unavailable,
+      atomicWriteProbe ? probe(atomicWriteProbe) : unavailable,
+      baseAtomicWriteProbe ? probe(baseAtomicWriteProbe) : unavailable,
+      probe(operonProbe),
+    ]);
   const unavailableGovernedNames = new Set<string>([
     ...(!options.governedRuntimes.note
       ? [
@@ -994,12 +1046,9 @@ export async function collectCapabilityManifest(options: {
     visibleToolNames,
     transport: config.mcpTransportType,
     cacheReady: runtimeBoolean(options.runtimeStatus, "sharedCache", "ready"),
-    semanticEnabled: runtimeBoolean(
-      options.runtimeStatus,
-      "semanticCache",
-      "enabled",
-    ),
+    semanticEnabled,
     queryEmbeddingEnabled: config.enableQueryEmbedding,
+    semanticIndex,
     operonMutationsEnabled: config.operonMutationsEnabled,
     writeMode: config.mcpWriteMode,
     operonAllowedPathPrefixesConfigured:

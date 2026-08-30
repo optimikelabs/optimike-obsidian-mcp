@@ -200,6 +200,38 @@ export class SemanticCacheService {
     return snapshot;
   }
 
+  /**
+   * Validates the semantic source that a query would use without refreshing or
+   * persisting the cache. Capability inspection must remain observational.
+   */
+  public async probeReadiness(): Promise<{ vectorCount: number }> {
+    if (!this.smartEnvDir) {
+      throw new Error("SMART_ENV_DIR is not configured");
+    }
+
+    const now = Date.now();
+    if (
+      this.memorySnapshot &&
+      (this.ttlMs === 0 || now - this.memorySnapshotLoadedAt < this.ttlMs)
+    ) {
+      return { vectorCount: this.countValidVectors(this.memorySnapshot.items) };
+    }
+
+    const sourceState = await scanSmartEnvSourceState(this.smartEnvDir);
+    const manifest = this.readManifest();
+    const items =
+      manifest &&
+      manifest.source_signature === sourceState.signature &&
+      manifest.smart_env_dir === this.smartEnvDir
+        ? this.loadSnapshotFromDb(manifest).items
+        : await loadSmartEnv(this.smartEnvDir);
+    const vectorCount = this.countValidVectors(items);
+    if (vectorCount === 0) {
+      throw new Error("Semantic index contains no valid vectors");
+    }
+    return { vectorCount };
+  }
+
   public getStats(): Record<string, unknown> {
     const manifest = this.readManifest();
     return {
@@ -246,6 +278,15 @@ export class SemanticCacheService {
       WHERE singleton = 1
     `);
     return ((stmt.get() as SemanticManifestRow | undefined) ?? null);
+  }
+
+  private countValidVectors(items: readonly SmartVec[]): number {
+    return items.filter(
+      (item) =>
+        Array.isArray(item.vec) &&
+        item.vec.length > 0 &&
+        item.vec.every((value) => Number.isFinite(value)),
+    ).length;
   }
 
   private loadSnapshotFromDb(manifest: SemanticManifestRow): SemanticCacheSnapshot {

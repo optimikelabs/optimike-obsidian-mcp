@@ -40,9 +40,12 @@ Chaque entrée fournit également :
 Le manifeste couvre Local REST, les lectures du coffre, la recherche
 sémantique, les lifecycles gouvernés Note, Frontmatter, Canvas et Base, ainsi
 que les lectures et écritures Operon. La recherche sémantique n’est utilisable
-que si son runtime d’index et l’embedder de requête sont tous deux activés.
-`semantic_query_embedding_disabled` signale donc un switch
-`ENABLE_QUERY_EMBEDDING` volontairement coupé au lieu d’annoncer l’outil prêt.
+que si son runtime d’index et l’embedder de requête sont activés et qu’une
+sonde live bornée charge au moins un vecteur valide depuis la source actuelle.
+`semantic_query_embedding_disabled` signale un switch
+`ENABLE_QUERY_EMBEDDING` volontairement coupé ; `semantic_index_unavailable`
+et `refresh_semantic_index` couvrent un index absent, vide, malformé, périmé ou
+en timeout au lieu d’annoncer l’outil prêt.
 Les lectures issues du cache Operon sont
 signalées `degraded` avec `operon_snapshot_fallback` ; un snapshot n’est jamais
 présenté comme preuve qu’une mutation peut s’exécuter ou a été appliquée.
