@@ -1,5 +1,12 @@
 import esbuild from "esbuild";
-import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { join } from "path";
 
 const banner = "/* Obsidian Bases Bridge - build via esbuild */";
@@ -64,6 +71,7 @@ async function build() {
     await ctx.watch();
     console.log("Watching for changes…");
   } else {
+    rmSync(outdir, { recursive: true, force: true });
     await esbuild.build(buildOptions);
     postBuild();
     console.log(`Built → ${outfile}`);

@@ -181,6 +181,23 @@ The final server can expose different capabilities depending on which Obsidian p
 <vault>/.obsidian/plugins/obsidian-tasks-plugin/data.json
 ```
 
+## Bridge bundle upgrade and rollback
+
+Optimike MCP `3.5.0` publishes one exact-SHA bundle for the Operon, Atomic
+Write and Bases Bridges. Verify `SHA256SUMS`, extract the zip outside the
+vault, close Obsidian and use the included PowerShell wrapper. The installer
+validates the complete allowlist before mutation, stages on the vault volume,
+backs up managed code outside the vault and never overwrites `data.json`,
+grants, write gates or unknown plugin files.
+
+After restart, use `obsidian_runtime_status` to verify Bridge availability and
+versions. Keep its separate authorization projection authoritative. If the
+upgrade must be reverted, close Obsidian and use the `backupPath` returned by
+the install receipt; rollback refuses any managed file changed after install.
+
+The full commands, failure states and release gate are in
+[Bridge Bundle, Upgrade and Rollback](docs/bridge-packaging.md).
+
 ## Governed atomic note replacement
 
 The live `obsidian_note_replace_*` tools expose the existing 2.5 atomic-note

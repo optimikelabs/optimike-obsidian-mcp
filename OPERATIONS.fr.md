@@ -183,6 +183,24 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 <vault>/.obsidian/plugins/obsidian-tasks-plugin/data.json
 ```
 
+## Mise à niveau et rollback du bundle des Bridges
+
+Optimike MCP `3.5.0` publie un bundle exact-SHA unique pour les Bridges Operon,
+Atomic Write et Bases. Vérifier `SHA256SUMS`, extraire le zip hors du coffre,
+fermer Obsidian puis utiliser le wrapper PowerShell inclus. L’installateur
+valide toute l’allowlist avant mutation, stage sur le volume du coffre,
+sauvegarde le code géré hors du coffre et n’écrase jamais `data.json`, les
+grants, write gates ou fichiers plugin inconnus.
+
+Après redémarrage, utiliser `obsidian_runtime_status` pour vérifier la
+disponibilité et les versions des Bridges. Sa projection d’autorisation séparée
+reste l’autorité. Pour revenir en arrière, fermer Obsidian et utiliser le
+`backupPath` du reçu d’installation ; le rollback refuse tout fichier géré
+modifié depuis l’installation.
+
+Les commandes complètes, états d’échec et gates de release vivent dans
+[Bundle des Bridges, mise à niveau et rollback](docs/bridge-packaging.fr.md).
+
 ## Remplacement atomique gouverné d’une note
 
 Les outils live `obsidian_note_replace_*` exposent l’adaptateur atomique 2.5

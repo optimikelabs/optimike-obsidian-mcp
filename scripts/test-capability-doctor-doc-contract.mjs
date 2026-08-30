@@ -93,6 +93,10 @@ assert.doesNotMatch(
   /path\.join\(process\.cwd\(\),\s*["']\.tmp["']/u,
   "the live canary must not retain private recovery artifacts in the repo",
 );
+assert.match(canarySource, /withTimeout\(client\.connect/);
+assert.match(canarySource, /withTimeout\(\s*client\.callTool/s);
+assert.match(canarySource, /withTimeout\(client\.close/);
+assert.match(canarySource, /child\.kill\("SIGKILL"\)/);
 
 const packageJson = JSON.parse(packageSource);
 for (const file of [

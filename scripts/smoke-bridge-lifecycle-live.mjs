@@ -21,14 +21,14 @@ const EXPECTED_VAULT_NAME = "operon-bridge-pilot-vault-2.5.0";
 const EXPECTED_BASE_URL = "http://127.0.0.1:27233";
 const CONFIRMATION = "I_CONFIRM_PILOT_2_LOCAL_REST_RELOAD";
 const EXPECTED_MCP_VERSION =
-  process.env.BRIDGE_LIFECYCLE_EXPECTED_MCP_VERSION?.trim() || "3.4.0";
+  process.env.BRIDGE_LIFECYCLE_EXPECTED_MCP_VERSION?.trim() || "3.5.0";
 const BRIDGES = [
   {
     id: "optimike-operon-bridge",
     directory: "obsidian-operon-bridge",
     expectedVersion:
       process.env.BRIDGE_LIFECYCLE_EXPECTED_OPERON_BRIDGE_VERSION?.trim() ||
-      "0.9.0",
+      "0.9.1",
     route: "/extensions/optimike-operon-bridge/v1/status",
     requireStatusOk: false,
     writeProjection(payload) {
@@ -43,7 +43,7 @@ const BRIDGES = [
     directory: "obsidian-atomic-write-bridge",
     expectedVersion:
       process.env.BRIDGE_LIFECYCLE_EXPECTED_ATOMIC_BRIDGE_VERSION?.trim() ||
-      "0.5.0",
+      "0.5.1",
     route: "/extensions/obsidian-atomic-write-bridge/status",
     requireStatusOk: true,
     writeProjection(payload) {
@@ -58,7 +58,7 @@ const BRIDGES = [
     directory: "obsidian-bases-bridge",
     expectedVersion:
       process.env.BRIDGE_LIFECYCLE_EXPECTED_BASES_BRIDGE_VERSION?.trim() ||
-      "1.2.0",
+      "1.2.1",
     route: "/extensions/obsidian-bases-bridge/atomic/status",
     requireStatusOk: true,
     writeProjection(payload) {

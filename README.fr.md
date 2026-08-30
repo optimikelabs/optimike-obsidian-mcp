@@ -114,7 +114,7 @@ N’activer que les surfaces utilisées :
 - **Bases Bridge** inclus pour Bases live et le CAS de formules gouvernées ;
 - **Optimike Atomic Write Bridge** inclus pour les cycles Note, Frontmatter et Canvas `plan → apply → status → recover` ;
 - **Smart Connections** pour l’index sémantique local ;
-- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.0** pour les tâches gouvernées. Optimike MCP `3.4.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Les trois Bridges inclus [récupèrent désormais leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture.
+- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.1** pour les tâches gouvernées. Optimike MCP `3.5.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Les trois Bridges inclus [récupèrent désormais leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture. Leur [bundle de release unique et vérifié](docs/bridge-packaging.fr.md) préserve les réglages plugin et permet un rollback clôturé.
 - **Obsidian Tasks** pour le parsing Markdown Tasks-compatible.
 
 Les mutations Operon exigent le réglage de mutation du Bridge plus :
@@ -198,6 +198,7 @@ Les suites runtime utilisent des coffres jetables et s’exécutent en CI Linux/
 - [Surface des outils](docs/obsidian_mcp_tools_spec.md)
 - [Matrice des capacités runtime](docs/runtime-capability-matrix.fr.md)
 - [Doctor des capacités runtime](docs/capability-doctor.fr.md)
+- [Bundle des Bridges, mise à niveau et rollback](docs/bridge-packaging.fr.md)
 - [Guide de routage](docs/mcp-routing-guide.fr.md)
 - [Contrat MCP Operon](docs/operon-mcp-contract.fr.md)
 - [Configuration External Roots](docs/external-roots-setup.fr.md)

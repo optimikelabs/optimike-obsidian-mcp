@@ -30,6 +30,8 @@ const requiredFiles = [
   "docs/README.fr.md",
   "docs/tool-surface-profiles.md",
   "docs/tool-surface-profiles.fr.md",
+  "docs/bridge-packaging.md",
+  "docs/bridge-packaging.fr.md",
   "docs/governed-note-replacement.md",
   "docs/governed-note-replacement.fr.md",
   "docs/governed-frontmatter-p1.md",
@@ -55,6 +57,13 @@ const requiredFiles = [
   "plugins/obsidian-atomic-write-bridge/build/manifest.json",
   "plugins/obsidian-operon-bridge/build/main.js",
   "plugins/obsidian-operon-bridge/build/manifest.json",
+  "scripts/build-bridge-bundle.mjs",
+  "scripts/install-bridge-bundle.mjs",
+  "scripts/install-bridge-bundle.ps1",
+  "scripts/archive-bridge-bundle.ps1",
+  "scripts/verify-bridge-release-assets.mjs",
+  "scripts/test-bridge-packaging-p3.mjs",
+  "scripts/smoke-bridge-packaging-live.mjs",
 ];
 
 const missing = requiredFiles.filter((file) => !files.has(file));

@@ -29,7 +29,8 @@ French operator guides are linked alongside their English equivalents.
 | Which tools are available in each runtime?                       | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
 | Why is a capability hidden, unavailable, or unauthorized?        | [Runtime Capability Doctor](capability-doctor.md)                                     |
 | How do I run and maintain the service?                           | [Operations](../OPERATIONS.md)                                                        |
-| How do Bridges recover after Local REST starts or reloads?       | [Bridge Lifecycle Recovery](bridge-lifecycle.md)                                     |
+| How do Bridges recover after Local REST starts or reloads?       | [Bridge Lifecycle Recovery](bridge-lifecycle.md)                                      |
+| How do I install, upgrade or roll back all three Bridges?        | [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md)                            |
 | Which tool should an agent choose inside its profile?            | [MCP Routing Guide](mcp-routing-guide.md)                                             |
 | How do I run without Obsidian Desktop?                           | [Headless Server Profile](headless-server-profile.md)                                 |
 | How do external reads, handoff, move and link repair work?       | [External Roots Setup](external-roots-setup.md)                                       |
@@ -70,6 +71,7 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 - runtime modes: [Runtime Capability Matrix](runtime-capability-matrix.md);
 - live profile/backend/grant diagnosis: [Runtime Capability Doctor](capability-doctor.md);
 - cache, health and maintenance: [Operations](../OPERATIONS.md).
+- verified Bridge release bundle and rollback: [Bridge Packaging](bridge-packaging.md).
 
 ### External documents
 
