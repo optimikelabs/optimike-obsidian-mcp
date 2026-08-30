@@ -403,17 +403,22 @@ function atomicCapability(
     | "governed-canvas-write",
 ): CapabilityManifestEntry {
   if (input.atomicWrite.state !== "ready") {
+    const unauthorized = input.atomicWrite.state === "unauthorized";
     return entry(
       input,
       id,
       false,
       false,
-      input.atomicWrite.state === "incompatible"
-        ? "bridge_contract_incompatible"
-        : "bridge_unavailable",
-      input.atomicWrite.state === "incompatible"
-        ? "update_bridge_contract"
-        : "install_or_enable_bridge",
+      unauthorized
+        ? "local_rest_unauthorized"
+        : input.atomicWrite.state === "incompatible"
+          ? "bridge_contract_incompatible"
+          : "bridge_unavailable",
+      unauthorized
+        ? "verify_local_rest_credentials"
+        : input.atomicWrite.state === "incompatible"
+          ? "update_bridge_contract"
+          : "install_or_enable_bridge",
     );
   }
   const status = record(input.atomicWrite.value);
@@ -464,17 +469,22 @@ function baseCapability(
   input: CapabilityManifestProjectionInput,
 ): CapabilityManifestEntry {
   if (input.baseAtomicWrite.state !== "ready") {
+    const unauthorized = input.baseAtomicWrite.state === "unauthorized";
     return entry(
       input,
       "governed-base-write",
       false,
       false,
-      input.baseAtomicWrite.state === "incompatible"
-        ? "bridge_contract_incompatible"
-        : "bridge_unavailable",
-      input.baseAtomicWrite.state === "incompatible"
-        ? "update_bridge_contract"
-        : "install_or_enable_bridge",
+      unauthorized
+        ? "local_rest_unauthorized"
+        : input.baseAtomicWrite.state === "incompatible"
+          ? "bridge_contract_incompatible"
+          : "bridge_unavailable",
+      unauthorized
+        ? "verify_local_rest_credentials"
+        : input.baseAtomicWrite.state === "incompatible"
+          ? "update_bridge_contract"
+          : "install_or_enable_bridge",
     );
   }
   const status = record(input.baseAtomicWrite.value);
@@ -659,6 +669,10 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
       const writePolicyAllows =
         input.writeMode === "full" ||
         (input.writeMode === "guarded" && guardedApplyAllowed);
+      const pathScopeAllows =
+        !input.operonAllowedPathPrefixesConfigured ||
+        (id !== "periodic-create" && id !== "recovery");
+      const operationPolicyAllows = writePolicyAllows && pathScopeAllows;
       const reasonCode: CapabilityReasonCode = !profileAllows
         ? "profile_hidden"
         : !modeAllows
@@ -673,7 +687,7 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
                   ? "mcp_operon_mutations_disabled"
                   : input.writeMode === "readonly"
                     ? "write_policy_blocked"
-                    : !writePolicyAllows
+                    : !operationPolicyAllows
                       ? "operation_policy_blocked"
                       : advertised
                         ? "ready"
@@ -692,7 +706,7 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
                   ? "enable_mcp_operon_mutations"
                   : input.writeMode === "readonly"
                     ? "enable_write_policy"
-                    : !writePolicyAllows
+                    : !operationPolicyAllows
                       ? "review_operation_policy"
                       : advertised
                         ? "none"
@@ -706,7 +720,7 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
           readAvailable &&
           mutationsEnabled &&
           input.operonMutationsEnabled &&
-          writePolicyAllows &&
+          operationPolicyAllows &&
           advertised,
         reasonCode,
         nextAction,

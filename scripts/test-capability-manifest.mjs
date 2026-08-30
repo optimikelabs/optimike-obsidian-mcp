@@ -337,6 +337,77 @@ assert.equal(
   true,
 );
 
+const scopedFullOperon = projectCapabilityManifest(
+  input({
+    profile: "tasks",
+    writeMode: "full",
+    operonAllowedPathPrefixesConfigured: true,
+  }),
+);
+const scopedFullWrite = capability(scopedFullOperon, "operon-write");
+assert.equal(scopedFullWrite.state, "degraded");
+assert.equal(scopedFullWrite.reasonCode, "operon_partial_capabilities");
+for (const id of ["periodic-create", "recovery"]) {
+  assert.deepEqual(
+    {
+      authorized: scopedFullWrite.operations.find(
+        (operation) => operation.id === id,
+      ).authorized,
+      reasonCode: scopedFullWrite.operations.find(
+        (operation) => operation.id === id,
+      ).reasonCode,
+      nextAction: scopedFullWrite.operations.find(
+        (operation) => operation.id === id,
+      ).nextAction,
+    },
+    {
+      authorized: false,
+      reasonCode: "operation_policy_blocked",
+      nextAction: "review_operation_policy",
+    },
+    id,
+  );
+}
+assert.equal(
+  scopedFullWrite.operations.find((operation) => operation.id === "update")
+    .authorized,
+  true,
+);
+
+const unauthorizedRestBridges = projectCapabilityManifest(
+  input({
+    localRest: { state: "unauthorized" },
+    atomicWrite: { state: "unauthorized" },
+    baseAtomicWrite: { state: "unauthorized" },
+  }),
+);
+assert.equal(
+  capability(unauthorizedRestBridges, "local-rest").reasonCode,
+  "local_rest_unauthorized",
+);
+for (const id of [
+  "governed-note-write",
+  "governed-frontmatter-write",
+  "governed-canvas-write",
+  "governed-base-write",
+]) {
+  assert.deepEqual(
+    {
+      available: capability(unauthorizedRestBridges, id).available,
+      authorized: capability(unauthorizedRestBridges, id).authorized,
+      reasonCode: capability(unauthorizedRestBridges, id).reasonCode,
+      nextAction: capability(unauthorizedRestBridges, id).nextAction,
+    },
+    {
+      available: false,
+      authorized: false,
+      reasonCode: "local_rest_unauthorized",
+      nextAction: "verify_local_rest_credentials",
+    },
+    id,
+  );
+}
+
 const operonIndexPending = projectCapabilityManifest(
   input({
     profile: "tasks",
