@@ -22,6 +22,40 @@ type PluginData = {
   allowCanvasWrites: boolean;
 };
 
+type AtomicResource = "note" | "canvas";
+
+function isObjectLike(value: unknown): value is object {
+  return (
+    (typeof value === "object" && value !== null) ||
+    typeof value === "function"
+  );
+}
+
+/**
+ * Error values cross the Local REST boundary. They can be proxies supplied by
+ * integrations, so even ordinary inspection must not be allowed to throw.
+ */
+function safeInstanceOf(value: unknown, constructor: Function): boolean {
+  try {
+    return value instanceof constructor;
+  } catch {
+    return false;
+  }
+}
+
+function safeProperty(value: unknown, property: string): unknown {
+  if (!isObjectLike(value)) return undefined;
+  try {
+    return Reflect.get(value, property);
+  } catch {
+    return undefined;
+  }
+}
+
+function safeMessageEquals(value: unknown, expected: string): boolean {
+  return safeProperty(value, "message") === expected;
+}
+
 function responseStatus(res: any, status: number): any {
   if (typeof res?.status === "function") return res.status(status);
   if (res && "statusCode" in res) res.statusCode = status;
@@ -36,17 +70,141 @@ function sendJson(res: any, status: number, payload: unknown): void {
   target.json(payload);
 }
 
-function errorPayload(code: string, message: string, details?: object) {
+type AtomicPublicErrorDescriptor = {
+  code: string;
+  reasonCode: string;
+  status: "blocked" | "conflict" | "not_found" | "rejected";
+  retryable: false;
+  message: string;
+};
+
+const ATOMIC_PUBLIC_ERRORS: Record<string, AtomicPublicErrorDescriptor> = {
+  invalid_request: {
+    code: "invalid_request",
+    reasonCode: "request_rejected",
+    status: "rejected",
+    retryable: false,
+    message: "The request could not be validated.",
+  },
+  note_not_found: {
+    code: "note_not_found",
+    reasonCode: "resource_not_found",
+    status: "not_found",
+    retryable: false,
+    message: "The requested note was not found.",
+  },
+  canvas_not_found: {
+    code: "canvas_not_found",
+    reasonCode: "resource_not_found",
+    status: "not_found",
+    retryable: false,
+    message: "The requested Canvas was not found.",
+  },
+  writes_disabled: {
+    code: "writes_disabled",
+    reasonCode: "write_not_authorized",
+    status: "blocked",
+    retryable: false,
+    message: "Atomic note writes are disabled.",
+  },
+  canvas_writes_disabled: {
+    code: "canvas_writes_disabled",
+    reasonCode: "write_not_authorized",
+    status: "blocked",
+    retryable: false,
+    message: "Atomic Canvas writes are disabled.",
+  },
+  binding_conflict: {
+    code: "binding_conflict",
+    reasonCode: "backend_binding_changed",
+    status: "conflict",
+    retryable: false,
+    message:
+      "The sealed backend binding no longer matches. Refresh status before retrying.",
+  },
+  hash_conflict: {
+    code: "hash_conflict",
+    reasonCode: "resource_changed",
+    status: "conflict",
+    retryable: false,
+    message:
+      "The resource changed after it was read. Read it again before retrying.",
+  },
+  read_error: {
+    code: "read_error",
+    reasonCode: "read_failed",
+    status: "rejected",
+    retryable: false,
+    message: "The resource could not be read.",
+  },
+  write_error: {
+    code: "write_error",
+    reasonCode: "write_failed",
+    status: "rejected",
+    retryable: false,
+    message: "The resource could not be written.",
+  },
+};
+
+function safeErrorDetails(
+  details: unknown,
+): { actualSha256: string } | undefined {
+  if (!isObjectLike(details)) {
+    return undefined;
+  }
+  try {
+    if (Array.isArray(details)) return undefined;
+  } catch {
+    return undefined;
+  }
+  const actualSha256 = safeProperty(details, "actualSha256");
+  return typeof actualSha256 === "string" &&
+    /^[a-f0-9]{64}$/u.test(actualSha256)
+    ? { actualSha256 }
+    : undefined;
+}
+
+function safeHashConflictDetails(
+  error: unknown,
+): { actualSha256: string } | undefined {
+  if (!safeInstanceOf(error, HashConflictError)) return undefined;
+  const actualSha256 = safeProperty(error, "actualSha256");
+  return typeof actualSha256 === "string" &&
+    /^[a-f0-9]{64}$/u.test(actualSha256)
+    ? { actualSha256 }
+    : undefined;
+}
+
+export function publicAtomicErrorPayload(
+  code: unknown,
+  _message?: unknown,
+  details?: unknown,
+) {
+  const descriptor =
+    typeof code === "string"
+      ? (ATOMIC_PUBLIC_ERRORS[code] ?? ATOMIC_PUBLIC_ERRORS.invalid_request)
+      : ATOMIC_PUBLIC_ERRORS.invalid_request;
+  const safeDetails = safeErrorDetails(details);
   return {
     ok: false,
     contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
-    error: { code, message, ...(details ? { details } : {}) },
+    status: descriptor.status,
+    retryable: descriptor.retryable,
+    error: {
+      code: descriptor.code,
+      reasonCode: descriptor.reasonCode,
+      message: descriptor.message,
+      ...(safeDetails ? { details: safeDetails } : {}),
+    },
   };
 }
+
+const errorPayload = publicAtomicErrorPayload;
 
 export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   private instanceId = "";
   private bindingFingerprint = "";
+  private readonly missingResources = new WeakMap<object, AtomicResource>();
   allowWrites = false;
   allowCanvasWrites = false;
 
@@ -93,10 +251,36 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     } satisfies PluginData);
   }
 
-  private file(path: string, label = "Note"): TFile {
+  private file(path: string, resource: AtomicResource = "note"): TFile {
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) throw new Error(`${label} not found.`);
-    return file;
+    if (!safeInstanceOf(file, TFile)) {
+      const missing = new Error();
+      this.missingResources.set(missing, resource);
+      throw missing;
+    }
+    return file as TFile;
+  }
+
+  private missingResource(error: unknown): AtomicResource | undefined {
+    if (!isObjectLike(error)) return undefined;
+    try {
+      return this.missingResources.get(error);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isMissingResource(
+    error: unknown,
+    resource: AtomicResource,
+  ): boolean {
+    return (
+      this.missingResource(error) === resource ||
+      safeMessageEquals(
+        error,
+        `${resource === "canvas" ? "Canvas" : "Note"} not found.`,
+      )
+    );
   }
 
   private async registerRestExtension(): Promise<void> {
@@ -157,10 +341,20 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       api
         .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/canvas/read`)
         .post(async (req: any, res: any) => {
+          let request: ReturnType<typeof parseCanvasReadRequest>;
           try {
-            const request = parseCanvasReadRequest(req?.body);
+            request = parseCanvasReadRequest(req?.body);
+          } catch (error) {
+            sendJson(
+              res,
+              400,
+              errorPayload("invalid_request"),
+            );
+            return;
+          }
+          try {
             const content = await this.app.vault.read(
-              this.file(request.path, "Canvas"),
+              this.file(request.path, "canvas"),
             );
             assertCanvasContentSize(content);
             sendJson(res, 200, {
@@ -173,15 +367,11 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               bindingFingerprint: this.bindingFingerprint,
             });
           } catch (error) {
-            const notFound =
-              error instanceof Error && error.message === "Canvas not found.";
+            const notFound = this.isMissingResource(error, "canvas");
             sendJson(
               res,
-              notFound ? 404 : 400,
-              errorPayload(
-                notFound ? "canvas_not_found" : "invalid_request",
-                error instanceof Error ? error.message : String(error),
-              ),
+              notFound ? 404 : 500,
+              errorPayload(notFound ? "canvas_not_found" : "read_error"),
             );
           }
         });
@@ -201,14 +391,24 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               );
               return;
             }
-            const request = parseCanvasCasRequest(req?.body);
+            let request: ReturnType<typeof parseCanvasCasRequest>;
+            try {
+              request = parseCanvasCasRequest(req?.body);
+            } catch (error) {
+              sendJson(
+                res,
+                400,
+                errorPayload("invalid_request"),
+              );
+              return;
+            }
             assertBindingFingerprint(
               request.bindingFingerprint,
               this.bindingFingerprint,
             );
             let beforeSha256 = "";
             const written = await this.app.vault.process(
-              this.file(request.path, "Canvas"),
+              this.file(request.path, "canvas"),
               (current) => {
                 const result = compareAndReplace(
                   current,
@@ -229,33 +429,31 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               bindingFingerprint: this.bindingFingerprint,
             });
           } catch (error) {
-            if (error instanceof BindingConflictError) {
+            if (safeInstanceOf(error, BindingConflictError)) {
               sendJson(
                 res,
                 409,
-                errorPayload("binding_conflict", error.message),
+                errorPayload("binding_conflict"),
               );
               return;
             }
-            if (error instanceof HashConflictError) {
+            if (safeInstanceOf(error, HashConflictError)) {
               sendJson(
                 res,
                 409,
-                errorPayload("hash_conflict", error.message, {
-                  actualSha256: error.actualSha256,
-                }),
+                errorPayload(
+                  "hash_conflict",
+                  undefined,
+                  safeHashConflictDetails(error),
+                ),
               );
               return;
             }
-            const notFound =
-              error instanceof Error && error.message === "Canvas not found.";
+            const notFound = this.isMissingResource(error, "canvas");
             sendJson(
               res,
-              notFound ? 404 : 400,
-              errorPayload(
-                notFound ? "canvas_not_found" : "invalid_request",
-                error instanceof Error ? error.message : String(error),
-              ),
+              notFound ? 404 : 500,
+              errorPayload(notFound ? "canvas_not_found" : "write_error"),
             );
           }
         });
@@ -263,8 +461,18 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       api
         .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/notes/read`)
         .post(async (req: any, res: any) => {
+          let request: ReturnType<typeof parseReadRequest>;
           try {
-            const request = parseReadRequest(req?.body);
+            request = parseReadRequest(req?.body);
+          } catch (error) {
+            sendJson(
+              res,
+              400,
+              errorPayload("invalid_request"),
+            );
+            return;
+          }
+          try {
             const content = await this.app.vault.read(this.file(request.path));
             sendJson(res, 200, {
               ok: true,
@@ -276,15 +484,11 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               bindingFingerprint: this.bindingFingerprint,
             });
           } catch (error) {
-            const notFound =
-              error instanceof Error && error.message === "Note not found.";
+            const notFound = this.isMissingResource(error, "note");
             sendJson(
               res,
-              notFound ? 404 : 400,
-              errorPayload(
-                notFound ? "note_not_found" : "invalid_request",
-                error instanceof Error ? error.message : String(error),
-              ),
+              notFound ? 404 : 500,
+              errorPayload(notFound ? "note_not_found" : "read_error"),
             );
           }
         });
@@ -304,7 +508,17 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               );
               return;
             }
-            const request = parseCasRequest(req?.body);
+            let request: ReturnType<typeof parseCasRequest>;
+            try {
+              request = parseCasRequest(req?.body);
+            } catch (error) {
+              sendJson(
+                res,
+                400,
+                errorPayload("invalid_request"),
+              );
+              return;
+            }
             assertBindingFingerprint(
               request.bindingFingerprint,
               this.bindingFingerprint,
@@ -332,33 +546,31 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               bindingFingerprint: this.bindingFingerprint,
             });
           } catch (error) {
-            if (error instanceof BindingConflictError) {
+            if (safeInstanceOf(error, BindingConflictError)) {
               sendJson(
                 res,
                 409,
-                errorPayload("binding_conflict", error.message),
+                errorPayload("binding_conflict"),
               );
               return;
             }
-            if (error instanceof HashConflictError) {
+            if (safeInstanceOf(error, HashConflictError)) {
               sendJson(
                 res,
                 409,
-                errorPayload("hash_conflict", error.message, {
-                  actualSha256: error.actualSha256,
-                }),
+                errorPayload(
+                  "hash_conflict",
+                  undefined,
+                  safeHashConflictDetails(error),
+                ),
               );
               return;
             }
-            const notFound =
-              error instanceof Error && error.message === "Note not found.";
+            const notFound = this.isMissingResource(error, "note");
             sendJson(
               res,
-              notFound ? 404 : 400,
-              errorPayload(
-                notFound ? "note_not_found" : "invalid_request",
-                error instanceof Error ? error.message : String(error),
-              ),
+              notFound ? 404 : 500,
+              errorPayload(notFound ? "note_not_found" : "write_error"),
             );
           }
         });

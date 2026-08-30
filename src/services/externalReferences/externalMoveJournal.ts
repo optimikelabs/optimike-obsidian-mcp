@@ -3,7 +3,10 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ExternalMoveSnapshot } from "../externalRootsService.js";
-import type { ExternalMoveBindingIdentity } from "./backendVaultAdapter.js";
+import type {
+  BackendVaultDestructiveSession,
+  ExternalMoveBindingIdentity,
+} from "./backendVaultAdapter.js";
 
 export type ExternalNoteRepair = {
   filePath: string;
@@ -37,6 +40,8 @@ export type ExternalMovePlan = {
   status: ExternalMovePlanStatus;
   snapshot: ExternalMoveSnapshot;
   bindingIdentity: ExternalMoveBindingIdentity;
+  /** Private, process-local fence; never projected through move status. */
+  destructiveSession: BackendVaultDestructiveSession;
   sourceToken: string;
   targetToken: string;
   oldFileUri: string;
@@ -46,7 +51,9 @@ export type ExternalMovePlan = {
   inventoryDigest: string;
   appliedRepairPaths: string[];
   restoredRepairPaths: string[];
+  /** Stable value-free failure codes only; raw backend text is never durable. */
   recoveryErrors: string[];
+  /** Stable value-free failure code only; legacy free text is redacted on read. */
   failure?: string;
 };
 

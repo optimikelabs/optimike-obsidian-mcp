@@ -278,9 +278,12 @@ properties, plugin-specific filters, or exact UI view semantics.
 
 ## Runtime
 
-- `obsidian_runtime_status`: process, cache, semantic, degraded-mode, and write
-  policy status.
-- `obsidian_runtime_maintenance`: integrity checks and cache refresh actions.
+- `obsidian_runtime_status`: redacted process, cache, semantic, degraded-mode,
+  and write-policy status. It returns modes, booleans, versions, hashes, and
+  counts only; never physical paths, URLs, secrets, raw configuration, or
+  local content.
+- `obsidian_runtime_maintenance`: integrity checks and cache refresh actions;
+  its public result uses the same redacted runtime diagnostics.
 
 ## External Document Roots
 

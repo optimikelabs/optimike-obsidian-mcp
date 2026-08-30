@@ -256,10 +256,12 @@ async function getFinalState(
   context: RequestContext,
 ): Promise<NoteJson | null> {
   const operation = "getFinalState";
-  logger.debug(
-    `Attempting to retrieve final state for target: ${targetType} ${targetIdentifier ?? "(active)"}`,
-    { ...context, operation },
-  );
+  logger.debug("Attempting to retrieve final state.", {
+    ...context,
+    operation,
+    targetType,
+    hasTargetIdentifier: Boolean(targetIdentifier),
+  });
   let noteJson: NoteJson | null = null;
   // Call the appropriate API method based on target type
   if (targetType === "filePath" && targetIdentifier) {
@@ -293,11 +295,10 @@ async function refreshFileCacheBestEffort(
   try {
     await vaultCacheService.updateCacheForFile(filePath, context);
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.warning(
-      `Background cache refresh failed for '${filePath}': ${errorMsg}`,
-      { ...context, operation: "backgroundCacheRefresh", filePath },
-    );
+    logger.warning("Background cache refresh failed.", {
+      ...context,
+      operation: "backgroundCacheRefresh",
+    });
   }
 }
 
@@ -354,10 +355,7 @@ export const processObsidianUpdateNote = async (
     // This is crucial for overwrite safety checks and createIfNeeded logic.
     let existsBefore = false;
     const checkContext = { ...context, operation: "existenceCheck" };
-    logger.debug(
-      `Checking existence of target: ${params.targetType} ${targetId ?? "(active)"}`,
-      checkContext,
-    );
+    logger.debug("Checking target existence.", checkContext);
 
     try {
       await retryWithDelay(
@@ -399,11 +397,9 @@ export const processObsidianUpdateNote = async (
             return should;
           },
           onRetry: (attempt, error) => {
-            const errorMsg =
-              error instanceof Error ? error.message : String(error);
             logger.warning(
-              `Existence check (attempt ${attempt}) failed for target '${params.targetType} ${targetId ?? ""}'. Error: ${errorMsg}. Retrying as createIfNeeded is true...`,
-              checkContext,
+              `Existence check failed on attempt ${attempt}; retrying because creation is allowed.`,
+              { ...checkContext, retryAttempt: attempt },
             );
           },
         },
@@ -423,7 +419,6 @@ export const processObsidianUpdateNote = async (
         // For any other error type, re-throw it as it's unexpected here.
         logger.error(
           `Unexpected error after existence check retries`,
-          error instanceof Error ? error : undefined,
           checkContext,
         );
         throw error;
@@ -445,7 +440,7 @@ export const processObsidianUpdateNote = async (
       );
       throw new McpError(
         BaseErrorCode.CONFLICT, // Use CONFLICT as it clashes with existing state + config
-        `Target ${params.targetType} '${targetId ?? "(active)"}' exists, and 'overwriteIfExists' is set to false. Cannot overwrite.`,
+        "The requested target exists and overwriteIfExists is false.",
         safetyCheckContext,
       );
     }
@@ -458,7 +453,7 @@ export const processObsidianUpdateNote = async (
       );
       throw new McpError(
         BaseErrorCode.NOT_FOUND,
-        `Target ${params.targetType} '${targetId ?? "(active)"}' not found, and 'createIfNeeded' is set to false. Cannot update.`,
+        "The requested target was not found and createIfNeeded is false.",
         safetyCheckContext,
       );
     }
@@ -504,16 +499,13 @@ export const processObsidianUpdateNote = async (
           );
         } catch (readError) {
           // This should ideally not happen if existsBefore is true, but handle defensively.
-          const errorMsg =
-            readError instanceof Error ? readError.message : String(readError);
           logger.error(
-            `Error reading existing content for ${mode} despite existence check.`,
-            readError instanceof Error ? readError : undefined,
+            `Unable to read existing content for ${mode} after existence check.`,
             readContext,
           );
           throw new McpError(
             BaseErrorCode.INTERNAL_ERROR,
-            `Failed to read existing content for ${mode} operation. Error: ${errorMsg}`,
+            `Failed to read existing content for ${mode} operation.`,
             readContext,
           );
         }
@@ -573,10 +565,7 @@ export const processObsidianUpdateNote = async (
           await obsidianService.updateActiveFile(contentString, updateContext);
           break;
       }
-      logger.debug(
-        `Successfully performed overwrite on target: ${params.targetType} ${targetId ?? "(active)"}`,
-        updateContext,
-      );
+      logger.debug("Successfully performed overwrite.", updateContext);
       if (params.targetType === "filePath") {
         await refreshFileCacheBestEffort(
           vaultCacheService,
@@ -630,11 +619,13 @@ export const processObsidianUpdateNote = async (
               return should;
             },
             onRetry: (attempt, error) => {
-              const errorMsg =
-                error instanceof Error ? error.message : String(error);
               logger.warning(
-                `getFinalState (attempt ${attempt}) failed. Error: ${errorMsg}. Retrying...`,
-                { ...context, operation: "getFinalStateRetry" },
+                `Final state retrieval failed on attempt ${attempt}; retrying.`,
+                {
+                  ...context,
+                  operation: "getFinalStateRetry",
+                  retryAttempt: attempt,
+                },
               );
             },
           },
@@ -645,12 +636,7 @@ export const processObsidianUpdateNote = async (
       } catch (error) {
         finalState = null;
         finalStateWarning = true;
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        logger.error(
-          `Failed to retrieve final state for target '${params.targetType} ${targetId ?? ""}' even after retries. Error: ${errorMsg}`,
-          error instanceof Error ? error : undefined,
-          context,
-        );
+        logger.error("Failed to retrieve final state after retries.", context);
       }
     } else if (params.targetType === "filePath" && targetId) {
       try {
@@ -663,7 +649,7 @@ export const processObsidianUpdateNote = async (
             if (!metadata) {
               throw new McpError(
                 BaseErrorCode.SERVICE_UNAVAILABLE,
-                `Could not retrieve final metadata for '${targetId}' after update.`,
+                "Could not retrieve final metadata after update.",
                 context,
               );
             }
@@ -694,10 +680,8 @@ export const processObsidianUpdateNote = async (
           formattedStatResult === null ? undefined : formattedStatResult;
       } catch (error) {
         finalStateWarning = true;
-        const errorMsg = error instanceof Error ? error.message : String(error);
         logger.error(
-          `Failed to retrieve final metadata for target '${targetId}' after update. Error: ${errorMsg}`,
-          error instanceof Error ? error : undefined,
+          "Failed to retrieve final metadata after update.",
           context,
         );
       }
@@ -732,10 +716,8 @@ export const processObsidianUpdateNote = async (
       } catch (error) {
         finalState = null;
         finalStateWarning = true;
-        const errorMsg = error instanceof Error ? error.message : String(error);
         logger.error(
-          `Failed to retrieve final state for stats on target '${params.targetType} ${targetId ?? ""}' after update. Error: ${errorMsg}`,
-          error instanceof Error ? error : undefined,
+          "Failed to retrieve final state for statistics after update.",
           context,
         );
       }
@@ -755,7 +737,7 @@ export const processObsidianUpdateNote = async (
     const targetName =
       params.targetType === "filePath" ? `'${targetId}'` : "the active file";
     let successMessage = `File content successfully ${messageAction} for ${targetName}.`; // Use let
-    logger.info(successMessage, context); // Log initial success message
+    logger.info("Note update completed successfully.", context);
 
     // Append a warning if the final state couldn't be retrieved
     if (finalStateWarning) {
@@ -810,25 +792,13 @@ export const processObsidianUpdateNote = async (
     // Errors from obsidianService calls should already be McpErrors and logged by the service.
     if (error instanceof McpError) {
       // Log McpErrors specifically from this level if needed, though lower levels might have logged already
-      logger.error(
-        `McpError during file update: ${error.message}`,
-        error,
-        context,
-      );
+      logger.error("MCP error during file update.", context);
       throw error; // Re-throw known McpError
     } else {
       // Catch unexpected errors, log them, and wrap in a generic McpError.
       const errorMessage = `Unexpected error updating Obsidian file/note`;
-      logger.error(
-        errorMessage,
-        error instanceof Error ? error : undefined,
-        context,
-      );
-      throw new McpError(
-        BaseErrorCode.INTERNAL_ERROR,
-        `${errorMessage}: ${error instanceof Error ? error.message : String(error)}`,
-        context,
-      );
+      logger.error(errorMessage, context);
+      throw new McpError(BaseErrorCode.INTERNAL_ERROR, errorMessage, context);
     }
   }
 };

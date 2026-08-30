@@ -538,7 +538,9 @@ async function testInvalidConfigurationRefused(sandbox) {
   });
   const exitCode = await Promise.race([
     new Promise((resolve) => child.once("exit", resolve)),
-    sleep(5000).then(() => "timeout"),
+    // Cold Windows starts can exceed five seconds while parallel CI workers
+    // are compiling; the contract is fail-closed exit, not startup speed.
+    sleep(15_000).then(() => "timeout"),
   ]);
   if (exitCode === "timeout") child.kill();
   assert.notEqual(exitCode, "timeout");

@@ -374,7 +374,10 @@ test("Operon 3 Developer API adapter stays unavailable when the host grant is pe
     "unavailable",
   );
   assert.equal(adapter.indexer.taskCount, 0);
-  assert.equal(adapter.status.reason, "grant-pending");
+  assert.deepEqual(adapter.status, {
+    availability: "unavailable",
+    grant: { state: "pending" },
+  });
 });
 
 test("Operon 3 Developer API adapter retries the bounded cache-ready startup window", async () => {
@@ -438,30 +441,53 @@ test("Operon 3 Developer API adapter retries the bounded cache-ready startup win
   assert.equal(await adapter.refresh(), true);
   assert.equal(healthCalls, 2);
   assert.equal(adapter.indexer.getGeneration(), 34);
-  assert.equal(adapter.status.reason, "ready");
+  assert.equal(adapter.status.availability, "available");
 });
 
 test("Operon 3 Developer API adapter turns malformed or throwing negotiation into diagnostics", async () => {
+  const marker =
+    "C:\\Users\\private\\Vault\\Tasks\\Client.md?query=confidential";
   const throwing = new OperonDeveloperApiRuntimeAdapter(consumer, {
     getDeveloperApiV1: () => {
-      throw new Error("contract handshake failed");
+      throw new Error(marker);
     },
   });
   assert.equal(await throwing.refresh(), false);
-  assert.equal(throwing.status.error?.reason, "contract handshake failed");
+  assert.deepEqual(throwing.status, { availability: "unavailable" });
+  assert.doesNotMatch(
+    JSON.stringify(throwing.status),
+    /private|Client\.md|confidential/u,
+  );
   assert.equal(throwing.negotiatedContractState, "invalid");
 
   const incomplete = new OperonDeveloperApiRuntimeAdapter(consumer, {
     getDeveloperApiV1: () => ({
       ok: true,
-      status: readyStatus(),
+      status: {
+        ...readyStatus(),
+        reason: marker,
+        message: marker,
+        path: marker,
+        query: marker,
+        payload: { marker },
+        rawMarker: marker,
+      },
       api: { hasCapability: () => true },
     }),
   });
   assert.equal(await incomplete.refresh(), false);
-  assert.equal(
-    incomplete.status.error?.reason,
-    "Operon Developer API V1 negotiation returned an incomplete runtime contract.",
+  assert.deepEqual(incomplete.status, {
+    availability: "unavailable",
+    authority: "granted",
+    admission: { reads: true, writes: false },
+    grant: {
+      state: "active",
+      effectiveCapabilities: ["tasks.read", "tasks.query", "catalog.read"],
+    },
+  });
+  assert.doesNotMatch(
+    JSON.stringify(incomplete.status),
+    /private|Client\.md|confidential/u,
   );
   assert.equal(incomplete.negotiatedContractState, "invalid");
 });
@@ -1373,7 +1399,7 @@ test("Operon 3 Developer API adapter refuses an explicitly truncated page withou
   });
 
   assert.equal(await adapter.refresh(), false);
-  assert.match(adapter.status.error?.reason ?? "", /truncation/u);
+  assert.equal(adapter.status.availability, "degraded");
   assert.equal(
     (await adapter.indexer.getIndexV8Diagnostics()).health,
     "degraded",
@@ -2146,9 +2172,7 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
     status: "outcome-unknown",
     mutationMayHaveApplied: true,
     retryAllowed: false,
-    groupResults: [
-      { groupId: "periodic-update", status: "outcome-unknown" },
-    ],
+    groupResults: [{ groupId: "periodic-update", status: "outcome-unknown" }],
     error: {
       code: "outcome-unknown",
       reason: "official uncertain union",
@@ -2205,8 +2229,8 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
   );
   assert.equal(
     "privateValue" in
-      (routedPeriodicCreate.nativeProof?.groupResults[0]?.resourceRevisions?.[0] ??
-        {}),
+      (routedPeriodicCreate.nativeProof?.groupResults[0]
+        ?.resourceRevisions?.[0] ?? {}),
     false,
   );
   const lossyGallery = await adapter.executeTaskWorkflow(
@@ -2460,7 +2484,10 @@ test("a rejected Operon 3.5 workflow grant does not revoke another workflow or c
   assert.equal(adapter.hasTaskWorkflowCapability("periodic-create"), true);
   assert.equal(adapter.hasTaskWorkflowRecoverySupport("periodic-create"), true);
   periodicGrantApproved = false;
-  assert.equal(await adapter.refreshTaskWorkflowRecovery("periodic-create"), false);
+  assert.equal(
+    await adapter.refreshTaskWorkflowRecovery("periodic-create"),
+    false,
+  );
   assert.equal(
     adapter.hasTaskWorkflowCapability("periodic-create"),
     true,

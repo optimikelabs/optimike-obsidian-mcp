@@ -38,8 +38,8 @@ const ExternalMovePlanViewSchema = z
     sourceSha256: z.string().regex(/^[a-f0-9]{64}$/u),
     sourceSize: z.number().int().nonnegative(),
     inventoryDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-    bindingFingerprint: z.string().min(1),
     bindingVerifiable: z.literal(true),
+    legacyBinding: z.literal(false),
     repairs: z.array(
       z.object({
         filePath: z.string().min(1),
@@ -54,7 +54,8 @@ const ExternalMovePlanViewSchema = z
     recoveryErrors: z.array(z.string()),
     appliedRepairCount: z.number().int().nonnegative(),
     restoredRepairCount: z.number().int().nonnegative(),
-    nextAction: z.enum(["apply", "rollback", "none"]),
+    nextAction: z.enum(["apply", "rollback", "manual_review", "none"]),
+    failureCode: z.string().min(1).optional(),
     failure: z.string().optional(),
   })
   .strict();
@@ -111,7 +112,6 @@ function receipt(raw: Record<string, unknown>): OperationReceipt {
     operationKind: "external.move",
     operationId: view.planId,
     idempotencyKey: view.idempotencyKey,
-    backendBinding: view.bindingFingerprint,
     rootId: view.rootId,
     sourceRelativePath: view.sourceRelativePath,
     targetRelativePath: view.targetRelativePath,
@@ -125,7 +125,8 @@ function receipt(raw: Record<string, unknown>): OperationReceipt {
   const recoverable =
     view.nextAction === "rollback" ||
     currentState.phase === "applying" ||
-    currentState.outcome === "outcome_unknown";
+    (currentState.outcome === "outcome_unknown" &&
+      view.nextAction !== "manual_review");
   const postflight =
     currentState.outcome === "committed"
       ? "verified"
@@ -146,10 +147,7 @@ function receipt(raw: Record<string, unknown>): OperationReceipt {
     planDigest: digest,
     phase: currentState.phase,
     outcome: currentState.outcome,
-    backend: {
-      kind: "external-filesystem",
-      bindingFingerprint: view.bindingFingerprint,
-    },
+    backend: { kind: "external-filesystem" },
     target: {
       kind: "same-root-file-move",
       logicalRef: `${view.rootId}:${view.sourceRelativePath}->${view.targetRelativePath}`,
@@ -160,7 +158,6 @@ function receipt(raw: Record<string, unknown>): OperationReceipt {
         sourceSha256: view.sourceSha256,
         sourceSize: view.sourceSize,
         inventoryDigest: view.inventoryDigest,
-        bindingFingerprint: view.bindingFingerprint,
       }),
       details: {
         sourceSha256: view.sourceSha256,

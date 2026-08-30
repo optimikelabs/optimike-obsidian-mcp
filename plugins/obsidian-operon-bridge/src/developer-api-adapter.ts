@@ -37,21 +37,20 @@ interface DeveloperApiError {
 }
 
 export interface DeveloperApiChannelStatus {
-  readonly availability?: string;
-  readonly reason?: string;
-  readonly authority?: string;
+  readonly availability?: "available" | "degraded" | "unavailable";
+  readonly lifecycle?: "cache-ready";
+  readonly retryAfterMs?: number;
+  readonly authority?: "granted" | "pending" | "denied" | "unavailable";
   readonly admission?: {
     readonly reads?: boolean;
     readonly writes?: boolean;
   };
   readonly grant?: {
-    readonly state?: string;
+    readonly state?: "active" | "pending" | "denied" | "unavailable";
     readonly requestedCapabilities?: readonly string[];
     readonly grantedCapabilities?: readonly string[];
     readonly effectiveCapabilities?: readonly string[];
   };
-  readonly error?: DeveloperApiError;
-  readonly [key: string]: unknown;
 }
 
 export interface TaskWorkflowBeforeApplyGateResult {
@@ -744,6 +743,15 @@ const TASK_WORKFLOW_CAPABILITIES: Record<
   ],
 };
 
+const PUBLIC_DEVELOPER_API_CAPABILITIES = new Set<string>([
+  ...BASELINE_CAPABILITIES,
+  ...CORE_READ_CAPABILITIES,
+  ...OPTIONAL_READ_CAPABILITIES,
+  ...Object.values(MUTATION_CAPABILITIES).flat(),
+  ...Object.values(TASK_WORKFLOW_CAPABILITIES).flat(),
+  "tasks.filter-query",
+]);
+
 // The official runtime may settle a graph/project-serial mutation after the
 // default local REST/MCP request budget. Returning an uncertain outcome with
 // the durable recovery reference is safer than holding the HTTP request open
@@ -1099,6 +1107,103 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function channelEnum<T extends string>(
+  value: unknown,
+  values: readonly T[],
+): T | undefined {
+  return typeof value === "string" && values.includes(value as T)
+    ? (value as T)
+    : undefined;
+}
+
+function publicCapabilityList(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return [
+    ...new Set(
+      value.filter(
+        (capability): capability is string =>
+          typeof capability === "string" &&
+          PUBLIC_DEVELOPER_API_CAPABILITIES.has(capability),
+      ),
+    ),
+  ];
+}
+
+/**
+ * The Developer API owns its status shape. Keep no raw part of it: this value
+ * is retained for diagnostics and returned from the public /status route.
+ */
+function projectDeveloperApiChannelStatus(
+  value: unknown,
+): DeveloperApiChannelStatus {
+  if (!isRecord(value)) return {};
+  const availability = channelEnum(value.availability, [
+    "available",
+    "degraded",
+    "unavailable",
+  ] as const);
+  // The upstream status calls this a reason, but the Bridge retains only the
+  // one lifecycle discriminator that drives bounded startup retry.
+  const lifecycle = channelEnum(value.reason, ["cache-ready"] as const);
+  const retryAfterMs =
+    typeof value.retryAfterMs === "number" &&
+    Number.isFinite(value.retryAfterMs) &&
+    value.retryAfterMs >= 0
+      ? Math.min(STARTUP_REFRESH_RETRY_MAX_MS, Math.trunc(value.retryAfterMs))
+      : undefined;
+  const authority = channelEnum(value.authority, [
+    "granted",
+    "pending",
+    "denied",
+    "unavailable",
+  ] as const);
+  const rawAdmission = isRecord(value.admission) ? value.admission : null;
+  const admission = rawAdmission
+    ? {
+        ...(typeof rawAdmission.reads === "boolean"
+          ? { reads: rawAdmission.reads }
+          : {}),
+        ...(typeof rawAdmission.writes === "boolean"
+          ? { writes: rawAdmission.writes }
+          : {}),
+      }
+    : undefined;
+  const rawGrant = isRecord(value.grant) ? value.grant : null;
+  const grantState = rawGrant
+    ? channelEnum(rawGrant.state, [
+        "active",
+        "pending",
+        "denied",
+        "unavailable",
+      ] as const)
+    : undefined;
+  const requestedCapabilities = rawGrant
+    ? publicCapabilityList(rawGrant.requestedCapabilities)
+    : undefined;
+  const grantedCapabilities = rawGrant
+    ? publicCapabilityList(rawGrant.grantedCapabilities)
+    : undefined;
+  const effectiveCapabilities = rawGrant
+    ? publicCapabilityList(rawGrant.effectiveCapabilities)
+    : undefined;
+  const grant = rawGrant
+    ? {
+        ...(grantState ? { state: grantState } : {}),
+        ...(requestedCapabilities ? { requestedCapabilities } : {}),
+        ...(grantedCapabilities ? { grantedCapabilities } : {}),
+        ...(effectiveCapabilities ? { effectiveCapabilities } : {}),
+      }
+    : undefined;
+  return {
+    ...(availability ? { availability } : {}),
+    ...(lifecycle ? { lifecycle } : {}),
+    ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    ...(authority ? { authority } : {}),
+    ...(admission && Object.keys(admission).length > 0 ? { admission } : {}),
+    ...(grant && Object.keys(grant).length > 0 ? { grant } : {}),
+  };
+}
+
 function isDeveloperApiV1(value: unknown): value is DeveloperApiV1 {
   if (!isRecord(value)) return false;
   const channel = isRecord(value.channel) ? value.channel : null;
@@ -1260,16 +1365,14 @@ export class OperonDeveloperApiRuntimeAdapter {
   private startupRetryDelayMs(): number | null {
     if (
       this.channelStatus.availability !== "degraded" ||
-      this.channelStatus.reason !== "cache-ready" ||
+      this.channelStatus.lifecycle !== "cache-ready" ||
       this.channelStatus.admission?.reads !== true
     ) {
       return null;
     }
-    const requestedDelay = Number(this.channelStatus.retryAfterMs ?? 500);
-    if (!Number.isFinite(requestedDelay)) return 500;
     return Math.min(
+      this.channelStatus.retryAfterMs ?? 500,
       STARTUP_REFRESH_RETRY_MAX_MS,
-      Math.max(0, Math.trunc(requestedDelay)),
     );
   }
 
@@ -1333,9 +1436,6 @@ export class OperonDeveloperApiRuntimeAdapter {
     try {
       const health = await api.system.health();
       if (!health.ok) {
-        this.channelStatus = health.error
-          ? { error: health.error }
-          : this.channelStatus;
         this.setUnavailableDiagnostics();
         return false;
       }
@@ -1429,9 +1529,7 @@ export class OperonDeveloperApiRuntimeAdapter {
       };
       this.channelStatus = {
         ...this.channelStatus,
-        error: {
-          reason: error instanceof Error ? error.message : String(error),
-        },
+        availability: "degraded",
       };
       return false;
     }
@@ -1794,7 +1892,8 @@ export class OperonDeveloperApiRuntimeAdapter {
       access.error !== undefined ||
       access.api.contractVersion !== 1 ||
       access.api.runtimeApi !== 1
-    ) return null;
+    )
+      return null;
     return access.api;
   }
 
@@ -1838,28 +1937,18 @@ export class OperonDeveloperApiRuntimeAdapter {
     } catch (error) {
       this.contractState = "invalid";
       this.channelStatus = {
-        error: {
-          reason:
-            error instanceof Error
-              ? error.message
-              : "Operon Developer API V1 negotiation threw an unknown error.",
-        },
+        availability: "unavailable",
       };
       return null;
     }
     if (!isRecord(rawAccess)) {
       this.contractState = "invalid";
       this.channelStatus = {
-        error: {
-          reason:
-            "Operon Developer API V1 negotiation returned an invalid result.",
-        },
+        availability: "unavailable",
       };
       return null;
     }
-    const status = isRecord(rawAccess.status)
-      ? (rawAccess.status as DeveloperApiChannelStatus)
-      : {};
+    const status = projectDeveloperApiChannelStatus(rawAccess.status);
     if (updateStatus) this.channelStatus = status;
     const grant = grantedCapabilitiesFromStatus(status);
     if (grant) this.grantedCapabilities = grant;
@@ -1870,10 +1959,7 @@ export class OperonDeveloperApiRuntimeAdapter {
       this.contractState = "invalid";
       this.channelStatus = {
         ...status,
-        error: {
-          reason:
-            "Operon Developer API V1 negotiation returned an incomplete runtime contract.",
-        },
+        availability: "unavailable",
       };
       return null;
     }
@@ -2470,10 +2556,7 @@ export class OperonDeveloperApiRuntimeAdapter {
       try {
         const replayedIdentity =
           execution.status === "already-applied"
-            ? this.taskWorkflowIdentity(
-                kind,
-                preview.plan.planDigest,
-              )
+            ? this.taskWorkflowIdentity(kind, preview.plan.planDigest)
             : undefined;
         const adopted = await this.findUniqueLiveTaskAfterMutation(
           (task) =>
@@ -2517,10 +2600,7 @@ export class OperonDeveloperApiRuntimeAdapter {
         const provenResourceKeys = this.taskWorkflowResourceKeys(execution);
         const replayedIdentity =
           execution.status === "already-applied"
-            ? this.taskWorkflowIdentity(
-                kind,
-                preview.plan.planDigest,
-              )
+            ? this.taskWorkflowIdentity(kind, preview.plan.planDigest)
             : undefined;
         const created = await this.findUniqueLiveTaskAfterMutation(
           (task) =>
@@ -2672,8 +2752,9 @@ export class OperonDeveloperApiRuntimeAdapter {
       );
     }
     let planDigest =
-      this.taskWorkflowRecoveryDigests.get(`${kind}:${normalizedRecoveryRef}`) ||
-      "";
+      this.taskWorkflowRecoveryDigests.get(
+        `${kind}:${normalizedRecoveryRef}`,
+      ) || "";
     if (planDigest && !SHA256_HEX.test(planDigest)) {
       return this.mutationFailure(
         "invalid-input",
@@ -2711,7 +2792,10 @@ export class OperonDeveloperApiRuntimeAdapter {
             "The recovery reference is not present with a valid digest in pending recovery state; native recovery was not dispatched.",
             null,
             true,
-            { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+            {
+              recoveryRef: normalizedRecoveryRef,
+              mutationMayHaveApplied: true,
+            },
           );
         }
         if (pendingPlanDigest !== suppliedPlanDigest) {
@@ -2720,7 +2804,10 @@ export class OperonDeveloperApiRuntimeAdapter {
             "planDigest does not match the pending native recovery; native recovery was not dispatched.",
             null,
             false,
-            { recoveryRef: normalizedRecoveryRef, mutationMayHaveApplied: true },
+            {
+              recoveryRef: normalizedRecoveryRef,
+              mutationMayHaveApplied: true,
+            },
           );
         }
         planDigest = pendingPlanDigest;
@@ -2856,7 +2943,11 @@ export class OperonDeveloperApiRuntimeAdapter {
       developerErrorMessage(execution.error),
       operonId,
       false,
-      { nativeStatus: status, recoveryRef: plan.recoveryRef, nativeProof: proof },
+      {
+        nativeStatus: status,
+        recoveryRef: plan.recoveryRef,
+        nativeProof: proof,
+      },
     );
   }
 
@@ -2896,8 +2987,11 @@ export class OperonDeveloperApiRuntimeAdapter {
       !Number.isFinite(createdAt) ||
       !Number.isFinite(expiresAt) ||
       expiresAt <= createdAt
-    ) return "plan timestamps are invalid";
-    if (!["none", "routine", "elevated", "destructive"].includes(plan.riskLevel))
+    )
+      return "plan timestamps are invalid";
+    if (
+      !["none", "routine", "elevated", "destructive"].includes(plan.riskLevel)
+    )
       return "riskLevel is invalid";
     if (typeof plan.requiresConsent !== "boolean")
       return "requiresConsent must be boolean";
@@ -2907,15 +3001,15 @@ export class OperonDeveloperApiRuntimeAdapter {
   private taskWorkflowPreviewViolation(
     preview: TaskWorkflowDeveloperMutationPreviewResult,
   ): string | null {
-    if (preview.contractVersion !== 1)
-      return "contractVersion must equal 1";
+    if (preview.contractVersion !== 1) return "contractVersion must equal 1";
     if (preview.kind !== "task-workflow-developer-mutation-preview-result")
       return "kind must be task-workflow-developer-mutation-preview-result";
     if (
       typeof preview.requestId !== "string" ||
       !preview.requestId ||
       preview.requestId.length > 128
-    ) return "requestId is invalid";
+    )
+      return "requestId is invalid";
     if (!Array.isArray(preview.warnings)) return "warnings must be an array";
     if (preview.ok) {
       if (!preview.plan || preview.error !== undefined)
@@ -2930,12 +3024,8 @@ export class OperonDeveloperApiRuntimeAdapter {
   private taskWorkflowPendingViolation(
     pending: DeveloperApiPendingRecoveriesResult,
   ): string | null {
-    if (pending.contractVersion !== 1)
-      return "contractVersion must equal 1";
-    if (
-      pending.kind !==
-      "task-workflow-developer-pending-recoveries-result"
-    )
+    if (pending.contractVersion !== 1) return "contractVersion must equal 1";
+    if (pending.kind !== "task-workflow-developer-pending-recoveries-result")
       return "kind must be task-workflow-developer-pending-recoveries-result";
     if (pending.ok) {
       if (!Array.isArray(pending.recoveries) || pending.error !== undefined)
@@ -2953,7 +3043,8 @@ export class OperonDeveloperApiRuntimeAdapter {
             expiresAt <= createdAt
           );
         })
-      ) return "pending recovery entries are invalid or unbounded";
+      )
+        return "pending recovery entries are invalid or unbounded";
       return null;
     }
     if (pending.recoveries !== undefined || !isRecord(pending.error))
@@ -2972,18 +3063,21 @@ export class OperonDeveloperApiRuntimeAdapter {
       typeof execution.requestId !== "string" ||
       !execution.requestId ||
       execution.requestId.length > 128
-    ) return "requestId is invalid";
+    )
+      return "requestId is invalid";
     if (
       typeof plan.planDigest !== "string" ||
       !SHA256_HEX.test(plan.planDigest) ||
       typeof plan.mutationKind !== "string" ||
       !plan.mutationKind ||
       plan.mutationKind.length > 128
-    ) return "sealed preview plan identity is invalid";
+    )
+      return "sealed preview plan identity is invalid";
     if (
       !Array.isArray(execution.groupResults) ||
       execution.groupResults.length > 32
-    ) return "groupResults must be a bounded array";
+    )
+      return "groupResults must be a bounded array";
     const resourceKinds = new Set([
       "timer",
       "repeat-series",
@@ -3003,7 +3097,8 @@ export class OperonDeveloperApiRuntimeAdapter {
         (group.resourceRevisions !== undefined &&
           (!Array.isArray(group.resourceRevisions) ||
             group.resourceRevisions.length > 64))
-      ) return "groupResults contain an invalid group";
+      )
+        return "groupResults contain an invalid group";
       for (const revision of group.resourceRevisions ?? []) {
         if (
           !resourceKinds.has(String(revision.resourceKind)) ||
@@ -3013,7 +3108,8 @@ export class OperonDeveloperApiRuntimeAdapter {
           typeof revision.revision !== "string" ||
           !revision.revision ||
           revision.revision.length > 256
-        ) return "groupResults contain an invalid resource revision";
+        )
+          return "groupResults contain an invalid resource revision";
       }
     }
     const receipt = execution.receipt;
@@ -3042,7 +3138,8 @@ export class OperonDeveloperApiRuntimeAdapter {
         execution.postflight?.status !== "verified" ||
         typeof execution.postflight.observedAt !== "string" ||
         !Number.isFinite(Date.parse(execution.postflight.observedAt))
-      ) return "applied union is inconsistent with the sealed plan";
+      )
+        return "applied union is inconsistent with the sealed plan";
       return null;
     }
     if (execution.status === "already-applied") {
@@ -3055,7 +3152,8 @@ export class OperonDeveloperApiRuntimeAdapter {
         !receiptMatches ||
         receipt?.terminalOutcome !== "already-applied" ||
         execution.postflight?.status !== "receipt-replay"
-      ) return "already-applied union is inconsistent with the sealed plan";
+      )
+        return "already-applied union is inconsistent with the sealed plan";
       return null;
     }
     if (execution.status === "failed") {
@@ -3070,7 +3168,8 @@ export class OperonDeveloperApiRuntimeAdapter {
           (group) =>
             group.status === "committed" || group.status === "outcome-unknown",
         )
-      ) return "failed union contains side-effect evidence";
+      )
+        return "failed union contains side-effect evidence";
       return null;
     }
     if (
@@ -3093,7 +3192,8 @@ export class OperonDeveloperApiRuntimeAdapter {
         recovery.plan.recoveryRef !== plan.recoveryRef ||
         recovery.plan.planDigest !== plan.planDigest ||
         recovery.plan.mutationKind !== plan.mutationKind
-      ) return "uncertain union does not preserve the same sealed plan";
+      )
+        return "uncertain union does not preserve the same sealed plan";
       return null;
     }
     return "status is not part of the Developer API mutation result union";
@@ -3102,7 +3202,8 @@ export class OperonDeveloperApiRuntimeAdapter {
   private baseMutationProof(
     execution: DeveloperApiMutationExecutionResult,
   ): DeveloperApiTaskWorkflowNativeProof {
-    type ProofGroup = DeveloperApiTaskWorkflowNativeProof["groupResults"][number];
+    type ProofGroup =
+      DeveloperApiTaskWorkflowNativeProof["groupResults"][number];
     type ProofRevision = NonNullable<ProofGroup["resourceRevisions"]>[number];
     const groupResults: ProofGroup[] = (execution.groupResults ?? []).map(
       (group) => {
@@ -3189,15 +3290,16 @@ export class OperonDeveloperApiRuntimeAdapter {
     ] as const);
     if (
       execution.contractVersion !== 1 ||
-      execution.kind !==
-        "task-workflow-developer-mutation-execution-result" ||
+      execution.kind !== "task-workflow-developer-mutation-execution-result" ||
       !statuses.has(execution.status as never) ||
       typeof execution.mutationMayHaveApplied !== "boolean" ||
       typeof execution.retryAllowed !== "boolean" ||
       !Array.isArray(execution.groupResults) ||
       execution.groupResults.length > 32
-    ) return undefined;
-    type ProofGroup = DeveloperApiTaskWorkflowNativeProof["groupResults"][number];
+    )
+      return undefined;
+    type ProofGroup =
+      DeveloperApiTaskWorkflowNativeProof["groupResults"][number];
     type ProofRevision = NonNullable<ProofGroup["resourceRevisions"]>[number];
     const groupResults: ProofGroup[] = [];
     for (const group of execution.groupResults) {
@@ -3209,7 +3311,8 @@ export class OperonDeveloperApiRuntimeAdapter {
         (group.resourceRevisions !== undefined &&
           (!Array.isArray(group.resourceRevisions) ||
             group.resourceRevisions.length > 64))
-      ) return undefined;
+      )
+        return undefined;
       const resourceRevisions: ProofRevision[] = [];
       for (const revision of group.resourceRevisions ?? []) {
         if (
@@ -3220,7 +3323,8 @@ export class OperonDeveloperApiRuntimeAdapter {
           typeof revision.revision !== "string" ||
           !revision.revision ||
           revision.revision.length > 256
-        ) return undefined;
+        )
+          return undefined;
         resourceRevisions.push({
           resourceKind: revision.resourceKind as ProofRevision["resourceKind"],
           resourceKey: revision.resourceKey,
@@ -3247,8 +3351,8 @@ export class OperonDeveloperApiRuntimeAdapter {
       Number.isFinite(Date.parse(receipt.effectiveAt)) &&
       typeof receipt.completedAt === "string" &&
       Number.isFinite(Date.parse(receipt.completedAt)) &&
-      typeof receipt.expiresAt === "string"
-      && Number.isFinite(Date.parse(receipt.expiresAt))
+      typeof receipt.expiresAt === "string" &&
+      Number.isFinite(Date.parse(receipt.expiresAt))
         ? {
             contractVersion: 1 as const,
             planDigest: receipt.planDigest,
@@ -3304,7 +3408,8 @@ export class OperonDeveloperApiRuntimeAdapter {
           revision.resourceKind === "task-source" &&
           typeof revision.resourceKey === "string" &&
           revision.resourceKey
-        ) keys.add(revision.resourceKey);
+        )
+          keys.add(revision.resourceKey);
       }
     }
     return keys;
@@ -3374,7 +3479,8 @@ export class OperonDeveloperApiRuntimeAdapter {
       if (
         JSON.stringify(normalizeTags(runtime.tags)) !==
         JSON.stringify(normalizeTags(requested.tags))
-      ) return false;
+      )
+        return false;
     }
     for (const [field, value] of Object.entries(fields)) {
       if (field === "priority" || field === "status") continue;
@@ -3394,17 +3500,16 @@ export class OperonDeveloperApiRuntimeAdapter {
     >,
   ): string | null {
     if (execution.contractVersion !== 1) return "contractVersion must equal 1";
-    if (
-      execution.kind !==
-      "task-workflow-developer-mutation-execution-result"
-    )
+    if (execution.kind !== "task-workflow-developer-mutation-execution-result")
       return "kind must be task-workflow-developer-mutation-execution-result";
     if (
       typeof execution.requestId !== "string" ||
       !execution.requestId ||
       execution.requestId.length > 128
-    ) return "requestId is invalid";
-    if (!Array.isArray(execution.groupResults)) return "groupResults must be an array";
+    )
+      return "requestId is invalid";
+    if (!Array.isArray(execution.groupResults))
+      return "groupResults must be an array";
     const status = execution.status;
     const groups = execution.groupResults;
     const receipt = execution.receipt;
@@ -3430,7 +3535,8 @@ export class OperonDeveloperApiRuntimeAdapter {
         execution.retryAllowed !== false ||
         execution.error !== undefined ||
         execution.recovery !== undefined
-      ) return "applied must be terminal and non-retryable";
+      )
+        return "applied must be terminal and non-retryable";
       if (
         groups.length === 0 ||
         groups.some(
@@ -3456,7 +3562,8 @@ export class OperonDeveloperApiRuntimeAdapter {
                     !revision.revision,
                 ))),
         )
-      ) return "applied requires non-empty committed groupResults";
+      )
+        return "applied requires non-empty committed groupResults";
       if (new Set(groups.map((group) => group.groupId)).size !== groups.length)
         return "groupResults contain duplicate group ids";
       if (!receiptStructureMatches || receipt?.terminalOutcome !== "applied")
@@ -3476,8 +3583,12 @@ export class OperonDeveloperApiRuntimeAdapter {
         groups.length !== 0 ||
         execution.error !== undefined ||
         execution.recovery !== undefined
-      ) return "already-applied requires no new groups and no retry";
-      if (!receiptStructureMatches || receipt?.terminalOutcome !== "already-applied")
+      )
+        return "already-applied requires no new groups and no retry";
+      if (
+        !receiptStructureMatches ||
+        receipt?.terminalOutcome !== "already-applied"
+      )
         return "already-applied receipt does not match the sealed plan";
       if (execution.postflight?.status !== "receipt-replay")
         return "already-applied requires receipt-replay postflight";
@@ -3491,8 +3602,12 @@ export class OperonDeveloperApiRuntimeAdapter {
         receipt ||
         execution.postflight ||
         execution.recovery ||
-        groups.some((group) => group.status === "committed" || group.status === "outcome-unknown")
-      ) return "failed result has inconsistent side-effect evidence";
+        groups.some(
+          (group) =>
+            group.status === "committed" || group.status === "outcome-unknown",
+        )
+      )
+        return "failed result has inconsistent side-effect evidence";
       return null;
     }
     if (status === "partial" || status === "outcome-unknown") {
@@ -3512,7 +3627,8 @@ export class OperonDeveloperApiRuntimeAdapter {
         this.taskWorkflowPlanViolation(recovery.plan) !== null ||
         recovery.plan.recoveryRef !== recovery.recoveryRef ||
         recovery.plan.planDigest !== recovery.planDigest
-      ) return "uncertain result must be non-retryable and may have applied";
+      )
+        return "uncertain result must be non-retryable and may have applied";
       return null;
     }
     return "status is not part of the task-workflow result union";

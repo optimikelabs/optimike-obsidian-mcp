@@ -65,6 +65,51 @@ Voir [Configuration des racines](docs/external-roots-setup.fr.md) et
 move local est définie dans
 [l’ADR Intégrité des références externes](docs/adr/ADR-External-Reference-Integrity.fr.md).
 
+## Contrat P0 de confidentialité des erreurs et des logs
+
+La frontière P0 est appliquée aux sinks MCP d’erreur et de journalisation
+partagés :
+
+- Les erreurs MCP et Bridge passent par leurs enveloppes publiques canoniques :
+  un `code` fermé, un `message` stable du catalogue et seulement des champs de
+  diagnostic autorisés. Les messages d’exception bruts, stacks et détails
+  arbitraires ne franchissent aucune de ces frontières publiques.
+- Chaque erreur normalisée par la frontière MCP partagée reçoit un UUID généré
+  de façon cryptographique. Le même identifiant est conservé dans l’enveloppe
+  de diagnostic publique et les logs structurés afin de corréler cette erreur
+  entre MCP et le serveur.
+- Les rejets HTTP utilisent la même enveloppe JSON-RPC fermée. Son
+  `error.data.requestId`, le header `X-Request-Id` et l’entrée ErrorHandler
+  sont un seul UUID ; `SERVICE_UNAVAILABLE` et `TIMEOUT` sont mappés vers
+  `503` et `504`.
+- Les entrées du caller et les réponses backend ne sont jamais journalisées en
+  clair. Corps, contenu du coffre, chemins, headers, tokens, noms/messages
+  d’exception et champs de contexte arbitraires sont omis ou réduits à des
+  métadonnées structurelles. Les chaînes issues du caller conservées pour
+  corrélation sont fingerprintées par HMAC avec un secret généré pour le
+  processus courant ; les fingerprints changent au redémarrage et ne sont pas
+  réversibles comme un hash dictionnaire simple.
+- Les diagnostics de recovery sont volontairement étroits : seuls des IDs,
+  digests, références et codes fermés de raison/phase/outcome validés par
+  schéma peuvent être retournés. Les erreurs d’items batch peuvent conserver
+  leur ordinal et l’exact chemin relatif au coffre déjà validé et fourni par le
+  caller. Un chemin issu d’un Bridge/backend non fiable, un chemin absolu et le
+  texte d’erreur backend ne franchissent jamais cette frontière.
+- `@modelcontextprotocol/sdk` est épinglé exactement à `1.30.0` : le hook privé
+  `createToolError` n’est que le fallback ultime pour la validation SDK et les
+  outils inconnus. La CI échoue en cas de dérive de dépendance jusqu’à ce que le
+  SDK fournisse un équivalent public.
+
+Il s’agit d’une frontière de confidentialité, pas d’une promesse d’absence de
+métadonnées opérationnelles dans les logs. Des champs autorisés comme méthode,
+classe de route, statut, compteurs, longueurs et durées peuvent rester, tandis
+que les corps de requête et les suffixes de route restent exclus.
+
+Le contrat est exercé par `npm run test:log-privacy` (fixture des items batch
+incluse) sur Linux et Windows dans la CI. Le job CI `bridge-privacy` exécute
+aussi les contrôles de confidentialité des Bridges Bases, Operon et Atomic
+Write sur les deux plateformes.
+
 ## Frontière reverse proxy
 
 Définir `MCP_TRUST_PROXY=true` seulement si :

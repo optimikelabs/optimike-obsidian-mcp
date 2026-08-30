@@ -79,22 +79,23 @@ export const registerObsidianUpdateNoteTool = async (
          *   containing either the successful response data or an error indication.
          */
         async (params: ObsidianUpdateNoteRegistrationInput) => {
+          const inputMetadata = {
+            targetType: params.targetType,
+            modificationType: params.modificationType,
+            wholeFileMode: params.wholeFileMode,
+            hasTargetIdentifier: Boolean(params.targetIdentifier),
+            createIfNeeded: params.createIfNeeded,
+            overwriteIfExists: params.overwriteIfExists,
+            returnContent: params.returnContent,
+            contentLength: params.content?.length ?? 0,
+          };
           // Create a specific context for this handler invocation.
           const handlerContext: RequestContext =
             requestContextService.createRequestContext({
               parentContext: registrationContext, // Link to the registration context
               operation: "HandleObsidianUpdateNoteRequest",
               toolName: toolName,
-              params: {
-                // Log key parameters for easier debugging, content is omitted for brevity/security
-                targetType: params.targetType,
-                modificationType: params.modificationType, // Note: Will always be 'wholeFile' due to schema
-                targetIdentifier: params.targetIdentifier,
-                wholeFileMode: params.wholeFileMode,
-                createIfNeeded: params.createIfNeeded,
-                overwriteIfExists: params.overwriteIfExists,
-                returnContent: params.returnContent,
-              },
+              params: inputMetadata,
             });
           logger.debug(
             `Handling '${toolName}' request (wholeFile mode)`,
@@ -141,15 +142,15 @@ export const registerObsidianUpdateNoteTool = async (
               // Configuration for the inner error handler (processing logic).
               operation: `processing ${toolName} handler`,
               context: handlerContext,
-              input: params, // Log the full raw input parameters if an error occurs during processing.
+              input: inputMetadata,
               // Custom error mapping to ensure consistent McpError format.
               errorMapper: (error: unknown) =>
                 new McpError(
                   error instanceof McpError
                     ? error.code
                     : BaseErrorCode.INTERNAL_ERROR, // Use INTERNAL_ERROR as the fallback
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext }, // Include context in the error details
+                  `Error processing ${toolName} tool.`,
+                  handlerContext,
                 ),
             },
           ); // End of inner ErrorHandler.tryCatch

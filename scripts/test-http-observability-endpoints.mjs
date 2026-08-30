@@ -226,6 +226,15 @@ try {
 
     const unauthenticated = await fetch(new URL("/statusz", headless.baseUrl));
     assert.equal(unauthenticated.status, 401);
+    const unauthenticatedRequestId =
+      unauthenticated.headers.get("x-request-id");
+    const unauthenticatedBody = await unauthenticated.json();
+    assert.equal(unauthenticatedBody.jsonrpc, "2.0");
+    assert.equal(
+      unauthenticatedBody.error.data.requestId,
+      unauthenticatedRequestId,
+      "authentication failures expose the exact request-state id in header and body",
+    );
 
     const token = await signToken("monitor-client");
     const status = await fetch(new URL("/statusz", headless.baseUrl), {
@@ -236,6 +245,12 @@ try {
       },
     });
     assert.equal(status.status, 200);
+    const statusRequestId = status.headers.get("x-request-id");
+    assert.match(
+      statusRequestId ?? "",
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+      "HTTP responses expose a correlable UUID request id",
+    );
     const statusBody = await status.json();
     assert.equal(statusBody.state, "ready");
     assert.ok(statusBody.controls.sessions);
@@ -276,8 +291,48 @@ try {
       }),
     });
     assert.equal(mappedError.status, 404);
+    const mappedErrorRequestId = mappedError.headers.get("x-request-id");
+    assert.match(
+      mappedErrorRequestId ?? "",
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+    );
     const mappedErrorBody = await mappedError.json();
     assert.equal(mappedErrorBody.id, 8);
+    assert.equal(mappedErrorBody.error.data.requestId, mappedErrorRequestId);
+
+    const zeroIdError = await fetch(new URL("/mcp", headless.baseUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "expired-observability-test-session",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "tools/list" }),
+    });
+    assert.equal(zeroIdError.status, 404);
+    const zeroIdBody = await zeroIdError.json();
+    assert.equal(zeroIdBody.id, 0, "JSON-RPC id 0 must not collapse to null");
+    assert.equal(
+      zeroIdBody.error.data.requestId,
+      zeroIdError.headers.get("x-request-id"),
+    );
+
+    const malformedIdError = await fetch(new URL("/mcp", headless.baseUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "expired-observability-test-session",
+      },
+      body: JSON.stringify({ id: 73, method: "tools/list" }),
+    });
+    assert.equal(malformedIdError.status, 404);
+    const malformedIdBody = await malformedIdError.json();
+    assert.equal(
+      malformedIdBody.id,
+      null,
+      "an id from a malformed JSON-RPC envelope must not be reflected",
+    );
 
     const rejectedOrigin = await fetch(new URL("/healthz", headless.baseUrl), {
       headers: {
@@ -286,16 +341,52 @@ try {
       },
     });
     assert.equal(rejectedOrigin.status, 403);
+    const rejectedOriginBody = await rejectedOrigin.json();
+    assert.equal(rejectedOriginBody.jsonrpc, "2.0");
+    assert.equal(
+      rejectedOriginBody.error.data.requestId,
+      rejectedOrigin.headers.get("x-request-id"),
+    );
+
+    const invalidProfile = await fetch(
+      new URL("/mcp/not-a-profile", headless.baseUrl),
+    );
+    assert.equal(invalidProfile.status, 404);
+    const invalidProfileBody = await invalidProfile.json();
+    assert.equal(invalidProfileBody.jsonrpc, "2.0");
+    assert.equal(
+      invalidProfileBody.error.data.requestId,
+      invalidProfile.headers.get("x-request-id"),
+      "pre-Hono profile rejection uses the canonical error envelope",
+    );
 
     await sleep(150);
     const logs = await readAllLogs(headless.logDir);
-    const completionLogs = logs
+    const logEntries = logs
       .split(/\r?\n/u)
-      .filter((line) => line.includes("HTTP request completed."))
-      .join("\n");
-    assert.ok(completionLogs.includes("incident-42:retry.1"));
-    assert.ok(
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(Boolean);
+    // The privacy logger replaces caller-controlled messages with a generic
+    // runtime label, so completion events are identified by their structured
+    // HTTP status/request fields rather than by the old clear-text message.
+    const completionEntries = logEntries.filter(
+      (entry) => entry.httpStatus !== undefined,
+    );
+    const completionLogs = JSON.stringify(completionEntries);
+    assert.equal(
+      completionLogs.includes("incident-42:retry.1"),
+      false,
+      "caller-controlled correlation ids must never be logged in clear",
+    );
+    assert.equal(
       completionLogs.includes("rejected-origin-403"),
+      false,
       "origin rejection must still emit its completion event",
     );
     assert.equal(completionLogs.includes(token), false);
@@ -308,19 +399,49 @@ try {
       completionLogs.includes("invalid incident with spaces"),
       false,
     );
-    const mappedErrorLog = completionLogs
-      .split(/\r?\n/u)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return undefined;
+    assert.ok(completionEntries.length > 0, "completion events must be logged");
+    for (const entry of completionEntries) {
+      if (entry.requestId !== undefined) {
+        assert.match(
+          entry.requestId,
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+          "logged request ids remain usable UUIDs",
+        );
+      }
+      for (const field of ["correlationId", "incidentId"]) {
+        assert.equal(entry[field], undefined, `${field} is not cleartext`);
+        const fingerprint = entry[`${field}Fingerprint`];
+        if (fingerprint !== undefined) {
+          assert.match(
+            fingerprint,
+            /^[0-9a-f]{16}$/u,
+            `${field} fingerprint must be a short HMAC digest`,
+          );
         }
-      })
-      .find((entry) => entry?.correlationId === "mapped-error-404");
+      }
+    }
+    assert.equal(completionLogs.includes("incident-42:retry.1"), false);
+    assert.equal(
+      completionLogs.includes("invalid incident with spaces"),
+      false,
+    );
+    assert.ok(
+      completionEntries.some(
+        (entry) =>
+          typeof entry.correlationIdFingerprint === "string" &&
+          /^[0-9a-f]{16}$/u.test(entry.correlationIdFingerprint),
+      ),
+      "a valid caller correlation hint must remain correlable only through its per-process HMAC fingerprint",
+    );
+    const mappedErrorLog = completionEntries.find(
+      (entry) => entry?.requestId === mappedErrorRequestId,
+    );
     assert.ok(mappedErrorLog, "mapped error must emit a completion event");
     assert.equal(mappedErrorLog.httpStatus, 404);
-    assert.equal(mappedErrorLog.result, "client_error");
+    assert.ok(
+      completionEntries.some((entry) => entry?.httpStatus === 403),
+      "origin rejection must still emit a completion event",
+    );
   } finally {
     await stopBackend(headless);
   }

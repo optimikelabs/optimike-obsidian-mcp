@@ -245,10 +245,11 @@ async function getFinalState(
   context: RequestContext,
 ): Promise<NoteJson | null> {
   const operation = "getFinalStateAfterSearchReplace";
-  const targetDesc = effectiveFilePath ?? "active file";
-  logger.debug(`Attempting to retrieve final state for target: ${targetDesc}`, {
+  logger.debug("Attempting to retrieve final state after search/replace.", {
     ...context,
     operation,
+    targetType,
+    hasFilePath: Boolean(effectiveFilePath),
   });
   try {
     let noteJson: NoteJson | null = null;
@@ -265,18 +266,17 @@ async function getFinalState(
         context,
       )) as NoteJson;
     }
-    logger.debug(`Successfully retrieved final state for ${targetDesc}`, {
+    logger.debug("Successfully retrieved final state after search/replace.", {
       ...context,
       operation,
     });
     return noteJson;
   } catch (error) {
     // Log the error but return null to avoid failing the main operation.
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.warning(
-      `Could not retrieve final state after search/replace for target: ${targetDesc}. Error: ${errorMsg}`,
-      { ...context, operation, error: errorMsg },
-    );
+    logger.warning("Could not retrieve final state after search/replace.", {
+      ...context,
+      operation,
+    });
     return null;
   }
 }
@@ -323,7 +323,8 @@ export const processObsidianSearchReplace = async (
   logger.debug(`Processing obsidian_search_replace request`, {
     ...context,
     targetType,
-    targetIdentifier,
+    hasTargetIdentifier: Boolean(targetIdentifier),
+    replacementCount: replacements.length,
     initialUseRegex,
     flexibleWhitespace,
     wholeWord,
@@ -364,20 +365,14 @@ export const processObsidianSearchReplace = async (
       targetDescription = targetIdentifier; // Initial description
       try {
         // Attempt 1: Case-sensitive read
-        logger.debug(
-          `Attempting to read file (case-sensitive): ${targetIdentifier}`,
-          readContext,
-        );
+        logger.debug("Attempting to read file with exact path.", readContext);
         originalContent = (await obsidianService.getFileContent(
           targetIdentifier,
           "markdown",
           readContext,
         )) as string;
         effectiveFilePath = targetIdentifier; // Confirm exact path worked
-        logger.debug(
-          `Successfully read file using exact path: ${targetIdentifier}`,
-          readContext,
-        );
+        logger.debug("Successfully read file with exact path.", readContext);
       } catch (readError) {
         // Attempt 2: Case-insensitive fallback if NOT_FOUND
         if (
@@ -385,7 +380,7 @@ export const processObsidianSearchReplace = async (
           readError.code === BaseErrorCode.NOT_FOUND
         ) {
           logger.info(
-            `File not found with exact path: ${targetIdentifier}. Attempting case-insensitive fallback.`,
+            "Exact file path was not found; attempting case-insensitive fallback.",
             readContext,
           );
           const dirname = path.posix.dirname(targetIdentifier);
@@ -411,7 +406,7 @@ export const processObsidianSearchReplace = async (
             effectiveFilePath = path.posix.join(dirname, correctFilename); // Construct the correct path
             targetDescription = effectiveFilePath; // Update description for subsequent logs/errors
             logger.info(
-              `Found case-insensitive match: ${effectiveFilePath}. Reading content.`,
+              "Found one case-insensitive file match; reading content.",
               readContext,
             );
             originalContent = (await obsidianService.getFileContent(
@@ -420,16 +415,19 @@ export const processObsidianSearchReplace = async (
               readContext,
             )) as string;
             logger.debug(
-              `Successfully read file using fallback path: ${effectiveFilePath}`,
+              "Successfully read file using case-insensitive fallback.",
               readContext,
             );
           } else {
             // Handle ambiguous (multiple matches) or no match found
             const errorMsg =
               matches.length > 1
-                ? `Read failed: Ambiguous case-insensitive matches found for '${targetIdentifier}' in directory '${dirToList}'. Matches: [${matches.join(", ")}]`
-                : `Read failed: File not found for '${targetIdentifier}' (case-insensitive fallback also failed in directory '${dirToList}').`;
-            logger.error(errorMsg, { ...readContext, matches });
+                ? "Case-insensitive file lookup was ambiguous."
+                : "File was not found after the case-insensitive fallback.";
+            logger.error(errorMsg, {
+              ...readContext,
+              candidateCount: matches.length,
+            });
             // Use NOT_FOUND for no match, CONFLICT for ambiguity
             throw new McpError(
               matches.length > 1
@@ -457,17 +455,10 @@ export const processObsidianSearchReplace = async (
   } catch (error) {
     // Catch and handle errors during the initial read phase
     if (error instanceof McpError) throw error; // Re-throw known McpErrors
-    const errorMessage = `Unexpected error reading target ${targetDescription} before search/replace.`;
-    logger.error(
-      errorMessage,
-      error instanceof Error ? error : undefined,
-      readContext,
-    );
-    throw new McpError(
-      BaseErrorCode.INTERNAL_ERROR,
-      `${errorMessage}: ${error instanceof Error ? error.message : String(error)}`,
-      readContext,
-    );
+    const errorMessage =
+      "Unexpected error reading target before search/replace.";
+    logger.error(errorMessage, readContext);
+    throw new McpError(BaseErrorCode.INTERNAL_ERROR, errorMessage, readContext);
   }
 
   if (params.expectedSha256) {
@@ -500,7 +491,8 @@ export const processObsidianSearchReplace = async (
     const repContext = {
       ...replaceContext,
       replacementIndex: i,
-      searchPattern: rep.search,
+      searchLength: rep.search.length,
+      replacementLength: rep.replace.length,
     };
     let currentReplacementsInBlock = 0;
     let finalSearchPattern: string | RegExp = rep.search; // Start with the raw search string
@@ -520,7 +512,7 @@ export const processObsidianSearchReplace = async (
           searchStr = escapeRegex(searchStr).replace(/\s+/g, "\\s+");
           useRegexForThisRep = true; // Now treat it as a regex pattern string
           logger.debug(
-            `Applying flexibleWhitespace: "${rep.search}" -> /${searchStr}/`,
+            "Applied flexible whitespace matching to replacement pattern.",
             patternPrepContext,
           );
         }
@@ -534,7 +526,7 @@ export const processObsidianSearchReplace = async (
           searchStr = `\\b${basePattern}\\b`;
           useRegexForThisRep = true; // Definitely treat as a regex pattern string now
           logger.debug(
-            `Applying wholeWord: "${rep.search}" -> /${searchStr}/`,
+            "Applied whole-word matching to replacement pattern.",
             patternPrepContext,
           );
         }
@@ -553,13 +545,13 @@ export const processObsidianSearchReplace = async (
           searchStr = `\\b${searchStr}\\b`;
           // Log a warning as this might interfere with complex user regex.
           logger.warning(
-            `Applying wholeWord=true to user-provided regex. Original: /${rep.search}/, Modified: /${searchStr}/. This might affect complex regex behavior.`,
+            "Applied whole-word matching to a user-provided regex; this can affect complex expressions.",
             patternPrepContext,
           );
           finalSearchPattern = searchStr; // Update the pattern string
         } else {
           logger.debug(
-            `wholeWord=true requested, but user regex /${searchStr}/ appears to already contain boundary anchors. Using original regex.`,
+            "The user regex already appears to contain boundary anchors; using it unchanged.",
             patternPrepContext,
           );
           finalSearchPattern = rep.search; // Keep original regex string
@@ -580,7 +572,7 @@ export const processObsidianSearchReplace = async (
         if (!caseSensitive) flags += "i"; // Ignore case flag
         const regex = new RegExp(finalSearchPattern as string, flags); // Create RegExp object
         logger.debug(
-          `Executing regex replacement: /${finalSearchPattern}/${flags}`,
+          `Executing regex replacement with flags: ${flags || "none"}.`,
           execContext,
         );
 
@@ -610,7 +602,7 @@ export const processObsidianSearchReplace = async (
           : searchString.toLowerCase();
         let startIndex = 0;
         logger.debug(
-          `Executing string replacement: "${searchString}" (caseSensitive: ${caseSensitive})`,
+          `Executing string replacement (caseSensitive: ${caseSensitive}).`,
           execContext,
         );
 
@@ -654,7 +646,7 @@ export const processObsidianSearchReplace = async (
           ) {
             // This is a heuristic, might not catch all cases but prevents common ones.
             logger.warning(
-              `Replacement string "${rep.replace}" contains search string "${searchString}". Potential infinite loop detected. Breaking loop for this block.`,
+              "Replacement can reintroduce its search pattern; stopping this block to avoid an infinite loop.",
               execContext,
             );
             break;
@@ -663,21 +655,17 @@ export const processObsidianSearchReplace = async (
       }
       totalReplacementsMade += currentReplacementsInBlock;
       logger.debug(
-        `Block ${i}: Performed ${currentReplacementsInBlock} replacements for search: "${rep.search}"`,
+        `Block ${i}: performed ${currentReplacementsInBlock} replacement(s).`,
         repContext,
       );
     } catch (error) {
       // Catch errors during a specific replacement block
-      const errorMessage = `Error during replacement block ${i} (search: "${rep.search}")`;
-      logger.error(
-        errorMessage,
-        error instanceof Error ? error : undefined,
-        repContext,
-      );
+      const errorMessage = `Error during replacement block ${i}.`;
+      logger.error(errorMessage, repContext);
       // Fail fast: Stop processing further replacements if one block fails.
       throw new McpError(
         BaseErrorCode.INTERNAL_ERROR,
-        `${errorMessage}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        errorMessage,
         repContext,
       );
     }
@@ -696,10 +684,7 @@ export const processObsidianSearchReplace = async (
   if (modifiedContent !== originalContent) {
     const writeContext = { ...context, operation: "writeFileContent" };
     try {
-      logger.debug(
-        `Content changed. Writing modified content back to ${targetDescription}`,
-        writeContext,
-      );
+      logger.debug("Content changed; writing the modified note.", writeContext);
       // Use the effectiveFilePath determined during the read phase for filePath targets
       if (targetType === "filePath") {
         await obsidianService.updateFileContent(
@@ -717,7 +702,7 @@ export const processObsidianSearchReplace = async (
         await obsidianService.updateActiveFile(modifiedContent, writeContext);
       }
       logger.info(
-        `Successfully updated ${targetDescription} with ${totalReplacementsMade} replacement(s).`,
+        `Search/replace write completed with ${totalReplacementsMade} replacement(s).`,
         writeContext,
       );
 
@@ -751,38 +736,33 @@ export const processObsidianSearchReplace = async (
                 err.code === BaseErrorCode.TIMEOUT),
             onRetry: (attempt, err) =>
               logger.warning(
-                `getFinalStateAfterSearchReplaceWrite (attempt ${attempt}) failed. Error: ${(err as Error).message}. Retrying...`,
-                writeContext,
+                `Final-state read failed on attempt ${attempt}; retrying.`,
+                { ...writeContext, retryAttempt: attempt },
               ),
           },
         );
       } catch (retryError) {
         finalState = null;
         logger.error(
-          `Failed to retrieve final state for ${targetDescription} after write, even after retries. Error: ${(retryError as Error).message}`,
-          retryError instanceof Error ? retryError : undefined,
+          "Failed to retrieve final state after write and retries.",
           writeContext,
         );
       }
     } catch (error) {
       // Handle errors during the write phase
       if (error instanceof McpError) throw error; // Re-throw known McpErrors
-      const errorMessage = `Unexpected error writing modified content to ${targetDescription}.`;
-      logger.error(
-        errorMessage,
-        error instanceof Error ? error : undefined,
-        writeContext,
-      );
+      const errorMessage = "Unexpected error writing modified content.";
+      logger.error(errorMessage, writeContext);
       throw new McpError(
         BaseErrorCode.INTERNAL_ERROR,
-        `${errorMessage}: ${error instanceof Error ? error.message : String(error)}`,
+        errorMessage,
         writeContext,
       );
     }
   } else {
     // Content did not change, no need to write.
     logger.info(
-      `No changes detected in ${targetDescription} after search/replace operations. Skipping write.`,
+      "No changes detected after search/replace; skipping write.",
       context,
     );
     // Still attempt to get the state, as the user might want stats even if content is unchanged.
@@ -815,16 +795,15 @@ export const processObsidianSearchReplace = async (
               err.code === BaseErrorCode.TIMEOUT),
           onRetry: (attempt, err) =>
             logger.warning(
-              `getFinalStateAfterSearchReplaceNoChange (attempt ${attempt}) failed. Error: ${(err as Error).message}. Retrying...`,
-              context,
+              `Final-state read failed on attempt ${attempt}; retrying.`,
+              { ...context, retryAttempt: attempt },
             ),
         },
       );
     } catch (retryError) {
       finalState = null;
       logger.error(
-        `Failed to retrieve final state for ${targetDescription} (no change), even after retries. Error: ${(retryError as Error).message}`,
-        retryError instanceof Error ? retryError : undefined,
+        "Failed to retrieve final state after a no-change result.",
         context,
       );
     }

@@ -17,13 +17,19 @@
 import { ServerType } from "@hono/node-server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { dump, load } from "js-yaml";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
 // Import validated configuration and environment details.
 import { config, environment } from "../config/index.js";
 // Import core utilities: ErrorHandler, logger, requestContextService.
-import { ErrorHandler, logger, requestContextService } from "../utils/index.js";
+import {
+  ErrorHandler,
+  logger,
+  publicMcpToolErrorPayload,
+  requestContextService,
+} from "../utils/index.js";
+import type { ErrorContext } from "../utils/internal/errorHandler.js";
 // Import the Obsidian service
 import { ObsidianRestApiService } from "../services/obsidianRestAPI/index.js";
 // Import the Vault Cache service
@@ -71,8 +77,169 @@ import {
 } from "./toolAnnotations.js";
 // Import transport setup functions.
 import { startHttpTransport } from "./transports/httpTransport.js";
+import { activeHttpRequestId } from "./transports/httpRequestState.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
 import { registerToolRoutingResource } from "./resources/toolRoutingResource.js";
+
+/**
+ * Converts one failed item of a direct batch write into the same public MCP
+ * error envelope used by single-item tools.  Batch success rows can report a
+ * resolved vault path; failure rows deliberately retain only their ordinal so
+ * that neither a caller path nor a backend error message crosses the boundary.
+ */
+export function publicBatchItemErrorPayload(
+  error: unknown,
+  options: {
+    operation: string;
+    toolName: string;
+    itemIndex: number;
+    params: unknown;
+  },
+): Record<string, unknown> {
+  return {
+    itemIndex: options.itemIndex,
+    ...publicMcpToolErrorPayload(error, {
+      operation: options.operation,
+      toolName: options.toolName,
+      params: options.params,
+    }),
+  };
+}
+
+/**
+ * Reports a server-lifecycle failure without observing arbitrary fields on the
+ * thrown value. This is shared by startup and background work so a revoked
+ * Proxy or throwing `message`/`stack` getter cannot turn diagnostics into a
+ * second uncaught failure.
+ */
+export function reportOpaqueServerFailure(
+  error: unknown,
+  options: {
+    operation: string;
+    context: ErrorContext;
+    critical?: boolean;
+  },
+): void {
+  ErrorHandler.handleError(error, {
+    operation: options.operation,
+    context: options.context,
+    critical: options.critical ?? false,
+    includeStack: false,
+  });
+}
+
+/**
+ * MCP SDK 1.30.0 converts every uncaught tool exception into a CallToolResult
+ * through its private `createToolError(error.message)` hook. That includes
+ * SDK-side input validation and unknown-tool errors, so tool-local boundaries
+ * cannot protect every path. Replace the hook before the first registration,
+ * when the SDK installs its tools/call request handler.
+ *
+ * This deliberately does not affect a tool which returns an `isError` result
+ * itself: the SDK only calls `createToolError` for thrown failures.
+ */
+export function installMcpSdkToolErrorPrivacyBoundary(server: McpServer): void {
+  const privateServer = server as unknown as {
+    createToolError?: unknown;
+    _toolHandlersInitialized?: unknown;
+  };
+
+  if (privateServer._toolHandlersInitialized) {
+    throw new Error(
+      "MCP SDK tool error privacy boundary must be installed before tool registration.",
+    );
+  }
+  if (typeof privateServer.createToolError !== "function") {
+    throw new Error(
+      "Unsupported @modelcontextprotocol/sdk: McpServer.createToolError is unavailable.",
+    );
+  }
+
+  privateServer.createToolError = () => {
+    const requestId = activeHttpRequestId() ?? randomUUID();
+    const handled = ErrorHandler.handleError(
+      new Error("MCP SDK tool execution failed."),
+      {
+        operation: "mcpSdkToolErrorBoundary",
+        context: { requestId, toolName: "mcp_sdk" },
+        includeStack: false,
+      },
+    );
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: false,
+            requestId,
+            error: ErrorHandler.formatError(handled),
+          }),
+        },
+      ],
+      isError: true,
+    };
+  };
+}
+
+/**
+ * Make public tool errors the normal control path. The SDK hook above remains
+ * necessary for SDK-side validation and unknown tools, but it intentionally
+ * cannot see the original error object. Wrapping callbacks before registration
+ * preserves the canonical code and allowlisted recovery metadata for every
+ * application handler, including the legacy handlers that use
+ * ErrorHandler.tryCatch() and rethrow.
+ */
+export function installMcpToolPublicErrorBoundary(server: McpServer): void {
+  type ToolRegistrar = (name: string, ...args: unknown[]) => unknown;
+  type ToolCallback = (...args: unknown[]) => unknown;
+  type PrivateServer = {
+    tool: ToolRegistrar;
+    __optimikePublicToolErrorBoundaryInstalled?: boolean;
+  };
+  const privateServer = server as unknown as PrivateServer;
+  if (privateServer.__optimikePublicToolErrorBoundaryInstalled) return;
+
+  const registerTool = privateServer.tool.bind(server);
+  privateServer.tool = (name, ...args) => {
+    const callback = args.at(-1);
+    if (typeof callback !== "function") {
+      // Preserve the SDK's own argument validation and privacy fallback for a
+      // malformed registration rather than introducing a second convention.
+      return registerTool(name, ...args);
+    }
+
+    const wrapped: ToolCallback = async (...callbackArgs) => {
+      try {
+        return await callback(...callbackArgs);
+      } catch (error) {
+        // HTTP requests carry their server-owned correlation UUID through the
+        // SDK dispatch chain. In-memory and stdio transports deliberately have
+        // no HTTP state and receive a bounded UUID in the public error helper.
+        const requestId = activeHttpRequestId();
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                publicMcpToolErrorPayload(error, {
+                  operation: `mcpTool:${name}`,
+                  toolName: name,
+                  params: callbackArgs.length > 1 ? callbackArgs[0] : undefined,
+                  requestId,
+                }),
+              ),
+            },
+          ],
+          isError: true,
+        };
+      }
+    };
+
+    return registerTool(name, ...args.slice(0, -1), wrapped);
+  };
+  privateServer.__optimikePublicToolErrorBoundaryInstalled = true;
+}
 
 async function updateCacheAfterGuardedWrite(
   vaultCacheService: VaultCacheService | undefined,
@@ -844,7 +1011,7 @@ function registerHeadlessGuardedWriteTools(
         context,
       });
       const results = [];
-      for (const operation of params.operations) {
+      for (const [itemIndex, operation] of params.operations.entries()) {
         try {
           if (Object.keys(operation.set ?? {}).length === 0) {
             throw new Error(
@@ -885,12 +1052,14 @@ function registerHeadlessGuardedWriteTools(
             hash: result.hash,
           });
         } catch (error) {
-          results.push({
-            file: operation.filePath,
-            error: {
-              message: error instanceof Error ? error.message : String(error),
-            },
-          });
+          results.push(
+            publicBatchItemErrorPayload(error, {
+              operation: "obsidian_batch_frontmatter:item",
+              toolName: "obsidian_batch_frontmatter",
+              itemIndex,
+              params: operation,
+            }),
+          );
           if (!params.continueOnError) {
             break;
           }
@@ -953,7 +1122,7 @@ function registerHeadlessGuardedWriteTools(
         context,
       });
       const results = [];
-      for (const item of params.items) {
+      for (const [itemIndex, item] of params.items.entries()) {
         try {
           const current = await vaultFileService.read(item.sourcePath, context);
           const targetPath =
@@ -1030,12 +1199,14 @@ function registerHeadlessGuardedWriteTools(
             hash: result.hash,
           });
         } catch (error) {
-          results.push({
-            sourcePath: item.sourcePath,
-            error: {
-              message: error instanceof Error ? error.message : String(error),
-            },
-          });
+          results.push(
+            publicBatchItemErrorPayload(error, {
+              operation: "obsidian_admin_filesystem:item",
+              toolName: "obsidian_admin_filesystem",
+              itemIndex,
+              params: item,
+            }),
+          );
           if (!params.continueOnError) break;
         }
       }
@@ -1531,7 +1702,7 @@ function registerHeadlessGuardedWriteTools(
         context,
       });
       const results = [];
-      for (const operation of params.operations) {
+      for (const [itemIndex, operation] of params.operations.entries()) {
         try {
           if (!operation.set || Object.keys(operation.set).length === 0) {
             throw new Error(
@@ -1558,13 +1729,14 @@ function registerHeadlessGuardedWriteTools(
             hash: result.hash,
           });
         } catch (error) {
-          const item = {
-            file: operation.file,
-            error: {
-              message: error instanceof Error ? error.message : String(error),
-            },
-          };
-          results.push(item);
+          results.push(
+            publicBatchItemErrorPayload(error, {
+              operation: "bases_upsert_rows:item",
+              toolName: "bases_upsert_rows",
+              itemIndex,
+              params: operation,
+            }),
+          );
           if (!params.continueOnError) {
             break;
           }
@@ -1657,6 +1829,8 @@ async function createMcpServerInstance(
       },
     },
   );
+  installMcpSdkToolErrorPrivacyBoundary(server);
+  installMcpToolPublicErrorBoundary(server);
 
   try {
     logger.debug(
@@ -1784,25 +1958,25 @@ async function createMcpServerInstance(
       // Intentionally not awaiting this promise to allow server startup to proceed.
       // Errors are logged within the catch block.
       vaultCacheService.buildVaultCache().catch((cacheBuildError) => {
-        logger.error("Error occurred during background vault cache build", {
-          ...context, // Use the initial context for correlation
-          subOperation: "BackgroundVaultCacheBuild", // Add sub-operation for clarity
-          error:
-            cacheBuildError instanceof Error
-              ? cacheBuildError.message
-              : String(cacheBuildError),
-          stack:
-            cacheBuildError instanceof Error
-              ? cacheBuildError.stack
-              : undefined,
+        // ErrorHandler is intentionally the first and only observer of a
+        // thrown value. `instanceof`, `.message`, `.stack`, and coercion can
+        // all execute hostile Proxy/getter hooks while an error is being
+        // reported, so this path must remain opaque and fail closed.
+        reportOpaqueServerFailure(cacheBuildError, {
+          operation: "BackgroundVaultCacheBuild",
+          context: {
+            ...context,
+            subOperation: "BackgroundVaultCacheBuild",
+          },
         });
       });
     }
   } catch (err) {
-    logger.error("Failed to register resources/tools", {
-      ...context,
-      error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
+    // Keep startup diagnostics opaque until ErrorHandler has classified them
+    // through its Proxy/getter-safe primitives.
+    reportOpaqueServerFailure(err, {
+      operation: "createMcpServerInstance",
+      context,
     });
     throw err; // Re-throw to be caught by the caller (e.g., startTransport)
   }
@@ -1942,13 +2116,8 @@ export async function initializeAndStartServer(
     );
     return result;
   } catch (err) {
-    logger.fatal("Critical error during MCP server initialization.", {
-      ...context,
-      error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
-    });
     // Ensure the error is handled by our centralized handler, which might log more details or perform cleanup.
-    ErrorHandler.handleError(err, {
+    reportOpaqueServerFailure(err, {
       operation: "initializeAndStartServer", // More specific operation
       context: context, // Pass the existing context
       critical: true, // This is a critical failure

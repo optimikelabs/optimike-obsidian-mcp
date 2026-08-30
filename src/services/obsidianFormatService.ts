@@ -47,6 +47,17 @@ const TAG_PATTERN = /^[A-Za-z_][A-Za-z0-9_/-]*$/u;
 const CANVAS_NODE_TYPES = new Set(["text", "file", "link", "group"]);
 const CANVAS_SIDES = new Set(["top", "right", "bottom", "left"]);
 
+// Parser diagnostics are deliberately not returned to callers. YAML/JSON
+// parsers are allowed to include source excerpts, keys, or scalar values in
+// their messages, which would turn format validation into a content-leaking
+// endpoint. The stable issue code and path below carry the actionable
+// location without reflecting any part of the document.
+const PARSER_ISSUE_MESSAGES = {
+  frontmatter: "Frontmatter YAML is invalid.",
+  base: ".base YAML is invalid.",
+  canvas: "Canvas JSON is invalid.",
+} as const;
+
 function splitIssues(issues: FormatIssue[]): {
   errors: FormatIssue[];
   warnings: FormatIssue[];
@@ -65,6 +76,64 @@ function addIssue(
   path?: string,
 ): void {
   issues.push({ severity, code, message, path });
+}
+
+function normalizeTag(tag: string): string {
+  return tag.replace(/^#+/u, "").trim();
+}
+
+function uniqueTags(tags: string[]): string[] {
+  return [...new Set(tags.map(normalizeTag).filter(Boolean))].sort();
+}
+
+function extractInlineTagsSafely(body: string): string[] {
+  return uniqueTags(
+    [...body.matchAll(/(^|[\s([{])#([A-Za-z0-9][A-Za-z0-9_/-]*)/gu)].map(
+      (match) => match[2],
+    ),
+  );
+}
+
+function extractMarkdownTagsSafely(
+  content: string,
+  body: string,
+  frontmatter: Record<string, unknown> | undefined,
+  frontmatterIssues: FormatIssue[],
+): {
+  frontmatterTags: string[];
+  inlineTags: string[];
+  allTags: string[];
+} {
+  // extractMarkdownTags reparses YAML and its parser exception may contain a
+  // source excerpt. Use the already isolated body when frontmatter parsing
+  // failed, so validation remains both useful and content-safe.
+  if (
+    frontmatterIssues.some((issue) => issue.code === "frontmatter-yaml-invalid")
+  ) {
+    const frontmatterTags: string[] = [];
+    const inlineTags = extractInlineTagsSafely(body);
+    return {
+      frontmatterTags,
+      inlineTags,
+      allTags: uniqueTags([...frontmatterTags, ...inlineTags]),
+    };
+  }
+
+  try {
+    return extractMarkdownTags(content);
+  } catch {
+    // Keep this boundary defensive in case the shared tag extractor gains
+    // another parser-backed path in the future.
+    const frontmatterTags = Array.isArray(frontmatter?.tags)
+      ? uniqueTags(frontmatter.tags.map(String))
+      : [];
+    const inlineTags = extractInlineTagsSafely(body);
+    return {
+      frontmatterTags,
+      inlineTags,
+      allTags: uniqueTags([...frontmatterTags, ...inlineTags]),
+    };
+  }
 }
 
 function readYamlFrontmatter(content: string): {
@@ -96,32 +165,30 @@ function readYamlFrontmatter(content: string): {
       body: content.slice(match[0].length),
       issues,
     };
-  } catch (error) {
+  } catch {
     addIssue(
       issues,
       "error",
       "frontmatter-yaml-invalid",
-      error instanceof Error ? error.message : String(error),
+      PARSER_ISSUE_MESSAGES.frontmatter,
       "frontmatter",
     );
     return { body: content.slice(match[0].length), issues };
   }
 }
 
-function collectStringsAndKeys(value: unknown, path = "$"): string[] {
+function collectStringsAndKeys(value: unknown): string[] {
   if (typeof value === "string") {
     return [value];
   }
   if (Array.isArray(value)) {
-    return value.flatMap((item, index) =>
-      collectStringsAndKeys(item, `${path}[${index}]`),
-    );
+    return value.flatMap((item) => collectStringsAndKeys(item));
   }
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
     return entries.flatMap(([key, child]) => [
       key,
-      ...collectStringsAndKeys(child, `${path}.${key}`),
+      ...collectStringsAndKeys(child),
     ]);
   }
   return [];
@@ -138,14 +205,19 @@ export function validateObsidianMarkdown(
   } = readYamlFrontmatter(content);
   issues.push(...frontmatterIssues);
 
-  const tags = extractMarkdownTags(content);
+  const tags = extractMarkdownTagsSafely(
+    content,
+    body,
+    frontmatter,
+    frontmatterIssues,
+  );
   for (const tag of tags.allTags) {
     if (!TAG_PATTERN.test(tag)) {
       addIssue(
         issues,
         "warning",
         "tag-syntax",
-        `Tag "${tag}" is outside the conservative Obsidian tag pattern.`,
+        "Tag is outside the conservative Obsidian tag pattern.",
         "tags",
       );
     }
@@ -215,7 +287,7 @@ export function validateObsidianMarkdown(
         issues,
         "warning",
         "unknown-callout",
-        `Callout type "${callout}" is not in the common Obsidian callout set.`,
+        "Callout type is not in the common Obsidian callout set.",
         "body",
       );
     }
@@ -246,12 +318,13 @@ export function validateObsidianBase(content: string): FormatValidationResult {
   let parsed: unknown;
   try {
     parsed = load(content);
-  } catch (error) {
+  } catch {
     addIssue(
       issues,
       "error",
       "base-yaml-invalid",
-      error instanceof Error ? error.message : String(error),
+      PARSER_ISSUE_MESSAGES.base,
+      "base",
     );
   }
 
@@ -287,7 +360,7 @@ export function validateObsidianBase(content: string): FormatValidationResult {
         issues,
         "warning",
         "base-undefined-formula",
-        `formula.${ref} is referenced but not defined in formulas.`,
+        "A formula is referenced but not defined in formulas.",
         "formulas",
       );
     }
@@ -353,12 +426,13 @@ export function validateJsonCanvas(content: string): FormatValidationResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
-  } catch (error) {
+  } catch {
     addIssue(
       issues,
       "error",
       "canvas-json-invalid",
-      error instanceof Error ? error.message : String(error),
+      PARSER_ISSUE_MESSAGES.canvas,
+      "canvas",
     );
   }
 
@@ -426,7 +500,7 @@ export function validateJsonCanvas(content: string): FormatValidationResult {
           issues,
           "error",
           "canvas-node-id-duplicate",
-          `Duplicate node id "${id}".`,
+          "Canvas node id is duplicated.",
           `${nodePath}.id`,
         );
       }
@@ -435,7 +509,7 @@ export function validateJsonCanvas(content: string): FormatValidationResult {
           issues,
           "warning",
           "canvas-node-id-shape",
-          `Node id "${id}" is not a 16-character hex id.`,
+          "Canvas node id is not a 16-character hex id.",
           `${nodePath}.id`,
         );
       }
@@ -456,7 +530,7 @@ export function validateJsonCanvas(content: string): FormatValidationResult {
           issues,
           "error",
           "canvas-node-geometry",
-          `Canvas node field ${field} must be a number.`,
+          "Canvas node geometry field must be a number.",
           `${nodePath}.${field}`,
         );
       }
@@ -510,7 +584,7 @@ export function validateJsonCanvas(content: string): FormatValidationResult {
           issues,
           "error",
           "canvas-edge-id-duplicate",
-          `Duplicate edge id "${id}".`,
+          "Canvas edge id is duplicated.",
           `${edgePath}.id`,
         );
       }
@@ -525,7 +599,7 @@ export function validateJsonCanvas(content: string): FormatValidationResult {
           issues,
           "error",
           "canvas-edge-node-reference",
-          `${field} must reference an existing node id.`,
+          "Canvas edge node reference must point to an existing node id.",
           `${edgePath}.${field}`,
         );
       }
@@ -540,7 +614,7 @@ export function validateJsonCanvas(content: string): FormatValidationResult {
           issues,
           "warning",
           "canvas-edge-side",
-          `${field} should be top, right, bottom, or left.`,
+          "Canvas edge side should be top, right, bottom, or left.",
           `${edgePath}.${field}`,
         );
       }

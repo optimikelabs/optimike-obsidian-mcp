@@ -4,6 +4,7 @@
  * It handles different log levels compliant with RFC 5424 and MCP specifications.
  * @module src/utils/internal/logger
  */
+import { createHmac, randomBytes } from "node:crypto";
 import path from "path";
 import winston from "winston";
 import TransportStream from "winston-transport";
@@ -60,27 +61,13 @@ const mcpToWinstonLevel: Record<
 };
 
 /**
- * Interface for a more structured error object, primarily for formatting console logs.
- * @private
- */
-interface ErrorWithMessageAndStack {
-  message?: string;
-  stack?: string;
-  [key: string]: any;
-}
-
-/**
  * Interface for the payload of an MCP log notification.
  * This structure is used when sending log data via MCP `notifications/message`.
  */
 export interface McpLogPayload {
   message: string;
-  context?: RequestContext;
-  error?: {
-    message: string;
-    stack?: string;
-  };
-  [key: string]: any;
+  context?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 /**
@@ -106,6 +93,365 @@ const resolvedLogsDir = config.logsPath;
 const isLogsDirSafe = !!resolvedLogsDir; // If logsPath is set, it's considered safe by config logic.
 
 /**
+ * Per-process secret used to correlate repeated log templates without retaining
+ * the template itself. A plain hash would make short paths, task titles and
+ * other low-entropy caller data reversible through dictionary attacks.
+ */
+const logEventHmacKey = randomBytes(32);
+
+const SAFE_LOG_CONTEXT_FIELDS = new Set([
+  "requestId",
+  "correlationId",
+  "incidentId",
+  "timestamp",
+  "operation",
+  "toolName",
+  "module",
+  "transport",
+  "writeMode",
+  "profile",
+  "errorCode",
+  "originalErrorType",
+  "finalErrorType",
+  "critical",
+  "status",
+  "httpStatus",
+  "durationMs",
+  "elapsedMs",
+  "attempt",
+  "retryCount",
+  "count",
+  "resultCount",
+  "total",
+  "limit",
+  "offset",
+  "phase",
+  "outcome",
+  "reasonCode",
+  "retryable",
+  "recoveryAllowed",
+  "applyAllowed",
+  "mutationMayHaveApplied",
+  "method",
+  "routeClass",
+  "hasBody",
+  "inputLength",
+  "inputType",
+  "failureCategory",
+  "event",
+  "signal",
+  "pluginVersion",
+  "appVersion",
+  "serverName",
+  "runtimeMode",
+  "configured",
+  "available",
+  "enabled",
+  "ready",
+  "cacheEnabled",
+  "source",
+  "concurrency",
+  "batchCount",
+  "contentLength",
+  "fieldCount",
+  "length",
+  "valueRedacted",
+  "kind",
+  "loggerSetup",
+  "originalLevel",
+  "stackAvailable",
+]);
+
+const SAFE_NESTED_LOG_FIELDS = new Set([
+  "operationId",
+  "planRef",
+  "recoveryRef",
+  "reasonCode",
+  "retryable",
+  "recoveryAllowed",
+  "applyAllowed",
+  "mutationMayHaveApplied",
+  "httpStatus",
+  "planDigest",
+  "phase",
+  "outcome",
+  "kind",
+  "fieldCount",
+  "length",
+  "valueRedacted",
+]);
+
+const SAFE_LOG_ENUM_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
+  errorCode: new Set([
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+    "NOT_FOUND",
+    "CONFLICT",
+    "VALIDATION_ERROR",
+    "PARSING_ERROR",
+    "RATE_LIMITED",
+    "TIMEOUT",
+    "SERVICE_UNAVAILABLE",
+    "INTERNAL_ERROR",
+    "UNKNOWN_ERROR",
+    "CONFIGURATION_ERROR",
+  ]),
+  transport: new Set(["stdio", "http", "sse", "streamable-http"]),
+  writeMode: new Set(["readonly", "guarded", "full"]),
+  profile: new Set(["minimal", "standard", "authoring", "tasks", "full"]),
+  originalErrorType: new Set([
+    "mcp",
+    "syntax",
+    "type",
+    "reference",
+    "range",
+    "uri",
+    "eval",
+    "error",
+    "non_error",
+  ]),
+  finalErrorType: new Set(["mcp"]),
+  method: new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]),
+  runtimeMode: new Set(["live", "headless", "hybrid"]),
+  kind: new Set([
+    "null",
+    "array",
+    "object",
+    "string",
+    "number",
+    "boolean",
+    "bigint",
+    "symbol",
+    "function",
+    "undefined",
+  ]),
+  originalLevel: new Set(Object.keys(mcpLevelSeverity)),
+  signal: new Set(["SIGINT", "SIGTERM", "SIGHUP"]),
+  phase: new Set([
+    "planned",
+    "applying",
+    "recovering",
+    "committed",
+    "conflict",
+    "rejected",
+    "failed",
+    "outcome_unknown",
+    "rolled_back",
+  ]),
+  outcome: new Set([
+    "planned",
+    "committed",
+    "conflict",
+    "rejected",
+    "failed",
+    "outcome_unknown",
+    "rolled_back",
+  ]),
+};
+
+function safeLogString(field: string, value: string): string | undefined {
+  if (field === "timestamp") {
+    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value)
+      ? value
+      : undefined;
+  }
+  if (field === "requestId") {
+    return /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|logger-[a-z0-9-]{1,64})$/iu.test(
+      value,
+    )
+      ? value
+      : undefined;
+  }
+  if (field === "planDigest") {
+    return /^[a-f0-9]{64}$/u.test(value) ? value : undefined;
+  }
+  if (field === "pluginVersion" || field === "appVersion") {
+    return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(value)
+      ? value
+      : undefined;
+  }
+  return SAFE_LOG_ENUM_VALUES[field]?.has(value) ? value : undefined;
+}
+
+function fingerprintLogValue(value: string): string {
+  return createHmac("sha256", logEventHmacKey)
+    .update(value, "utf8")
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * Reads only an own data property.  In particular, do not invoke getters from
+ * caller/backend objects: both accessors and Proxy traps are untrusted input.
+ */
+function readOwnDataProperty(value: unknown, field: string): unknown {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
+  )
+    return undefined;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, field);
+    return descriptor && "value" in descriptor ? descriptor.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const SAFE_BOOLEAN_LOG_FIELDS = new Set([
+  "critical",
+  "retryable",
+  "recoveryAllowed",
+  "applyAllowed",
+  "mutationMayHaveApplied",
+  "hasBody",
+  "configured",
+  "available",
+  "enabled",
+  "ready",
+  "cacheEnabled",
+  "valueRedacted",
+  "loggerSetup",
+  "stackAvailable",
+]);
+
+const SAFE_COUNT_LOG_FIELDS = new Set([
+  "attempt",
+  "retryCount",
+  "count",
+  "resultCount",
+  "total",
+  "limit",
+  "offset",
+  "batchCount",
+  "fieldCount",
+  "length",
+]);
+
+const SAFE_LENGTH_LOG_FIELDS = new Set(["inputLength", "contentLength"]);
+const MAX_SAFE_LOG_COUNT = 1_000_000;
+const MAX_SAFE_LOG_LENGTH = 10 * 1024 * 1024;
+const MAX_SAFE_LOG_DURATION_MS = 24 * 60 * 60 * 1000;
+
+function isSafeLogNumber(field: string, value: number): boolean {
+  if (!Number.isFinite(value)) return false;
+  if (field === "httpStatus" || field === "status") {
+    return Number.isInteger(value) && value >= 100 && value <= 599;
+  }
+  if (field === "durationMs" || field === "elapsedMs") {
+    return value >= 0 && value <= MAX_SAFE_LOG_DURATION_MS;
+  }
+  if (SAFE_COUNT_LOG_FIELDS.has(field)) {
+    return Number.isInteger(value) && value >= 0 && value <= MAX_SAFE_LOG_COUNT;
+  }
+  if (SAFE_LENGTH_LOG_FIELDS.has(field)) {
+    return (
+      Number.isInteger(value) && value >= 0 && value <= MAX_SAFE_LOG_LENGTH
+    );
+  }
+  return false;
+}
+
+/**
+ * `instanceof` may invoke a Proxy's getPrototypeOf trap. Error values cross
+ * the public boundary, so classification must never let that trap escape.
+ */
+function safelyInstanceOf(value: unknown, constructor: Function): boolean {
+  try {
+    return value instanceof constructor;
+  } catch {
+    return false;
+  }
+}
+
+function isErrorValue(value: unknown): value is Error {
+  return safelyInstanceOf(value, Error);
+}
+
+function isObjectRecord(value: unknown): value is object {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) {
+    return false;
+  }
+  try {
+    return !Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
+
+function appendSafeLogPrimitive(
+  target: Record<string, unknown>,
+  field: string,
+  value: unknown,
+): void {
+  if (typeof value === "string") {
+    const safe = safeLogString(field, value);
+    if (safe !== undefined) target[field] = safe;
+    else if (value.length > 0)
+      target[`${field}Fingerprint`] = fingerprintLogValue(value);
+    return;
+  }
+  if (typeof value === "number") {
+    if (isSafeLogNumber(field, value)) target[field] = value;
+    return;
+  }
+  if (typeof value === "boolean" && SAFE_BOOLEAN_LOG_FIELDS.has(field)) {
+    target[field] = value;
+  }
+}
+
+function sanitizeNestedLogMetadata(
+  value: unknown,
+): Record<string, string | number | boolean> | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const safe: Record<string, unknown> = {};
+  for (const field of SAFE_NESTED_LOG_FIELDS) {
+    appendSafeLogPrimitive(safe, field, readOwnDataProperty(value, field));
+  }
+  return Object.keys(safe).length > 0
+    ? (safe as Record<string, string | number | boolean>)
+    : undefined;
+}
+
+function sanitizeLogContext(context?: RequestContext): Record<string, unknown> {
+  if (!context) return {};
+  const safe: Record<string, unknown> = {};
+  for (const field of SAFE_LOG_CONTEXT_FIELDS) {
+    appendSafeLogPrimitive(safe, field, readOwnDataProperty(context, field));
+  }
+  for (const field of ["input", "errorDetails"] as const) {
+    const nested = sanitizeNestedLogMetadata(
+      readOwnDataProperty(context, field),
+    );
+    if (nested) safe[field] = nested;
+  }
+  return safe;
+}
+
+function logErrorCategory(error: unknown): string {
+  if (safelyInstanceOf(error, SyntaxError)) return "syntax";
+  if (safelyInstanceOf(error, TypeError)) return "type";
+  if (safelyInstanceOf(error, ReferenceError)) return "reference";
+  if (safelyInstanceOf(error, RangeError)) return "range";
+  if (safelyInstanceOf(error, URIError)) return "uri";
+  if (safelyInstanceOf(error, EvalError)) return "eval";
+  if (isErrorValue(error)) return "error";
+  return "non_error";
+}
+
+function hasReadableErrorStack(error: unknown): boolean {
+  try {
+    return Boolean(readOwnDataProperty(error, "stack"));
+  } catch {
+    return false;
+  }
+}
+
+function fingerprintLogEvent(message: string): string {
+  return fingerprintLogValue(message);
+}
+
+/**
  * Creates the Winston console log format.
  * @returns The Winston log format for console output.
  * @private
@@ -117,16 +463,6 @@ function createWinstonConsoleFormat(): winston.Logform.Format {
     winston.format.printf(({ timestamp, level, message, ...meta }) => {
       let metaString = "";
       const metaCopy = { ...meta };
-      if (metaCopy.error && typeof metaCopy.error === "object") {
-        const errorObj = metaCopy.error as ErrorWithMessageAndStack;
-        if (errorObj.message) metaString += `\n  Error: ${errorObj.message}`;
-        if (errorObj.stack)
-          metaString += `\n  Stack: ${String(errorObj.stack)
-            .split("\n")
-            .map((l: string) => `    ${l}`)
-            .join("\n")}`;
-        delete metaCopy.error;
-      }
       if (Object.keys(metaCopy).length > 0) {
         try {
           const replacer = (_key: string, value: unknown) =>
@@ -135,11 +471,7 @@ function createWinstonConsoleFormat(): winston.Logform.Format {
           if (remainingMetaJson !== "{}")
             metaString += `\n  Meta: ${remainingMetaJson}`;
         } catch (stringifyError: unknown) {
-          const errorMessage =
-            stringifyError instanceof Error
-              ? stringifyError.message
-              : String(stringifyError);
-          metaString += `\n  Meta: [Error stringifying metadata: ${errorMessage}]`;
+          metaString += "\n  Meta: [Metadata serialization failed]";
         }
       }
       return `${timestamp} ${level}: ${message}${metaString}`;
@@ -159,7 +491,6 @@ export class Logger {
   private currentMcpLevel: McpLogLevel = "info";
   private currentWinstonLevel: "debug" | "info" | "warn" | "error" = "info";
 
-  private readonly MCP_NOTIFICATION_STACK_TRACE_MAX_LENGTH = 1024;
   private readonly LOG_FILE_MAX_SIZE = 5 * 1024 * 1024; // 5MB
   private readonly LOG_MAX_FILES = 5;
 
@@ -194,7 +525,6 @@ export class Logger {
 
     const fileFormat = winston.format.combine(
       winston.format.timestamp(),
-      winston.format.errors({ stack: true }),
       winston.format.json(),
     );
 
@@ -423,48 +753,59 @@ export class Logger {
       return; // Do not log if message level is less severe than currentMcpLevel
     }
 
-    const logData: Record<string, unknown> = { ...context };
-    const winstonLevel = mcpToWinstonLevel[level];
-
+    // Runtime callers can bypass TypeScript. Never coerce an exotic message;
+    // only a primitive string is eligible for fingerprinting/length metadata.
+    const safeMessage = typeof msg === "string" ? msg : undefined;
+    const logData: Record<string, unknown> = {
+      ...sanitizeLogContext(context),
+    };
+    if (safeMessage !== undefined) {
+      logData.eventFingerprint = fingerprintLogEvent(safeMessage);
+      logData.messageLength = safeMessage.length;
+    }
     if (error) {
-      this.winstonLogger!.log(winstonLevel, msg, { ...logData, error });
-    } else {
-      this.winstonLogger!.log(winstonLevel, msg, logData);
+      logData.errorCategory = logErrorCategory(error);
+      logData.stackAvailable = hasReadableErrorStack(error);
+    }
+    const winstonLevel = mcpToWinstonLevel[level];
+    const publicMessage = `Runtime ${level} event.`;
+
+    try {
+      this.winstonLogger!.log(winstonLevel, publicMessage, logData);
+    } catch {
+      // Logging is observability only. A transport failure must never turn a
+      // handled backend error into an uncaught exception.
+      return;
     }
 
     if (this.mcpNotificationSender) {
-      const mcpDataPayload: McpLogPayload = { message: msg };
-      if (context && Object.keys(context).length > 0)
-        mcpDataPayload.context = context;
-      if (error) {
-        mcpDataPayload.error = { message: error.message };
-        // Include stack trace in debug mode for MCP notifications, truncated for brevity
-        if (this.currentMcpLevel === "debug" && error.stack) {
-          mcpDataPayload.error.stack = error.stack.substring(
-            0,
-            this.MCP_NOTIFICATION_STACK_TRACE_MAX_LENGTH,
-          );
-        }
-      }
+      const mcpDataPayload: McpLogPayload = {
+        message: publicMessage,
+        context: logData,
+      };
       try {
         const serverName =
           config?.mcpServerName ?? "MCP_SERVER_NAME_NOT_CONFIGURED";
         this.mcpNotificationSender(level, mcpDataPayload, serverName);
       } catch (sendError: unknown) {
-        const errorMessage =
-          sendError instanceof Error ? sendError.message : String(sendError);
+        const requestIdCandidate = readOwnDataProperty(context, "requestId");
         const internalErrorContext: RequestContext = {
-          requestId: context?.requestId || "logger-internal-error",
+          requestId:
+            typeof requestIdCandidate === "string"
+              ? requestIdCandidate
+              : "logger-internal-error",
           timestamp: new Date().toISOString(),
           originalLevel: level,
-          originalMessage: msg,
-          sendError: errorMessage,
-          mcpPayload: JSON.stringify(mcpDataPayload).substring(0, 500), // Log a preview
+          failureCategory: logErrorCategory(sendError),
         };
-        this.winstonLogger!.error(
-          "Failed to send MCP log notification",
-          internalErrorContext,
-        );
+        try {
+          this.winstonLogger!.error(
+            "Runtime logging notification failed.",
+            sanitizeLogContext(internalErrorContext),
+          );
+        } catch {
+          // The fallback transport is best effort too.
+        }
       }
     }
   }
@@ -500,8 +841,8 @@ export class Logger {
     err?: Error | RequestContext,
     context?: RequestContext,
   ): void {
-    const errorObj = err instanceof Error ? err : undefined;
-    const actualContext = err instanceof Error ? context : err;
+    const errorObj = isErrorValue(err) ? err : undefined;
+    const actualContext = isErrorValue(err) ? context : err;
     this.log("error", msg, actualContext, errorObj);
   }
 
@@ -516,8 +857,8 @@ export class Logger {
     err?: Error | RequestContext,
     context?: RequestContext,
   ): void {
-    const errorObj = err instanceof Error ? err : undefined;
-    const actualContext = err instanceof Error ? context : err;
+    const errorObj = isErrorValue(err) ? err : undefined;
+    const actualContext = isErrorValue(err) ? context : err;
     this.log("crit", msg, actualContext, errorObj);
   }
 
@@ -532,8 +873,8 @@ export class Logger {
     err?: Error | RequestContext,
     context?: RequestContext,
   ): void {
-    const errorObj = err instanceof Error ? err : undefined;
-    const actualContext = err instanceof Error ? context : err;
+    const errorObj = isErrorValue(err) ? err : undefined;
+    const actualContext = isErrorValue(err) ? context : err;
     this.log("alert", msg, actualContext, errorObj);
   }
 
@@ -548,8 +889,8 @@ export class Logger {
     err?: Error | RequestContext,
     context?: RequestContext,
   ): void {
-    const errorObj = err instanceof Error ? err : undefined;
-    const actualContext = err instanceof Error ? context : err;
+    const errorObj = isErrorValue(err) ? err : undefined;
+    const actualContext = isErrorValue(err) ? context : err;
     this.log("emerg", msg, actualContext, errorObj);
   }
 
@@ -564,8 +905,8 @@ export class Logger {
     err?: Error | RequestContext,
     context?: RequestContext,
   ): void {
-    const errorObj = err instanceof Error ? err : undefined;
-    const actualContext = err instanceof Error ? context : err;
+    const errorObj = isErrorValue(err) ? err : undefined;
+    const actualContext = isErrorValue(err) ? context : err;
     this.log("emerg", msg, actualContext, errorObj);
   }
 }

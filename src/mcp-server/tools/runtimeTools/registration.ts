@@ -6,6 +6,8 @@ import {
 } from "../../toolAnnotations.js";
 import {
   collectRuntimeStatus,
+  projectPublicRuntimeMaintenanceResult,
+  projectPublicRuntimeStatus,
   runRuntimeMaintenance,
 } from "../../../services/runtimeState.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
@@ -33,6 +35,18 @@ const MaintenanceInputSchema = z.object({
     .describe("Maintenance action to run on the shared local runtime."),
 });
 
+const RuntimeStatusInputSchema = z
+  .object({
+    // Used by the local stdio proxy only. The backend recomputes its private
+    // target proof and returns a boolean, never this challenge or a vault
+    // digest. Normal runtime status callers omit it.
+    expectedDestructiveVaultAttestation: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+  })
+  .strict();
+
 export async function registerRuntimeTools(
   server: McpServer,
   vaultCacheService: VaultCacheService | undefined,
@@ -42,15 +56,21 @@ export async function registerRuntimeTools(
 ): Promise<void> {
   server.tool(
     "obsidian_runtime_status",
-    "Returns the current local runtime status for the shared cache, semantic cache, degraded-mode capabilities, and local process health.",
-    {},
+    "Returns redacted local runtime status for cache, semantic, degraded-mode, and process health diagnostics. Physical paths, URLs, secrets, and raw configuration are never returned.",
+    RuntimeStatusInputSchema.shape,
     READ_ONLY_TOOL_ANNOTATIONS,
-    async () => ({
+    async (params: z.infer<typeof RuntimeStatusInputSchema>) => ({
       content: [
         {
           type: "text",
           text: JSON.stringify(
-            await collectRuntimeStatus(vaultCacheService),
+            projectPublicRuntimeStatus(
+              await collectRuntimeStatus(vaultCacheService),
+              {
+                expectedDestructiveVaultAttestation:
+                  params.expectedDestructiveVaultAttestation,
+              },
+            ),
             null,
             2,
           ),
@@ -70,7 +90,10 @@ export async function registerRuntimeTools(
         {
           type: "text",
           text: JSON.stringify(
-            await runRuntimeMaintenance(params.action, vaultCacheService),
+            projectPublicRuntimeMaintenanceResult(
+              params.action,
+              await runRuntimeMaintenance(params.action, vaultCacheService),
+            ),
             null,
             2,
           ),

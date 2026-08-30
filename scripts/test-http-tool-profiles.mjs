@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
@@ -62,6 +69,7 @@ async function protocolRequest({
   body,
   sessionId,
   method = "POST",
+  extraHeaders = {},
 }) {
   const response = await fetch(new URL(profilePath, baseUrl), {
     method,
@@ -70,6 +78,7 @@ async function protocolRequest({
       ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
       Authorization: `Bearer ${token}`,
       ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
+      ...extraHeaders,
     },
     body: method === "POST" ? JSON.stringify(body) : undefined,
   });
@@ -170,6 +179,42 @@ function toolNames(payload) {
     .sort((a, b) => a.localeCompare(b));
 }
 
+function publicToolFailure(payload, label) {
+  const text = payload?.result?.content
+    ?.filter((block) => block?.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+  assert.ok(text, `${label} must return an MCP text error result`);
+  const failure = JSON.parse(text);
+  assert.equal(
+    failure.ok,
+    false,
+    `${label} must use the public error envelope`,
+  );
+  return failure;
+}
+
+async function completionEntries(logDir) {
+  const files = await readdir(logDir);
+  const lines = (
+    await Promise.all(
+      files
+        .filter((file) => file.endsWith(".log"))
+        .map((file) => readFile(path.join(logDir, file), "utf8")),
+    )
+  )
+    .join("\n")
+    .split(/\r?\n/u);
+  return lines.flatMap((line) => {
+    try {
+      const entry = JSON.parse(line);
+      return entry.httpStatus === undefined ? [] : [entry];
+    } catch {
+      return [];
+    }
+  });
+}
+
 const vault = await createVault();
 const port = await unusedPort();
 const logDir = path.join(process.cwd(), ".tmp", `http-tool-profiles-${port}`);
@@ -195,7 +240,7 @@ const child = spawn(process.execPath, ["dist/index.js"], {
     MCP_HTTP_HOST: "127.0.0.1",
     MCP_HTTP_PORT: String(port),
     MCP_HTTP_PORT_RETRIES: "0",
-    MCP_LOG_LEVEL: "error",
+    MCP_LOG_LEVEL: "info",
     LOGS_DIR: logDir,
     MCP_AUTH_MODE: "jwt",
     MCP_AUTH_SECRET_KEY: jwtSecret,
@@ -247,7 +292,7 @@ try {
 
   assert.equal(standardNames.length, 9);
   assert.equal(tasksNames.length, 14);
-  assert.equal(fullNames.length, 46);
+  assert.equal(fullNames.length, 48);
   assert.deepEqual(
     legacyNames,
     standardNames,
@@ -262,6 +307,80 @@ try {
   assert.ok(fullNames.includes("smart_semantic_search"));
   assert.ok(!fullNames.includes("smart_search"));
   assert.ok(!fullNames.includes("smart-search"));
+
+  // A real authenticated HTTP path must retain one server-owned request id
+  // across the response header, public tool error envelope, and completion
+  // event. The three variants exercise the SDK's unknown/validation fallbacks
+  // and an application callback that throws after successful validation.
+  const maliciousRequestId = "caller-controlled-request-id";
+  const failureCases = [
+    {
+      label: "unknown tool",
+      id: 0,
+      params: { name: "unknown_http_correlation_tool", arguments: {} },
+    },
+    {
+      label: "validation failure",
+      id: 1101,
+      params: { name: "obsidian_read_note", arguments: {} },
+    },
+    {
+      label: "internally caught application failure",
+      id: 1102,
+      params: {
+        // This handler catches its own error and calls the shared public
+        // boundary, proving that non-throwing tool paths inherit the HTTP id
+        // too (rather than relying only on the outer SDK callback wrapper).
+        name: "obsidian_list_notes",
+        arguments: { dirPath: "/", responseMode: "compact", cursor: "-1" },
+      },
+    },
+  ];
+  const observedFailureRequestIds = [];
+  for (const failureCase of failureCases) {
+    const result = await protocolRequest({
+      baseUrl,
+      profilePath: standard.profilePath,
+      token: standard.token,
+      sessionId: standard.sessionId,
+      extraHeaders: { "X-Optimike-Request-Id": maliciousRequestId },
+      body: {
+        jsonrpc: "2.0",
+        id: failureCase.id,
+        method: "tools/call",
+        params: failureCase.params,
+      },
+    });
+    assert.equal(result.response.status, 200, result.text);
+    assert.equal(result.payload?.id, failureCase.id, failureCase.label);
+    const failure = publicToolFailure(result.payload, failureCase.label);
+    const requestId = result.response.headers.get("x-request-id");
+    assert.match(
+      requestId ?? "",
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+      `${failureCase.label} must expose a server-owned request id`,
+    );
+    assert.equal(failure.requestId, requestId, failureCase.label);
+    assert.equal(
+      failure.error?.details?.requestId,
+      requestId,
+      failureCase.label,
+    );
+    assert.notEqual(
+      requestId,
+      maliciousRequestId,
+      `${failureCase.label} must ignore a caller-supplied correlation header`,
+    );
+    observedFailureRequestIds.push(requestId);
+  }
+  await sleep(150);
+  const completions = await completionEntries(logDir);
+  for (const requestId of observedFailureRequestIds) {
+    assert.ok(
+      completions.some((entry) => entry.requestId === requestId),
+      `completion log must keep the exact HTTP request id ${requestId}`,
+    );
+  }
 
   for (const snapshotSafe of [
     "operon_status",
@@ -309,7 +428,12 @@ try {
     },
   });
   assert.equal(mismatchPost.response.status, 404, mismatchPost.text);
-  assert.match(mismatchPost.text, /Invalid or expired session ID/);
+  assert.equal(mismatchPost.payload?.error?.code, "NOT_FOUND");
+  assert.equal(
+    mismatchPost.payload?.error?.data?.requestId,
+    mismatchPost.response.headers.get("x-request-id"),
+    "profile-session mismatch uses the closed public error envelope",
+  );
 
   const mismatchDelete = await protocolRequest({
     baseUrl,
@@ -319,7 +443,11 @@ try {
     method: "DELETE",
   });
   assert.equal(mismatchDelete.response.status, 404, mismatchDelete.text);
-  assert.match(mismatchDelete.text, /Invalid or expired session ID/);
+  assert.equal(mismatchDelete.payload?.error?.code, "NOT_FOUND");
+  assert.equal(
+    mismatchDelete.payload?.error?.data?.requestId,
+    mismatchDelete.response.headers.get("x-request-id"),
+  );
 
   const sameSessionStillWorks = await call(standard, baseUrl, "tools/list");
   assert.equal(toolNames(sameSessionStillWorks).length, 9);
@@ -343,7 +471,13 @@ try {
     }),
   });
   assert.equal(unknown.status, 404);
-  assert.match(await unknown.text(), /unknown_tool_profile/);
+  const unknownPayload = await unknown.json();
+  assert.equal(unknownPayload.error?.code, "NOT_FOUND");
+  assert.equal(
+    unknownPayload.error?.data?.requestId,
+    unknown.headers.get("x-request-id"),
+    "unknown profiles use the closed pre-Hono error envelope",
+  );
 
   console.log(
     "PASS: HTTP profile endpoints coexist, /mcp defaults to standard, /mcp/full stays explicit, removed semantic aliases stay absent, and sessions cannot cross profile routes",

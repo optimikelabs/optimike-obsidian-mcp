@@ -4,14 +4,24 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Hono } from "hono";
-import {
+
+process.env.OBSIDIAN_RUNTIME_MODE ??= "headless-readonly";
+process.env.OBSIDIAN_VAULT ??= process.cwd();
+process.env.OBSIDIAN_CACHE_SOURCE ??= "filesystem";
+process.env.OBSIDIAN_ENABLE_CACHE ??= "false";
+process.env.MCP_WRITE_MODE ??= "readonly";
+process.env.SEMANTIC_SEARCH_PREWARM ??= "false";
+
+const {
   AdmissionRejectedError,
   FairAdmissionController,
   createHttpBackpressureMiddleware,
   createHttpRequestBodyGuardMiddleware,
   httpBackpressureConfig,
-} from "../dist/mcp-server/transports/httpBackpressure.js";
-import { getHttpRequestState } from "../dist/mcp-server/transports/httpRequestState.js";
+} = await import("../dist/mcp-server/transports/httpBackpressure.js");
+const { getHttpRequestState } = await import(
+  "../dist/mcp-server/transports/httpRequestState.js"
+);
 
 function controller(overrides = {}) {
   return new FairAdmissionController({
@@ -661,9 +671,11 @@ function testOneSidedZeroQueueConfigurationIsRejected() {
     },
   );
   assert.notEqual(result.status, 0);
-  assert.match(
+  assert.match(result.stderr, /Invalid HTTP backpressure configuration/u);
+  assert.doesNotMatch(
     result.stderr,
-    /MCP_HTTP_MAX_QUEUED_PER_IDENTITY must be positive/u,
+    /MCP_HTTP_MAX_QUEUED_PER_IDENTITY/u,
+    "bootstrap validation must not echo configuration field names or values",
   );
 }
 
@@ -712,7 +724,7 @@ async function testStalledRequestBodyTimesOutAndReleasesLease() {
   });
 
   const response = await app.request(stalledJsonRequest());
-  assert.equal(response.status, 408);
+  assert.equal(response.status, 504);
   const body = await response.json();
   assert.equal(body.error.data.readTimeoutMs, 40);
   assert.equal(body.error.data.retryable, true);
@@ -763,7 +775,7 @@ async function testBodyGuardRunsBeforeBodyReadingRejections() {
   assert.equal(rejectionMiddlewareCalls, 0);
 
   const stalled = await app.request(stalledJsonRequest());
-  assert.equal(stalled.status, 408);
+  assert.equal(stalled.status, 504);
   assert.equal(rejectionMiddlewareCalls, 0);
 
   const bounded = await app.request("http://test/mcp", {
@@ -811,7 +823,7 @@ async function testJsonRpcBatchesAreRejectedFailClosed() {
   const body = await response.json();
   assert.equal(body.error.data.batchSupported, false);
   assert.equal(body.error.data.maxEnvelopesPerRequest, 1);
-  assert.match(body.error.message, /one envelope per POST/u);
+  assert.equal(body.error.message, "The request could not be validated.");
   assert.equal(handlerCalls, 0);
   assert.equal(admission.getSnapshot().inFlight, 0);
 }

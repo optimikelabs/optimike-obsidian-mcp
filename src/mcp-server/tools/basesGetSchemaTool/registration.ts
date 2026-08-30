@@ -9,6 +9,7 @@ import {
   RequestContext,
   requestContextService,
 } from "../../../utils/index.js";
+import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import {
   BasesGetSchemaInput,
   BasesGetSchemaInputSchema,
@@ -42,25 +43,45 @@ export async function registerBasesGetSchemaTool(
             parentContext: registrationContext,
             operation: "HandleBasesGetSchema",
             toolName: TOOL_NAME,
-            params,
+            params: { hasInput: true },
           });
 
-          const result = await processBasesGetSchema(
-            params,
-            handlerContext,
-            obsidianService,
-            localBasesService,
-          );
+          try {
+            const result = await processBasesGetSchema(
+              params,
+              handlerContext,
+              obsidianService,
+              localBasesService,
+            );
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-            isError: false,
-          };
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+              isError: false,
+            };
+          } catch (error) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    publicMcpToolErrorPayload(error, {
+                      operation: "HandleBasesGetSchema",
+                      toolName: TOOL_NAME,
+                      params,
+                    }),
+                    null,
+                    2,
+                  ),
+                },
+              ],
+              isError: true,
+            };
+          }
         },
       );
 
@@ -76,9 +97,7 @@ export async function registerBasesGetSchemaTool(
       errorMapper: (error: unknown) =>
         new McpError(
           error instanceof McpError ? error.code : BaseErrorCode.INTERNAL_ERROR,
-          `Impossible d'enregistrer ${TOOL_NAME}: ${
-            error instanceof Error ? error.message : "Erreur inconnue"
-          }`,
+          `Impossible d'enregistrer ${TOOL_NAME}.`,
           registrationContext,
         ),
       critical: true,

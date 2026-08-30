@@ -16,7 +16,7 @@ const { BaseErrorCode, McpError } = await import(
 const { updateFileContent } = await import(
   "../dist/services/obsidianRestAPI/methods/vaultMethods.js"
 );
-const { ObsidianRestApiService } = await import(
+const { ObsidianRestApiService, ObsidianRestConflictError } = await import(
   "../dist/services/obsidianRestAPI/service.js"
 );
 
@@ -66,7 +66,90 @@ try {
       error instanceof McpError &&
       error.code === BaseErrorCode.CONFLICT &&
       error.message ===
-        "Obsidian API Precondition Failed: the note changed after it was read.",
+        "The request conflicts with the current resource state.",
+  );
+
+  const actualSha256 = "a".repeat(64);
+  service.axiosInstance = {
+    request: async () => {
+      const error = new Error("Request failed with status code 409");
+      error.response = {
+        status: 409,
+        data: {
+          ok: false,
+          error: {
+            code: "hash_conflict",
+            details: {
+              actualSha256,
+              path: "C:\\Users\\private\\Vault\\Secret.md",
+              content: "PRIVATE_CONTENT",
+            },
+          },
+        },
+      };
+      throw error;
+    },
+  };
+  await assert.rejects(
+    () =>
+      service.replaceAtomicWriteNote(
+        {
+          contractVersion: 1,
+          path: "Canary/Test.md",
+          bindingFingerprint: "b".repeat(64),
+          expectedSha256: "c".repeat(64),
+          nextContent: "after",
+        },
+        context,
+      ),
+    (error) => {
+      assert.ok(error instanceof ObsidianRestConflictError);
+      assert.equal(error.code, BaseErrorCode.CONFLICT);
+      assert.equal(error.actualSha256, actualSha256);
+      assert.deepEqual(error.details, { actualSha256 });
+      assert.doesNotMatch(
+        JSON.stringify(error.details),
+        /private|Secret|PRIVATE_CONTENT/u,
+      );
+      return true;
+    },
+  );
+
+  service.axiosInstance = {
+    request: async () => {
+      const error = new Error("Request failed with status code 409");
+      error.response = {
+        status: 409,
+        data: {
+          error: {
+            code: "hash_conflict",
+            details: {
+              actualSha256: "NOT_A_DIGEST",
+              content: "PRIVATE_CONTENT",
+            },
+          },
+        },
+      };
+      throw error;
+    },
+  };
+  await assert.rejects(
+    () =>
+      service.replaceAtomicWriteNote(
+        {
+          contractVersion: 1,
+          path: "Canary/Test.md",
+          bindingFingerprint: "b".repeat(64),
+          expectedSha256: "c".repeat(64),
+          nextContent: "after",
+        },
+        context,
+      ),
+    (error) =>
+      error instanceof McpError &&
+      !(error instanceof ObsidianRestConflictError) &&
+      error.code === BaseErrorCode.CONFLICT &&
+      error.details?.actualSha256 === undefined,
   );
 
   console.log("Obsidian REST live-write boundary tests passed.");

@@ -47,12 +47,17 @@ export const registerObsidianManageTagsTool = async (
         ObsidianManageTagsInputSchemaShape,
         DESTRUCTIVE_TOOL_ANNOTATIONS,
         async (params: ObsidianManageTagsInput) => {
+          const inputMetadata = {
+            operation: params.operation,
+            hasFilePath: Boolean(params.filePath),
+            tagCount: params.tags?.length ?? 0,
+          };
           const handlerContext: RequestContext =
             requestContextService.createRequestContext({
               parentContext: registrationContext,
               operation: "HandleObsidianManageTagsRequest",
               toolName: toolName,
-              params: params,
+              params: inputMetadata,
             });
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
@@ -85,14 +90,14 @@ export const registerObsidianManageTagsTool = async (
             {
               operation: `processing ${toolName} handler`,
               context: handlerContext,
-              input: params,
+              input: inputMetadata,
               errorMapper: (error: unknown) =>
                 new McpError(
                   error instanceof McpError
                     ? error.code
                     : BaseErrorCode.INTERNAL_ERROR,
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext },
+                  `Error processing ${toolName} tool.`,
+                  handlerContext,
                 ),
             },
           );

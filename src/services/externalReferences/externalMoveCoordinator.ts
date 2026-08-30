@@ -3,11 +3,17 @@ import path from "node:path";
 import {
   ExternalRootError,
   type ExternalMoveSnapshot,
+  type ExternalRootErrorCode,
   ExternalRootsService,
 } from "../externalRootsService.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import { config } from "../../config/index.js";
-import { BackendVaultAdapter, sha256Text } from "./backendVaultAdapter.js";
+import {
+  BackendVaultAdapter,
+  BackendVaultSessionChangedError,
+  type BackendVaultDestructiveSession,
+  sha256Text,
+} from "./backendVaultAdapter.js";
 import {
   ExternalMoveJournal,
   type ExternalMovePlan,
@@ -84,10 +90,16 @@ function replaceOccurrence(
   return content.slice(0, start) + replacement + content.slice(end);
 }
 
-function publicPlan(plan: ExternalMovePlan): Record<string, unknown> {
+export function projectExternalMovePlanForStatus(
+  plan: ExternalMovePlan,
+): Record<string, unknown> {
+  const recoveryErrors = safeRecoveryCodes(plan.recoveryErrors);
+  const failureCode = safeStoredFailureCode(plan.failure);
   const recoveryRequired =
-    plan.status === "recovery_required" ||
-    (plan.recoveryErrors?.length ?? 0) > 0;
+    plan.status === "recovery_required" || recoveryErrors.length > 0;
+  const automaticRecoveryBlocked = recoveryErrors.includes(
+    "backend_session_changed",
+  );
   return {
     planId: plan.planId,
     idempotencyKey: plan.idempotencyKey,
@@ -100,8 +112,8 @@ function publicPlan(plan: ExternalMovePlan): Record<string, unknown> {
     sourceSha256: plan.snapshot.sha256,
     sourceSize: plan.snapshot.size,
     inventoryDigest: plan.inventoryDigest,
-    bindingFingerprint: plan.bindingIdentity?.bindingFingerprint,
-    bindingVerifiable: plan.bindingIdentity?.verifiable ?? false,
+    bindingVerifiable: hasCurrentDestructiveBinding(plan),
+    legacyBinding: !hasCurrentDestructiveBinding(plan),
     repairs: plan.repairs.map((repair) => ({
       filePath: repair.filePath,
       expectedSha256: repair.expectedSha256,
@@ -109,7 +121,7 @@ function publicPlan(plan: ExternalMovePlan): Record<string, unknown> {
     manualReview: plan.manualReview,
     readyToApply: plan.manualReview.length === 0,
     recoveryRequired,
-    recoveryErrors: plan.recoveryErrors ?? [],
+    recoveryErrors,
     appliedRepairCount: plan.appliedRepairPaths?.length ?? 0,
     restoredRepairCount: plan.restoredRepairPaths?.length ?? 0,
     nextAction:
@@ -119,21 +131,44 @@ function publicPlan(plan: ExternalMovePlan): Record<string, unknown> {
           ? "rollback"
           : plan.status === "failed_compensated"
             ? "rollback"
-            : recoveryRequired ||
-                [
-                  "applying",
-                  "applying_file",
-                  "file_moved",
-                  "applying_repairs",
-                  "rolling_back",
-                  "rolling_back_repairs",
-                  "rolling_back_file",
-                  "failed",
-                ].includes(plan.status)
-              ? "rollback"
-              : "none",
-    failure: plan.failure,
+            : automaticRecoveryBlocked
+              ? "manual_review"
+              : recoveryRequired ||
+                  [
+                    "applying",
+                    "applying_file",
+                    "file_moved",
+                    "applying_repairs",
+                    "rolling_back",
+                    "rolling_back_repairs",
+                    "rolling_back_file",
+                    "failed",
+                  ].includes(plan.status)
+                ? "rollback"
+                : "none",
+    ...(failureCode
+      ? {
+          failureCode,
+          failure: publicFailureMessage(failureCode),
+        }
+      : {}),
   };
+}
+
+/**
+ * Journals written before backend vault attestation are intentionally
+ * inspectable for incident recovery, but must never acquire a new target by
+ * virtue of an upgrade. Destructive continuations require this exact schema.
+ */
+function hasCurrentDestructiveBinding(plan: ExternalMovePlan): boolean {
+  return (
+    plan.bindingIdentity?.schemaVersion === 2 &&
+    plan.bindingIdentity.vaultIdentitySource ===
+      "backend_destructive_vault_attestation" &&
+    plan.bindingIdentity.verifiable === true &&
+    typeof plan.destructiveSession?.sessionId === "string" &&
+    Number.isSafeInteger(plan.destructiveSession.generation)
+  );
 }
 
 type Inventory = {
@@ -183,8 +218,114 @@ function snapshotsMatch(
   );
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+type ExternalMoveFailureCode =
+  | "backend_session_changed"
+  | "backend_failure"
+  | "compensation_failed"
+  | "journal_missing"
+  | `external_root_${ExternalRootErrorCode}`;
+
+const EXTERNAL_ROOT_ERROR_CODES = [
+  "configuration_invalid",
+  "root_unknown",
+  "root_unavailable",
+  "capability_denied",
+  "path_invalid",
+  "path_outside_root",
+  "path_not_allowed",
+  "path_link_unsupported",
+  "not_found",
+  "not_a_file",
+  "not_a_directory",
+  "target_exists",
+  "precondition_failed",
+  "too_large",
+  "unsupported",
+  "encrypted",
+  "inaccessible",
+  "non_verifiable",
+  "timeout",
+] as const satisfies readonly ExternalRootErrorCode[];
+
+type MissingExternalRootErrorCode = Exclude<
+  ExternalRootErrorCode,
+  (typeof EXTERNAL_ROOT_ERROR_CODES)[number]
+>;
+const EXTERNAL_ROOT_ERROR_CODE_SET: ReadonlySet<string> = new Set(
+  EXTERNAL_ROOT_ERROR_CODES.map((code) => `external_root_${code}`),
+);
+const EXTERNAL_ROOT_ERROR_CODES_ARE_EXHAUSTIVE: MissingExternalRootErrorCode extends never
+  ? true
+  : never = true;
+void EXTERNAL_ROOT_ERROR_CODES_ARE_EXHAUSTIVE;
+
+function failureCode(error: unknown): ExternalMoveFailureCode {
+  if (error instanceof BackendVaultSessionChangedError) {
+    return "backend_session_changed";
+  }
+  if (error instanceof ExternalRootError) {
+    return `external_root_${error.code}`;
+  }
+  return "backend_failure";
+}
+
+function safeStoredFailureCode(
+  value: unknown,
+): ExternalMoveFailureCode | undefined {
+  if (value === "backend_session_changed") return value;
+  if (
+    value === "backend_failure" ||
+    value === "compensation_failed" ||
+    value === "journal_missing"
+  ) {
+    return value;
+  }
+  if (
+    typeof value === "string" &&
+    EXTERNAL_ROOT_ERROR_CODE_SET.has(value)
+  ) {
+    return value as ExternalMoveFailureCode;
+  }
+  return undefined;
+}
+
+function safeRecoveryCodes(values: unknown): ExternalMoveFailureCode[] {
+  if (!Array.isArray(values)) return [];
+  const codes = values.map((value) => safeStoredFailureCode(value));
+  return [
+    ...new Set(
+      codes.filter((value): value is ExternalMoveFailureCode => Boolean(value)),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+}
+
+function publicFailureMessage(code: ExternalMoveFailureCode): string {
+  if (code === "backend_session_changed") {
+    return "The backend session changed after this move began. Automatic recovery is disabled; retain the plan for manual incident review.";
+  }
+  return "The external move did not complete. Review the stable failure code before retrying.";
+}
+
+function externalFailure(error: unknown): ExternalRootError {
+  const code =
+    error instanceof ExternalRootError ? error.code : "non_verifiable";
+  return new ExternalRootError(
+    code,
+    "The external move did not complete. Review its durable status before retrying.",
+  );
+}
+
+function needsSessionFence(status: ExternalMovePlan["status"]): boolean {
+  return [
+    "applying",
+    "applying_file",
+    "file_moved",
+    "applying_repairs",
+    "rolling_back",
+    "rolling_back_repairs",
+    "rolling_back_file",
+    "failed",
+  ].includes(status);
 }
 
 function protectedFrontmatterLines(content: string): Map<string, string> {
@@ -272,9 +413,20 @@ export class ExternalMoveCoordinator {
           "The idempotency key is already bound to another external move.",
         );
       }
-      return publicPlan(existing);
+      return projectExternalMovePlanForStatus(existing);
     }
 
+    // Re-attest before we inspect either mutable surface. A same-endpoint
+    // backend swap must not be able to seal a new plan against Proxy A's root.
+    const bindingIdentity = await this.vault.getBindingIdentity(true);
+    if (!bindingIdentity.verifiable) {
+      throw new ExternalRootError(
+        "non_verifiable",
+        "External move planning requires a verifiable backend vault target.",
+      );
+    }
+    const destructiveSession =
+      await this.vault.captureDestructiveSession(bindingIdentity);
     const snapshot = await this.roots.planMove(
       input.rootId,
       input.sourceRelativePath,
@@ -289,13 +441,6 @@ export class ExternalMoveCoordinator {
       snapshot.rootId,
       snapshot.targetRelativePath,
     );
-    const bindingIdentity = await this.vault.getBindingIdentity(true);
-    if (!bindingIdentity.verifiable) {
-      throw new ExternalRootError(
-        "non_verifiable",
-        "External move planning requires a verifiable vault identity. Configure MCP_EXTERNAL_MOVE_PROFILE_ID.",
-      );
-    }
     await this.vault.refreshInventory();
     const inventory = await this.inventoryInternal(
       snapshot,
@@ -309,6 +454,7 @@ export class ExternalMoveCoordinator {
       idempotencyKey: input.idempotencyKey,
       snapshot,
       bindingIdentity,
+      destructiveSession,
       sourceToken,
       targetToken,
       oldFileUri: locations.sourceFileUri,
@@ -320,15 +466,25 @@ export class ExternalMoveCoordinator {
       restoredRepairPaths: [],
       recoveryErrors: [],
     });
-    return publicPlan(plan);
+    return projectExternalMovePlanForStatus(plan);
   }
 
   status(planId: string): Record<string, unknown> {
-    const plan = this.journal.get(planId);
+    let plan = this.journal.get(planId);
     if (!plan) {
       throw new ExternalRootError("not_found", "Unknown external move plan.");
     }
-    return publicPlan(plan);
+    // A plan may survive a proxy restart in SQLite, but its private session
+    // fence may not. Never advertise rollback against a replacement backend:
+    // status itself converts that stale partial state into a durable,
+    // fail-closed manual-review receipt before a caller can attempt recovery.
+    if (
+      needsSessionFence(plan.status) &&
+      !this.vault.isDestructiveSessionCurrent(plan.destructiveSession)
+    ) {
+      plan = this.markRecoveryRequired(plan, "backend_session_changed");
+    }
+    return projectExternalMovePlanForStatus(plan);
   }
 
   async apply(
@@ -337,7 +493,8 @@ export class ExternalMoveCoordinator {
     options: { allowCompensatedReapply?: boolean } = {},
   ): Promise<Record<string, unknown>> {
     let plan = this.requirePlan(planId, idempotencyKey);
-    if (plan.status === "applied") return publicPlan(plan);
+    if (plan.status === "applied")
+      return projectExternalMovePlanForStatus(plan);
     const applicableStatuses: ExternalMovePlan["status"][] =
       options.allowCompensatedReapply === false
         ? ["planned"]
@@ -372,7 +529,7 @@ export class ExternalMoveCoordinator {
         "This plan predates inventory digests. Create a new plan with a new idempotency key.",
       );
     }
-    await this.assertCurrentBinding(plan);
+    const session = await this.openDestructiveSession(plan);
 
     const currentSnapshot = await this.roots.planMove(
       plan.snapshot.rootId,
@@ -386,13 +543,14 @@ export class ExternalMoveCoordinator {
       );
     }
     const locations = await this.roots.getPrivateMoveLocations(currentSnapshot);
-    await this.vault.refreshInventory();
+    await this.vault.refreshInventory(session);
     const currentInventory = await this.inventoryInternal(
       currentSnapshot,
       locations.sourceFileUri,
       locations.targetFileUri,
       plan.sourceToken,
       plan.targetToken,
+      session,
     );
     if (inventoryDigest(currentInventory) !== plan.inventoryDigest) {
       throw new ExternalRootError(
@@ -400,7 +558,7 @@ export class ExternalMoveCoordinator {
         "The complete ÉLYSIA reference inventory changed after planning.",
       );
     }
-    await this.vault.assertConditionalWritesSupported();
+    await this.vault.assertConditionalWritesSupported(session);
 
     plan = this.journal.transition(
       plan.planId,
@@ -413,6 +571,7 @@ export class ExternalMoveCoordinator {
       },
     );
     try {
+      this.vault.assertDestructiveSession(session);
       await this.roots.applyMove(plan.snapshot);
       plan = this.journal.transition(
         plan.planId,
@@ -430,28 +589,25 @@ export class ExternalMoveCoordinator {
           repair.before,
           repair.after,
           repair.expectedSha256,
+          session,
         );
         plan = this.journal.recordAppliedRepair(plan.planId, repair.filePath);
       }
       const committed = this.journal.update(plan.planId, "applied");
-      return publicPlan(committed);
+      return projectExternalMovePlanForStatus(committed);
     } catch (error) {
-      const compensation = await this.compensateApply(plan.planId, error);
+      const compensation = await this.compensateApply(
+        plan.planId,
+        error,
+        session,
+      );
       if (compensation.length > 0) {
         throw new ExternalRootError(
           "non_verifiable",
-          `External move apply failed and recovery is required: ${compensation.join(" | ")}`,
+          "The external move requires manual incident review; automatic compensation was not completed.",
         );
       }
-      if (error instanceof ExternalRootError) {
-        throw new ExternalRootError(
-          error.code,
-          `${error.message} All partial effects were compensated and journaled.`,
-        );
-      }
-      throw new Error(
-        `${errorMessage(error)} All partial effects were compensated and journaled.`,
-      );
+      throw externalFailure(error);
     }
   }
 
@@ -460,7 +616,8 @@ export class ExternalMoveCoordinator {
     idempotencyKey: string,
   ): Promise<Record<string, unknown>> {
     let plan = this.requirePlan(planId, idempotencyKey);
-    if (plan.status === "rolled_back") return publicPlan(plan);
+    if (plan.status === "rolled_back")
+      return projectExternalMovePlanForStatus(plan);
     const recoverableStatuses: ExternalMovePlan["status"][] = [
       "planned",
       "failed_compensated",
@@ -492,18 +649,19 @@ export class ExternalMoveCoordinator {
       action: "rollback",
       destructive: true,
     });
-    await this.assertCurrentBinding(plan);
+    const session = await this.openDestructiveSession(plan);
     if (plan.status === "planned" || plan.status === "failed_compensated") {
-      return publicPlan(
+      return projectExternalMovePlanForStatus(
         this.journal.transition(plan.planId, [plan.status], "rolled_back", {
           recoveryErrors: [],
         }),
       );
     }
-    await this.vault.assertConditionalWritesSupported();
+    await this.vault.assertConditionalWritesSupported(session);
     try {
       let placement = await this.inspectFilePlacement(plan.snapshot);
       if (placement === "both") {
+        this.vault.assertDestructiveSession(session);
         await this.roots.recoverMoveToSource(plan.snapshot);
         placement = await this.inspectFilePlacement(plan.snapshot);
       }
@@ -513,7 +671,10 @@ export class ExternalMoveCoordinator {
           `External file placement is ${placement}; automatic rollback is unsafe.`,
         );
       }
-      const rollbackContents = await this.prepareRollbackContents(plan);
+      const rollbackContents = await this.prepareRollbackContents(
+        plan,
+        session,
+      );
       plan = this.journal.transition(
         plan.planId,
         recoverableStatuses,
@@ -528,6 +689,7 @@ export class ExternalMoveCoordinator {
             rollback.current,
             rollback.restored,
             sha256Text(rollback.current),
+            session,
           );
         }
         plan = this.journal.recordRestoredRepair(plan.planId, repair.filePath);
@@ -537,21 +699,24 @@ export class ExternalMoveCoordinator {
         ["rolling_back_repairs"],
         "rolling_back_file",
       );
+      this.vault.assertDestructiveSession(session);
       if ((await this.inspectFilePlacement(plan.snapshot)) === "target") {
         await this.roots.rollbackMove(plan.snapshot);
       }
-      return publicPlan(this.journal.update(plan.planId, "rolled_back"));
+      return projectExternalMovePlanForStatus(
+        this.journal.update(plan.planId, "rolled_back"),
+      );
     } catch (error) {
-      const message = errorMessage(error);
       const current = this.journal.get(plan.planId) ?? plan;
       const partial = current.status !== "applied";
+      const code = failureCode(error);
       this.journal.update(
         current.planId,
         partial ? "recovery_required" : current.status,
-        message,
-        { recoveryErrors: [message] },
+        code,
+        { recoveryErrors: [code] },
       );
-      throw error;
+      throw externalFailure(error);
     }
   }
 
@@ -569,23 +734,50 @@ export class ExternalMoveCoordinator {
     return plan;
   }
 
-  private async assertCurrentBinding(plan: ExternalMovePlan): Promise<void> {
-    if (!plan.bindingIdentity?.verifiable) {
+  private async openDestructiveSession(
+    plan: ExternalMovePlan,
+  ): Promise<BackendVaultDestructiveSession> {
+    if (!hasCurrentDestructiveBinding(plan)) {
       throw new ExternalRootError(
         "non_verifiable",
-        "The move plan has no verifiable backend/vault/root binding.",
+        "This move plan predates authenticated backend vault binding. It remains available for status only; create a new plan instead of applying or rolling it back.",
       );
     }
-    const current = await this.vault.getBindingIdentity(true);
-    if (
-      !current.verifiable ||
-      current.bindingFingerprint !== plan.bindingIdentity.bindingFingerprint
-    ) {
+    try {
+      return await this.vault.openDestructiveSession(
+        plan.bindingIdentity,
+        plan.destructiveSession,
+      );
+    } catch (error) {
+      if (error instanceof BackendVaultSessionChangedError) {
+        const partial =
+          needsSessionFence(plan.status) || plan.status === "recovery_required";
+        if (needsSessionFence(plan.status)) {
+          this.markRecoveryRequired(plan, "backend_session_changed");
+        }
+        throw new ExternalRootError(
+          partial ? "non_verifiable" : "precondition_failed",
+          "The backend session changed after planning. Automatic recovery is disabled; use the durable receipt for manual incident review.",
+        );
+      }
+      if (error instanceof ExternalRootError) throw error;
       throw new ExternalRootError(
         "precondition_failed",
-        "The backend, vault, or external-root configuration changed after planning.",
+        "The backend session, vault, or external-root configuration changed after planning.",
       );
     }
+  }
+
+  private markRecoveryRequired(
+    plan: ExternalMovePlan,
+    code: ExternalMoveFailureCode,
+  ): ExternalMovePlan {
+    const current = this.journal.get(plan.planId) ?? plan;
+    if (current.status === "recovery_required") return current;
+    if (!needsSessionFence(current.status)) return current;
+    return this.journal.update(current.planId, "recovery_required", code, {
+      recoveryErrors: [...safeRecoveryCodes(current.recoveryErrors), code],
+    });
   }
 
   private async inspectFilePlacement(
@@ -627,10 +819,11 @@ export class ExternalMoveCoordinator {
 
   private async prepareRollbackContents(
     plan: ExternalMovePlan,
+    session: BackendVaultDestructiveSession,
   ): Promise<Map<string, { current: string; restored: string }>> {
     const contents = new Map<string, { current: string; restored: string }>();
     for (const repair of plan.repairs) {
-      const current = await this.vault.read(repair.filePath);
+      const current = await this.vault.read(repair.filePath, session);
       const normalized = normalizeProtectedFrontmatter(current.content);
       if (normalized === normalizeProtectedFrontmatter(repair.before)) {
         continue;
@@ -655,16 +848,24 @@ export class ExternalMoveCoordinator {
   private async compensateApply(
     planId: string,
     originalError: unknown,
+    session: BackendVaultDestructiveSession,
   ): Promise<string[]> {
     const errors: string[] = [];
     let plan = this.journal.get(planId);
-    if (!plan) return ["The transaction journal entry disappeared."];
+    if (!plan) return ["journal_missing"];
     try {
+      // Compensation is deliberately all-or-nothing with the originating
+      // backend generation. A replacement connection must never repair or
+      // roll back a vault it did not attest for this operation.
+      this.vault.assertDestructiveSession(session);
       const placement = await this.inspectFilePlacement(plan.snapshot);
       if (placement === "both" || placement === "missing_or_changed") {
         throw new Error(`External file placement is ${placement}.`);
       }
-      const rollbackContents = await this.prepareRollbackContents(plan);
+      const rollbackContents = await this.prepareRollbackContents(
+        plan,
+        session,
+      );
       plan = this.journal.transition(
         plan.planId,
         [plan.status],
@@ -679,6 +880,7 @@ export class ExternalMoveCoordinator {
             rollback.current,
             rollback.restored,
             sha256Text(rollback.current),
+            session,
           );
         }
         plan = this.journal.recordRestoredRepair(plan.planId, repair.filePath);
@@ -688,25 +890,27 @@ export class ExternalMoveCoordinator {
         ["rolling_back_repairs"],
         "rolling_back_file",
       );
+      this.vault.assertDestructiveSession(session);
       if ((await this.inspectFilePlacement(plan.snapshot)) === "target") {
         await this.roots.rollbackMove(plan.snapshot);
       }
       this.journal.update(
         plan.planId,
         "failed_compensated",
-        errorMessage(originalError),
+        failureCode(originalError),
         { recoveryErrors: [] },
       );
     } catch (compensationError) {
-      errors.push(errorMessage(compensationError));
+      errors.push(failureCode(compensationError));
       const current = this.journal.get(planId);
       if (current) {
-        this.journal.update(
-          current.planId,
-          "recovery_required",
-          errorMessage(originalError),
-          { recoveryErrors: errors },
-        );
+        const originalCode = failureCode(originalError);
+        this.journal.update(current.planId, "recovery_required", originalCode, {
+          recoveryErrors: [
+            ...safeRecoveryCodes(current.recoveryErrors),
+            ...errors,
+          ],
+        });
       }
     }
     return errors;
@@ -750,6 +954,7 @@ export class ExternalMoveCoordinator {
     newFileUri: string,
     sourceToken: string,
     targetToken: string,
+    session?: BackendVaultDestructiveSession,
   ): Promise<Inventory> {
     const location = await this.roots.getPrivateReferenceLocation(
       snapshot.rootId,
@@ -766,6 +971,7 @@ export class ExternalMoveCoordinator {
         candidate.query,
         "",
         candidate.caseSensitive,
+        session,
       )) {
         candidatePaths.add(filePath);
       }
@@ -776,7 +982,7 @@ export class ExternalMoveCoordinator {
     for (const filePath of [...candidatePaths].sort((a, b) =>
       a.localeCompare(b),
     )) {
-      const note = await this.vault.read(filePath);
+      const note = await this.vault.read(filePath, session);
       const scan = scanCanonicalExternalReferences(note.content);
       const mentioned = scan.occurrences.filter((occurrence) =>
         occurrenceMentionsSource(

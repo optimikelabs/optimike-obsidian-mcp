@@ -100,17 +100,19 @@ export interface HtmlSanitizeConfig {
 /**
  * A singleton utility class for performing various input sanitization tasks.
  * It provides methods to clean and validate strings, HTML, URLs, file paths, JSON,
- * and numbers, and to redact sensitive data for logging.
+ * and numbers, and to produce value-free metadata for logging.
  */
 export class Sanitization {
   private static instance: Sanitization;
 
+  // Kept for the public configuration API. Logging itself is now value-free, so
+  // this list is no longer the primary security boundary.
   private sensitiveFields: string[] = [
     "password",
     "token",
     "secret",
     "key",
-    "apiKey",
+    "apikey",
     "auth",
     "credential",
     "jwt",
@@ -120,8 +122,8 @@ export class Sanitization {
     "cvv",
     "authorization",
     "passphrase",
-    "privatekey", // Added more common sensitive field names
-    "obsidianapikey", // Specific to this project potentially
+    "privatekey",
+    "obsidianapikey",
   ];
 
   private defaultHtmlSanitizeConfig: HtmlSanitizeConfig = {
@@ -249,7 +251,6 @@ export class Sanitization {
   }
 
   /**
->>>>>>> REPLACE
    * Sanitizes a string based on its intended usage context (e.g., HTML, URL, plain text).
    *
    * **Security Note:** Using `context: 'javascript'` is explicitly disallowed and will throw an `McpError`.
@@ -296,9 +297,9 @@ export class Sanitization {
             "Invalid URL detected during string sanitization (context: url).",
             {
               ...opContext,
-              input,
-              error:
-                urlError instanceof Error ? urlError.message : String(urlError),
+              inputType: typeof input,
+              inputLength: input.length,
+              failureCategory: "invalid_url",
             },
           );
           return ""; // Return empty or rethrow, depending on desired strictness. Empty for now.
@@ -306,7 +307,7 @@ export class Sanitization {
       case "javascript":
         logger.error(
           "Attempted JavaScript sanitization via sanitizeString, which is disallowed.",
-          { ...opContext, inputPreview: input.substring(0, 100) },
+          { ...opContext, inputLength: input.length },
         );
         throw new McpError(
           BaseErrorCode.VALIDATION_ERROR,
@@ -572,18 +573,14 @@ export class Sanitization {
       return parsed as T;
     } catch (error) {
       if (error instanceof McpError) throw error; // Re-throw if already McpError (e.g., size limit)
-      const message =
-        error instanceof Error ? error.message : "Invalid JSON format.";
-      logger.warning(`JSON sanitization failed: ${message}`, {
+      const message = "Invalid JSON format.";
+      logger.warning("JSON sanitization failed.", {
         ...opContext,
-        inputPreview: input.substring(0, 100),
-        errorDetails: String(error),
+        inputType: typeof input,
+        inputLength: typeof input === "string" ? input.length : undefined,
+        failureCategory: error instanceof SyntaxError ? "syntax" : "invalid",
       });
-      throw new McpError(BaseErrorCode.VALIDATION_ERROR, message, {
-        ...opContext,
-        inputPreview:
-          input.length > 100 ? `${input.substring(0, 100)}...` : input,
-      });
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, message, opContext);
     }
   }
 
@@ -663,14 +660,16 @@ export class Sanitization {
   }
 
   /**
-   * Sanitizes an object or array for logging by deep cloning it and redacting fields
-   * whose names (case-insensitively) match any of the configured sensitive field names.
-   * Redacted fields are replaced with the string `'[REDACTED]'`.
+   * Produces structural metadata for an input that is safe to put in a log.
    *
-   * @param {unknown} input - The object, array, or other value to sanitize for logging.
-   *   If input is not an object or array, it's returned as is.
+   * This is deliberately not a key-name blacklist. MCP mutation payloads can carry
+   * note bodies, frontmatter values, Canvas JSON, Base formulas, or a new payload
+   * shape that has not been added to a blacklist yet. Logging only the input shape
+   * keeps diagnostics useful without retaining any caller supplied value.
+   *
+   * @param {unknown} input - The object, array, or other value to summarize.
    * @param {RequestContext} [contextForLogging] - Optional context for logging errors during sanitization.
-   * @returns {unknown} A sanitized copy of the input, safe for logging.
+   * @returns {unknown} Value-free input metadata, safe for logging.
    *   Returns `'[Log Sanitization Failed]'` if an unexpected error occurs during sanitization.
    */
   public sanitizeForLogging(
@@ -683,22 +682,27 @@ export class Sanitization {
         operation: "sanitizeForLogging",
       });
     try {
-      // Primitives and null are returned as is.
-      if (input === null || typeof input !== "object") {
-        return input;
+      if (input === null) {
+        return { kind: "null", valueRedacted: true };
       }
 
-      // Use structuredClone if available (Node.js >= 17), otherwise fallback to JSON parse/stringify.
-      // JSON.parse(JSON.stringify(obj)) is a common way to deep clone, but has limitations
-      // (e.g., loses functions, undefined, Date objects become strings).
-      // For logging, this is often acceptable.
-      const clonedInput =
-        typeof structuredClone === "function"
-          ? structuredClone(input)
-          : JSON.parse(JSON.stringify(input));
+      if (Array.isArray(input)) {
+        return {
+          kind: "array",
+          length: input.length,
+          valueRedacted: true,
+        };
+      }
 
-      this.redactSensitiveFields(clonedInput);
-      return clonedInput;
+      if (typeof input === "object") {
+        return {
+          kind: "object",
+          fieldCount: Object.keys(input).length,
+          valueRedacted: true,
+        };
+      }
+
+      return { kind: typeof input, valueRedacted: true };
     } catch (error) {
       logger.error(
         "Error during log sanitization process.",
@@ -729,55 +733,6 @@ export class Sanitization {
     // No complex conversion needed if options.allowedAttributes is already Record<string, string[]>.
     return attrs;
   }
-
-  /**
-   * Recursively redacts sensitive fields within an object or array.
-   * This method modifies the input object/array in place.
-   * @param {unknown} obj - The object or array to redact sensitive fields from.
-   * @private
-   */
-  private redactSensitiveFields(obj: unknown): void {
-    if (!obj || typeof obj !== "object") {
-      return; // Not an object or array, or null
-    }
-
-    if (Array.isArray(obj)) {
-      obj.forEach((item) => {
-        // Recurse only if the item is an object (including nested arrays)
-        if (item && typeof item === "object") {
-          this.redactSensitiveFields(item);
-        }
-      });
-      return;
-    }
-
-    // It's an object (but not an array)
-    for (const key in obj) {
-      // Check if the property belongs to the object itself, not its prototype
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        const value = (obj as Record<string, unknown>)[key];
-        const lowerKey = key.toLowerCase();
-
-        // Special handling for non-serializable but non-sensitive objects
-        if (key === "httpsAgent") {
-          (obj as Record<string, unknown>)[key] = "[HttpAgent Instance]";
-          continue; // Skip further processing for this key
-        }
-
-        // Check if the lowercase key includes any of the lowercase sensitive field terms
-        const isSensitive = this.sensitiveFields.some(
-          (field) => lowerKey.includes(field), // sensitiveFields are already stored as lowercase
-        );
-
-        if (isSensitive) {
-          (obj as Record<string, unknown>)[key] = "[REDACTED]";
-        } else if (value && typeof value === "object") {
-          // If the value is another object or array, recurse
-          this.redactSensitiveFields(value);
-        }
-      }
-    }
-  }
 }
 
 /**
@@ -791,20 +746,20 @@ export class Sanitization {
  * const unsafeHtml = "<script>alert('xss')</script><p>Safe</p>";
  * const safeHtml = sanitization.sanitizeHtml(unsafeHtml);
  *
- * const sensitiveData = { password: '123', username: 'user' };
- * const safeLogData = sanitizeInputForLogging(sensitiveData);
- * // safeLogData will be { password: '[REDACTED]', username: 'user' }
+ * const request = { content: '# private note', mode: 'overwrite' };
+ * const safeLogData = sanitizeInputForLogging(request);
+ * // safeLogData will be { kind: 'object', fieldCount: 2, valueRedacted: true }
  * ```
  */
 export const sanitization = Sanitization.getInstance();
 
 /**
  * A convenience function that wraps `sanitization.sanitizeForLogging`.
- * Sanitizes an object or array for logging by redacting sensitive fields.
+ * Converts arbitrary caller input into value-free metadata for logging.
  *
  * @param {unknown} input - The data to sanitize for logging.
  * @param {RequestContext} [contextForLogging] - Optional context for logging errors during sanitization.
- * @returns {unknown} A sanitized copy of the input, safe for logging.
+ * @returns {unknown} Value-free input metadata, safe for logging.
  */
 export const sanitizeInputForLogging = (
   input: unknown,

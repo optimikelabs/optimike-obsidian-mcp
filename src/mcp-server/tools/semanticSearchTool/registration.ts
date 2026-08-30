@@ -18,6 +18,7 @@ import { resolveNoteAbsolutePath } from "./resolvePath.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { READ_ONLY_OPEN_WORLD_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
+import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 
 const In = z.object({
   query: z.string().min(2, "query too short"),
@@ -268,15 +269,20 @@ function makeSuccessResult(payload: OutType) {
   };
 }
 
-function makeErrorResult(error: unknown) {
-  const message =
-    error instanceof Error ? error.message : String(error ?? "Unknown error");
-
+function makeErrorResult(error: unknown, params: unknown) {
   return {
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify({ error: message }, null, 2),
+        text: JSON.stringify(
+          publicMcpToolErrorPayload(error, {
+            operation: "smart_semantic_search",
+            toolName: "smart_semantic_search",
+            params,
+          }),
+          null,
+          2,
+        ),
       },
     ],
     isError: true,
@@ -574,7 +580,7 @@ export const registerSemanticSearchTool = async (
           Out.parse(payload);
           return makeSuccessResult(payload);
         } catch (error) {
-          return makeErrorResult(error);
+          return makeErrorResult(error, params);
         }
       },
     );

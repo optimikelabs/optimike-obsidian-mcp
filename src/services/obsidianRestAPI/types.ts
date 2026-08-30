@@ -429,6 +429,8 @@ export interface BaseCreateResponse {
   ok: boolean;
   id: string;
   warnings?: string[];
+  created?: boolean;
+  overwritten?: boolean;
 }
 
 /**

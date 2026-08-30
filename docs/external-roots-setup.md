@@ -407,10 +407,31 @@ MCP_EXTERNAL_MOVE_PROFILE_ID=<stable-lowercase-vault-profile-id>
 MCP_EXTERNAL_MOVE_JOURNAL_PATH=<optional-absolute-local-sqlite-path>
 ```
 
-The profile ID is required when the live backend cannot prove a configured
-vault path. It is hashed into the backend/vault/root binding and must change
-when the selected vault changes. The journal filename is automatically
+The profile ID is mandatory only when the external-move coordinator starts
+(`MCP_WRITE_MODE=full` and `MCP_EXTERNAL_MOVE_ENABLED=true`). Read/list/stat/
+handoff work without it and do not initialize a move journal. The profile is an
+operator label, not the destructive identity on its own: both the proxy and its
+already-running backend must be in `headless-filesystem` against the same
+configured, resolvable `OBSIDIAN_VAULT`. Before plan, apply and rollback, the
+backend re-reads its vault directory and compares its strict SHA-256 filesystem
+proof (device/inode) to an opaque 64-hex challenge supplied by the proxy. It
+returns only `destructiveVaultIdentityVerified: true|false` plus a scheme
+version: neither side's digest is returned by runtime status. The proxy fails
+closed on absence or mismatch.
+
+The proof and challenge never contain a path, URL, device or inode. The
+challenge is not logged, reflected, stored in a plan or placed in a receipt.
+`external_runtime_status` exposes only `identityVerified` and the source label.
+The journal persists its private derived binding only and is automatically
 namespaced by that binding.
+
+An apply or rollback also captures the proxy's current backend connection
+generation immediately after that proof. The complete destructive sequence is
+fenced to that one live session: a reconnect or backend swap at any point
+invalidates the operation. It does not continue, repair notes, compensate, or
+roll back through the replacement backend; the durable journal records a
+manual-recovery state instead. Public runtime status deliberately exposes no
+stable configuration fingerprint or other connection correlator.
 
 All three write grants are required for apply and rollback: full write mode,
 the feature flag and the root `move` capability. Scan, plan and status do not
@@ -454,6 +475,16 @@ verified window where source and target are hard links to the same object.
 Direct HTTP refuses scan, plan, status, apply and rollback. HTTP tickets remain
 read-only handoffs.
 
+### Legacy journals are status-only
+
+An existing pre-attestation journal at the old configured
+`MCP_EXTERNAL_MOVE_JOURNAL_PATH` is never adopted into a new binding. If it is
+still present, `external_move_status` can read its redacted receipt and marks it
+`legacyBinding: true`; apply and rollback refuse it. Keep the private journal
+and its preimages for a manual incident recovery, then create a new plan with a
+new idempotency key after the backend/proxy target has been verified. Never copy
+or rename a legacy database to make it look authenticated.
+
 There is still no external-root upload, create, replace, directory move,
 cross-root/cross-volume move, overwrite, delete, trash or sync operation.
 
@@ -477,20 +508,21 @@ Disable all external roots:
 
 Common failures:
 
-| Error/state             | Check                                                                                                   |
-| ----------------------- | ------------------------------------------------------------------------------------------------------- |
-| `configuration_invalid` | Absolute config path, valid JSON, version `1`, known fields, root ID rules.                             |
-| `root_unavailable`      | The configured directory exists and the MCP process can access it.                                      |
-| `capability_denied`     | The root declares the required capability; HTTP ticket mode is enabled and uses real auth.              |
-| `path_not_allowed`      | The relative file path matches `include` and does not match `exclude`.                                  |
-| `path_link_unsupported` | Remove symlinks or junctions from the requested path.                                                   |
-| `target_exists`         | Choose an absent target; overwrite is never allowed.                                                    |
-| `precondition_failed`   | Re-scan and create a new plan after a source, note or plan-state change.                                |
-| `too_large`             | Root limits plus the local or HTTP aggregate handoff budget.                                            |
-| `unsupported`           | Use UTF-8 text for `external_read`, or a supported handoff mode for binary content.                     |
-| HTTP ticket unavailable | Check feature flag, auth mode, bearer identity, TTL, one-use semantics, and service restart.            |
-| Unexpected port         | Keep `MCP_HTTP_PORT_RETRIES=0` or inspect the bounded configured fallback.                              |
-| Remote client failure   | Verify TLS proxy, Origin allowlist, auth metadata, forwarding trust, firewall and client compatibility. |
+| Error/state             | Check                                                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `configuration_invalid` | Absolute config path, valid JSON, version `1`, known fields, root ID rules.                                                        |
+| `root_unavailable`      | The configured directory exists and the MCP process can access it.                                                                 |
+| `capability_denied`     | The root declares the required capability; HTTP ticket mode is enabled and uses real auth.                                         |
+| `path_not_allowed`      | The relative file path matches `include` and does not match `exclude`.                                                             |
+| `path_link_unsupported` | Remove symlinks or junctions from the requested path.                                                                              |
+| `target_exists`         | Choose an absent target; overwrite is never allowed.                                                                               |
+| `precondition_failed`   | Re-scan and create a new plan after a source, note or plan-state change.                                                           |
+| Move target unavailable | Confirm both proxy and backend use `headless-filesystem`, the same resolvable vault, the profile ID, then restart the local proxy. |
+| `too_large`             | Root limits plus the local or HTTP aggregate handoff budget.                                                                       |
+| `unsupported`           | Use UTF-8 text for `external_read`, or a supported handoff mode for binary content.                                                |
+| HTTP ticket unavailable | Check feature flag, auth mode, bearer identity, TTL, one-use semantics, and service restart.                                       |
+| Unexpected port         | Keep `MCP_HTTP_PORT_RETRIES=0` or inspect the bounded configured fallback.                                                         |
+| Remote client failure   | Verify TLS proxy, Origin allowlist, auth metadata, forwarding trust, firewall and client compatibility.                            |
 
 The server never infers a new root from a path found in an Obsidian note.
 Disable move without affecting reads by setting `MCP_EXTERNAL_MOVE_ENABLED=false`

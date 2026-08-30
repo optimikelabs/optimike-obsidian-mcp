@@ -11,8 +11,12 @@ const {
   sanitizeLoggedOperationName,
   wrapResponseForCompletion,
 } = await import("../dist/mcp-server/transports/httpObservability.js");
-const { liveApiProbeIntervalMs } =
-  await import("../dist/mcp-server/transports/httpTransport.js");
+const { jsonRpcIdFromBody } = await import(
+  "../dist/mcp-server/transports/httpJsonRpcError.js"
+);
+const { liveApiProbeIntervalMs } = await import(
+  "../dist/mcp-server/transports/httpTransport.js"
+);
 
 const now = Date.parse("2026-07-29T12:00:00.000Z");
 const vaultPath = process.cwd();
@@ -21,6 +25,32 @@ const missingVault = path.join(
   ".tmp",
   "observability-missing-vault",
 );
+
+const requestEnvelope = (id, extras = {}) => ({
+  jsonrpc: "2.0",
+  method: "tools/list",
+  id,
+  ...extras,
+});
+assert.equal(jsonRpcIdFromBody(requestEnvelope(0)), 0);
+assert.equal(jsonRpcIdFromBody(requestEnvelope("request-1")), "request-1");
+assert.equal(jsonRpcIdFromBody(requestEnvelope(null)), null);
+assert.equal(
+  jsonRpcIdFromBody(requestEnvelope({ marker: "do-not-reflect" })),
+  null,
+);
+assert.equal(jsonRpcIdFromBody(requestEnvelope(["do-not-reflect"])), null);
+assert.equal(jsonRpcIdFromBody({ id: "malformed-missing-version" }), null);
+assert.equal(
+  jsonRpcIdFromBody({ jsonrpc: "1.0", method: "tools/list", id: 7 }),
+  null,
+);
+assert.equal(jsonRpcIdFromBody({ jsonrpc: "2.0", id: 8 }), null);
+assert.equal(
+  jsonRpcIdFromBody(requestEnvelope(9, { params: "not-structured" })),
+  null,
+);
+assert.equal(jsonRpcIdFromBody([requestEnvelope(10)]), null);
 
 function cache(stats) {
   return { getStats: () => stats };

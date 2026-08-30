@@ -10,6 +10,8 @@ import {
   GovernedCanvasAtomicServer,
 } from "./fixtures/governed-canvas-atomic-server.mjs";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
 const fixture = new GovernedCanvasAtomicServer();
 await fixture.listen();
 const testParent = path.join(process.cwd(), ".tmp");
@@ -63,6 +65,16 @@ function parsed(result) {
   );
 }
 
+function assertPublicError(result, code, forbiddenMarker, label) {
+  assert.equal(result.isError, true, `${label} MCP error`);
+  const payload = parsed(result);
+  assert.equal(payload.error.code, code, `${label} error code`);
+  assert.equal(payload.error.message, "The request could not be completed. Use the request id to inspect server diagnostics.", `${label} catalog message`);
+  assert.match(payload.requestId ?? "", UUID, `${label} request id`);
+  assert.equal(payload.error.details?.requestId, payload.requestId, `${label} request id details`);
+  assert.doesNotMatch(JSON.stringify(payload), new RegExp(forbiddenMarker, "u"), `${label} leaked marker`);
+}
+
 try {
   await client.connect(transport);
   const tools = await client.listTools();
@@ -86,8 +98,7 @@ try {
       idempotencyKey: "p3-mcp-padded-path",
     },
   });
-  assert.equal(paddedPathResult.isError, true);
-  assert.match(JSON.stringify(paddedPathResult.content), /must not be padded/u);
+  assertPublicError(paddedPathResult, "INTERNAL_ERROR", "must not be padded", "padded path");
   assert.equal(fixture.writes, 0);
 
   const plannedResult = await client.callTool({

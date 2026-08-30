@@ -281,35 +281,64 @@ export class OperonService {
       payload?.error && typeof payload.error === "object"
         ? (payload.error as Record<string, unknown>)
         : null;
-    const code =
+    const descriptor =
       status === 400 || status === 422
-        ? BaseErrorCode.VALIDATION_ERROR
+        ? {
+            code: BaseErrorCode.VALIDATION_ERROR,
+            reasonCode: "OPERON_BRIDGE_REQUEST_INVALID",
+            message: "The Operon Bridge rejected the request.",
+          }
         : status === 401
-          ? BaseErrorCode.UNAUTHORIZED
+          ? {
+              code: BaseErrorCode.UNAUTHORIZED,
+              reasonCode: "OPERON_BRIDGE_UNAUTHORIZED",
+              message: "Authentication with the Operon Bridge failed.",
+            }
           : status === 403
-            ? BaseErrorCode.FORBIDDEN
+            ? {
+                code: BaseErrorCode.FORBIDDEN,
+                reasonCode: "OPERON_BRIDGE_FORBIDDEN",
+                message: "The Operon Bridge denied the requested capability.",
+              }
             : status === 404
-              ? BaseErrorCode.NOT_FOUND
+              ? {
+                  code: BaseErrorCode.NOT_FOUND,
+                  reasonCode: "OPERON_BRIDGE_RESOURCE_NOT_FOUND",
+                  message:
+                    "The requested Operon Bridge resource was not found.",
+                }
               : status === 409
-                ? BaseErrorCode.CONFLICT
+                ? {
+                    code: BaseErrorCode.CONFLICT,
+                    reasonCode: "OPERON_BRIDGE_CONFLICT",
+                    message: "The Operon Bridge reported a state conflict.",
+                  }
                 : status === 429
-                  ? BaseErrorCode.RATE_LIMITED
+                  ? {
+                      code: BaseErrorCode.RATE_LIMITED,
+                      reasonCode: "OPERON_BRIDGE_RATE_LIMITED",
+                      message: "The Operon Bridge rate limited the request.",
+                    }
                   : status >= 500
-                    ? BaseErrorCode.SERVICE_UNAVAILABLE
-                    : BaseErrorCode.INTERNAL_ERROR;
-    const message =
-      typeof nativeError?.message === "string"
-        ? nativeError.message
-        : typeof payload?.message === "string"
-          ? payload.message
-          : `Operon Bridge request failed with HTTP ${status}.`;
+                    ? {
+                        code: BaseErrorCode.SERVICE_UNAVAILABLE,
+                        reasonCode: "OPERON_BRIDGE_UNAVAILABLE",
+                        message:
+                          "The Operon Bridge is temporarily unavailable.",
+                      }
+                    : {
+                        code: BaseErrorCode.INTERNAL_ERROR,
+                        reasonCode: "OPERON_BRIDGE_REQUEST_FAILED",
+                        message:
+                          "The Operon Bridge request could not be completed.",
+                      };
     throw new McpError(
-      code,
-      message,
+      descriptor.code,
+      descriptor.message,
       this.requestContext(operation, {
         httpStatus: status,
-        bridgeCode:
-          typeof nativeError?.code === "string" ? nativeError.code : undefined,
+        reasonCode: descriptor.reasonCode,
+        hasBridgeCode: typeof nativeError?.code === "string",
       }),
     );
   }
@@ -926,13 +955,11 @@ export class OperonService {
       }
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
-        typeof responseError.message === "string"
-          ? responseError.message
-          : "The exact Operon task-workflow grant is pending or unavailable.",
+        "The exact Operon task-workflow grant is pending or unavailable.",
         this.requestContext(operation, {
           operonId,
           idempotencyKey,
-          bridgeCode: responseError.code,
+          hasBridgeCode: typeof responseError.code === "string",
           mutationMayHaveApplied: false,
         }),
       );
@@ -944,12 +971,25 @@ export class OperonService {
         `Invalid Operon mutation response (${response.status}).`,
         this.requestContext(operation, {
           operonId,
-          issues: parsed.error.issues,
-          response: response.data,
+          responseStatus: response.status,
+          responseShapeValid: false,
+          issueCount: parsed.error.issues.length,
         }),
       );
     }
     const result = parsed.data;
+    if (result.idempotencyKey !== idempotencyKey) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        "Operon Bridge mutation receipt did not match the requested idempotency key.",
+        this.requestContext(operation, {
+          operonId,
+          responseStatus: response.status,
+          responseShapeValid: true,
+          correlationMatched: false,
+        }),
+      );
+    }
     if (result.status === "applied") {
       if (!result.after) {
         throw new McpError(
@@ -983,7 +1023,7 @@ export class OperonService {
     }
     this.writeMutationJournal(
       action,
-      operonId ?? result.after?.operonId ?? null,
+      operonId ?? ("after" in result ? result.after?.operonId : null) ?? null,
       payload,
       result,
     );
@@ -1297,7 +1337,7 @@ export class OperonService {
             `Invalid Operon task snapshot payload for ${row.operonId}.`,
             this.requestContext("loadOperonSnapshot", {
               operonId: row.operonId,
-              issues: parsed.error.issues,
+              issueCount: parsed.error.issues.length,
             }),
           );
         }
@@ -1438,9 +1478,7 @@ export class OperonService {
     }
   }
 
-  private async fetchBridgeStatus(
-    operation: string,
-  ): Promise<OperonStatus> {
+  private async fetchBridgeStatus(operation: string): Promise<OperonStatus> {
     const response = await this.getClient().get(`${BRIDGE_PREFIX}/status`);
     const parsed = OperonStatusSchema.safeParse(response.data);
     if (!parsed.success) {
@@ -1448,7 +1486,7 @@ export class OperonService {
         BaseErrorCode.PARSING_ERROR,
         "Operon Bridge /status returned an incompatible payload.",
         this.requestContext(operation, {
-          issues: parsed.error.issues,
+          issueCount: parsed.error.issues.length,
         }),
       );
     }
@@ -1457,11 +1495,7 @@ export class OperonService {
 
   private async fetchLiveStatus(): Promise<OperonStatus> {
     const status = await this.fetchBridgeStatus("fetchLiveOperonStatus");
-    if (
-      !status.ok ||
-      !status.operon.compatible ||
-      !status.index.ready
-    ) {
+    if (!status.ok || !status.operon.compatible || !status.index.ready) {
       throw new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
         `Operon Bridge is not ready (present=${status.operon.present}, version=${status.operon.version ?? "unknown"}, compatible=${status.operon.compatible}).`,
@@ -1497,7 +1531,7 @@ export class OperonService {
         BaseErrorCode.PARSING_ERROR,
         "Operon Bridge /recovery-status returned an incompatible payload.",
         this.requestContext("fetchLiveOperonRecoveryStatus", {
-          issues: parsed.error.issues,
+          issueCount: parsed.error.issues.length,
         }),
       );
     }
@@ -1520,7 +1554,7 @@ export class OperonService {
         BaseErrorCode.PARSING_ERROR,
         "Operon Bridge /validate returned an incompatible payload.",
         this.requestContext("fetchLiveOperonValidation", {
-          issues: parsed.error.issues,
+          issueCount: parsed.error.issues.length,
         }),
       );
     }
@@ -1537,7 +1571,7 @@ export class OperonService {
         BaseErrorCode.PARSING_ERROR,
         "Operon Bridge /configuration returned an incompatible payload.",
         this.requestContext("fetchLiveOperonConfiguration", {
-          issues: parsed.error.issues,
+          issueCount: parsed.error.issues.length,
         }),
       );
     }
@@ -1600,7 +1634,7 @@ export class OperonService {
           "Operon Bridge /tasks/query returned an incompatible payload.",
           this.requestContext("fetchAllLiveOperonTasks", {
             pageIndex,
-            issues: parsed.error.issues,
+            issueCount: parsed.error.issues.length,
           }),
         );
       }
@@ -1969,7 +2003,7 @@ export class OperonService {
         BaseErrorCode.PARSING_ERROR,
         "Operon Bridge saved-filter query returned an incompatible payload.",
         this.requestContext("operonQuerySavedFilter", {
-          issues: parsed.error.issues,
+          issueCount: parsed.error.issues.length,
         }),
       );
     }
@@ -2022,7 +2056,7 @@ export class OperonService {
         BaseErrorCode.PARSING_ERROR,
         `Operon Bridge ${operation} returned an incompatible payload.`,
         this.requestContext(`operon_${operation}`, {
-          issues: parsed.success ? [] : parsed.error.issues,
+          issueCount: parsed.success ? 0 : parsed.error.issues.length,
         }),
       );
     }
@@ -2272,7 +2306,7 @@ export class OperonService {
           `Operon Bridge ${request.family} pending-recoveries returned an incompatible payload.`,
           this.requestContext("operonPendingRecoveries", {
             family: request.family,
-            issues: parsed.error.issues,
+            issueCount: parsed.error.issues.length,
           }),
         );
       }
@@ -2324,8 +2358,7 @@ export class OperonService {
     const flatCandidateRequestedJson = stableJson({
       recoveryRef: params.recoveryRef,
       kind: params.recovery.kind,
-      ...(params.recovery.kind !== "developer-api" &&
-      params.recovery.planDigest
+      ...(params.recovery.kind !== "developer-api" && params.recovery.planDigest
         ? { planDigest: params.recovery.planDigest }
         : {}),
     });
@@ -2435,7 +2468,18 @@ export class OperonService {
         `Invalid Operon recovery response (${response.status}).`,
         this.requestContext("operon_recover_mutation", {
           recoveryRef: params.recoveryRef,
-          issues: parsed.error.issues,
+          issueCount: parsed.error.issues.length,
+        }),
+      );
+    }
+    if (parsed.data.idempotencyKey !== params.idempotencyKey) {
+      throw new McpError(
+        BaseErrorCode.PARSING_ERROR,
+        "Operon Bridge recovery receipt did not match the requested idempotency key.",
+        this.requestContext("operon_recover_mutation", {
+          recoveryRef: params.recoveryRef,
+          responseShapeValid: true,
+          correlationMatched: false,
         }),
       );
     }

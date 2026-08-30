@@ -65,6 +65,47 @@ configuration and [HTTP Delivery ADR](docs/adr/ADR-HTTP-External-Artifact-Delive
 for the transport threat model. The local move boundary is specified by the
 [External Reference Integrity ADR](docs/adr/ADR-External-Reference-Integrity.md).
 
+## P0 error and log privacy contract
+
+The P0 boundary is implemented at the shared MCP error and logger sinks:
+
+- MCP and Bridge failures are returned through their canonical public error
+  envelopes: a closed `code`, a stable catalog `message`, and only allowlisted
+  diagnostic fields. Raw exception messages, stacks and arbitrary error details
+  do not cross either public boundary.
+- Every failure normalized by the shared MCP boundary receives a
+  cryptographically generated UUID request ID. The same ID is retained in the
+  public diagnostic envelope and structured logs so an operator can correlate
+  that failure across MCP and server observations.
+- HTTP rejection paths use the same closed JSON-RPC envelope. Its
+  `error.data.requestId`, `X-Request-Id` header and ErrorHandler log entry are
+  one UUID; `SERVICE_UNAVAILABLE` and `TIMEOUT` map to `503` and `504`.
+- Caller input and backend responses are never logged in cleartext. Bodies,
+  vault content, paths, headers, tokens, exception names/messages and arbitrary
+  context fields are omitted or reduced to structural metadata. Caller-derived
+  strings that are retained only for correlation are HMAC-fingerprinted with a
+  secret generated for the current process; fingerprints are not stable across
+  process restarts and are not reversible through a plain dictionary hash.
+- Recovery diagnostics are deliberately narrow: only schema-validated IDs,
+  digests, references and closed reason/phase/outcome codes may be returned.
+  Batch-item failures may retain their ordinal and the exact validated
+  vault-relative request path already supplied by the caller. An untrusted
+  Bridge/backend path, an absolute path, and backend error text never pass this
+  boundary.
+- `@modelcontextprotocol/sdk` is pinned exactly to `1.30.0`: the private
+  `createToolError` hook is only the ultimate fallback for SDK validation and
+  unknown-tool failures. CI fails on dependency drift until the SDK provides a
+  public equivalent.
+
+This is a privacy boundary, not a promise that logs contain no operational
+metadata. Allowlisted fields such as method, route class, status, counts,
+lengths and timing may remain, while request bodies and route tails remain
+excluded.
+
+The contract is exercised by `npm run test:log-privacy` (including the batch
+item fixture) on Linux and Windows in CI. The CI `bridge-privacy` job also runs
+privacy checks for the Bases, Operon and Atomic Write Bridges on both platforms.
+
 ## Reverse proxy boundary
 
 Set `MCP_TRUST_PROXY=true` only when:

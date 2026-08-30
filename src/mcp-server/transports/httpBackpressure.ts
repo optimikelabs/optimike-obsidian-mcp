@@ -6,6 +6,7 @@ import {
   getHttpRequestState,
   type HttpOperationClass,
 } from "./httpRequestState.js";
+import { jsonRpcErrorResponse } from "./httpJsonRpcError.js";
 
 const DEFAULT_EXPENSIVE_TOOLS = [
   "smart_semantic_search",
@@ -146,11 +147,10 @@ const HttpBackpressureEnvSchema = z
 
 const parsedBackpressureEnv = HttpBackpressureEnvSchema.safeParse(process.env);
 if (!parsedBackpressureEnv.success) {
-  throw new Error(
-    `Invalid HTTP backpressure configuration: ${JSON.stringify(
-      parsedBackpressureEnv.error.flatten().fieldErrors,
-    )}`,
-  );
+  // Configuration values can be caller-controlled in local launchers. Keep
+  // startup failures diagnosable by category without reflecting keys, values
+  // or parser details to process output.
+  throw new Error("Invalid HTTP backpressure configuration.");
 }
 
 function parseToolSet(
@@ -820,22 +820,17 @@ function requestBodyTooLargeResponse(
   c: Context<{ Bindings: HttpBindings }>,
   maxBytes: number,
 ): Response {
-  const state = getHttpRequestState(c.req.raw);
-  c.header("X-Request-Id", state.requestId);
-  c.header("Cache-Control", "no-store");
-  return c.json(
+  return jsonRpcErrorResponse(
+    c,
+    new McpError(
+      BaseErrorCode.VALIDATION_ERROR,
+      "The HTTP request body exceeds the configured limit.",
+    ),
     {
-      jsonrpc: "2.0",
-      error: {
-        code: BaseErrorCode.VALIDATION_ERROR,
-        message: "The HTTP request body exceeds the configured limit.",
-        data: {
-          maxBytes,
-        },
-      },
-      id: null,
+      operation: "httpRequestBodyTooLarge",
+      status: 413,
+      details: { maxBytes },
     },
-    413,
   );
 }
 
@@ -843,48 +838,34 @@ function requestBodyReadTimeoutResponse(
   c: Context<{ Bindings: HttpBindings }>,
   readTimeoutMs: number,
 ): Response {
-  const state = getHttpRequestState(c.req.raw);
-  c.header("X-Request-Id", state.requestId);
-  c.header("Cache-Control", "no-store");
-  return c.json(
+  return jsonRpcErrorResponse(
+    c,
+    new McpError(
+      BaseErrorCode.TIMEOUT,
+      "The HTTP request body was not completed before the server deadline.",
+    ),
     {
-      jsonrpc: "2.0",
-      error: {
-        code: BaseErrorCode.SERVICE_UNAVAILABLE,
-        message:
-          "The HTTP request body was not completed before the server deadline.",
-        data: {
-          retryable: true,
-          readTimeoutMs,
-        },
-      },
-      id: null,
+      operation: "httpRequestBodyReadTimeout",
+      status: 504,
+      details: { retryable: true, readTimeoutMs },
     },
-    408,
   );
 }
 
 function batchUnsupportedResponse(
   c: Context<{ Bindings: HttpBindings }>,
 ): Response {
-  const state = getHttpRequestState(c.req.raw);
-  c.header("X-Request-Id", state.requestId);
-  c.header("Cache-Control", "no-store");
-  return c.json(
+  return jsonRpcErrorResponse(
+    c,
+    new McpError(
+      BaseErrorCode.VALIDATION_ERROR,
+      "JSON-RPC batches are not supported by this HTTP transport.",
+    ),
     {
-      jsonrpc: "2.0",
-      error: {
-        code: BaseErrorCode.VALIDATION_ERROR,
-        message:
-          "JSON-RPC batches are not supported by this HTTP transport. Send one envelope per POST request.",
-        data: {
-          batchSupported: false,
-          maxEnvelopesPerRequest: 1,
-        },
-      },
-      id: null,
+      operation: "httpJsonRpcBatchRejected",
+      status: 400,
+      details: { batchSupported: false, maxEnvelopesPerRequest: 1 },
     },
-    400,
   );
 }
 
@@ -966,22 +947,21 @@ function admissionRejectionResponse(
   c.header("Retry-After", String(error.retryAfterSeconds));
   c.header("X-Optimike-Backpressure", error.reason);
   c.header("X-Optimike-Operation-Class", descriptor.operationClass);
-  c.header("X-Request-Id", state.requestId);
-  c.header("Cache-Control", "no-store");
-  return c.json(
+  return jsonRpcErrorResponse(
+    c,
+    new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      rejectionMessage(error.reason),
+    ),
     {
-      jsonrpc: "2.0",
-      error: {
-        code: BaseErrorCode.SERVICE_UNAVAILABLE,
-        message: rejectionMessage(error.reason),
-        data: {
-          retryable: error.reason !== "cancelled",
-          admission: error.reason,
-        },
-      },
+      operation: "httpAdmissionRejected",
       id: descriptor.rpcId,
+      status: 503,
+      details: {
+        retryable: error.reason !== "cancelled",
+        admission: error.reason,
+      },
     },
-    503,
   );
 }
 

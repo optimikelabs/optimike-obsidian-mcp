@@ -25,6 +25,9 @@ const { ExternalRootError, ExternalRootsService } = await import(
 const { ExternalMoveCoordinator } = await import(
   "../dist/services/externalReferences/externalMoveCoordinator.js"
 );
+const { BackendVaultSessionChangedError } = await import(
+  "../dist/services/externalReferences/backendVaultAdapter.js"
+);
 const { ExternalMoveJournal } = await import(
   "../dist/services/externalReferences/externalMoveJournal.js"
 );
@@ -84,36 +87,83 @@ function createRootService(
   });
 }
 
+const PRIVATE_BACKEND_SENTINEL = "private-backend-failure-sentinel-9f21";
+const PRIVATE_CODE_SHAPED_LEGACY_SENTINEL =
+  "external_root_private_legacy_sentinel";
+
 class FakeVault {
   constructor(entries = {}) {
     this.notes = new Map(Object.entries(entries));
     this.bindingFingerprint = "test-binding";
+    this.backendGeneration = 1;
+    this.backendSessionId = "test-session-1";
     this.conditionalWritesSupported = true;
     this.conditionalReplaceCalls = 0;
     this.failConditionalReplaceAt = undefined;
+    this.failConditionalReplaceError = undefined;
+    this.beforeConditionalReplace = undefined;
   }
 
   async getBindingIdentity() {
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       backendFingerprint: "test-backend",
       vaultFingerprint: "test-vault",
       rootConfigFingerprint: "test-roots",
       bindingFingerprint: this.bindingFingerprint,
-      vaultIdentitySource: "explicit_profile",
+      vaultIdentitySource: "backend_destructive_vault_attestation",
       verifiable: true,
     };
   }
 
-  async refreshInventory() {}
+  async openDestructiveSession(expectedBinding, expectedSession) {
+    if (expectedSession) this.assertDestructiveSession(expectedSession);
+    const identity = await this.getBindingIdentity();
+    if (identity.bindingFingerprint !== expectedBinding.bindingFingerprint) {
+      throw new Error("Fake backend binding changed.");
+    }
+    return {
+      generation: this.backendGeneration,
+      sessionId: this.backendSessionId,
+      bindingFingerprint: identity.bindingFingerprint,
+    };
+  }
 
-  async assertConditionalWritesSupported() {
+  async captureDestructiveSession(expectedBinding) {
+    return this.openDestructiveSession(expectedBinding);
+  }
+
+  assertDestructiveSession(session) {
+    if (
+      session.generation !== this.backendGeneration ||
+      session.sessionId !== this.backendSessionId
+    ) {
+      throw new BackendVaultSessionChangedError();
+    }
+  }
+
+  isDestructiveSessionCurrent(session) {
+    try {
+      this.assertDestructiveSession(session);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async refreshInventory(session) {
+    if (session) this.assertDestructiveSession(session);
+  }
+
+  async assertConditionalWritesSupported(session) {
+    if (session) this.assertDestructiveSession(session);
     if (!this.conditionalWritesSupported) {
       throw new Error("Conditional note writes are unavailable.");
     }
   }
 
-  async searchPaths(query, searchInPath = "", caseSensitive = true) {
+  async searchPaths(query, searchInPath = "", caseSensitive = true, session) {
+    if (session) this.assertDestructiveSession(session);
     const normalizedQuery = caseSensitive ? query : query.toLowerCase();
     return [...this.notes.entries()]
       .filter(
@@ -127,17 +177,25 @@ class FakeVault {
       .sort((left, right) => left.localeCompare(right));
   }
 
-  async read(filePath) {
+  async read(filePath, session) {
+    if (session) this.assertDestructiveSession(session);
     const content = this.notes.get(filePath);
     if (content === undefined)
       throw new Error(`Missing fake note: ${filePath}`);
     return { filePath, content, sha256: hashText(content) };
   }
 
-  async conditionalReplace(filePath, before, after, expectedSha256) {
+  async conditionalReplace(filePath, before, after, expectedSha256, session) {
+    const hook = this.beforeConditionalReplace;
+    this.beforeConditionalReplace = undefined;
+    hook?.();
+    if (session) this.assertDestructiveSession(session);
     this.conditionalReplaceCalls += 1;
     if (this.conditionalReplaceCalls === this.failConditionalReplaceAt) {
-      throw new Error(`Injected conditional repair failure for ${filePath}.`);
+      throw (
+        this.failConditionalReplaceError ??
+        new Error(`Injected conditional repair failure for ${filePath}.`)
+      );
     }
     const current = await this.read(filePath);
     if (current.sha256 !== expectedSha256 || current.content !== before) {
@@ -422,17 +480,26 @@ try {
   });
   assert.equal(compensationPlan.repairs.length, 2);
   compensationVault.failConditionalReplaceAt = 2;
+  compensationVault.failConditionalReplaceError = new Error(
+    PRIVATE_BACKEND_SENTINEL,
+  );
   await assert.rejects(
     () =>
       compensationCoordinator.apply(
         compensationPlan.planId,
         "coordinator-compensation",
       ),
-    /All partial effects were compensated and journaled/u,
+    /external move did not complete/u,
   );
+  const compensatedStatus = compensationCoordinator.status(
+    compensationPlan.planId,
+  );
+  assert.equal(compensatedStatus.status, "failed_compensated");
+  assert.equal(compensatedStatus.failureCode, "backend_failure");
   assert.equal(
-    compensationCoordinator.status(compensationPlan.planId).status,
-    "failed_compensated",
+    JSON.stringify(compensatedStatus).includes(PRIVATE_BACKEND_SENTINEL),
+    false,
+    "a compensated receipt must never retain a raw backend failure",
   );
   assert.equal(await readFile(compensationSource, "utf8"), "compensation");
   assert.equal(await exists(compensationTarget), false);
@@ -546,6 +613,212 @@ try {
   assert.equal(await readFile(bindingSource, "utf8"), "binding");
   assert.equal(await exists(bindingTarget), false);
 
+  // The plan is not transferable to a restarted proxy/backend session, even
+  // if it presents the same attested target and binding identity.
+  const restartSource = path.join(rootPath, "generation-restart.txt");
+  const restartTarget = path.join(archivePath, "generation-restart.txt");
+  await writeFile(restartSource, "generation restart", "utf8");
+  const restartUri = pathToFileURL(restartSource).href;
+  const restartVault = new FakeVault({
+    "Efforts/Projets/Generation restart.md":
+      `[Generation restart](${restartUri}) ` +
+      "`external-ref:pilot.move::generation-restart.txt`\n",
+  });
+  const restartCoordinator = new ExternalMoveCoordinator(
+    service,
+    restartVault,
+    new ExternalMoveJournal(":memory:"),
+  );
+  const restartPlan = await restartCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "generation-restart.txt",
+    targetRelativePath: "archive/generation-restart.txt",
+    idempotencyKey: "coordinator-generation-restart",
+  });
+  restartVault.backendGeneration = 2;
+  restartVault.backendSessionId = "test-session-2";
+  await expectExternalCode(
+    () =>
+      restartCoordinator.apply(
+        restartPlan.planId,
+        "coordinator-generation-restart",
+      ),
+    "precondition_failed",
+  );
+  assert.equal(await readFile(restartSource, "utf8"), "generation restart");
+  assert.equal(await exists(restartTarget), false);
+
+  // A swap after the external file moved but before the first vault repair is
+  // terminal. The replacement vault receives neither a repair nor a rollback.
+  const partialSource = path.join(rootPath, "generation-partial.txt");
+  const partialTarget = path.join(archivePath, "generation-partial.txt");
+  await writeFile(partialSource, "generation partial", "utf8");
+  const partialUri = pathToFileURL(partialSource).href;
+  const partialNotePath = "Efforts/Projets/Generation partial.md";
+  const partialNote =
+    `[Generation partial](${partialUri}) ` +
+    "`external-ref:pilot.move::generation-partial.txt`\n";
+  const partialVault = new FakeVault({ [partialNotePath]: partialNote });
+  const partialCoordinator = new ExternalMoveCoordinator(
+    service,
+    partialVault,
+    new ExternalMoveJournal(":memory:"),
+  );
+  const partialPlan = await partialCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "generation-partial.txt",
+    targetRelativePath: "archive/generation-partial.txt",
+    idempotencyKey: "coordinator-generation-partial",
+  });
+  partialVault.beforeConditionalReplace = () => {
+    partialVault.backendGeneration = 2;
+    partialVault.backendSessionId = "replacement-session";
+  };
+  await expectExternalCode(
+    () =>
+      partialCoordinator.apply(
+        partialPlan.planId,
+        "coordinator-generation-partial",
+      ),
+    "non_verifiable",
+  );
+  assert.equal(await exists(partialSource), false);
+  assert.equal(await readFile(partialTarget, "utf8"), "generation partial");
+  assert.equal(
+    partialVault.notes.get(partialNotePath),
+    partialNote,
+    "the replacement vault must not receive a repair or compensation write",
+  );
+  assert.equal(
+    partialCoordinator.status(partialPlan.planId).status,
+    "recovery_required",
+  );
+
+  // A journal written before backend target attestation remains discoverable
+  // for incident inspection, but it can never be silently rebound to the
+  // current vault or used to mutate either surface.
+  const legacySource = path.join(rootPath, "legacy-binding.txt");
+  await writeFile(legacySource, "legacy binding", "utf8");
+  const legacySnapshot = await service.planMove(
+    "pilot.move",
+    "legacy-binding.txt",
+    "archive/legacy-binding.txt",
+  );
+  const legacyJournal = new ExternalMoveJournal(":memory:");
+  const legacyStored = legacyJournal.create({
+    idempotencyKey: "legacy-binding-status-only",
+    snapshot: legacySnapshot,
+    bindingIdentity: {
+      schemaVersion: 1,
+      backendFingerprint: "legacy-backend",
+      vaultFingerprint: "legacy-vault",
+      rootConfigFingerprint: "legacy-roots",
+      bindingFingerprint: "legacy-binding",
+      vaultIdentitySource: "explicit_profile",
+      verifiable: true,
+    },
+    sourceToken: "external-ref:pilot.move::legacy-binding.txt",
+    targetToken: "external-ref:pilot.move::archive/legacy-binding.txt",
+    oldFileUri: "file:///private/legacy-binding.txt",
+    newFileUri: "file:///private/archive/legacy-binding.txt",
+    repairs: [],
+    manualReview: [],
+    inventoryDigest: "legacy",
+    appliedRepairPaths: [],
+    restoredRepairPaths: [],
+    recoveryErrors: [
+      PRIVATE_BACKEND_SENTINEL,
+      PRIVATE_CODE_SHAPED_LEGACY_SENTINEL,
+    ],
+    failure: PRIVATE_CODE_SHAPED_LEGACY_SENTINEL,
+  });
+  const legacyCoordinator = new ExternalMoveCoordinator(
+    service,
+    new FakeVault(),
+    legacyJournal,
+  );
+  const legacyStatus = legacyCoordinator.status(legacyStored.planId);
+  assert.equal(legacyStatus.legacyBinding, true);
+  assert.equal(legacyStatus.bindingVerifiable, false);
+  assert.equal(JSON.stringify(legacyStatus).includes("file:///private"), false);
+  assert.equal(
+    JSON.stringify(legacyStatus).includes(PRIVATE_BACKEND_SENTINEL),
+    false,
+    "legacy journal replay must redact raw historical failure text",
+  );
+  assert.equal(
+    JSON.stringify(legacyStatus).includes(
+      PRIVATE_CODE_SHAPED_LEGACY_SENTINEL,
+    ),
+    false,
+    "legacy journal replay must reject code-shaped values outside the finite failure-code allowlist",
+  );
+  await expectExternalCode(
+    () =>
+      legacyCoordinator.apply(
+        legacyStored.planId,
+        "legacy-binding-status-only",
+      ),
+    "non_verifiable",
+  );
+  await expectExternalCode(
+    () =>
+      legacyCoordinator.rollback(
+        legacyStored.planId,
+        "legacy-binding-status-only",
+      ),
+    "non_verifiable",
+  );
+  assert.equal(await readFile(legacySource, "utf8"), "legacy binding");
+  assert.equal(
+    await exists(path.join(archivePath, "legacy-binding.txt")),
+    false,
+  );
+
+  // A backend swap after a successful apply must also fence recovery: the
+  // proxy cannot repair Vault A's old plan through a same-endpoint Vault B.
+  const swapRecoverySource = path.join(rootPath, "binding-recovery.txt");
+  const swapRecoveryTarget = path.join(archivePath, "binding-recovery.txt");
+  await writeFile(swapRecoverySource, "binding recovery", "utf8");
+  const swapRecoveryUri = pathToFileURL(swapRecoverySource).href;
+  const swapRecoveryNotePath = "Efforts/Projets/Binding recovery.md";
+  const swapRecoveryVault = new FakeVault({
+    [swapRecoveryNotePath]:
+      `[Binding recovery](${swapRecoveryUri}) ` +
+      "`external-ref:pilot.move::binding-recovery.txt`\n",
+  });
+  const swapRecoveryCoordinator = new ExternalMoveCoordinator(
+    service,
+    swapRecoveryVault,
+    new ExternalMoveJournal(":memory:"),
+  );
+  const swapRecoveryPlan = await swapRecoveryCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "binding-recovery.txt",
+    targetRelativePath: "archive/binding-recovery.txt",
+    idempotencyKey: "coordinator-binding-recovery",
+  });
+  await swapRecoveryCoordinator.apply(
+    swapRecoveryPlan.planId,
+    "coordinator-binding-recovery",
+  );
+  assert.equal(await exists(swapRecoverySource), false);
+  assert.equal(await readFile(swapRecoveryTarget, "utf8"), "binding recovery");
+  swapRecoveryVault.bindingFingerprint = "swapped-backend-binding";
+  await expectExternalCode(
+    () =>
+      swapRecoveryCoordinator.rollback(
+        swapRecoveryPlan.planId,
+        "coordinator-binding-recovery",
+      ),
+    "precondition_failed",
+  );
+  assert.equal(
+    await readFile(swapRecoveryTarget, "utf8"),
+    "binding recovery",
+    "a stale backend must not recover an applied external move",
+  );
+
   // A process crash after the file move is recoverable from the durable
   // intermediate journal state through the ordinary rollback tool.
   const recoverySource = path.join(rootPath, "recovery.txt");
@@ -584,6 +857,91 @@ try {
   assert.equal(await readFile(recoverySource, "utf8"), "recovery");
   assert.equal(await exists(recoveryTarget), false);
   assert.equal(recoveryVault.notes.get(recoveryNotePath), recoveryNote);
+
+  // A persisted partial journal is not transferable to a real proxy restart.
+  // The new concrete session must turn status into manual-review recovery
+  // before it can repair or compensate a different backend vault.
+  const restartedPartialSource = path.join(rootPath, "restart-partial.txt");
+  const restartedPartialTarget = path.join(archivePath, "restart-partial.txt");
+  await writeFile(restartedPartialSource, "restart partial", "utf8");
+  const restartedPartialUri = pathToFileURL(restartedPartialSource).href;
+  const restartedPartialNotePath = "Efforts/Projets/Restart partial.md";
+  const restartedPartialNote =
+    `[Restart partial](${restartedPartialUri}) ` +
+    "`external-ref:pilot.move::restart-partial.txt`\n";
+  const restartedPartialJournal = new ExternalMoveJournal(":memory:");
+  const firstProcessVault = new FakeVault({
+    [restartedPartialNotePath]: restartedPartialNote,
+  });
+  const firstProcessCoordinator = new ExternalMoveCoordinator(
+    service,
+    firstProcessVault,
+    restartedPartialJournal,
+  );
+  const restartedPartialPlan = await firstProcessCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "restart-partial.txt",
+    targetRelativePath: "archive/restart-partial.txt",
+    idempotencyKey: "coordinator-restart-partial",
+  });
+  const interruptedPlan = restartedPartialJournal.get(
+    restartedPartialPlan.planId,
+  );
+  await service.applyMove(interruptedPlan.snapshot);
+  restartedPartialJournal.transition(
+    restartedPartialPlan.planId,
+    ["planned"],
+    "applying_file",
+  );
+  restartedPartialJournal.transition(
+    restartedPartialPlan.planId,
+    ["applying_file"],
+    "file_moved",
+  );
+  const secondProcessVault = new FakeVault({
+    [restartedPartialNotePath]: restartedPartialNote,
+  });
+  secondProcessVault.backendGeneration = 2;
+  secondProcessVault.backendSessionId = "proxy-session-after-restart";
+  const secondProcessCoordinator = new ExternalMoveCoordinator(
+    service,
+    secondProcessVault,
+    restartedPartialJournal,
+  );
+  const restartedPartialStatus = secondProcessCoordinator.status(
+    restartedPartialPlan.planId,
+  );
+  assert.equal(restartedPartialStatus.status, "recovery_required");
+  assert.equal(restartedPartialStatus.nextAction, "manual_review");
+  assert.equal(restartedPartialStatus.failureCode, "backend_session_changed");
+  assert.deepEqual(restartedPartialStatus.recoveryErrors, [
+    "backend_session_changed",
+  ]);
+  assert.equal(
+    JSON.stringify(restartedPartialStatus).includes(
+      "proxy-session-after-restart",
+    ),
+    false,
+    "external_move_status must not expose a private replacement session",
+  );
+  await expectExternalCode(
+    () =>
+      secondProcessCoordinator.rollback(
+        restartedPartialPlan.planId,
+        "coordinator-restart-partial",
+      ),
+    "non_verifiable",
+  );
+  assert.equal(await exists(restartedPartialSource), false);
+  assert.equal(
+    await readFile(restartedPartialTarget, "utf8"),
+    "restart partial",
+  );
+  assert.equal(
+    secondProcessVault.notes.get(restartedPartialNotePath),
+    restartedPartialNote,
+    "a replacement process must never repair or compensate its new vault",
+  );
 
   // A crash after the no-clobber hard link but before source unlink leaves
   // both paths on the same inode. Rollback must recover that verified window.

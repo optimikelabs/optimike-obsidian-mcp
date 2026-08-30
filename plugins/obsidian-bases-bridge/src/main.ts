@@ -1,6 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Plugin, PluginSettingTab, Setting, TFile, parseYaml, stringifyYaml } from "obsidian";
-import { compareFilterValues, isTruthyFilterReference, isTruthyFilterValue, parseComparisonLiteral } from "./filter-comparison.mjs";
+import {
+  Plugin,
+  PluginSettingTab,
+  Setting,
+  TFile,
+  parseYaml,
+  stringifyYaml,
+} from "obsidian";
+import {
+  compareFilterValues,
+  isTruthyFilterReference,
+  isTruthyFilterValue,
+  parseComparisonLiteral,
+} from "./filter-comparison.mjs";
 import { normalizeLinkish } from "./link-normalization.mjs";
 import {
   BASE_ATOMIC_CONTRACT_VERSION,
@@ -85,15 +97,456 @@ function sendJson(res: any, status: number, payload: unknown): void {
   if (typeof target?.json !== "function") {
     throw new Error("Local REST API response does not expose json().");
   }
-  target.json(payload);
+  target.json(publicBaseHttpFailurePayload(payload));
 }
 
-function atomicError(code: string, message: string, details?: object) {
+type LegacyBaseRouteHandler = (
+  req: any,
+  res: any,
+) => unknown | Promise<unknown>;
+
+/**
+ * Values arriving at an HTTP boundary are untrusted, including values thrown by
+ * host/plugin code.  A revoked Proxy or a throwing getter must be treated as
+ * absent: reading it must never make our redaction path throw (or fall through
+ * to Local REST's serializer).
+ */
+function safeProperty(value: unknown, key: string): unknown {
+  if (
+    value === null ||
+    (typeof value !== "object" && typeof value !== "function")
+  ) {
+    return undefined;
+  }
+  try {
+    return Reflect.get(value, key);
+  } catch {
+    return undefined;
+  }
+}
+
+function safeArray(value: unknown): unknown[] | undefined {
+  try {
+    return Array.isArray(value) ? Array.from(value) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeArrayItems(value: unknown): unknown[] {
+  return safeArray(value) ?? [];
+}
+
+function safeRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  try {
+    return Array.isArray(value) ? undefined : (value as Record<string, unknown>);
+  } catch {
+    return undefined;
+  }
+}
+
+function safeStringProperty(value: unknown, key: string): string | undefined {
+  const candidate = safeProperty(value, key);
+  return typeof candidate === "string" ? candidate : undefined;
+}
+
+function safeNumberProperty(value: unknown, key: string): number | undefined {
+  const candidate = safeProperty(value, key);
+  return typeof candidate === "number" && Number.isFinite(candidate)
+    ? candidate
+    : undefined;
+}
+
+function safeBooleanProperty(
+  value: unknown,
+  key: string,
+): boolean | undefined {
+  const candidate = safeProperty(value, key);
+  return typeof candidate === "boolean" ? candidate : undefined;
+}
+
+function isBaseBindingConflict(error: unknown): boolean {
+  try {
+    return error instanceof BaseBindingConflictError;
+  } catch {
+    return false;
+  }
+}
+
+function isBaseHashConflict(error: unknown): boolean {
+  try {
+    return error instanceof BaseHashConflictError;
+  } catch {
+    return false;
+  }
+}
+
+function isBaseNotFoundError(error: unknown): boolean {
+  const message = safeStringProperty(error, "message");
+  return (
+    message === "Base not found." ||
+    (typeof message === "string" && message.startsWith("Base introuvable:"))
+  );
+}
+
+/**
+ * Local REST's extension router does not install a value-safe error boundary for
+ * plugin routes. Keep legacy success payloads untouched, but ensure a thrown
+ * Vault/engine error can never fall through to the host's undocumented error
+ * serializer.
+ */
+export function withPublicLegacyBaseBoundary(
+  handler: LegacyBaseRouteHandler,
+): LegacyBaseRouteHandler {
+  return async (req: any, res: any) => {
+    try {
+      await handler(req, res);
+    } catch (error) {
+      if (safeProperty(res, "headersSent") || safeProperty(res, "writableEnded")) {
+        return;
+      }
+      if (isBaseBindingConflict(error)) {
+        sendJson(res, 409, atomicError("binding_conflict"));
+        return;
+      }
+      if (isBaseHashConflict(error)) {
+        sendJson(
+          res,
+          409,
+          atomicError("hash_conflict", undefined, {
+            actualSha256: safeStringProperty(error, "actualSha256"),
+          }),
+        );
+        return;
+      }
+      const notFound = isBaseNotFoundError(error);
+      sendJson(
+        res,
+        notFound ? 404 : 500,
+        atomicError(notFound ? "base_not_found" : "read_error"),
+      );
+    }
+  };
+}
+
+type BasePublicErrorDescriptor = {
+  code: string;
+  reasonCode: string;
+  status: "blocked" | "conflict" | "not_found" | "rejected";
+  retryable: false;
+  message: string;
+};
+
+const BASE_PUBLIC_ERRORS: Record<string, BasePublicErrorDescriptor> = {
+  invalid_request: {
+    code: "invalid_request",
+    reasonCode: "request_rejected",
+    status: "rejected",
+    retryable: false,
+    message: "The request could not be validated.",
+  },
+  base_not_found: {
+    code: "base_not_found",
+    reasonCode: "resource_not_found",
+    status: "not_found",
+    retryable: false,
+    message: "The requested Base was not found.",
+  },
+  writes_disabled: {
+    code: "writes_disabled",
+    reasonCode: "write_not_authorized",
+    status: "blocked",
+    retryable: false,
+    message: "Atomic Base writes are disabled.",
+  },
+  binding_conflict: {
+    code: "binding_conflict",
+    reasonCode: "backend_binding_changed",
+    status: "conflict",
+    retryable: false,
+    message:
+      "The sealed backend binding no longer matches. Refresh status before retrying.",
+  },
+  hash_conflict: {
+    code: "hash_conflict",
+    reasonCode: "resource_changed",
+    status: "conflict",
+    retryable: false,
+    message:
+      "The Base changed after it was read. Read it again before retrying.",
+  },
+  write_timeout: {
+    code: "write_timeout",
+    reasonCode: "write_timeout",
+    status: "rejected",
+    retryable: false,
+    message:
+      "The Base write did not complete. Verify the current state before retrying.",
+  },
+  write_error: {
+    code: "write_error",
+    reasonCode: "write_failed",
+    status: "rejected",
+    retryable: false,
+    message: "The Base write could not be completed.",
+  },
+  read_error: {
+    code: "read_error",
+    reasonCode: "read_failed",
+    status: "rejected",
+    retryable: false,
+    message: "The Base could not be read.",
+  },
+  forbidden_key: {
+    code: "forbidden_key",
+    reasonCode: "field_not_authorized",
+    status: "rejected",
+    retryable: false,
+    message: "The request includes a protected Base field.",
+  },
+  serialization_error: {
+    code: "serialization_error",
+    reasonCode: "serialization_failed",
+    status: "rejected",
+    retryable: false,
+    message: "The Base specification could not be serialized.",
+  },
+};
+
+function safeAtomicErrorDetails(
+  details: unknown,
+): { actualSha256: string } | undefined {
+  if (!safeRecord(details)) return undefined;
+  const actualSha256 = safeStringProperty(details, "actualSha256");
+  return typeof actualSha256 === "string" &&
+    /^[a-f0-9]{64}$/u.test(actualSha256)
+    ? { actualSha256 }
+    : undefined;
+}
+
+export function publicBaseAtomicErrorPayload(
+  code: string,
+  _message?: unknown,
+  details?: unknown,
+) {
+  const requestedCode = typeof code === "string" ? code : "";
+  const descriptor =
+    BASE_PUBLIC_ERRORS[requestedCode] ?? BASE_PUBLIC_ERRORS.invalid_request;
+  const safeDetails = safeAtomicErrorDetails(details);
   return {
     ok: false,
     contractVersion: BASE_ATOMIC_CONTRACT_VERSION,
-    error: { code, message, ...(details ? { details } : {}) },
+    status: descriptor.status,
+    retryable: descriptor.retryable,
+    error: {
+      code: descriptor.code,
+      reasonCode: descriptor.reasonCode,
+      message: descriptor.message,
+      ...(safeDetails ? { details: safeDetails } : {}),
+    },
   };
+}
+
+const atomicError = publicBaseAtomicErrorPayload;
+
+type LegacyUpsertErrorDescriptor = {
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+
+const LEGACY_UPSERT_ERRORS: Record<string, LegacyUpsertErrorDescriptor> = {
+  validation_error: {
+    code: "validation_error",
+    message: "The Base row operation could not be validated.",
+    retryable: false,
+  },
+  not_found: {
+    code: "not_found",
+    message: "The requested note was not found.",
+    retryable: false,
+  },
+  mtime_conflict: {
+    code: "mtime_conflict",
+    message:
+      "The note changed after it was read. Read it again before retrying.",
+    retryable: false,
+  },
+  forbidden_key: {
+    code: "forbidden_key",
+    message: "The request includes a protected Base field.",
+    retryable: false,
+  },
+  write_timeout: {
+    code: "write_timeout",
+    message:
+      "The Base write did not complete. Verify the current state before retrying.",
+    retryable: true,
+  },
+  write_error: {
+    code: "write_error",
+    message: "The Base write could not be completed.",
+    retryable: false,
+  },
+};
+
+function publicLegacyUpsertFailurePayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const results = safeArrayItems(safeProperty(payload, "results"));
+  return {
+    ok: false,
+    results: results.map((result) => {
+      const item = safeRecord(result);
+      if (!item) {
+        return {
+          mtime: 0,
+          error: {
+            code: "write_error",
+            message: LEGACY_UPSERT_ERRORS.write_error.message,
+            retryable: false,
+          },
+        };
+      }
+      const rawError = safeRecord(safeProperty(item, "error"));
+      if (!rawError) {
+        const safe: Record<string, unknown> = {};
+        const mtime = safeNumberProperty(item, "mtime");
+        if (mtime !== undefined) {
+          safe.mtime = mtime;
+        }
+        const changed = safeRecord(safeProperty(item, "changed"));
+        if (changed) {
+          const keys = safeArrayItems(safeProperty(changed, "keys")).filter(
+            (key) => typeof key === "string",
+          );
+          const unset = safeArrayItems(safeProperty(changed, "unset")).filter(
+            (key) => typeof key === "string",
+          );
+          safe.changed = {
+            keys,
+            ...(unset.length > 0 ? { unset } : {}),
+          };
+        }
+        const warnings = safeArrayItems(safeProperty(item, "warnings"));
+        if (warnings.length > 0 && warnings.every((warning) => warning === "dry_run_no_write")) {
+          safe.warnings = ["dry_run_no_write"];
+        }
+        return safe;
+      }
+      const descriptor =
+        LEGACY_UPSERT_ERRORS[safeStringProperty(rawError, "code") ?? ""] ??
+        LEGACY_UPSERT_ERRORS.write_error;
+      const safe: Record<string, unknown> = {
+        mtime: safeNumberProperty(item, "mtime") ?? 0,
+        error: {
+          code: descriptor.code,
+          message: descriptor.message,
+          retryable: descriptor.retryable,
+        },
+      };
+      const warnings = safeArrayItems(safeProperty(item, "warnings"));
+      if (warnings.length > 0 && warnings.every((warning) => warning === "dry_run_no_write")) {
+        safe.warnings = ["dry_run_no_write"];
+      }
+      return safe;
+    }),
+  };
+}
+
+const LEGACY_BASE_FAILURE_WARNINGS = new Map<string, string>([
+  [
+    "YAML invalide: root doit être un objet.",
+    "The Base YAML root must be an object.",
+  ],
+  ["Payload requis: yaml ou json.", "A YAML or JSON payload is required."],
+  ["path requis.", "A Base path is required."],
+  ["spec doit être un objet.", "The Base specification must be an object."],
+  [
+    "The Base specification could not be serialized.",
+    "The Base specification could not be serialized.",
+  ],
+  [
+    "Legacy whole-file Base writes are disabled. Use the governed atomic Base operation.",
+    "Legacy whole-file Base writes are disabled. Use the governed atomic Base operation.",
+  ],
+  [
+    "Legacy Base creation and replacement are disabled. Enable the explicit compatibility toggle to use this route.",
+    "Legacy Base creation and replacement are disabled. Enable the explicit compatibility toggle to use this route.",
+  ],
+]);
+
+function safeLegacyBaseId(value: unknown): string {
+  if (typeof value !== "string" || value.length > 1024) return "";
+  const normalized = value.replace(/\\/gu, "/");
+  if (
+    !normalized ||
+    normalized.startsWith("/") ||
+    /^[a-z]:\//iu.test(normalized) ||
+    !normalized.toLowerCase().endsWith(".base")
+  ) {
+    return "";
+  }
+  const segments = normalized.split("/");
+  if (
+    segments.some(
+      (segment) => !segment || segment === "." || segment === "..",
+    ) ||
+    segments[0]?.toLowerCase() === ".obsidian"
+  ) {
+    return "";
+  }
+  return normalized;
+}
+
+function publicLegacyConfigFailurePayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const rawWarnings = safeArrayItems(safeProperty(payload, "warnings"));
+  const warnings = rawWarnings.map((warning) =>
+    typeof warning === "string"
+      ? (LEGACY_BASE_FAILURE_WARNINGS.get(warning) ??
+        "The Base operation could not be completed.")
+      : "The Base operation could not be completed.",
+  );
+  const created = safeBooleanProperty(payload, "created");
+  const overwritten = safeBooleanProperty(payload, "overwritten");
+  return {
+    ok: false,
+    id: safeLegacyBaseId(safeProperty(payload, "id")),
+    warnings:
+      warnings.length > 0
+        ? warnings
+        : ["The Base operation could not be completed."],
+    ...(created !== undefined ? { created } : {}),
+    ...(overwritten !== undefined ? { overwritten } : {}),
+  };
+}
+
+/** Normalizes every non-throwing REST failure before it reaches HTTP. */
+export function publicBaseHttpFailurePayload(payload: unknown): unknown {
+  const record = safeRecord(payload);
+  if (!record) {
+    return publicBaseAtomicErrorPayload("invalid_request");
+  }
+  const ok = safeProperty(record, "ok");
+  if (ok === true) return payload;
+  if (ok !== false) return publicBaseAtomicErrorPayload("invalid_request");
+  if (safeArray(safeProperty(record, "results")) !== undefined) {
+    return publicLegacyUpsertFailurePayload(record);
+  }
+  if (
+    safeProperty(record, "id") !== undefined &&
+    safeArray(safeProperty(record, "warnings")) !== undefined &&
+    safeProperty(record, "error") === undefined
+  ) {
+    return publicLegacyConfigFailurePayload(record);
+  }
+  const rawError = safeRecord(safeProperty(record, "error"));
+  const requestedCode = safeStringProperty(rawError, "code") ?? "invalid_request";
+  const rawDetails = safeRecord(safeProperty(rawError, "details"));
+  return publicBaseAtomicErrorPayload(requestedCode, undefined, rawDetails);
 }
 type BaseCreateRequest = {
   path: string;
@@ -176,10 +629,17 @@ const PROTECTED_UPSERT_KEYS = new Set(["création", "creation", "modification"])
 
 function isForbiddenUpsertKey(key: string): boolean {
   const normalized = key.trim().toLowerCase();
-  return normalized.startsWith("file.") || normalized.startsWith("formula.") || PROTECTED_UPSERT_KEYS.has(normalized);
+  return (
+    normalized.startsWith("file.") ||
+    normalized.startsWith("formula.") ||
+    PROTECTED_UPSERT_KEYS.has(normalized)
+  );
 }
 
-function validateUpsertKeys(setObj: Record<string, any>, unsetArr: string[]): string[] {
+function validateUpsertKeys(
+  setObj: Record<string, any>,
+  unsetArr: string[],
+): string[] {
   return [...Object.keys(setObj), ...unsetArr].filter(isForbiddenUpsertKey);
 }
 
@@ -188,15 +648,24 @@ function classifyWriteError(error: any): {
   message: string;
   warnings?: string[];
 } {
-  const message = String(error?.message ?? error);
-  if (/processFrontMatter.*timed out|timed out|timeout/i.test(message)) {
+  const message = safeStringProperty(error, "message");
+  if (
+    typeof message === "string" &&
+    /processFrontMatter.*timed out|timed out|timeout/i.test(message)
+  ) {
     return {
       code: "write_timeout",
-      message,
-      warnings: ["Obsidian appears busy, indexing, locked, or slow while processFrontMatter is running. Retry this operation alone after a short backoff."],
+      message:
+        "The Base write did not complete. Verify the current state before retrying.",
+      warnings: [
+        "The write did not complete. Verify the current state before retrying.",
+      ],
     };
   }
-  return { code: "write_error", message };
+  return {
+    code: "write_error",
+    message: "The Base write could not be completed.",
+  };
 }
 
 function ensureBaseExt(path: string): string {
@@ -210,7 +679,12 @@ function dirname(path: string): string {
   return idx === -1 ? "" : normalized.slice(0, idx);
 }
 
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+function clampInt(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(num)));
@@ -218,7 +692,10 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 
 function stripQuotes(value: string): string {
   const trimmed = value.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
     return trimmed.slice(1, -1);
   }
   return trimmed;
@@ -314,16 +791,20 @@ export default class BasesBridgePlugin extends Plugin {
     const adapter = this.app.vault.adapter as { getBasePath?: () => string };
     const basePath = adapter.getBasePath?.();
     if (!basePath) {
-      throw new Error("Bases Bridge atomic writes require a desktop filesystem vault identity.");
+      throw new Error(
+        "Bases Bridge atomic writes require a desktop filesystem vault identity.",
+      );
     }
-    this.bindingFingerprint = createHash("sha256").update(`${deviceId}\0${this.settings.instanceId}\0${basePath}`, "utf8").digest("hex");
+    this.bindingFingerprint = createHash("sha256")
+      .update(`${deviceId}\0${this.settings.instanceId}\0${basePath}`, "utf8")
+      .digest("hex");
     await this.saveSettings();
     this.addSettingTab(new BridgeSettingsTab(this.app, this));
 
     (this as any).setEngineEnabled = async (on: boolean) => {
       this.settings.engineEnabled = !!on;
       await this.saveData(this.settings);
-      console.log("[bases-bridge] ENGINE_ENABLED:", this.settings.engineEnabled);
+      console.log("[bases-bridge] Engine setting updated.");
       if (this.settings.engineEnabled) {
         this.maybeRegisterHeadlessView();
       }
@@ -347,7 +828,7 @@ export default class BasesBridgePlugin extends Plugin {
     this.addCommand({
       id: "engine-state",
       name: "Bases Bridge: Show engine state",
-      callback: () => console.log((this as any).getEngineState()),
+      callback: () => console.log("[bases-bridge] Engine state requested."),
     });
 
     // Important: ne tente pas de monter l'engine tant qu'il n'est pas explicitement activé.
@@ -366,9 +847,21 @@ export default class BasesBridgePlugin extends Plugin {
         this.invalidateEngineCache();
       }
     };
-    this.registerEvent(this.app.vault.on("modify", (file: any) => onVaultMutation(String(file?.path ?? ""))));
-    this.registerEvent(this.app.vault.on("create", (file: any) => onVaultMutation(String(file?.path ?? ""))));
-    this.registerEvent(this.app.vault.on("delete", (file: any) => onVaultMutation(String(file?.path ?? ""))));
+    this.registerEvent(
+      this.app.vault.on("modify", (file: any) =>
+        onVaultMutation(String(file?.path ?? "")),
+      ),
+    );
+    this.registerEvent(
+      this.app.vault.on("create", (file: any) =>
+        onVaultMutation(String(file?.path ?? "")),
+      ),
+    );
+    this.registerEvent(
+      this.app.vault.on("delete", (file: any) =>
+        onVaultMutation(String(file?.path ?? "")),
+      ),
+    );
     this.registerEvent(
       this.app.vault.on("rename", (file: any, oldPath: string) => {
         onVaultMutation(String(oldPath ?? ""));
@@ -376,8 +869,8 @@ export default class BasesBridgePlugin extends Plugin {
       }),
     );
 
-    this.registerRestExtension().catch((error) => {
-      console.error("[bases-bridge] Unable to register REST extension:", error);
+    this.registerRestExtension().catch(() => {
+      console.error("[bases-bridge] REST extension registration failed.");
     });
   }
 
@@ -400,8 +893,8 @@ export default class BasesBridgePlugin extends Plugin {
   private maybeRegisterHeadlessView(): void {
     if (this.headlessMounted) return;
     this.headlessMounted = true;
-    this.registerHeadlessView().catch((error) => {
-      console.error("[bases-bridge] Unable to register headless view:", error);
+    this.registerHeadlessView().catch(() => {
+      console.error("[bases-bridge] Headless view registration failed.");
       this.headlessMounted = false;
     });
   }
@@ -412,7 +905,11 @@ export default class BasesBridgePlugin extends Plugin {
       if (mounted) return;
       const selfRegister: any = (this as any).registerBasesView;
       if (typeof selfRegister === "function") {
-        const disp = selfRegister.call(this, VIEW_TYPE, this.makeHeadlessSpec());
+        const disp = selfRegister.call(
+          this,
+          VIEW_TYPE,
+          this.makeHeadlessSpec(),
+        );
         this.register(cleanupOf(disp));
         console.log("[bases-bridge] Headless view registered via self API");
         mounted = true;
@@ -423,10 +920,18 @@ export default class BasesBridgePlugin extends Plugin {
         (this.app as any).plugins?.plugins?.["obsidian-bases"] ??
         (this.app as any).plugins?.getPlugin?.("bases") ??
         (this.app as any).plugins?.getPlugin?.("obsidian-bases");
-      const basesApi: any = basesPlugin?.api ?? (this.app as any).bases ?? (this.app as any).plugins?.api?.bases;
+      const basesApi: any =
+        basesPlugin?.api ??
+        (this.app as any).bases ??
+        (this.app as any).plugins?.api?.bases;
       const externalRegister: any = basesApi?.registerBasesView;
       if (typeof externalRegister === "function") {
-        const disp = externalRegister.call(basesApi, this, VIEW_TYPE, this.makeHeadlessSpec());
+        const disp = externalRegister.call(
+          basesApi,
+          this,
+          VIEW_TYPE,
+          this.makeHeadlessSpec(),
+        );
         this.register(cleanupOf(disp));
         console.log("[bases-bridge] Headless view registered via Bases API");
         mounted = true;
@@ -436,7 +941,10 @@ export default class BasesBridgePlugin extends Plugin {
     if (!mounted) {
       const interval = window.setInterval(tryMount, 500);
       const timeout = window.setTimeout(() => {
-        if (!mounted) console.warn("[bases-bridge] Bases API still unavailable; headless view not mounted");
+        if (!mounted)
+          console.warn(
+            "[bases-bridge] Bases API still unavailable; headless view not mounted",
+          );
         window.clearInterval(interval);
       }, 30000);
       this.register(() => {
@@ -451,19 +959,25 @@ export default class BasesBridgePlugin extends Plugin {
       name: "Bridge (Headless)",
       icon: "plug-zap",
       factory: (controller: any, _containerEl: HTMLElement) => {
-        const basePath = controller?.config?.path ?? controller?.base?.path ?? controller?.file?.path ?? "";
+        const basePath =
+          controller?.config?.path ??
+          controller?.base?.path ??
+          controller?.file?.path ??
+          "";
         const id = normBaseId(basePath);
 
         const sync = () => {
           if (!this.settings.engineEnabled) return;
           try {
             const data = controller?.data;
-            const entries = data?.entries ?? data?.rows ?? data?.table?.rows ?? [];
+            const entries =
+              data?.entries ?? data?.rows ?? data?.table?.rows ?? [];
             const rows: EngineRow[] = [];
-            for (const entry of entries) rows.push(entry?.values ?? entry?.row ?? entry ?? {});
+            for (const entry of entries)
+              rows.push(entry?.values ?? entry?.row ?? entry ?? {});
             ENGINE_CACHE.set(id, { ts: Date.now(), rows, total: rows.length });
-          } catch (error) {
-            console.error("[bases-bridge] engine sync error:", error);
+          } catch {
+            console.error("[bases-bridge] Engine synchronization failed.");
           }
         };
 
@@ -509,7 +1023,10 @@ export default class BasesBridgePlugin extends Plugin {
     }
     const yaml = await this.app.vault.read(abstract);
     const jsonRaw = parseYaml(yaml);
-    const json = jsonRaw && typeof jsonRaw === "object" && !Array.isArray(jsonRaw) ? (jsonRaw as Record<string, any>) : {};
+    const json =
+      jsonRaw && typeof jsonRaw === "object" && !Array.isArray(jsonRaw)
+        ? (jsonRaw as Record<string, any>)
+        : {};
 
     return { id: path, file: abstract, yaml, json };
   }
@@ -527,24 +1044,46 @@ export default class BasesBridgePlugin extends Plugin {
     }
   }
 
-  private extractSchema(basePath: string, spec: Record<string, any>): BaseSchemaResponse {
+  private extractSchema(
+    basePath: string,
+    spec: Record<string, any>,
+  ): BaseSchemaResponse {
     const propertiesValue = spec.properties;
     const formulasValue = spec.formulas;
     const viewsValue = spec.views;
 
     const properties: BaseSchemaProperty[] = [];
-    if (propertiesValue && typeof propertiesValue === "object" && !Array.isArray(propertiesValue)) {
+    if (
+      propertiesValue &&
+      typeof propertiesValue === "object" &&
+      !Array.isArray(propertiesValue)
+    ) {
       for (const [key, value] of Object.entries(propertiesValue)) {
-        const displayName = value && typeof value === "object" && !Array.isArray(value) ? ((value as any).name ?? (value as any).label) : undefined;
-        const valueType = value && typeof value === "object" && !Array.isArray(value) ? ((value as any).type ?? (value as any).valueType) : undefined;
-        const kind: BaseSchemaProperty["kind"] = key.startsWith("file.") ? "file" : "note";
+        const displayName =
+          value && typeof value === "object" && !Array.isArray(value)
+            ? ((value as any).name ?? (value as any).label)
+            : undefined;
+        const valueType =
+          value && typeof value === "object" && !Array.isArray(value)
+            ? ((value as any).type ?? (value as any).valueType)
+            : undefined;
+        const kind: BaseSchemaProperty["kind"] = key.startsWith("file.")
+          ? "file"
+          : "note";
         properties.push({ key, kind, displayName, valueType });
       }
     }
 
-    if (formulasValue && typeof formulasValue === "object" && !Array.isArray(formulasValue)) {
+    if (
+      formulasValue &&
+      typeof formulasValue === "object" &&
+      !Array.isArray(formulasValue)
+    ) {
       for (const [key, value] of Object.entries(formulasValue)) {
-        const displayName = value && typeof value === "object" && !Array.isArray(value) ? ((value as any).name ?? (value as any).label) : undefined;
+        const displayName =
+          value && typeof value === "object" && !Array.isArray(value)
+            ? ((value as any).name ?? (value as any).label)
+            : undefined;
         properties.push({
           key,
           kind: "formula",
@@ -561,14 +1100,20 @@ export default class BasesBridgePlugin extends Plugin {
         views.push({
           name: String((view as any).name ?? ""),
           type: String((view as any).type ?? "table"),
-          limit: typeof (view as any).limit === "number" ? (view as any).limit : undefined,
+          limit:
+            typeof (view as any).limit === "number"
+              ? (view as any).limit
+              : undefined,
           order: Array.isArray((view as any).order)
             ? ((view as any).order as any[]).map((v) => String(v))
             : Array.isArray((view as any).sort)
               ? ((view as any).sort as any[]).map((v) => String(v))
               : undefined,
           filters: (view as any).filters,
-          description: typeof (view as any).description === "string" ? (view as any).description : undefined,
+          description:
+            typeof (view as any).description === "string"
+              ? (view as any).description
+              : undefined,
         });
       }
     }
@@ -578,7 +1123,12 @@ export default class BasesBridgePlugin extends Plugin {
       path: basePath,
       name: spec.name ? String(spec.name) : undefined,
       properties,
-      formulas: formulasValue && typeof formulasValue === "object" && !Array.isArray(formulasValue) ? (formulasValue as any) : undefined,
+      formulas:
+        formulasValue &&
+        typeof formulasValue === "object" &&
+        !Array.isArray(formulasValue)
+          ? (formulasValue as any)
+          : undefined,
       views,
       filters: spec.filters,
     };
@@ -587,7 +1137,9 @@ export default class BasesBridgePlugin extends Plugin {
   private getFrontmatter(file: TFile): Record<string, any> {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter;
-    return fm && typeof fm === "object" && !Array.isArray(fm) ? (fm as Record<string, any>) : {};
+    return fm && typeof fm === "object" && !Array.isArray(fm)
+      ? (fm as Record<string, any>)
+      : {};
   }
 
   private getTagSet(file: TFile): Set<string> {
@@ -609,7 +1161,8 @@ export default class BasesBridgePlugin extends Plugin {
       }
     } else if (Array.isArray(fmTags)) {
       for (const t of fmTags) {
-        if (typeof t === "string" && t.trim()) tags.add(t.startsWith("#") ? t.slice(1) : t);
+        if (typeof t === "string" && t.trim())
+          tags.add(t.startsWith("#") ? t.slice(1) : t);
       }
     }
     return tags;
@@ -622,7 +1175,8 @@ export default class BasesBridgePlugin extends Plugin {
     const links = cache?.links ?? [];
     const normalizedWant = want.replace(/\.md$/i, "");
     for (const link of links) {
-      const raw = typeof (link as any).link === "string" ? (link as any).link : "";
+      const raw =
+        typeof (link as any).link === "string" ? (link as any).link : "";
       if (!raw) continue;
       const normalizedLink = raw.replace(/\.md$/i, "");
       if (normalizedLink === normalizedWant || raw === want) return true;
@@ -630,7 +1184,11 @@ export default class BasesBridgePlugin extends Plugin {
     return false;
   }
 
-  private getValueForRef(file: TFile, ref: string, schema?: BaseSchemaResponse): any {
+  private getValueForRef(
+    file: TFile,
+    ref: string,
+    schema?: BaseSchemaResponse,
+  ): any {
     const fm = this.getFrontmatter(file);
     const trimmed = ref.trim();
     if (trimmed.startsWith("file.")) {
@@ -666,8 +1224,13 @@ export default class BasesBridgePlugin extends Plugin {
     return fm[trimmed];
   }
 
-  private evalFormula(file: TFile, formulaKey: string, schema?: BaseSchemaResponse): any {
-    if (!schema?.formulas || typeof schema.formulas !== "object") return undefined;
+  private evalFormula(
+    file: TFile,
+    formulaKey: string,
+    schema?: BaseSchemaResponse,
+  ): any {
+    if (!schema?.formulas || typeof schema.formulas !== "object")
+      return undefined;
     const expr = (schema.formulas as any)[formulaKey];
     if (typeof expr !== "string") return undefined;
     return this.evalFormulaExpression(file, expr, schema);
@@ -697,7 +1260,11 @@ export default class BasesBridgePlugin extends Plugin {
    * Évalue un sous-ensemble “safe” de formules Bases.
    * Objectif : améliorer le mode fallback quand l’engine est désactivé.
    */
-  private evalFormulaExpression(file: TFile, expr: string, schema?: BaseSchemaResponse): any {
+  private evalFormulaExpression(
+    file: TFile,
+    expr: string,
+    schema?: BaseSchemaResponse,
+  ): any {
     const raw = String(expr ?? "").trim();
     if (!raw) return undefined;
 
@@ -705,12 +1272,19 @@ export default class BasesBridgePlugin extends Plugin {
     if (raw === "null") return null;
     if (/^(true|false)$/i.test(raw)) return /^true$/i.test(raw);
     if (/^-?\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
-    if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    if (
+      (raw.startsWith('"') && raw.endsWith('"')) ||
+      (raw.startsWith("'") && raw.endsWith("'"))
+    ) {
       return stripQuotes(raw);
     }
 
     // Direct refs
-    if (raw.startsWith("file.") || raw.startsWith("note.") || raw.startsWith("formula.")) {
+    if (
+      raw.startsWith("file.") ||
+      raw.startsWith("note.") ||
+      raw.startsWith("formula.")
+    ) {
       return this.getValueForRef(file, raw, schema);
     }
     if (/^[\p{L}\p{N}_-]+$/u.test(raw)) {
@@ -718,11 +1292,17 @@ export default class BasesBridgePlugin extends Plugin {
     }
 
     // join(list(x))
-    const joinListMatch = raw.match(/^join\s*\(\s*list\s*\(\s*([^\)]+)\s*\)\s*\)\s*$/s);
+    const joinListMatch = raw.match(
+      /^join\s*\(\s*list\s*\(\s*([^\)]+)\s*\)\s*\)\s*$/s,
+    );
     if (joinListMatch) {
       const ref = String(joinListMatch[1] ?? "").trim();
       const v = this.getValueForRef(file, ref, schema);
-      const arr = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v];
+      const arr = Array.isArray(v)
+        ? v
+        : v === undefined || v === null
+          ? []
+          : [v];
       return arr.map((x) => String(x)).join(", ");
     }
 
@@ -738,7 +1318,9 @@ export default class BasesBridgePlugin extends Plugin {
     // if(a, b, c)
     const ifMatch = raw.match(/^if\((.*)\)$/s);
     if (ifMatch) {
-      const args = splitTopLevelCommas(String(ifMatch[1] ?? "")).map((x) => x.trim());
+      const args = splitTopLevelCommas(String(ifMatch[1] ?? "")).map((x) =>
+        x.trim(),
+      );
       if (args.length >= 3) {
         const condExpr = args[0]!;
         const thenExpr = args[1]!;
@@ -750,14 +1332,19 @@ export default class BasesBridgePlugin extends Plugin {
           condVal = condRes.ok;
         }
 
-        return this.isTruthyValue(condVal) ? this.evalFormulaExpression(file, thenExpr, schema) : this.evalFormulaExpression(file, elseExpr, schema);
+        return this.isTruthyValue(condVal)
+          ? this.evalFormulaExpression(file, thenExpr, schema)
+          : this.evalFormulaExpression(file, elseExpr, schema);
       }
     }
 
     return undefined;
   }
 
-  private buildComputed(file: TFile, schema: BaseSchemaResponse): Record<string, any> {
+  private buildComputed(
+    file: TFile,
+    schema: BaseSchemaResponse,
+  ): Record<string, any> {
     const computed: Record<string, any> = {};
     const formulas = schema.formulas ?? {};
     if (formulas && typeof formulas === "object" && !Array.isArray(formulas)) {
@@ -768,7 +1355,11 @@ export default class BasesBridgePlugin extends Plugin {
     return computed;
   }
 
-  private evaluateStatement(file: TFile, statement: string, schema?: BaseSchemaResponse): { ok: boolean; warnings: string[] } {
+  private evaluateStatement(
+    file: TFile,
+    statement: string,
+    schema?: BaseSchemaResponse,
+  ): { ok: boolean; warnings: string[] } {
     const warnings: string[] = [];
     const raw = String(statement ?? "").trim();
     if (!raw) return { ok: true, warnings };
@@ -834,7 +1425,9 @@ export default class BasesBridgePlugin extends Plugin {
     }
     const inFolderMatch = raw.match(/^file\.inFolder\((.+)\)$/);
     if (inFolderMatch) {
-      const folder = stripQuotes(inFolderMatch[1]).replace(/\\/g, "/").replace(/\/+$/g, "");
+      const folder = stripQuotes(inFolderMatch[1])
+        .replace(/\\/g, "/")
+        .replace(/\/+$/g, "");
       const prefix = folder ? `${folder}/` : "";
       return { ok: prefix ? file.path.startsWith(prefix) : true, warnings };
     }
@@ -865,9 +1458,13 @@ export default class BasesBridgePlugin extends Plugin {
       const needle = stripQuotes(pathContainsMatch[1]).replace(/\\/g, "/");
       return { ok: file.path.includes(needle), warnings };
     }
-    const folderStartsWithMatch = raw.match(/^file\.folder\.startsWith\((.+)\)$/);
+    const folderStartsWithMatch = raw.match(
+      /^file\.folder\.startsWith\((.+)\)$/,
+    );
     if (folderStartsWithMatch) {
-      const prefix = stripQuotes(folderStartsWithMatch[1]).replace(/\\/g, "/").replace(/\/+$/g, "");
+      const prefix = stripQuotes(folderStartsWithMatch[1])
+        .replace(/\\/g, "/")
+        .replace(/\/+$/g, "");
       const folder = dirname(file.path);
       return { ok: folder.startsWith(prefix), warnings };
     }
@@ -886,29 +1483,43 @@ export default class BasesBridgePlugin extends Plugin {
     }
 
     // collection.contains(link("Domaines")) / list(dans).contains(link("Atlas/Maps/Réunions"))
-    const listPropContainsLinkMatch = raw.match(/^list\(([\p{L}\p{N}_-]+)\)\.contains\(link\((.+)\)\)$/u);
+    const listPropContainsLinkMatch = raw.match(
+      /^list\(([\p{L}\p{N}_-]+)\)\.contains\(link\((.+)\)\)$/u,
+    );
     if (listPropContainsLinkMatch) {
       const key = listPropContainsLinkMatch[1];
       const targetRaw = stripQuotes(listPropContainsLinkMatch[2]);
       const want = normalizeLinkish(targetRaw);
       const v = this.getValueForRef(file, key, schema);
-      const arr = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v];
+      const arr = Array.isArray(v)
+        ? v
+        : v === undefined || v === null
+          ? []
+          : [v];
       const ok = arr.some((x) => normalizeLinkish(String(x)) === want);
       return { ok, warnings };
     }
-    const propContainsLinkMatch = raw.match(/^([\p{L}\p{N}_-]+)\.contains\(link\((.+)\)\)$/u);
+    const propContainsLinkMatch = raw.match(
+      /^([\p{L}\p{N}_-]+)\.contains\(link\((.+)\)\)$/u,
+    );
     if (propContainsLinkMatch) {
       const key = propContainsLinkMatch[1];
       const targetRaw = stripQuotes(propContainsLinkMatch[2]);
       const want = normalizeLinkish(targetRaw);
       const v = this.getValueForRef(file, key, schema);
-      const arr = Array.isArray(v) ? v : v === undefined || v === null ? [] : [v];
+      const arr = Array.isArray(v)
+        ? v
+        : v === undefined || v === null
+          ? []
+          : [v];
       const ok = arr.some((x) => normalizeLinkish(String(x)) === want);
       return { ok, warnings };
     }
 
     // Generic contains/startsWith on simple file.* fields
-    const fileFieldOpMatch = raw.match(/^file\.(path|name|folder|ext)\.(contains|startsWith)\((.+)\)$/);
+    const fileFieldOpMatch = raw.match(
+      /^file\.(path|name|folder|ext)\.(contains|startsWith)\((.+)\)$/,
+    );
     if (fileFieldOpMatch) {
       const field = `file.${fileFieldOpMatch[1]}`;
       const op = fileFieldOpMatch[2];
@@ -937,13 +1548,18 @@ export default class BasesBridgePlugin extends Plugin {
       return { ok: isTruthyFilterValue(v), warnings };
     }
 
-    warnings.push(`Filter non reconnu: ${raw}`);
+    warnings.push("Filter non reconnu.");
     return { ok: true, warnings };
   }
 
-  private evaluateFilter(file: TFile, filter: any, schema?: BaseSchemaResponse): { ok: boolean; warnings: string[] } {
+  private evaluateFilter(
+    file: TFile,
+    filter: any,
+    schema?: BaseSchemaResponse,
+  ): { ok: boolean; warnings: string[] } {
     if (!filter) return { ok: true, warnings: [] };
-    if (typeof filter === "string") return this.evaluateStatement(file, filter, schema);
+    if (typeof filter === "string")
+      return this.evaluateStatement(file, filter, schema);
 
     if (typeof filter === "object" && !Array.isArray(filter)) {
       if (Array.isArray((filter as any).and)) {
@@ -975,7 +1591,10 @@ export default class BasesBridgePlugin extends Plugin {
     return { ok: true, warnings: ["Filter non supporté (shape inconnu)."] };
   }
 
-  private buildRowProps(file: TFile, schema: BaseSchemaResponse): Record<string, any> {
+  private buildRowProps(
+    file: TFile,
+    schema: BaseSchemaResponse,
+  ): Record<string, any> {
     const props: Record<string, any> = {};
     for (const p of schema.properties) {
       if (p.kind === "formula") {
@@ -989,19 +1608,28 @@ export default class BasesBridgePlugin extends Plugin {
   }
 
   private async registerRestExtension(): Promise<void> {
-    await new Promise<void>((resolve) => this.app.workspace.onLayoutReady(() => resolve()));
+    await new Promise<void>((resolve) =>
+      this.app.workspace.onLayoutReady(() => resolve()),
+    );
     let mounted = false;
     const tryMount = () => {
       if (mounted) return;
-      const restPlugin: any = (this.app as any).plugins?.plugins?.["obsidian-local-rest-api"] ?? (this.app as any).plugins?.getPlugin?.("obsidian-local-rest-api");
+      const restPlugin: any =
+        (this.app as any).plugins?.plugins?.["obsidian-local-rest-api"] ??
+        (this.app as any).plugins?.getPlugin?.("obsidian-local-rest-api");
 
-      const getPublicApi = typeof restPlugin?.getPublicApi === "function" ? restPlugin.getPublicApi.bind(restPlugin) : undefined;
+      const getPublicApi =
+        typeof restPlugin?.getPublicApi === "function"
+          ? restPlugin.getPublicApi.bind(restPlugin)
+          : undefined;
 
       if (typeof getPublicApi === "function") {
         const api = getPublicApi(this.manifest);
         if (!api || typeof api.addRoute !== "function") return;
 
-        console.log(`[bases-bridge] Registered API extension via Local REST API (prefix=${REST_PREFIX})`);
+        console.log(
+          `[bases-bridge] Registered API extension via Local REST API (prefix=${REST_PREFIX})`,
+        );
 
         api.addRoute(`${REST_PREFIX}/ping`).get((_req: any, res: any) =>
           res.json({
@@ -1014,94 +1642,160 @@ export default class BasesBridgePlugin extends Plugin {
           }),
         );
 
-        api.addRoute(`${BASE_ATOMIC_REST_PREFIX}/status`).get((_req: any, res: any) =>
-          sendJson(res, 200, {
-            ok: true,
-            contractVersion: BASE_ATOMIC_CONTRACT_VERSION,
-            plugin: { id: this.manifest.id, version: this.manifest.version },
-            backend: {
-              kind: "obsidian-vault-process-base",
-              bindingFingerprint: this.bindingFingerprint,
-              atomicCas: true,
-              writeEnabled: this.settings.allowAtomicBaseWrites,
-            },
-            limits: {
-              baseOnly: true,
-              sourcePreservingCompilerRequired: true,
-            },
-            migration: {
-              legacyConfigWritesEnabled: this.settings.allowLegacyConfigWrites,
-            },
-          }),
-        );
-
-        api.addRoute(`${BASE_ATOMIC_REST_PREFIX}/bases/read`).post(async (req: any, res: any) => {
-          try {
-            const request = parseBaseReadRequest(req?.body);
-            const yaml = await this.app.vault.read(this.baseFile(request.path));
+        api
+          .addRoute(`${BASE_ATOMIC_REST_PREFIX}/status`)
+          .get((_req: any, res: any) =>
             sendJson(res, 200, {
               ok: true,
               contractVersion: BASE_ATOMIC_CONTRACT_VERSION,
-              path: request.path,
-              yaml,
-              sha256: sha256(yaml),
-              size: Buffer.byteLength(yaml, "utf8"),
-              bindingFingerprint: this.bindingFingerprint,
-            });
-          } catch (error) {
-            const notFound = error instanceof Error && error.message === "Base not found.";
-            sendJson(res, notFound ? 404 : 400, atomicError(notFound ? "base_not_found" : "invalid_request", error instanceof Error ? error.message : String(error)));
-          }
-        });
+              plugin: { id: this.manifest.id, version: this.manifest.version },
+              backend: {
+                kind: "obsidian-vault-process-base",
+                bindingFingerprint: this.bindingFingerprint,
+                atomicCas: true,
+                writeEnabled: this.settings.allowAtomicBaseWrites,
+              },
+              limits: {
+                baseOnly: true,
+                sourcePreservingCompilerRequired: true,
+              },
+              migration: {
+                legacyConfigWritesEnabled:
+                  this.settings.allowLegacyConfigWrites,
+              },
+            }),
+          );
 
-        api.addRoute(`${BASE_ATOMIC_REST_PREFIX}/bases/cas`).post(async (req: any, res: any) => {
-          try {
-            if (!this.settings.allowAtomicBaseWrites) {
-              sendJson(res, 403, atomicError("writes_disabled", "Atomic Base writes are disabled in the bridge settings."));
-              return;
-            }
-            const request = parseBaseCasRequest(req?.body);
-            assertBaseBinding(request.bindingFingerprint, this.bindingFingerprint);
-            const parsed = parseYaml(request.nextYaml);
-            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-              throw new Error("nextYaml must contain a Base mapping root.");
-            }
-            let beforeSha256 = "";
-            const written = await this.app.vault.process(this.baseFile(request.path), (current) => {
-              const result = compareAndReplaceBase(current, request.expectedSha256, request.nextYaml);
-              beforeSha256 = result.beforeSha256;
-              return result.content;
-            });
-            sendJson(res, 200, {
-              ok: true,
-              contractVersion: BASE_ATOMIC_CONTRACT_VERSION,
-              path: request.path,
-              beforeSha256,
-              afterSha256: sha256(written),
-              size: Buffer.byteLength(written, "utf8"),
-              bindingFingerprint: this.bindingFingerprint,
-            });
-          } catch (error) {
-            if (error instanceof BaseBindingConflictError) {
-              sendJson(res, 409, atomicError("binding_conflict", error.message));
-              return;
-            }
-            if (error instanceof BaseHashConflictError) {
+        api
+          .addRoute(`${BASE_ATOMIC_REST_PREFIX}/bases/read`)
+          .post(async (req: any, res: any) => {
+            let request: ReturnType<typeof parseBaseReadRequest>;
+            try {
+              request = parseBaseReadRequest(req?.body);
+            } catch (error) {
               sendJson(
                 res,
-                409,
-                atomicError("hash_conflict", error.message, {
-                  actualSha256: error.actualSha256,
-                }),
+                400,
+                atomicError("invalid_request"),
               );
               return;
             }
-            const notFound = error instanceof Error && error.message === "Base not found.";
-            sendJson(res, notFound ? 404 : 400, atomicError(notFound ? "base_not_found" : "invalid_request", error instanceof Error ? error.message : String(error)));
-          }
-        });
+            try {
+              const yaml = await this.app.vault.read(
+                this.baseFile(request.path),
+              );
+              sendJson(res, 200, {
+                ok: true,
+                contractVersion: BASE_ATOMIC_CONTRACT_VERSION,
+                path: request.path,
+                yaml,
+                sha256: sha256(yaml),
+                size: Buffer.byteLength(yaml, "utf8"),
+                bindingFingerprint: this.bindingFingerprint,
+              });
+            } catch (error) {
+              const notFound = isBaseNotFoundError(error);
+              sendJson(
+                res,
+                notFound ? 404 : 500,
+                atomicError(notFound ? "base_not_found" : "read_error"),
+              );
+            }
+          });
 
-        api.addRoute(`${REST_PREFIX}/debug/engine-keys`).get((_req: any, res: any) => res.json({ keys: Array.from(ENGINE_CACHE.keys()) }));
+        api
+          .addRoute(`${BASE_ATOMIC_REST_PREFIX}/bases/cas`)
+          .post(async (req: any, res: any) => {
+            try {
+              if (!this.settings.allowAtomicBaseWrites) {
+                sendJson(
+                  res,
+                  403,
+                  atomicError(
+                    "writes_disabled",
+                    "Atomic Base writes are disabled in the bridge settings.",
+                  ),
+                );
+                return;
+              }
+              let request: ReturnType<typeof parseBaseCasRequest>;
+              try {
+                request = parseBaseCasRequest(req?.body);
+                const parsed = parseYaml(request.nextYaml);
+                if (
+                  !parsed ||
+                  typeof parsed !== "object" ||
+                  Array.isArray(parsed)
+                ) {
+                  throw new Error("nextYaml must contain a Base mapping root.");
+                }
+              } catch (error) {
+                sendJson(
+                  res,
+                  400,
+                  atomicError("invalid_request"),
+                );
+                return;
+              }
+              assertBaseBinding(
+                request.bindingFingerprint,
+                this.bindingFingerprint,
+              );
+              let beforeSha256 = "";
+              const written = await this.app.vault.process(
+                this.baseFile(request.path),
+                (current) => {
+                  const result = compareAndReplaceBase(
+                    current,
+                    request.expectedSha256,
+                    request.nextYaml,
+                  );
+                  beforeSha256 = result.beforeSha256;
+                  return result.content;
+                },
+              );
+              sendJson(res, 200, {
+                ok: true,
+                contractVersion: BASE_ATOMIC_CONTRACT_VERSION,
+                path: request.path,
+                beforeSha256,
+                afterSha256: sha256(written),
+                size: Buffer.byteLength(written, "utf8"),
+                bindingFingerprint: this.bindingFingerprint,
+              });
+            } catch (error) {
+              if (isBaseBindingConflict(error)) {
+                sendJson(
+                  res,
+                  409,
+                  atomicError("binding_conflict"),
+                );
+                return;
+              }
+              if (isBaseHashConflict(error)) {
+                sendJson(
+                  res,
+                  409,
+                  atomicError("hash_conflict", undefined, {
+                    actualSha256: safeStringProperty(error, "actualSha256"),
+                  }),
+                );
+                return;
+              }
+              const notFound = isBaseNotFoundError(error);
+              sendJson(
+                res,
+                notFound ? 404 : 500,
+                atomicError(notFound ? "base_not_found" : "write_error"),
+              );
+            }
+          });
+
+        api
+          .addRoute(`${REST_PREFIX}/debug/engine-keys`)
+          .get((_req: any, res: any) =>
+            res.json({ keys: Array.from(ENGINE_CACHE.keys()) }),
+          );
 
         const listBases = async (_req: any, res: any) => {
           const bases: BaseSummary[] = [];
@@ -1114,8 +1808,10 @@ export default class BasesBridgePlugin extends Plugin {
           const response: BasesListResponse = { bases };
           res.json(response);
         };
-        api.addRoute(`${REST_PREFIX}/bases`).get(listBases);
-        api.addRoute(`/bases`).get(listBases);
+        api
+          .addRoute(`${REST_PREFIX}/bases`)
+          .get(withPublicLegacyBaseBoundary(listBases));
+        api.addRoute(`/bases`).get(withPublicLegacyBaseBoundary(listBases));
 
         const getBaseConfig = async (req: any, res: any) => {
           const id = normBaseId(req.params?.id);
@@ -1128,8 +1824,12 @@ export default class BasesBridgePlugin extends Plugin {
           res.json(response);
         };
 
-        api.addRoute(`${REST_PREFIX}/bases/:id(*)/config`).get(getBaseConfig);
-        api.addRoute(`/bases/:id(*)/config`).get(getBaseConfig);
+        api
+          .addRoute(`${REST_PREFIX}/bases/:id(*)/config`)
+          .get(withPublicLegacyBaseBoundary(getBaseConfig));
+        api
+          .addRoute(`/bases/:id(*)/config`)
+          .get(withPublicLegacyBaseBoundary(getBaseConfig));
 
         const putBaseConfig = async (req: any, res: any) => {
           const id = normBaseId(req.params?.id);
@@ -1142,17 +1842,25 @@ export default class BasesBridgePlugin extends Plugin {
 
           if (typeof body?.yaml === "string" && body.yaml.trim()) {
             const parsed = parseYaml(body.yaml);
-            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            if (
+              !parsed ||
+              typeof parsed !== "object" ||
+              Array.isArray(parsed)
+            ) {
               const response: BaseConfigUpsertResponse = {
                 ok: false,
                 id: path,
                 warnings: ["YAML invalide: root doit être un objet."],
               };
-              res.json(response);
+              sendJson(res, 200, response);
               return;
             }
             nextYaml = body.yaml;
-          } else if (body?.json && typeof body.json === "object" && !Array.isArray(body.json)) {
+          } else if (
+            body?.json &&
+            typeof body.json === "object" &&
+            !Array.isArray(body.json)
+          ) {
             nextYaml = stringifyYaml(body.json);
           } else {
             const response: BaseConfigUpsertResponse = {
@@ -1160,7 +1868,7 @@ export default class BasesBridgePlugin extends Plugin {
               id: path,
               warnings: ["Payload requis: yaml ou json."],
             };
-            res.json(response);
+            sendJson(res, 200, response);
             return;
           }
 
@@ -1170,7 +1878,7 @@ export default class BasesBridgePlugin extends Plugin {
               id: path,
               warnings,
             };
-            res.json(response);
+            sendJson(res, 200, response);
             return;
           }
 
@@ -1178,14 +1886,17 @@ export default class BasesBridgePlugin extends Plugin {
             sendJson(res, 403, {
               ok: false,
               id: path,
-              warnings: ["Legacy whole-file Base writes are disabled. Use the governed atomic Base operation."],
+              warnings: [
+                "Legacy whole-file Base writes are disabled. Use the governed atomic Base operation.",
+              ],
             });
             return;
           }
 
           await this.ensureFoldersFor(path);
           const existing = this.app.vault.getAbstractFileByPath(path);
-          if (existing instanceof TFile) await this.app.vault.modify(existing, nextYaml);
+          if (existing instanceof TFile)
+            await this.app.vault.modify(existing, nextYaml);
           else await this.app.vault.create(path, nextYaml);
 
           const response: BaseConfigUpsertResponse = {
@@ -1196,8 +1907,12 @@ export default class BasesBridgePlugin extends Plugin {
           res.json(response);
         };
 
-        api.addRoute(`${REST_PREFIX}/bases/:id(*)/config`).put(putBaseConfig);
-        api.addRoute(`/bases/:id(*)/config`).put(putBaseConfig);
+        api
+          .addRoute(`${REST_PREFIX}/bases/:id(*)/config`)
+          .put(withPublicLegacyBaseBoundary(putBaseConfig));
+        api
+          .addRoute(`/bases/:id(*)/config`)
+          .put(withPublicLegacyBaseBoundary(putBaseConfig));
 
         const createBase = async (req: any, res: any) => {
           const body: BaseCreateRequest = (req.body ?? {}) as any;
@@ -1208,16 +1923,20 @@ export default class BasesBridgePlugin extends Plugin {
               id: path || "",
               warnings: ["path requis."],
             };
-            res.json(response);
+            sendJson(res, 200, response);
             return;
           }
-          if (!body?.spec || typeof body.spec !== "object" || Array.isArray(body.spec)) {
+          if (
+            !body?.spec ||
+            typeof body.spec !== "object" ||
+            Array.isArray(body.spec)
+          ) {
             const response: BaseCreateResponse = {
               ok: false,
               id: path,
               warnings: ["spec doit être un objet."],
             };
-            res.json(response);
+            sendJson(res, 200, response);
             return;
           }
           const overwrite = body?.overwrite !== false;
@@ -1230,9 +1949,9 @@ export default class BasesBridgePlugin extends Plugin {
             const response: BaseCreateResponse = {
               ok: false,
               id: path,
-              warnings: [`spec non sérialisable: ${String(e?.message ?? e)}`],
+              warnings: ["The Base specification could not be serialized."],
             };
-            res.json(response);
+            sendJson(res, 200, response);
             return;
           }
 
@@ -1264,7 +1983,9 @@ export default class BasesBridgePlugin extends Plugin {
             sendJson(res, 403, {
               ok: false,
               id: path,
-              warnings: ["Legacy Base creation and replacement are disabled. Enable the explicit compatibility toggle to use this route."],
+              warnings: [
+                "Legacy Base creation and replacement are disabled. Enable the explicit compatibility toggle to use this route.",
+              ],
               created: false,
               overwritten: false,
             });
@@ -1293,8 +2014,10 @@ export default class BasesBridgePlugin extends Plugin {
           res.json(response);
         };
 
-        api.addRoute(`${REST_PREFIX}/bases`).post(createBase);
-        api.addRoute(`/bases`).post(createBase);
+        api
+          .addRoute(`${REST_PREFIX}/bases`)
+          .post(withPublicLegacyBaseBoundary(createBase));
+        api.addRoute(`/bases`).post(withPublicLegacyBaseBoundary(createBase));
 
         const getBaseSchema = async (req: any, res: any) => {
           const id = normBaseId(req.params?.id);
@@ -1303,8 +2026,12 @@ export default class BasesBridgePlugin extends Plugin {
           res.json(schema);
         };
 
-        api.addRoute(`${REST_PREFIX}/bases/:id(*)/schema`).get(getBaseSchema);
-        api.addRoute(`/bases/:id(*)/schema`).get(getBaseSchema);
+        api
+          .addRoute(`${REST_PREFIX}/bases/:id(*)/schema`)
+          .get(withPublicLegacyBaseBoundary(getBaseSchema));
+        api
+          .addRoute(`/bases/:id(*)/schema`)
+          .get(withPublicLegacyBaseBoundary(getBaseSchema));
 
         const queryBase = async (req: any, res: any) => {
           const id = normBaseId(req.params?.id);
@@ -1313,9 +2040,13 @@ export default class BasesBridgePlugin extends Plugin {
           const config = await this.readBaseConfig(id);
           const schema = this.extractSchema(config.id, config.json);
 
-          const viewName = typeof body?.view === "string" ? body.view : undefined;
-          const view = viewName ? schema.views.find((v) => v.name === viewName) : schema.views[0];
-          const viewLookupWarning = viewName && !view ? `Vue introuvable: ${JSON.stringify(viewName)}.` : undefined;
+          const viewName =
+            typeof body?.view === "string" ? body.view : undefined;
+          const view = viewName
+            ? schema.views.find((v) => v.name === viewName)
+            : schema.views[0];
+          const viewLookupWarning =
+            viewName && !view ? "Vue introuvable." : undefined;
 
           const limit = clampInt(body?.limit ?? view?.limit ?? 20, 20, 1, 500);
           const page = clampInt(body?.page ?? 1, 1, 1, 1_000_000);
@@ -1336,7 +2067,11 @@ export default class BasesBridgePlugin extends Plugin {
             and: [schema.filters, view?.filters, body?.filter].filter(Boolean),
           };
 
-          const files = this.app.vault.getFiles().filter((f) => !f.path.startsWith(".obsidian/") && f.extension !== "base");
+          const files = this.app.vault
+            .getFiles()
+            .filter(
+              (f) => !f.path.startsWith(".obsidian/") && f.extension !== "base",
+            );
 
           const matches: TFile[] = [];
           for (const f of files) {
@@ -1352,14 +2087,21 @@ export default class BasesBridgePlugin extends Plugin {
               if (!s || typeof s !== "object") continue;
               const prop = String((s as any).prop ?? "").trim();
               if (!prop) continue;
-              const dir = String((s as any).dir ?? "asc").toLowerCase() === "desc" ? "desc" : "asc";
+              const dir =
+                String((s as any).dir ?? "asc").toLowerCase() === "desc"
+                  ? "desc"
+                  : "asc";
               sortSpecs.push({ prop, dir });
             }
           } else if (Array.isArray(view?.order)) {
             for (const raw of view.order) {
               const str = String(raw);
-              const dir: "asc" | "desc" = str.trim().startsWith("-") ? "desc" : "asc";
-              const prop = str.trim().startsWith("-") ? str.trim().slice(1) : str.trim();
+              const dir: "asc" | "desc" = str.trim().startsWith("-")
+                ? "desc"
+                : "asc";
+              const prop = str.trim().startsWith("-")
+                ? str.trim().slice(1)
+                : str.trim();
               if (prop) sortSpecs.push({ prop, dir });
             }
           }
@@ -1388,12 +2130,16 @@ export default class BasesBridgePlugin extends Plugin {
           const rows: BaseQueryRow[] = slice.map((file) => ({
             file: { path: file.path, name: file.basename },
             props: this.buildRowProps(file, schema),
-            computed: body?.evaluate ? this.buildComputed(file, schema) : undefined,
+            computed: body?.evaluate
+              ? this.buildComputed(file, schema)
+              : undefined,
           }));
 
           const evaluate = !!body?.evaluate;
           const shouldEngine = evaluate && this.settings.engineEnabled;
-          let snap = shouldEngine ? ENGINE_CACHE.get(ensureBaseExt(id)) : undefined;
+          let snap = shouldEngine
+            ? ENGINE_CACHE.get(ensureBaseExt(id))
+            : undefined;
           if (shouldEngine && !snap) {
             const engineRows: BaseQueryRow[] = matches.map((file) => ({
               file: { path: file.path, name: file.basename },
@@ -1407,7 +2153,9 @@ export default class BasesBridgePlugin extends Plugin {
             };
             ENGINE_CACHE.set(ensureBaseExt(id), snap);
           }
-          const warnings = Array.from(warningsSet).sort((a, b) => a.localeCompare(b));
+          const warnings = Array.from(warningsSet).sort((a, b) =>
+            a.localeCompare(b),
+          );
           if (warningsTruncated) warnings.push("Warnings tronqués (max 200).");
 
           if (evaluate && shouldEngine && snap) {
@@ -1420,14 +2168,25 @@ export default class BasesBridgePlugin extends Plugin {
 
             const alignedRows: BaseQueryRow[] = matches.map((file) => {
               const cached = cachedRowsByPath.get(file.path);
-              if (cached && cached.file && cached.props) return cached as BaseQueryRow;
+              if (cached && cached.file && cached.props)
+                return cached as BaseQueryRow;
               if (cached) {
                 const inferredPath = this.getEngineRowPath(cached) ?? file.path;
-                const inferredName = typeof cached?.file?.name === "string" && cached.file.name.trim().length > 0 ? cached.file.name : file.basename;
+                const inferredName =
+                  typeof cached?.file?.name === "string" &&
+                  cached.file.name.trim().length > 0
+                    ? cached.file.name
+                    : file.basename;
                 return {
                   file: { path: inferredPath, name: inferredName },
-                  props: cached?.props && typeof cached.props === "object" ? cached.props : this.buildRowProps(file, schema),
-                  computed: cached?.computed && typeof cached.computed === "object" ? cached.computed : this.buildComputed(file, schema),
+                  props:
+                    cached?.props && typeof cached.props === "object"
+                      ? cached.props
+                      : this.buildRowProps(file, schema),
+                  computed:
+                    cached?.computed && typeof cached.computed === "object"
+                      ? cached.computed
+                      : this.buildComputed(file, schema),
                 };
               }
               return {
@@ -1438,7 +2197,10 @@ export default class BasesBridgePlugin extends Plugin {
             });
 
             const startEngine = (page - 1) * limit;
-            const engineRows = alignedRows.slice(startEngine, startEngine + limit);
+            const engineRows = alignedRows.slice(
+              startEngine,
+              startEngine + limit,
+            );
             const response: BaseQueryResponse = {
               total: alignedRows.length,
               page,
@@ -1462,8 +2224,12 @@ export default class BasesBridgePlugin extends Plugin {
           res.json(response);
         };
 
-        api.addRoute(`${REST_PREFIX}/bases/:id(*)/query`).post(queryBase);
-        api.addRoute(`/bases/:id(*)/query`).post(queryBase);
+        api
+          .addRoute(`${REST_PREFIX}/bases/:id(*)/query`)
+          .post(withPublicLegacyBaseBoundary(queryBase));
+        api
+          .addRoute(`/bases/:id(*)/query`)
+          .post(withPublicLegacyBaseBoundary(queryBase));
 
         const upsertBase = async (req: any, res: any) => {
           const body: BaseUpsertRequest = (req.body ?? {}) as any;
@@ -1500,7 +2266,10 @@ export default class BasesBridgePlugin extends Plugin {
               continue;
             }
 
-            const expected = typeof op?.expected_mtime === "number" ? op.expected_mtime : undefined;
+            const expected =
+              typeof op?.expected_mtime === "number"
+                ? op.expected_mtime
+                : undefined;
             if (expected && abstract.stat.mtime !== expected) {
               results.push({
                 file: filePath,
@@ -1514,8 +2283,13 @@ export default class BasesBridgePlugin extends Plugin {
               continue;
             }
 
-            const setObj = op?.set && typeof op.set === "object" && !Array.isArray(op.set) ? (op.set as Record<string, any>) : {};
-            const unsetArr = Array.isArray(op?.unset) ? (op.unset.filter((k: any) => typeof k === "string") as string[]) : [];
+            const setObj =
+              op?.set && typeof op.set === "object" && !Array.isArray(op.set)
+                ? (op.set as Record<string, any>)
+                : {};
+            const unsetArr = Array.isArray(op?.unset)
+              ? (op.unset.filter((k: any) => typeof k === "string") as string[])
+              : [];
             const forbiddenKeys = validateUpsertKeys(setObj, unsetArr);
             if (forbiddenKeys.length > 0) {
               results.push({
@@ -1523,7 +2297,7 @@ export default class BasesBridgePlugin extends Plugin {
                 mtime: abstract.stat.mtime,
                 error: {
                   code: "forbidden_key",
-                  message: `Clés non modifiables via Bases Bridge: ${forbiddenKeys.join(", ")}`,
+                  message: "The request includes a protected Base field.",
                 },
               });
               if (!continueOnError) break;
@@ -1535,14 +2309,17 @@ export default class BasesBridgePlugin extends Plugin {
               for (const k of Object.keys(setObj)) changedKeys.push(k);
 
               if (!dryRun) {
-                await (this.app as any).fileManager.processFrontMatter(abstract, (fm: any) => {
-                  for (const [k, v] of Object.entries(setObj)) {
-                    fm[k] = v;
-                  }
-                  for (const k of unsetArr) {
-                    if (k in fm) delete fm[k];
-                  }
-                });
+                await (this.app as any).fileManager.processFrontMatter(
+                  abstract,
+                  (fm: any) => {
+                    for (const [k, v] of Object.entries(setObj)) {
+                      fm[k] = v;
+                    }
+                    for (const k of unsetArr) {
+                      if (k in fm) delete fm[k];
+                    }
+                  },
+                );
               }
 
               results.push({
@@ -1571,11 +2348,15 @@ export default class BasesBridgePlugin extends Plugin {
 
           const ok = results.every((r) => !r.error);
           const response: BaseUpsertResponse = { ok, results };
-          res.json(response);
+          sendJson(res, 200, response);
         };
 
-        api.addRoute(`${REST_PREFIX}/bases/:id(*)/upsert`).post(upsertBase);
-        api.addRoute(`/bases/:id(*)/upsert`).post(upsertBase);
+        api
+          .addRoute(`${REST_PREFIX}/bases/:id(*)/upsert`)
+          .post(withPublicLegacyBaseBoundary(upsertBase));
+        api
+          .addRoute(`/bases/:id(*)/upsert`)
+          .post(withPublicLegacyBaseBoundary(upsertBase));
 
         this.register(() => {
           try {
@@ -1591,8 +2372,12 @@ export default class BasesBridgePlugin extends Plugin {
       const interval = window.setInterval(tryMount, 500);
       const timeout = window.setTimeout(() => {
         if (!mounted) {
-          console.warn("[bases-bridge] Local REST API extension API not available; skipping extension mount");
-          console.warn("[bases-bridge] Conseil: vérifiez que 'obsidian-local-rest-api' est actif (v3.x) et relancez Obsidian.");
+          console.warn(
+            "[bases-bridge] Local REST API extension API not available; skipping extension mount",
+          );
+          console.warn(
+            "[bases-bridge] Conseil: vérifiez que 'obsidian-local-rest-api' est actif (v3.x) et relancez Obsidian.",
+          );
         }
         window.clearInterval(interval);
       }, 30000);
@@ -1619,33 +2404,45 @@ class BridgeSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Activer l’engine v2 (évaluations natives)")
-      .setDesc('ON: queries renvoient source:"engine" (cache auto + headless si dispo). OFF: fallback disque.')
+      .setDesc(
+        'ON: queries renvoient source:"engine" (cache auto + headless si dispo). OFF: fallback disque.',
+      )
       .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.engineEnabled).onChange(async (value) => {
-          await (this.plugin as any).setEngineEnabled(value);
-        }),
+        toggle
+          .setValue(this.plugin.settings.engineEnabled)
+          .onChange(async (value) => {
+            await (this.plugin as any).setEngineEnabled(value);
+          }),
       );
 
     containerEl.createEl("h3", { text: "Écritures gouvernées" });
 
     new Setting(containerEl)
       .setName("Autoriser le CAS atomique des Bases")
-      .setDesc("Désactivé par défaut. Autorise uniquement les remplacements .base avec empreinte de coffre et précondition SHA-256 exactes.")
+      .setDesc(
+        "Désactivé par défaut. Autorise uniquement les remplacements .base avec empreinte de coffre et précondition SHA-256 exactes.",
+      )
       .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.allowAtomicBaseWrites).onChange(async (value) => {
-          this.plugin.settings.allowAtomicBaseWrites = value;
-          await this.plugin.saveSettings();
-        }),
+        toggle
+          .setValue(this.plugin.settings.allowAtomicBaseWrites)
+          .onChange(async (value) => {
+            this.plugin.settings.allowAtomicBaseWrites = value;
+            await this.plugin.saveSettings();
+          }),
       );
 
     new Setting(containerEl)
       .setName("Compatibilité : écritures de configuration historiques")
-      .setDesc("Désactivé par défaut. Réactive temporairement le remplacement complet non gouverné via PUT /bases/:id/config et POST /bases.")
+      .setDesc(
+        "Désactivé par défaut. Réactive temporairement le remplacement complet non gouverné via PUT /bases/:id/config et POST /bases.",
+      )
       .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.allowLegacyConfigWrites).onChange(async (value) => {
-          this.plugin.settings.allowLegacyConfigWrites = value;
-          await this.plugin.saveSettings();
-        }),
+        toggle
+          .setValue(this.plugin.settings.allowLegacyConfigWrites)
+          .onChange(async (value) => {
+            this.plugin.settings.allowLegacyConfigWrites = value;
+            await this.plugin.saveSettings();
+          }),
       );
   }
 }

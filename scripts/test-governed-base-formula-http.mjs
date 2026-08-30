@@ -12,6 +12,8 @@ import {
   GovernedBaseAtomicServer,
 } from "./fixtures/governed-base-atomic-server.mjs";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
 async function unusedPort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -49,6 +51,15 @@ function parsed(result) {
       .map((item) => item.text)
       .join("\n"),
   );
+}
+
+function assertPublicError(payload, code, forbiddenMarker, label) {
+  assert.equal(payload.error.code, code, `${label} error code`);
+  assert.equal(payload.error.message, "This request is not authorized.", `${label} catalog message`);
+  const requestId = payload.requestId ?? payload.error.details?.requestId;
+  assert.match(requestId ?? "", UUID, `${label} request id`);
+  assert.equal(payload.error.details?.requestId, requestId, `${label} request id details`);
+  assert.doesNotMatch(JSON.stringify(payload), new RegExp(forbiddenMarker, "u"), `${label} leaked marker`);
 }
 
 const parent = path.join(process.cwd(), ".tmp");
@@ -138,10 +149,7 @@ try {
     },
   });
   assert.equal(blocked.isError, true);
-  assert.equal(
-    parsed(blocked).error.details.reason,
-    "legacy_base_config_writes_enabled",
-  );
+  assertPublicError(parsed(blocked), "FORBIDDEN", "legacy_base_config_writes_enabled", "legacy write policy");
 } catch (error) {
   throw new Error(
     `${error instanceof Error ? error.stack : String(error)}\nstdout:\n${stdout}\nstderr:\n${stderr}`,

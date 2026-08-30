@@ -47,12 +47,24 @@ export const registerObsidianManageFrontmatterTool = async (
         ObsidianManageFrontmatterInputSchemaShape,
         DESTRUCTIVE_TOOL_ANNOTATIONS,
         async (params: ObsidianManageFrontmatterInput) => {
+          const inputMetadata = {
+            operation: params.operation,
+            hasFilePath: Boolean(params.filePath),
+            hasKey: Boolean(params.key),
+            hasValue: params.value !== undefined,
+            valueType:
+              params.value === null
+                ? "null"
+                : Array.isArray(params.value)
+                  ? "array"
+                  : typeof params.value,
+          };
           const handlerContext: RequestContext =
             requestContextService.createRequestContext({
               parentContext: registrationContext,
               operation: "HandleObsidianManageFrontmatterRequest",
               toolName: toolName,
-              params: params,
+              params: inputMetadata,
             });
           logger.debug(`Handling '${toolName}' request`, handlerContext);
 
@@ -86,14 +98,14 @@ export const registerObsidianManageFrontmatterTool = async (
             {
               operation: `processing ${toolName} handler`,
               context: handlerContext,
-              input: params,
+              input: inputMetadata,
               errorMapper: (error: unknown) =>
                 new McpError(
                   error instanceof McpError
                     ? error.code
                     : BaseErrorCode.INTERNAL_ERROR,
-                  `Error processing ${toolName} tool: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  { ...handlerContext },
+                  `Error processing ${toolName} tool.`,
+                  handlerContext,
                 ),
             },
           );

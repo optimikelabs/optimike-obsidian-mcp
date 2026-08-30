@@ -174,7 +174,7 @@ const start = async () => {
   } else {
     // Use console.warn here as logger isn't initialized yet
     console.warn(
-      `Invalid MCP_LOG_LEVEL "${initialLogLevelConfig}" provided via config/env. Defaulting to "info".`,
+      'Invalid MCP_LOG_LEVEL provided via config/env. Defaulting to "info".',
     );
   }
   // Initialize the logger with the validated MCP level and wait for it to complete.
