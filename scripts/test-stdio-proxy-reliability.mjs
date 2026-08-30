@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { McpError } from "@modelcontextprotocol/sdk/types.js";
 
 const { safelyReadUntrustedErrorField, safelySnapshotUntrustedErrorArray } =
   await import("../dist/utils/security/safeErrorField.js");
@@ -109,6 +110,42 @@ const RECONNECT_FAILURE_SECRET = "fixture-reconnect-secret";
 const SESSION_REPLAY_SECRET = "fixture-session-replay-secret";
 const APPLICATION_404_BODY_MARKER = "fixture-application-404-body-marker";
 const APPLICATION_503_BODY_MARKER = "fixture-application-503-body-marker";
+const ADMISSION_REQUEST_ID = "fd369d0a-631a-4d48-8a8a-dba7f9a3ed19";
+const ADMISSION_REQUEST_ID_SECRET = "fixture-admission-request-id-secret";
+const ADMISSION_CASES = [
+  {
+    reason: "queue-full",
+    message: "The HTTP operation queue is full.",
+    retryable: true,
+  },
+  {
+    reason: "identity-queue-full",
+    message:
+      "This client identity already has the maximum number of queued operations.",
+    retryable: true,
+  },
+  {
+    reason: "timeout",
+    message: "The operation was not admitted before its queue timeout.",
+    retryable: true,
+  },
+  {
+    reason: "cancelled",
+    message: "The operation was cancelled before admission.",
+    retryable: false,
+  },
+];
+
+function assertProjectedAdmission(error, admission) {
+  assert.ok(error instanceof McpError);
+  assert.equal(error.code, -32015);
+  assert.equal(error.message, `MCP error -32015: ${admission.message}`);
+  assert.deepEqual(error.data, {
+    applicationCode: "SERVICE_UNAVAILABLE",
+    admission: admission.reason,
+    retryable: admission.retryable,
+  });
+}
 const state = {
   initializeAttempts: 0,
   initializeCount: 0,
@@ -269,8 +306,45 @@ const backend = createServer(async (request, response) => {
     state.admissionRequests += 1;
     state.admissionErrors += 1;
     if (state.admissionErrors === 2) admissionErrorsObserved.resolve();
+    const admission = ADMISSION_CASES.find(
+      (candidate) => candidate.reason === args.admissionReason,
+    );
+    assert.ok(admission, "admission fixture received an unknown reason");
+    json(response, 503, {
+      jsonrpc: "2.0",
+      error: {
+        code: -32015,
+        message: admission.message,
+        data: {
+          applicationCode: "SERVICE_UNAVAILABLE",
+          admission: admission.reason,
+          retryable: admission.retryable,
+          requestId: ADMISSION_REQUEST_ID,
+        },
+      },
+      id: message.id,
+    });
+    return;
+  }
+  if (args.malformedAdmissionError) {
     response.writeHead(503, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: "backpressure" }));
+    response.end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32015,
+          message: "The HTTP operation queue is full.",
+          data: {
+            applicationCode: "SERVICE_UNAVAILABLE",
+            admission: "queue-full",
+            retryable: true,
+            requestId: ADMISSION_REQUEST_ID,
+            privateMarker: ADMISSION_REQUEST_ID_SECRET,
+          },
+        },
+        id: message.id,
+      }),
+    );
     return;
   }
   if (args.admissionSuccess) {
@@ -476,10 +550,13 @@ try {
     }),
   );
   const admissionErrors = await Promise.allSettled(
-    Array.from({ length: 2 }, () =>
+    ADMISSION_CASES.slice(0, 2).map((admission) =>
       client.callTool({
         name: "read_probe",
-        arguments: { admissionError: true },
+        arguments: {
+          admissionError: true,
+          admissionReason: admission.reason,
+        },
       }),
     ),
   );
@@ -500,6 +577,12 @@ try {
     ),
     false,
   );
+  for (const [index, result] of admissionErrors.entries()) {
+    const admission = ADMISSION_CASES[index];
+    assert.equal(result.status, "rejected");
+    assert.ok(admission);
+    assertProjectedAdmission(result.reason, admission);
+  }
   assert.equal(
     proxyStderr
       .join("")
@@ -524,6 +607,55 @@ try {
     false,
   );
   await client.callTool({ name: "read_probe", arguments: {} });
+
+  const initializeBeforeRemainingAdmissionCatalog = state.initializeCount;
+  for (const admission of ADMISSION_CASES.slice(2)) {
+    let failure;
+    try {
+      await client.callTool({
+        name: "read_probe",
+        arguments: {
+          admissionError: true,
+          admissionReason: admission.reason,
+        },
+      });
+      assert.fail(`${admission.reason} admission fixture must reject`);
+    } catch (error) {
+      failure = error;
+    }
+    assertProjectedAdmission(failure, admission);
+  }
+  assert.equal(
+    state.initializeCount,
+    initializeBeforeRemainingAdmissionCatalog,
+    "every catalogued admission reason must remain an application outcome without reconnecting",
+  );
+
+  let malformedAdmissionFailure;
+  try {
+    await client.callTool({
+      name: "read_probe",
+      arguments: { malformedAdmissionError: true },
+    });
+    assert.fail("a malformed HTTP admission envelope must reject");
+  } catch (error) {
+    malformedAdmissionFailure = error;
+  }
+  assert.match(
+    String(malformedAdmissionFailure),
+    /MCP backend rejected the request \(status=503\)/u,
+  );
+  assert.equal(
+    malformedAdmissionFailure?.code,
+    -32603,
+    "a malformed admission envelope must remain the proxy's status-only application failure",
+  );
+  assert.equal(malformedAdmissionFailure?.data, undefined);
+  assert.equal(
+    String(malformedAdmissionFailure).includes(ADMISSION_REQUEST_ID_SECRET),
+    false,
+    "the HTTP request id must never be reflected through stdio",
+  );
 
   const initializeBeforeApplication404 = state.initializeCount;
   let application404Failure;

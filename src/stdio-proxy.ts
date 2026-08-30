@@ -518,6 +518,116 @@ const SESSION_INVALID_MESSAGES = new Set([
   "Invalid or expired session ID.",
   "Session not found or expired.",
 ]);
+const HTTP_ADMISSION_ERROR_CODE = -32015;
+const MAX_HTTP_ADMISSION_ERROR_BODY_BYTES = 8 * 1024;
+const HTTP_ADMISSION_MESSAGES = new Map([
+  ["queue-full", "The HTTP operation queue is full."],
+  [
+    "identity-queue-full",
+    "This client identity already has the maximum number of queued operations.",
+  ],
+  ["timeout", "The operation was not admitted before its queue timeout."],
+  ["cancelled", "The operation was cancelled before admission."],
+] as const);
+const HTTP_ADMISSION_REQUEST_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+type HttpAdmissionReason =
+  | "queue-full"
+  | "identity-queue-full"
+  | "timeout"
+  | "cancelled";
+type HttpAdmissionError = {
+  applicationCode: "SERVICE_UNAVAILABLE";
+  admission: HttpAdmissionReason;
+  retryable: boolean;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactlyKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  const observed = Object.keys(value);
+  return (
+    observed.length === keys.length &&
+    observed.every((key) => keys.includes(key))
+  );
+}
+
+/**
+ * Only the server-owned HTTP admission envelope is safe to project through
+ * stdio. Its request correlation id and any future HTTP-only fields remain on
+ * the HTTP boundary; all other application failures stay status-only.
+ */
+function parseHttpAdmissionError(
+  error: unknown,
+): HttpAdmissionError | undefined {
+  if (!(error instanceof StreamableHTTPError) || error.code !== 503) {
+    return undefined;
+  }
+  if (!error.message.startsWith(STREAMABLE_HTTP_POST_ERROR_PREFIX)) {
+    return undefined;
+  }
+  const responseBody = error.message.slice(
+    STREAMABLE_HTTP_POST_ERROR_PREFIX.length,
+  );
+  if (
+    Buffer.byteLength(responseBody, "utf8") >
+    MAX_HTTP_ADMISSION_ERROR_BODY_BYTES
+  ) {
+    return undefined;
+  }
+  try {
+    const body = JSON.parse(responseBody) as unknown;
+    if (
+      !isRecord(body) ||
+      !hasExactlyKeys(body, ["jsonrpc", "error", "id"]) ||
+      body.jsonrpc !== "2.0" ||
+      !(
+        body.id === null ||
+        typeof body.id === "string" ||
+        (typeof body.id === "number" && Number.isFinite(body.id))
+      ) ||
+      !isRecord(body.error) ||
+      !hasExactlyKeys(body.error, ["code", "message", "data"]) ||
+      body.error.code !== HTTP_ADMISSION_ERROR_CODE ||
+      !isRecord(body.error.data) ||
+      !hasExactlyKeys(body.error.data, [
+        "applicationCode",
+        "admission",
+        "retryable",
+        "requestId",
+      ]) ||
+      body.error.data.applicationCode !== "SERVICE_UNAVAILABLE" ||
+      typeof body.error.data.admission !== "string" ||
+      !HTTP_ADMISSION_MESSAGES.has(
+        body.error.data.admission as HttpAdmissionReason,
+      ) ||
+      body.error.message !==
+        HTTP_ADMISSION_MESSAGES.get(
+          body.error.data.admission as HttpAdmissionReason,
+        ) ||
+      typeof body.error.data.retryable !== "boolean" ||
+      body.error.data.retryable !==
+        (body.error.data.admission !== "cancelled") ||
+      typeof body.error.data.requestId !== "string" ||
+      !HTTP_ADMISSION_REQUEST_ID.test(body.error.data.requestId)
+    ) {
+      return undefined;
+    }
+    return {
+      applicationCode: "SERVICE_UNAVAILABLE",
+      admission: body.error.data.admission as HttpAdmissionReason,
+      retryable: body.error.data.retryable,
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 function errorHasNetworkCause(
   error: unknown,
@@ -613,6 +723,16 @@ function backendOutcomeUnknownAfterRetryError(): Error {
 }
 
 function backendApplicationError(error: unknown): Error {
+  const admission = parseHttpAdmissionError(error);
+  if (admission) {
+    // The server transport adds a JSON-RPC envelope around thrown errors. Keep
+    // this local error message catalogued so clients receive it once, then
+    // construct their normal SDK McpError from the structured response.
+    return Object.assign(
+      new Error(HTTP_ADMISSION_MESSAGES.get(admission.admission)!),
+      { code: HTTP_ADMISSION_ERROR_CODE, data: admission },
+    );
+  }
   const rawCode = safelyReadUntrustedErrorField(error, "code");
   const numericCode =
     typeof rawCode === "number"
