@@ -11,7 +11,7 @@ import {
   readFile,
   readdir,
   rm,
-  stat,
+  stat as statFile,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -45,7 +45,7 @@ async function snapshotProfiledMoveJournals(directory) {
   return Promise.all(
     names.map(async (name) => {
       const filePath = path.join(directory, name);
-      const metadata = await stat(filePath, { bigint: true });
+      const metadata = await statFile(filePath, { bigint: true });
       return {
         name,
         size: metadata.size.toString(),
@@ -98,6 +98,16 @@ async function waitForHealth(url, child) {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(`Timed out waiting for ${url}`);
+}
+
+async function withTimeout(promise, milliseconds, message) {
+  let timeoutHandle;
+  const timeout = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(message)), milliseconds);
+  });
+  return Promise.race([promise, timeout]).finally(() =>
+    clearTimeout(timeoutHandle),
+  );
 }
 
 const sandbox = await mkdtemp(
@@ -313,6 +323,8 @@ let profiledStatusProxyTransport;
 let profiledStatusProxyClient;
 let mismatchedMoveProxyTransport;
 let mismatchedMoveProxyClient;
+let coldMetadataProxyTransport;
+let coldMetadataProxyClient;
 
 try {
   await waitForHealth(healthUrl, backend);
@@ -332,6 +344,22 @@ try {
   assert.equal(status.localHandoffAllowed, true);
   assert.equal(status.externalMove.available, false);
   assert.equal(status.externalMove.identityVerified, false);
+  assert.equal(status.externalMove.planningAvailable, false);
+  assert.equal(
+    status.externalMove.planningUnavailableReason,
+    "profile_required",
+    "planning must explicitly report a missing required profile",
+  );
+  assert.equal(
+    status.externalMove.mutationUnavailableReason,
+    "native_handle_relative_mutation_unavailable",
+    "the global mutation boundary must be reported independently",
+  );
+  assert.equal(
+    status.externalMove.unavailableReason,
+    "profile_required",
+    "a missing profile must remain distinguishable from the global mutation boundary",
+  );
   assert.equal(
     "profileFingerprint" in status.externalMove,
     false,
@@ -339,9 +367,8 @@ try {
   );
   assert.equal(JSON.stringify(status).includes(externalPath), false);
 
-  // Planning requires an attested profile but not destructive write mode. A
-  // readonly stdio process must retain scan/plan/status while apply/rollback
-  // remain closed at the handler boundary.
+  // Even with every former destructive gate open, scan/plan/status remain
+  // diagnostic-only and the mutation entrypoints stay unsupported.
   moveProxyTransport = new StdioClientTransport({
     command: process.execPath,
     args: ["dist/stdio-proxy.js"],
@@ -350,7 +377,7 @@ try {
       ...commonEnv,
       OBSIDIAN_RUNTIME_MODE: "headless-filesystem",
       MCP_EXTERNAL_ROOTS_FILE: configPath,
-      MCP_WRITE_MODE: "readonly",
+      MCP_WRITE_MODE: "full",
       MCP_EXTERNAL_MOVE_ENABLED: "true",
       MCP_EXTERNAL_MOVE_PROFILE_ID: "stdio-proxy-move-test",
       MCP_EXTERNAL_MOVE_JOURNAL_PATH: profiledJournalBasePath,
@@ -376,6 +403,23 @@ try {
   );
   assert.equal(moveStatus.externalMove.available, false);
   assert.equal(moveStatus.externalMove.identityVerified, true);
+  assert.equal(moveStatus.externalMove.planningAvailable, true);
+  assert.equal(
+    "planningUnavailableReason" in moveStatus.externalMove,
+    false,
+    "a verified stdio coordinator must not report a planning denial",
+  );
+  assert.equal(
+    "unavailableReason" in moveStatus.externalMove,
+    false,
+    "the legacy compatibility alias is only present for unavailable planning",
+  );
+  assert.equal(moveStatus.mode, "read-only");
+  assert.equal(moveStatus.externalMove.mutationAvailable, false);
+  assert.equal(
+    moveStatus.externalMove.mutationUnavailableReason,
+    "native_handle_relative_mutation_unavailable",
+  );
   assert.equal(
     moveStatus.externalMove.identitySource,
     "backend_destructive_vault_attestation",
@@ -423,7 +467,13 @@ try {
     }),
   );
   assert.equal(readonlyPlan.status, "planned");
-  assert.equal(readonlyPlan.readyToApply, true);
+  assert.equal(readonlyPlan.readyToApply, false);
+  assert.equal(readonlyPlan.nextAction, "none");
+  assert.equal(readonlyPlan.mutationAvailable, false);
+  assert.equal(
+    readonlyPlan.mutationUnavailableReason,
+    "native_handle_relative_mutation_unavailable",
+  );
   assert.equal(
     (await snapshotProfiledMoveJournals(sandbox)).some((entry) =>
       /^move\.[a-f0-9]{24}\.sqlite$/u.test(entry.name),
@@ -431,6 +481,14 @@ try {
     true,
     "external_move_plan must create its durable profiled journal",
   );
+  const sourceBeforeUnsupportedMutation = await readFile(
+    path.join(externalPath, "hello.txt"),
+  );
+  const noteBeforeUnsupportedMutation = await readFile(
+    path.join(vaultPath, "Smoke.md"),
+  );
+  const journalBeforeUnsupportedMutation =
+    await snapshotProfiledMoveJournals(sandbox);
   const readonlyApply = await moveProxyClient.callTool({
     name: "external_move_apply",
     arguments: {
@@ -439,7 +497,7 @@ try {
     },
   });
   assert.equal(readonlyApply.isError, true);
-  assert.equal(jsonOf(readonlyApply).error, "capability_denied");
+  assert.equal(jsonOf(readonlyApply).error, "unsupported");
   const readonlyRollback = await moveProxyClient.callTool({
     name: "external_move_rollback",
     arguments: {
@@ -448,10 +506,38 @@ try {
     },
   });
   assert.equal(readonlyRollback.isError, true);
-  assert.equal(jsonOf(readonlyRollback).error, "capability_denied");
+  assert.equal(jsonOf(readonlyRollback).error, "unsupported");
   assert.equal(
     await readFile(path.join(externalPath, "hello.txt"), "utf8"),
     "Bonjour depuis le proxy",
+  );
+  assert.deepEqual(
+    await readFile(path.join(externalPath, "hello.txt")),
+    sourceBeforeUnsupportedMutation,
+  );
+  await assert.rejects(() => statFile(path.join(externalPath, "moved.txt")));
+  assert.deepEqual(
+    await readFile(path.join(vaultPath, "Smoke.md")),
+    noteBeforeUnsupportedMutation,
+  );
+  assert.deepEqual(
+    await snapshotProfiledMoveJournals(sandbox),
+    journalBeforeUnsupportedMutation,
+    "Unsupported apply/rollback must not alter the profiled journal or WAL.",
+  );
+  const statusAfterUnsupportedMutation = jsonOf(
+    await moveProxyClient.callTool({
+      name: "external_move_status",
+      arguments: { planId: readonlyPlan.planId },
+    }),
+  );
+  assert.equal(statusAfterUnsupportedMutation.status, "planned");
+  assert.equal(statusAfterUnsupportedMutation.readyToApply, false);
+  assert.equal(statusAfterUnsupportedMutation.nextAction, "none");
+  assert.equal(statusAfterUnsupportedMutation.mutationAvailable, false);
+  assert.equal(
+    statusAfterUnsupportedMutation.mutationUnavailableReason,
+    "native_handle_relative_mutation_unavailable",
   );
 
   // Close the planning process before inspecting its journal: this models a
@@ -511,7 +597,7 @@ try {
     }),
   );
   assert.equal(reliableProfiledStatus.status, "recovery_required");
-  assert.equal(reliableProfiledStatus.nextAction, "manual_review");
+  assert.equal(reliableProfiledStatus.nextAction, "none");
   assert.equal(reliableProfiledStatus.readyToApply, false);
   assert.equal(reliableProfiledStatus.failureCode, "backend_session_changed");
   assert.deepEqual(reliableProfiledStatus.recoveryErrors, [
@@ -607,6 +693,11 @@ try {
   );
   assert.equal(disabledStatus.externalMove.available, false);
   assert.equal(disabledStatus.externalMove.identityVerified, true);
+  assert.equal(
+    disabledStatus.externalMove.planningAvailable,
+    true,
+    "the historical mutation feature flag must not disable read-only planning",
+  );
   const disabledPlanReplay = jsonOf(
     await disabledMoveProxyClient.callTool({
       name: "external_move_plan",
@@ -628,7 +719,7 @@ try {
     },
   });
   assert.equal(disabledApply.isError, true);
-  assert.equal(jsonOf(disabledApply).error, "capability_denied");
+  assert.equal(jsonOf(disabledApply).error, "unsupported");
   await disabledMoveProxyClient.close();
   await disabledMoveProxyTransport.close().catch(() => undefined);
   disabledMoveProxyClient = undefined;
@@ -668,7 +759,7 @@ try {
   assert.equal(profiledRecoveryStatus.planId, readonlyPlan.planId);
   assert.equal(profiledRecoveryStatus.legacyBinding, false);
   assert.equal(profiledRecoveryStatus.recoveryRequired, true);
-  assert.equal(profiledRecoveryStatus.nextAction, "manual_review");
+  assert.equal(profiledRecoveryStatus.nextAction, "none");
   assert.deepEqual(profiledRecoveryStatus.recoveryErrors, [
     "backend_session_changed",
   ]);
@@ -706,9 +797,20 @@ try {
   );
   assert.equal(mismatchedStatus.externalMove.available, false);
   assert.equal(mismatchedStatus.externalMove.identityVerified, false);
+  assert.equal(mismatchedStatus.externalMove.planningAvailable, false);
+  assert.equal(
+    mismatchedStatus.externalMove.planningUnavailableReason,
+    "target_unverified",
+    "planning must explicitly report a rejected target attestation",
+  );
+  assert.equal(
+    mismatchedStatus.externalMove.mutationUnavailableReason,
+    "native_handle_relative_mutation_unavailable",
+  );
   assert.equal(
     mismatchedStatus.externalMove.unavailableReason,
     "target_unverified",
+    "a rejected target attestation must remain distinguishable from the global mutation boundary",
   );
   assert.equal(JSON.stringify(mismatchedStatus).includes(vaultBPath), false);
   const mismatchRead = jsonOf(
@@ -740,7 +842,7 @@ try {
   assert.equal(legacyStatus.legacyBinding, true);
   assert.equal(legacyStatus.bindingVerifiable, false);
   assert.equal(legacyStatus.status, "recovery_required");
-  assert.equal(legacyStatus.nextAction, "manual_review");
+  assert.equal(legacyStatus.nextAction, "none");
   assert.equal(legacyStatus.readyToApply, false);
   assert.equal(legacyStatus.failureCode, "external_root_non_verifiable");
   assert.deepEqual(legacyStatus.recoveryErrors, [
@@ -914,8 +1016,85 @@ try {
     await httpClient.close().catch(() => undefined);
   }
 
+  // Do not call tools/list or configure any external-root/move environment on
+  // this proxy. It starts with only the static full profile while the backend
+  // is live, then the backend is deliberately lost before the first CallTool.
+  // A stable unsupported reply proves the local endpoint uses static profile
+  // visibility instead of a warmed coordinator or cold/stale backend metadata.
+  const coldMetadataEnv = {
+    ...commonEnv,
+    OBSIDIAN_RUNTIME_MODE: "headless-filesystem",
+    MCP_TOOL_PROFILE: "full",
+    MCP_PROXY_REQUIRE_EXISTING_BACKEND: "true",
+    MCP_PROXY_START_TIMEOUT_MS: "20000",
+  };
+  for (const name of [
+    "MCP_EXTERNAL_ROOTS_FILE",
+    "MCP_EXTERNAL_MOVE_ENABLED",
+    "MCP_EXTERNAL_MOVE_PROFILE_ID",
+    "MCP_EXTERNAL_MOVE_JOURNAL_PATH",
+  ]) {
+    delete coldMetadataEnv[name];
+  }
+  coldMetadataProxyTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["dist/stdio-proxy.js"],
+    cwd: process.cwd(),
+    env: coldMetadataEnv,
+  });
+  coldMetadataProxyClient = new Client({
+    name: "optimike-external-roots-cold-metadata-test",
+    version: "0",
+  });
+  await coldMetadataProxyClient.connect(coldMetadataProxyTransport);
+  backend.kill();
+  await new Promise((resolve) => {
+    if (backend.exitCode !== null) return resolve();
+    backend.once("exit", resolve);
+    const exitFallback = setTimeout(resolve, 3_000);
+    exitFallback.unref();
+  });
+  const offlineApply = await withTimeout(
+    coldMetadataProxyClient.callTool({
+      name: "external_move_apply",
+      arguments: {
+        planId: readonlyPlan.planId,
+        idempotencyKey: readonlyPlan.idempotencyKey,
+      },
+    }),
+    5_000,
+    "offline unsupported apply timed out",
+  );
+  assert.equal(offlineApply.isError, true);
+  assert.equal(
+    jsonOf(offlineApply).error,
+    "unsupported",
+    "a full-profile local apply must fail closed without backend tools/list",
+  );
+  const offlineRollback = await withTimeout(
+    coldMetadataProxyClient.callTool({
+      name: "external_move_rollback",
+      arguments: {
+        planId: readonlyPlan.planId,
+        idempotencyKey: readonlyPlan.idempotencyKey,
+      },
+    }),
+    5_000,
+    "offline unsupported rollback timed out",
+  );
+  assert.equal(offlineRollback.isError, true);
+  assert.equal(
+    jsonOf(offlineRollback).error,
+    "unsupported",
+    "a full-profile local rollback must fail closed without backend tools/list",
+  );
+  await coldMetadataProxyClient.close().catch(() => undefined);
+  await coldMetadataProxyTransport.close().catch(() => undefined);
+  coldMetadataProxyClient = undefined;
+  coldMetadataProxyTransport = undefined;
+
   console.log(
-    "PASS: stdio proxy keeps scan/plan/status available behind readonly or disabled destructive gates, recovers profiled status after restart, denies HTTP handoff, and keeps responses path-redacted",
+    "PASS: stdio proxy keeps scan/plan/status available behind readonly or disabled destructive gates, returns local unsupported apply without backend metadata, recovers profiled status after restart, denies HTTP handoff, and keeps responses path-redacted",
   );
 } finally {
   await moveProxyClient?.close().catch(() => undefined);
@@ -926,6 +1105,8 @@ try {
   await profiledStatusProxyTransport?.close().catch(() => undefined);
   await mismatchedMoveProxyClient?.close().catch(() => undefined);
   await mismatchedMoveProxyTransport?.close().catch(() => undefined);
+  await coldMetadataProxyClient?.close().catch(() => undefined);
+  await coldMetadataProxyTransport?.close().catch(() => undefined);
   await proxyClient.close().catch(() => undefined);
   backend.kill();
   await new Promise((resolve) => {

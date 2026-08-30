@@ -50,10 +50,132 @@ for (const [name, content, forbidden] of [
 }
 
 const externalAdr = await text("docs/adr/ADR-External-Document-Roots.md");
+const externalAdrIntegrity = await text(
+  "docs/adr/ADR-External-Reference-Integrity.md",
+);
+const externalAdrIntegrityFr = await text(
+  "docs/adr/ADR-External-Reference-Integrity.fr.md",
+);
 const httpAdr = await text("docs/adr/ADR-HTTP-External-Artifact-Delivery.md");
 assert.match(externalAdr, /handoff transport amended/i);
 assert.match(httpAdr, /Status: accepted and implemented on `main`/);
 assert.match(httpAdr, /remote HTTP remains pilot-only/i);
+
+const externalMoveDiagnosticDocs = [
+  ["README.md", readme],
+  ["README.fr.md", readmeFr],
+  ["SECURITY.md", await text("SECURITY.md")],
+  ["SECURITY.fr.md", await text("SECURITY.fr.md")],
+  ["ADR-External-Document-Roots.md", externalAdr],
+  ["ADR-External-Reference-Integrity.md", externalAdrIntegrity],
+  ["ADR-External-Reference-Integrity.fr.md", externalAdrIntegrityFr],
+  ["external-roots-setup.md", await text("docs/external-roots-setup.md")],
+  ["external-roots-setup.fr.md", await text("docs/external-roots-setup.fr.md")],
+  ["mcp-routing-guide.md", await text("docs/mcp-routing-guide.md")],
+  ["mcp-routing-guide.fr.md", await text("docs/mcp-routing-guide.fr.md")],
+  ["obsidian_mcp_tools_spec.md", await text("docs/obsidian_mcp_tools_spec.md")],
+  [
+    "runtime-capability-matrix.md",
+    await text("docs/runtime-capability-matrix.md"),
+  ],
+  [
+    "runtime-capability-matrix.fr.md",
+    await text("docs/runtime-capability-matrix.fr.md"),
+  ],
+];
+for (const [name, content] of externalMoveDiagnosticDocs) {
+  assert.match(
+    content,
+    /native_handle_relative_mutation_unavailable/u,
+    `${name} omits fail-closed runtime reason`,
+  );
+  assert.match(
+    content,
+    /external_move_(?:scan|plan|status)|external_references_scan/u,
+  );
+  assert.match(content, /diagnostic|diagnostique|read-only|lecture seule/iu);
+  assert.match(content, /disabled|désactiv|ne peut muter|ne peuvent activer/iu);
+}
+const externalMoveNoLongerActiveDocs = [
+  ["ADR-External-Reference-Integrity.md", externalAdrIntegrity],
+  ["ADR-External-Reference-Integrity.fr.md", externalAdrIntegrityFr],
+  ["external-roots-setup.md", await text("docs/external-roots-setup.md")],
+  ["external-roots-setup.fr.md", await text("docs/external-roots-setup.fr.md")],
+  ["mcp-routing-guide.md", await text("docs/mcp-routing-guide.md")],
+  ["mcp-routing-guide.fr.md", await text("docs/mcp-routing-guide.fr.md")],
+  [
+    "runtime-capability-matrix.md",
+    await text("docs/runtime-capability-matrix.md"),
+  ],
+  [
+    "runtime-capability-matrix.fr.md",
+    await text("docs/runtime-capability-matrix.fr.md"),
+  ],
+];
+for (const [name, content] of [
+  ["external-roots-setup.md", await text("docs/external-roots-setup.md")],
+  ["external-roots-setup.fr.md", await text("docs/external-roots-setup.fr.md")],
+  [
+    "runtime-capability-matrix.md",
+    await text("docs/runtime-capability-matrix.md"),
+  ],
+  [
+    "runtime-capability-matrix.fr.md",
+    await text("docs/runtime-capability-matrix.fr.md"),
+  ],
+]) {
+  assert.match(content, /planningAvailable/u, `${name} omits planning status`);
+  assert.match(
+    content,
+    /planningUnavailableReason/u,
+    `${name} omits planning-denial reason`,
+  );
+  assert.match(content, /stdio_only/u, `${name} omits direct HTTP denial`);
+  assert.match(
+    content,
+    /(?:profile_required|target_unverified|backend_attestation_unavailable)/u,
+    `${name} omits redacted stdio planning reasons`,
+  );
+}
+for (const [name, content] of externalMoveNoLongerActiveDocs) {
+  assert.doesNotMatch(
+    content,
+    /(?:Apply (?:revalidates|uses)|External move uses|L[’']apply (?:revérifie|emploie)|Le move externe emploie)/u,
+    `${name} still presents retired external-move mutation as active`,
+  );
+}
+for (const [name, content] of [
+  ["ADR-External-Reference-Integrity.md", externalAdrIntegrity],
+  ["ADR-External-Reference-Integrity.fr.md", externalAdrIntegrityFr],
+  ["external-roots-setup.md", await text("docs/external-roots-setup.md")],
+  ["external-roots-setup.fr.md", await text("docs/external-roots-setup.fr.md")],
+]) {
+  assert.match(
+    content,
+    /redact|redacted|expurg|sans chemin physique/iu,
+    `${name} regressed redaction contract`,
+  );
+  assert.match(
+    content,
+    /SQLite/iu,
+    `${name} regressed private SQLite contract`,
+  );
+  assert.match(
+    content,
+    /legacy/iu,
+    `${name} regressed legacy binding contract`,
+  );
+  assert.match(
+    content,
+    /stale|session.*binding|binding.*session/iu,
+    `${name} regressed stale binding contract`,
+  );
+  assert.match(
+    content,
+    /CAS|SHA-256/iu,
+    `${name} regressed exact CAS contract`,
+  );
+}
 
 const matrix = await text("docs/runtime-capability-matrix.md");
 const matrixFr = await text("docs/runtime-capability-matrix.fr.md");

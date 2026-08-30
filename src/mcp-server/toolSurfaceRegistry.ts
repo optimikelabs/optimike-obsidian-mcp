@@ -415,14 +415,16 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "external.move",
     "external-move",
     ALL_MODES,
-    { annotationClass: "destructive" },
+    // Retained only to return a stable unsupported result until a native
+    // primitive is independently audited and admitted.
+    { annotationClass: "read-only" },
   ),
   defineTool(
     "external_move_rollback",
     "external.move",
     "external-move",
     ALL_MODES,
-    { annotationClass: "destructive" },
+    { annotationClass: "read-only" },
   ),
 ] as const;
 

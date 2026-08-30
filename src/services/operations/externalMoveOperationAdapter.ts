@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ExternalRootError } from "../externalRootsService.js";
 import type { ExternalMoveCoordinator } from "../externalReferences/externalMoveCoordinator.js";
 import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
@@ -10,6 +11,8 @@ import {
 } from "./contract.js";
 
 const PLAN_REF_PREFIX = "external-move:v1:";
+const REDACTED = "[redacted]";
+const INCIDENT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
 const ExternalMovePlanViewSchema = z
   .object({
@@ -50,6 +53,10 @@ const ExternalMovePlanViewSchema = z
       z.object({ filePath: z.string().min(1), reason: z.string().min(1) }),
     ),
     readyToApply: z.boolean(),
+    mutationAvailable: z.literal(false),
+    mutationUnavailableReason: z.literal(
+      "native_handle_relative_mutation_unavailable",
+    ),
     recoveryRequired: z.boolean(),
     recoveryErrors: z.array(z.string()),
     appliedRepairCount: z.number().int().nonnegative(),
@@ -61,6 +68,19 @@ const ExternalMovePlanViewSchema = z
   .strict();
 
 type ExternalMovePlanView = z.infer<typeof ExternalMovePlanViewSchema>;
+
+/**
+ * A status projection is a diagnostic boundary, not a trusted journal row.
+ * The coordinator deliberately emits legacy and incident projections for
+ * stored data that must never be used as a continuation instruction. A
+ * current, fully parsed diagnostic projection remains useful across
+ * plan/status even when it requires manual review or reports a stale session;
+ * those states are already non-actionable below. The discriminator only
+ * rejects legacy/unsafe schema shapes and never recovers fields from them.
+ */
+function isTrustedCurrentProjection(view: ExternalMovePlanView): boolean {
+  return view.bindingVerifiable && !view.legacyBinding;
+}
 
 export type ExternalMoveOperationPlanInput = {
   rootId: string;
@@ -103,8 +123,63 @@ function state(view: ExternalMovePlanView): {
   return { phase: "applying", outcome: null };
 }
 
-function receipt(raw: Record<string, unknown>): OperationReceipt {
-  const view = ExternalMovePlanViewSchema.parse(raw);
+function redactedIncidentReceipt(
+  operationId: string,
+  reference: string,
+): OperationReceipt {
+  const planDigest = operationDigest({
+    contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
+    operationKind: "external.move",
+    operationId,
+    incident: "untrusted_status_projection",
+  });
+
+  return {
+    contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
+    operationId,
+    idempotencyKey: REDACTED,
+    operationKind: "external.move",
+    planRef: reference,
+    planDigest,
+    phase: "terminal",
+    outcome: "outcome_unknown",
+    backend: { kind: "external-filesystem" },
+    target: { kind: "same-root-file-move", logicalRef: REDACTED },
+    beforeProof: {
+      kind: "external-move-status-incident",
+      digest: operationDigest({ planDigest, incident: true }),
+    },
+    postflight: { status: "unverified" },
+    admittedAt: INCIDENT_TIMESTAMP,
+    updatedAt: INCIDENT_TIMESTAMP,
+    terminalAt: INCIDENT_TIMESTAMP,
+    recoveryAllowed: false,
+    applyAllowed: false,
+  };
+}
+
+function receipt(
+  raw: Record<string, unknown>,
+  fallback?: { operationId: string; reference: string },
+): OperationReceipt {
+  const parsed = ExternalMovePlanViewSchema.safeParse(raw);
+  if (!parsed.success) {
+    if (fallback) {
+      return redactedIncidentReceipt(fallback.operationId, fallback.reference);
+    }
+    // New plans originate from the current coordinator and must meet its
+    // complete contract. Do not turn a producer/journal mismatch into either
+    // a Zod issue dump (which can reflect stored data) or a plausible receipt
+    // without a caller-supplied, validated plan reference.
+    throw new ExternalRootError(
+      "non_verifiable",
+      "The external move plan could not be safely verified.",
+    );
+  }
+  const view = parsed.data;
+  if (fallback && !isTrustedCurrentProjection(view)) {
+    return redactedIncidentReceipt(fallback.operationId, fallback.reference);
+  }
   const currentState = state(view);
   const reference = planRef(view.planId);
   const digest = operationDigest({
@@ -122,11 +197,7 @@ function receipt(raw: Record<string, unknown>): OperationReceipt {
     manualReview: view.manualReview,
   });
   const terminal = currentState.phase === "terminal";
-  const recoverable =
-    view.nextAction === "rollback" ||
-    currentState.phase === "applying" ||
-    (currentState.outcome === "outcome_unknown" &&
-      view.nextAction !== "manual_review");
+  const recoverable = false;
   const postflight =
     currentState.outcome === "committed"
       ? "verified"
@@ -193,10 +264,7 @@ function receipt(raw: Record<string, unknown>): OperationReceipt {
     ...(terminal ? { terminalAt: view.updatedAt } : {}),
     ...(recoverable ? { recoveryRef: reference } : {}),
     recoveryAllowed: recoverable,
-    applyAllowed:
-      currentState.phase !== "terminal" &&
-      view.readyToApply &&
-      view.nextAction === "apply",
+    applyAllowed: false,
   };
 }
 
@@ -224,7 +292,11 @@ export class ExternalMoveOperationAdapter
   }
 
   async status(reference: string): Promise<OperationReceipt> {
-    return receipt(this.coordinator.status(planIdFromRef(reference)));
+    const operationId = planIdFromRef(reference);
+    return receipt(this.coordinator.status(operationId), {
+      operationId,
+      reference,
+    });
   }
 
   async recover(

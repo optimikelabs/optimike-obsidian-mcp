@@ -4,12 +4,11 @@ import { z } from "zod";
 import {
   ExternalRootError,
   ExternalRootsService,
+  externalMoveMutationUnavailableError,
+  moveMutationStatus,
 } from "../../../services/externalRootsService.js";
 import { externalTransferBroker } from "../../../services/externalTransferBroker.js";
-import {
-  DESTRUCTIVE_TOOL_ANNOTATIONS,
-  READ_ONLY_TOOL_ANNOTATIONS,
-} from "../../toolAnnotations.js";
+import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 
@@ -264,6 +263,17 @@ export async function registerExternalRootsTools(
         return {
           enabled: Boolean(service),
           mode: "read-only",
+          externalMove: {
+            available: false,
+            // Direct HTTP may report the mutation boundary, but it cannot
+            // establish the local vault binding required to plan or inspect a
+            // move. Keep that transport limitation distinct from mutation
+            // availability so callers do not mistake a transport denial for a
+            // missing native primitive.
+            planningAvailable: false,
+            planningUnavailableReason: "stdio_only",
+            ...moveMutationStatus(),
+          },
           localHandoffAllowed,
           handoffModes: [
             ...(localHandoffAllowed ? (["local_path"] as const) : []),
@@ -379,30 +389,33 @@ export async function registerExternalRootsTools(
     {
       name: "external_move_plan",
       description:
-        "Builds a durable stdio-only plan for a same-root external file move and exact ÉLYSIA link repairs. Ambiguous references block apply.",
+        "Builds a durable stdio-only diagnostic plan for a same-root external file move and exact ÉLYSIA link repairs. Mutation is unavailable.",
       schema: ExternalMovePlanSchema.shape,
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     {
       name: "external_move_status",
       description:
-        "Returns the durable status and redacted receipt for one external move plan.",
+        "Returns the read-only durable status and redacted receipt for one external move plan.",
       schema: ExternalMoveStatusSchema.shape,
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     {
       name: "external_move_apply",
       description:
-        "Applies a previously verified same-root file move and its exact ÉLYSIA repairs. Requires stdio, MCP_WRITE_MODE=full, the move root capability, and MCP_EXTERNAL_MOVE_ENABLED=true.",
+        "Unavailable: native handle-relative external move mutation is not supported on this runtime.",
       schema: ExternalMoveApplySchema.shape,
-      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+      // This endpoint is retained so callers receive a stable, explicit
+      // unsupported result. It cannot mutate while the native primitive is
+      // unavailable, therefore its advertised MCP behavior must be read-only.
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     {
       name: "external_move_rollback",
       description:
-        "Rolls back an applied external move and its ÉLYSIA repairs when every stored precondition still holds.",
+        "Unavailable: native handle-relative external move mutation is not supported on this runtime.",
       schema: ExternalMoveRollbackSchema.shape,
-      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
   ] as const) {
     server.tool(
@@ -412,10 +425,13 @@ export async function registerExternalRootsTools(
       definition.annotations,
       externalRootsResult(definition.name, {}, () =>
         Promise.reject(
-          new ExternalRootError(
-            "capability_denied",
-            "External reference mutations and their plans are available only through the local stdio proxy.",
-          ),
+          definition.name === "external_move_apply" ||
+            definition.name === "external_move_rollback"
+            ? externalMoveMutationUnavailableError()
+            : new ExternalRootError(
+                "capability_denied",
+                "External reference mutations and their plans are available only through the local stdio proxy.",
+              ),
         ),
       ),
     );

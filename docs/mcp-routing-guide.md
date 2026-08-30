@@ -30,7 +30,7 @@ explicit complete/admin surface. See [Tool Surface Profiles](tool-surface-profil
 | Operon or Markdown Tasks workflows                                           | `tasks` profile                                               | Complete Operon contract plus Tasks-compatible Markdown tools.          |
 | Bases, tags or Canvas authoring                                              | `authoring` profile                                           | Adds the authoring-specific surfaces without the full admin set.        |
 | Read an explicitly configured document outside the vault                     | `full` + Optimike MCP external-root tools                     | External roots are specialized and default-deny.                        |
-| Move one external file without silently breaking ÉLYSIA links                | `full` over local stdio on a copied or dedicated vault        | Inventory, durable plan, exact hash repairs, receipt and rollback.      |
+| Diagnose a planned external-file move without silently breaking ÉLYSIA links | `full` over local stdio                                       | Inventory, durable plan and redacted receipt; mutation is disabled.     |
 | Full Obsidian behavior, commands, active file, plugin-backed Bases           | Optimike MCP in `live` or `hybrid` with Obsidian Desktop open | This is the only mode with Desktop/plugin-backed semantics.             |
 | Safe backend server over a synced vault                                      | `headless-readonly` first                                     | No Desktop required and no write risk.                                  |
 | Bounded Markdown/frontmatter/tag/admin writes on a copied or dedicated vault | `headless-filesystem`                                         | Path safety, dry-run defaults, and preconditions.                       |
@@ -139,16 +139,18 @@ For an ÉLYSIA-managed move:
    `external-ref:<rootId>::<percent-encoded-relative-path>`;
 2. use `external_references_scan`, then `external_move_plan`;
 3. stop when `manualReview` is non-empty; never repair a historical or ambiguous occurrence automatically;
-4. inspect `external_move_status`, then call `external_move_apply` only with
-   explicit local write gates and the same idempotency key;
-5. verify both the target file and repaired notes; use
-   `external_move_rollback` only while its stored preconditions still hold.
+4. inspect `external_move_status` as a diagnostic; while the fail-closed
+   boundary is active it returns `readyToApply: false` and
+   `native_handle_relative_mutation_unavailable`;
+5. do not call `external_move_apply` or `external_move_rollback`: mutating
+   apply, rollback and automatic recovery are disabled on every platform until
+   an audited native handle-relative primitive exists.
 
-This transaction is local stdio only. It supports one regular file, an absent
-target in an existing parent, and a same-root/same-volume no-clobber move.
-Concurrent note edits are protected by an exact SHA-256 precondition in
-`headless-filesystem` on a copied or dedicated vault. Live Local REST apply
-fails closed because whole-note writes do not currently enforce `If-Match`.
+This diagnostic workflow is local stdio only. It plans one regular file and an
+absent target in an existing parent. A future audited primitive must establish
+its own same-root/same-volume no-clobber and exact-hash note-repair guarantees;
+the retired hard-link/unlink design is not executable. Live Local REST whole-note
+writes do not enforce `If-Match` and cannot authorize external mutation.
 Do not route create, replace, upload, delete, sync, directory, cross-root or
 cross-volume operations through this workflow.
 

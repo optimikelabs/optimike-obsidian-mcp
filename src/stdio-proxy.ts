@@ -41,6 +41,7 @@ import {
   externalRootsResult,
 } from "./mcp-server/tools/externalRootsTools/registration.js";
 import {
+  compileToolProfileNames,
   selectAvailableToolProfileNames,
   type ToolProfileId,
 } from "./mcp-server/toolProfiles.js";
@@ -50,6 +51,8 @@ import { ensureLocalBackendRunning } from "./runtime/localBackend.js";
 import {
   ExternalRootError,
   ExternalRootsService,
+  externalMoveMutationUnavailableError,
+  moveMutationStatus,
 } from "./services/externalRootsService.js";
 import {
   attestVaultFilesystemTarget,
@@ -128,6 +131,34 @@ const backendUrl = new URL(`http://${host}:${port}/mcp/full`);
 const healthUrl = new URL(`http://${host}:${port}/healthz`);
 const backendBearerToken = process.env.MCP_BACKEND_BEARER_TOKEN?.trim();
 const toolProfile: ToolProfileId = resolveToolProfile();
+const FAIL_CLOSED_EXTERNAL_MOVE_MUTATION_TOOLS = new Set([
+  "external_move_apply",
+  "external_move_rollback",
+] as const);
+// These two names are implemented by this proxy (not forwarded to the backend)
+// and are registered in every server mode. Decide their profile visibility from
+// the static profile contract before any backend metadata request: an unavailable
+// backend must not turn a known fail-closed endpoint into an indeterminate one.
+const staticallyVisibleLocalExternalMoveMutationTools = new Set(
+  compileToolProfileNames({
+    profile: toolProfile,
+    registrationMode: "headless-readonly",
+  }),
+);
+
+function isLocalFailClosedExternalMoveMutationTool(
+  toolName: string,
+): toolName is "external_move_apply" | "external_move_rollback" {
+  return FAIL_CLOSED_EXTERNAL_MOVE_MUTATION_TOOLS.has(
+    toolName as "external_move_apply" | "external_move_rollback",
+  );
+}
+
+function localFailClosedExternalMoveMutationIsVisible(
+  toolName: "external_move_apply" | "external_move_rollback",
+): boolean {
+  return staticallyVisibleLocalExternalMoveMutationTools.has(toolName);
+}
 
 const proxyServer = new Server(
   { name: `${packageName}-stdio-proxy`, version: packageVersion },
@@ -209,26 +240,12 @@ function unavailableExternalMove(): Promise<never> {
 }
 
 function disabledExternalMoveMutation(): Promise<never> {
-  return Promise.reject(
-    new ExternalRootError(
-      "capability_denied",
-      "External move apply and rollback require full write mode, an enabled move feature, and a verified target binding.",
-    ),
-  );
+  return Promise.reject(externalMoveMutationUnavailableError());
 }
 
 function unknownExternalMovePlan(): Promise<never> {
   return Promise.reject(
     new ExternalRootError("not_found", "Unknown external move plan."),
-  );
-}
-
-function externalMoveDestructiveAvailable(): boolean {
-  return (
-    Boolean(externalMoveCoordinator) &&
-    externalMoveBindingIdentity?.verifiable === true &&
-    config.externalMoveEnabled &&
-    config.mcpWriteMode === "full"
   );
 }
 
@@ -1000,9 +1017,9 @@ async function start() {
     : undefined;
 
   await ensureBackendConnected();
-  // Scan, plan and status are read/planning operations. Initialize their
-  // profiled, attested dependencies independently from the feature flag and
-  // write mode; apply and rollback enforce those destructive gates themselves.
+  // Scan, plan and status remain diagnostic. Their binding and private SQLite
+  // snapshot handling is retained, while native-handle-relative mutation is
+  // unavailable on every platform.
   if (externalRootsService) {
     const moveRootsService = externalRootsService;
     const rootsFingerprint = rootConfigFingerprint(
@@ -1087,6 +1104,28 @@ async function start() {
   );
 
   proxyServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    // Apply and rollback are local retained endpoints. Their visibility is
+    // derivable from the static profile contract, so do not call tools/list
+    // before returning their stable unsupported result. This keeps the
+    // fail-closed boundary deterministic through cold metadata and a backend
+    // outage, while profiles that do not include external.move still see a
+    // hidden tool.
+    if (isLocalFailClosedExternalMoveMutationTool(request.params.name)) {
+      if (!localFailClosedExternalMoveMutationIsVisible(request.params.name)) {
+        return hiddenToolResult();
+      }
+      const parsed =
+        request.params.name === "external_move_apply"
+          ? ExternalMoveApplySchema.safeParse(request.params.arguments ?? {})
+          : ExternalMoveRollbackSchema.safeParse(
+              request.params.arguments ?? {},
+            );
+      if (!parsed.success) {
+        return invalidExternalArguments(request.params.name);
+      }
+      return externalRootsResult(() => disabledExternalMoveMutation())();
+    }
+
     if (!(await toolIsExposed(request.params.name))) {
       return hiddenToolResult();
     }
@@ -1094,22 +1133,31 @@ async function start() {
     if (request.params.name === "external_runtime_status") {
       return externalRootsResult(async () => ({
         enabled: Boolean(externalRootsService),
-        mode:
-          config.externalMoveEnabled && config.mcpWriteMode === "full"
-            ? "read-write-opt-in"
-            : "read-only",
+        mode: "read-only",
         localHandoffAllowed: true,
         externalMove: {
-          available: externalMoveDestructiveAvailable(),
+          available: false,
+          ...moveMutationStatus(),
           transport: "stdio-only",
           requiresRootCapability: "move",
           identityVerified: Boolean(externalMoveCoordinator),
+          planningAvailable: Boolean(externalMoveCoordinator),
           ...(externalMoveCoordinator
             ? {
                 identitySource:
                   externalMoveBindingIdentity?.vaultIdentitySource,
               }
-            : { unavailableReason: externalMoveUnavailableReason }),
+            : {
+                // This is deliberately separate from mutationUnavailableReason:
+                // the native mutation primitive is unavailable everywhere,
+                // while planning/status can additionally be unavailable when
+                // this process cannot establish a redacted, verifiable
+                // binding. unavailableReason remains a compatibility alias
+                // for older clients; new callers must use the explicit
+                // planningUnavailableReason field.
+                planningUnavailableReason: externalMoveUnavailableReason,
+                unavailableReason: externalMoveUnavailableReason,
+              }),
         },
         roots: externalRootsService
           ? await externalRootsService.listRoots()
@@ -1260,40 +1308,6 @@ async function start() {
         // the durable journal.
         return projectExternalMovePlanForUnavailableDestructiveSession(stored);
       })();
-    }
-
-    if (request.params.name === "external_move_apply") {
-      const parsed = ExternalMoveApplySchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
-      }
-      return externalRootsResult(() =>
-        externalMoveDestructiveAvailable() && externalMoveCoordinator
-          ? externalMoveCoordinator.apply(
-              parsed.data.planId,
-              parsed.data.idempotencyKey,
-            )
-          : disabledExternalMoveMutation(),
-      )();
-    }
-
-    if (request.params.name === "external_move_rollback") {
-      const parsed = ExternalMoveRollbackSchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
-      }
-      return externalRootsResult(() =>
-        externalMoveDestructiveAvailable() && externalMoveCoordinator
-          ? externalMoveCoordinator.rollback(
-              parsed.data.planId,
-              parsed.data.idempotencyKey,
-            )
-          : disabledExternalMoveMutation(),
-      )();
     }
 
     return withBackendRetry(

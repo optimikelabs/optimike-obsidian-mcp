@@ -34,33 +34,33 @@ Periodic Notes API extension is outside the core MCP contract.
 
 ## Capability Table
 
-| Capability                       | `live`                  | `hybrid` API available                  | `hybrid` API unavailable | `headless-readonly`     | `headless-guarded`               | `headless-filesystem`                                                    |
-| -------------------------------- | ----------------------- | --------------------------------------- | ------------------------ | ----------------------- | -------------------------------- | ------------------------------------------------------------------------ |
-| Start without `OBSIDIAN_API_KEY` | No                      | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| Start without Obsidian Desktop   | Yes; live tools wait    | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| Filesystem cache                 | Optional                | Yes                                     | Yes                      | Required                | Required                         | Required                                                                 |
-| Vault exclusion policy           | Yes for cache scans     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| List/read/search                 | REST/cache              | REST/cache                              | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                         |
-| Tasks list/query                 | Cache/filesystem        | Cache/filesystem                        | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                         |
-| Smart semantic search            | `.smart-env` + embedder | `.smart-env` + compatible embedder      | `.smart-env` + embedder  | `.smart-env` + embedder | `.smart-env` + embedder          | `.smart-env` + embedder                                                  |
-| Runtime status/maintenance       | Yes                     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                      |
-| External document roots          | Optional local config   | Optional local config                   | Optional local config    | Optional local config   | Optional local config            | Optional local config                                                    |
-| External reference scan/plan     | Local stdio             | Local stdio                             | Local stdio              | Local stdio             | Local stdio                      | Local stdio                                                              |
-| External move apply/rollback     | No                      | No                                      | No                       | No                      | No                               | Local stdio + `full` + move/root opt-ins                                 |
-| Format validation                | Markdown/Base/Canvas    | Markdown/Base/Canvas                    | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                     |
-| Update note                      | REST full tool          | REST full tool                          | No                       | No                      | Append/prepend only              | Append/prepend only                                                      |
-| Governed atomic note replacement | Atomic Write Bridge CAS | Same while API and Bridge are available | No                       | No                      | No                               | No                                                                       |
-| Search/replace                   | REST full tool          | REST full tool                          | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                         |
-| Frontmatter                      | REST full tool          | REST full tool                          | No                       | No                      | Single-key `set` only            | `set`, batch frontmatter dry-run/apply, and Bases rows                   |
-| Tags                             | REST full tool          | REST full tool                          | No                       | No                      | No                               | Frontmatter tags, inline tags, local index/audit, dry-run rename         |
-| Admin filesystem                 | No                      | No                                      | No                       | No                      | No                               | Archive, batch move, batch delete; dry-run by default                    |
-| Delete note                      | REST delete             | REST delete                             | No                       | No                      | No                               | Filesystem delete requiring `expectedHash` or `expectedMtime`            |
-| Move/rename                      | No                      | No                                      | No                       | No                      | No                               | Filesystem move requiring `expectedHash` or `expectedMtime`              |
-| Active file / UI / commands      | Via Desktop/plugin      | Via Desktop/plugins while API available | No                       | No                      | No                               | No                                                                       |
-| Bases list/schema/query          | Bases Bridge REST       | Bases Bridge REST                       | No                       | Local readonly fallback | Local readonly fallback          | Local fallback with simple filters (`eq`, `contains`, `in`, comparisons) |
-| Bases create/upsert              | Bases Bridge REST       | Bases Bridge REST                       | No                       | No                      | No                               | `.base` YAML create/config + rows -> frontmatter `set`                   |
-| JSON Canvas create/edit          | Governed graph CAS      | Same while API/Bridge are available     | No                       | No                      | No                               | Direct minimal `.canvas` create, text node, edge, validate               |
-| Obsidian plugin parity           | Desktop plugins         | Desktop plugins while API available     | No                       | No                      | No                               | No                                                                       |
+| Capability                       | `live`                  | `hybrid` API available                  | `hybrid` API unavailable | `headless-readonly`     | `headless-guarded`               | `headless-filesystem`                                                     |
+| -------------------------------- | ----------------------- | --------------------------------------- | ------------------------ | ----------------------- | -------------------------------- | ------------------------------------------------------------------------- |
+| Start without `OBSIDIAN_API_KEY` | No                      | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                       |
+| Start without Obsidian Desktop   | Yes; live tools wait    | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                       |
+| Filesystem cache                 | Optional                | Yes                                     | Yes                      | Required                | Required                         | Required                                                                  |
+| Vault exclusion policy           | Yes for cache scans     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                       |
+| List/read/search                 | REST/cache              | REST/cache                              | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                          |
+| Tasks list/query                 | Cache/filesystem        | Cache/filesystem                        | Cache/filesystem         | Cache/filesystem        | Cache/filesystem                 | Cache/filesystem                                                          |
+| Smart semantic search            | `.smart-env` + embedder | `.smart-env` + compatible embedder      | `.smart-env` + embedder  | `.smart-env` + embedder | `.smart-env` + embedder          | `.smart-env` + embedder                                                   |
+| Runtime status/maintenance       | Yes                     | Yes                                     | Yes                      | Yes                     | Yes                              | Yes                                                                       |
+| External document roots          | Optional local config   | Optional local config                   | Optional local config    | Optional local config   | Optional local config            | Optional local config                                                     |
+| External reference scan/plan     | Local stdio             | Local stdio                             | Local stdio              | Local stdio             | Local stdio                      | Local stdio                                                               |
+| External move apply/rollback     | No                      | No                                      | No                       | No                      | No                               | Disabled on every platform: `native_handle_relative_mutation_unavailable` |
+| Format validation                | Markdown/Base/Canvas    | Markdown/Base/Canvas                    | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                      |
+| Update note                      | REST full tool          | REST full tool                          | No                       | No                      | Append/prepend only              | Append/prepend only                                                       |
+| Governed atomic note replacement | Atomic Write Bridge CAS | Same while API and Bridge are available | No                       | No                      | No                               | No                                                                        |
+| Search/replace                   | REST full tool          | REST full tool                          | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                          |
+| Frontmatter                      | REST full tool          | REST full tool                          | No                       | No                      | Single-key `set` only            | `set`, batch frontmatter dry-run/apply, and Bases rows                    |
+| Tags                             | REST full tool          | REST full tool                          | No                       | No                      | No                               | Frontmatter tags, inline tags, local index/audit, dry-run rename          |
+| Admin filesystem                 | No                      | No                                      | No                       | No                      | No                               | Archive, batch move, batch delete; dry-run by default                     |
+| Delete note                      | REST delete             | REST delete                             | No                       | No                      | No                               | Filesystem delete requiring `expectedHash` or `expectedMtime`             |
+| Move/rename                      | No                      | No                                      | No                       | No                      | No                               | Filesystem move requiring `expectedHash` or `expectedMtime`               |
+| Active file / UI / commands      | Via Desktop/plugin      | Via Desktop/plugins while API available | No                       | No                      | No                               | No                                                                        |
+| Bases list/schema/query          | Bases Bridge REST       | Bases Bridge REST                       | No                       | Local readonly fallback | Local readonly fallback          | Local fallback with simple filters (`eq`, `contains`, `in`, comparisons)  |
+| Bases create/upsert              | Bases Bridge REST       | Bases Bridge REST                       | No                       | No                      | No                               | `.base` YAML create/config + rows -> frontmatter `set`                    |
+| JSON Canvas create/edit          | Governed graph CAS      | Same while API/Bridge are available     | No                       | No                      | No                               | Direct minimal `.canvas` create, text node, edge, validate                |
+| Obsidian plugin parity           | Desktop plugins         | Desktop plugins while API available     | No                       | No                      | No                               | No                                                                        |
 
 ## Tool Registry By Mode
 
@@ -73,10 +73,22 @@ closed.
 
 The direct HTTP server registers the five reference-integrity names only to
 return an explicit stdio-only denial. The local stdio proxy implements them.
-Scan, plan and status are read-only. Apply and rollback additionally require
-`MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, the root `move`
-capability, and a backend mode that exposes conditional
-`obsidian_search_replace`.
+Scan, plan and status are diagnostic/read-only. Apply, rollback and automatic
+mutating recovery are disabled on every platform until an audited native
+handle-relative mutation primitive exists. Runtime reports
+`native_handle_relative_mutation_unavailable`; write-mode, feature and root
+capability gates cannot override it. Redacted receipts, private SQLite
+snapshots, legacy/stale session-binding checks and exact-CAS evidence remain
+contractual.
+
+`external_runtime_status.externalMove` separates the two closed capability
+planes. Direct HTTP always reports `planningAvailable: false` with
+`planningUnavailableReason: "stdio_only"`; verified local stdio may report
+`planningAvailable: true`. In both transports `mutationAvailable: false` and
+`mutationUnavailableReason: "native_handle_relative_mutation_unavailable"`
+remain authoritative. If stdio cannot verify its local binding, it reports a
+redacted planning reason (`profile_required`, `target_unverified`, or
+`backend_attestation_unavailable`) without publishing a path or digest.
 
 Every mode also registers the 25 Operon contract tools:
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
@@ -125,8 +137,9 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
   disabled by default;
 - no runtime mode gains external-root upload, create, replace, delete or sync
   from this delivery profile;
-- the separate local-stdio move contract is one same-root regular file with an
-  absent target, exact ÉLYSIA reference repair and rollback.
+- the separate local-stdio move contract is diagnostic planning for one
+  same-root regular file; mutation, rollback and automatic recovery are disabled
+  on every platform.
 
 | Runtime mode                    | Tools registered                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -182,12 +195,11 @@ binding/SHA-256. They are absent from every headless mode.
 - HTTP artifact tickets require a real authenticated identity with
   `external:read` and never authorize external-root mutation. Direct HTTP also
   refuses reference scan, move plan/status, apply and rollback.
-- Automatic external-link repair requires an exact adjacent
+- A future automatic external-link repair requires an exact adjacent
   `external-ref:<rootId>::<percent-encoded-relative-path>` token. Any ambiguous,
-  historical or unsupported occurrence blocks apply.
-- External move uses a no-clobber same-volume hard-link/unlink sequence and
-  exact-hash note writes in `headless-filesystem` on a copied or dedicated
-  vault. Live apply fails closed until Local REST provides atomic conditional
-  whole-note writes.
+  historical or unsupported occurrence blocks that future mutation.
+- External move has no current mutation mechanism. The retired hard-link/unlink
+  design is historical only; a future audited native handle-relative primitive
+  must define no-clobber and exact-hash repair guarantees independently.
 - Governed whole-note replacement is live-only, preserves protected frontmatter, and treats recovery as exact-plan reconciliation/resumption rather than undo.
 - Headless write validation should create a new draft file in a sandbox folder. It should not edit existing notes in a real vault.

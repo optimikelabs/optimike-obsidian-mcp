@@ -24,18 +24,18 @@ terrain.
 
 ## Matrice des capacités
 
-| Capacité                                                        | Linux `headless-readonly` | Source requise                                              | Verdict du pilote                                                    |
-| --------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| Streamable HTTP, sessions, identité JWT, quotas et backpressure | Oui                       | Processus Optimike MCP                                      | Automatisé avec plusieurs clients concurrents distincts              |
-| Liveness, readiness et statut expurgé                           | Oui                       | Runtime HTTP et cache filesystem                            | Automatisé ; l’existence d’un chemin ne suffit pas à la readiness    |
-| Liste, lecture et recherche globale du coffre                   | Oui                       | Copie/coffre dédié et cache filesystem                      | Automatisé sur une fixture jetable                                   |
-| Tâches Markdown legacy                                          | Oui                       | Markdown/cache filesystem                                   | Lecture seule ; ce n’est pas le moteur natif de filtres Operon       |
-| Liste/requête Bases                                             | Oui                       | Fallback local `.base` et Markdown                          | Fallback local en lecture seule                                      |
-| Lecture de racines externes et handoff HTTP par ticket          | Optionnel                 | Allowlist explicite et scope `external:read`                | Couvert par les suites handoff et gateway séparées                   |
-| Écriture de notes, frontmatter, tags, Bases ou Canvas           | Non                       | Profil d’écriture guarded/filesystem                        | Les outils d’écriture ne doivent pas être enregistrés                |
-| Move externe et réparation des références                       | Non en HTTP direct        | Stdio local et `headless-filesystem` sur copie/coffre dédié | CAS, journal et rollback restent locaux                              |
-| Lectures/écritures Obsidian live                                | Non                       | Obsidian Desktop et Local REST API                          | Jamais déduit de la fraîcheur filesystem                             |
-| Filtres natifs et mutations Operon                              | Non                       | Bridge Operon vivant dans Obsidian                          | Un snapshot validé peut seulement fournir certaines lectures bornées |
+| Capacité                                                        | Linux `headless-readonly` | Source requise                               | Verdict du pilote                                                    |
+| --------------------------------------------------------------- | ------------------------- | -------------------------------------------- | -------------------------------------------------------------------- |
+| Streamable HTTP, sessions, identité JWT, quotas et backpressure | Oui                       | Processus Optimike MCP                       | Automatisé avec plusieurs clients concurrents distincts              |
+| Liveness, readiness et statut expurgé                           | Oui                       | Runtime HTTP et cache filesystem             | Automatisé ; l’existence d’un chemin ne suffit pas à la readiness    |
+| Liste, lecture et recherche globale du coffre                   | Oui                       | Copie/coffre dédié et cache filesystem       | Automatisé sur une fixture jetable                                   |
+| Tâches Markdown legacy                                          | Oui                       | Markdown/cache filesystem                    | Lecture seule ; ce n’est pas le moteur natif de filtres Operon       |
+| Liste/requête Bases                                             | Oui                       | Fallback local `.base` et Markdown           | Fallback local en lecture seule                                      |
+| Lecture de racines externes et handoff HTTP par ticket          | Optionnel                 | Allowlist explicite et scope `external:read` | Couvert par les suites handoff et gateway séparées                   |
+| Écriture de notes, frontmatter, tags, Bases ou Canvas           | Non                       | Profil d’écriture guarded/filesystem         | Les outils d’écriture ne doivent pas être enregistrés                |
+| Diagnostics de move externe                                     | Non en HTTP direct        | Stdio local                                  | Scan/plan/status seulement ; mutation désactivée partout             |
+| Lectures/écritures Obsidian live                                | Non                       | Obsidian Desktop et Local REST API           | Jamais déduit de la fraîcheur filesystem                             |
+| Filtres natifs et mutations Operon                              | Non                       | Bridge Operon vivant dans Obsidian           | Un snapshot validé peut seulement fournir certaines lectures bornées |
 
 ## Environnement du pilote
 

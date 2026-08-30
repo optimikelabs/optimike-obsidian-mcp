@@ -113,8 +113,9 @@ Capabilities are independent:
 - `readable` permits hashing and direct UTF-8 reads;
 - `handoff` permits one verified snapshot through a delivery mode supported by
   the active transport.
-- `move` permits planning one same-root regular-file move. Apply and rollback
-  still require the two process-level write gates and local stdio.
+- `move` permits planning one same-root regular-file move. It does not enable
+  apply, rollback, or automatic mutating recovery: those paths are disabled on
+  every platform until an audited native handle-relative primitive exists.
 
 Limit defaults and schema ceilings:
 
@@ -355,17 +356,26 @@ modification time, and SHA-256, not a local path or ticket.
 
 ## 8. Governed local move and reference repair
 
-The only external-root mutation is a local stdio transaction for one regular
-file. It is designed to preserve ÉLYSIA references, not to replace filesystem
-tools.
+The reference scan, move plan and move status are diagnostic/read-only on every
+platform. Move apply, rollback and automatic mutating recovery are disabled
+until an audited native handle-relative mutation primitive exists. The runtime
+reason is `native_handle_relative_mutation_unavailable`; setting write mode,
+the feature flag or the root `move` capability does not override this fail-closed
+boundary. Redacted receipts, private SQLite snapshots, legacy bindings, stale
+session/binding checks and exact-CAS evidence remain required contract data.
+
+The designed external-root mutation is a local stdio transaction for one
+regular file. It is currently disabled on every platform by the
+`native_handle_relative_mutation_unavailable` boundary; it is designed to
+preserve ÉLYSIA references, not to replace filesystem tools.
 
 The durable reference model is assembled at scan/plan time from `rootId`,
 root-relative path, source SHA-256, occurrence classification and source note
 path. The Markdown token serializes only the stable `rootId` plus relative path.
-Repair planning and apply are embedded in `external_move_plan` and
-`external_move_apply`; separate `external_links_repair_*` tools are
-intentionally absent so the file and note surfaces remain one compensating
-transaction.
+Repair planning is embedded in `external_move_plan`. The disabled
+`external_move_apply` surface remains only the future same-plan continuation
+boundary; separate `external_links_repair_*` tools are intentionally absent so
+an audited implementation cannot apply file and note changes independently.
 
 ### Add the stable identity next to the clickable link
 
@@ -378,27 +388,28 @@ root ID and the canonically percent-encoded root-relative path. `/` separates
 encoded path segments. The token neither exposes the configured root path nor
 authorizes access by itself.
 
-Only an exact token/link pair in the same active Markdown paragraph can be
-repaired automatically. Bare physical paths, mismatched or orphan tokens,
-multiple candidates, unsupported syntax and historical/example/archive/release
-sections are classified for manual review. One manual-review occurrence blocks
-apply.
+Only an exact token/link pair in the same active Markdown paragraph is eligible
+for a future automatic repair. Bare physical paths, mismatched or orphan
+tokens, multiple candidates, unsupported syntax and
+historical/example/archive/release sections are classified for manual review.
+One manual-review occurrence blocks any future mutation.
 
 The Markdown parser does not traverse fenced code and excludes YAML frontmatter.
 A free-form path, a YAML property or a path under an artifacts heading without
-the canonical pair is never auto-repaired. If it physically refers to the moved
-file, it remains manual review and blocks apply.
+the canonical pair is never auto-repaired. If it physically refers to the
+planned source, it remains manual review and blocks any future mutation.
 
-### Enable the pilot explicitly
+### Configure diagnostic planning explicitly
 
-Keep the ordinary examples above read-only. For one non-sensitive pilot root,
-add `move` deliberately:
+Keep the ordinary examples above read-only. For one non-sensitive diagnostic
+pilot root, add `move` deliberately:
 
 ```json
 "capabilities": ["visible", "readable", "handoff", "move"]
 ```
 
-Then configure the local stdio process:
+Then configure the local stdio process. These historical write gates do not
+enable mutation while the fail-closed boundary is active:
 
 ```text
 MCP_WRITE_MODE=full
@@ -413,7 +424,7 @@ coordinator, independently of `MCP_WRITE_MODE` and
 initialize a move journal. The profile is an operator label, not the
 destructive identity on its own: both the proxy and its already-running backend
 must be in `headless-filesystem` against the same configured, resolvable
-`OBSIDIAN_VAULT`. Before plan, apply and rollback, the
+`OBSIDIAN_VAULT`. Before plan, and before any future mutation, the
 backend re-reads its vault directory and compares its strict SHA-256 filesystem
 proof (device/inode) to an opaque 64-hex challenge supplied by the proxy. It
 returns only `destructiveVaultIdentityVerified: true|false` plus a scheme
@@ -422,8 +433,16 @@ closed on absence or mismatch.
 
 The proof and challenge never contain a path, URL, device or inode. The
 challenge is not logged, reflected, stored in a plan or placed in a receipt.
-`external_runtime_status` exposes only `identityVerified` and the source label.
-The journal persists its private derived binding only and is automatically
+`external_runtime_status.externalMove` exposes only the redacted binding facts:
+`planningAvailable` is `false` with `planningUnavailableReason: "stdio_only"`
+on direct HTTP; on local stdio it is true only after binding verification, or
+false with one of `profile_required`, `target_unverified`, or
+`backend_attestation_unavailable`. `mutationAvailable` is independently always
+false with `native_handle_relative_mutation_unavailable`. For older clients,
+stdio retains `unavailableReason` only as a compatibility alias of the planning
+reason; new callers must use the explicit planning fields. No path, digest,
+challenge, URL, device or inode is exposed. The journal persists its private
+derived binding only and is automatically
 namespaced by that binding. Attested startup, runtime status, scan and an
 unknown file-backed status do not create or open a writable journal. Plan opens
 the journal lazily. An existing receipt, including one still held in a WAL, is
@@ -445,55 +464,58 @@ status-only: it keeps its safe logical root/path fields, reports
 review. A malformed receipt (for example an absolute, traversal or backslash
 path, an unrecognised manual-review reason, or inconsistent hashes/tokens) is
 never normalized or rewritten by status: it becomes a wholly redacted no-write
-manual-review incident. Apply and rollback reject either kind before opening a
-destructive backend session or consulting a stored path.
+manual-review incident. The disabled apply and rollback routes return their
+stable unavailable result before opening a backend session or consulting a
+stored path.
 
-An apply or rollback also captures the proxy's current backend connection
-generation immediately after that proof. The complete destructive sequence is
-fenced to that one live session: a reconnect or backend swap at any point
-invalidates the operation. It does not continue, repair notes, compensate, or
-roll back through the replacement backend; the durable journal records a
+For a future audited mutation, the proxy must capture its current backend
+connection generation immediately after that proof. The destructive sequence
+must be fenced to that one live session: a reconnect or backend swap must
+invalidate the operation. It must not continue, repair notes, compensate, or
+roll back through the replacement backend; the durable journal must record a
 manual-recovery state instead. Public runtime status deliberately exposes no
 stable configuration fingerprint or other connection correlator.
 
-All three write grants are required for apply and rollback: full write mode,
-the feature flag and the root `move` capability. Scan, plan and status do not
-move the file, but remain stdio-only because the proxy owns the local root and
-journal.
+The historical three write grants (full write mode, the feature flag and the
+root `move` capability) are necessary evidence but cannot enable mutation while
+the native handle-relative primitive is unavailable. Scan, plan and status do
+not move the file, but remain stdio-only because the proxy owns the local root
+and journal.
 
-### Use the transaction
+### Diagnostic workflow
 
 1. Call `external_references_scan` with `rootId` and `relativePath`. The scan
    inventories the whole governed vault.
 2. Call `external_move_plan` with `sourceRelativePath`,
    `targetRelativePath` and a unique `idempotencyKey`. Planning always
    inventories the whole governed vault; it cannot be narrowed to a subfolder.
-3. Inspect `external_move_status`; proceed only when `readyToApply` is true and
-   `manualReview` is empty.
-4. Call `external_move_apply` with the returned `planId` and the same
-   `idempotencyKey`.
-5. Verify the target and repaired notes. If the verified result must be undone,
-   call `external_move_rollback` with the same identifiers before changing the
-   file or repaired notes.
+3. Inspect `external_move_status`; it remains diagnostic and reports
+   `readyToApply: false` with reason
+   `native_handle_relative_mutation_unavailable` while the fail-closed boundary
+   is active.
+4. Do not call `external_move_apply`; it cannot mutate on any platform.
+5. Do not call `external_move_rollback`; recovery is diagnostic/manual only.
 
 The target parent must already exist. Source and target must be regular-file
 paths in the same logical root and filesystem volume, and the target must be
-absent. Apply revalidates the source size, modification time and SHA-256. It
-uses a no-clobber hard-link/unlink sequence and fails closed when the filesystem
-cannot prove the move.
+absent. These are plan-time diagnostic conditions. A future audited mutation
+must revalidate source size, modification time and SHA-256; its native
+handle-relative primitive, not the retired hard-link/unlink design, must prove
+no-clobber behavior.
 
-Each note repair is planned with an expected SHA-256. Apply and rollback are
-currently restricted to `headless-filesystem` on a copied or dedicated vault,
-where that hash is enforced by the filesystem writer. Local REST API 4.1.7
-returns an ETag but does not enforce `If-Match` on whole-note writes, so live
-apply fails closed before moving the external file. The machine-local SQLite
+Each note repair is planned with an expected SHA-256 for future audited
+execution. Apply and rollback remain disabled; if enabled after the native
+handle-relative primitive is audited, they must stay restricted to
+`headless-filesystem` on a copied or dedicated vault, where that hash is
+enforced by the filesystem writer. Local REST API 4.1.7 returns an ETag but does
+not enforce `If-Match` on whole-note writes. The machine-local SQLite
 journal persists plan state and note preimages for compensation. Treat that
 journal as sensitive local data and never commit or share it.
 
-If apply fails after one or more note repairs, the coordinator restores the
-already-modified notes and moves the verified file back to its source. After a
-process interruption, rollback also recovers the durable post-move state and the
-verified window where source and target are hard links to the same object.
+The historic compensating design restored already-modified notes and moved a
+verified file back to its source. It is not executable now. A future primitive
+must specify and independently audit its compensation and post-interruption
+recovery semantics before any mutation can be enabled.
 
 Direct HTTP refuses scan, plan, status, apply and rollback. HTTP tickets remain
 read-only handoffs.
@@ -503,7 +525,7 @@ read-only handoffs.
 An existing pre-attestation journal at the old configured
 `MCP_EXTERNAL_MOVE_JOURNAL_PATH` is never adopted into a new binding. If it is
 still present, `external_move_status` can read its redacted receipt and marks it
-`legacyBinding: true`; apply and rollback refuse it. Keep the private journal
+`legacyBinding: true`; the disabled apply and rollback routes refuse it. Keep the private journal
 and its preimages for a manual incident recovery, then create a new plan with a
 new idempotency key after the backend/proxy target has been verified. Never copy
 or rename a legacy database to make it look authenticated.

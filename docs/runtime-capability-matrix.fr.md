@@ -40,7 +40,7 @@ bornées du contrôle initial.
 | Status/maintenance runtime             | Oui                          | Oui                                        | Oui                       | Oui                             | Oui                                 | Oui                                                                        |
 | Racines documentaires externes         | Config locale optionnelle    | Config locale optionnelle                  | Config locale optionnelle | Config locale optionnelle       | Config locale optionnelle           | Config locale optionnelle                                                  |
 | Scan/plan des références externes      | Stdio local                  | Stdio local                                | Stdio local               | Stdio local                     | Stdio local                         | Stdio local                                                                |
-| Apply/rollback de move externe         | Non                          | Non                                        | Non                       | Non                             | Non                                 | Stdio local + `full` + opt-ins move/racine                                 |
+| Apply/rollback de move externe         | Non                          | Non                                        | Non                       | Non                             | Non                                 | Désactivé partout : `native_handle_relative_mutation_unavailable`          |
 | Validation de format                   | Markdown/Base/Canvas         | Markdown/Base/Canvas                       | Markdown/Base/Canvas      | Markdown/Base/Canvas            | Markdown/Base/Canvas                | Markdown/Base/Canvas                                                       |
 | Update note                            | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | Append/prepend seulement            | Append/prepend seulement                                                   |
 | Remplacement atomique gouverné         | CAS Atomic Write Bridge      | Idem tant que l’API et le Bridge répondent | Non                       | Non                             | Non                                 | Non                                                                        |
@@ -67,9 +67,24 @@ fermées.
 
 Le serveur HTTP direct enregistre les cinq noms d’intégrité uniquement pour
 retourner un refus stdio-only explicite. Le proxy stdio local les implémente.
-Scan, plan et status sont read-only. Apply et rollback exigent en plus
-`MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, la capacité `move` de
-la racine et un backend qui expose `obsidian_search_replace` conditionnel.
+Scan, plan et status sont diagnostiques/read-only. Apply, rollback et toute
+récupération mutante automatique sont désactivés sur toutes les plateformes
+jusqu’à l’existence d’une primitive native handle-relative auditée. Le runtime
+retourne `native_handle_relative_mutation_unavailable` ; les gates de mode
+write, de feature et de capacité racine ne peuvent pas le contourner. Les
+reçus redacted, snapshots SQLite privés, contrôles de binding/session stale et
+preuves CAS exactes restent contractuels.
+
+`external_runtime_status.externalMove` sépare les deux plans de capacité
+fermés. Le HTTP direct retourne toujours `planningAvailable: false` avec
+`planningUnavailableReason: "stdio_only"` ; le stdio local vérifié peut
+retourner `planningAvailable: true`. Dans les deux transports,
+`mutationAvailable: false` et
+`mutationUnavailableReason: "native_handle_relative_mutation_unavailable"`
+restent autoritaires. Si stdio ne peut pas vérifier son binding local, il
+retourne une raison de planification expurgée (`profile_required`,
+`target_unverified` ou `backend_attestation_unavailable`) sans publier de
+chemin ni de digest.
 
 Tous les modes enregistrent aussi les 25 outils du contrat Operon :
 `operon_status`, `operon_get_configuration`, `operon_list_tasks`,
@@ -118,9 +133,9 @@ du mode runtime :
   à usage unique et désactivé par défaut ;
 - aucun mode runtime ne gagne d’upload, create, replace, delete ou sync sur une
   racine externe grâce à ce profil de livraison ;
-- le contrat de move stdio local séparé porte un fichier régulier dans la même
-  racine, une cible absente, la réparation exacte des références ÉLYSIA et le
-  rollback.
+- le contrat de move stdio local séparé porte une planification diagnostique
+  d’un fichier régulier dans la même racine ; mutation, rollback et récupération
+  automatique sont désactivés sur toutes les plateformes.
 
 | Mode runtime                     | Tools enregistrées                                                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -175,13 +190,12 @@ backend. Ils sont absents de tous les modes headless.
 - Les tickets HTTP d’artefacts exigent une vraie identité authentifiée avec
   `external:read` et n’autorisent jamais une mutation de racine externe. Le HTTP
   direct refuse aussi scan de références, plan/status de move, apply et rollback.
-- La réparation automatique exige le token adjacent exact
+- Une future réparation automatique exige le token adjacent exact
   `external-ref:<rootId>::<chemin-relatif-encode-en-pourcentage>`. Toute
-  occurrence ambiguë, historique ou non supportée bloque l’apply.
-- Le move externe emploie une séquence hard-link/unlink sans écrasement sur le
-  même volume et des écritures de notes préconditionnées par hash exact en
-  `headless-filesystem`, sur une copie ou un coffre dédié. L’apply live échoue
-  fermé tant que Local REST ne fournit pas d’écriture atomique conditionnelle
-  de note complète.
+  occurrence ambiguë, historique ou non supportée bloque cette future mutation.
+- Le move externe n’a aucun mécanisme de mutation actuel. Le design
+  hard-link/unlink retiré est uniquement historique ; une future primitive native
+  handle-relative auditée devra définir indépendamment les garanties de
+  non-écrasement et de réparation par hash exact.
 - Le remplacement gouverné de note complète est live-only ; `recover` est une réconciliation ou reprise du plan exact, jamais un undo.
 - Une validation d’écriture headless doit créer un nouveau brouillon dans un dossier sandbox. Elle ne doit pas modifier des notes existantes d’un vrai vault.

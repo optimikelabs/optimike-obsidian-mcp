@@ -303,26 +303,27 @@ machine-local JSON configuration.
   - optional `http_ticket` for an authenticated direct HTTP client.
 - `external_references_scan`: stdio-only inventory of exact, ambiguous and
   historical ÉLYSIA references to one external file.
-- `external_move_plan`: persist a verified same-root regular-file move plan and
-  exact note repairs.
+- `external_move_plan`: persist a verified diagnostic same-root regular-file
+  move plan and future-repair evidence.
 - `external_move_status`: return the durable, redacted plan receipt.
-- `external_move_apply`: execute an eligible plan and its conditional note
-  repairs.
-- `external_move_rollback`: restore an applied move and its note repairs while
-  every stored precondition still holds.
+- `external_move_apply`: diagnostic-only registration; mutation is disabled on
+  every platform until an audited native handle-relative primitive exists.
+- `external_move_rollback`: diagnostic-only registration; mutating recovery is
+  disabled on every platform under the same boundary.
 
 The reference record assembled by scan and plan contains the logical `rootId`,
 root-relative path, source SHA-256, occurrence classification and source note
 path. Only `rootId` plus relative path are serialized in the stable
 `external-ref:` token. Exact repairs are intentionally embedded in
-`external_move_plan` and `external_move_apply`; no standalone link-repair apply
+`external_move_plan`; the disabled `external_move_apply` remains only the
+future same-plan continuation boundary, and no standalone link-repair apply
 surface exists.
 
-Automatic repair accepts one exact Markdown `file:///` link paired with one
-adjacent inline `external-ref:` token. YAML frontmatter, fenced code, historical
-or example sections, free-form paths and unsupported declarations are never
-auto-repaired. Relevant unsupported or ambiguous physical-path occurrences are
-returned for manual review and block apply.
+A future automatic repair requires one exact Markdown `file:///` link paired
+with one adjacent inline `external-ref:` token. YAML frontmatter, fenced code,
+historical or example sections, free-form paths and unsupported declarations are
+never auto-repaired. Relevant unsupported or ambiguous physical-path occurrences
+are returned for manual review and block any future mutation.
 
 The core MCP does not parse PDF or Office files. Handoff requires both
 `readable` and `handoff`. HTTP ticket delivery is disabled by default and must be
@@ -336,13 +337,13 @@ Every external-root tool invoked through direct HTTP requires
 `external:read`. Local stdio keeps its process-local trust model. Direct HTTP
 explicitly refuses the five reference-integrity operations.
 
-Neither handoff mode authorizes mutation. Local move apply and rollback instead
-require `MCP_WRITE_MODE=full`, `MCP_EXTERNAL_MOVE_ENABLED=true`, a root carrying
-`move`, an unambiguous canonical `file:///` plus
-`external-ref:<rootId>::<encoded-relative-path>` pair, and unchanged source and
-note preconditions. There is no upload, create, replace, directory/cross-root
-move, overwrite, delete or sync. The client owns binary extraction and must
-verify the returned size and SHA-256.
+Neither handoff mode authorizes mutation. Scan, plan and status remain
+diagnostic; apply, rollback and automatic mutating recovery are disabled on
+every platform until an audited native handle-relative primitive exists. The
+runtime reason is `native_handle_relative_mutation_unavailable`. Redacted
+receipts, private SQLite snapshots, legacy/stale session-binding checks and
+exact-CAS evidence remain in the contract. There is no upload, create, replace,
+directory/cross-root move, overwrite, delete or sync.
 See [External document roots — setup and operations](external-roots-setup.md),
 [ADR — External document roots](adr/ADR-External-Document-Roots.md), and
 [ADR — Governed HTTP delivery](adr/ADR-HTTP-External-Artifact-Delivery.md). The

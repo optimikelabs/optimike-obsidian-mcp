@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   ExternalRootError,
+  externalMoveMutationUnavailableError,
+  moveMutationStatus,
   type ExternalMoveSnapshot,
   type ExternalRootErrorCode,
   ExternalRootsService,
@@ -138,13 +140,6 @@ export function projectExternalMovePlanForStatus(
   // changed file/note, invalid capability or non-verifiable placement needs a
   // human decision first; advertising rollback for those receipts would invite
   // an LLM to repeat an operation that has already failed closed.
-  const manualIncidentRequired = recoveryErrors.some(
-    recoveryErrorRequiresManualIncidentReview,
-  );
-  const manualReviewRequired =
-    plan.manualReview.length > 0 || manualIncidentRequired;
-  const applyActionAvailable =
-    plan.status === "planned" || plan.status === "rolled_back";
   const failureCode = destructiveBindingUnavailable
     ? "external_root_non_verifiable"
     : automaticRecoveryBlocked
@@ -173,36 +168,16 @@ export function projectExternalMovePlanForStatus(
       expectedSha256: repair.expectedSha256,
     })),
     manualReview: plan.manualReview,
-    readyToApply:
-      !automaticRecoveryBlocked &&
-      !manualReviewRequired &&
-      applyActionAvailable,
+    // Native handle-relative mutation is not available on any supported
+    // platform. Plans remain diagnostic receipts only: never advertise a
+    // continuation that could cause a client to retry a filesystem mutation.
+    readyToApply: false,
+    ...moveMutationStatus(),
     recoveryRequired,
     recoveryErrors,
     appliedRepairCount: plan.appliedRepairPaths?.length ?? 0,
     restoredRepairCount: plan.restoredRepairPaths?.length ?? 0,
-    nextAction:
-      automaticRecoveryBlocked || manualReviewRequired
-        ? "manual_review"
-        : plan.status === "planned" || plan.status === "rolled_back"
-          ? "apply"
-          : plan.status === "applied"
-            ? "rollback"
-            : plan.status === "failed_compensated"
-              ? "rollback"
-              : recoveryRequired ||
-                  [
-                    "applying",
-                    "applying_file",
-                    "file_moved",
-                    "applying_repairs",
-                    "rolling_back",
-                    "rolling_back_repairs",
-                    "rolling_back_file",
-                    "failed",
-                  ].includes(plan.status)
-                ? "rollback"
-                : "none",
+    nextAction: "none",
     ...(failureCode
       ? {
           failureCode,
@@ -272,11 +247,12 @@ function projectUnsafeStoredPlan(
       },
     ],
     readyToApply: false,
+    ...moveMutationStatus(),
     recoveryRequired: true,
     recoveryErrors,
     appliedRepairCount: 0,
     restoredRepairCount: 0,
-    nextAction: "manual_review",
+    nextAction: "none",
     failureCode: "external_root_non_verifiable",
     failure: publicFailureMessage("external_root_non_verifiable"),
   };
@@ -727,6 +703,10 @@ function externalFailure(error: unknown): ExternalRootError {
   );
 }
 
+function assertExternalMoveMutationUnavailable(): void {
+  throw externalMoveMutationUnavailableError();
+}
+
 function isExternalMoveConcurrentStateChange(error: unknown): boolean {
   return (
     error instanceof ExternalMoveJournalConcurrencyError ||
@@ -1086,6 +1066,8 @@ export class ExternalMoveCoordinator {
     idempotencyKey: string,
     options: { allowCompensatedReapply?: boolean } = {},
   ): Promise<Record<string, unknown>> {
+    assertExternalMoveMutationUnavailable();
+
     let observed = this.requireObservedPlan(planId, idempotencyKey);
     let plan = observed.plan;
     if (plan.status === "applied") return this.status(planId, plan);
@@ -1216,6 +1198,8 @@ export class ExternalMoveCoordinator {
     planId: string,
     idempotencyKey: string,
   ): Promise<Record<string, unknown>> {
+    assertExternalMoveMutationUnavailable();
+
     let observed = this.requireObservedPlan(planId, idempotencyKey);
     let plan = observed.plan;
     if (plan.status === "rolled_back") return this.status(planId, plan);

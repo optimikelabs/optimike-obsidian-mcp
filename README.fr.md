@@ -17,7 +17,7 @@ Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouver
 | Tâches                  | Markdown Tasks-compatible + 25 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
 | Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` + embedding Ollama ou compatible OpenAI |
 | Runtime                 | Cache SQLite partagé, santé, maintenance et modes dégradés                      | Filesystem local                                     |
-| Documents externes      | Lectures/handoff default-deny + move local opt-in                               | Allowlist de racines                                 |
+| Documents externes      | Lectures/handoff default-deny + diagnostic de move local                        | Allowlist de racines                                 |
 | Administration headless | Opérations métadonnées/filesystem bornées                                       | Copie ou coffre dédié                                |
 
 Le registre canonique des outils est documenté dans [Surface des outils](docs/obsidian_mcp_tools_spec.md).
@@ -145,7 +145,16 @@ Les racines externes sont désactivées par défaut. Elles forment un courtier d
 - le HTTP direct authentifié peut retourner un `http_ticket` opt-in, lié à l’identité et à usage unique ;
 - aucun mode de livraison n’autorise une mutation ni ne révèle le chemin source physique.
 
-Une transaction séparée en stdio local peut déplacer un fichier régulier dans une même racine configurée et réparer les références ÉLYSIA exactes. Elle exige inventaire, plan durable, gates d’écriture explicites, préconditions hash/CAS, journal et rollback. Elle n’est pas exposée en HTTP direct et n’ajoute pas de create, replace, delete, upload ou sync générique.
+Le stdio local expose `external_references_scan`, `external_move_plan` et
+`external_move_status` pour le diagnostic d’un déplacement de fichier régulier
+dans une même racine configurée. `external_move_apply`,
+`external_move_rollback` et toute récupération mutante automatique sont
+désactivés sur toutes les plateformes avec la raison
+`native_handle_relative_mutation_unavailable`; les gates d’écriture historiques
+ne peuvent pas les activer. Les reçus redacted, le journal privé et les preuves
+hash/CAS restent conservés pour une future primitive auditée. Cette surface n’est
+pas exposée en HTTP direct et n’ajoute pas de create, replace, delete, upload ou
+sync générique.
 
 Le cœur MCP n’embarque pas de moteur PDF, Office ou OCR. Le client appelant assure l’extraction binaire et vérifie taille et SHA-256.
 

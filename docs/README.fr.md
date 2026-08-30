@@ -13,7 +13,7 @@ question.
 | ------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Nouvel utilisateur local        | [Présentation](../README.fr.md)                           | [Profils d’outils](tool-surface-profiles.fr.md), [Exploitation](../OPERATIONS.fr.md)                                                                    |
 | Opérateur Codex ou agent local  | [Profils d’outils](tool-surface-profiles.fr.md)           | [Exploitation](../OPERATIONS.fr.md), [Routage agentique](mcp-routing-guide.fr.md)                                                                       |
-| Opérateur headless/serveur      | [Profil serveur headless](headless-server-profile.fr.md)  | [Matrice runtime](runtime-capability-matrix.fr.md), [Profils d’outils](tool-surface-profiles.fr.md), [Sécurité](../SECURITY.fr.md)                       |
+| Opérateur headless/serveur      | [Profil serveur headless](headless-server-profile.fr.md)  | [Matrice runtime](runtime-capability-matrix.fr.md), [Profils d’outils](tool-surface-profiles.fr.md), [Sécurité](../SECURITY.fr.md)                      |
 | Intégrateur d’une gateway       | [Compatibilité gateways OSS](gateway-compatibility.fr.md) | [Sécurité HTTP](http-multiclient-security.fr.md), [Backpressure](http-concurrency-backpressure.fr.md)                                                   |
 | Intégrateur d’un client MCP     | [Profils d’outils](tool-surface-profiles.fr.md)           | [Surface des outils](obsidian_mcp_tools_spec.md), [Matrice runtime](runtime-capability-matrix.fr.md)                                                    |
 | Opérateur de documents externes | [Configuration des racines](external-roots-setup.fr.md)   | [ADR racines externes](adr/ADR-External-Document-Roots.md), [ADR intégrité des références](adr/ADR-External-Reference-Integrity.fr.md)                  |
@@ -73,7 +73,7 @@ Formules Base gouvernées source-preserving : [contrat P2](governed-base-formula
 - configuration et parcours clients : [Configuration des racines](external-roots-setup.fr.md) ;
 - routage agentique : [Guide de routage](mcp-routing-guide.fr.md#routage-documentaire-externe) ;
 - frontière de livraison HTTP : [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md) ;
-- move local, réparation exacte des liens et rollback :
+- planification diagnostique du move local, preuves redacted et mutation différée :
   [ADR intégrité des références](adr/ADR-External-Reference-Integrity.fr.md).
 
 ## Propriété documentaire

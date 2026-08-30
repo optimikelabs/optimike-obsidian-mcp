@@ -1,6 +1,6 @@
 # ADR — Governed external-file move and ÉLYSIA reference integrity
 
-- Status: accepted and implemented for a local stdio pilot
+- Status: accepted; diagnostic local-stdio surfaces implemented, mutation deferred
 - Scope: one regular file inside one configured local external root
 - French version: [ADR-External-Reference-Integrity.fr.md](ADR-External-Reference-Integrity.fr.md)
 - Amends: [External document roots](ADR-External-Document-Roots.md)
@@ -13,8 +13,9 @@ handoff only. A local harness can already move a file, but that operation alone
 can silently break the Obsidian notes that explain the file's role.
 
 The useful product capability is therefore not a generic file manager. It is a
-bounded transaction that inventories ÉLYSIA references, plans one same-root file
-move, repairs only exact references, proves the result and can roll it back.
+bounded future transaction that inventories ÉLYSIA references, plans one
+same-root file move, repairs only exact references, proves the result and can
+roll it back.
 
 ## Decision
 
@@ -29,22 +30,28 @@ Add a local-stdio-only workflow:
    receipts remain inspectable status-only; malformed stored paths, tokens,
    hashes or review reasons are wholly redacted and can never drive a backend
    read or write.
-4. `external_move_apply` moves the file and conditionally repairs exact notes.
-5. `external_move_rollback` restores both surfaces when every precondition still
-   holds.
+4. `external_move_apply` is registered for diagnostics but is disabled.
+5. `external_move_rollback` is registered for diagnostics but is disabled.
 
-Reference repair is deliberately part of `external_move_plan` and
-`external_move_apply`; there are no separate `external_links_repair_plan` or
-`external_links_repair_apply` tools. The file move and its exact note repairs
-form one compensating transaction, so a client cannot apply one surface while
-silently leaving the other behind.
+Reference-repair planning is deliberately part of `external_move_plan`; the
+disabled `external_move_apply` remains the future same-plan continuation
+boundary. There are no separate `external_links_repair_plan` or
+`external_links_repair_apply` tools, so an audited implementation cannot apply
+one surface while silently leaving the other behind.
 
-Planning and scanning are read-only. Apply and rollback require all three
-positive gates:
+Scanning, planning and status are diagnostic/read-only. Apply, rollback and
+automatic mutating recovery are disabled on every platform until an audited
+native handle-relative mutation primitive exists. Runtime reports the stable
+reason `native_handle_relative_mutation_unavailable`; the historical write
+gates below are not sufficient to enable mutation:
 
 - `MCP_WRITE_MODE=full`;
 - `MCP_EXTERNAL_MOVE_ENABLED=true`;
 - the selected root declares the `move` capability.
+
+The disabled surface still preserves path-redacted receipts, private SQLite
+snapshots, legacy-binding and stale session/binding checks, and exact-CAS
+preconditions as evidence for a future audited primitive.
 
 The root capability never implies upload, create, replace, delete or sync.
 
@@ -76,11 +83,11 @@ time, the complete reference record also carries the source SHA-256, occurrence
 classification and source note path. Hashes and note paths are mutable evidence,
 not durable identity, so they are not embedded in the token.
 
-Only an exact token/link pair in an active Markdown paragraph is automatically
-repairable. Bare paths, unmatched tokens, mismatched pairs, multiple candidate
-links, unsupported syntax, and references under history, archive, example,
-release-note or changelog headings require manual review. Any manual-review
-occurrence blocks apply.
+Only an exact token/link pair in an active Markdown paragraph is eligible for a
+future automatic repair. Bare paths, unmatched tokens, mismatched pairs,
+multiple candidate links, unsupported syntax, and references under history,
+archive, example, release-note or changelog headings require manual review. Any
+manual-review occurrence blocks any future mutation.
 
 The scanner uses a Markdown AST. Fenced code is not traversed and YAML
 frontmatter is excluded. A free-form path, a YAML property, or a path merely
@@ -88,9 +95,9 @@ placed under an artifacts heading is not promoted to a canonical reference.
 Relevant physical-path occurrences and other unsupported forms are reported for
 manual review and are never rewritten by guessing.
 
-## Filesystem transaction
+## Future filesystem transaction requirements
 
-The V1 move contract is intentionally narrow:
+Any future audited move contract must remain intentionally narrow:
 
 - one regular file only;
 - source and target inside the same logical root and filesystem volume;
@@ -98,23 +105,24 @@ The V1 move contract is intentionally narrow:
 - target does not exist;
 - include/exclude policy accepts both paths;
 - links and junctions are not followed;
-- source size, modification time and SHA-256 still match the plan.
+- source size, modification time and SHA-256 still match the plan at execution.
 
-Apply uses a no-clobber hard-link/unlink sequence. It creates the target link,
-proves that source and target identify the same filesystem object, then removes
-the source. Filesystems that cannot provide these guarantees fail closed.
+The former hard-link/unlink sequence is retired and is not executable. A future
+native handle-relative primitive must prove no-clobber behavior and fail closed
+when that proof cannot be established.
 
 ## Vault repair and concurrency
 
 Each planned note repair stores its exact before/after content and expected
-SHA-256. Apply re-reads every note before moving the file. Apply and rollback
-are restricted to `headless-filesystem` on a copied or dedicated vault, where
-the existing exact-hash precondition is enforced. Local REST API 4.1.7 exposes
-an ETag but does not enforce `If-Match` on whole-note writes; live apply
-therefore fails closed before the external file is moved.
+SHA-256 as future evidence. An audited implementation must re-read every note
+before moving the file and keep any exact-hash writer restricted to
+`headless-filesystem` on a copied or dedicated vault. Local REST API 4.1.7
+exposes an ETag but does not enforce `If-Match` on whole-note writes; it cannot
+be used for a live external mutation.
 
-If a repair fails after the file move, the coordinator compensates completed
-note repairs and rolls the file back when the verified state still permits it.
+The former coordinator compensation is historic evidence, not a current
+capability. A future primitive must define and independently audit compensation
+and post-interruption recovery before mutation can be enabled.
 
 ## Journal and recovery
 
@@ -129,15 +137,15 @@ committed, shared, or attached to public diagnostics. Public tool results expose
 logical root IDs, relative paths, hashes, note paths and state, never physical
 root paths.
 
-The idempotency key is bound to one source/target request. Replaying a completed
-apply or rollback returns the recorded state; reusing the key for another move
-is rejected.
+The idempotency key is bound to one source/target request. Replaying plan/status
+returns the recorded receipt; reusing the key for another move is rejected. The
+disabled apply and rollback routes never continue a stored plan.
 
 ## Transport boundary
 
-The stdio proxy owns external-root configuration, the physical move and the
-journal. The backend only supplies vault search/read and conditional note
-replacement.
+The stdio proxy owns external-root configuration and the journal. It does not
+perform a physical move. The backend only supplies vault search/read for the
+diagnostic surfaces.
 
 Direct HTTP registers the tool names for discoverability but rejects scan,
 plan, status, apply and rollback. HTTP tickets remain read-only downloads and
@@ -159,8 +167,9 @@ These capabilities require demonstrated ÉLYSIA value and a separate decision.
 
 ## Verification
 
-The regression suite must cover canonical parsing, excluded/ambiguous
-references, target collision, changed sources, changed notes, no-clobber move,
-failure after a subset of note repairs, compensation, rollback, both durable
-restart states around the hard-link/unlink boundary, HTTP denial and path
-redaction on Windows and Linux where applicable.
+The regression suite covers canonical parsing, excluded/ambiguous references,
+target collision, changed sources, changed notes, stale/legacy receipt
+projection, HTTP denial, all-platform disabled apply/rollback/recovery, and
+path redaction on Windows and Linux where applicable. A future mutation proposal
+must add deterministic no-clobber, compensation and interruption tests for its
+own primitive.

@@ -12,10 +12,10 @@ French operator guides are linked alongside their English equivalents.
 | I am…                           | Start here                                            | Then use                                                                                                                                             |
 | ------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A new local user                | [Product overview](../README.md)                      | [Tool Surface Profiles](tool-surface-profiles.md), [Operations](../OPERATIONS.md)                                                                    |
-| A Codex or local-agent operator | [Tool Surface Profiles](tool-surface-profiles.md)     | [Operations](../OPERATIONS.md), [Agent routing](mcp-routing-guide.md)                                                                                 |
-| A headless/server operator      | [Headless Server Profile](headless-server-profile.md) | [Runtime Matrix](runtime-capability-matrix.md), [Tool Surface Profiles](tool-surface-profiles.md), [Security](../SECURITY.md)                          |
+| A Codex or local-agent operator | [Tool Surface Profiles](tool-surface-profiles.md)     | [Operations](../OPERATIONS.md), [Agent routing](mcp-routing-guide.md)                                                                                |
+| A headless/server operator      | [Headless Server Profile](headless-server-profile.md) | [Runtime Matrix](runtime-capability-matrix.md), [Tool Surface Profiles](tool-surface-profiles.md), [Security](../SECURITY.md)                        |
 | A gateway integrator            | [OSS Gateway Compatibility](gateway-compatibility.md) | [HTTP Security](http-multiclient-security.md), [Backpressure](http-concurrency-backpressure.md)                                                      |
-| An MCP client integrator        | [Tool Surface Profiles](tool-surface-profiles.md)     | [Tool Surface](obsidian_mcp_tools_spec.md), [Runtime Matrix](runtime-capability-matrix.md)                                                            |
+| An MCP client integrator        | [Tool Surface Profiles](tool-surface-profiles.md)     | [Tool Surface](obsidian_mcp_tools_spec.md), [Runtime Matrix](runtime-capability-matrix.md)                                                           |
 | An external-document operator   | [External Roots Setup](external-roots-setup.md)       | [External Roots ADR](adr/ADR-External-Document-Roots.md), [Reference Integrity ADR](adr/ADR-External-Reference-Integrity.md)                         |
 | A Tasks/Operon operator         | [Operon MCP Contract](operon-mcp-contract.md)         | [CLI/API audit](operon-cli-audit.md), [Local Validation](operon-local-validation.md), [public ÉLYSIA profile](../profiles/elysia-tasks/README.fr.md) |
 | A contributor or reviewer       | [Architecture decisions](adr/README.md)               | [Repository tree](tree.md), plugin READMEs                                                                                                           |
@@ -73,7 +73,7 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 - configuration and client workflows: [External Roots Setup](external-roots-setup.md);
 - semantic routing for agents: [MCP Routing Guide](mcp-routing-guide.md#external-document-routing);
 - HTTP delivery boundary: [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md);
-- local move, exact link repair and rollback:
+- diagnostic local-move planning, redacted evidence and deferred mutation:
   [Reference Integrity ADR](adr/ADR-External-Reference-Integrity.md).
 
 ## Documentation ownership

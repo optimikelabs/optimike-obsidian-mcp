@@ -23,18 +23,18 @@ server contract; a real Linux host remains an operational field gate.
 
 ## Capability matrix
 
-| Capability                                                       | Linux `headless-readonly` | Required source                                                    | Pilot statement                                     |
-| ---------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ | --------------------------------------------------- |
-| Streamable HTTP, sessions, JWT identity, quotas and backpressure | Yes                       | Optimike MCP process                                               | Automated with distinct concurrent clients          |
-| Liveness, readiness and sanitized status                         | Yes                       | HTTP runtime and filesystem cache                                  | Automated; path existence alone is not readiness    |
-| Vault list, read and global search                               | Yes                       | Copied/dedicated vault plus filesystem cache                       | Automated on a disposable fixture                   |
-| Legacy Markdown tasks                                            | Yes                       | Markdown/filesystem cache                                          | Read-only; not the native Operon filter engine      |
-| Bases list/query                                                 | Yes                       | Local `.base` and Markdown fallback                                | Read-only local fallback                            |
-| External-root read and HTTP ticket handoff                       | Optional                  | Explicit root allowlist and `external:read`                        | Covered by the separate handoff and gateway suites  |
-| Note, frontmatter, tag, Bases or Canvas writes                   | No                        | Guarded/filesystem write profile                                   | Write tools must not be registered in this pilot    |
-| External move and reference repair                               | No over direct HTTP       | Local stdio plus `headless-filesystem` on a copied/dedicated vault | CAS, journal and rollback stay local                |
-| Live Obsidian reads/writes                                       | No                        | Obsidian Desktop and Local REST API                                | Never inferred from filesystem freshness            |
-| Operon native filters and mutations                              | No                        | Live Obsidian Operon Bridge                                        | A validated snapshot may support bounded reads only |
+| Capability                                                       | Linux `headless-readonly` | Required source                              | Pilot statement                                        |
+| ---------------------------------------------------------------- | ------------------------- | -------------------------------------------- | ------------------------------------------------------ |
+| Streamable HTTP, sessions, JWT identity, quotas and backpressure | Yes                       | Optimike MCP process                         | Automated with distinct concurrent clients             |
+| Liveness, readiness and sanitized status                         | Yes                       | HTTP runtime and filesystem cache            | Automated; path existence alone is not readiness       |
+| Vault list, read and global search                               | Yes                       | Copied/dedicated vault plus filesystem cache | Automated on a disposable fixture                      |
+| Legacy Markdown tasks                                            | Yes                       | Markdown/filesystem cache                    | Read-only; not the native Operon filter engine         |
+| Bases list/query                                                 | Yes                       | Local `.base` and Markdown fallback          | Read-only local fallback                               |
+| External-root read and HTTP ticket handoff                       | Optional                  | Explicit root allowlist and `external:read`  | Covered by the separate handoff and gateway suites     |
+| Note, frontmatter, tag, Bases or Canvas writes                   | No                        | Guarded/filesystem write profile             | Write tools must not be registered in this pilot       |
+| External move diagnostics                                        | No over direct HTTP       | Local stdio                                  | Scan/plan/status only; mutation is disabled everywhere |
+| Live Obsidian reads/writes                                       | No                        | Obsidian Desktop and Local REST API          | Never inferred from filesystem freshness               |
+| Operon native filters and mutations                              | No                        | Live Obsidian Operon Bridge                  | A validated snapshot may support bounded reads only    |
 
 ## Pilot environment
 

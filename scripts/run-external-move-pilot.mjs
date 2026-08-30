@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,6 +33,38 @@ function jsonOf(result) {
     result.content?.map((item) => item.text ?? "").join("\n") ?? "{}";
   if (result.isError) throw new Error(text);
   return JSON.parse(text);
+}
+
+function errorJsonOf(result) {
+  assert.equal(result.isError, true, JSON.stringify(result));
+  return JSON.parse(
+    result.content?.map((item) => item.text ?? "").join("\n") ?? "{}",
+  );
+}
+
+async function snapshotJournalFamily(journalPath) {
+  const directory = path.dirname(journalPath);
+  const extension = path.extname(journalPath);
+  const stem = path.basename(journalPath, extension);
+  const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const journalName = new RegExp(
+    `^${escapeRegex(stem)}(?:\\.[a-f0-9]{24})?${escapeRegex(extension)}(?:-(?:shm|wal))?$`,
+    "u",
+  );
+  const names = (await readdir(directory))
+    .filter((name) => journalName.test(name))
+    .sort((left, right) => left.localeCompare(right));
+  return Promise.all(
+    names.map(async (name) => {
+      const filePath = path.join(directory, name);
+      const metadata = await stat(filePath, { bigint: true });
+      return {
+        name,
+        bytes: Buffer.from(await readFile(filePath)).toString("base64"),
+        size: metadata.size.toString(),
+      };
+    }),
+  );
 }
 
 async function unusedPort() {
@@ -79,7 +111,11 @@ async function exists(filePath) {
 
 const vault = path.resolve(process.env.PILOT_VAULT);
 const rootsFile = path.resolve(process.env.PILOT_ROOTS_FILE);
-const notePath = process.env.PILOT_NOTE.replaceAll("\\", "/");
+const noteInput = process.env.PILOT_NOTE;
+const notePath = noteInput.replaceAll("\\", "/");
+const noteFilePath = path.isAbsolute(noteInput)
+  ? path.resolve(noteInput)
+  : path.join(vault, notePath);
 const rootConfig = JSON.parse(await readFile(rootsFile, "utf8"));
 const root = rootConfig.roots.find(
   (candidate) => candidate.id === process.env.PILOT_ROOT_ID,
@@ -90,6 +126,7 @@ const sourcePath = path.join(rootPath, process.env.PILOT_SOURCE);
 const targetPath = path.join(rootPath, process.env.PILOT_TARGET);
 assert.equal(await exists(sourcePath), true, "Pilot source must exist.");
 assert.equal(await exists(targetPath), false, "Pilot target must be absent.");
+assert.equal(await exists(noteFilePath), true, "Pilot note must exist.");
 
 const port = await unusedPort();
 const commonEnv = {
@@ -146,6 +183,8 @@ try {
     () => backendOutput,
   );
   await client.connect(transport);
+  const sourceBefore = await readFile(sourcePath);
+  const noteBefore = await readFile(noteFilePath);
   const key = `pilot-${Date.now()}`;
   const scan = jsonOf(
     await client.callTool({
@@ -169,9 +208,15 @@ try {
   );
   assert.equal(
     plan.readyToApply,
-    true,
-    `Pilot plan was not ready: ${JSON.stringify(plan)}`,
+    false,
+    `External moves must remain fail-closed: ${JSON.stringify(plan)}`,
   );
+  assert.equal(plan.mutationAvailable, false);
+  assert.equal(
+    plan.mutationUnavailableReason,
+    "native_handle_relative_mutation_unavailable",
+  );
+  assert.equal(plan.nextAction, "none");
   assert.equal(
     plan.manualReview.length,
     0,
@@ -183,25 +228,58 @@ try {
     ),
   );
 
-  const applied = jsonOf(
+  const statusBeforeMutation = jsonOf(
+    await client.callTool({
+      name: "external_move_status",
+      arguments: { planId: plan.planId },
+    }),
+  );
+  assert.equal(statusBeforeMutation.status, "planned");
+  assert.equal(statusBeforeMutation.mutationAvailable, false);
+  assert.equal(
+    statusBeforeMutation.mutationUnavailableReason,
+    "native_handle_relative_mutation_unavailable",
+  );
+  const journalBeforeMutation = await snapshotJournalFamily(
+    path.resolve(process.env.PILOT_JOURNAL),
+  );
+  assert.ok(journalBeforeMutation.length > 0, "Pilot plan must be durable.");
+
+  const applyError = errorJsonOf(
     await client.callTool({
       name: "external_move_apply",
       arguments: { planId: plan.planId, idempotencyKey: key },
     }),
   );
-  assert.equal(applied.status, "applied");
-  assert.equal(await exists(sourcePath), false);
-  assert.equal(await exists(targetPath), true);
+  assert.equal(applyError.error, "unsupported");
 
-  const rolledBack = jsonOf(
+  const rollbackError = errorJsonOf(
     await client.callTool({
       name: "external_move_rollback",
       arguments: { planId: plan.planId, idempotencyKey: key },
     }),
   );
-  assert.equal(rolledBack.status, "rolled_back");
-  assert.equal(await exists(sourcePath), true);
+  assert.equal(rollbackError.error, "unsupported");
+  assert.deepEqual(await readFile(sourcePath), sourceBefore);
   assert.equal(await exists(targetPath), false);
+  assert.deepEqual(await readFile(noteFilePath), noteBefore);
+  assert.deepEqual(
+    await snapshotJournalFamily(path.resolve(process.env.PILOT_JOURNAL)),
+    journalBeforeMutation,
+    "Apply/rollback must not mutate the durable journal or sidecars.",
+  );
+  const finalStatus = jsonOf(
+    await client.callTool({
+      name: "external_move_status",
+      arguments: { planId: plan.planId },
+    }),
+  );
+  assert.equal(finalStatus.status, "planned");
+  assert.equal(finalStatus.mutationAvailable, false);
+  assert.equal(
+    finalStatus.mutationUnavailableReason,
+    "native_handle_relative_mutation_unavailable",
+  );
 
   console.log(
     JSON.stringify(
@@ -213,7 +291,9 @@ try {
         bindingFingerprint: plan.bindingFingerprint,
         scanReparable: scan.reparable?.length ?? 0,
         repairedNotes: plan.repairs.length,
-        finalStatus: rolledBack.status,
+        mutationAvailable: finalStatus.mutationAvailable,
+        mutationUnavailableReason: finalStatus.mutationUnavailableReason,
+        finalStatus: finalStatus.status,
       },
       null,
       2,

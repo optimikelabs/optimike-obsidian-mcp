@@ -158,17 +158,22 @@ by default.
 - Operon apply requires both the Bridge mutation setting and
   `OPERON_MUTATIONS_ENABLED=true`.
 - Use dry-run, expected revisions/hashes and post-write proof where supported.
-- External roots are read-only by default. The only external mutation is a
-  local-stdio same-root regular-file move with exact ÉLYSIA reference repair.
-- External move apply and rollback require `MCP_WRITE_MODE=full`,
-  `MCP_EXTERNAL_MOVE_ENABLED=true` and a root carrying the `move` capability.
-- The target must be absent under an existing real parent. The no-clobber
-  hard-link/unlink sequence fails closed on unsupported or cross-volume
-  filesystems.
-- Any ambiguous, historical, legacy or unsupported reference blocks apply.
-  Exact-hash repairs are limited to `headless-filesystem` on a copied or
-  dedicated vault. Live apply fails closed because whole-note Local REST writes
-  do not enforce `If-Match`.
+- External roots are read-only by default. Scan, plan and status for external
+  move remain diagnostic only.
+- External move apply, rollback and automatic mutating recovery are disabled on
+  every platform until an audited native handle-relative mutation primitive
+  exists. Runtime reports
+  `native_handle_relative_mutation_unavailable`.
+- The disabled contract still requires redacted receipts, private SQLite
+  snapshots, legacy-binding and stale session/binding rejection, and exact-CAS
+  evidence before any future mutation can be enabled.
+- Target absence, exact reference classification, binding/session rejection and
+  exact-CAS evidence remain future-primitive requirements. The former
+  hard-link/unlink design is retired; it is not a current mutation mechanism.
+- Any ambiguous, historical, legacy or unsupported reference blocks any future
+  mutation. Exact-hash repair remains a future `headless-filesystem` requirement
+  on a copied or dedicated vault; Local REST whole-note writes do not enforce
+  `If-Match` and cannot authorize external mutation.
 - `MCP_EXTERNAL_MOVE_JOURNAL_PATH` contains durable plan state and note
   preimages. Keep it machine-local, access-restricted and outside repositories,
   synchronized folders and public diagnostics.

@@ -119,8 +119,9 @@ Les capacités sont distinctes :
 - `handoff` autorise un snapshot vérifié via un mode de livraison supporté par
   le transport actif.
 - `move` autorise la planification d’un déplacement de fichier régulier dans la
-  même racine. L’apply et le rollback exigent encore les deux gates du processus
-  et le stdio local.
+  même racine. Il n’active ni apply, ni rollback, ni récupération mutante
+  automatique : ces chemins sont désactivés sur toutes les plateformes jusqu’à
+  l’existence d’une primitive native handle-relative auditée.
 
 Valeurs par défaut et plafonds du schéma :
 
@@ -366,17 +367,28 @@ la date de modification et le SHA-256, pas un chemin local ni un ticket.
 
 ## 8. Move local gouverné et réparation des références
 
-L’unique mutation external-root est une transaction stdio locale sur un fichier
-régulier. Elle sert à préserver les références ÉLYSIA, pas à remplacer les
-outils filesystem.
+Le scan, le plan et le status du move sont diagnostiques/read-only sur toutes
+les plateformes. L’apply, le rollback et toute récupération mutante automatique
+sont désactivés jusqu’à l’existence d’une primitive native handle-relative
+auditée. La raison runtime est
+`native_handle_relative_mutation_unavailable` ; le mode d’écriture, le flag et
+la capacité `move` ne contournent pas cette frontière fail-closed. Les reçus
+redacted, snapshots SQLite privés, bindings legacy, contrôles de session/binding
+stale et preuves CAS exactes restent des données contractuelles obligatoires.
+
+La mutation external-root conçue est une transaction stdio locale sur un fichier
+régulier. Elle est actuellement désactivée sur toutes les plateformes par la
+frontière `native_handle_relative_mutation_unavailable` ; elle sert à préserver
+les références ÉLYSIA, pas à remplacer les outils filesystem.
 
 Le modèle durable de référence est assemblé au scan/plan avec `rootId`, chemin
 relatif à la racine, SHA-256 source, classification de l’occurrence et chemin de
 la note source. Le token Markdown sérialise uniquement le `rootId` et le chemin
-relatif stables. La planification et l’apply des réparations sont intégrés à
-`external_move_plan` et `external_move_apply` ; l’absence volontaire d’outils
-séparés `external_links_repair_*` maintient le fichier et les notes dans une
-seule transaction compensatoire.
+relatif stables. La planification des réparations est intégrée à
+`external_move_plan`. La surface `external_move_apply`, aujourd’hui désactivée,
+reste seulement la frontière future du même plan ; l’absence volontaire d’outils
+séparés `external_links_repair_*` empêche une implémentation auditée de dissocier
+fichier et notes.
 
 ### Ajouter l’identité stable à côté du lien cliquable
 
@@ -389,28 +401,29 @@ le chemin relatif à la racine, encodé canoniquement en pourcentage. `/` sépar
 les segments encodés. Le token n’expose pas le chemin configuré de la racine et
 n’autorise aucun accès par lui-même.
 
-Seule une paire exacte token/lien dans le même paragraphe Markdown actif peut
-être réparée automatiquement. Chemins physiques nus, tokens incohérents ou
-orphelins, candidats multiples, syntaxe non supportée et sections
+Seule une paire exacte token/lien dans le même paragraphe Markdown actif est
+éligible à une future réparation automatique. Chemins physiques nus, tokens
+incohérents ou orphelins, candidats multiples, syntaxe non supportée et sections
 d’historique/exemple/archive/release passent en revue manuelle. Une seule
-occurrence en revue manuelle bloque l’apply.
+occurrence en revue manuelle bloque toute mutation future.
 
 Le parser Markdown ne parcourt pas les blocs de code fenced et exclut le
 frontmatter YAML. Un chemin libre, une propriété YAML ou un chemin sous une
 rubrique d’artefacts sans paire canonique n’est jamais réparé automatiquement.
-S’il désigne physiquement le fichier déplacé, il reste en revue manuelle et
-bloque l’apply.
+S’il désigne physiquement la source planifiée, il reste en revue manuelle et
+bloque toute mutation future.
 
-### Activer explicitement le pilote
+### Configurer explicitement la planification diagnostique
 
 Conserver les exemples ordinaires ci-dessus en lecture seule. Pour une racine
-pilote non sensible, ajouter volontairement `move` :
+pilote diagnostique non sensible, ajouter volontairement `move` :
 
 ```json
 "capabilities": ["visible", "readable", "handoff", "move"]
 ```
 
-Puis configurer le processus stdio local :
+Puis configurer le processus stdio local. Ces gates historiques ne permettent
+pas d’activer une mutation tant que la frontière fail-closed est active :
 
 ```text
 MCP_WRITE_MODE=full
@@ -425,7 +438,7 @@ coordinateur de move external, indépendamment de `MCP_WRITE_MODE` et de
 n’initialisent pas de journal de move. Le profil est un libellé opérateur, pas
 l’identité destructive à lui seul : le proxy et son backend déjà lancé doivent
 tous deux être en `headless-filesystem` sur le même `OBSIDIAN_VAULT` configuré
-et résoluble. Avant le plan, l’apply et le rollback, le backend relit son dossier coffre et compare
+et résoluble. Avant le plan, et avant toute mutation future, le backend relit son dossier coffre et compare
 sa preuve filesystem SHA-256 stricte (device/inode) à un challenge opaque de 64
 hex fourni par le proxy. Il retourne uniquement
 `destructiveVaultIdentityVerified: true|false` et une version de schéma : aucun
@@ -434,8 +447,17 @@ digest d’un côté ou de l’autre n’est retourné par le statut runtime. Le
 
 La preuve et le challenge ne contiennent ni chemin, ni URL, ni device, ni
 inode. Le challenge n’est ni loggé, ni réfléchi, ni stocké dans un plan ou un
-receipt. `external_runtime_status` expose seulement `identityVerified` et le
-libellé source. Le journal ne persiste que son binding dérivé privé et est
+receipt. `external_runtime_status.externalMove` expose seulement les faits de
+binding expurgés : `planningAvailable` vaut `false` avec
+`planningUnavailableReason: "stdio_only"` en HTTP direct ; en stdio local, il
+vaut true seulement après vérification du binding, ou false avec l’une des
+raisons `profile_required`, `target_unverified` ou
+`backend_attestation_unavailable`. `mutationAvailable` reste indépendamment
+toujours false avec `native_handle_relative_mutation_unavailable`. Pour les
+anciens clients stdio, `unavailableReason` reste uniquement un alias de
+compatibilité de la raison de planification ; les nouveaux clients doivent
+utiliser les champs explicites de planification. Aucun chemin, digest,
+challenge, URL, device ou inode n’est exposé. Le journal ne persiste que son binding dérivé privé et est
 automatiquement profilé par ce binding. Le démarrage attesté, le statut runtime,
 le scan et un statut fichier inconnu ne créent pas et n’ouvrent pas de journal
 en écriture. Le plan ouvre le journal à la demande. Un reçu existant fiable est
@@ -456,25 +478,26 @@ conserve ses champs logiques sûrs, rapporte `legacyBinding: true`, puis projett
 `external_root_non_verifiable` avec revue manuelle. Un reçu malformé (par
 exemple chemin absolu, traversal ou backslash, reason de revue inconnue, hashes
 ou tokens incohérents) n’est jamais normalisé ni réécrit par status : il devient
-un incident de revue manuelle sans écriture et entièrement redacted. Apply et
-rollback refusent ces deux cas avant d’ouvrir une session backend destructive ou
-de consulter un chemin stocké.
+un incident de revue manuelle sans écriture et entièrement redacted. Les routes
+apply et rollback désactivées retournent leur indisponibilité stable avant
+d’ouvrir une session backend ou de consulter un chemin stocké.
 
-Un apply ou un rollback capture aussi la génération de connexion backend du
-proxy juste après cette preuve. Toute la séquence destructive est clôturée sur
-cette session live unique : une reconnexion ou un swap backend à n’importe quel
-moment invalide l’opération. Elle ne continue pas, ne répare pas les notes, ne
-compense pas et ne rollback pas via le backend de remplacement ; le journal
-durable consigne alors un état de récupération manuelle. Le statut runtime
+Pour une future mutation auditée, le proxy doit capturer la génération de
+connexion backend juste après cette preuve. Toute la séquence destructive doit
+être clôturée sur cette session live unique : une reconnexion ou un swap backend
+doit invalider l’opération. Elle ne doit ni continuer, ni réparer les notes, ni
+compenser, ni rollback via le backend de remplacement ; le journal durable doit
+alors consigner un état de récupération manuelle. Le statut runtime
 public n’expose volontairement aucun fingerprint de configuration stable ni
 autre corrélateur de connexion.
 
-Les trois autorisations write sont nécessaires pour l’apply et le rollback :
-mode write complet, feature flag et capacité `move` de la racine. Scan, plan et
-status ne déplacent pas le fichier, mais restent stdio-only car le proxy possède
-la racine locale et le journal.
+Les trois autorisations write historiques (mode complet, feature flag et
+capacité `move`) constituent des preuves nécessaires mais ne peuvent activer
+une mutation tant que la primitive native handle-relative est indisponible.
+Scan, plan et status ne déplacent pas le fichier, mais restent stdio-only car
+le proxy possède la racine locale et le journal.
 
-### Exécuter la transaction
+### Workflow diagnostique
 
 1. Appeler `external_references_scan` avec `rootId` et `relativePath`. Le scan
    inventorie tout le coffre gouverné.
@@ -482,33 +505,35 @@ la racine locale et le journal.
    `targetRelativePath` et une `idempotencyKey` unique. Le plan inventorie
    toujours tout le coffre gouverné ; il ne peut pas être limité à un
    sous-dossier.
-3. Examiner `external_move_status` ; ne poursuivre que si `readyToApply` vaut
-   true et `manualReview` est vide.
-4. Appeler `external_move_apply` avec le `planId` retourné et la même
-   `idempotencyKey`.
-5. Vérifier cible et notes réparées. Si le résultat vérifié doit être annulé,
-   appeler `external_move_rollback` avec les mêmes identifiants avant de modifier
-   le fichier ou les notes réparées.
+3. Examiner `external_move_status` ; il reste diagnostique et retourne
+   `readyToApply: false` avec la raison
+   `native_handle_relative_mutation_unavailable` tant que la frontière
+   fail-closed est active.
+4. Ne pas appeler `external_move_apply` : il ne peut muter sur aucune
+   plateforme.
+5. Ne pas appeler `external_move_rollback` : la récupération reste uniquement
+   diagnostique/manuelle.
 
 Le dossier parent cible doit déjà exister. Source et cible doivent être des
 fichiers réguliers dans la même racine logique et sur le même volume ; la cible
-doit être absente. L’apply revérifie taille, date de modification et SHA-256 de
-la source. Il emploie une séquence hard-link/unlink sans écrasement et échoue
-fermé si le filesystem ne peut pas prouver le move.
+doit être absente. Ce sont des conditions diagnostiques du plan. Une future
+mutation auditée devra revérifier taille, date de modification et SHA-256 ; sa
+primitive native handle-relative, et non le design hard-link/unlink retiré,
+devra prouver l’absence d’écrasement.
 
 Chaque réparation de note est planifiée avec un SHA-256 attendu. L’apply et le
-rollback sont actuellement limités à `headless-filesystem` sur une copie ou un
-coffre dédié, où ce hash est imposé par l’écriture filesystem. Local REST API
-4.1.7 renvoie un ETag mais n’impose pas `If-Match` lors d’un remplacement de
-note complète : l’apply live échoue donc fermé avant de déplacer le fichier
-externe. Le journal SQLite local persiste l’état du plan et les préimages des
+rollback restent désactivés ; après audit de la primitive native handle-relative,
+ils devront rester limités à `headless-filesystem` sur une copie ou un coffre
+dédié, où ce hash est imposé par l’écriture filesystem. Local REST API 4.1.7
+renvoie un ETag mais n’impose pas `If-Match` lors d’un remplacement de note
+complète. Le journal SQLite local persiste l’état du plan et les préimages des
 notes pour la compensation. Le traiter comme une donnée locale sensible : ne jamais le
 committer ni le partager.
 
-Si l’apply échoue après une ou plusieurs réparations, le coordinateur restaure
-les notes déjà modifiées puis replace le fichier vérifié à sa source. Après une
-interruption de processus, le rollback récupère aussi l’état durable post-move
-et la fenêtre vérifiée où source et cible sont deux hard-links du même objet.
+Le design compensatoire historique restaurait les notes déjà modifiées puis
+replaçait un fichier vérifié à sa source. Il n’est plus exécutable. Une future
+primitive devra spécifier et faire auditer indépendamment sa compensation et sa
+récupération après interruption avant toute activation de mutation.
 
 Le HTTP direct refuse scan, plan, status, apply et rollback. Les tickets HTTP
 restent des handoffs en lecture seule.
@@ -518,7 +543,8 @@ restent des handoffs en lecture seule.
 Un journal pré-attestation existant à l’ancien
 `MCP_EXTERNAL_MOVE_JOURNAL_PATH` n’est jamais adopté dans un nouveau binding.
 S’il est toujours présent, `external_move_status` peut lire son reçu redacted et
-le marque `legacyBinding: true` ; apply et rollback le refusent. Conserver le
+le marque `legacyBinding: true` ; les routes apply et rollback désactivées le
+refusent. Conserver le
 journal privé et ses préimages pour une récupération manuelle, puis créer un
 nouveau plan avec une nouvelle clé d’idempotence après vérification de la cible
 backend/proxy. Ne jamais copier ou renommer une base legacy pour la faire passer

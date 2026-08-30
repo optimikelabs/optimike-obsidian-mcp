@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- External move is now fail-closed on every platform: scan, plan and status
+  remain diagnostic, while apply, rollback and automatic mutating recovery
+  return the stable `native_handle_relative_mutation_unavailable` reason. The
+  former write gates cannot override that boundary; path-redacted receipts,
+  private journal evidence, binding/session checks and exact-CAS proof remain
+  preserved for a future audited native primitive.
+
 - Canonicalized MCP and Bridge error envelopes now expose only closed error
   codes, stable public messages and allowlisted diagnostics. Request-scoped
   UUIDs remain correlable across MCP/backend observations, while caller input
