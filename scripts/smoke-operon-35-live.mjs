@@ -391,6 +391,27 @@ function plannedTaskSourcePaths(plan) {
   return paths;
 }
 
+function mutationRequiresProjectedTaskSourcePaths(name, resolvedPathCount) {
+  switch (name) {
+    case "operon_adopt_task":
+    case "operon_update_task":
+      // These mutations are already physically bounded by the exact targetPath
+      // or by the source paths resolved from every referenced Operon identity.
+      // Task Workflow V1 adoption intentionally exposes only plan metadata;
+      // ordinary update is likewise bounded to the pre-resolved task sources.
+      // An empty public path projection is therefore not evidence of an
+      // unbounded write once at least one such source is sealed.
+      return resolvedPathCount === 0;
+    case "operon_create_periodic_task":
+    case "operon_update_periodic_scheduling":
+    default:
+      // Routing mutations can create or move task sources that are not fully
+      // determined by their request. They must enumerate those paths in the
+      // projected plan before dispatch.
+      return true;
+  }
+}
+
 async function assertSafePlannedTaskSourceArtifacts(
   plan,
   label,
@@ -1244,6 +1265,64 @@ async function offlinePathSafetyContract() {
       "Offline periodic create pre-apply",
     );
     assert.equal(plannedCreatePaths.has(plannedCreatePath), true);
+    assert.equal(
+      mutationRequiresProjectedTaskSourcePaths("operon_adopt_task", 1),
+      false,
+    );
+    assert.equal(
+      mutationRequiresProjectedTaskSourcePaths("operon_update_task", 1),
+      false,
+    );
+    assert.equal(
+      mutationRequiresProjectedTaskSourcePaths("operon_adopt_task", 0),
+      true,
+    );
+    assert.equal(
+      mutationRequiresProjectedTaskSourcePaths("operon_update_task", 0),
+      true,
+    );
+    assert.equal(
+      mutationRequiresProjectedTaskSourcePaths(
+        "operon_create_periodic_task",
+        1,
+      ),
+      true,
+    );
+    assert.equal(
+      mutationRequiresProjectedTaskSourcePaths(
+        "operon_update_periodic_scheduling",
+        1,
+      ),
+      true,
+    );
+    const metadataOnlyAdoptionPlan = await assertSafePlannedTaskSourceArtifacts(
+      {},
+      "Offline request-bounded adoption",
+      { requirePaths: false },
+    );
+    assert.equal(metadataOnlyAdoptionPlan.size, 0);
+    const requestBoundAdoptionPaths = new Set([
+      normalPath,
+      ...metadataOnlyAdoptionPlan,
+    ]);
+    assert.equal(requestBoundAdoptionPaths.size, 1);
+    await safeVaultRegularFile(
+      [...requestBoundAdoptionPaths][0],
+      "Offline request-bounded adoption source",
+    );
+    await assert.rejects(
+      assertSafePlannedTaskSourceArtifacts(
+        {},
+        "Offline adoption without a resolved source",
+        {
+          requirePaths: mutationRequiresProjectedTaskSourcePaths(
+            "operon_adopt_task",
+            0,
+          ),
+        },
+      ),
+      /did not seal every task-source path/u,
+    );
     await assert.rejects(
       assertSafePlannedTaskSourceArtifacts(
         { periodicRoute: {} },
@@ -2229,7 +2308,12 @@ async function main() {
       : await assertSafePlannedTaskSourceArtifacts(
           observed.payload?.plan,
           label,
-          { requirePaths: true },
+          {
+            requirePaths: mutationRequiresProjectedTaskSourcePaths(
+              name,
+              expectedPaths.size,
+            ),
+          },
         );
     assert.equal(
       preflightConflict && expectedPaths.size === 0,
