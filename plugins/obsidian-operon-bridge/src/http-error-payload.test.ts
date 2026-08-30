@@ -143,9 +143,19 @@ test("Operon Bridge lifecycle remounts one Local REST provider generation", asyn
   plugins["obsidian-local-rest-api"] = makeProvider();
   bridge.restLifecycle.probeNow();
   assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 2);
-  bridge.restLifecycle.stop();
+  providers[1].failUnregisters = 2;
+  assert.doesNotThrow(
+    () => registeredCleanups[0](),
+    "plugin unload must contain a persistent unregister failure",
+  );
   assert.equal(providers[1].unregisters, 1);
-  for (const cleanup of registeredCleanups) cleanup();
+  assert.equal(
+    providers[1].failUnregisters,
+    1,
+    "unload must not retry the same cleanup outside the lifecycle boundary",
+  );
+  assert.equal(bridge.restLifecycle, null);
+  assert.equal(bridge.restCleanup, null);
 });
 
 test("Operon HTTP errors redact arbitrary task fields, paths, and backend messages", async () => {

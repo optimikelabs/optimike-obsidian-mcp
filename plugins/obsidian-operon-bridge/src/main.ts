@@ -1034,9 +1034,19 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     });
 
     this.register(() => {
-      this.restLifecycle?.stop();
+      const lifecycle = this.restLifecycle;
+      if (lifecycle) {
+        lifecycle.stop();
+      } else if (this.restCleanup) {
+        try {
+          this.restCleanup();
+        } catch {
+          console.warn(
+            `[${EXTENSION_ID}] Failed to unregister Local REST API routes.`,
+          );
+        }
+      }
       this.restLifecycle = null;
-      this.restCleanup?.();
       this.restCleanup = null;
     });
   }
