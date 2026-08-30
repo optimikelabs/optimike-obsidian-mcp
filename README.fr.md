@@ -125,6 +125,16 @@ OPERON_MUTATIONS_ENABLED=true
 
 Les snapshots Operon obsolètes restent read-only. Aucune route Operon ne retombe sur du Markdown brut ou des API privées. L’adoption officielle et le routage Daily/Weekly négocient leur grant additif exact au premier usage, y compris après un démarrage MCP à froid ; un grant en attente ou refusé échoue toujours fermé. Operon reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan. Task Type et Task Image restent scalaires, Task Gallery reste un tableau ordonné et `__taskDataType` est read-only. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
 
+Operon `3.6.0` expose le plan public Task Workflow périodique uniquement sous
+forme de métadonnées, sans chemin de source des tâches avant apply. La canary de
+release sur le SHA exact négocie et prévisualise les opérations périodiques, mais
+saute les applies périodiques avec la raison
+`public_task_source_projection_unavailable`. Cela confine la canary destructive
+sans désactiver les outils runtime ; la projection publique du chemin de source
+reste un suivi amont non bloquant et aucune certification périodique complète
+n’est revendiquée. Les gates startup, adoption, médias, Frontmatter Date Manager,
+idempotence et restauration restent obligatoires.
+
 ## Opérations gouvernées
 
 Les familles Note, Frontmatter, formule Base et Canvas sont exposées atomiquement :

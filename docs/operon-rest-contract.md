@@ -28,6 +28,16 @@ All routes inherit Local REST API authentication and TLS behavior.
 
 The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The `3.5.3` / CLI `1.2.0` integration historically added official adoption, periodic-note routing and typed task media fields; Bridge `0.8.2` also negotiated the exact additive workflow grant on first use when the cached capability was cold. Working-tree Pilot 2 runs exercised Optimike MCP `3.2.0`, Bridge `0.8.3`, Operon `3.6.0` and Local REST API `5.1.0`; release admission still requires the same gate on the clean final SHA. The Developer API V1 contract did not drift. Product-version certification remains explicit, but valid mutations are admitted by negotiated contract, exact capabilities, schemas, live health, settled index and recovery support rather than a second version allowlist. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
 
+Periodic applies observed in working-tree Pilot 2 runs are historical/diagnostic
+evidence only. For official Operon `3.6.0`, the public Task Workflow plan is
+metadata-only and exposes no pre-apply task-source path; the exact-SHA release
+canary therefore performs periodic preview and exact-grant negotiation, then
+skips periodic applies with reason
+`public_task_source_projection_unavailable`. Runtime tools remain available;
+this is a destructive-canary containment/certification boundary, upstream public
+path projection is a nonblocking follow-up, and no full periodic certification is
+claimed.
+
 A future non-denied product version remains `compatible-provisional` until it
 joins the certified evidence set, but it may advertise mutations when every
 contract and live-use gate validates. Known-bad versions and narrowly documented

@@ -236,6 +236,14 @@ Kairélys uses Public API v1. Dry-run is the default, idempotency is mandatory,
 existing tasks require `expectedRevision`, and there is no direct Markdown
 fallback.
 
+Periodic applies observed in working-tree runs are historical/diagnostic
+evidence only. With official Operon `3.6.0`, the public Task Workflow plan is
+metadata-only and exposes no pre-apply task-source path. The exact-SHA release
+canary performs periodic preview and exact-grant negotiation but skips periodic
+applies with reason `public_task_source_projection_unavailable`. Runtime tools
+remain available; upstream public path projection is a nonblocking follow-up,
+and no full periodic certification is claimed.
+
 The complete 3.2.0 acceptance evidence uses a local build carrying only the
 Developer API settings-renderer fix. Frontmatter settlement and multi-window
 consent from #135/#137 are already merged; File Task rename safety remains in

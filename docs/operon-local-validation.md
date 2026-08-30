@@ -320,7 +320,14 @@ The script refuses to start unless all of these gates hold:
   does not expose all task-source paths, or any mutation without one resolved
   physical source/target, is refused before dispatch;
 
-A periodic plan that does not expose all task-source paths is refused before dispatch.
+A periodic plan that does not expose all task-source paths is refused before dispatch. Official
+Operon `3.6.0` currently exposes a metadata-only public periodic plan, so the exact-SHA
+release canary performs periodic preview and exact-grant negotiation but skips periodic
+applies with reason `public_task_source_projection_unavailable`. This is a destructive-canary
+containment/certification boundary; the runtime tools remain available and upstream public
+task-source path projection is a nonblocking follow-up. Do not claim full periodic
+certification. Core startup, adoption, media, Frontmatter Date Manager, idempotence and
+restoration gates remain mandatory.
 For a stale-revision or same-key replay, where a new dry-run can only
 return the expected conflict because the original apply has already changed the
 source, the canary instead re-attests the exact source paths from the first
@@ -396,10 +403,13 @@ fixture and inventory restoration, P0/P1/P2 at zero, zero pending recoveries and
 zero retained periodic artifacts. Working-tree runs for the unreleased Optimike
 MCP `3.2.0` candidate then exercised Bridge `0.8.3`, stock Operon `3.6.0`,
 Operon CLI `1.2.0` and Local REST API `5.1.0`: same-connection startup order,
-mutation/replay/stale-conflict/recovery, adoption, periodic creation and
-scheduling, Frontmatter Date Manager settlement, validation and exact
-restoration. They remain diagnostic until this recipe passes after a clean
-rebuild on the final candidate SHA. The Operon Developer API V1 public contract
+mutation/replay/stale-conflict/recovery, adoption, Frontmatter Date Manager
+settlement, validation and exact restoration. Periodic runs were historical/
+diagnostic only; the exact-SHA canary negotiates and previews periodic workflow
+but skips periodic apply under `public_task_source_projection_unavailable`.
+The non-periodic gate results remain diagnostic until this recipe passes after a
+clean rebuild on the final candidate SHA; the historical periodic apply remains
+diagnostic even after that gate. The Operon Developer API V1 public contract
 did not drift from `3.5.3`.
 The
 synthetic `3.5.240438` identity remains historical and
@@ -420,18 +430,22 @@ the configured modified-time writer to be disabled before mutation and restored
 afterward. It retains a private recovery directory only on failure and prints a
 redacted evidence path.
 
-The following working-tree diagnostic run (not accepted release evidence) proved Scheduled Date on a blocked task through
+The following working-tree diagnostic run (not accepted release evidence) exercised Scheduled Date on a blocked task through
 `operon_update_periodic_scheduling`, preserved `blockedBy` plus inverse
 `blocking`, removed the run-owned periodic parent artifact, restored the fixture
 and complete Markdown inventory exactly, returned validation P0/P1/P2 and
-pending recoveries to zero, and re-enabled Frontmatter Date Manager. Task Editor
+pending recoveries to zero, and re-enabled Frontmatter Date Manager. It is historical
+diagnostic evidence only; the exact-SHA canary skips periodic apply under the
+public-source projection boundary above. Task Editor
 deletion is explicitly `SKIP` because the MCP has no public delete surface.
 Parent-date expansion is explicitly `SKIP` because Pilot 2's public
 configuration does not announce the opt-in automation as active. Operators who
 enable those features must exercise the two skipped checks before relying on
 them. None of these checks permits unrelated relationship or parent-date drift
-during MCP postflight. It must be repeated from a clean rebuild pinned to the
-exact release SHA before it can be cited as accepted release evidence.
+during MCP postflight. Its applicable non-periodic checks must be repeated from a
+clean rebuild pinned to the exact release SHA before they can be cited as
+accepted release evidence. The exact-SHA canary does not repeat Scheduled Date
+apply; it skips periodic apply under `public_task_source_projection_unavailable`.
 
 ## 9. Restart and reindex
 

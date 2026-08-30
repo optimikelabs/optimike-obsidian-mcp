@@ -83,8 +83,14 @@ contract and added exact first-use workflow negotiation. Bridge `0.8.3` keeps
 that boundary while hardening public failure and replay semantics. Working-tree
 Pilot 2 runs for MCP `3.2.0` exercised stock Operon `3.6.0`, CLI `1.2.0` and
 Local REST API `5.1.0`: same-connection startup-order recovery, adoption,
-periodic creation and scheduling, replay, stale conflict, recovery, Frontmatter
-Date Manager settlement, zero validation violations and exact restoration. The
+replay, stale conflict, recovery, Frontmatter Date Manager settlement, zero
+validation violations and exact restoration. Periodic working-tree runs are
+historical/diagnostic only: the exact-SHA canary performs periodic preview and
+exact-grant negotiation but skips periodic applies because the public plan is
+metadata-only and exposes no pre-apply task-source path
+(`public_task_source_projection_unavailable`). The tools remain available; this
+is a destructive-canary containment/certification boundary, not full periodic
+certification. Upstream public path projection is a nonblocking follow-up. The
 release still requires the same gate on the clean final SHA. `3.6.0` remains provisional by explicit certification metadata,
 not because mutations are allowed by product-version allowlist.
 
@@ -96,8 +102,11 @@ restoration. Task Editor deletion cleanup remains `SKIP` without a public MCP
 delete surface. Parent-date expansion remains `SKIP` while the public
 configuration does not announce the opt-in automation as active. Release checks
 must exercise those skipped cases when their public surfaces/configuration make
-them observable. These are behavior checks, not permission to accept unrelated
-postflight drift.
+them observable. The Scheduled Date apply remains historical/diagnostic
+worktree evidence; the exact-SHA release canary does not repeat it, and instead
+skips periodic apply with `public_task_source_projection_unavailable` after
+preview and exact-grant negotiation. These are behavior checks, not permission
+to accept unrelated postflight drift.
 
 Still outside this local acceptance proof:
 

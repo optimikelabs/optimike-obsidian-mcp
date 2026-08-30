@@ -60,6 +60,8 @@ const SETTLE_TIMEOUT_MS = boundedInteger(
 const DELETION_SKIP_REASON = "public_delete_surface_unavailable";
 const PARENT_DATE_MISSING_REASON = "public_configuration_not_announced";
 const PARENT_DATE_DISABLED_REASON = "public_configuration_disabled";
+const PERIODIC_TASK_SOURCE_PROJECTION_UNAVAILABLE_REASON =
+  "public_task_source_projection_unavailable";
 const MUTATION_RETRY_LIMIT = 3;
 
 const TOOL_MUTATION_CAPABILITIES = Object.freeze({
@@ -348,12 +350,52 @@ function plannedTaskSourcePaths(plan) {
   return paths;
 }
 
+function periodicSchedulingProjectedTaskSourcePaths(plan) {
+  const sourceTransitions = Array.isArray(
+    plan?.periodicUpdate?.sourceTransitions,
+  )
+    ? plan.periodicUpdate.sourceTransitions
+    : [];
+  const taskSources = Array.isArray(plan?.projection?.taskSources)
+    ? plan.projection.taskSources
+    : [];
+  return new Set(
+    [
+      plan?.periodicRoute?.notePath,
+      plan?.periodicUpdate?.notePath,
+      ...sourceTransitions.map((transition) => transition?.filePath),
+      ...taskSources.map((taskSource) => taskSource?.filePath),
+    ].filter((value) => typeof value === "string"),
+  );
+}
+
+function periodicSchedulingDispatchDecision(plan) {
+  // Periodic scheduling needs an explicit public task-source projection. Do
+  // not treat opaque metadata (including metadata.path) as a dispatch grant.
+  const paths = periodicSchedulingProjectedTaskSourcePaths(plan);
+  return {
+    paths,
+    dispatch: paths.size > 0,
+    reason:
+      paths.size > 0
+        ? null
+        : PERIODIC_TASK_SOURCE_PROJECTION_UNAVAILABLE_REASON,
+  };
+}
+
+function routeAcceptsOpaquePlanMetadata(name) {
+  return [
+    "operon_create_task",
+    "operon_update_task",
+    "operon_set_relationships",
+  ].includes(name);
+}
+
 async function assertSafePlannedTaskSourceArtifacts(
   plan,
   label,
-  { requirePaths = false } = {},
+  { requirePaths = false, paths = plannedTaskSourcePaths(plan) } = {},
 ) {
-  const paths = plannedTaskSourcePaths(plan);
   if (requirePaths) {
     assert.ok(
       paths.size > 0,
@@ -958,6 +1000,48 @@ async function offlineContract() {
       },
     }),
   );
+  const periodicProjectionUnavailable = periodicSchedulingDispatchDecision({
+    periodicUpdate: { metadata: { source: "opaque" } },
+  });
+  assert.equal(periodicProjectionUnavailable.dispatch, false);
+  assert.equal(
+    periodicProjectionUnavailable.reason,
+    PERIODIC_TASK_SOURCE_PROJECTION_UNAVAILABLE_REASON,
+  );
+  const periodicMetadataPathIsNotProjection =
+    periodicSchedulingDispatchDecision({
+      periodicUpdate: { metadata: { path: "Canary/Fixture.md" } },
+    });
+  assert.equal(
+    plannedTaskSourcePaths({
+      periodicUpdate: { metadata: { path: "Canary/Fixture.md" } },
+    }).has("Canary/Fixture.md"),
+    true,
+  );
+  assert.equal(periodicMetadataPathIsNotProjection.dispatch, false);
+  assert.equal(
+    periodicMetadataPathIsNotProjection.reason,
+    PERIODIC_TASK_SOURCE_PROJECTION_UNAVAILABLE_REASON,
+  );
+  assert.equal(
+    periodicSchedulingDispatchDecision({
+      periodicUpdate: {
+        sourceTransitions: [{ filePath: "Canary/Fixture.md" }],
+      },
+    }).dispatch,
+    true,
+  );
+  assert.equal(routeAcceptsOpaquePlanMetadata("operon_create_task"), true);
+  assert.equal(routeAcceptsOpaquePlanMetadata("operon_update_task"), true);
+  assert.equal(
+    routeAcceptsOpaquePlanMetadata("operon_set_relationships"),
+    true,
+  );
+  assert.equal(
+    routeAcceptsOpaquePlanMetadata("operon_update_periodic_scheduling"),
+    false,
+  );
+  assert.equal(routeAcceptsOpaquePlanMetadata("operon_unknown_route"), false);
   const baseline = new Map([
     ["Canary/Fixture.md", { sha256: sha256("before"), size: 6 }],
   ]);
@@ -983,6 +1067,11 @@ async function offlineContract() {
         status: "SKIP",
         reason: PARENT_DATE_MISSING_REASON,
       },
+      periodicScheduling: {
+        status: "SKIP",
+        reason: PERIODIC_TASK_SOURCE_PROJECTION_UNAVAILABLE_REASON,
+      },
+      periodicApplyDispatched: false,
     }),
   );
 }
@@ -1265,7 +1354,8 @@ async function main() {
     // native call, not merely when the canary started.
     const expectedPaths = new Set([fixturePath]);
     await safeVaultRegularFile(fixturePath, `${label} fixture pre-dispatch`);
-    if (args?.task?.targetPath !== undefined) {
+    const hasExplicitTaskSource = args?.task?.targetPath !== undefined;
+    if (hasExplicitTaskSource) {
       assert.equal(
         args.task.targetPath,
         fixturePath,
@@ -1280,8 +1370,10 @@ async function main() {
         ...(args?.relationships?.blocking ?? []),
       ].filter((value) => typeof value === "string"),
     );
+    let resolvedTaskSourceCount = 0;
     for (const operonId of taskIds) {
       await assertKnownMutationTaskSource(operonId, label);
+      resolvedTaskSourceCount += 1;
     }
 
     const observed = await callRaw(
@@ -1303,14 +1395,29 @@ async function main() {
       "planned",
       `${label} physical preflight did not return a sealed plan.`,
     );
+    const periodicDispatch =
+      name === "operon_update_periodic_scheduling"
+        ? periodicSchedulingDispatchDecision(observed.payload?.plan)
+        : null;
+    if (periodicDispatch && !periodicDispatch.dispatch) {
+      return {
+        skipReason: periodicDispatch.reason,
+        projectedTaskSourceCount: 0,
+      };
+    }
     const projectedPaths = await assertSafePlannedTaskSourceArtifacts(
       observed.payload?.plan,
       label,
-      { requirePaths: true },
+      {
+        // Routing and unknown operations remain strict. Generic task
+        // mutations may carry opaque plan metadata only after their explicit
+        // or queried task sources have been physically resolved.
+        requirePaths:
+          !routeAcceptsOpaquePlanMetadata(name) ||
+          (!hasExplicitTaskSource && resolvedTaskSourceCount === 0),
+        paths: periodicDispatch?.paths,
+      },
     );
-    // Every mutable route must enumerate its task-source paths in the sealed
-    // dry-run. The explicit fixture locator narrows that plan; it never fills
-    // in a missing projection.
     const paths = new Set([...expectedPaths, ...projectedPaths]);
     for (const relativePath of paths) {
       await safeVaultRegularFile(relativePath, `${label} resolved path`, {
@@ -1318,7 +1425,11 @@ async function main() {
           projectedPaths.has(relativePath) && !expectedPaths.has(relativePath),
       });
     }
-    return { paths, inventory: await captureMarkdownInventory() };
+    return {
+      paths,
+      inventory: await captureMarkdownInventory(),
+      projectedTaskSourceCount: projectedPaths.size,
+    };
   }
 
   async function assertPhysicalPostDispatch(result, preflight, label) {
@@ -1425,6 +1536,23 @@ async function main() {
         args.dryRun === false
           ? await assertPhysicalPreDispatch(name, args, label)
           : null;
+      if (physicalPreflight?.skipReason) {
+        evidence.mutationReceipts.push({
+          label,
+          attempt,
+          status: "skipped",
+          isError: false,
+          reason: physicalPreflight.skipReason,
+          dispatchAttempted: false,
+          projectedTaskSourceCount: physicalPreflight.projectedTaskSourceCount,
+        });
+        return {
+          status: "skipped",
+          reason: physicalPreflight.skipReason,
+          projectedTaskSourceCount: physicalPreflight.projectedTaskSourceCount,
+          periodicApplyDispatched: false,
+        };
+      }
       if (args.dryRun === false) await assertCandidateStillExact(candidate);
       if (args.dryRun === false) {
         await assertVaultRootStillSame(`${label} native apply`);
@@ -2128,85 +2256,129 @@ async function main() {
       blockerParent: relatedBlocker.parentTask,
     };
 
-    const scheduled = assertApplied(
-      await callMutation(
-        "operon_update_periodic_scheduling",
-        {
-          operonId: blocked.operonId,
-          expectedRevision: relatedBlocked.revision,
-          idempotencyKey: `${runId}:blocked:scheduled`,
-          dryRun: false,
-          patch: { fields: { dateScheduled: dates.scheduled } },
-        },
-        "blocked task Scheduled Date via periodic scheduling route",
-      ),
+    const scheduled = await callMutation(
+      "operon_update_periodic_scheduling",
+      {
+        operonId: blocked.operonId,
+        expectedRevision: relatedBlocked.revision,
+        idempotencyKey: `${runId}:blocked:scheduled`,
+        dryRun: false,
+        patch: { fields: { dateScheduled: dates.scheduled } },
+      },
       "blocked task Scheduled Date via periodic scheduling route",
     );
-    const scheduledBlocked = await stableTask(
-      blocked.operonId,
-      (task) => task.dates?.scheduled === dates.scheduled,
-    );
-    const scheduledBlocker = await stableTask(blocker.operonId);
-    assert.equal(scheduledBlocked.dates.scheduled, dates.scheduled);
-    assert.deepEqual(
-      {
-        childBlockedBy: [...scheduledBlocked.blockedBy],
-        childBlocking: [...scheduledBlocked.blocking],
-        blockerBlockedBy: [...scheduledBlocker.blockedBy],
-        blockerBlocking: [...scheduledBlocker.blocking],
-        blockerParent: scheduledBlocker.parentTask,
-      },
-      {
-        childBlockedBy: relationBefore.childBlockedBy,
-        childBlocking: relationBefore.childBlocking,
-        blockerBlockedBy: relationBefore.blockerBlockedBy,
-        blockerBlocking: relationBefore.blockerBlocking,
-        blockerParent: relationBefore.blockerParent,
-      },
-      "Scheduled Date update changed blocker relationships.",
-    );
-    const scheduledInventory = await captureMarkdownInventory();
-    const createdByPeriodicWorkflow = inventoryDiff(
-      baseline,
-      scheduledInventory,
-    ).filter(
-      (change) => change.change === "created" && change.path !== fixturePath,
-    );
-    if (createdByPeriodicWorkflow.length > 0) {
+    if (scheduled?.status === "skipped") {
       assert.equal(
-        typeof scheduledBlocked.parentTask,
-        "string",
-        "Periodic workflow created Markdown without a projected parent identity.",
+        scheduled.reason,
+        PERIODIC_TASK_SOURCE_PROJECTION_UNAVAILABLE_REASON,
       );
-      for (const change of createdByPeriodicWorkflow) {
-        const checked = await safeVaultRegularFile(
-          change.path,
-          "Created periodic artifact",
-        );
-        const content = await readFile(checked.absolute, "utf8");
+      assert.equal(scheduled.periodicApplyDispatched, false);
+      const skippedBlocked = await stableTask(blocked.operonId);
+      const skippedBlocker = await stableTask(blocker.operonId);
+      assert.equal(
+        skippedBlocked.dates?.scheduled ?? null,
+        null,
+        "Periodic scheduling was dispatched despite an unavailable task-source projection.",
+      );
+      assert.deepEqual(
+        {
+          childBlockedBy: [...skippedBlocked.blockedBy],
+          childBlocking: [...skippedBlocked.blocking],
+          blockerBlockedBy: [...skippedBlocker.blockedBy],
+          blockerBlocking: [...skippedBlocker.blocking],
+          blockerParent: skippedBlocker.parentTask,
+        },
+        {
+          childBlockedBy: relationBefore.childBlockedBy,
+          childBlocking: relationBefore.childBlocking,
+          blockerBlockedBy: relationBefore.blockerBlockedBy,
+          blockerBlocking: relationBefore.blockerBlocking,
+          blockerParent: relationBefore.blockerParent,
+        },
+        "Periodic scheduling skip changed blocker relationships.",
+      );
+      evidence.scheduledDateOnBlockedTask = {
+        status: "SKIP",
+        reason: PERIODIC_TASK_SOURCE_PROJECTION_UNAVAILABLE_REASON,
+        blockedTaskIdHash: shortHash(blocked.operonId),
+        blockerIdHash: shortHash(blocker.operonId),
+        periodicApplyDispatched: false,
+        projectedTaskSourceCount: scheduled.projectedTaskSourceCount,
+        blockedByPreserved: true,
+        inverseBlockingPreserved: true,
+      };
+      await ensureOnlyFixtureChanged("scheduledDateProjectionSkip");
+    } else {
+      const scheduledApplied = assertApplied(
+        scheduled,
+        "blocked task Scheduled Date via periodic scheduling route",
+      );
+      const scheduledBlocked = await stableTask(
+        blocked.operonId,
+        (task) => task.dates?.scheduled === dates.scheduled,
+      );
+      const scheduledBlocker = await stableTask(blocker.operonId);
+      assert.equal(scheduledBlocked.dates.scheduled, dates.scheduled);
+      assert.deepEqual(
+        {
+          childBlockedBy: [...scheduledBlocked.blockedBy],
+          childBlocking: [...scheduledBlocked.blocking],
+          blockerBlockedBy: [...scheduledBlocker.blockedBy],
+          blockerBlocking: [...scheduledBlocker.blocking],
+          blockerParent: scheduledBlocker.parentTask,
+        },
+        {
+          childBlockedBy: relationBefore.childBlockedBy,
+          childBlocking: relationBefore.childBlocking,
+          blockerBlockedBy: relationBefore.blockerBlockedBy,
+          blockerBlocking: relationBefore.blockerBlocking,
+          blockerParent: relationBefore.blockerParent,
+        },
+        "Scheduled Date update changed blocker relationships.",
+      );
+      const scheduledInventory = await captureMarkdownInventory();
+      const createdByPeriodicWorkflow = inventoryDiff(
+        baseline,
+        scheduledInventory,
+      ).filter(
+        (change) => change.change === "created" && change.path !== fixturePath,
+      );
+      if (createdByPeriodicWorkflow.length > 0) {
         assert.equal(
-          content.includes(scheduledBlocked.parentTask),
-          true,
-          "Created periodic artifact is not bound to the projected parent identity.",
+          typeof scheduledBlocked.parentTask,
+          "string",
+          "Periodic workflow created Markdown without a projected parent identity.",
         );
-        createdArtifactPaths.add(change.path);
-        createdArtifactMarkers.set(change.path, scheduledBlocked.parentTask);
+        for (const change of createdByPeriodicWorkflow) {
+          const checked = await safeVaultRegularFile(
+            change.path,
+            "Created periodic artifact",
+          );
+          const content = await readFile(checked.absolute, "utf8");
+          assert.equal(
+            content.includes(scheduledBlocked.parentTask),
+            true,
+            "Created periodic artifact is not bound to the projected parent identity.",
+          );
+          createdArtifactPaths.add(change.path);
+          createdArtifactMarkers.set(change.path, scheduledBlocked.parentTask);
+        }
       }
+      assert.equal(related?.after?.operonId, blocked.operonId);
+      assert.equal(scheduledApplied?.after?.operonId, blocked.operonId);
+      evidence.scheduledDateOnBlockedTask = {
+        status: "PASS",
+        scheduledDate: dates.scheduled,
+        blockedTaskIdHash: shortHash(blocked.operonId),
+        blockerIdHash: shortHash(blocker.operonId),
+        blockedByPreserved: true,
+        inverseBlockingPreserved: true,
+        periodicParentChanged:
+          scheduledBlocked.parentTask !== relationBefore.childParent,
+        createdPeriodicArtifactCount: createdByPeriodicWorkflow.length,
+      };
+      await ensureOnlyFixtureChanged("scheduledDate");
     }
-    assert.equal(related?.after?.operonId, blocked.operonId);
-    assert.equal(scheduled?.after?.operonId, blocked.operonId);
-    evidence.scheduledDateOnBlockedTask = {
-      status: "PASS",
-      scheduledDate: dates.scheduled,
-      blockedTaskIdHash: shortHash(blocked.operonId),
-      blockerIdHash: shortHash(blocker.operonId),
-      blockedByPreserved: true,
-      inverseBlockingPreserved: true,
-      periodicParentChanged:
-        scheduledBlocked.parentTask !== relationBefore.childParent,
-      createdPeriodicArtifactCount: createdByPeriodicWorkflow.length,
-    };
-    await ensureOnlyFixtureChanged("scheduledDate");
 
     if (parentAutomation.enabled) {
       const parentCreate = assertApplied(

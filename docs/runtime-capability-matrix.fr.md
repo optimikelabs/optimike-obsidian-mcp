@@ -111,10 +111,18 @@ leur catalogue ; l’adoption reste indisponible. Les relations et la récurrenc
 ont passé le pilote live dédié 3.2.0. Les limites bornées #99/#101 et #139
 restent ouvertes. Le renderer Settings manquant en 3.2.1 est suivi dans #145/#146.
 Operon `3.5.3` reste une preuve historique du déploiement de l’adoption et des
-workflows périodiques ; il n’est pas la cible candidate actuelle. Le candidat
-Des runs Pilot 2 sur le worktree ont exercé Optimike MCP `3.2.0` avec Operon
+workflows périodiques ; il n’est pas la cible candidate actuelle. Des runs
+Pilot 2 sur le worktree ont exercé Optimike MCP `3.2.0` avec Operon
 `3.6.0`, CLI `1.2.0`, Local REST API `5.1.0` et Bridge `0.8.3` ; l’admission de
 la release exige la même gate sur le SHA final propre.
+Les applies périodiques de ces runs sur le worktree sont uniquement des preuves
+historiques/diagnostiques. La canary sur le SHA exact effectue la prévisualisation
+périodique et la négociation du grant exact, puis saute les applies périodiques
+avec la raison `public_task_source_projection_unavailable`, car le plan public
+Task Workflow est limité aux métadonnées et n’expose aucun chemin de source des
+tâches avant apply. Les outils runtime restent disponibles ; la projection
+publique du chemin de source est un suivi amont non bloquant et aucune
+certification périodique complète n’est revendiquée.
 Voir le [contrat MCP Operon](operon-mcp-contract.fr.md) et
 l’[audit CLI/API](operon-cli-audit.fr.md).
 

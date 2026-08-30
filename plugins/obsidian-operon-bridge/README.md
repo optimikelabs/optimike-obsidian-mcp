@@ -37,8 +37,9 @@ Project Serial transition edge. Uncertain outcomes
 remain fail-closed; the Bridge never retries blindly or falls back to
 Markdown/private APIs.
 
-Bridge `0.8.3` supports Operon `3.5.3`'s separate
-task-workflow Developer API sessions. Adoption, daily/weekly periodic-note
+Bridge `0.8.3` supports the separate task-workflow Developer API sessions
+introduced by Operon `3.5.3` and retained by the current `3.6.0` target.
+Adoption, daily/weekly periodic-note
 creation, and periodic-note-aware updates each negotiate their own exact grant
 on first use, even when the last status snapshot reported the capability cold;
 a pending or malformed optional grant cannot revoke the established core read
@@ -50,8 +51,9 @@ workflow kind. The Bridge converts its public one-based adoption line to the
 official zero-based locator exactly once. `taskType` and `taskImage` remain
 scalars, while `taskGallery` crosses the Bridge as an ordered `string[]`; the
 Bridge never guesses media boundaries by splitting a string. Operon `3.5.3`
-reports `compatible-provisional` because certification metadata remains
-explicit, but product-version membership is not a second mutation gate. A
+remains historical rollout evidence, while the current `3.6.0` target reports
+`compatible-provisional` because certification metadata remains explicit; product-
+version membership is not a second mutation gate. A
 non-denied future release remains writable only after the exact negotiated
 contract, capabilities, schemas, health, settled index and recovery checks pass.
 
@@ -60,9 +62,17 @@ and Bridge `0.8.3` without a public-contract migration: degraded startup and
 same-client recovery, operation-scoped grants, adoption, periodic routing and
 scheduling, replay, stale conflicts, concurrent apply, validation,
 modified-time settlement, pending recovery and exact fixture restoration. The
-release still requires the same gate on the clean final SHA. Operon therefore remains
-`compatible-provisional`, admitted by the same contract-first checks rather than
-by a positive product-version allowlist.
+periodic applies in those working-tree runs are historical/diagnostic evidence
+only. The exact-SHA release canary performs periodic preview and exact-grant
+negotiation but skips periodic applies with reason
+`public_task_source_projection_unavailable`, because the public Task Workflow
+plan is metadata-only and exposes no pre-apply task-source path. This is a
+destructive-canary containment/certification boundary, not a runtime tool
+disablement: the runtime tools remain available, upstream public path projection
+is a nonblocking follow-up, and no full periodic certification is claimed. The
+release still requires the applicable gate on the clean final SHA. Operon
+therefore remains `compatible-provisional`, admitted by the same contract-first
+checks rather than by a positive product-version allowlist.
 
 Compatibility is reported explicitly:
 

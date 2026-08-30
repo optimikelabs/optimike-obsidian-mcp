@@ -12,6 +12,15 @@ official adoption after their exact grants. Operon owns every opaque sealed
 plan and same-plan recovery. `taskType` and `taskImage` remain scalar,
 `taskGallery` remains an ordered array, and `__taskDataType` is read-only.
 
+The official `3.6.0` public Task Workflow periodic plan is metadata-only and
+does not expose a pre-apply task-source path. The exact-SHA release canary still
+performs periodic preview and exact-grant negotiation, but skips periodic applies
+with reason `public_task_source_projection_unavailable`. This is a destructive-
+canary containment/certification boundary; runtime tools remain available and
+upstream public path projection is a nonblocking follow-up. Do not claim full
+periodic certification. Core startup, adoption, media, Frontmatter Date Manager,
+idempotence and restoration gates remain mandatory.
+
 Operon `3.6.0` changes three product behaviors that stay outside the generic MCP
 write contract: Task Editor deletion cleans direct child and blocking
 relationships; a blocked task may receive a Scheduled Date; and its opt-in
@@ -25,6 +34,10 @@ public configuration does not announce that opt-in automation as active.
 Operators enabling those features should test the two skipped behaviors before
 depending on them. A postflight never treats unrelated parent or relationship
 drift as an accepted write.
+The Scheduled Date apply described above is historical/diagnostic working-tree
+evidence only. The exact-SHA release canary does not repeat it: periodic preview
+and exact-grant negotiation are followed by `SKIP` with reason
+`public_task_source_projection_unavailable`.
 
 ## Historical 3.3.2 acceptance
 

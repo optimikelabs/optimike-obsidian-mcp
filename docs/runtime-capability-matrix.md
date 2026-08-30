@@ -118,6 +118,13 @@ periodic-workflow rollout; it is not the current candidate target. The
 Working-tree Pilot 2 runs exercised Optimike MCP `3.2.0` with Operon `3.6.0`,
 CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.8.3`; release admission
 requires the same gate on the clean final SHA.
+Periodic applies in those working-tree runs are historical/diagnostic evidence
+only. The exact-SHA release canary performs periodic preview and exact-grant
+negotiation, then skips periodic applies with reason
+`public_task_source_projection_unavailable` because the public Task Workflow
+plan is metadata-only and exposes no pre-apply task-source path. Runtime tools
+remain available; upstream public path projection is a nonblocking follow-up and
+no full periodic certification is claimed.
 The missing 3.2.1 Settings renderer is tracked in #145/#146. Elevated transitions require fresh
 confirmation in the owning Obsidian vault window; unattended consent fails
 closed after 45 seconds. See the [Operon MCP contract](operon-mcp-contract.md)

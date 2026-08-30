@@ -57,12 +57,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   graphs; it must prove startup-order recovery on the same MCP connection,
   grant-on-first-use, replay, stale conflict, concurrency, response loss,
   recovery inspection, zero index validation and restored plugin settings.
-- The separate Operon `3.6.0` behavior gate must prove that a blocked task can
-  receive a Scheduled Date through the periodic workflow without losing
-  `blockedBy` or its inverse `blocking` edge, then remove every run-owned
-  periodic artifact and restore the fixture plus complete Markdown inventory
-  exactly. Working-tree pilot runs exercised these paths; they are diagnostic,
-  not exact-candidate release evidence.
+- A separate Operon `3.6.0` behavior gate historically exercised a blocked task
+  receiving a Scheduled Date through the periodic workflow without losing
+  `blockedBy` or its inverse `blocking` edge, then removed every run-owned
+  periodic artifact and restored the fixture plus complete Markdown inventory
+  exactly. This working-tree apply is historical/diagnostic evidence only, not
+  exact-candidate release evidence; the exact-SHA canary does not repeat it and
+  skips periodic apply under `public_task_source_projection_unavailable`.
+- The exact-SHA release canary performs periodic preview and exact-grant
+  negotiation but skips periodic applies because the public Task Workflow plan
+  is metadata-only and exposes no pre-apply task-source path. The stable reason
+  is `public_task_source_projection_unavailable`. This is a destructive-canary
+  containment/certification boundary, not a runtime tool disablement; working-
+  tree periodic runs remain historical/diagnostic and do not certify the final
+  SHA. Core startup, adoption, media, Frontmatter Date Manager, idempotence and
+  restoration gates remain mandatory. Upstream public path projection is a
+  nonblocking follow-up; no full periodic certification is claimed.
 
 ### Security
 

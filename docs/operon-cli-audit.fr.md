@@ -23,6 +23,17 @@ reste propriétaire de chaque plan opaque scellé et de sa récupération same-p
 `taskType` et `taskImage` restent scalaires, `taskGallery` reste un tableau
 ordonné et `__taskDataType` est read-only.
 
+Le plan public Task Workflow périodique d’Operon officiel `3.6.0` est
+uniquement composé de métadonnées et n’expose aucun chemin de source des tâches
+avant apply. La canary de release sur le SHA exact effectue toujours la
+prévisualisation périodique et la négociation du grant exact, mais saute les
+applies périodiques avec la raison `public_task_source_projection_unavailable`.
+C’est une limite de confinement et de certification de la canary destructive ;
+les outils runtime restent disponibles et la projection publique du chemin de
+source est un suivi amont non bloquant. Ne pas revendiquer une certification
+périodique complète. Les gates startup, adoption, médias, Frontmatter Date
+Manager, idempotence et restauration restent obligatoires.
+
 Operon `3.6.0` modifie trois comportements produit qui restent hors du contrat
 d’écriture générique du MCP : la suppression via Task Editor nettoie les
 relations enfant directes et de blocage ; une tâche bloquée peut recevoir une
@@ -37,6 +48,10 @@ pas cette automatisation opt-in active. Les opérateurs qui activent ces fonctio
 doivent tester ces deux comportements avant de s’y appuyer. Un postflight
 n’accepte jamais une dérive non liée du parent ou des relations comme une
 écriture validée.
+L’apply Scheduled Date décrit ci-dessus reste une preuve historique/diagnostique
+du worktree uniquement. La canary sur le SHA exact ne la répète pas : elle
+effectue la prévisualisation périodique et la négociation du grant exact, puis
+retourne `SKIP` avec la raison `public_task_source_projection_unavailable`.
 
 ## Acceptation historique 3.3.2
 

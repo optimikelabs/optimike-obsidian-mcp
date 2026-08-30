@@ -360,7 +360,7 @@ async function assertSafeMissingVaultTarget(relativePath, label) {
   return checked.absolute;
 }
 
-function plannedTaskSourcePaths(plan) {
+function periodicTaskSourcePaths(plan) {
   const paths = new Set(
     [
       plan?.periodicRoute?.notePath,
@@ -368,27 +368,46 @@ function plannedTaskSourcePaths(plan) {
       ...(plan?.periodicUpdate?.sourceTransitions ?? []).map(
         (transition) => transition?.filePath,
       ),
+      ...(plan?.projection?.taskSources ?? []).map(
+        (taskSource) => taskSource?.filePath,
+      ),
     ].filter((value) => typeof value === "string"),
   );
-  const seen = new WeakSet();
-  const visit = (value, key = "") => {
-    if (!value || typeof value !== "object") return;
-    if (seen.has(value)) return;
-    seen.add(value);
-    for (const [childKey, child] of Object.entries(value)) {
-      if (
-        typeof child === "string" &&
-        ["filePath", "notePath", "targetPath", "path"].includes(childKey)
-      ) {
-        paths.add(child);
-      } else if (child && typeof child === "object") {
-        visit(child, childKey);
-      }
-    }
-    void key;
-  };
-  visit(plan);
   return paths;
+}
+
+const PERIODIC_PROJECTION_SKIP_REASON =
+  "public_task_source_projection_unavailable";
+
+function selectPeriodicCanaryExecution(plan) {
+  // Periodic applies are authorized only by these public task-source
+  // projections. Opaque plan metadata (including a generic metadata.path)
+  // is not a task-source grant and must fail closed.
+  const projectedTaskSourcePaths = periodicTaskSourcePaths(plan);
+  if (projectedTaskSourcePaths.size === 0) {
+    return {
+      mode: "skip",
+      reason: PERIODIC_PROJECTION_SKIP_REASON,
+      projectedTaskSourcePaths,
+      periodicApplyOperations: [],
+      periodicApplyDispatched: false,
+      periodicApplyDispatchCount: 0,
+    };
+  }
+  const periodicApplyOperations = [
+    "daily-create",
+    "weekly-create",
+    "schedule-set",
+    "schedule-clear",
+    "bridge-concurrency",
+  ];
+  return {
+    mode: "apply",
+    projectedTaskSourcePaths,
+    periodicApplyOperations,
+    periodicApplyDispatched: true,
+    periodicApplyDispatchCount: periodicApplyOperations.length,
+  };
 }
 
 function mutationRequiresProjectedTaskSourcePaths(name, resolvedPathCount) {
@@ -417,7 +436,7 @@ async function assertSafePlannedTaskSourceArtifacts(
   label,
   { requirePaths = true } = {},
 ) {
-  const paths = plannedTaskSourcePaths(plan);
+  const paths = periodicTaskSourcePaths(plan);
   if (requirePaths) {
     assert.ok(
       paths.size > 0,
@@ -1295,6 +1314,71 @@ async function offlinePathSafetyContract() {
       ),
       true,
     );
+    assert.equal(
+      mutationRequiresProjectedTaskSourcePaths("unknown_periodic_route", 1),
+      true,
+      "Unknown mutation routes must remain strict.",
+    );
+    const metadataOnlyPeriodicExecution = selectPeriodicCanaryExecution({});
+    assert.equal(metadataOnlyPeriodicExecution.mode, "skip");
+    assert.equal(
+      metadataOnlyPeriodicExecution.reason,
+      PERIODIC_PROJECTION_SKIP_REASON,
+    );
+    assert.equal(
+      metadataOnlyPeriodicExecution.projectedTaskSourcePaths.size,
+      0,
+    );
+    assert.deepEqual(metadataOnlyPeriodicExecution.periodicApplyOperations, []);
+    assert.equal(metadataOnlyPeriodicExecution.periodicApplyDispatched, false);
+    assert.equal(metadataOnlyPeriodicExecution.periodicApplyDispatchCount, 0);
+    const opaqueMetadataPathPeriodicExecution = selectPeriodicCanaryExecution({
+      metadata: { path: plannedCreatePath },
+    });
+    assert.equal(
+      opaqueMetadataPathPeriodicExecution.mode,
+      "skip",
+      "An opaque metadata.path must not authorize a periodic task-source apply.",
+    );
+    assert.equal(
+      opaqueMetadataPathPeriodicExecution.reason,
+      PERIODIC_PROJECTION_SKIP_REASON,
+    );
+    assert.equal(
+      opaqueMetadataPathPeriodicExecution.projectedTaskSourcePaths.size,
+      0,
+    );
+    assert.equal(
+      opaqueMetadataPathPeriodicExecution.periodicApplyDispatched,
+      false,
+    );
+    assert.equal(
+      opaqueMetadataPathPeriodicExecution.periodicApplyDispatchCount,
+      0,
+    );
+    await assert.rejects(
+      assertSafePlannedTaskSourceArtifacts(
+        { metadata: { path: plannedCreatePath } },
+        "Offline opaque metadata.path periodic create",
+      ),
+      /did not seal every task-source path/u,
+    );
+    const projectedPeriodicExecution = selectPeriodicCanaryExecution({
+      periodicRoute: { notePath: plannedCreatePath },
+    });
+    assert.equal(projectedPeriodicExecution.mode, "apply");
+    assert.deepEqual(projectedPeriodicExecution.periodicApplyOperations, [
+      "daily-create",
+      "weekly-create",
+      "schedule-set",
+      "schedule-clear",
+      "bridge-concurrency",
+    ]);
+    assert.equal(projectedPeriodicExecution.periodicApplyDispatched, true);
+    assert.equal(
+      projectedPeriodicExecution.periodicApplyDispatchCount,
+      projectedPeriodicExecution.periodicApplyOperations.length,
+    );
     const metadataOnlyAdoptionPlan = await assertSafePlannedTaskSourceArtifacts(
       {},
       "Offline request-bounded adoption",
@@ -1540,6 +1624,13 @@ async function offlinePathSafetyContract() {
           regularFileAccepted: true,
           plannedCreatePathAttested: true,
           unboundedPlanRefused: true,
+          metadataOnlyPeriodicPreviewSkipped: true,
+          metadataOnlyPeriodicApplyOperations: 0,
+          opaqueMetadataPathPeriodicPreviewSkipped: true,
+          opaqueMetadataPathPeriodicApplyDispatchCount: 0,
+          projectedPeriodicApplyDispatchCount:
+            projectedPeriodicExecution.periodicApplyDispatchCount,
+          unknownMutationRouteStrict: true,
           periodicCreateJunctionSwapRefused: plannedJunction,
           periodicUpdateHardlinkSwapRefused: true,
           candidateBuildOrderAttested: true,
@@ -1885,7 +1976,7 @@ async function main() {
   );
 
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     redacted: true,
     ok: false,
     runId,
@@ -1901,6 +1992,7 @@ async function main() {
     frontmatterDateManager: {},
     adoption: {},
     media: {},
+    periodicCertification: { status: "not-run" },
     periodicScheduling: {},
     periodicCreates: [],
     bridgeConcurrency: {},
@@ -2372,7 +2464,7 @@ async function main() {
     }
   }
 
-  async function periodicCreateViaMcp(kind, routeDate, label) {
+  async function preparePeriodicCreateViaMcp(kind, routeDate, label) {
     const description = `Operon 3.5 ${kind} canary ${runId}`;
     const before = await markdownInventory();
     const periodic = {
@@ -2403,6 +2495,7 @@ async function main() {
     const plannedSourcePaths = await assertSafePlannedTaskSourceArtifacts(
       preview.plan,
       `${label} preview`,
+      { requirePaths: false },
     );
     assert.deepEqual(
       redactedInventoryChanges(
@@ -2410,6 +2503,32 @@ async function main() {
       ),
       [],
       `${label} preview changed the vault inventory.`,
+    );
+    return {
+      before,
+      description,
+      kind,
+      label,
+      periodic,
+      plannedSourcePaths,
+      preview,
+      routeDate,
+    };
+  }
+
+  async function applyPreparedPeriodicCreate(prepared) {
+    const {
+      before,
+      kind,
+      label,
+      periodic,
+      plannedSourcePaths,
+      preview,
+      routeDate,
+    } = prepared;
+    assert.ok(
+      plannedSourcePaths.size > 0,
+      `${label} has no public task-source projection; refusing periodic apply.`,
     );
     // A plan is not a physical containment proof: revalidate immediately
     // before dispatch so a parent junction or a target hardlink swap aborts
@@ -3088,13 +3207,13 @@ async function main() {
       staleRevisionConflict: staleRevision.status,
     };
 
-    const daily = await periodicCreateViaMcp(
+    const dailyPreview = await preparePeriodicCreateViaMcp(
       "daily",
       dates.daily,
       "Daily periodic create",
     );
     const periodicCreateStatusGate = await waitForRefreshedSnapshotStatus(
-      "post-periodic-create status",
+      "post-periodic-create preview status",
     );
     const postPeriodicCreateStatus = periodicCreateStatusGate.status;
     assertRefreshedSnapshotStatus(postPeriodicCreateStatus);
@@ -3113,452 +3232,506 @@ async function main() {
     evidence.firstUseNegotiation.periodicCreateOnly = true;
     evidence.firstUseNegotiation.periodicCreateStatusAttempts =
       periodicCreateStatusGate.attempts;
-    const weekly = await periodicCreateViaMcp(
-      "weekly",
-      dates.weekly,
-      "Weekly periodic create",
+    const periodicExecution = selectPeriodicCanaryExecution(
+      dailyPreview.preview.plan,
     );
-    assert.notEqual(daily.path, weekly.path);
-
-    const schedulingStatusGate = await waitForRefreshedSnapshotStatus(
-      "pre-periodic-update status",
-    );
-    const schedulingCapabilityStatus = schedulingStatusGate.status;
-    assertRefreshedSnapshotStatus(schedulingCapabilityStatus);
-    assert.equal(
-      schedulingCapabilityStatus.snapshot.capabilities.periodicUpdate,
-      false,
-      "Periodic-update must remain cold until its own exact first operation.",
-    );
-    const beforeSchedule = await stableTask(daily.operonId);
-    assert.deepEqual(
-      { path: beforeSchedule.path, line: beforeSchedule.line },
-      { path: daily.path, line: daily.line },
-      "The created Daily fixture locator changed before periodic scheduling.",
-    );
-    assert.equal(beforeSchedule.source, "inline");
-    assert.equal(
-      typeof beforeSchedule.parentTask === "string" &&
-        beforeSchedule.parentTask.length > 0,
-      true,
-      "The created Daily fixture has no projected periodic parent; refusing periodic scheduling.",
-    );
-    const sourceLocator = {
-      path: beforeSchedule.path,
-      line: beforeSchedule.line,
-    };
-    const schedulePreview = mutationStatus(
-      await callMutation(
-        "operon_update_periodic_scheduling",
-        {
-          operonId: daily.operonId,
-          expectedRevision: beforeSchedule.revision,
-          idempotencyKey: `${runId}:periodic-schedule:set-preview`,
-          dryRun: true,
-          patch: { fields: { dateScheduled: dates.scheduled } },
+    if (periodicExecution.mode === "skip") {
+      evidence.periodicCertification = {
+        status: "skipped",
+        reason: periodicExecution.reason,
+        dailyPreview: {
+          capability: dailyPreview.preview.plan?.capability ?? null,
+          mutationKind: dailyPreview.preview.plan?.mutationKind ?? null,
+          planDigestHash: shortHash(dailyPreview.preview.planDigest),
+          projectedTaskSourcePathCount:
+            periodicExecution.projectedTaskSourcePaths.size,
         },
+        appliedOperations: periodicExecution.periodicApplyOperations,
+        periodicApplyDispatched: periodicExecution.periodicApplyDispatched,
+        periodicApplyDispatchCount:
+          periodicExecution.periodicApplyDispatchCount,
+        skippedApplyOperations: [
+          "daily-create",
+          "weekly-create",
+          "schedule-set",
+          "schedule-clear",
+          "bridge-concurrency",
+        ],
+      };
+      evidence.periodicScheduling = {
+        status: "skipped",
+        reason: periodicExecution.reason,
+      };
+      evidence.bridgeConcurrency = {
+        status: "skipped",
+        reason: periodicExecution.reason,
+        restoredOnPass: "not-applicable",
+      };
+    } else {
+      const daily = await applyPreparedPeriodicCreate(dailyPreview);
+      const weekly = await applyPreparedPeriodicCreate(
+        await preparePeriodicCreateViaMcp(
+          "weekly",
+          dates.weekly,
+          "Weekly periodic create",
+        ),
+      );
+      assert.notEqual(daily.path, weekly.path);
+
+      const schedulingStatusGate = await waitForRefreshedSnapshotStatus(
+        "pre-periodic-update status",
+      );
+      const schedulingCapabilityStatus = schedulingStatusGate.status;
+      assertRefreshedSnapshotStatus(schedulingCapabilityStatus);
+      assert.equal(
+        schedulingCapabilityStatus.snapshot.capabilities.periodicUpdate,
+        false,
+        "Periodic-update must remain cold until its own exact first operation.",
+      );
+      const beforeSchedule = await stableTask(daily.operonId);
+      assert.deepEqual(
+        { path: beforeSchedule.path, line: beforeSchedule.line },
+        { path: daily.path, line: daily.line },
+        "The created Daily fixture locator changed before periodic scheduling.",
+      );
+      assert.equal(beforeSchedule.source, "inline");
+      assert.equal(
+        typeof beforeSchedule.parentTask === "string" &&
+          beforeSchedule.parentTask.length > 0,
+        true,
+        "The created Daily fixture has no projected periodic parent; refusing periodic scheduling.",
+      );
+      const sourceLocator = {
+        path: beforeSchedule.path,
+        line: beforeSchedule.line,
+      };
+      const schedulePreview = mutationStatus(
+        await callMutation(
+          "operon_update_periodic_scheduling",
+          {
+            operonId: daily.operonId,
+            expectedRevision: beforeSchedule.revision,
+            idempotencyKey: `${runId}:periodic-schedule:set-preview`,
+            dryRun: true,
+            patch: { fields: { dateScheduled: dates.scheduled } },
+          },
+          "periodic scheduling set preview",
+        ),
         "periodic scheduling set preview",
-      ),
-      "periodic scheduling set preview",
-      "planned",
-    );
-    assert.equal(
-      schedulePreview.plan?.capability,
-      "tasks.update.periodic-note.preview",
-      "Operon did not project the additive periodic-update plan for the created Daily fixture.",
-    );
-    assert.equal(schedulePreview.plan?.mutationKind, "task.update");
-    assert.equal(schedulePreview.plan?.planDigest, schedulePreview.planDigest);
-    const periodicUpdateStatusGate = await waitForRefreshedSnapshotStatus(
-      "post-periodic-update status",
-    );
-    const postPeriodicUpdateStatus = periodicUpdateStatusGate.status;
-    assertRefreshedSnapshotStatus(postPeriodicUpdateStatus);
-    assert.equal(
-      postPeriodicUpdateStatus.snapshot.capabilities.periodicUpdate,
-      true,
-    );
-    assert.equal(
-      postPeriodicUpdateStatus.snapshot.capabilities.filterQuery,
-      false,
-    );
-    evidence.firstUseNegotiation.periodicUpdateOnly = true;
-    evidence.firstUseNegotiation.periodicUpdateStatusAttempts =
-      periodicUpdateStatusGate.attempts;
-    const schedulePlannedSourcePaths =
+        "planned",
+      );
+      assert.equal(
+        schedulePreview.plan?.capability,
+        "tasks.update.periodic-note.preview",
+        "Operon did not project the additive periodic-update plan for the created Daily fixture.",
+      );
+      assert.equal(schedulePreview.plan?.mutationKind, "task.update");
+      assert.equal(
+        schedulePreview.plan?.planDigest,
+        schedulePreview.planDigest,
+      );
+      const periodicUpdateStatusGate = await waitForRefreshedSnapshotStatus(
+        "post-periodic-update status",
+      );
+      const postPeriodicUpdateStatus = periodicUpdateStatusGate.status;
+      assertRefreshedSnapshotStatus(postPeriodicUpdateStatus);
+      assert.equal(
+        postPeriodicUpdateStatus.snapshot.capabilities.periodicUpdate,
+        true,
+      );
+      assert.equal(
+        postPeriodicUpdateStatus.snapshot.capabilities.filterQuery,
+        false,
+      );
+      evidence.firstUseNegotiation.periodicUpdateOnly = true;
+      evidence.firstUseNegotiation.periodicUpdateStatusAttempts =
+        periodicUpdateStatusGate.attempts;
+      const schedulePlannedSourcePaths =
+        await assertSafePlannedTaskSourceArtifacts(
+          schedulePreview.plan,
+          "Periodic scheduling set preview",
+        );
+      const beforeScheduleApply = await stableTask(daily.operonId);
+      assert.equal(
+        beforeScheduleApply.revision,
+        beforeSchedule.revision,
+        "The Daily fixture changed after periodic scheduling preview.",
+      );
+      const beforeSchedulingMutationInventory = await markdownInventory();
       await assertSafePlannedTaskSourceArtifacts(
         schedulePreview.plan,
-        "Periodic scheduling set preview",
+        "Periodic scheduling set apply pre-dispatch",
       );
-    const beforeScheduleApply = await stableTask(daily.operonId);
-    assert.equal(
-      beforeScheduleApply.revision,
-      beforeSchedule.revision,
-      "The Daily fixture changed after periodic scheduling preview.",
-    );
-    const beforeSchedulingMutationInventory = await markdownInventory();
-    await assertSafePlannedTaskSourceArtifacts(
-      schedulePreview.plan,
-      "Periodic scheduling set apply pre-dispatch",
-    );
-    const scheduledResult = await callMutation(
-      "operon_update_periodic_scheduling",
-      {
-        operonId: daily.operonId,
-        expectedRevision: beforeScheduleApply.revision,
-        idempotencyKey: `${runId}:periodic-schedule:set`,
-        dryRun: false,
-        patch: { fields: { dateScheduled: dates.scheduled } },
-      },
-      "periodic scheduling set",
-    );
-    const schedulingMutationChanges = inventoryDiff(
-      beforeSchedulingMutationInventory,
-      await markdownInventory(),
-    );
-    for (const change of schedulingMutationChanges) {
-      if (
-        change.change === "created" &&
-        path.basename(change.path, ".md") === dates.scheduled
-      ) {
-        assert.equal(
-          schedulePlannedSourcePaths.has(change.path),
-          true,
-          "Periodic scheduling created a source path not sealed by the pre-dispatch plan.",
-        );
-        assert.equal(
-          canonicalRelativeMarkdownPath(change.path),
-          true,
-          "Periodic scheduling created an unsafe task-source path.",
-        );
-        await recordRunOwnedArtifact(
-          change.path,
-          "Periodic scheduling generated source",
-        );
-      }
-    }
-    await trackNativeTaskSourceArtifacts(
-      scheduledResult,
-      "Periodic scheduling set",
-    );
-    const scheduled = mutationStatus(
-      scheduledResult,
-      "periodic scheduling set",
-      "applied",
-    );
-    evidence.nativeProofs.push(
-      assertNativeMutationProof(scheduled, "periodic scheduling set"),
-    );
-    assert.equal(scheduled.after.path, sourceLocator.path);
-    await safeVaultRegularFile(
-      scheduled.after.path,
-      "Periodic scheduling updated source",
-    );
-    assert.equal(scheduled.after.operonId, daily.operonId);
-    assert.equal(Number.isInteger(scheduled.after.line), true);
-    assert.equal(scheduled.after.dates.scheduled, dates.scheduled);
-    assert.equal(
-      typeof scheduled.after.parentTask === "string" &&
-        scheduled.after.parentTask.length > 0,
-      true,
-      "Periodic scheduling set did not project a periodic parent.",
-    );
-    assert.notEqual(scheduled.after.parentTask, beforeSchedule.parentTask);
-    const beforeClear = await stableTask(daily.operonId);
-    assert.equal(beforeClear.parentTask === beforeSchedule.parentTask, false);
-    const clearPreview = mutationStatus(
-      await callMutation(
+      const scheduledResult = await callMutation(
         "operon_update_periodic_scheduling",
         {
           operonId: daily.operonId,
-          expectedRevision: beforeClear.revision,
-          idempotencyKey: `${runId}:periodic-schedule:clear-preview`,
-          dryRun: true,
+          expectedRevision: beforeScheduleApply.revision,
+          idempotencyKey: `${runId}:periodic-schedule:set`,
+          dryRun: false,
+          patch: { fields: { dateScheduled: dates.scheduled } },
+        },
+        "periodic scheduling set",
+      );
+      const schedulingMutationChanges = inventoryDiff(
+        beforeSchedulingMutationInventory,
+        await markdownInventory(),
+      );
+      for (const change of schedulingMutationChanges) {
+        if (
+          change.change === "created" &&
+          path.basename(change.path, ".md") === dates.scheduled
+        ) {
+          assert.equal(
+            schedulePlannedSourcePaths.has(change.path),
+            true,
+            "Periodic scheduling created a source path not sealed by the pre-dispatch plan.",
+          );
+          assert.equal(
+            canonicalRelativeMarkdownPath(change.path),
+            true,
+            "Periodic scheduling created an unsafe task-source path.",
+          );
+          await recordRunOwnedArtifact(
+            change.path,
+            "Periodic scheduling generated source",
+          );
+        }
+      }
+      await trackNativeTaskSourceArtifacts(
+        scheduledResult,
+        "Periodic scheduling set",
+      );
+      const scheduled = mutationStatus(
+        scheduledResult,
+        "periodic scheduling set",
+        "applied",
+      );
+      evidence.nativeProofs.push(
+        assertNativeMutationProof(scheduled, "periodic scheduling set"),
+      );
+      assert.equal(scheduled.after.path, sourceLocator.path);
+      await safeVaultRegularFile(
+        scheduled.after.path,
+        "Periodic scheduling updated source",
+      );
+      assert.equal(scheduled.after.operonId, daily.operonId);
+      assert.equal(Number.isInteger(scheduled.after.line), true);
+      assert.equal(scheduled.after.dates.scheduled, dates.scheduled);
+      assert.equal(
+        typeof scheduled.after.parentTask === "string" &&
+          scheduled.after.parentTask.length > 0,
+        true,
+        "Periodic scheduling set did not project a periodic parent.",
+      );
+      assert.notEqual(scheduled.after.parentTask, beforeSchedule.parentTask);
+      const beforeClear = await stableTask(daily.operonId);
+      assert.equal(beforeClear.parentTask === beforeSchedule.parentTask, false);
+      const clearPreview = mutationStatus(
+        await callMutation(
+          "operon_update_periodic_scheduling",
+          {
+            operonId: daily.operonId,
+            expectedRevision: beforeClear.revision,
+            idempotencyKey: `${runId}:periodic-schedule:clear-preview`,
+            dryRun: true,
+            patch: { fields: { dateScheduled: null } },
+          },
+          "periodic scheduling clear preview",
+        ),
+        "periodic scheduling clear preview",
+        "planned",
+      );
+      assert.equal(
+        clearPreview.plan?.capability,
+        "tasks.update.periodic-note.preview",
+        "Operon did not project the additive periodic-update clear plan for the created Daily fixture.",
+      );
+      assert.equal(clearPreview.plan?.mutationKind, "task.update");
+      assert.equal(clearPreview.plan?.planDigest, clearPreview.planDigest);
+      const clearPlannedSourcePaths =
+        await assertSafePlannedTaskSourceArtifacts(
+          clearPreview.plan,
+          "Periodic scheduling clear preview",
+        );
+      const beforeClearApply = await stableTask(daily.operonId);
+      assert.equal(
+        beforeClearApply.revision,
+        beforeClear.revision,
+        "The Daily fixture changed after periodic scheduling clear preview.",
+      );
+      await assertSafePlannedTaskSourceArtifacts(
+        clearPreview.plan,
+        "Periodic scheduling clear apply pre-dispatch",
+      );
+      const clearedResult = await callMutation(
+        "operon_update_periodic_scheduling",
+        {
+          operonId: daily.operonId,
+          expectedRevision: beforeClearApply.revision,
+          idempotencyKey: `${runId}:periodic-schedule:clear`,
+          dryRun: false,
           patch: { fields: { dateScheduled: null } },
         },
-        "periodic scheduling clear preview",
-      ),
-      "periodic scheduling clear preview",
-      "planned",
-    );
-    assert.equal(
-      clearPreview.plan?.capability,
-      "tasks.update.periodic-note.preview",
-      "Operon did not project the additive periodic-update clear plan for the created Daily fixture.",
-    );
-    assert.equal(clearPreview.plan?.mutationKind, "task.update");
-    assert.equal(clearPreview.plan?.planDigest, clearPreview.planDigest);
-    const clearPlannedSourcePaths = await assertSafePlannedTaskSourceArtifacts(
-      clearPreview.plan,
-      "Periodic scheduling clear preview",
-    );
-    const beforeClearApply = await stableTask(daily.operonId);
-    assert.equal(
-      beforeClearApply.revision,
-      beforeClear.revision,
-      "The Daily fixture changed after periodic scheduling clear preview.",
-    );
-    await assertSafePlannedTaskSourceArtifacts(
-      clearPreview.plan,
-      "Periodic scheduling clear apply pre-dispatch",
-    );
-    const clearedResult = await callMutation(
-      "operon_update_periodic_scheduling",
-      {
-        operonId: daily.operonId,
-        expectedRevision: beforeClearApply.revision,
-        idempotencyKey: `${runId}:periodic-schedule:clear`,
-        dryRun: false,
-        patch: { fields: { dateScheduled: null } },
-      },
-      "periodic scheduling clear",
-    );
-    await trackNativeTaskSourceArtifacts(
-      clearedResult,
-      "Periodic scheduling clear",
-    );
-    const cleared = mutationStatus(
-      clearedResult,
-      "periodic scheduling clear",
-      "applied",
-    );
-    assert.equal(
-      clearPlannedSourcePaths.has(cleared.after.path),
-      true,
-      "Periodic scheduling clear returned a source path not sealed by the pre-dispatch plan.",
-    );
-    await safeVaultRegularFile(
-      cleared.after.path,
-      "Periodic scheduling cleared source",
-    );
-    evidence.nativeProofs.push(
-      assertNativeMutationProof(cleared, "periodic scheduling clear"),
-    );
-    assert.equal(cleared.after.path, sourceLocator.path);
-    assert.equal(cleared.after.operonId, daily.operonId);
-    assert.equal(Number.isInteger(cleared.after.line), true);
-    assert.equal(cleared.after.dates.scheduled, null);
-    assert.equal(cleared.after.parentTask, null);
-    evidence.periodicScheduling = {
-      fixtureKind: "daily",
-      fixtureOperonIdHash: shortHash(daily.operonId),
-      capabilityProjected: true,
-      periodicParentProjected: true,
-      initialParentTaskHash: shortHash(beforeSchedule.parentTask),
-      setPreviewPlanDigestHash: shortHash(schedulePreview.planDigest),
-      clearPreviewPlanDigestHash: shortHash(clearPreview.planDigest),
-      set: true,
-      clear: true,
-      sourcePathPreserved: true,
-      sourceIdentityPreserved: true,
-      sourceLineShiftObserved:
-        scheduled.after.line !== sourceLocator.line ||
-        cleared.after.line !== sourceLocator.line,
-      sourcePathHash: shortHash(sourceLocator.path),
-    };
-
-    const beforeConcurrent = await markdownInventory();
-    const concurrentDescription = `Operon 3.5 concurrent periodic canary ${runId}`;
-    const concurrentPeriodic = {
-      description: concurrentDescription,
-      periodicKind: "daily",
-      routeDate: dates.concurrent,
-      fields: { taskType: "canary-concurrent-periodic" },
-    };
-    // The direct Bridge route below intentionally tests HTTP same-key joining.
-    // It must nevertheless receive the same physical containment gate as an
-    // MCP mutation: a distinct non-mutating preview seals every task source.
-    const concurrentPreview = mutationStatus(
-      await callMutation(
-        "operon_create_periodic_task",
-        {
-          idempotencyKey: `${runId}:bridge:periodic-concurrent:physical-preview`,
-          dryRun: true,
-          periodic: concurrentPeriodic,
-        },
-        "Bridge concurrency physical preview",
-      ),
-      "Bridge concurrency physical preview",
-      "planned",
-    );
-    const concurrentPlannedSourcePaths =
-      await assertSafePlannedTaskSourceArtifacts(
-        concurrentPreview.plan,
-        "Bridge concurrency physical preview",
+        "periodic scheduling clear",
       );
-    assert.deepEqual(
-      redactedInventoryChanges(
-        inventoryDiff(beforeConcurrent, await markdownInventory()),
-      ),
-      [],
-      "Bridge concurrency physical preview changed the vault inventory.",
-    );
-    const concurrentBody = JSON.stringify({
-      idempotencyKey: `${runId}:bridge:periodic-concurrent`,
-      dryRun: false,
-      periodic: concurrentPeriodic,
-    });
-    const bridgeUrl = `${baseUrl}${BRIDGE_PREFIX}/tasks/periodic`;
-    const bridgePost = async () => {
-      // The two same-key calls are intentionally concurrent, but each HTTP
-      // dispatch owns its own final physical and candidate re-attestation.
-      // They are not treated as one atomic batch by this client process.
-      await assertSafePlannedTaskSourceArtifacts(
-        concurrentPreview.plan,
-        "Bridge concurrency physical apply pre-dispatch",
+      await trackNativeTaskSourceArtifacts(
+        clearedResult,
+        "Periodic scheduling clear",
       );
-      await assertCandidateStillExact(candidate);
-      await assertVaultRootStillSame("Bridge concurrency native apply");
-      const response = await fetchWithAbortTimeout(
-        bridgeUrl,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: concurrentBody,
-        },
-        "concurrent Bridge periodic POST",
-        MUTATION_TIMEOUT_MS,
-      );
-      const payload = await response.json();
-      return { status: response.status, payload };
-    };
-    const bridgeSettled = await Promise.allSettled([
-      track(bridgePost()),
-      track(bridgePost()),
-    ]);
-    for (const [index, settled] of bridgeSettled.entries()) {
-      if (settled.status === "rejected") {
-        evidence.mutationStatuses.push(
-          mutationDiagnostic(
-            null,
-            `Bridge concurrency ${index === 0 ? "A" : "B"}`,
-            {
-              transportError: true,
-              thrownMessage:
-                settled.reason instanceof Error
-                  ? settled.reason.message
-                  : String(settled.reason),
-              thrownCode:
-                typeof settled.reason?.code === "string"
-                  ? settled.reason.code
-                  : undefined,
-            },
-          ),
-        );
-      }
-    }
-    const rejectedBridge = bridgeSettled.find(
-      (settled) => settled.status === "rejected",
-    );
-    if (rejectedBridge) throw rejectedBridge.reason;
-    const [bridgeA, bridgeB] = bridgeSettled.map((settled) => settled.value);
-    evidence.mutationStatuses.push(
-      {
-        ...mutationDiagnostic(bridgeA.payload, "Bridge concurrency A"),
-        httpStatus: bridgeA.status,
-      },
-      {
-        ...mutationDiagnostic(bridgeB.payload, "Bridge concurrency B"),
-        httpStatus: bridgeB.status,
-      },
-    );
-    assert.equal(bridgeA.status, 200);
-    assert.equal(bridgeB.status, 200);
-    mutationStatus(bridgeA.payload, "Bridge concurrency A", "applied");
-    evidence.nativeProofs.push(
-      assertNativeMutationProof(bridgeA.payload, "Bridge concurrency A"),
-    );
-    assert.equal(bridgeB.payload.status, bridgeA.payload.status);
-    assert.equal(
-      bridgeB.payload.operationId,
-      bridgeA.payload.operationId,
-      "Concurrent Bridge responses returned different operationIds.",
-    );
-    const bridgeResultHash = sha256(JSON.stringify(bridgeA.payload));
-    assert.equal(
-      sha256(JSON.stringify(bridgeB.payload)),
-      bridgeResultHash,
-      "Concurrent Bridge responses returned different result bodies.",
-    );
-    const concurrentTask = bridgeA.payload.after;
-    assert.equal(concurrentTask?.source, "inline");
-    assert.equal(canonicalRelativeMarkdownPath(concurrentTask?.path), true);
-    assert.equal(
-      concurrentPlannedSourcePaths.has(concurrentTask.path),
-      true,
-      "Concurrent Bridge result source was not sealed by the physical pre-dispatch plan.",
-    );
-    await safeVaultRegularFile(
-      concurrentTask.path,
-      "Concurrent Bridge result source",
-    );
-    const afterConcurrent = await markdownInventory();
-    const concurrentChanges = inventoryDiff(beforeConcurrent, afterConcurrent);
-    for (const change of concurrentChanges) {
-      assert.equal(
-        change.change,
-        "created",
-        "Concurrent Bridge request changed a pre-existing Markdown source.",
+      const cleared = mutationStatus(
+        clearedResult,
+        "periodic scheduling clear",
+        "applied",
       );
       assert.equal(
-        concurrentPlannedSourcePaths.has(change.path),
+        clearPlannedSourcePaths.has(cleared.after.path),
         true,
-        "Concurrent Bridge request created a source not sealed by the physical pre-dispatch plan.",
+        "Periodic scheduling clear returned a source path not sealed by the pre-dispatch plan.",
       );
       await safeVaultRegularFile(
-        change.path,
-        "Concurrent Bridge created planned source",
+        cleared.after.path,
+        "Periodic scheduling cleared source",
       );
+      evidence.nativeProofs.push(
+        assertNativeMutationProof(cleared, "periodic scheduling clear"),
+      );
+      assert.equal(cleared.after.path, sourceLocator.path);
+      assert.equal(cleared.after.operonId, daily.operonId);
+      assert.equal(Number.isInteger(cleared.after.line), true);
+      assert.equal(cleared.after.dates.scheduled, null);
+      assert.equal(cleared.after.parentTask, null);
+      evidence.periodicScheduling = {
+        fixtureKind: "daily",
+        fixtureOperonIdHash: shortHash(daily.operonId),
+        capabilityProjected: true,
+        periodicParentProjected: true,
+        initialParentTaskHash: shortHash(beforeSchedule.parentTask),
+        setPreviewPlanDigestHash: shortHash(schedulePreview.planDigest),
+        clearPreviewPlanDigestHash: shortHash(clearPreview.planDigest),
+        set: true,
+        clear: true,
+        sourcePathPreserved: true,
+        sourceIdentityPreserved: true,
+        sourceLineShiftObserved:
+          scheduled.after.line !== sourceLocator.line ||
+          cleared.after.line !== sourceLocator.line,
+        sourcePathHash: shortHash(sourceLocator.path),
+      };
+
+      const beforeConcurrent = await markdownInventory();
+      const concurrentDescription = `Operon 3.5 concurrent periodic canary ${runId}`;
+      const concurrentPeriodic = {
+        description: concurrentDescription,
+        periodicKind: "daily",
+        routeDate: dates.concurrent,
+        fields: { taskType: "canary-concurrent-periodic" },
+      };
+      // The direct Bridge route below intentionally tests HTTP same-key joining.
+      // It must nevertheless receive the same physical containment gate as an
+      // MCP mutation: a distinct non-mutating preview seals every task source.
+      const concurrentPreview = mutationStatus(
+        await callMutation(
+          "operon_create_periodic_task",
+          {
+            idempotencyKey: `${runId}:bridge:periodic-concurrent:physical-preview`,
+            dryRun: true,
+            periodic: concurrentPeriodic,
+          },
+          "Bridge concurrency physical preview",
+        ),
+        "Bridge concurrency physical preview",
+        "planned",
+      );
+      const concurrentPlannedSourcePaths =
+        await assertSafePlannedTaskSourceArtifacts(
+          concurrentPreview.plan,
+          "Bridge concurrency physical preview",
+        );
+      assert.deepEqual(
+        redactedInventoryChanges(
+          inventoryDiff(beforeConcurrent, await markdownInventory()),
+        ),
+        [],
+        "Bridge concurrency physical preview changed the vault inventory.",
+      );
+      const concurrentBody = JSON.stringify({
+        idempotencyKey: `${runId}:bridge:periodic-concurrent`,
+        dryRun: false,
+        periodic: concurrentPeriodic,
+      });
+      const bridgeUrl = `${baseUrl}${BRIDGE_PREFIX}/tasks/periodic`;
+      const bridgePost = async () => {
+        // The two same-key calls are intentionally concurrent, but each HTTP
+        // dispatch owns its own final physical and candidate re-attestation.
+        // They are not treated as one atomic batch by this client process.
+        await assertSafePlannedTaskSourceArtifacts(
+          concurrentPreview.plan,
+          "Bridge concurrency physical apply pre-dispatch",
+        );
+        await assertCandidateStillExact(candidate);
+        await assertVaultRootStillSame("Bridge concurrency native apply");
+        const response = await fetchWithAbortTimeout(
+          bridgeUrl,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: concurrentBody,
+          },
+          "concurrent Bridge periodic POST",
+          MUTATION_TIMEOUT_MS,
+        );
+        const payload = await response.json();
+        return { status: response.status, payload };
+      };
+      const bridgeSettled = await Promise.allSettled([
+        track(bridgePost()),
+        track(bridgePost()),
+      ]);
+      for (const [index, settled] of bridgeSettled.entries()) {
+        if (settled.status === "rejected") {
+          evidence.mutationStatuses.push(
+            mutationDiagnostic(
+              null,
+              `Bridge concurrency ${index === 0 ? "A" : "B"}`,
+              {
+                transportError: true,
+                thrownMessage:
+                  settled.reason instanceof Error
+                    ? settled.reason.message
+                    : String(settled.reason),
+                thrownCode:
+                  typeof settled.reason?.code === "string"
+                    ? settled.reason.code
+                    : undefined,
+              },
+            ),
+          );
+        }
+      }
+      const rejectedBridge = bridgeSettled.find(
+        (settled) => settled.status === "rejected",
+      );
+      if (rejectedBridge) throw rejectedBridge.reason;
+      const [bridgeA, bridgeB] = bridgeSettled.map((settled) => settled.value);
+      evidence.mutationStatuses.push(
+        {
+          ...mutationDiagnostic(bridgeA.payload, "Bridge concurrency A"),
+          httpStatus: bridgeA.status,
+        },
+        {
+          ...mutationDiagnostic(bridgeB.payload, "Bridge concurrency B"),
+          httpStatus: bridgeB.status,
+        },
+      );
+      assert.equal(bridgeA.status, 200);
+      assert.equal(bridgeB.status, 200);
+      mutationStatus(bridgeA.payload, "Bridge concurrency A", "applied");
+      evidence.nativeProofs.push(
+        assertNativeMutationProof(bridgeA.payload, "Bridge concurrency A"),
+      );
+      assert.equal(bridgeB.payload.status, bridgeA.payload.status);
+      assert.equal(
+        bridgeB.payload.operationId,
+        bridgeA.payload.operationId,
+        "Concurrent Bridge responses returned different operationIds.",
+      );
+      const bridgeResultHash = sha256(JSON.stringify(bridgeA.payload));
+      assert.equal(
+        sha256(JSON.stringify(bridgeB.payload)),
+        bridgeResultHash,
+        "Concurrent Bridge responses returned different result bodies.",
+      );
+      const concurrentTask = bridgeA.payload.after;
+      assert.equal(concurrentTask?.source, "inline");
+      assert.equal(canonicalRelativeMarkdownPath(concurrentTask?.path), true);
+      assert.equal(
+        concurrentPlannedSourcePaths.has(concurrentTask.path),
+        true,
+        "Concurrent Bridge result source was not sealed by the physical pre-dispatch plan.",
+      );
+      await safeVaultRegularFile(
+        concurrentTask.path,
+        "Concurrent Bridge result source",
+      );
+      const afterConcurrent = await markdownInventory();
+      const concurrentChanges = inventoryDiff(
+        beforeConcurrent,
+        afterConcurrent,
+      );
+      for (const change of concurrentChanges) {
+        assert.equal(
+          change.change,
+          "created",
+          "Concurrent Bridge request changed a pre-existing Markdown source.",
+        );
+        assert.equal(
+          concurrentPlannedSourcePaths.has(change.path),
+          true,
+          "Concurrent Bridge request created a source not sealed by the physical pre-dispatch plan.",
+        );
+        await safeVaultRegularFile(
+          change.path,
+          "Concurrent Bridge created planned source",
+        );
+      }
+      await recordRunOwnedArtifact(
+        concurrentTask.path,
+        "Concurrent Bridge periodic result",
+      );
+      assert.equal(beforeConcurrent.has(concurrentTask.path), false);
+      assert.equal(
+        concurrentChanges.some(
+          (change) =>
+            change.path === concurrentTask.path && change.change === "created",
+        ),
+        true,
+      );
+      const concurrentQuery = await call("operon_query_tasks", {
+        search: concurrentDescription,
+        pathIncludes: [concurrentTask.path],
+        forceRefresh: true,
+        limit: 100,
+      });
+      const exactConcurrentTasks = (concurrentQuery?.tasks ?? []).filter(
+        (task) =>
+          task.description === concurrentDescription &&
+          task.path === concurrentTask.path,
+      );
+      assert.equal(
+        exactConcurrentTasks.length,
+        1,
+        "Concurrent Bridge requests created more than one periodic task.",
+      );
+      assert.equal(
+        exactConcurrentTasks[0].operonId,
+        concurrentTask.operonId,
+        "The single visible concurrent task does not match the Bridge result.",
+      );
+      evidence.bridgeConcurrency = {
+        route: `${BRIDGE_PREFIX}/tasks/periodic`,
+        httpStatuses: [bridgeA.status, bridgeB.status],
+        sameOperationId: true,
+        sameResult: true,
+        exactVisibleTaskCount: exactConcurrentTasks.length,
+        resultHash: bridgeResultHash,
+        operationIdHash: shortHash(bridgeA.payload.operationId),
+        operonIdHash: shortHash(concurrentTask.operonId),
+        pathHash: shortHash(concurrentTask.path),
+        markdownChanges: redactedInventoryChanges(concurrentChanges),
+        restoredOnPass: false,
+      };
+      evidence.periodicCertification = {
+        status: "certified",
+        appliedOperations: periodicExecution.periodicApplyOperations,
+        periodicApplyDispatched: periodicExecution.periodicApplyDispatched,
+        periodicApplyDispatchCount:
+          periodicExecution.periodicApplyDispatchCount,
+      };
     }
-    await recordRunOwnedArtifact(
-      concurrentTask.path,
-      "Concurrent Bridge periodic result",
-    );
-    assert.equal(beforeConcurrent.has(concurrentTask.path), false);
-    assert.equal(
-      concurrentChanges.some(
-        (change) =>
-          change.path === concurrentTask.path && change.change === "created",
-      ),
-      true,
-    );
-    const concurrentQuery = await call("operon_query_tasks", {
-      search: concurrentDescription,
-      pathIncludes: [concurrentTask.path],
-      forceRefresh: true,
-      limit: 100,
-    });
-    const exactConcurrentTasks = (concurrentQuery?.tasks ?? []).filter(
-      (task) =>
-        task.description === concurrentDescription &&
-        task.path === concurrentTask.path,
-    );
-    assert.equal(
-      exactConcurrentTasks.length,
-      1,
-      "Concurrent Bridge requests created more than one periodic task.",
-    );
-    assert.equal(
-      exactConcurrentTasks[0].operonId,
-      concurrentTask.operonId,
-      "The single visible concurrent task does not match the Bridge result.",
-    );
-    evidence.bridgeConcurrency = {
-      route: `${BRIDGE_PREFIX}/tasks/periodic`,
-      httpStatuses: [bridgeA.status, bridgeB.status],
-      sameOperationId: true,
-      sameResult: true,
-      exactVisibleTaskCount: exactConcurrentTasks.length,
-      resultHash: bridgeResultHash,
-      operationIdHash: shortHash(bridgeA.payload.operationId),
-      operonIdHash: shortHash(concurrentTask.operonId),
-      pathHash: shortHash(concurrentTask.path),
-      markdownChanges: redactedInventoryChanges(concurrentChanges),
-      restoredOnPass: false,
-    };
 
     await validateZero("afterMutations");
     await pendingRecoveriesZero("afterMutations");
@@ -3617,7 +3790,9 @@ async function main() {
     for (const artifact of evidence.periodicCreates) {
       artifact.restoredOnPass = true;
     }
-    evidence.bridgeConcurrency.restoredOnPass = true;
+    if (evidence.periodicCertification.status === "certified") {
+      evidence.bridgeConcurrency.restoredOnPass = true;
+    }
 
     evidence.ok = true;
     evidence.completedAt = new Date().toISOString();

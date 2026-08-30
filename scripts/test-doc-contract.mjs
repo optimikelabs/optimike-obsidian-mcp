@@ -244,6 +244,8 @@ const operonCandidateEvidenceDocs = [
   ["operon-cli-audit.fr.md", await text("docs/operon-cli-audit.fr.md")],
   ["operon-decision-report.md", await text("docs/operon-decision-report.md")],
   ["operon-local-validation.md", operonLocalValidation],
+  ["operon-mcp-contract.md", await text("docs/operon-mcp-contract.md")],
+  ["operon-mcp-contract.fr.md", await text("docs/operon-mcp-contract.fr.md")],
   ["operon-rest-contract.md", await text("docs/operon-rest-contract.md")],
   ["runtime-capability-matrix.md", matrix],
   ["runtime-capability-matrix.fr.md", matrixFr],
@@ -269,7 +271,51 @@ for (const [name, content] of operonCandidateEvidenceDocs) {
       `${name} presents working-tree evidence as exact-candidate acceptance`,
     );
   }
+  assert.match(
+    content,
+    /public_task_source_projection_unavailable/u,
+    `${name} must disclose the exact-SHA periodic apply skip`,
+  );
+  assert.match(
+    content,
+    /(?:no|not|do not claim)[\s\S]{0,80}periodic[\s\S]{0,30}certification|(?:aucune|pas une|ne pas revendiquer)[\s\S]{0,80}certification[\s\S]{0,30}périodique/iu,
+    `${name} must reject a full periodic-certification claim`,
+  );
 }
+const workingTreePeriodicEvidenceDocs = operonCandidateEvidenceDocs.filter(
+  ([name]) =>
+    ![
+      "README.md",
+      "README.fr.md",
+      "operon-mcp-contract.md",
+      "operon-mcp-contract.fr.md",
+    ].includes(name),
+);
+for (const [name, content] of workingTreePeriodicEvidenceDocs) {
+  assert.match(
+    content,
+    /historical\/\s*diagnostic|historique(?:s)?\/\s*diagnostique(?:s)?/iu,
+    `${name} must label working-tree periodic applies as historical/diagnostic`,
+  );
+}
+const periodicCertificationClaims = operonCandidateEvidenceDocs
+  .map(([, content]) => content)
+  .join("\n");
+assert.doesNotMatch(
+  periodicCertificationClaims,
+  /exact-SHA[^\n]{0,160}(?:must|doit)[^\n]{0,80}(?:repeat|répéter)[^\n]{0,80}(?:Scheduled Date|periodic apply)/iu,
+  "exact-SHA documentation must not promise to repeat a periodic apply that the gate skips",
+);
+assert.match(
+  periodicCertificationClaims,
+  /historical\/diagnostic|historique\/diagnostique/iu,
+  "working-tree periodic applies must remain explicitly historical/diagnostic",
+);
+assert.match(
+  periodicCertificationClaims,
+  /no full periodic certification|aucune certification périodique complète/iu,
+  "the candidate documentation must not claim full periodic certification",
+);
 assert.match(
   operonCandidateEvidenceDocs.map(([, content]) => content).join("\n"),
   /exact-SHA|SHA exact|clean final SHA|SHA final propre/iu,

@@ -228,6 +228,16 @@ exacte déjà créée. C’est le seul outil MCP pour modifier ensuite ce champ 
 Operon peut avoir besoin de son workflow périodique additif pour conserver,
 détacher ou réaligner la tâche, sans déplacer le Markdown source.
 
+Avec Operon officiel `3.6.0`, le plan public Task Workflow périodique est
+uniquement composé de métadonnées : il n’expose aucun chemin de source des
+tâches avant apply. La canary de release sur le SHA exact effectue donc la
+prévisualisation périodique et la négociation du grant exact, mais saute les
+applies périodiques avec la raison `public_task_source_projection_unavailable`.
+C’est une limite de confinement et de certification de la canary destructive,
+pas une désactivation de l’outil runtime ; la projection publique du chemin de
+source reste un suivi amont non bloquant. Ne pas revendiquer une certification
+périodique complète à partir de cette gate.
+
 Les champs gérés conservent leur forme officielle : `taskType` et `taskImage`
 sont des chaînes scalaires, `taskGallery` est un tableau ordonné sans perte et
 les chaînes à séparateurs sont refusées. Le champ dérivé `__taskDataType` est

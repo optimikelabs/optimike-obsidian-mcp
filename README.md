@@ -125,6 +125,14 @@ OPERON_MUTATIONS_ENABLED=true
 
 Stale Operon snapshots remain read-only. No Operon route falls back to raw Markdown or private APIs. Official adoption and Daily/Weekly routing negotiate their exact additive grant on first use, including after a cold MCP start; a pending or refused grant still fails closed. Operon owns every opaque sealed plan and same-plan recovery. Task Type and Task Image stay scalar, Task Gallery stays an ordered array, and `__taskDataType` is read-only. Full compatibility, certified/provisional versions, recovery semantics and current API gaps live in the [Operon MCP contract](docs/operon-mcp-contract.md) and [CLI / Developer API audit](docs/operon-cli-audit.md).
 
+Operon `3.6.0` exposes the public periodic Task Workflow plan as metadata-only,
+without a pre-apply task-source path. The exact-SHA release canary negotiates and
+previews periodic operations but skips periodic applies with reason
+`public_task_source_projection_unavailable`. This contains the destructive canary
+without disabling runtime tools; upstream public path projection is a nonblocking
+follow-up, and no full periodic certification is claimed. Core startup, adoption,
+media, Frontmatter Date Manager, idempotence and restoration gates remain mandatory.
+
 ## Governed operations
 
 Governed Note, Frontmatter, Base formula and Canvas families are exposed atomically:

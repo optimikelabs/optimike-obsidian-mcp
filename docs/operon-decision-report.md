@@ -27,9 +27,15 @@ complete canary with exact restoration, zero retained periodic artifacts and
 zero pending recoveries. Operon `3.5.3` historically ships superseding
 implementations of those fixes. Working-tree Pilot 2 runs subsequently exercised
 stock Operon `3.6.0` with Bridge `0.8.3`, including startup-order continuity on
-one MCP connection, mutation/replay/stale-conflict/recovery, adoption, periodic
-scheduling, Frontmatter Date Manager settlement, zero validation violations and
-exact restoration. Those runs are diagnostic rather than evidence for the final
+one MCP connection, mutation/replay/stale-conflict/recovery, adoption,
+Frontmatter Date Manager settlement, zero validation violations and exact
+restoration. Periodic runs are historical/diagnostic only: the exact-SHA canary
+performs periodic preview and exact-grant negotiation but skips periodic applies
+because the public plan exposes no pre-apply task-source path
+(`public_task_source_projection_unavailable`). The tools remain available; this
+is a destructive-canary containment/certification boundary, not full periodic
+certification. The upstream public path projection is a nonblocking follow-up.
+Those runs are diagnostic rather than evidence for the final
 candidate SHA. The exact release gate and execution journal live in [the local
 validation recipe](operon-local-validation.md).
 
@@ -37,14 +43,17 @@ The `3.6.0` public Developer API V1 contract directory is unchanged from
 `3.5.3`, so its provisional admission remains contract-first rather than a
 product-version allowlist. Its Task Editor relation cleanup, Scheduled Date on
 blocked tasks and opt-in parent-date expansion are observable product behavior.
-The dedicated working-tree Pilot 2 gate exercised the Scheduled Date case
-through the periodic workflow while preserving `blockedBy` and inverse
+The dedicated working-tree Pilot 2 gate historically exercised the Scheduled
+Date case through the periodic workflow while preserving `blockedBy` and inverse
 `blocking`, then restored the fixture and removed the run-owned periodic parent
-artifact. The exact-SHA release run must repeat this proof. Task Editor deletion
-is explicitly `SKIP` without a public delete surface, and parent-date expansion
-is explicitly `SKIP` while the public configuration does not announce the opt-in
-automation as active. These are bounded behavior results, not broadened MCP
-postflight acceptance.
+artifact. This apply is historical/diagnostic evidence only. The exact-SHA
+release canary does not repeat Scheduled Date apply: it performs periodic preview
+and exact-grant negotiation, then records `SKIP` with reason
+`public_task_source_projection_unavailable` because the public plan exposes no
+pre-apply task-source path. Task Editor deletion is explicitly `SKIP` without a
+public delete surface, and parent-date expansion is explicitly `SKIP` while the
+public configuration does not announce the opt-in automation as active. These
+are bounded behavior results, not broadened MCP postflight acceptance.
 
 ## Historical status — 2026-08-17
 

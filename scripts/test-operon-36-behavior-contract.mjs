@@ -59,6 +59,11 @@ assert.deepEqual(result.parentDateMissing, {
   status: "SKIP",
   reason: "public_configuration_not_announced",
 });
+assert.deepEqual(result.periodicScheduling, {
+  status: "SKIP",
+  reason: "public_task_source_projection_unavailable",
+});
+assert.equal(result.periodicApplyDispatched, false);
 const physicalSafety = await runOfflineContract(
   "--offline-path-safety-contract",
 );
@@ -94,6 +99,12 @@ for (const invariant of [
   "I_CONFIRM_PILOT_2_OPERON_36_BEHAVIOR_MUTATIONS",
   "public_delete_surface_unavailable",
   "public_configuration_not_announced",
+  "public_task_source_projection_unavailable",
+  "function periodicSchedulingProjectedTaskSourcePaths(plan)",
+  "function periodicSchedulingDispatchDecision(plan)",
+  "function routeAcceptsOpaquePlanMetadata(name)",
+  "periodicApplyDispatched: false",
+  "dispatchAttempted: false",
   "autoExpandParentTaskDateRange",
   "Unexpected Markdown drift was detected and was deliberately not overwritten.",
   "Canary tasks remained indexed after restoration.",
@@ -167,10 +178,44 @@ const mutationDispatchIndex = source.indexOf(
   "const observed = await callRaw(name, args",
   callMutationIndex,
 );
+const periodicProjectionSkipIndex = source.indexOf(
+  "if (physicalPreflight?.skipReason)",
+  callMutationIndex,
+);
 assert.ok(
   mutationRootFenceIndex > callMutationIndex &&
     mutationRootFenceIndex < mutationDispatchIndex,
   "Every native apply must revalidate the sealed physical vault root immediately before dispatch.",
+);
+assert.ok(
+  periodicProjectionSkipIndex > callMutationIndex &&
+    periodicProjectionSkipIndex < mutationDispatchIndex,
+  "A missing periodic task-source projection must return SKIP before native dispatch.",
+);
+const periodicProjectionHelperIndex = source.indexOf(
+  "function periodicSchedulingProjectedTaskSourcePaths(plan)",
+);
+const periodicDecisionIndex = source.indexOf(
+  "function periodicSchedulingDispatchDecision(plan)",
+);
+const periodicDecisionSource = source.slice(
+  periodicDecisionIndex,
+  source.indexOf(
+    "function routeAcceptsOpaquePlanMetadata(name)",
+    periodicDecisionIndex,
+  ),
+);
+assert.ok(
+  periodicProjectionHelperIndex > 0 &&
+    periodicDecisionSource.includes(
+      "periodicSchedulingProjectedTaskSourcePaths(plan)",
+    ),
+  "Periodic scheduling must use only its explicit task-source projection helper.",
+);
+assert.equal(
+  periodicDecisionSource.includes("plannedTaskSourcePaths(plan)"),
+  false,
+  "Periodic scheduling must not accept generic plan metadata as a task-source projection.",
 );
 const mcpRebuildIndex = source.indexOf(
   'await runNpmCommand(["run", "build"], "MCP candidate rebuild")',
