@@ -408,7 +408,7 @@ function validatePresenceDescriptor(value, label, expectedPath) {
     (expectedPath !== undefined && value.path !== expectedPath) ||
     !/^[0-9a-f]{64}$/.test(value.sha256) ||
     !Number.isSafeInteger(value.size) ||
-    value.size < 1
+    value.size < 0
   ) {
     fail(`${label} is invalid.`);
   }

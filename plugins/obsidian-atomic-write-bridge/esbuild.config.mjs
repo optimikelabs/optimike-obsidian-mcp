@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -45,6 +46,7 @@ function postBuild() {
 
 async function build() {
   if (!isWatch) {
+    rmSync(outdir, { recursive: true, force: true });
     await esbuild.build(buildOptions);
     postBuild();
     return;

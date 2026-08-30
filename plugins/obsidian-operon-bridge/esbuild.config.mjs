@@ -1,5 +1,12 @@
 import esbuild from "esbuild";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 const entryFile = "src/main.ts";
@@ -26,9 +33,13 @@ function postBuild() {
   if (existsSync("manifest.json")) {
     const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
     manifest.main = "main.js";
-    writeFileSync(join(outdir, "manifest.json"), JSON.stringify(manifest, null, 2));
+    writeFileSync(
+      join(outdir, "manifest.json"),
+      JSON.stringify(manifest, null, 2),
+    );
   }
-  if (existsSync("styles.css")) copyFileSync("styles.css", join(outdir, "styles.css"));
+  if (existsSync("styles.css"))
+    copyFileSync("styles.css", join(outdir, "styles.css"));
 }
 
 async function run() {
@@ -38,6 +49,7 @@ async function run() {
     console.log(`Watching ${entryFile}`);
     return;
   }
+  rmSync(outdir, { recursive: true, force: true });
   await esbuild.build(buildOptions);
   postBuild();
   console.log(`Built ${outfile}`);

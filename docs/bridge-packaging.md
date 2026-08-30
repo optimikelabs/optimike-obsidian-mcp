@@ -27,6 +27,11 @@ and the SHA-256 plus byte size of every file. The installer accepts only
 `data.json`, unknown files, links, junctions and hard-linked bundle entries are
 rejected before staging.
 
+Every non-watch Bridge build removes its previous ignored `build/` directory
+before compilation. An optional artifact can therefore enter an attested
+bundle only when the current source build emitted it; an obsolete
+`styles.css` from an earlier checkout cannot survive into a release.
+
 ## Upgrade on Windows
 
 1. Download the zip and `SHA256SUMS` from the same GitHub release.

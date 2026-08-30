@@ -10,6 +10,11 @@ const builder = read("scripts/build-bridge-bundle.mjs");
 const archive = read("scripts/archive-bridge-bundle.ps1");
 const workflow = read(".github/workflows/bridge-packaging-p3.yml");
 const liveCanary = read("scripts/smoke-bridge-packaging-live.mjs");
+const bridgeBuilds = [
+  read("plugins/obsidian-operon-bridge/esbuild.config.mjs"),
+  read("plugins/obsidian-atomic-write-bridge/esbuild.config.mjs"),
+  read("plugins/obsidian-bases-bridge/esbuild.config.mjs"),
+];
 
 assert.equal(rootPackage.version, "3.5.0");
 for (const script of [
@@ -35,12 +40,24 @@ for (const source of [english, french]) {
   assert.match(source, /applying/);
   assert.match(source, /rollback_in_progress/);
   assert.match(source, /closed Pilot 2|Pilot 2 fermé/);
+  assert.match(source, /previous ignored `build\/`|ancien dossier `build\/`/);
   assert.match(source, /40/);
+}
+for (const bridgeBuild of bridgeBuilds) {
+  assert.match(
+    bridgeBuild,
+    /rmSync\(outdir, \{ recursive: true, force: true \}\)/,
+  );
 }
 assert.match(builder, /status", "--porcelain", "--untracked-files=all"/);
 assert.doesNotMatch(builder, /--untracked-files=no/);
 assert.match(builder, /sourceCommit/);
 assert.match(builder, /artifactCount/);
+assert.match(builder, /Current styles\.css source\/build mismatch/);
+assert.match(
+  builder,
+  /Built styles\.css is not derived from the current source/,
+);
 assert.doesNotMatch(
   builder.match(/const managedFiles = \[[^\]]+\]/s)?.[0] ?? "",
   /data\.json/,

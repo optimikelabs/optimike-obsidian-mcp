@@ -39,7 +39,52 @@ const bridgeIds = [
   "obsidian-atomic-write-bridge",
   "obsidian-bases-bridge",
 ];
+const bridgeDirectories = [
+  "obsidian-operon-bridge",
+  "obsidian-atomic-write-bridge",
+  "obsidian-bases-bridge",
+].map((directory) => path.join(repositoryRoot, "plugins", directory));
 const digest = (content) => createHash("sha256").update(content).digest("hex");
+
+function proveCleanBridgeBuilds() {
+  for (const directory of bridgeDirectories) {
+    const buildDirectory = path.join(directory, "build");
+    const staleUnknown = path.join(buildDirectory, "stale-ignored-output.bin");
+    const staleStyles = path.join(buildDirectory, "styles.css");
+    mkdirSync(buildDirectory, { recursive: true });
+    writeFileSync(staleUnknown, "must-not-survive\n", "utf8");
+    writeFileSync(staleStyles, "stale-style-must-not-survive\n", "utf8");
+
+    const built = spawnSync(process.execPath, ["esbuild.config.mjs"], {
+      cwd: directory,
+      encoding: "utf8",
+    });
+    assert.equal(
+      built.status,
+      0,
+      `Bridge build failed for ${path.basename(directory)}:\n${built.error?.message ?? built.stderr}`,
+    );
+    assert.equal(
+      existsSync(staleUnknown),
+      false,
+      `${path.basename(directory)} retained a previous ignored build artifact:\n${built.stdout}`,
+    );
+    const sourceStyles = path.join(directory, "styles.css");
+    if (existsSync(sourceStyles)) {
+      assert.deepEqual(
+        readFileSync(staleStyles),
+        readFileSync(sourceStyles),
+        "generated styles.css must exactly match the current source",
+      );
+    } else {
+      assert.equal(
+        existsSync(staleStyles),
+        false,
+        `${path.basename(directory)} retained styles.css from an earlier build`,
+      );
+    }
+  }
+}
 
 function writeJson(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -120,7 +165,8 @@ function createVault(root) {
       version: `1.${index}.0`,
       main: "main.js",
     });
-    if (index === 0)
+    if (index === 0) writeFileSync(path.join(directory, "styles.css"), "");
+    if (index === 1)
       writeFileSync(path.join(directory, "styles.css"), "old-style\n");
     writeJson(path.join(directory, "data.json"), {
       writeGate: index === 1,
@@ -202,6 +248,7 @@ function runRollback({ vault, backupPath, extra = [], env = {} }) {
 
 const tempRoot = mkdtempSync(path.join(os.tmpdir(), "optimike-bridge-p3-"));
 try {
+  proveCleanBridgeBuilds();
   const bundle = createBundle(tempRoot);
   const vault = createVault(tempRoot);
   const backupRoot = path.join(tempRoot, "private backups");

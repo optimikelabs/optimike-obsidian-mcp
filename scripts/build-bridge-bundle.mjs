@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -146,6 +147,23 @@ function buildBundle() {
     for (const required of ["main.js", "manifest.json"]) {
       if (!buildEntries.some((entry) => entry.name === required)) {
         throw new Error(`Missing ${required} for ${definition.id}`);
+      }
+    }
+
+    const sourceStyles = path.join(sourceDirectory, "styles.css");
+    const builtStyles = path.join(buildDirectory, "styles.css");
+    if (existsSync(sourceStyles) !== existsSync(builtStyles)) {
+      throw new Error(
+        `Current styles.css source/build mismatch for ${definition.id}`,
+      );
+    }
+    if (existsSync(sourceStyles)) {
+      assertRegularUnaliasedFile(sourceStyles);
+      assertRegularUnaliasedFile(builtStyles);
+      if (!readFileSync(sourceStyles).equals(readFileSync(builtStyles))) {
+        throw new Error(
+          `Built styles.css is not derived from the current source for ${definition.id}`,
+        );
       }
     }
 

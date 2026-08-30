@@ -26,6 +26,11 @@ L’installateur accepte uniquement `main.js`, `manifest.json` et un éventuel
 `styles.css` par Bridge. `data.json`, tout fichier inconnu, lien, jonction ou
 hardlink dans le bundle sont refusés avant le staging.
 
+Chaque build non-watch d’un Bridge supprime son ancien dossier `build/` ignoré
+avant compilation. Un artefact optionnel ne peut donc entrer dans un bundle
+attesté que si le build des sources courantes l’a produit ; un ancien
+`styles.css` issu d’un checkout précédent ne peut pas survivre dans la release.
+
 ## Mise à niveau sous Windows
 
 1. Télécharger le zip et `SHA256SUMS` depuis la même GitHub Release.
