@@ -34,10 +34,11 @@ assert.deepEqual(manifest.bridges.map((bridge) => bridge.id).sort(), [
   "obsidian-bases-bridge",
   "optimike-operon-bridge",
 ]);
-const expectedLines = [zipPath, manifestPath]
-  .map((filePath) => `${hash(filePath)}  ${path.basename(filePath)}`)
-  .join("\n");
-assert.equal(readFileSync(checksumPath, "utf8").trim(), expectedLines);
+const expectedLines = [zipPath, manifestPath].map(
+  (filePath) => `${hash(filePath)}  ${path.basename(filePath)}`,
+);
+const actualLines = readFileSync(checksumPath, "utf8").trim().split(/\r?\n/u);
+assert.deepEqual(actualLines, expectedLines);
 
 console.log(
   `PASS: Bridge release assets bind ${rootPackage.version} to ${sourceCommit}`,
