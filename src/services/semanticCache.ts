@@ -204,7 +204,11 @@ export class SemanticCacheService {
    * Validates the semantic source that a query would use without refreshing or
    * persisting the cache. Capability inspection must remain observational.
    */
-  public async probeReadiness(): Promise<{ vectorCount: number }> {
+  public async probeReadiness(): Promise<{
+    vectorCount: number;
+    dominantModel?: string;
+    dominantDimension?: number;
+  }> {
     if (!this.smartEnvDir) {
       throw new Error("SMART_ENV_DIR is not configured");
     }
@@ -214,22 +218,27 @@ export class SemanticCacheService {
       this.memorySnapshot &&
       (this.ttlMs === 0 || now - this.memorySnapshotLoadedAt < this.ttlMs)
     ) {
-      return { vectorCount: this.countValidVectors(this.memorySnapshot.items) };
+      return this.projectReadiness(
+        this.memorySnapshot.items,
+        this.memorySnapshot.dominantModel,
+        this.memorySnapshot.dominantDim,
+      );
     }
 
     const sourceState = await scanSmartEnvSourceState(this.smartEnvDir);
     const manifest = this.readManifest();
-    const items =
+    const snapshot =
       manifest &&
       manifest.source_signature === sourceState.signature &&
       manifest.smart_env_dir === this.smartEnvDir
-        ? this.loadSnapshotFromDb(manifest).items
-        : await loadSmartEnv(this.smartEnvDir);
-    const vectorCount = this.countValidVectors(items);
-    if (vectorCount === 0) {
-      throw new Error("Semantic index contains no valid vectors");
-    }
-    return { vectorCount };
+        ? this.loadSnapshotFromDb(manifest)
+        : null;
+    const items = snapshot?.items ?? (await loadSmartEnv(this.smartEnvDir));
+    return this.projectReadiness(
+      items,
+      snapshot?.dominantModel,
+      snapshot?.dominantDim,
+    );
   }
 
   public getStats(): Record<string, unknown> {
@@ -287,6 +296,30 @@ export class SemanticCacheService {
         item.vec.length > 0 &&
         item.vec.every((value) => Number.isFinite(value)),
     ).length;
+  }
+
+  private projectReadiness(
+    items: readonly SmartVec[],
+    knownModel?: string,
+    knownDimension?: number,
+  ): {
+    vectorCount: number;
+    dominantModel?: string;
+    dominantDimension?: number;
+  } {
+    const vectorCount = this.countValidVectors(items);
+    if (vectorCount === 0) {
+      throw new Error("Semantic index contains no valid vectors");
+    }
+    const dominantDimension = knownDimension ?? pickDominantDimension([...items]);
+    const dimensionItems = dominantDimension
+      ? items.filter((item) => item.vec.length === dominantDimension)
+      : items;
+    return {
+      vectorCount,
+      dominantModel: knownModel ?? pickDominantModel([...dimensionItems]),
+      dominantDimension,
+    };
   }
 
   private loadSnapshotFromDb(manifest: SemanticManifestRow): SemanticCacheSnapshot {

@@ -103,7 +103,10 @@ function input({
   cacheReady = true,
   semanticEnabled = true,
   queryEmbeddingEnabled = true,
-  semanticIndex = { state: "ready", value: { vectorCount: 4 } },
+  semanticIndex = {
+    state: "ready",
+    value: { vectorCount: 4, embedderReady: true },
+  },
   operonMutationsEnabled = true,
   writeMode = "full",
   operonAllowedPathPrefixesConfigured = false,
@@ -463,7 +466,7 @@ const semanticQueryEmbeddingDisabled = projectCapabilityManifest(
 
 for (const semanticIndex of [
   { state: "unavailable" },
-  { state: "ready", value: { vectorCount: 0 } },
+  { state: "ready", value: { vectorCount: 0, embedderReady: true } },
 ]) {
   const invalidSemanticIndex = projectCapabilityManifest(
     input({ semanticIndex }),
@@ -488,6 +491,33 @@ for (const semanticIndex of [
     },
   );
 }
+
+const semanticEmbedderUnavailable = projectCapabilityManifest(
+  input({
+    semanticIndex: {
+      state: "ready",
+      value: { vectorCount: 4, embedderReady: false },
+    },
+  }),
+);
+assert.deepEqual(
+  {
+    available: capability(semanticEmbedderUnavailable, "semantic-search")
+      .available,
+    authorized: capability(semanticEmbedderUnavailable, "semantic-search")
+      .authorized,
+    reasonCode: capability(semanticEmbedderUnavailable, "semantic-search")
+      .reasonCode,
+    nextAction: capability(semanticEmbedderUnavailable, "semantic-search")
+      .nextAction,
+  },
+  {
+    available: false,
+    authorized: false,
+    reasonCode: "semantic_embedder_unavailable",
+    nextAction: "configure_query_embedder",
+  },
+);
 assert.deepEqual(
   {
     available: capability(semanticQueryEmbeddingDisabled, "semantic-search")

@@ -45,7 +45,10 @@ sonde live bornée charge au moins un vecteur valide depuis la source actuelle.
 `semantic_query_embedding_disabled` signale un switch
 `ENABLE_QUERY_EMBEDDING` volontairement coupé ; `semantic_index_unavailable`
 et `refresh_semantic_index` couvrent un index absent, vide, malformé, périmé ou
-en timeout au lieu d’annoncer l’outil prêt.
+en timeout. `semantic_embedder_unavailable` et `configure_query_embedder`
+signalent séparément un provider de requête impossible à construire depuis la
+configuration non secrète actuelle. Le doctor n’envoie jamais de requête
+d’embedding de test.
 Les lectures issues du cache Operon sont
 signalées `degraded` avec `operon_snapshot_fallback` ; un snapshot n’est jamais
 présenté comme preuve qu’une mutation peut s’exécuter ou a été appliquée.

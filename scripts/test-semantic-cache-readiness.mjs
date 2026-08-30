@@ -26,15 +26,38 @@ process.env.SEMANTIC_SEARCH_PREWARM = "false";
 const { SemanticCacheService } = await import(
   "../dist/services/semanticCache.js"
 );
+const { getQueryEmbedder } = await import("../dist/adapters/embed/index.js");
 const service = new SemanticCacheService(source, dbPath, 60_000);
 
 try {
   const observed = await service.probeReadiness();
   assert.equal(observed.vectorCount, 1);
+  assert.equal(observed.dominantDimension, 2);
   assert.equal(
     service.getStats().manifest,
     null,
     "the read-only readiness probe must not persist or refresh a manifest",
+  );
+
+  await assert.rejects(
+    () =>
+      getQueryEmbedder({
+        provider: "openai",
+        vaultModel: observed.dominantModel,
+        dimension: observed.dominantDimension,
+      }),
+    /OPENAI_API_KEY/u,
+    "embedder setup must reject a missing required credential without a network call",
+  );
+  await assert.rejects(
+    () =>
+      getQueryEmbedder({
+        provider: "auto",
+        vaultModel: "sentence-transformers/all-MiniLM-L6-v2",
+        dimension: 384,
+      }),
+    /xenova is disabled/u,
+    "auto selection must expose a deterministically disabled provider",
   );
 
   const snapshot = await service.getSnapshot();

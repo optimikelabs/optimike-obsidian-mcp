@@ -1,4 +1,5 @@
 import { config } from "../config/index.js";
+import { getQueryEmbedder } from "../adapters/embed/index.js";
 import {
   compileToolProfileNames,
   type ToolProfileId,
@@ -49,6 +50,7 @@ export type CapabilityReasonCode =
   | "semantic_search_disabled"
   | "semantic_query_embedding_disabled"
   | "semantic_index_unavailable"
+  | "semantic_embedder_unavailable"
   | "bridge_unavailable"
   | "bridge_lifecycle_not_ready"
   | "bridge_contract_incompatible"
@@ -80,6 +82,7 @@ export type CapabilityNextAction =
   | "enable_semantic_search"
   | "enable_query_embedding"
   | "refresh_semantic_index"
+  | "configure_query_embedder"
   | "install_or_enable_bridge"
   | "wait_for_bridge"
   | "update_bridge_contract"
@@ -156,7 +159,10 @@ export interface CapabilityManifestProjectionInput {
   cacheReady: boolean;
   semanticEnabled: boolean;
   queryEmbeddingEnabled: boolean;
-  semanticIndex: NormalizedProbe<{ vectorCount: number }>;
+  semanticIndex: NormalizedProbe<{
+    vectorCount: number;
+    embedderReady: boolean;
+  }>;
   operonMutationsEnabled: boolean;
   writeMode: "readonly" | "guarded" | "full";
   operonAllowedPathPrefixesConfigured: boolean;
@@ -176,7 +182,10 @@ export interface CapabilityManifestProjectionInput {
 
 export interface CapabilityProbeDependencies {
   localRest?: () => Promise<{ authenticated: boolean }>;
-  semanticIndex?: () => Promise<{ vectorCount: number }>;
+  semanticIndex?: () => Promise<{
+    vectorCount: number;
+    embedderReady: boolean;
+  }>;
   atomicWrite?: () => Promise<AtomicWriteStatusResponse>;
   baseAtomicWrite?: () => Promise<BaseAtomicStatusResponse>;
   operon?: () => Promise<Record<string, unknown>>;
@@ -427,13 +436,24 @@ function semanticCapability(
     input.semanticIndex.state === "ready" &&
     Number.isFinite(input.semanticIndex.value.vectorCount) &&
     input.semanticIndex.value.vectorCount > 0;
+  const embedderReady =
+    input.semanticIndex.state === "ready" &&
+    input.semanticIndex.value.embedderReady === true;
   return entry(
     input,
     "semantic-search",
-    validated,
-    validated,
-    validated ? "ready" : "semantic_index_unavailable",
-    validated ? "none" : "refresh_semantic_index",
+    validated && embedderReady,
+    validated && embedderReady,
+    !validated
+      ? "semantic_index_unavailable"
+      : embedderReady
+        ? "ready"
+        : "semantic_embedder_unavailable",
+    !validated
+      ? "refresh_semantic_index"
+      : embedderReady
+        ? "none"
+        : "configure_query_embedder",
   );
 }
 
@@ -1007,7 +1027,29 @@ export async function collectCapabilityManifest(options: {
     config.enableQueryEmbedding &&
     modeToolNames.includes("smart_semantic_search")
       ? (options.probes?.semanticIndex ??
-        (() => getSemanticCacheService().probeReadiness()))
+        (async () => {
+          const readiness = await getSemanticCacheService().probeReadiness();
+          try {
+            await getQueryEmbedder({
+              provider: config.queryEmbedder,
+              modelHint: config.queryEmbedderModelHint,
+              model: config.queryEmbedderModel,
+              vaultModel: readiness.dominantModel,
+              dimension: readiness.dominantDimension,
+              ollamaBaseUrl: config.ollamaBaseUrl,
+              openaiApiKey: config.openaiApiKey,
+              openaiBaseUrl: config.openaiBaseUrl,
+              openaiDimensions: Number.isFinite(
+                Number(config.openaiEmbeddingDimensions),
+              )
+                ? Number(config.openaiEmbeddingDimensions)
+                : undefined,
+            });
+            return { ...readiness, embedderReady: true };
+          } catch {
+            return { ...readiness, embedderReady: false };
+          }
+        }))
       : undefined;
   const unavailable = Promise.resolve<NormalizedProbe<never>>({
     state: "unavailable",

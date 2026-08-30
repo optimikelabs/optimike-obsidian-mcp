@@ -43,7 +43,10 @@ enabled and a bounded live probe loads at least one valid vector from the
 current source. `semantic_query_embedding_disabled` reports an intentionally
 disabled `ENABLE_QUERY_EMBEDDING` switch, while `semantic_index_unavailable`
 and `refresh_semantic_index` cover a missing, empty, malformed, stale, or
-timed-out index instead of claiming the tool is ready.
+timed-out index. `semantic_embedder_unavailable` and
+`configure_query_embedder` separately report a query provider that cannot be
+constructed from the current non-secret configuration. The doctor never sends
+a test embedding request.
 Operon cached reads are reported as `degraded` with
 `operon_snapshot_fallback`; cached state is never presented as proof that a
 mutation can run or was applied.
