@@ -15,7 +15,10 @@ import {
   sha256,
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
-import { RestExtensionLifecycle } from "../../shared/restExtensionLifecycle.js";
+import {
+  RestExtensionLifecycle,
+  RestExtensionPartialMountError,
+} from "../../shared/restExtensionLifecycle.js";
 
 type PluginData = {
   instanceId: string;
@@ -581,10 +584,11 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
 
       return () => api.unregister?.();
       } catch {
+        const rollback = () => api.unregister?.();
         try {
-          api.unregister?.();
+          rollback();
         } catch {
-          // The lifecycle retry remains fail-closed if rollback is partial.
+          throw new RestExtensionPartialMountError(rollback);
         }
         throw new Error("Local REST API route registration failed.");
       }

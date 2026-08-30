@@ -45,7 +45,10 @@ import {
   type DeveloperApiTaskWorkflowKind,
   type TaskWorkflowIdentityStore,
 } from "./developer-api-adapter";
-import { RestExtensionLifecycle } from "../../shared/restExtensionLifecycle";
+import {
+  RestExtensionLifecycle,
+  RestExtensionPartialMountError,
+} from "../../shared/restExtensionLifecycle";
 
 const EXTENSION_ID = "optimike-operon-bridge";
 const REST_PREFIX = `/extensions/${EXTENSION_ID}/v1`;
@@ -5633,10 +5636,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     );
     return cleanup;
     } catch {
+      const rollback = () => api.unregister?.();
       try {
-        api.unregister?.();
+        rollback();
       } catch {
-        // The lifecycle retry remains fail-closed even if rollback is partial.
+        throw new RestExtensionPartialMountError(rollback);
       }
       throw new Error("Local REST API route registration failed.");
     }

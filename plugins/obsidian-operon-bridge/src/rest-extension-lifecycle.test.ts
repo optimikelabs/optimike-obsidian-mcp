@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RestExtensionLifecycle } from "../../shared/restExtensionLifecycle.js";
+import {
+  RestExtensionLifecycle,
+  RestExtensionPartialMountError,
+} from "../../shared/restExtensionLifecycle.js";
 
 function deterministicTimers() {
   let nextId = 1;
@@ -160,5 +163,48 @@ test("failed cleanup is fenced until the same mount is actually removed", () => 
   assert.equal(lifecycle.snapshot().mountGeneration, 2);
   assert.equal(lifecycle.snapshot().state, "ready");
   assert.equal(mounts, 2);
+  lifecycle.stop();
+});
+
+test("a partial mount remains fenced until its rollback succeeds", () => {
+  const timers = deterministicTimers();
+  const provider = {};
+  let mountAttempts = 0;
+  let rollbackAttempts = 0;
+  const lifecycle = new RestExtensionLifecycle<object>({
+    probe: () => provider,
+    mount: () => {
+      mountAttempts += 1;
+      if (mountAttempts === 1) {
+        throw new RestExtensionPartialMountError(() => {
+          rollbackAttempts += 1;
+          if (rollbackAttempts === 1) {
+            throw new Error("fixture rollback still blocked");
+          }
+        });
+      }
+      return () => undefined;
+    },
+    schedule: timers.schedule,
+    cancel: (timer) => timers.cancel(timer as number),
+  });
+
+  lifecycle.start();
+  assert.equal(lifecycle.snapshot().state, "degraded");
+  assert.equal(lifecycle.snapshot().mountGeneration, 0);
+  timers.runNext();
+  assert.equal(rollbackAttempts, 1);
+  assert.equal(
+    mountAttempts,
+    1,
+    "mount must remain fenced after rollback failure",
+  );
+  assert.equal(lifecycle.snapshot().unloadGeneration, 0);
+  timers.runNext();
+  assert.equal(rollbackAttempts, 2);
+  assert.equal(lifecycle.snapshot().unloadGeneration, 1);
+  assert.equal(mountAttempts, 2);
+  assert.equal(lifecycle.snapshot().mountGeneration, 1);
+  assert.equal(lifecycle.snapshot().state, "ready");
   lifecycle.stop();
 });

@@ -25,7 +25,10 @@ import {
   parseBaseReadRequest,
   sha256,
 } from "./atomic-contract.mjs";
-import { RestExtensionLifecycle } from "../../shared/restExtensionLifecycle.js";
+import {
+  RestExtensionLifecycle,
+  RestExtensionPartialMountError,
+} from "../../shared/restExtensionLifecycle.js";
 
 /** -------- Engine V2 (flag + cache) -------- */
 type EngineRow = Record<string, any>;
@@ -2369,10 +2372,11 @@ export default class BasesBridgePlugin extends Plugin {
 
         return () => api.unregister?.();
         } catch {
+          const rollback = () => api.unregister?.();
           try {
-            api.unregister?.();
+            rollback();
           } catch {
-            // The lifecycle retry remains fail-closed if rollback is partial.
+            throw new RestExtensionPartialMountError(rollback);
           }
           throw new Error("Local REST API route registration failed.");
         }

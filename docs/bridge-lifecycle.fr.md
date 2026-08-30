@@ -21,8 +21,10 @@ sans redémarrer.
 - Les échecs de montage ou de nettoyage sont contenus. Un nettoyage en échec
   maintient l’ancienne génération sous fence en état `degraded`, n’incrémente
   pas `unloadGeneration` et interdit le montage du remplacement jusqu’à la
-  réussite de ce même nettoyage. Aucun échec n’active d’écriture ni ne modifie
-  un grant Operon.
+  réussite de ce même nettoyage. Lors d’un montage partiel, un rollback en
+  échec conserve la même fence afin qu’aucun retry ne s’enregistre par-dessus
+  les routes survivantes. Aucun échec n’active d’écriture ni ne modifie un
+  grant Operon.
 - L’arrêt ou la désactivation d’un Bridge annule son timer et désenregistre son
   extension courante.
 

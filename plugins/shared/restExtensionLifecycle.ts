@@ -25,6 +25,13 @@ export interface RestExtensionLifecycleOptions<Provider extends object> {
   onCleanupError?: () => void;
 }
 
+export class RestExtensionPartialMountError extends Error {
+  constructor(readonly cleanup: () => void) {
+    super("Partial extension mount cleanup is pending.");
+    this.name = "RestExtensionPartialMountError";
+  }
+}
+
 /**
  * Permanently supervises one Local REST API extension registration.
  *
@@ -112,8 +119,10 @@ export class RestExtensionLifecycle<Provider extends object> {
     this.clearTimer();
     this.probing = true;
     this.state = "probing";
+    let candidateProvider: Provider | null = null;
     try {
       const provider = this.options.probe();
+      candidateProvider = provider;
       if (!provider) {
         if (!this.disposeMount()) {
           this.state = "degraded";
@@ -156,8 +165,17 @@ export class RestExtensionLifecycle<Provider extends object> {
       this.consecutiveFailures = 0;
       this.state = "ready";
       this.scheduleNext(this.readyProbeMs);
-    } catch {
-      this.disposeMount();
+    } catch (error) {
+      if (
+        candidateProvider &&
+        error instanceof RestExtensionPartialMountError
+      ) {
+        this.provider = candidateProvider;
+        this.cleanup = error.cleanup;
+        this.cleanupPending = true;
+      } else {
+        this.disposeMount();
+      }
       this.state = "degraded";
       this.consecutiveFailures += 1;
       this.scheduleRetry();

@@ -418,9 +418,14 @@ test("Atomic Write Bridge remounts exactly once after Local REST reload", async 
   const providers: Array<{
     handlers: Map<string, Function>;
     unregisters: number;
+    failUnregisters: number;
   }> = [];
-  const makeProvider = (failAtRoute?: number) => {
-    const record = { handlers: new Map<string, Function>(), unregisters: 0 };
+  const makeProvider = (failAtRoute?: number, failUnregisters = 0) => {
+    const record = {
+      handlers: new Map<string, Function>(),
+      unregisters: 0,
+      failUnregisters,
+    };
     let routeCount = 0;
     const api = {
       addRoute: (path: string) => {
@@ -442,6 +447,10 @@ test("Atomic Write Bridge remounts exactly once after Local REST reload", async 
       },
       unregister: () => {
         record.unregisters += 1;
+        if (record.failUnregisters > 0) {
+          record.failUnregisters -= 1;
+          throw new Error("private partial rollback failure");
+        }
       },
     };
     providers.push(record);
@@ -457,18 +466,26 @@ test("Atomic Write Bridge remounts exactly once after Local REST reload", async 
 
   await bridge.registerRestExtension();
   assert.equal(bridge.restLifecycle.snapshot().state, "unavailable");
-  plugins["obsidian-local-rest-api"] = makeProvider(2);
+  plugins["obsidian-local-rest-api"] = makeProvider(2, 2);
   bridge.restLifecycle.probeNow();
   assert.equal(bridge.restLifecycle.snapshot().state, "degraded");
   assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 0);
   assert.equal(
     providers[0].unregisters,
     1,
-    "a partial route generation must roll back before retry",
+    "the failed rollback must be retained as a lifecycle fence",
   );
   plugins["obsidian-local-rest-api"] = makeProvider();
   bridge.restLifecycle.probeNow();
+  assert.equal(providers[0].unregisters, 2);
+  assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 0);
+  assert.equal(
+    providers[1].handlers.size,
+    0,
+    "a replacement provider must not mount over partial routes",
+  );
   bridge.restLifecycle.probeNow();
+  assert.equal(providers[0].unregisters, 3);
   assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 1);
   let statusBody: any;
   providers[1].handlers.get(

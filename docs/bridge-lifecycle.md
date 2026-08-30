@@ -20,7 +20,9 @@ survive an Obsidian or Local REST API reload without being restarted.
 - Mount and cleanup failures are contained. A failed cleanup keeps the old
   generation fenced in `degraded`, does not advance `unloadGeneration`, and
   blocks replacement mounting until that same cleanup succeeds. Failures
-  never enable writes or change an Operon grant.
+  during a partial route mount retain the same fence if rollback fails, so a
+  retry cannot register over surviving routes. Failures never enable writes or
+  change an Operon grant.
 - Stopping or disabling a Bridge cancels its timer and unregisters its current
   extension.
 

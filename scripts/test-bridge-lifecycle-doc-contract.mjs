@@ -22,6 +22,7 @@ for (const [label, document] of [
   assert.match(document, /mountGeneration/u);
   assert.match(document, /unloadGeneration/u);
   assert.match(document, /degraded/u);
+  assert.match(document, /partial|partiel/u);
   assert.match(document, /terminated|terminé/u);
   assert.match(document, /I_CONFIRM_PILOT_2_LOCAL_REST_RELOAD/u);
   assert.match(document, /temporary|temporaire/u);
