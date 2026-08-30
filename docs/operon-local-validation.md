@@ -79,6 +79,7 @@ From the MCP repository:
 
 ```bash
 npm ci
+npm --prefix plugins/obsidian-operon-bridge ci
 npm run test:runtime
 npm run check:operon
 npm pack --dry-run

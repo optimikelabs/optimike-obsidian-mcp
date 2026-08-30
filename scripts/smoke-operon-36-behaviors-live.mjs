@@ -485,15 +485,23 @@ async function runProjectCommand(args, label) {
 
 async function runNpmCommand(args, label) {
   // Node 24 on Windows can reject a direct .cmd spawn with EINVAL. Invoke the
-  // npm CLI through this same Node binary so the offline attestation is as
-  // portable and deterministic as the live rebuild.
-  const npmCli = path.join(
-    path.dirname(process.execPath),
-    "node_modules",
-    "npm",
-    "bin",
-    "npm-cli.js",
-  );
+  // npm CLI through this same Node binary. npm_execpath is authoritative when
+  // the canary is launched by npm; the fallback covers direct node invocation
+  // without assuming the Windows-only Node installation layout on POSIX.
+  const nodeDirectory = path.dirname(process.execPath);
+  const npmCli =
+    process.env.npm_execpath?.trim() ||
+    (process.platform === "win32"
+      ? path.join(nodeDirectory, "node_modules", "npm", "bin", "npm-cli.js")
+      : path.resolve(
+          nodeDirectory,
+          "..",
+          "lib",
+          "node_modules",
+          "npm",
+          "bin",
+          "npm-cli.js",
+        ));
   const child = spawn(process.execPath, [npmCli, ...args], {
     cwd: PROJECT_ROOT,
     env: process.env,

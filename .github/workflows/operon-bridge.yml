@@ -47,6 +47,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Install Operon Bridge dependencies for manifest attestation
+        run: npm --prefix plugins/obsidian-operon-bridge ci
       - run: npm run test:runtime
       - run: npm run test:operon-contract
       - run: npm run test:operon-service

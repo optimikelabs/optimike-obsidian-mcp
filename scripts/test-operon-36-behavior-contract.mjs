@@ -392,6 +392,7 @@ const workflow = await readFile(
 for (const required of [
   "scripts/smoke-operon-36-behaviors-live.mjs",
   "scripts/test-operon-36-behavior-contract.mjs",
+  "npm --prefix plugins/obsidian-operon-bridge ci",
   "npm run test:operon-canary-path-safety",
   "npm run test:operon-36-behavior-contract",
 ]) {
@@ -399,6 +400,36 @@ for (const required of [
     workflow.includes(required),
     true,
     `Operon CI is missing ${required}.`,
+  );
+}
+const bridgeInstallIndex = workflow.indexOf(
+  "npm --prefix plugins/obsidian-operon-bridge ci",
+);
+const pathSafetyIndex = workflow.indexOf(
+  "npm run test:operon-canary-path-safety",
+);
+assert.equal(
+  bridgeInstallIndex < pathSafetyIndex,
+  true,
+  "Operon CI must install Bridge dependencies before the manifest rebuild gate.",
+);
+
+for (const canarySource of [
+  await readFile(
+    path.join(projectRoot, "scripts", "smoke-operon-35-live.mjs"),
+    "utf8",
+  ),
+  source,
+]) {
+  assert.match(
+    canarySource,
+    /process\.env\.npm_execpath\?\.trim\(\)/u,
+    "Canary Bridge rebuilds must use npm's cross-platform executable path.",
+  );
+  assert.match(
+    canarySource,
+    /process\.platform === "win32"/u,
+    "Direct canary invocation must retain an OS-aware npm CLI fallback.",
   );
 }
 
