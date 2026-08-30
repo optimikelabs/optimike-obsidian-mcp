@@ -59,10 +59,17 @@ import {
 import type { ExternalMoveBindingIdentity } from "./services/externalReferences/backendVaultAdapter.js";
 import {
   ExternalMoveCoordinator,
-  projectExternalMovePlanForStatus,
+  projectExternalMovePlanForUnavailableDestructiveSession,
 } from "./services/externalReferences/externalMoveCoordinator.js";
-import { ExternalMoveJournal } from "./services/externalReferences/externalMoveJournal.js";
-import type { ExternalMovePlan } from "./services/externalReferences/externalMoveJournal.js";
+import {
+  ExternalMoveJournal,
+  isExternalMoveJournalObservationConsistent,
+} from "./services/externalReferences/externalMoveJournal.js";
+import type {
+  ExternalMoveJournalObservation,
+  ExternalMovePlan,
+  ExternalMovePlanStatus,
+} from "./services/externalReferences/externalMoveJournal.js";
 import {
   safelyReadUntrustedErrorField,
   safelySnapshotUntrustedErrorArray,
@@ -328,12 +335,40 @@ function readExternalMovePlanFromJournal(
     db.exec("PRAGMA busy_timeout=5000");
     db.exec("PRAGMA query_only=ON");
     const row = db
-      .prepare("SELECT payload_json FROM external_move_plans WHERE plan_id = ?")
-      .get(planId) as { payload_json?: unknown } | undefined;
-    if (typeof row?.payload_json !== "string") return undefined;
+      .prepare(
+        `SELECT plan_id, idempotency_key, status, payload_json, updated_at
+         FROM external_move_plans WHERE plan_id = ?`,
+      )
+      .get(planId) as
+      | {
+          plan_id?: unknown;
+          idempotency_key?: unknown;
+          status?: unknown;
+          payload_json?: unknown;
+          updated_at?: unknown;
+        }
+      | undefined;
+    if (
+      typeof row?.plan_id !== "string" ||
+      typeof row.idempotency_key !== "string" ||
+      typeof row.status !== "string" ||
+      typeof row.payload_json !== "string" ||
+      typeof row.updated_at !== "string"
+    ) {
+      return undefined;
+    }
     const parsed = JSON.parse(row.payload_json) as unknown;
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as ExternalMovePlan)
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const observed: ExternalMoveJournalObservation = {
+      plan: parsed as ExternalMovePlan,
+      planId: row.plan_id,
+      idempotencyKey: row.idempotency_key,
+      status: row.status as ExternalMovePlanStatus,
+      rawPayload: row.payload_json,
+      updatedAt: row.updated_at,
+    };
+    return isExternalMoveJournalObservationConsistent(observed)
+      ? observed.plan
       : undefined;
   } catch {
     return undefined;
@@ -1219,7 +1254,11 @@ async function start() {
         ) {
           return externalMoveCoordinator.status(parsed.data.planId, stored);
         }
-        return projectExternalMovePlanForStatus(stored);
+        // A journal may be readable after restart or from another binding, but
+        // this process cannot authenticate the session that sealed it. Project
+        // all actionable receipts as manual review without opening or changing
+        // the durable journal.
+        return projectExternalMovePlanForUnavailableDestructiveSession(stored);
       })();
     }
 

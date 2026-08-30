@@ -97,14 +97,20 @@ function createRootService(
 const PRIVATE_BACKEND_SENTINEL = "private-backend-failure-sentinel-9f21";
 const PRIVATE_CODE_SHAPED_LEGACY_SENTINEL =
   "external_root_private_legacy_sentinel";
+const TEST_BACKEND_FINGERPRINT = hashText("test-backend");
+const TEST_VAULT_FINGERPRINT = hashText("test-vault");
+const TEST_ROOTS_FINGERPRINT = hashText("test-roots");
+const TEST_BINDING_FINGERPRINT = hashText("test-binding");
+const TEST_SESSION_ID = "00000000-0000-4000-8000-000000000001";
 
 class FakeVault {
   constructor(entries = {}) {
     this.notes = new Map(Object.entries(entries));
-    this.bindingFingerprint = "test-binding";
+    this.bindingFingerprint = TEST_BINDING_FINGERPRINT;
     this.backendGeneration = 1;
-    this.backendSessionId = "test-session-1";
+    this.backendSessionId = TEST_SESSION_ID;
     this.conditionalWritesSupported = true;
+    this.openDestructiveSessionCalls = 0;
     this.conditionalReplaceCalls = 0;
     this.failConditionalReplaceAt = undefined;
     this.failConditionalReplaceError = undefined;
@@ -118,9 +124,9 @@ class FakeVault {
   async getBindingIdentity() {
     return {
       schemaVersion: 2,
-      backendFingerprint: "test-backend",
-      vaultFingerprint: "test-vault",
-      rootConfigFingerprint: "test-roots",
+      backendFingerprint: TEST_BACKEND_FINGERPRINT,
+      vaultFingerprint: TEST_VAULT_FINGERPRINT,
+      rootConfigFingerprint: TEST_ROOTS_FINGERPRINT,
       bindingFingerprint: this.bindingFingerprint,
       vaultIdentitySource: "backend_destructive_vault_attestation",
       verifiable: true,
@@ -128,6 +134,7 @@ class FakeVault {
   }
 
   async openDestructiveSession(expectedBinding, expectedSession) {
+    this.openDestructiveSessionCalls += 1;
     if (expectedSession) this.assertDestructiveSession(expectedSession);
     const identity = await this.getBindingIdentity();
     if (identity.bindingFingerprint !== expectedBinding.bindingFingerprint) {
@@ -361,6 +368,8 @@ try {
     "coordinator-round-trip",
   );
   assert.equal(applied.status, "applied");
+  assert.equal(applied.readyToApply, false);
+  assert.equal(applied.nextAction, "rollback");
   assert.equal(await exists(coordinatedSource), false);
   assert.equal(await readFile(coordinatedTarget, "utf8"), "coordinated");
   const repairedNote = vault.notes.get(notePath);
@@ -384,6 +393,8 @@ try {
     "coordinator-round-trip",
   );
   assert.equal(rolledBack.status, "rolled_back");
+  assert.equal(rolledBack.readyToApply, true);
+  assert.equal(rolledBack.nextAction, "apply");
   assert.equal(await readFile(coordinatedSource, "utf8"), "coordinated");
   assert.equal(await exists(coordinatedTarget), false);
   const expectedRuntimePreservingRollback = originalNote
@@ -440,10 +451,197 @@ try {
       .get(editedBodyNotePath)
       .includes("Concurrent body edit."),
   );
+  const editedBodyStatus = editedBodyCoordinator.status(editedBodyPlan.planId);
+  assert.equal(editedBodyStatus.status, "recovery_required");
+  // This is a durable ambiguous outcome, not permission to overwrite the
+  // concurrent body edit. Its original failure code remains observable, but
+  // the only permitted next step is human incident review.
+  assert.equal(
+    editedBodyStatus.failureCode,
+    "external_root_precondition_failed",
+  );
+  assert.equal(editedBodyStatus.nextAction, "manual_review");
+  assert.equal(editedBodyStatus.recoveryRequired, true);
+  const editedBodyAfterFailedRollback =
+    editedBodyVault.notes.get(editedBodyNotePath);
+  await expectExternalCode(
+    () =>
+      editedBodyCoordinator.rollback(
+        editedBodyPlan.planId,
+        "coordinator-edited-body",
+      ),
+    "precondition_failed",
+  );
+  assert.equal(await exists(editedBodySource), false);
+  assert.equal(await readFile(editedBodyTarget, "utf8"), "edited body");
+  assert.equal(
+    editedBodyVault.notes.get(editedBodyNotePath),
+    editedBodyAfterFailedRollback,
+    "a recovery retry must not overwrite a concurrent body edit",
+  );
   assert.equal(
     editedBodyCoordinator.status(editedBodyPlan.planId).status,
-    "applied",
+    "recovery_required",
   );
+
+  // Availability failures remain retryable: unlike a changed note they do not
+  // attest a conflicting content or filesystem state. The projection keeps the
+  // original public code and exposes the governed rollback continuation.
+  const retryableRecoverySource = path.join(rootPath, "retryable-recovery.txt");
+  const retryableRecoveryTarget = path.join(
+    archivePath,
+    "retryable-recovery.txt",
+  );
+  await writeFile(retryableRecoverySource, "retryable recovery", "utf8");
+  const retryableRecoveryJournal = new ExternalMoveJournal(":memory:");
+  const retryableRecoveryCoordinator = new ExternalMoveCoordinator(
+    createRootService(rootPath),
+    new FakeVault(),
+    retryableRecoveryJournal,
+  );
+  const retryableRecoveryPlan = await retryableRecoveryCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "retryable-recovery.txt",
+    targetRelativePath: "archive/retryable-recovery.txt",
+    idempotencyKey: "coordinator-retryable-recovery",
+  });
+  retryableRecoveryJournal.transition(
+    retryableRecoveryPlan.planId,
+    ["planned"],
+    "recovery_required",
+    {
+      failure: "external_root_timeout",
+      recoveryErrors: ["external_root_timeout"],
+    },
+  );
+  const retryableRecoveryStatus = retryableRecoveryCoordinator.status(
+    retryableRecoveryPlan.planId,
+  );
+  assert.equal(retryableRecoveryStatus.status, "recovery_required");
+  assert.equal(retryableRecoveryStatus.failureCode, "external_root_timeout");
+  assert.equal(retryableRecoveryStatus.nextAction, "rollback");
+  assert.equal(retryableRecoveryStatus.readyToApply, false);
+  assert.equal(retryableRecoveryStatus.recoveryRequired, true);
+  const retryableRecoveryResult = await retryableRecoveryCoordinator.rollback(
+    retryableRecoveryPlan.planId,
+    "coordinator-retryable-recovery",
+  );
+  assert.equal(retryableRecoveryResult.status, "rolled_back");
+  assert.equal(
+    await readFile(retryableRecoverySource, "utf8"),
+    "retryable recovery",
+  );
+  assert.equal(await exists(retryableRecoveryTarget), false);
+  retryableRecoveryJournal.close();
+
+  // A rollback executor must claim the exact durable receipt before it even
+  // inspects an ambiguous file placement. If another executor wins that
+  // compare-and-swap, the loser cannot repair, recover the file, or replace
+  // the winner's incident receipt. A subsequent executor that claims the
+  // winner is the sole process allowed to perform recovery.
+  const rollbackClaimRaceSource = path.join(
+    rootPath,
+    "rollback-claim-race.txt",
+  );
+  const rollbackClaimRaceTarget = path.join(
+    archivePath,
+    "rollback-claim-race.txt",
+  );
+  await writeFile(rollbackClaimRaceSource, "rollback claim race", "utf8");
+  const rollbackClaimRaceUri = pathToFileURL(rollbackClaimRaceSource).href;
+  const rollbackClaimRaceNotePath = "Efforts/Projets/Rollback claim race.md";
+  const rollbackClaimRaceVault = new FakeVault({
+    [rollbackClaimRaceNotePath]:
+      `[Rollback claim race](${rollbackClaimRaceUri}) ` +
+      "`external-ref:pilot.move::rollback-claim-race.txt`\n",
+  });
+  const rollbackClaimRaceService = createRootService(rootPath);
+  const rollbackClaimRaceJournal = new ExternalMoveJournal(":memory:");
+  const rollbackClaimRaceCoordinator = new ExternalMoveCoordinator(
+    rollbackClaimRaceService,
+    rollbackClaimRaceVault,
+    rollbackClaimRaceJournal,
+  );
+  const rollbackClaimRacePlan = await rollbackClaimRaceCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "rollback-claim-race.txt",
+    targetRelativePath: "archive/rollback-claim-race.txt",
+    idempotencyKey: "coordinator-rollback-claim-race",
+  });
+  await rollbackClaimRaceCoordinator.apply(
+    rollbackClaimRacePlan.planId,
+    "coordinator-rollback-claim-race",
+  );
+  // Simulate the crash-window duplicate identity that only recovery may
+  // collapse. The source and target are deliberately the same inode.
+  await link(rollbackClaimRaceTarget, rollbackClaimRaceSource);
+  const rollbackClaimRaceRecover =
+    rollbackClaimRaceService.recoverMoveToSource.bind(rollbackClaimRaceService);
+  let rollbackClaimRaceRecoverCalls = 0;
+  rollbackClaimRaceService.recoverMoveToSource = async (...args) => {
+    rollbackClaimRaceRecoverCalls += 1;
+    return rollbackClaimRaceRecover(...args);
+  };
+  const rollbackClaimRaceTransition =
+    rollbackClaimRaceJournal.transitionObserved.bind(rollbackClaimRaceJournal);
+  let rollbackClaimRaceInjected = false;
+  let rollbackClaimRaceWinner;
+  rollbackClaimRaceJournal.transitionObserved = (observed, ...args) => {
+    if (
+      !rollbackClaimRaceInjected &&
+      observed.planId === rollbackClaimRacePlan.planId &&
+      observed.status === "applied"
+    ) {
+      rollbackClaimRaceInjected = true;
+      const rival = rollbackClaimRaceJournal.observe(
+        rollbackClaimRacePlan.planId,
+      );
+      assert.ok(rival);
+      rollbackClaimRaceWinner = rollbackClaimRaceJournal.updateObserved(
+        rival,
+        "recovery_required",
+        "backend_failure",
+        { recoveryErrors: ["backend_failure"] },
+      ).plan;
+    }
+    return rollbackClaimRaceTransition(observed, ...args);
+  };
+  await expectExternalCode(
+    () =>
+      rollbackClaimRaceCoordinator.rollback(
+        rollbackClaimRacePlan.planId,
+        "coordinator-rollback-claim-race",
+      ),
+    "non_verifiable",
+  );
+  assert.equal(rollbackClaimRaceInjected, true);
+  assert.equal(
+    rollbackClaimRaceRecoverCalls,
+    0,
+    "a CAS-losing rollback must not inspect or recover the duplicate file",
+  );
+  assert.deepEqual(
+    rollbackClaimRaceJournal.get(rollbackClaimRacePlan.planId),
+    rollbackClaimRaceWinner,
+    "the loser must preserve the concurrent winner receipt exactly",
+  );
+  assert.equal(await exists(rollbackClaimRaceSource), true);
+  assert.equal(await exists(rollbackClaimRaceTarget), true);
+
+  // Once the injected winner is no longer racing, the successful exact claim
+  // is the only executor that may collapse the duplicate and complete the
+  // rollback.
+  rollbackClaimRaceJournal.transitionObserved = rollbackClaimRaceTransition;
+  const rollbackClaimRaceRolledBack =
+    await rollbackClaimRaceCoordinator.rollback(
+      rollbackClaimRacePlan.planId,
+      "coordinator-rollback-claim-race",
+    );
+  assert.equal(rollbackClaimRaceRolledBack.status, "rolled_back");
+  assert.equal(rollbackClaimRaceRecoverCalls, 1);
+  assert.equal(await exists(rollbackClaimRaceSource), true);
+  assert.equal(await exists(rollbackClaimRaceTarget), false);
+  rollbackClaimRaceJournal.close();
 
   // A changed note fails the coordinator's CAS gate before the file move.
   const casSource = path.join(rootPath, "cas-source.txt");
@@ -531,6 +729,75 @@ try {
     Object.fromEntries(compensationVault.notes),
     compensationNotes,
   );
+
+  // A compensation executor must not adopt a receipt that another process
+  // changed after the failed apply. Its exact observed CAS must fail before it
+  // issues an extra repair or filesystem rollback against that replacement.
+  const compensationCasSource = path.join(rootPath, "compensation-cas.txt");
+  const compensationCasTarget = path.join(archivePath, "compensation-cas.txt");
+  await writeFile(compensationCasSource, "compensation cas", "utf8");
+  const compensationCasReference =
+    `[Compensation CAS](${pathToFileURL(compensationCasSource).href}) ` +
+    "`external-ref:pilot.move::compensation-cas.txt`\n";
+  const compensationCasNotes = {
+    "Efforts/Projets/Compensation CAS A.md": compensationCasReference,
+    "Efforts/Projets/Compensation CAS B.md": compensationCasReference,
+  };
+  const compensationCasJournal = new ExternalMoveJournal(":memory:");
+  const compensationCasVault = new FakeVault(compensationCasNotes);
+  const compensationCasCoordinator = new ExternalMoveCoordinator(
+    service,
+    compensationCasVault,
+    compensationCasJournal,
+  );
+  const compensationCasPlan = await compensationCasCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "compensation-cas.txt",
+    targetRelativePath: "archive/compensation-cas.txt",
+    idempotencyKey: "coordinator-compensation-cas",
+  });
+  compensationCasVault.failConditionalReplaceAt = 2;
+  compensationCasVault.failConditionalReplaceError = new Error(
+    "compensation-cas-failure",
+  );
+  const transitionObserved = compensationCasJournal.transitionObserved.bind(
+    compensationCasJournal,
+  );
+  let compensationCasInjected = false;
+  compensationCasJournal.transitionObserved = (observed, ...args) => {
+    if (!compensationCasInjected && observed.status === "applying_repairs") {
+      compensationCasInjected = true;
+      const rival = compensationCasJournal.observe(observed.planId);
+      compensationCasJournal.updateObserved(
+        rival,
+        "recovery_required",
+        "backend_failure",
+        { recoveryErrors: ["backend_failure"] },
+      );
+    }
+    return transitionObserved(observed, ...args);
+  };
+  await expectExternalCode(
+    () =>
+      compensationCasCoordinator.apply(
+        compensationCasPlan.planId,
+        "coordinator-compensation-cas",
+      ),
+    "non_verifiable",
+  );
+  assert.equal(compensationCasInjected, true);
+  assert.equal(
+    compensationCasVault.conditionalReplaceCalls,
+    2,
+    "a CAS-loss compensation must not issue a third rollback repair",
+  );
+  assert.equal(await exists(compensationCasSource), false);
+  assert.equal(await exists(compensationCasTarget), true);
+  const compensationCasDurable = compensationCasJournal.get(
+    compensationCasPlan.planId,
+  );
+  assert.equal(compensationCasDurable.status, "recovery_required");
+  assert.deepEqual(compensationCasDurable.recoveryErrors, ["backend_failure"]);
 
   // An unsupported vault writer is rejected before the external file moves.
   const unsupportedSource = path.join(rootPath, "unsupported-writer.txt");
@@ -791,7 +1058,7 @@ try {
     newFileUri: "file:///private/archive/legacy-binding.txt",
     repairs: [],
     manualReview: [],
-    inventoryDigest: "legacy",
+    inventoryDigest: hashText("legacy"),
     appliedRepairPaths: [],
     restoredRepairPaths: [],
     recoveryErrors: [
@@ -808,6 +1075,11 @@ try {
   const legacyStatus = legacyCoordinator.status(legacyStored.planId);
   assert.equal(legacyStatus.legacyBinding, true);
   assert.equal(legacyStatus.bindingVerifiable, false);
+  assert.equal(legacyStatus.rootId, "pilot.move");
+  assert.equal(legacyStatus.sourceRelativePath, "legacy-binding.txt");
+  assert.equal(legacyStatus.nextAction, "manual_review");
+  assert.equal(legacyStatus.readyToApply, false);
+  assert.equal(legacyStatus.failureCode, "external_root_non_verifiable");
   assert.equal(JSON.stringify(legacyStatus).includes("file:///private"), false);
   assert.equal(
     JSON.stringify(legacyStatus).includes(PRIVATE_BACKEND_SENTINEL),
@@ -984,6 +1256,16 @@ try {
     "backend_session_changed",
   ]);
   assert.equal(
+    restartedPartialJournal.get(restartedPartialPlan.planId).status,
+    "recovery_required",
+    "a stale partial receipt must be durably retained for manual review",
+  );
+  assert.deepEqual(
+    restartedPartialJournal.get(restartedPartialPlan.planId).recoveryErrors,
+    ["backend_session_changed"],
+    "a stale partial receipt must record its stable session failure code",
+  );
+  assert.equal(
     JSON.stringify(restartedPartialStatus).includes(
       "proxy-session-after-restart",
     ),
@@ -996,7 +1278,7 @@ try {
         restartedPartialPlan.planId,
         "coordinator-restart-partial",
       ),
-    "non_verifiable",
+    "precondition_failed",
   );
   assert.equal(await exists(restartedPartialSource), false);
   assert.equal(
@@ -1008,6 +1290,346 @@ try {
     restartedPartialNote,
     "a replacement process must never repair or compensate its new vault",
   );
+
+  // Every state that would otherwise advertise apply or rollback must be
+  // fail-closed after a session restart. Partial receipts are durably marked
+  // for manual review; non-partial receipts receive an ephemeral projection
+  // and remain byte-for-byte unchanged in the journal.
+  const durablyReconciledStaleStatuses = new Set([
+    "applying",
+    "applying_file",
+    "file_moved",
+    "applying_repairs",
+    "rolling_back",
+    "rolling_back_repairs",
+    "rolling_back_file",
+    "failed",
+    "recovery_required",
+  ]);
+  for (const staleStatus of [
+    "planned",
+    "rolled_back",
+    "applied",
+    "failed_compensated",
+    "applying",
+    "applying_file",
+    "file_moved",
+    "applying_repairs",
+    "rolling_back",
+    "rolling_back_repairs",
+    "rolling_back_file",
+    "failed",
+    "recovery_required",
+  ]) {
+    const sourceRelativePath = `stale-status-${staleStatus}.txt`;
+    const targetRelativePath = `archive/stale-status-${staleStatus}.txt`;
+    const sourcePath = path.join(rootPath, sourceRelativePath);
+    const targetPath = path.join(rootPath, targetRelativePath);
+    await writeFile(sourcePath, `stale status ${staleStatus}`, "utf8");
+    const sourceUri = pathToFileURL(sourcePath).href;
+    const notePath = `Efforts/Projets/Stale status ${staleStatus}.md`;
+    const note =
+      `[Stale status](${sourceUri}) ` +
+      `\`external-ref:pilot.move::${sourceRelativePath}\`\n`;
+    const firstVault = new FakeVault({ [notePath]: note });
+    const journal = new ExternalMoveJournal(":memory:");
+    const firstCoordinator = new ExternalMoveCoordinator(
+      service,
+      firstVault,
+      journal,
+    );
+    const planned = await firstCoordinator.plan({
+      rootId: "pilot.move",
+      sourceRelativePath,
+      targetRelativePath,
+      idempotencyKey: `coordinator-stale-status-${staleStatus}`,
+    });
+    if (staleStatus !== "planned") {
+      journal.transition(planned.planId, ["planned"], staleStatus);
+    }
+    const replacementVault = new FakeVault({ [notePath]: note });
+    replacementVault.backendGeneration = 2;
+    replacementVault.backendSessionId = `replacement-${staleStatus}`;
+    const replacementCoordinator = new ExternalMoveCoordinator(
+      service,
+      replacementVault,
+      journal,
+    );
+    const projected = replacementCoordinator.status(planned.planId);
+    assert.equal(projected.status, "recovery_required", staleStatus);
+    assert.equal(projected.nextAction, "manual_review", staleStatus);
+    assert.equal(projected.readyToApply, false, staleStatus);
+    assert.equal(projected.failureCode, "backend_session_changed", staleStatus);
+    assert.deepEqual(projected.recoveryErrors, ["backend_session_changed"]);
+    const durable = journal.get(planned.planId);
+    if (durablyReconciledStaleStatuses.has(staleStatus)) {
+      assert.equal(durable.status, "recovery_required", staleStatus);
+      assert.equal(durable.failure, "backend_session_changed", staleStatus);
+      assert.deepEqual(
+        durable.recoveryErrors,
+        ["backend_session_changed"],
+        staleStatus,
+      );
+    } else {
+      assert.equal(durable.status, staleStatus, staleStatus);
+      assert.deepEqual(durable.recoveryErrors, [], staleStatus);
+    }
+    if (staleStatus === "planned") {
+      const replay = await replacementCoordinator.plan({
+        rootId: "pilot.move",
+        sourceRelativePath,
+        targetRelativePath,
+        idempotencyKey: `coordinator-stale-status-${staleStatus}`,
+      });
+      assert.equal(replay.nextAction, "manual_review");
+      assert.equal(replay.readyToApply, false);
+      assert.equal(journal.get(planned.planId).status, "planned");
+    }
+    if (staleStatus === "applied") {
+      const replay = await replacementCoordinator.apply(
+        planned.planId,
+        `coordinator-stale-status-${staleStatus}`,
+      );
+      assert.equal(replay.nextAction, "manual_review");
+      assert.equal(replay.readyToApply, false);
+      assert.equal(journal.get(planned.planId).status, "applied");
+    }
+    if (staleStatus === "rolled_back") {
+      const replay = await replacementCoordinator.rollback(
+        planned.planId,
+        `coordinator-stale-status-${staleStatus}`,
+      );
+      assert.equal(replay.nextAction, "manual_review");
+      assert.equal(replay.readyToApply, false);
+      assert.equal(journal.get(planned.planId).status, "rolled_back");
+    }
+    assert.equal(
+      await readFile(sourcePath, "utf8"),
+      `stale status ${staleStatus}`,
+    );
+    assert.equal(await exists(targetPath), false);
+    assert.equal(
+      JSON.stringify(projected).includes(`replacement-${staleStatus}`),
+      false,
+      "stale session identifiers must remain private",
+    );
+  }
+
+  // Even a durable recovery_required receipt with a benign stored failure
+  // cannot continue after the originating session is gone. Its status is an
+  // ephemeral manual-review projection and rollback remains side-effect free.
+  const staleRecoverySource = path.join(rootPath, "stale-recovery.txt");
+  const staleRecoveryTarget = path.join(rootPath, "archive/stale-recovery.txt");
+  await writeFile(staleRecoverySource, "stale recovery", "utf8");
+  const staleRecoveryUri = pathToFileURL(staleRecoverySource).href;
+  const staleRecoveryNotePath = "Efforts/Projets/Stale recovery.md";
+  const staleRecoveryNote =
+    `[Stale recovery](${staleRecoveryUri}) ` +
+    "`external-ref:pilot.move::stale-recovery.txt`\n";
+  const staleRecoveryJournal = new ExternalMoveJournal(":memory:");
+  const staleRecoveryFirstCoordinator = new ExternalMoveCoordinator(
+    service,
+    new FakeVault({ [staleRecoveryNotePath]: staleRecoveryNote }),
+    staleRecoveryJournal,
+  );
+  const staleRecoveryPlan = await staleRecoveryFirstCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "stale-recovery.txt",
+    targetRelativePath: "archive/stale-recovery.txt",
+    idempotencyKey: "coordinator-stale-recovery-required",
+  });
+  staleRecoveryJournal.transition(
+    staleRecoveryPlan.planId,
+    ["planned"],
+    "recovery_required",
+    { failure: "backend_failure", recoveryErrors: ["backend_failure"] },
+  );
+  const staleRecoveryReplacementVault = new FakeVault({
+    [staleRecoveryNotePath]: staleRecoveryNote,
+  });
+  staleRecoveryReplacementVault.backendGeneration = 2;
+  staleRecoveryReplacementVault.backendSessionId = "replacement-recovery";
+  const staleRecoveryCoordinator = new ExternalMoveCoordinator(
+    service,
+    staleRecoveryReplacementVault,
+    staleRecoveryJournal,
+  );
+  const staleRecoveryProjection = staleRecoveryCoordinator.status(
+    staleRecoveryPlan.planId,
+  );
+  assert.equal(staleRecoveryProjection.status, "recovery_required");
+  assert.equal(staleRecoveryProjection.nextAction, "manual_review");
+  assert.equal(staleRecoveryProjection.readyToApply, false);
+  assert.equal(staleRecoveryProjection.failureCode, "backend_session_changed");
+  assert.deepEqual(staleRecoveryProjection.recoveryErrors, [
+    "backend_failure",
+    "backend_session_changed",
+  ]);
+  await expectExternalCode(
+    () =>
+      staleRecoveryCoordinator.rollback(
+        staleRecoveryPlan.planId,
+        "coordinator-stale-recovery-required",
+      ),
+    "precondition_failed",
+  );
+  const staleRecoveryDurable = staleRecoveryJournal.get(
+    staleRecoveryPlan.planId,
+  );
+  assert.equal(staleRecoveryDurable.status, "recovery_required");
+  assert.equal(staleRecoveryDurable.failure, "backend_session_changed");
+  assert.deepEqual(staleRecoveryDurable.recoveryErrors, [
+    "backend_failure",
+    "backend_session_changed",
+  ]);
+  assert.equal(await readFile(staleRecoverySource, "utf8"), "stale recovery");
+  assert.equal(await exists(staleRecoveryTarget), false);
+
+  // A stale file-backed snapshot may be overtaken by a terminal executor
+  // before status re-opens the writable journal. The later terminal state is
+  // authoritative: do not overwrite it and do not advertise its rollback to
+  // the replacement session.
+  const staleSnapshotSource = path.join(rootPath, "stale-snapshot.txt");
+  const staleSnapshotTarget = path.join(rootPath, "archive/stale-snapshot.txt");
+  await writeFile(staleSnapshotSource, "stale snapshot", "utf8");
+  const staleSnapshotUri = pathToFileURL(staleSnapshotSource).href;
+  const staleSnapshotNotePath = "Efforts/Projets/Stale snapshot.md";
+  const staleSnapshotNote =
+    `[Stale snapshot](${staleSnapshotUri}) ` +
+    "`external-ref:pilot.move::stale-snapshot.txt`\n";
+  const staleSnapshotJournal = new ExternalMoveJournal(":memory:");
+  const staleSnapshotFirstCoordinator = new ExternalMoveCoordinator(
+    service,
+    new FakeVault({ [staleSnapshotNotePath]: staleSnapshotNote }),
+    staleSnapshotJournal,
+  );
+  const staleSnapshotPlan = await staleSnapshotFirstCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "stale-snapshot.txt",
+    targetRelativePath: "archive/stale-snapshot.txt",
+    idempotencyKey: "coordinator-stale-preloaded-terminal",
+  });
+  staleSnapshotJournal.transition(
+    staleSnapshotPlan.planId,
+    ["planned"],
+    "file_moved",
+  );
+  const staleSnapshotPreloaded = staleSnapshotJournal.get(
+    staleSnapshotPlan.planId,
+  );
+  const staleSnapshotReplacementVault = new FakeVault({
+    [staleSnapshotNotePath]: staleSnapshotNote,
+  });
+  staleSnapshotReplacementVault.backendGeneration = 2;
+  staleSnapshotReplacementVault.backendSessionId = "replacement-snapshot";
+  const staleSnapshotCoordinator = new ExternalMoveCoordinator(
+    service,
+    staleSnapshotReplacementVault,
+    staleSnapshotJournal,
+  );
+  const staleSnapshotObserve =
+    staleSnapshotJournal.observe.bind(staleSnapshotJournal);
+  let terminalizedDuringStatusReload = false;
+  staleSnapshotJournal.observe = (planId) => {
+    if (!terminalizedDuringStatusReload) {
+      terminalizedDuringStatusReload = true;
+      staleSnapshotJournal.observe = staleSnapshotObserve;
+      staleSnapshotJournal.transition(planId, ["file_moved"], "applied");
+    }
+    return staleSnapshotObserve(planId);
+  };
+  const staleSnapshotStatus = staleSnapshotCoordinator.status(
+    staleSnapshotPlan.planId,
+    staleSnapshotPreloaded,
+  );
+  assert.equal(staleSnapshotStatus.status, "recovery_required");
+  assert.equal(staleSnapshotStatus.nextAction, "manual_review");
+  assert.equal(staleSnapshotStatus.readyToApply, false);
+  assert.equal(staleSnapshotStatus.failureCode, "backend_session_changed");
+  const terminalAfterSnapshotReload = staleSnapshotJournal.get(
+    staleSnapshotPlan.planId,
+  );
+  assert.equal(terminalAfterSnapshotReload.status, "applied");
+  assert.deepEqual(terminalAfterSnapshotReload.recoveryErrors, []);
+  assert.equal(terminalAfterSnapshotReload.failure, undefined);
+  assert.equal(
+    JSON.stringify(staleSnapshotStatus).includes("replacement-snapshot"),
+    false,
+  );
+  assert.equal(await readFile(staleSnapshotSource, "utf8"), "stale snapshot");
+  assert.equal(await exists(staleSnapshotTarget), false);
+
+  // Two stale status calls can race the same guarded transition. One may make
+  // the durable recovery_required receipt; the losing status must reload that
+  // winner and return the same fail-closed projection instead of surfacing a
+  // concurrency error or overwriting its terminal/manual state.
+  const staleRaceSource = path.join(rootPath, "stale-status-race.txt");
+  const staleRaceTarget = path.join(rootPath, "archive/stale-status-race.txt");
+  await writeFile(staleRaceSource, "stale status race", "utf8");
+  const staleRaceUri = pathToFileURL(staleRaceSource).href;
+  const staleRaceNotePath = "Efforts/Projets/Stale status race.md";
+  const staleRaceNote =
+    `[Stale race](${staleRaceUri}) ` +
+    "`external-ref:pilot.move::stale-status-race.txt`\n";
+  const staleRaceJournal = new ExternalMoveJournal(":memory:");
+  const staleRaceFirstCoordinator = new ExternalMoveCoordinator(
+    service,
+    new FakeVault({ [staleRaceNotePath]: staleRaceNote }),
+    staleRaceJournal,
+  );
+  const staleRacePlan = await staleRaceFirstCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "stale-status-race.txt",
+    targetRelativePath: "archive/stale-status-race.txt",
+    idempotencyKey: "coordinator-stale-status-race",
+  });
+  staleRaceJournal.transition(staleRacePlan.planId, ["planned"], "file_moved");
+  const staleRaceVaultA = new FakeVault({ [staleRaceNotePath]: staleRaceNote });
+  staleRaceVaultA.backendGeneration = 2;
+  staleRaceVaultA.backendSessionId = "replacement-race-a";
+  const staleRaceVaultB = new FakeVault({ [staleRaceNotePath]: staleRaceNote });
+  staleRaceVaultB.backendGeneration = 2;
+  staleRaceVaultB.backendSessionId = "replacement-race-b";
+  const staleRaceCoordinatorB = new ExternalMoveCoordinator(
+    service,
+    staleRaceVaultB,
+    staleRaceJournal,
+  );
+  const staleRaceCoordinatorA = new ExternalMoveCoordinator(
+    service,
+    staleRaceVaultA,
+    staleRaceJournal,
+  );
+  const staleRaceUpdateObserved =
+    staleRaceJournal.updateObserved.bind(staleRaceJournal);
+  let interleavedStaleStatus = false;
+  staleRaceJournal.updateObserved = (...args) => {
+    if (!interleavedStaleStatus) {
+      interleavedStaleStatus = true;
+      const winner = staleRaceCoordinatorB.status(staleRacePlan.planId);
+      assert.equal(winner.nextAction, "manual_review");
+      throw new Error("External move plan state changed concurrently.");
+    }
+    return staleRaceUpdateObserved(...args);
+  };
+  const staleRaceLoser = staleRaceCoordinatorA.status(staleRacePlan.planId);
+  assert.equal(staleRaceLoser.status, "recovery_required");
+  assert.equal(staleRaceLoser.nextAction, "manual_review");
+  assert.equal(staleRaceLoser.readyToApply, false);
+  assert.equal(staleRaceLoser.failureCode, "backend_session_changed");
+  assert.equal(
+    interleavedStaleStatus,
+    true,
+    "the loser must exercise the observed-CAS concurrency path",
+  );
+  const staleRaceDurable = staleRaceJournal.get(staleRacePlan.planId);
+  assert.equal(staleRaceDurable.status, "recovery_required");
+  assert.equal(staleRaceDurable.failure, "backend_session_changed");
+  assert.deepEqual(staleRaceDurable.recoveryErrors, [
+    "backend_session_changed",
+  ]);
+  assert.equal(await readFile(staleRaceSource, "utf8"), "stale status race");
+  assert.equal(await exists(staleRaceTarget), false);
 
   // A crash after the no-clobber hard link but before source unlink leaves
   // both paths on the same inode. Rollback must recover that verified window.
@@ -1096,6 +1718,7 @@ try {
     idempotencyKey: "coordinator-manual-review",
   });
   assert.equal(manualPlan.readyToApply, false);
+  assert.equal(manualPlan.nextAction, "manual_review");
   assert.equal(manualPlan.repairs.length, 0);
   assert.equal(manualPlan.manualReview.length, 1);
   await expectExternalCode(
@@ -1356,7 +1979,13 @@ try {
   const applyPreflightReached = new Promise((resolve) => {
     signalApplyPreflight = resolve;
   });
+  let conditionalWriteChecks = 0;
   operationRaceVault.assertConditionalWritesSupported = async () => {
+    conditionalWriteChecks += 1;
+    // Apply is deliberately paused before its claim. Recovery may still make
+    // its own non-mutating capability check before it wins the planned-state
+    // claim; only the first check is the injected pause.
+    if (conditionalWriteChecks > 1) return;
     signalApplyPreflight();
     await new Promise((resolve) => {
       releaseApplyPreflight = resolve;
@@ -1374,11 +2003,216 @@ try {
   assert.equal(racedRecovery.phase, "terminal");
   assert.equal(racedRecovery.outcome, "compensated");
   assert.equal(racedRecovery.applyAllowed, false);
+  assert.equal(conditionalWriteChecks, 2);
   releaseApplyPreflight();
   await assert.rejects(racedApply, /state changed concurrently/u);
   assert.equal(await readFile(operationRaceSource, "utf8"), "operation race");
   assert.equal(await exists(operationRaceTarget), false);
   operationRaceJournal.close();
+
+  // A journal is durable, not trusted input. A legacy/tampered row must not
+  // leak hostile paths/reasons through status or feed one into a backend call.
+  const tamperedSource = path.join(rootPath, "tampered-journal.txt");
+  const tamperedTarget = path.join(archivePath, "tampered-journal.txt");
+  await writeFile(tamperedSource, "tampered journal", "utf8");
+  const tamperedNotePath = "Efforts/Projets/Tampered journal.md";
+  const tamperedNote =
+    `[Tampered](${pathToFileURL(tamperedSource).href}) ` +
+    "`external-ref:pilot.move::tampered-journal.txt`\n";
+  const tamperedJournal = new ExternalMoveJournal(":memory:");
+  const tamperedVault = new FakeVault({ [tamperedNotePath]: tamperedNote });
+  const tamperedCoordinator = new ExternalMoveCoordinator(
+    service,
+    tamperedVault,
+    tamperedJournal,
+  );
+  const safeTamperedPlan = await tamperedCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "tampered-journal.txt",
+    targetRelativePath: "archive/tampered-journal.txt",
+    idempotencyKey: "tampered-journal-plan",
+  });
+  tamperedJournal.transition(
+    safeTamperedPlan.planId,
+    ["planned"],
+    "applying_file",
+  );
+  const safePreloadedPartial = tamperedJournal.get(safeTamperedPlan.planId);
+  const tamperedStored = tamperedJournal.get(safeTamperedPlan.planId);
+  const hostilePath = "C:\\private\\journal-sentinel.md";
+  const hostileReason = "private-manual-review-sentinel";
+  const backslashRelativePath = "folder\\journal-sentinel.md";
+  tamperedStored.snapshot.sourceRelativePath = backslashRelativePath;
+  tamperedStored.repairs = [
+    {
+      filePath: hostilePath,
+      expectedSha256: hashText("before"),
+      before: "before",
+      after: "after",
+    },
+  ];
+  tamperedStored.manualReview = [
+    { filePath: "//server/private.md", reason: hostileReason },
+  ];
+  // The journal implementation intentionally exposes no mutation API for raw
+  // payloads; the test injects the exact attacker/legacy storage boundary.
+  tamperedJournal.db
+    .prepare(
+      "UPDATE external_move_plans SET payload_json = ? WHERE plan_id = ?",
+    )
+    .run(JSON.stringify(tamperedStored), tamperedStored.planId);
+  const tamperedBytesBefore = JSON.stringify(
+    tamperedJournal.get(tamperedStored.planId),
+  );
+  tamperedVault.backendGeneration = 2;
+  tamperedVault.backendSessionId = "00000000-0000-4000-8000-000000000002";
+  const tamperedStatus = tamperedCoordinator.status(
+    tamperedStored.planId,
+    safePreloadedPartial,
+  );
+  const tamperedPublic = JSON.stringify(tamperedStatus);
+  assert.equal(tamperedStatus.status, "recovery_required");
+  assert.equal(tamperedStatus.nextAction, "manual_review");
+  assert.equal(tamperedStatus.readyToApply, false);
+  assert.equal(tamperedStatus.failureCode, "external_root_non_verifiable");
+  assert.equal(tamperedPublic.includes(hostilePath), false);
+  assert.equal(tamperedPublic.includes(backslashRelativePath), false);
+  assert.equal(tamperedPublic.includes(hostileReason), false);
+  const mismatchedPreloadedStatus = tamperedCoordinator.status(
+    "33333333-3333-4333-8333-333333333333",
+    safePreloadedPartial,
+  );
+  assert.equal(mismatchedPreloadedStatus.planId, "[redacted]");
+  assert.equal(mismatchedPreloadedStatus.nextAction, "manual_review");
+  assert.equal(
+    JSON.stringify(tamperedJournal.get(tamperedStored.planId)),
+    tamperedBytesBefore,
+    "tampered status is a no-write projection",
+  );
+  const tamperedReplay = await tamperedCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "tampered-journal.txt",
+    targetRelativePath: "archive/tampered-journal.txt",
+    idempotencyKey: "tampered-journal-plan",
+  });
+  assert.equal(tamperedReplay.planId, "[redacted]");
+  assert.equal(tamperedReplay.nextAction, "manual_review");
+  const sessionCallsBeforeTamper = tamperedVault.openDestructiveSessionCalls;
+  await expectExternalCode(
+    () =>
+      tamperedCoordinator.apply(tamperedStored.planId, "tampered-journal-plan"),
+    "non_verifiable",
+  );
+  await expectExternalCode(
+    () =>
+      tamperedCoordinator.rollback(
+        tamperedStored.planId,
+        "tampered-journal-plan",
+      ),
+    "non_verifiable",
+  );
+  assert.equal(
+    tamperedVault.openDestructiveSessionCalls,
+    sessionCallsBeforeTamper,
+    "unsafe stored paths must fail before a destructive backend session opens",
+  );
+  assert.equal(await readFile(tamperedSource, "utf8"), "tampered journal");
+  assert.equal(await exists(tamperedTarget), false);
+  assert.equal(tamperedVault.notes.get(tamperedNotePath), tamperedNote);
+  tamperedJournal.close();
+
+  // Stable error taxonomy is part of the receipt integrity contract. A row
+  // may retain an otherwise valid binding and paths while an attacker (or an
+  // obsolete writer) injects an unknown failure value. Status must redact that
+  // row and rollback must reject it before opening a backend session or asking
+  // the filesystem about either path.
+  const taxonomyTamperSource = path.join(rootPath, "taxonomy-tamper.txt");
+  const taxonomyTamperTarget = path.join(archivePath, "taxonomy-tamper.txt");
+  await writeFile(taxonomyTamperSource, "taxonomy tamper", "utf8");
+  const taxonomyTamperRoots = createRootService(rootPath);
+  const taxonomyTamperVault = new FakeVault();
+  const taxonomyTamperJournal = new ExternalMoveJournal(":memory:");
+  const taxonomyTamperCoordinator = new ExternalMoveCoordinator(
+    taxonomyTamperRoots,
+    taxonomyTamperVault,
+    taxonomyTamperJournal,
+  );
+  const taxonomyTamperPlan = await taxonomyTamperCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "taxonomy-tamper.txt",
+    targetRelativePath: "archive/taxonomy-tamper.txt",
+    idempotencyKey: "coordinator-taxonomy-tamper",
+  });
+  taxonomyTamperJournal.transition(
+    taxonomyTamperPlan.planId,
+    ["planned"],
+    "recovery_required",
+  );
+  const taxonomyTamperedStored = taxonomyTamperJournal.get(
+    taxonomyTamperPlan.planId,
+  );
+  const unknownFailureSentinel = "private-unknown-recovery-taxonomy";
+  taxonomyTamperedStored.failure = unknownFailureSentinel;
+  taxonomyTamperedStored.recoveryErrors = [unknownFailureSentinel];
+  taxonomyTamperJournal.db
+    .prepare(
+      "UPDATE external_move_plans SET payload_json = ? WHERE plan_id = ?",
+    )
+    .run(JSON.stringify(taxonomyTamperedStored), taxonomyTamperPlan.planId);
+  const taxonomyTamperBytesBefore = JSON.stringify(
+    taxonomyTamperJournal.get(taxonomyTamperPlan.planId),
+  );
+  let taxonomyTamperRootCalls = 0;
+  const taxonomyTamperInspect =
+    taxonomyTamperRoots.inspectMoveSource.bind(taxonomyTamperRoots);
+  taxonomyTamperRoots.inspectMoveSource = async (...args) => {
+    taxonomyTamperRootCalls += 1;
+    return taxonomyTamperInspect(...args);
+  };
+  const taxonomyTamperSessionsBefore =
+    taxonomyTamperVault.openDestructiveSessionCalls;
+  const taxonomyTamperStatus = taxonomyTamperCoordinator.status(
+    taxonomyTamperPlan.planId,
+  );
+  assert.equal(taxonomyTamperStatus.status, "recovery_required");
+  assert.equal(taxonomyTamperStatus.rootId, "pilot.move");
+  assert.equal(taxonomyTamperStatus.sourceRelativePath, "taxonomy-tamper.txt");
+  assert.equal(taxonomyTamperStatus.nextAction, "manual_review");
+  assert.equal(taxonomyTamperStatus.readyToApply, false);
+  assert.equal(
+    taxonomyTamperStatus.failureCode,
+    "external_root_non_verifiable",
+  );
+  assert.equal(
+    JSON.stringify(taxonomyTamperStatus).includes(unknownFailureSentinel),
+    false,
+  );
+  await expectExternalCode(
+    () =>
+      taxonomyTamperCoordinator.rollback(
+        taxonomyTamperPlan.planId,
+        "coordinator-taxonomy-tamper",
+      ),
+    "non_verifiable",
+  );
+  assert.equal(
+    taxonomyTamperVault.openDestructiveSessionCalls,
+    taxonomyTamperSessionsBefore,
+    "unknown recovery taxonomy must fail before the backend session opens",
+  );
+  assert.equal(
+    taxonomyTamperRootCalls,
+    0,
+    "unknown recovery taxonomy must fail before filesystem inspection",
+  );
+  assert.equal(await readFile(taxonomyTamperSource, "utf8"), "taxonomy tamper");
+  assert.equal(await exists(taxonomyTamperTarget), false);
+  assert.equal(
+    JSON.stringify(taxonomyTamperJournal.get(taxonomyTamperPlan.planId)),
+    taxonomyTamperBytesBefore,
+    "unknown recovery taxonomy must not transition or normalize the journal row",
+  );
+  taxonomyTamperJournal.close();
 
   console.log("External move integrity tests passed.");
 } finally {

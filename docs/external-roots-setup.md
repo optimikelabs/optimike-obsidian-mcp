@@ -430,7 +430,23 @@ the journal lazily. An existing receipt, including one still held in a WAL, is
 read from a verified private temporary DB/WAL snapshot with a freshly rebuilt
 private SHM. That private directory is deleted after the query; the original
 journal is not opened by SQLite. Status opens the writable journal only when it
-must durably reconcile an interrupted state to `recovery_required`.
+can prove the current binding yet finds a stale session on a partial receipt:
+that guarded reconciliation persists `recovery_required` with the stable
+`backend_session_changed` code. If no coordinator is available, the stored
+binding differs, or the receipt is a non-partial actionable state, status makes
+no journal write: it returns an ephemeral manual-review projection with
+`readyToApply: false` and no apply or rollback continuation.
+
+The journal payload is untrusted input, even when its SQLite file is private.
+A receipt with an authenticated-binding shape that is legacy or incomplete but
+whose paths and integrity fields are still canonical remains inspectable as
+status-only: it keeps its safe logical root/path fields, reports
+`legacyBinding: true`, and projects `external_root_non_verifiable` with manual
+review. A malformed receipt (for example an absolute, traversal or backslash
+path, an unrecognised manual-review reason, or inconsistent hashes/tokens) is
+never normalized or rewritten by status: it becomes a wholly redacted no-write
+manual-review incident. Apply and rollback reject either kind before opening a
+destructive backend session or consulting a stored path.
 
 An apply or rollback also captures the proxy's current backend connection
 generation immediately after that proof. The complete destructive sequence is

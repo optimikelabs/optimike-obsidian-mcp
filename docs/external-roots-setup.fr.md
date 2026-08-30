@@ -441,8 +441,24 @@ le scan et un statut fichier inconnu ne créent pas et n’ouvrent pas de journa
 en écriture. Le plan ouvre le journal à la demande. Un reçu existant fiable est
 lu depuis un snapshot privé temporaire DB/WAL vérifié, avec un SHM privé
 reconstruit. Ce dossier privé est supprimé après la requête ; SQLite n’ouvre pas
-le journal original. Status n’ouvre le journal en écriture que lorsqu’il doit
-réconcilier durablement un état interrompu vers `recovery_required`.
+le journal original. Status n’ouvre le journal en écriture que lorsqu’il peut
+prouver le binding courant mais constate une session stale sur un reçu partiel :
+cette réconciliation gardée persiste `recovery_required` avec le code stable
+`backend_session_changed`. Sans coordinateur, si le binding stocké diffère, ou
+pour un état actionnable non partiel, status n’écrit pas le journal : il renvoie
+une projection éphémère en revue manuelle, avec `readyToApply: false` et sans
+continuation apply ou rollback.
+
+Le payload du journal reste une entrée non fiable, même si son fichier SQLite
+est privé. Un reçu dont le binding est legacy ou incomplet mais dont les chemins
+et champs d’intégrité restent canoniques demeure inspectable en status-only : il
+conserve ses champs logiques sûrs, rapporte `legacyBinding: true`, puis projette
+`external_root_non_verifiable` avec revue manuelle. Un reçu malformé (par
+exemple chemin absolu, traversal ou backslash, reason de revue inconnue, hashes
+ou tokens incohérents) n’est jamais normalisé ni réécrit par status : il devient
+un incident de revue manuelle sans écriture et entièrement redacted. Apply et
+rollback refusent ces deux cas avant d’ouvrir une session backend destructive ou
+de consulter un chemin stocké.
 
 Un apply ou un rollback capture aussi la génération de connexion backend du
 proxy juste après cette preuve. Toute la séquence destructive est clôturée sur

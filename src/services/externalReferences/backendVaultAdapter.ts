@@ -71,6 +71,48 @@ export class BackendVaultSessionChangedError extends Error {
   }
 }
 
+/** A backend search result was not a strict vault-relative path. */
+export class BackendVaultInvalidPathError extends Error {
+  constructor() {
+    super("The vault backend returned an invalid vault-relative path.");
+    this.name = "BackendVaultInvalidPathError";
+  }
+}
+
+/**
+ * Backend search results are untrusted. Keep their values inside the vault
+ * namespace without ever exposing an absolute or traversal-shaped path to a
+ * later repair step. Separators are normalized only after the raw shape has
+ * passed the same strict relative-path checks; hostile paths are rejected,
+ * never repaired into apparently-safe values.
+ */
+export function normalizeBackendVaultRelativePath(value: string): string {
+  if (
+    value.length === 0 ||
+    /[\p{Cc}]/u.test(value) ||
+    /^[A-Za-z]:/u.test(value) ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(value)
+  ) {
+    throw new BackendVaultInvalidPathError();
+  }
+
+  const normalized = value.replace(/\\/gu, "/");
+  if (normalized.startsWith("/")) {
+    throw new BackendVaultInvalidPathError();
+  }
+
+  const segments = normalized.split("/");
+  if (
+    segments.some(
+      (segment) => segment.length === 0 || segment === "." || segment === "..",
+    )
+  ) {
+    throw new BackendVaultInvalidPathError();
+  }
+
+  return normalized;
+}
+
 function sha256Json(value: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(value), "utf8")
@@ -503,7 +545,7 @@ export class BackendVaultAdapter {
           "path" in item &&
           typeof item.path === "string"
         ) {
-          paths.add(item.path.replace(/^\/+/u, ""));
+          paths.add(normalizeBackendVaultRelativePath(item.path));
         }
       }
       totalPages =

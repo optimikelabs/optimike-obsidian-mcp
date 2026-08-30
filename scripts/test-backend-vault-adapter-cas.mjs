@@ -353,6 +353,63 @@ for (const payload of [
   );
 }
 
+{
+  const hostilePaths = [
+    "C:\\\\private-backend-path-sentinel-1a2b",
+    "\\\\server\\share\\private-backend-path-sentinel-2b3c",
+    "../../private-backend-path-sentinel-3c4d",
+    "/private-backend-path-sentinel-4d5e",
+    "folder/./private-backend-path-sentinel-5e6f",
+    "folder/../private-backend-path-sentinel-6f7a",
+    "folder//private-backend-path-sentinel-7a8b",
+    "folder/\u0000private-backend-path-sentinel-8b9c",
+    "https://private-backend-path-sentinel-9c0d.example.test/note.md",
+  ];
+
+  for (const hostilePath of hostilePaths) {
+    const calls = [];
+    const adapter = new BackendVaultAdapter(async (name, args) => {
+      calls.push({ name, args });
+      return result({ results: [{ path: hostilePath }], totalPages: 1 });
+    });
+    let failure;
+    try {
+      await adapter.searchPaths("reference");
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(
+      String(failure),
+      "BackendVaultInvalidPathError: The vault backend returned an invalid vault-relative path.",
+    );
+    assert.equal(
+      String(failure).includes(hostilePath),
+      false,
+      "a rejected backend path must not be reflected into the failure",
+    );
+    assert.deepEqual(
+      calls.map((call) => call.name),
+      ["obsidian_global_search"],
+      "rejecting a backend path must not invoke any repair mutation",
+    );
+  }
+}
+
+{
+  const adapter = new BackendVaultAdapter(async () =>
+    result({
+      results: [
+        { path: "Dossiers\\Réunion équipe\\Décision café.md" },
+        { path: "Dossiers/Réunion équipe/Décision café.md" },
+      ],
+      totalPages: 1,
+    }),
+  );
+  assert.deepEqual(await adapter.searchPaths("Décision"), [
+    "Dossiers/Réunion équipe/Décision café.md",
+  ]);
+}
+
 console.log(
-  "Backend vault adapter binding privacy, CAS forwarding, and repair proof tests passed.",
+  "Backend vault adapter binding privacy, path boundary, CAS forwarding, and repair proof tests passed.",
 );

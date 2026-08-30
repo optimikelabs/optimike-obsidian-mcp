@@ -196,7 +196,7 @@ await writeFile(
       sourceRelativePath: "hello.txt",
       targetRelativePath: "moved.txt",
       size: 21,
-      modifiedAt: 0,
+      modifiedAt: "2026-08-30T00:00:00.000Z",
       sha256: "a".repeat(64),
     },
     bindingIdentity: {
@@ -214,7 +214,9 @@ await writeFile(
     newFileUri: "file:///P0-PRIVATE/legacy-target.txt",
     repairs: [],
     manualReview: [],
-    inventoryDigest: "legacy",
+    inventoryDigest: createHash("sha256")
+      .update("legacy", "utf8")
+      .digest("hex"),
     appliedRepairPaths: [],
     restoredRepairPaths: [],
     recoveryErrors: [LEGACY_FAILURE_SENTINEL],
@@ -228,6 +230,20 @@ await writeFile(
     legacyPlanId,
     legacyPlan.idempotencyKey,
     legacyPlan.status,
+    JSON.stringify(legacyPlan),
+    legacyPlan.createdAt,
+    legacyPlan.updatedAt,
+  );
+  // The fallback reads a private SQLite snapshot. A row whose indexed identity
+  // disagrees with its JSON payload is never a status receipt for either plan.
+  db.prepare(
+    `INSERT INTO external_move_plans
+      (plan_id, idempotency_key, status, payload_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "22222222-2222-4222-8222-222222222222",
+    "split-brain-status-key",
+    "planned",
     JSON.stringify(legacyPlan),
     legacyPlan.createdAt,
     legacyPlan.updatedAt,
@@ -494,7 +510,13 @@ try {
       arguments: { planId: readonlyPlan.planId },
     }),
   );
-  assert.equal(reliableProfiledStatus.status, "planned");
+  assert.equal(reliableProfiledStatus.status, "recovery_required");
+  assert.equal(reliableProfiledStatus.nextAction, "manual_review");
+  assert.equal(reliableProfiledStatus.readyToApply, false);
+  assert.equal(reliableProfiledStatus.failureCode, "backend_session_changed");
+  assert.deepEqual(reliableProfiledStatus.recoveryErrors, [
+    "backend_session_changed",
+  ]);
   assert.deepEqual(
     await snapshotProfiledMoveJournals(sandbox),
     reliableJournalSnapshot,
@@ -708,6 +730,7 @@ try {
   assert.equal(deniedMove.isError, true);
   assert.equal(jsonOf(deniedMove).error, "configuration_invalid");
   assert.equal(JSON.stringify(deniedMove).includes(vaultBPath), false);
+  const legacyJournalBeforeStatus = await readFile(legacyJournalPath);
   const legacyStatus = jsonOf(
     await mismatchedMoveProxyClient.callTool({
       name: "external_move_status",
@@ -716,12 +739,30 @@ try {
   );
   assert.equal(legacyStatus.legacyBinding, true);
   assert.equal(legacyStatus.bindingVerifiable, false);
+  assert.equal(legacyStatus.status, "recovery_required");
+  assert.equal(legacyStatus.nextAction, "manual_review");
+  assert.equal(legacyStatus.readyToApply, false);
+  assert.equal(legacyStatus.failureCode, "external_root_non_verifiable");
+  assert.deepEqual(legacyStatus.recoveryErrors, [
+    "external_root_non_verifiable",
+  ]);
+  assert.deepEqual(
+    await readFile(legacyJournalPath),
+    legacyJournalBeforeStatus,
+    "cross-binding fallback status must not rewrite a legacy journal",
+  );
   assert.equal(JSON.stringify(legacyStatus).includes("P0-PRIVATE"), false);
   assert.equal(
     JSON.stringify(legacyStatus).includes(LEGACY_FAILURE_SENTINEL),
     false,
     "external_move_status must redact raw legacy recovery failures",
   );
+  const splitBrainStatus = await mismatchedMoveProxyClient.callTool({
+    name: "external_move_status",
+    arguments: { planId: "22222222-2222-4222-8222-222222222222" },
+  });
+  assert.equal(splitBrainStatus.isError, true);
+  assert.equal(jsonOf(splitBrainStatus).error, "not_found");
 
   const roots = jsonOf(
     await proxyClient.callTool({
