@@ -14,6 +14,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { compileFrontmatterPatch } from "../dist/services/frontmatterPatchCompiler.js";
+import { assertByteExactCanaryDateIsolation } from "./modified-time-canary-helpers.mjs";
 
 const canaryPath = process.env.OBSIDIAN_FRONTMATTER_CANARY_PATH?.trim();
 const confirmation = process.env.OBSIDIAN_FRONTMATTER_CANARY_CONFIRM?.trim();
@@ -32,9 +33,7 @@ if (!canaryPath.toLowerCase().endsWith(".md")) {
   throw new Error("The P1 canary path must identify an existing .md note.");
 }
 if (confirmation !== CONFIRMATION) {
-  throw new Error(
-    `Set OBSIDIAN_FRONTMATTER_CANARY_CONFIRM=${CONFIRMATION}.`,
-  );
+  throw new Error(`Set OBSIDIAN_FRONTMATTER_CANARY_CONFIRM=${CONFIRMATION}.`);
 }
 if (!apiKey) {
   throw new Error("OBSIDIAN_API_KEY is required for the live P1 canary.");
@@ -98,9 +97,13 @@ function parse(result) {
     .join("\n");
   const payload = JSON.parse(text || "null");
   if (result.isError) {
-    throw new Error(
+    const error = new Error(
       payload?.error?.message ?? `MCP tool failed: ${JSON.stringify(payload)}`,
     );
+    error.publicCode = payload?.error?.code;
+    error.publicReasonCode = payload?.error?.details?.reasonCode;
+    error.requestId = payload?.requestId ?? payload?.error?.details?.requestId;
+    throw error;
   }
   return payload;
 }
@@ -117,6 +120,24 @@ async function readNote() {
   });
   assert.equal(typeof result.content, "string");
   return result.content;
+}
+
+async function assertDateIsolation() {
+  const [{ ObsidianRestApiService }, { requestContextService }] =
+    await Promise.all([
+      import("../dist/services/obsidianRestAPI/index.js"),
+      import("../dist/utils/index.js"),
+    ]);
+  const rest = new ObsidianRestApiService();
+  const context = requestContextService.createRequestContext({
+    operation: "GovernedFrontmatterLiveCanaryDateIsolation",
+    target: canaryPath,
+  });
+  const status = await rest.getAtomicWriteStatus(context);
+  assertByteExactCanaryDateIsolation(
+    status,
+    "byte-exact governed-frontmatter canary",
+  );
 }
 
 async function planApplyStatus(operations, key) {
@@ -142,17 +163,24 @@ async function planApplyStatus(operations, key) {
 }
 
 async function restoreWholeNote(originalContent, key) {
-  const planned = await call("obsidian_note_replace_plan", {
-    path: canaryPath,
-    nextContent: originalContent,
-    idempotencyKey: key,
-  });
-  const applied = await call("obsidian_note_replace_apply", {
-    planRef: planned.planRef,
-    idempotencyKey: key,
-  });
-  assert.equal(applied.outcome, "committed");
-  return applied;
+  let cleanupStage = "plan";
+  try {
+    const planned = await call("obsidian_note_replace_plan", {
+      path: canaryPath,
+      nextContent: originalContent,
+      idempotencyKey: key,
+    });
+    cleanupStage = "apply";
+    const applied = await call("obsidian_note_replace_apply", {
+      planRef: planned.planRef,
+      idempotencyKey: key,
+    });
+    assert.equal(applied.outcome, "committed");
+    return applied;
+  } catch (error) {
+    if (error && typeof error === "object") error.cleanupStage = cleanupStage;
+    throw error;
+  }
 }
 
 let originalContent;
@@ -176,6 +204,11 @@ try {
     assert.equal(names.has(name), true, `${name} is not registered`);
   }
 
+  // This canary promises byte-exact restoration. Modified-time integrations
+  // have their own destructive canary, including the legitimate 0 -> 1
+  // property-insertion path, and must be disabled before this first mutation.
+  await assertDateIsolation();
+
   originalContent = await readNote();
   // Parsing the candidate before backup/mutation also verifies that the source
   // belongs to the supported P1 subset and that reserved keys are absent.
@@ -185,9 +218,7 @@ try {
   ]);
   assert.equal(initialProbe.nextContent.includes(`${CANARY_KEY}:`), true);
   if (
-    originalContent.match(
-      new RegExp(`^(?:${CANARY_KEY}|${DELETE_KEY}):`, "mu"),
-    )
+    originalContent.match(new RegExp(`^(?:${CANARY_KEY}|${DELETE_KEY}):`, "mu"))
   ) {
     throw new Error(
       `The disposable note already contains ${CANARY_KEY} or ${DELETE_KEY}.`,
@@ -222,10 +253,7 @@ try {
     originalContent,
     addOperations,
   ).nextContent;
-  const added = await planApplyStatus(
-    addOperations,
-    `p1-live:${runId}:add`,
-  );
+  const added = await planApplyStatus(addOperations, `p1-live:${runId}:add`);
   assert.equal(await readNote(), expectedAdded);
 
   const updateOperations = [
@@ -333,6 +361,22 @@ try {
               restoreError instanceof Error
                 ? restoreError.message
                 : String(restoreError),
+            cleanupStage:
+              restoreError && typeof restoreError === "object"
+                ? restoreError.cleanupStage
+                : undefined,
+            publicCode:
+              restoreError && typeof restoreError === "object"
+                ? restoreError.publicCode
+                : undefined,
+            publicReasonCode:
+              restoreError && typeof restoreError === "object"
+                ? restoreError.publicReasonCode
+                : undefined,
+            requestId:
+              restoreError && typeof restoreError === "object"
+                ? restoreError.requestId
+                : undefined,
           },
           null,
           2,

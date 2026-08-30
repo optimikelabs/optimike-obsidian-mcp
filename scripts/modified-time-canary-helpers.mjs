@@ -9,7 +9,10 @@ export function supportsModifiedTimeSettlementBridgeVersion(value) {
   return major > 0 || (major === 0 && minor >= 3);
 }
 
-export function assertAtomicNoteCanaryDateIsolation(status) {
+export function assertByteExactCanaryDateIsolation(
+  status,
+  canaryLabel = "byte-exact canary",
+) {
   const settlementIntegrations =
     status?.settlement?.modifiedTimeFrontmatter?.integrations ?? [];
   const protection = status?.protection?.frontmatterDateProperties;
@@ -36,15 +39,21 @@ export function assertAtomicNoteCanaryDateIsolation(status) {
   if (Array.isArray(unsupportedIntegrations)) {
     for (const integration of unsupportedIntegrations) {
       if (integration?.activeRoles?.includes("modified")) {
-        active.add(`${integration?.pluginId ?? "unknown"}:modified(unsupported)`);
+        active.add(
+          `${integration?.pluginId ?? "unknown"}:modified(unsupported)`,
+        );
       }
     }
   }
 
   if (active.size === 0) return;
   throw new Error(
-    `The byte-exact atomic-note canary requires active modified-time integrations to be disabled before mutation (${[...active].join(", ")}). Run smoke:modified-time-settlement-live separately with the integration enabled.`,
+    `The ${canaryLabel} requires active modified-time integrations to be disabled before mutation (${[...active].join(", ")}). Run smoke:modified-time-settlement-live separately with the integration enabled.`,
   );
+}
+
+export function assertAtomicNoteCanaryDateIsolation(status) {
+  assertByteExactCanaryDateIsolation(status, "byte-exact atomic-note canary");
 }
 
 export function isSafeModifiedTimePropertyName(value) {
@@ -63,7 +72,10 @@ function lineWithoutCarriageReturn(line) {
   return line.endsWith("\r") ? line.slice(0, -1) : line;
 }
 
-export function modifiedTimeFrontmatterPropertyValue(content, propertyName) {
+export function optionalModifiedTimeFrontmatterPropertyValue(
+  content,
+  propertyName,
+) {
   const lines = content.split("\n");
   if (lineWithoutCarriageReturn(lines[0] ?? "") !== "---") {
     throw new Error("The canary note must start with standard frontmatter.");
@@ -79,15 +91,29 @@ export function modifiedTimeFrontmatterPropertyValue(content, propertyName) {
     .slice(1, closingDelimiter)
     .map(lineWithoutCarriageReturn)
     .filter((line) => line.startsWith(prefix));
-  if (matches.length !== 1) {
+  if (matches.length > 1) {
     throw new Error(
-      `The canary note must contain exactly one top-level ${propertyName} frontmatter property.`,
+      `The canary note must contain at most one top-level ${propertyName} frontmatter property.`,
     );
   }
+  if (matches.length === 0) return undefined;
   const value = matches[0].slice(prefix.length).trim();
   if (!value) {
     throw new Error(
       `The canary note ${propertyName} property must be non-empty.`,
+    );
+  }
+  return value;
+}
+
+export function modifiedTimeFrontmatterPropertyValue(content, propertyName) {
+  const value = optionalModifiedTimeFrontmatterPropertyValue(
+    content,
+    propertyName,
+  );
+  if (value === undefined) {
+    throw new Error(
+      `The canary note must contain exactly one top-level ${propertyName} frontmatter property.`,
     );
   }
   return value;

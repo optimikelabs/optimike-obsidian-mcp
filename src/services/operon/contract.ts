@@ -657,6 +657,21 @@ const OPERON_LIST_MUTATION_FIELDS = new Set([
   "blockedBy",
 ]);
 
+/**
+ * Fields which have a distinct native Operon workflow.  Keeping the routing
+ * decision here makes the generic update contract truthful: it never offers a
+ * convenient-looking path which bypasses a workflow that owns its own
+ * invariants (periodic placement, relationship consistency, or recurrence).
+ */
+const OPERON_DEDICATED_UPDATE_FIELD_TOOLS: Readonly<Record<string, string>> = {
+  parentTask: "operon_set_relationships",
+  blocking: "operon_set_relationships",
+  blockedBy: "operon_set_relationships",
+  repeat: "operon_update_recurrence",
+  datetimeRepeatEnd: "operon_update_recurrence",
+  dateScheduled: "operon_update_periodic_scheduling",
+};
+
 function validateKnownMutationFieldTypes(
   fields:
     | Record<string, z.infer<typeof OperonMutationFieldValueSchema>>
@@ -709,6 +724,21 @@ function validateTaskGallery(
       message: `taskGallery must contain at most ${maximumItems} items.`,
     });
   }
+}
+
+function rejectDateScheduledOutsidePeriodicUpdate(
+  fields:
+    | Record<string, z.infer<typeof OperonMutationFieldValueSchema>>
+    | undefined,
+  context: z.RefinementCtx,
+): void {
+  if (fields?.dateScheduled === undefined) return;
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["fields", "dateScheduled"],
+    message:
+      "Managed field 'dateScheduled' is accepted only by 'operon_update_periodic_scheduling'.",
+  });
 }
 
 function normalizeTaskGalleryFields<
@@ -917,6 +947,7 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
     .superRefine((value, context) => {
       validateKnownMutationFieldTypes(value.fields, context);
       validateTaskGallery(value.fields, 256, context);
+      rejectDateScheduledOutsidePeriodicUpdate(value.fields, context);
       if (value.source === "file" && value.targetPath) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -959,19 +990,13 @@ export const OperonUpdatePatchSchema = z
   .superRefine((value, context) => {
     validateKnownMutationFieldTypes(value.fields, context);
     validateTaskGallery(value.fields, 512, context);
-    const dedicatedFields = new Set([
-      "parentTask",
-      "blocking",
-      "blockedBy",
-      "repeat",
-      "datetimeRepeatEnd",
-    ]);
     for (const field of Object.keys(value.fields ?? {})) {
-      if (dedicatedFields.has(field)) {
+      const dedicatedTool = OPERON_DEDICATED_UPDATE_FIELD_TOOLS[field];
+      if (dedicatedTool) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["fields", field],
-          message: `Managed field '${field}' must use the dedicated relationship or recurrence mutation tool.`,
+          message: `Managed field '${field}' must use '${dedicatedTool}'.`,
         });
       }
     }
@@ -1128,7 +1153,6 @@ const OperonRecurrenceChangesSchema = z
   .object({
     repeat: z.string().trim().min(1).nullable().optional(),
     datetimeRepeatEnd: z.string().trim().min(1).nullable().optional(),
-    dateScheduled: z.string().trim().min(1).nullable().optional(),
     dateStarted: z.string().trim().min(1).nullable().optional(),
     dateDue: z.string().trim().min(1).nullable().optional(),
     datetimeStart: z.string().trim().min(1).nullable().optional(),

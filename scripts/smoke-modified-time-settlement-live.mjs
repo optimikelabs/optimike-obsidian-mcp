@@ -19,6 +19,7 @@ import {
   isSafeModifiedTimePropertyName,
   modifiedTimeFrontmatterPropertyValue,
   nextRepresentableTimestampReadyAt,
+  optionalModifiedTimeFrontmatterPropertyValue,
   supportsModifiedTimeSettlementBridgeVersion,
 } from "./modified-time-canary-helpers.mjs";
 
@@ -648,7 +649,10 @@ try {
   originalContent = original.content;
   originalSha256 = original.sha256;
   assert.equal(originalSha256, sha256(originalContent));
-  const originalPropertyValue = propertyValue(originalContent);
+  const originalPropertyValue = optionalModifiedTimeFrontmatterPropertyValue(
+    originalContent,
+    propertyName,
+  );
   runId = randomUUID();
   writeFileSync(backupPath, originalContent, { encoding: "utf8", mode: 0o600 });
   backupMetadata = {
@@ -682,10 +686,12 @@ try {
     assert.equal(toolNames.has(name), true, `${name} is not registered`);
   }
 
-  await waitForNextRepresentableTimestamp(
-    originalPropertyValue,
-    status.settlement.modifiedTimeFrontmatter.utcOffsetMinutes,
-  );
+  if (originalPropertyValue !== undefined) {
+    await waitForNextRepresentableTimestamp(
+      originalPropertyValue,
+      status.settlement.modifiedTimeFrontmatter.utcOffsetMinutes,
+    );
+  }
 
   const positiveMarker = `<!-- modified-time-positive:${runId} -->`;
   const positiveTarget = `${originalContent}${
@@ -793,6 +799,7 @@ try {
     backendBindingFingerprint: originalBindingFingerprint,
     modifiedTimePluginId: pluginId,
     modifiedTimeProperty: propertyName,
+    originalModifiedTimePropertyPresent: originalPropertyValue !== undefined,
     utcOffsetMinutes:
       status.settlement.modifiedTimeFrontmatter.utcOffsetMinutes,
     droppedCasResponses,

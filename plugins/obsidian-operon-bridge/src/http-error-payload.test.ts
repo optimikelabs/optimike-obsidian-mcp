@@ -50,10 +50,10 @@ test("Operon HTTP errors redact arbitrary task fields, paths, and backend messag
   const payloadFactory = await exported("publicOperonErrorPayload");
   const secret =
     "C:\\Users\\private\\Vault\\Tasks\\Client.md description: confidential";
-  const payload = payloadFactory(new Error(secret), "native-error: task title") as Record<
-    string,
-    any
-  >;
+  const payload = payloadFactory(
+    new Error(secret),
+    "native-error: task title",
+  ) as Record<string, any>;
 
   assert.equal(payload.ok, false);
   assert.equal(payload.contractVersion, "1");
@@ -147,7 +147,12 @@ test("Operon mutation receipts fail closed for a revoked Proxy or throwing gette
   httpRevoked.revoke();
   const getterPayload = Object.create(null, {
     ok: { enumerable: true, get: () => false },
-    status: { enumerable: true, get: () => { throw new Error("confidential"); } },
+    status: {
+      enumerable: true,
+      get: () => {
+        throw new Error("confidential");
+      },
+    },
   });
 
   const fromRevoked = payloadFactory(revoked.proxy) as Record<string, unknown>;
@@ -213,7 +218,12 @@ function responseCapture(): Record<string, any> {
 
 async function mountedCreateMutationRoute(
   nativeResult: () => unknown,
-): Promise<{ bridge: any; handler: Function; calls: () => number }> {
+): Promise<{
+  bridge: any;
+  handler: Function;
+  handlers: Map<string, Function>;
+  calls: () => number;
+}> {
   const Bridge = (await bridgeModule()).default;
   assert.equal(typeof Bridge, "function");
   const handlers = new Map<string, Function>();
@@ -259,8 +269,703 @@ async function mountedCreateMutationRoute(
     "POST /extensions/optimike-operon-bridge/v1/tasks",
   );
   assert.equal(typeof handler, "function");
-  return { bridge, handler: handler!, calls: () => nativeCalls };
+  return { bridge, handler: handler!, handlers, calls: () => nativeCalls };
 }
+
+test("generic REST dateScheduled requests fail before reservation or native preview", async () => {
+  const {
+    bridge,
+    handler: create,
+    handlers,
+    calls,
+  } = await mountedCreateMutationRoute(() => ({ ok: true }));
+  const update = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/tasks/:operonId/update",
+  );
+  const recurrence = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/tasks/:operonId/recurrence",
+  );
+  assert.equal(typeof update, "function");
+  assert.equal(typeof recurrence, "function");
+
+  const cyclicCreateTask: Record<string, unknown> = {
+    source: "inline",
+    description: "Cyclic input",
+  };
+  cyclicCreateTask.self = cyclicCreateTask;
+  const getterCreateTask = Object.create(null, {
+    source: { enumerable: true, value: "inline" },
+    description: { enumerable: true, value: "Getter input" },
+    nested: {
+      enumerable: true,
+      get: () => {
+        throw new Error("must not invoke caller getters");
+      },
+    },
+  });
+  const throwingProxy = new Proxy(
+    {
+      idempotencyKey: "scheduled-date-proxy",
+      task: { source: "inline", description: "Proxy input" },
+    },
+    {
+      ownKeys: () => {
+        throw new Error("must not enumerate proxy input");
+      },
+    },
+  );
+  let changingOwnKeysCalls = 0;
+  const changingOwnKeysProxy = new Proxy(
+    {
+      idempotencyKey: "scheduled-date-changing-own-keys",
+      task: { source: "inline", description: "Changing proxy" },
+    },
+    {
+      ownKeys: () => {
+        changingOwnKeysCalls += 1;
+        return changingOwnKeysCalls === 1
+          ? ["idempotencyKey", "task"]
+          : ["idempotencyKey", "task", "dateScheduled"];
+      },
+    },
+  );
+  const getterProxy = new Proxy(
+    {
+      idempotencyKey: "scheduled-date-proxy-getter",
+      dateScheduled: "2026-09-01",
+      task: { source: "inline", description: "Getter proxy" },
+    },
+    {
+      get: (target, property, receiver) => {
+        if (property === "idempotencyKey") {
+          return Reflect.get(target, property, receiver);
+        }
+        throw new Error(
+          "generic routes must not reread a proxy after snapshot",
+        );
+      },
+    },
+  );
+
+  const requests = [
+    {
+      label: "create",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "scheduled-date-standard-create",
+          task: {
+            source: "inline",
+            description: "Must stay periodic",
+            fields: { dateScheduled: "2026-09-01" },
+          },
+        },
+      },
+    },
+    {
+      label: "update",
+      handler: update,
+      request: {
+        params: { operonId: "task123" },
+        body: {
+          idempotencyKey: "scheduled-date-generic-update",
+          expectedRevision: "fnv1a32:12345678",
+          patch: { fields: { dateScheduled: "2026-09-01" } },
+        },
+      },
+    },
+    {
+      label: "recurrence",
+      handler: recurrence,
+      request: {
+        params: { operonId: "task123" },
+        body: {
+          idempotencyKey: "scheduled-date-recurrence",
+          expectedRevision: "fnv1a32:12345678",
+          scope: "this-task",
+          changes: { dateScheduled: "2026-09-01" },
+        },
+      },
+    },
+    {
+      label: "create top-level",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "scheduled-date-top-level-create",
+          dateScheduled: "2026-09-01",
+          task: { source: "inline", description: "Must stay periodic" },
+        },
+      },
+    },
+    {
+      label: "create array container",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "scheduled-date-array-task",
+          task: [],
+        },
+      },
+    },
+    {
+      label: "create fields array container",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "scheduled-date-array-fields-create",
+          task: {
+            source: "inline",
+            description: "Must stay periodic",
+            fields: [],
+          },
+        },
+      },
+    },
+    {
+      label: "create misplaced nested",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "scheduled-date-misplaced-create",
+          task: {
+            source: "inline",
+            description: "Must stay periodic",
+            metadata: { dateScheduled: "2026-09-01" },
+          },
+        },
+      },
+    },
+    {
+      label: "create array",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "scheduled-date-array-create",
+          task: {
+            source: "inline",
+            description: "Must stay periodic",
+            tags: [{ dateScheduled: "2026-09-01" }],
+          },
+        },
+      },
+    },
+    {
+      label: "create cycle",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "scheduled-date-cycle-create",
+          task: cyclicCreateTask,
+        },
+      },
+    },
+    {
+      label: "create getter",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "scheduled-date-getter-create",
+          task: getterCreateTask,
+        },
+      },
+    },
+    {
+      label: "create proxy",
+      handler: create,
+      request: { body: throwingProxy },
+    },
+    {
+      label: "create changing ownKeys proxy",
+      handler: create,
+      request: { body: changingOwnKeysProxy },
+    },
+    {
+      label: "create getter proxy",
+      handler: create,
+      request: { body: getterProxy },
+    },
+    {
+      label: "update array container",
+      handler: update,
+      request: {
+        params: { operonId: "task123" },
+        body: {
+          idempotencyKey: "scheduled-date-array-update",
+          patch: [],
+        },
+      },
+    },
+    {
+      label: "update fields array container",
+      handler: update,
+      request: {
+        params: { operonId: "task123" },
+        body: {
+          idempotencyKey: "scheduled-date-array-fields-update",
+          patch: { fields: [] },
+        },
+      },
+    },
+    {
+      label: "recurrence array container",
+      handler: recurrence,
+      request: {
+        params: { operonId: "task123" },
+        body: {
+          idempotencyKey: "scheduled-date-array-recurrence",
+          changes: [],
+        },
+      },
+    },
+  ] as const;
+
+  for (const { label, handler, request } of requests) {
+    const response = responseCapture();
+    await handler!(request, response);
+    assert.equal(response.statusCode, 400, `${label} must be rejected`);
+    assert.equal(response.payload.error.code, "validation_error");
+    assert.equal(
+      bridge.mutationReservations.get(request.body.idempotencyKey),
+      undefined,
+      `${label} must not reserve an idempotency entry`,
+    );
+    assert.equal(
+      bridge.mutationResults.has(request.body.idempotencyKey),
+      false,
+      `${label} must not cache a mutation result`,
+    );
+    assert.equal(
+      bridge.mutationPreflightFlights.has(request.body.idempotencyKey),
+      false,
+      `${label} must be rejected before ephemeral preflight coordination`,
+    );
+  }
+  assert.equal(
+    calls(),
+    0,
+    "no rejected request may reach native preview/apply",
+  );
+  assert.equal(changingOwnKeysCalls, 2);
+});
+
+test("periodic REST creation retains its initial scheduled date", async () => {
+  const { bridge, handlers } = await mountedCreateMutationRoute(() => ({
+    ok: true,
+  }));
+  const periodic = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/tasks/periodic",
+  );
+  assert.equal(typeof periodic, "function");
+  let received: Record<string, unknown> | undefined;
+  bridge.executePeriodicCreateMutation = async (
+    body: Record<string, unknown>,
+  ) => {
+    received = body;
+    return { httpStatus: 200, payload: { ok: true } };
+  };
+  const response = responseCapture();
+  await periodic!(
+    {
+      body: {
+        idempotencyKey: "periodic-scheduled-date-allowed",
+        description: "Initial periodic task",
+        periodicKind: "daily",
+        fields: { dateScheduled: "2026-09-01" },
+      },
+    },
+    response,
+  );
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(received?.fields, { dateScheduled: "2026-09-01" });
+});
+
+test("a mutation-runtime failure before Bridge reservation is a safe same-key retry", async () => {
+  const secret = "C:\\Users\\private\\Vault\\Tasks\\Client.md confidential";
+  const { bridge, handlers, calls } = await mountedCreateMutationRoute(() => ({
+    ok: true,
+  }));
+  const update = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/tasks/:operonId/update",
+  );
+  assert.equal(typeof update, "function");
+
+  const requireMutationRuntime = bridge.constructor.prototype
+    .requireMutationRuntime as Function;
+  let indexSettled = false;
+  let capabilityAvailable = true;
+  let nativeMutationCalls = 0;
+  const runtime = {
+    developerApi: {
+      hasMutationCapability: () => capabilityAvailable,
+      hasRecoverySupport: () => true,
+      executeMutation: async () => {
+        nativeMutationCalls += 1;
+        return { ok: true };
+      },
+    },
+  };
+  bridge.requireRuntime = () => runtime;
+  bridge.runtimeTaskCount = () => 1;
+  bridge.indexState = async () => ({
+    ready: indexSettled,
+    diagnostics: { taskCount: indexSettled ? 1 : 0 },
+  });
+  bridge.requireMutationRuntime = (capability: string) =>
+    requireMutationRuntime.call(bridge, capability);
+  bridge.oneTask = async () => ({
+    task: { operonId: "task-1", revision: "revision-1" },
+  });
+
+  const request = {
+    params: { operonId: "task-1" },
+    body: {
+      idempotencyKey: "pre-dispatch-runtime-same-key",
+      expectedRevision: "revision-1",
+      dryRun: true,
+      patch: { fields: { secret } },
+    },
+  };
+  const first = responseCapture();
+  await update!(request, first);
+
+  assert.equal(first.statusCode, 503);
+  assert.equal(first.payload.ok, false);
+  assert.equal(first.payload.status, "not-ready");
+  assert.equal(first.payload.error.code, "operon_index_not_settled");
+  assert.equal(first.payload.retryable, true);
+  assert.equal(first.payload.mutationMayHaveApplied, false);
+  assert.equal(first.payload.idempotencyKey, request.body.idempotencyKey);
+  assert.deepEqual(first.payload.requested, {});
+  assert.equal(
+    bridge.mutationReservations.get(request.body.idempotencyKey),
+    undefined,
+  );
+  assert.equal(bridge.mutationResults.has(request.body.idempotencyKey), false);
+  assert.equal(calls(), 0);
+  assert.equal(nativeMutationCalls, 0);
+  assert.doesNotMatch(
+    JSON.stringify(first.payload),
+    /private|Client\.md|confidential|secret/u,
+  );
+
+  indexSettled = true;
+  capabilityAvailable = false;
+  const capability = responseCapture();
+  await update!(
+    {
+      ...request,
+      body: {
+        ...request.body,
+        idempotencyKey: "pre-dispatch-capability-unavailable",
+      },
+    },
+    capability,
+  );
+  assert.equal(capability.statusCode, 503);
+  assert.equal(
+    capability.payload.error.code,
+    "operon_mutation_capability_unavailable",
+  );
+  assert.equal(capability.payload.mutationMayHaveApplied, false);
+
+  capabilityAvailable = true;
+  const second = responseCapture();
+  await update!(request, second);
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.payload.status, "planned");
+  assert.equal(nativeMutationCalls, 1);
+});
+
+test("an in-flight same-key HTTP replay joins before transient runtime probes", async () => {
+  const { bridge, handlers } = await mountedCreateMutationRoute(() => ({
+    ok: true,
+  }));
+  const update = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/tasks/:operonId/update",
+  );
+  assert.equal(typeof update, "function");
+
+  let resolveNative!: (result: Record<string, unknown>) => void;
+  const nativeStarted = new Promise<void>((resolve) => {
+    bridge.requireMutationRuntime = async () => {
+      bridge.requireMutationRuntimeCalls =
+        (bridge.requireMutationRuntimeCalls ?? 0) + 1;
+      if (bridge.requireMutationRuntimeCalls > 1) {
+        throw new Error("unrelated concurrent runtime refresh failed");
+      }
+      return {
+        developerApi: {
+          executeMutation: async () => {
+            resolve();
+            return new Promise<Record<string, unknown>>((done) => {
+              resolveNative = done;
+            });
+          },
+        },
+      };
+    };
+  });
+  bridge.oneTask = async () => ({
+    task: { operonId: "task-1", revision: "revision-1" },
+  });
+
+  const request = {
+    params: { operonId: "task-1" },
+    body: {
+      idempotencyKey: "concurrent-pre-reservation-key",
+      expectedRevision: "revision-1",
+      dryRun: true,
+      patch: { fields: { priority: "A" } },
+    },
+  };
+  const first = responseCapture();
+  const firstPromise = update!(request, first);
+  await nativeStarted;
+  const firstReservation = bridge.mutationReservations.get(
+    request.body.idempotencyKey,
+  );
+  assert.ok(firstReservation);
+
+  const sameSignatureReplay = responseCapture();
+  const sameSignaturePromise = update!(request, sameSignatureReplay);
+  await Promise.resolve();
+  assert.equal(
+    bridge.requireMutationRuntimeCalls,
+    1,
+    "an identical replay must join before probing runtime again",
+  );
+
+  const differentSignatureFailure = responseCapture();
+  await update!(
+    {
+      ...request,
+      body: {
+        ...request.body,
+        patch: { fields: { priority: "B" } },
+      },
+    },
+    differentSignatureFailure,
+  );
+  assert.equal(differentSignatureFailure.statusCode, 409);
+  assert.equal(
+    bridge.mutationReservations.get(request.body.idempotencyKey),
+    firstReservation,
+    "a conflicting key must not settle call A",
+  );
+  assert.equal(bridge.mutationResults.has(request.body.idempotencyKey), false);
+
+  resolveNative({ ok: true, code: "planned", retryable: false });
+  await Promise.all([firstPromise, sameSignaturePromise]);
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.payload.status, "planned");
+  assert.equal(sameSignatureReplay.statusCode, 200);
+  assert.deepEqual(sameSignatureReplay.payload, first.payload);
+  assert.equal(bridge.requireMutationRuntimeCalls, 1);
+  assert.equal(
+    bridge.mutationReservations.get(request.body.idempotencyKey),
+    undefined,
+  );
+});
+
+test("create and recovery gates stay pre-dispatch until their native call begins", async () => {
+  const {
+    bridge,
+    handler: create,
+    handlers,
+  } = await mountedCreateMutationRoute(() => ({ ok: true }));
+  const recover = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/mutations/recover",
+  );
+  const workflowRecover = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/task-workflows/recover",
+  );
+  assert.equal(typeof recover, "function");
+  assert.equal(typeof workflowRecover, "function");
+
+  const cases = [
+    {
+      key: "create-gate-same-key",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "create-gate-same-key",
+          dryRun: true,
+          task: { source: "inline", description: "gate" },
+        },
+      },
+      install: (attempt: number) => {
+        bridge.requireMutationRuntime = async () => {
+          if (attempt === 0) throw new Error("runtime startup transient");
+          return {
+            developerApi: {
+              executeMutation: async () => ({
+                ok: true,
+                code: "planned",
+                retryable: false,
+              }),
+            },
+          };
+        };
+      },
+    },
+    {
+      key: "recovery-gate-same-key",
+      handler: recover!,
+      request: {
+        body: {
+          idempotencyKey: "recovery-gate-same-key",
+          recoveryRef: `dvr1_${"a".repeat(48)}`,
+        },
+      },
+      install: (attempt: number) => {
+        bridge.requireDeveloperApiMutationRuntime = async () => {
+          if (attempt === 0) throw new Error("recovery grant transient");
+          return {
+            developerApi: {
+              recoverMutation: async () => ({
+                ok: true,
+                code: "applied",
+                retryable: false,
+              }),
+            },
+          };
+        };
+      },
+    },
+    {
+      key: "workflow-recovery-gate-same-key",
+      handler: workflowRecover!,
+      request: {
+        body: {
+          idempotencyKey: "workflow-recovery-gate-same-key",
+          recoveryRef: `dvr1_${"b".repeat(48)}`,
+          kind: "periodic-create",
+        },
+      },
+      install: (attempt: number) => {
+        bridge.requireTaskWorkflowRecoveryRuntime = async () => {
+          if (attempt === 0)
+            throw new Error("workflow recovery grant transient");
+          return {
+            developerApi: {
+              recoverTaskWorkflow: async () => ({
+                ok: true,
+                code: "applied",
+                retryable: false,
+              }),
+            },
+          };
+        };
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    scenario.install(0);
+    const transient = responseCapture();
+    await scenario.handler(scenario.request, transient);
+    assert.equal(transient.statusCode, 503, scenario.key);
+    assert.equal(transient.payload.mutationMayHaveApplied, false, scenario.key);
+    assert.equal(bridge.mutationReservations.get(scenario.key), undefined);
+    assert.equal(bridge.mutationResults.has(scenario.key), false);
+
+    scenario.install(1);
+    const replay = responseCapture();
+    await scenario.handler(scenario.request, replay);
+    assert.equal(replay.statusCode, 200, scenario.key);
+    assert.equal(replay.payload.idempotencyKey, scenario.key);
+  }
+});
+
+test("post-call ambiguity stays durable for create and both recovery routes", async () => {
+  const {
+    bridge,
+    handler: create,
+    handlers,
+  } = await mountedCreateMutationRoute(() => ({ ok: true }));
+  const recover = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/mutations/recover",
+  );
+  const workflowRecover = handlers.get(
+    "POST /extensions/optimike-operon-bridge/v1/task-workflows/recover",
+  );
+  const scenarios = [
+    {
+      key: "create-post-call-unknown",
+      handler: create,
+      request: {
+        body: {
+          idempotencyKey: "create-post-call-unknown",
+          dryRun: false,
+          task: { source: "inline", description: "ambiguous" },
+        },
+      },
+      install: () => {
+        bridge.requireMutationRuntime = async () => ({
+          developerApi: {
+            executeMutation: async () => {
+              throw new Error("native call became ambiguous");
+            },
+          },
+        });
+      },
+    },
+    {
+      key: "recovery-post-call-unknown",
+      handler: recover!,
+      request: {
+        body: {
+          idempotencyKey: "recovery-post-call-unknown",
+          recoveryRef: `dvr1_${"c".repeat(48)}`,
+        },
+      },
+      install: () => {
+        bridge.requireDeveloperApiMutationRuntime = async () => ({
+          developerApi: {
+            recoverMutation: async () => {
+              throw new Error("native recovery became ambiguous");
+            },
+          },
+        });
+      },
+    },
+    {
+      key: "workflow-recovery-post-call-unknown",
+      handler: workflowRecover!,
+      request: {
+        body: {
+          idempotencyKey: "workflow-recovery-post-call-unknown",
+          recoveryRef: `dvr1_${"d".repeat(48)}`,
+          kind: "periodic-create",
+        },
+      },
+      install: () => {
+        bridge.requireTaskWorkflowRecoveryRuntime = async () => ({
+          developerApi: {
+            recoverTaskWorkflow: async () => {
+              throw new Error("workflow recovery became ambiguous");
+            },
+          },
+        });
+      },
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    scenario.install();
+    const first = responseCapture();
+    await scenario.handler(scenario.request, first);
+    assert.equal(first.statusCode, 500, scenario.key);
+    assert.equal(first.payload.status, "outcome-unknown", scenario.key);
+    assert.equal(first.payload.mutationMayHaveApplied, true, scenario.key);
+    const replay = responseCapture();
+    await scenario.handler(scenario.request, replay);
+    assert.equal(replay.statusCode, 500, scenario.key);
+    assert.equal(replay.payload.status, "outcome-unknown", scenario.key);
+    assert.equal(replay.payload.mutationMayHaveApplied, true, scenario.key);
+  }
+});
 
 test("registered create route normalizes a resolved native failure and replays its safe receipt", async () => {
   const secret = "C:\\Users\\private\\Vault\\Tasks\\Client.md confidential";
@@ -317,7 +1022,9 @@ test("registered create route fails closed for hostile native result getters", a
       },
     },
   );
-  const { handler } = await mountedCreateMutationRoute(() => hostileNative);
+  const { handler, calls } = await mountedCreateMutationRoute(
+    () => hostileNative,
+  );
   const response = responseCapture();
   await handler(
     {
@@ -330,13 +1037,35 @@ test("registered create route fails closed for hostile native result getters", a
     response,
   );
 
-  assert.equal(response.statusCode, 503);
+  assert.equal(response.statusCode, 500);
   assert.equal(response.payload.ok, false);
   assert.equal(response.payload.idempotencyKey, "hostile-route-failure-key");
   assert.deepEqual(response.payload.requested, {});
-  assert.equal(response.payload.error.code, "mutation_unavailable");
+  assert.equal(response.payload.error.code, "outcome_unverified");
   assert.doesNotMatch(
     JSON.stringify(response.payload),
+    /private|Client\.md|confidential/u,
+  );
+
+  // The first call had already passed Bridge reservation and invoked a hostile
+  // native result. It is not safe to infer that dispatch did not happen, so a
+  // same-key retry must replay the uncertainty rather than dispatch again.
+  const retry = responseCapture();
+  await handler(
+    {
+      body: {
+        idempotencyKey: "hostile-route-failure-key",
+        dryRun: false,
+        task: { source: "inline", description: secret },
+      },
+    },
+    retry,
+  );
+  assert.equal(retry.statusCode, 500);
+  assert.equal(calls(), 1);
+  assert.equal(retry.payload.mutationMayHaveApplied, true);
+  assert.doesNotMatch(
+    JSON.stringify(retry.payload),
     /private|Client\.md|confidential/u,
   );
 });
@@ -370,11 +1099,14 @@ test("registered create route contains a hostile rejected Proxy without a second
     response,
   );
 
-  assert.equal(response.statusCode, 503);
+  assert.equal(response.statusCode, 500);
   assert.equal(response.jsonCalls, 1);
   assert.equal(response.payload.ok, false);
-  assert.equal(response.payload.error.code, "mutation_unavailable");
-  assert.doesNotMatch(JSON.stringify(response.payload), /private|Rejected\.md|confidential/u);
+  assert.equal(response.payload.error.code, "outcome_unverified");
+  assert.doesNotMatch(
+    JSON.stringify(response.payload),
+    /private|Rejected\.md|confidential/u,
+  );
 });
 
 test("Operon runtime console diagnostics never pass raw error objects", () => {

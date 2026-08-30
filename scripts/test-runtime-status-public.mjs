@@ -29,7 +29,7 @@ const internalStatus = {
   transport: callerMarker,
   runtimeMode: callerMarker,
   runtime: {
-    packageVersion: "3.1.2",
+    packageVersion: "3.2.0",
     nodeVersion: "v24.0.0",
     cwd: windowsVaultMarker,
     projectRoot: windowsVaultMarker,

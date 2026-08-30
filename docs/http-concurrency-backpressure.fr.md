@@ -169,9 +169,9 @@ refusé par le contrat d’admission JSON-RPC exact avec
 `data.applicationCode: SERVICE_UNAVAILABLE`, aucun
 appel frère ne renvoie `Connection closed`, puis une nouvelle lecture réussit.
 Il n’accepte que `queue-full`, `identity-queue-full`, `timeout` ou `cancelled`
-dans `data.admission`, avec le message et la valeur `data.retryable`
-correspondants. Un `503` générique, un échec upstream ou un rate-limit `429`
-n’est pas une preuve de backpressure. Connexion, découverte, burst, lecture de
+dans `data.admission`, avec le message public `SERVICE_UNAVAILABLE` et la valeur
+`data.retryable` correspondante. Un `503` générique, un échec upstream ou un
+rate-limit `429` n’est pas une preuve de backpressure. Connexion, découverte, burst, lecture de
 contrôle et arrêt sont tous bornés par des watchdogs. Ne pas utiliser pour ce
 gate un backend partagé déjà sollicité à répétition : sa fenêtre indépendante
 de rate-limit par identité, longue de 15 minutes, peut masquer l’admission par

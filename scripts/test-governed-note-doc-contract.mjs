@@ -32,6 +32,9 @@ const bridgeReadme = await text(
   "plugins/obsidian-atomic-write-bridge/README.md",
 );
 const liveCanary = await text("scripts/smoke-atomic-note-mcp-live.mjs");
+const frontmatterLiveCanary = await text(
+  "scripts/smoke-governed-frontmatter-live.mjs",
+);
 const modifiedTimeLiveCanary = await text(
   "scripts/smoke-modified-time-settlement-live.mjs",
 );
@@ -279,6 +282,11 @@ assert.match(
 );
 assert.match(liveCanary, /assertAtomicNoteCanaryDateIsolation\(status\)/);
 assert.match(
+  frontmatterLiveCanary,
+  /assertByteExactCanaryDateIsolation\([\s\S]*byte-exact governed-frontmatter canary/u,
+);
+assert.match(frontmatterLiveCanary, /cleanupStage/u);
+assert.match(
   modifiedTimeCanaryHelpers,
   /requires active modified-time integrations to be disabled before mutation/,
 );
@@ -292,6 +300,7 @@ assert.match(modifiedTimeLiveCanary, /dropNextReconciliationRead/);
 assert.match(modifiedTimeLiveCanary, /applyWithResponse/);
 assert.match(modifiedTimeLiveCanary, /result\.outcome, "committed"/);
 assert.match(modifiedTimeLiveCanary, /waitForNextRepresentableTimestamp/);
+assert.match(modifiedTimeLiveCanary, /originalModifiedTimePropertyPresent/u);
 assert.match(modifiedTimeCanaryHelpers, /\[,\\r\\n:\]/);
 assert.match(modifiedTimeCanaryHelpers, /\\p\{L\}.*\\p\{M\}.*\\p\{N\}/);
 assert.match(modifiedTimeCanaryHelpers, /representableTickMs/);

@@ -70,6 +70,7 @@ export class GovernedFrontmatterAtomicServer {
     this.mutateAfterReadContent = undefined;
     this.blockedCas = undefined;
     this.settlement = undefined;
+    this.protection = undefined;
     this.modifiedTimePropertyAfterWrite = undefined;
   }
 
@@ -139,6 +140,7 @@ export class GovernedFrontmatterAtomicServer {
         },
         limits: { markdownOnly: true },
         ...(this.settlement ? { settlement: this.settlement } : {}),
+        ...(this.protection ? { protection: this.protection } : {}),
       });
       return;
     }
@@ -266,6 +268,7 @@ export class GovernedFrontmatterAtomicServer {
   mutateAfterReadContent = undefined;
   blockedCas = undefined;
   settlement = undefined;
+  protection = undefined;
   modifiedTimePropertyAfterWrite = undefined;
   baseUrl = "";
 }

@@ -7,8 +7,8 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Operon `3.5.3` with Operon CLI `1.2.0` for the current release; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
-- Optimike Operon Bridge `0.8.2`
+- Optimike MCP `3.2.0`, targeting Operon `3.6.0`, Operon CLI `1.2.0` and Local REST API `5.1.0` behind the exact-SHA release gate below; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Optimike Operon Bridge `0.8.3`
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
@@ -29,7 +29,7 @@ version allowlist.
 Unsupported or uncertain paths stay fail-closed; this
 recipe never authorizes a Markdown/private-API fallback or a blind retry.
 
-For 3.1.2, begin one adoption or periodic dry-run from a cold MCP session. The
+For the 3.2.0 candidate, begin one adoption or periodic dry-run from a cold MCP session. The
 request must reach the Bridge and create or reuse only the exact additive grant;
 before operator approval it must fail closed, and after approval the identical
 dry-run must plan successfully without requiring a warm-up status/read call.
@@ -79,6 +79,7 @@ From the MCP repository:
 
 ```bash
 npm ci
+npm --prefix plugins/obsidian-operon-bridge ci
 npm run test:runtime
 npm run check:operon
 npm pack --dry-run
@@ -130,7 +131,7 @@ PASS when:
 - index generation is greater than zero;
 - diagnostics report `health=healthy`, `runtimePhase=idle`,
   `verifiedThisSession=true`, and `dirtySourceCount=0`;
-- official Operon `3.5.3` reports the exact Developer API V1 and additive
+- official Operon `3.6.0` reports the exact Developer API V1 and additive
   task-workflow grants; the Bridge advertises only the mutation capabilities
   that the live runtime proves and bounds uncertain applies without a blind
   retry;
@@ -244,7 +245,7 @@ operon_recover_mutation
 PASS when:
 
 - all twenty-five tools are registered;
-- official Operon `3.5.3` exposes mutations after Developer API V1 negotiation,
+- official Operon `3.6.0` exposes mutations after Developer API V1 negotiation,
   exact grants, valid response schemas, live health, a settled index, write
   policy and recovery checks; a missing or malformed gate returns a structured
   unavailable result without a Markdown fallback;
@@ -260,7 +261,7 @@ PASS when:
 - subsequent calls with unchanged generation do not rewrite the full snapshot;
 - responses say `source=operon-live`, `stale=false`.
 
-## 8a. Exact Operon 3.5 live canary
+## 8a. Exact Operon 3.6 live canary
 
 Run only after the exact release Bridge is installed and the Pilot 2 core
 status, index and validation gates above are green. Optional task-workflow
@@ -279,6 +280,10 @@ $env:OBSIDIAN_VAULT = "<exact disposable Pilot 2 path required by the script>"
 $env:OBSIDIAN_BASE_URL = "http://127.0.0.1:27233"
 $env:OBSIDIAN_API_KEY = "<Pilot 2 Local REST API key>"
 $env:OPERON_MUTATIONS_ENABLED = "true"
+$env:OPERON_35_CANARY_EXPECTED_OPERON_VERSION = "3.6.0"
+$env:OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION = "0.8.3"
+$env:OPERON_35_CANARY_EXPECTED_MCP_VERSION = "3.2.0"
+$env:OPERON_35_CANARY_RELEASE_CANDIDATE = "true"
 $env:OPERON_35_CANARY_CONFIRM = "I_CONFIRM_PILOT_2_DISPOSABLE_LIVE_MUTATIONS"
 $env:OPERON_35_CANARY_OPEN_VAULT = "true"
 $env:OPERON_35_CANARY_CONFIRM_OPEN_VAULT = "I_CONFIRM_OPENING_ONLY_OPERON_PILOT_2"
@@ -289,7 +294,11 @@ npm run smoke:operon-35-live
 ```
 
 If `obsidian` is not on `PATH`, set
-`OPERON_35_CANARY_OBSIDIAN_CLI` to its exact executable or launcher first. To
+`OPERON_35_CANARY_OBSIDIAN_CLI` to its exact executable or launcher first. The
+historical script name remains stable; it validates the negotiated contract, not
+a product-version allowlist. Its default expected runtime is the current live
+target, Operon `3.6.0`; set the explicit variable above so copied acceptance
+recipes remain self-describing. To
 test an already-open Pilot 2 instead, remove the two `OPEN_VAULT` variables and
 set `OPERON_35_CANARY_CONFIRM_PILOT_ALREADY_OPEN=true`; that mode does not prove
 the startup-order contract.
@@ -298,6 +307,33 @@ The script refuses to start unless all of these gates hold:
 
 - the resolved vault is the one exact disposable Pilot 2 compiled into the
   canary, with the expected vault name;
+- release-candidate mode names one exact clean Git SHA and rebuilds both MCP and
+  Bridge from that checkout before proof. The build manifest is checked against
+  the normalized source manifest with its expected generated `main: "main.js"`
+  entry (rather than a byte-for-byte source comparison), then the bundle and
+  generated manifest must match the files installed in Pilot 2. The SHA, clean
+  status, MCP build hash, Bridge build hash, generated-manifest hash and
+  installed bundle/manifest hashes are rechecked immediately before every native dispatch;
+- every native canary mutation first performs an explicit dry-run/projection and
+  an immediate physical source/target attestation. Every parent must resolve
+  inside the real Pilot 2 root without a symlink, junction or reparse point, and
+  every existing target must be a single-link regular file. A periodic plan that
+  does not expose all task-source paths, or any mutation without one resolved
+  physical source/target, is refused before dispatch;
+
+A periodic plan that does not expose all task-source paths is refused before dispatch. Official
+Operon `3.6.0` currently exposes a metadata-only public periodic plan, so the exact-SHA
+release canary performs periodic preview and exact-grant negotiation but skips periodic
+applies with reason `public_task_source_projection_unavailable`. This is a destructive-canary
+containment/certification boundary; the runtime tools remain available and upstream public
+task-source path projection is a nonblocking follow-up. Do not claim full periodic
+certification. Core startup, adoption, media, Frontmatter Date Manager, idempotence and
+restoration gates remain mandatory.
+For a stale-revision or same-key replay, where a new dry-run can only
+return the expected conflict because the original apply has already changed the
+source, the canary instead re-attests the exact source paths from the first
+sealed preflight immediately before replay; it never broadens them.
+
 - Local REST uses exactly `http://127.0.0.1:27233` and a non-empty API key;
 - `OPERON_MUTATIONS_ENABLED=true`, the Bridge mutation setting is enabled, and
   the required core Developer API capabilities are live; each task-workflow
@@ -309,6 +345,16 @@ The script refuses to start unless all of these gates hold:
 - the canary process forces `MCP_WRITE_MODE=full`, an empty mutation path
   allowlist, non-blocking startup, the `tasks` profile, and a private temporary
   cache/backup scope.
+
+This is a fail-closed best-effort TOCTOU fence, not a native handle-relative
+filesystem guarantee: Node cannot hold every parent and target by an `openat`-
+style handle across the subsequent Operon dispatch on supported Windows/macOS
+and Linux runtimes. The canaries therefore re-resolve every relevant path after
+the dry-run and immediately before dispatch, re-hash the candidate artifacts at
+that same boundary, and re-check observed result paths afterwards. A concurrent
+attacker with filesystem write access can still race the gap between that final
+check and Operon's own native open; do not treat this canary as authority to run
+against a non-disposable vault or an untrusted writable filesystem.
 
 The command writes its JSON evidence under the OS temporary root and prints the
 exact `evidenceFile`. Certification is forbidden unless the command exits `0`,
@@ -355,9 +401,52 @@ historical acceptance evidence for the patched candidate. Stock Operon `3.5.3`
 with Bridge `0.8.1` passed this same complete recipe on 2026-08-25. Bridge
 `0.8.2` then repeated it on the same disposable Pilot 2 with `ok=true`, exact
 fixture and inventory restoration, P0/P1/P2 at zero, zero pending recoveries and
-zero retained periodic artifacts. The
+zero retained periodic artifacts. Working-tree runs for the unreleased Optimike
+MCP `3.2.0` candidate then exercised Bridge `0.8.3`, stock Operon `3.6.0`,
+Operon CLI `1.2.0` and Local REST API `5.1.0`: same-connection startup order,
+mutation/replay/stale-conflict/recovery, adoption, Frontmatter Date Manager
+settlement, validation and exact restoration. Periodic runs were historical/
+diagnostic only; the exact-SHA canary negotiates and previews periodic workflow
+but skips periodic apply under `public_task_source_projection_unavailable`.
+The non-periodic gate results remain diagnostic until this recipe passes after a
+clean rebuild on the final candidate SHA; the historical periodic apply remains
+diagnostic even after that gate. The Operon Developer API V1 public contract
+did not drift from `3.5.3`.
+The
 synthetic `3.5.240438` identity remains historical and
 must never be published as an upstream Operon release.
+
+### Operon 3.6 behavior checks
+
+Run the offline safety contract first:
+
+```powershell
+npm run test:operon-36-behavior-contract
+```
+
+The live gate is `npm run smoke:operon-36-behaviors-live`. It is hard-bound to
+the disposable Pilot 2 path and Local REST port, requires the explicit
+`OPERON_36_BEHAVIOR_CANARY_CONFIRM` value printed by the script, and requires
+the configured modified-time writer to be disabled before mutation and restored
+afterward. It retains a private recovery directory only on failure and prints a
+redacted evidence path.
+
+The following working-tree diagnostic run (not accepted release evidence) exercised Scheduled Date on a blocked task through
+`operon_update_periodic_scheduling`, preserved `blockedBy` plus inverse
+`blocking`, removed the run-owned periodic parent artifact, restored the fixture
+and complete Markdown inventory exactly, returned validation P0/P1/P2 and
+pending recoveries to zero, and re-enabled Frontmatter Date Manager. It is historical
+diagnostic evidence only; the exact-SHA canary skips periodic apply under the
+public-source projection boundary above. Task Editor
+deletion is explicitly `SKIP` because the MCP has no public delete surface.
+Parent-date expansion is explicitly `SKIP` because Pilot 2's public
+configuration does not announce the opt-in automation as active. Operators who
+enable those features must exercise the two skipped checks before relying on
+them. None of these checks permits unrelated relationship or parent-date drift
+during MCP postflight. Its applicable non-periodic checks must be repeated from a
+clean rebuild pinned to the exact release SHA before they can be cited as
+accepted release evidence. The exact-SHA canary does not repeat Scheduled Date
+apply; it skips periodic apply under `public_task_source_projection_unavailable`.
 
 ## 9. Restart and reindex
 

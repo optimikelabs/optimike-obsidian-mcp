@@ -221,6 +221,7 @@ export interface CachedMutation {
 	signature: string;
 	payload: Record<string, unknown>;
 	httpStatus?: number;
+	dispatchProvenance?: "proven-pre-dispatch" | "unknown-or-dispatched";
 }
 
 export interface MutationReservation {

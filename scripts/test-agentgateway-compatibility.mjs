@@ -42,8 +42,80 @@ async function readAllLogs(directory) {
   return chunks.join("\n");
 }
 
-async function waitForCompletionLog(
+function completionFingerprintRequests(logs) {
+  const requestsByPair = new Map();
+  for (const line of logs.split(/\r?\n/u)) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (
+      !entry ||
+      entry.httpStatus !== 200 ||
+      entry.transport !== "streamable-http"
+    )
+      continue;
+    assert.equal(
+      entry.correlationId,
+      undefined,
+      "completion telemetry must not retain a cleartext correlation id",
+    );
+    assert.equal(
+      entry.incidentId,
+      undefined,
+      "completion telemetry must not retain a cleartext incident id",
+    );
+    const correlationFingerprint = entry.correlationIdFingerprint;
+    const incidentFingerprint = entry.incidentIdFingerprint;
+    if (
+      typeof correlationFingerprint === "string" &&
+      /^[0-9a-f]{16}$/u.test(correlationFingerprint) &&
+      typeof incidentFingerprint === "string" &&
+      /^[0-9a-f]{16}$/u.test(incidentFingerprint)
+    ) {
+      assert.match(
+        entry.requestId ?? "",
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+        "correlated completion telemetry must retain a valid request UUID",
+      );
+      const pair = `${correlationFingerprint}:${incidentFingerprint}`;
+      const requestIds = requestsByPair.get(pair) ?? new Set();
+      requestIds.add(entry.requestId);
+      requestsByPair.set(pair, requestIds);
+    }
+  }
+  return requestsByPair;
+}
+
+async function observedCompletionFingerprintRequests(logDir) {
+  return completionFingerprintRequests(await readAllLogs(logDir));
+}
+
+function hasNewRequestForPair(current, baseline, pair) {
+  const baselineRequests = baseline.get(pair) ?? new Set();
+  return [...(current.get(pair) ?? [])].some(
+    (requestId) => !baselineRequests.has(requestId),
+  );
+}
+
+function assertCorrelationIdsArePrivate(logs, correlationId, incidentId) {
+  assert.equal(
+    logs.includes(correlationId),
+    false,
+    "gateway correlation id must not be logged in cleartext",
+  );
+  assert.equal(
+    logs.includes(incidentId),
+    false,
+    "gateway incident id must not be logged in cleartext",
+  );
+}
+
+async function waitForNewCorrelationFingerprint(
   logDir,
+  baseline,
   correlationId,
   incidentId,
   timeoutMs = 5000,
@@ -51,19 +123,64 @@ async function waitForCompletionLog(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const logs = await readAllLogs(logDir);
-    const completion = logs
-      .split(/\r?\n/u)
-      .find(
-        (line) =>
-          line.includes("HTTP request completed.") &&
-          line.includes(correlationId) &&
-          line.includes(incidentId),
-      );
-    if (completion) return completion;
+    assertCorrelationIdsArePrivate(logs, correlationId, incidentId);
+    const current = completionFingerprintRequests(logs);
+    const newPair = [...current.keys()].find((pair) =>
+      hasNewRequestForPair(current, baseline, pair),
+    );
+    if (newPair) return newPair;
     await sleep(50);
   }
   throw new Error(
-    `backend did not log forwarded correlation identifiers ${correlationId}/${incidentId}`,
+    "backend did not emit a new privacy-safe correlation fingerprint pair",
+  );
+}
+
+async function waitForExpectedCorrelationFingerprint(
+  logDir,
+  baseline,
+  expectedPair,
+  correlationId,
+  incidentId,
+  timeoutMs = 5000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const logs = await readAllLogs(logDir);
+    assertCorrelationIdsArePrivate(logs, correlationId, incidentId);
+    const current = completionFingerprintRequests(logs);
+    if (hasNewRequestForPair(current, baseline, expectedPair)) {
+      return expectedPair;
+    }
+    await sleep(50);
+  }
+  throw new Error(
+    "gateway request did not preserve the calibrated correlation fingerprint pair",
+  );
+}
+
+async function calibrateCorrelationFingerprint(
+  directBackendUrl,
+  token,
+  logDir,
+  correlationId,
+  incidentId,
+) {
+  const baseline = await observedCompletionFingerprintRequests(logDir);
+  const response = await fetch(new URL("/statusz", directBackendUrl), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Correlation-Id": correlationId,
+      "X-Incident-Id": incidentId,
+    },
+  });
+  assert.equal(response.status, 200, await response.text());
+  await response.body?.cancel().catch(() => undefined);
+  return waitForNewCorrelationFingerprint(
+    logDir,
+    baseline,
+    correlationId,
+    incidentId,
   );
 }
 
@@ -771,11 +888,25 @@ async function closeEventStream(stream) {
   await stream.response.body?.cancel().catch(() => undefined);
 }
 
-async function streamCancellationProof(client, baseUrl, logDir, observerToken) {
-  const baseline = await statusSnapshot(baseUrl, observerToken);
-  const baselineActive = baseline.controls.sessions.activeRequests;
+async function streamCancellationProof(
+  client,
+  baseUrl,
+  directBackendUrl,
+  logDir,
+  observerToken,
+) {
   const correlationId = "gateway-e2e:cancel.1";
   const incidentId = "gateway-e2e-cancel-001";
+  const expectedPair = await calibrateCorrelationFingerprint(
+    directBackendUrl,
+    observerToken,
+    logDir,
+    correlationId,
+    incidentId,
+  );
+  const baseline = await statusSnapshot(baseUrl, observerToken);
+  const baselineActive = baseline.controls.sessions.activeRequests;
+  const gatewayBaseline = await observedCompletionFingerprintRequests(logDir);
   const stream = await openEventStream(
     client,
     baseUrl,
@@ -795,7 +926,13 @@ async function streamCancellationProof(client, baseUrl, logDir, observerToken) {
     (active) => active <= baselineActive,
     "gateway cancellation reached Optimike",
   );
-  await waitForCompletionLog(logDir, correlationId, incidentId);
+  await waitForExpectedCorrelationFingerprint(
+    logDir,
+    gatewayBaseline,
+    expectedPair,
+    correlationId,
+    incidentId,
+  );
   const ping = await call(client, baseUrl, "ping");
   assert.equal(ping.response.status, 200, ping.text);
 }
@@ -1175,6 +1312,7 @@ async function main() {
       backendPort,
     );
     const baseUrl = new URL(`http://127.0.0.1:${gatewayPort}`);
+    const directBackendUrl = new URL(`http://127.0.0.1:${backendPort}`);
     const tokenA = await signToken("gateway-client-a");
     const tokenB = await signToken("gateway-client-b");
     const cancellationObserverToken = await signToken(
@@ -1192,6 +1330,7 @@ async function main() {
     await streamCancellationProof(
       clientA,
       baseUrl,
+      directBackendUrl,
       logDir,
       cancellationObserverToken,
     );
@@ -1208,11 +1347,22 @@ async function main() {
     const mutation = await mutationReplayHarnessStatus(clientA, baseUrl, tools);
     const quota = await quotaIsolationProof(baseUrl);
 
+    const statusCorrelationId = "gateway-e2e:status.1";
+    const statusIncidentId = "gateway-e2e-001";
+    const expectedStatusPair = await calibrateCorrelationFingerprint(
+      directBackendUrl,
+      cancellationObserverToken,
+      logDir,
+      statusCorrelationId,
+      statusIncidentId,
+    );
+    const statusCorrelationBaseline =
+      await observedCompletionFingerprintRequests(logDir);
     const status = await fetch(new URL("/statusz", baseUrl), {
       headers: {
         Authorization: `Bearer ${tokenB}`,
-        "X-Correlation-Id": "gateway-e2e:status.1",
-        "X-Incident-Id": "gateway-e2e-001",
+        "X-Correlation-Id": statusCorrelationId,
+        "X-Incident-Id": statusIncidentId,
       },
     });
     assert.equal(status.status, 200);
@@ -1231,10 +1381,12 @@ async function main() {
       false,
       "authenticated status disclosed the physical external-root path",
     );
-    await waitForCompletionLog(
+    await waitForExpectedCorrelationFingerprint(
       logDir,
-      "gateway-e2e:status.1",
-      "gateway-e2e-001",
+      statusCorrelationBaseline,
+      expectedStatusPair,
+      statusCorrelationId,
+      statusIncidentId,
     );
 
     const selectedConfigOut = process.env.AGENTGATEWAY_SELECTED_CONFIG_OUT;

@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-08-30
+
+### Fixed
+
+- Modified-time settlement now proves the legitimate `0 → 1` case where a
+  supported date plugin inserts its configured modified property after an
+  atomic write. The receipt commits only when one top-level timestamp line is
+  inside the sealed execution window and removing that line recreates the
+  sealed content byte for byte; all unrelated drift remains
+  `outcome_unknown`.
+- The Operon live acceptance harness no longer requests optional task-workflow
+  grants during read-only pending-recovery inspection, and waits for a bounded
+  `operon-live` post-mutation snapshot instead of treating a transient durable
+  cache snapshot as a product failure.
+- Byte-exact Note and Frontmatter canaries refuse active modified-time writers
+  before their first mutation. The dedicated settlement canary now covers both
+  an existing timestamp and a previously absent configured property, retains
+  structural cleanup diagnostics, and restores the plugin state and original
+  SHA-256.
+- Operon create and recovery calls now complete runtime, grant and index gates
+  before reserving an idempotency key. Only a schema-valid, key-correlated
+  version-2 receipt carrying explicit pre-dispatch provenance can release that
+  exact reservation. Version-1 receipts are migrated conservatively and never
+  inferred safe from `not-ready` payload fields alone; malformed `503`
+  responses and post-call ambiguity remain durable for explicit recovery. The
+  same replay rule now covers create, adoption, periodic workflows and every
+  existing-task mutation family.
+- `dateScheduled` is no longer accepted by the generic Operon update tool. The
+  public schema, tool descriptions and task-governor profile route every such
+  change through `operon_update_periodic_scheduling`, whose additive workflow
+  owns periodic parent retain, detach and realign semantics.
+- Operon release canaries now rebuild the MCP and Bridge before attestation,
+  bind the installed Bridge bundle and manifest to that clean SHA, and recheck
+  all hashes immediately before native dispatch. Every planned Markdown source
+  is physically validated before apply; missing path projections, junction or
+  symlink parents, and hardlinked targets fail before mutation. Offline safety
+  fixtures are created from the canonical OS temporary directory so legitimate
+  Windows temp aliases do not weaken or falsely trip the strict live-vault
+  identity check.
+
+### Changed
+
+- The compatibility target is now official Operon `3.6.0`, Operon
+  CLI `1.2.0`, Local REST API `5.1.0` and Optimike Operon Bridge `0.8.3`.
+  Operon remains `compatible-provisional`; admission is still based on the
+  negotiated Developer API V1 contract, exact grants, schemas, health, index
+  readiness and recovery support rather than a product-version allowlist.
+
+### Validation
+
+- Release admission requires an exact-SHA run in the disposable Pilot 2 vault
+  after rebuilding the MCP and Bridge from the clean candidate. The gate covers
+  Operon, modified-time settlement with the configured property initially
+  absent, governed Frontmatter, governed Base formulas and governed Canvas
+  graphs; it must prove startup-order recovery on the same MCP connection,
+  grant-on-first-use, replay, stale conflict, concurrency, response loss,
+  recovery inspection, zero index validation and restored plugin settings.
+- A separate Operon `3.6.0` behavior gate historically exercised a blocked task
+  receiving a Scheduled Date through the periodic workflow without losing
+  `blockedBy` or its inverse `blocking` edge, then removed every run-owned
+  periodic artifact and restored the fixture plus complete Markdown inventory
+  exactly. This working-tree apply is historical/diagnostic evidence only, not
+  exact-candidate release evidence; the exact-SHA canary does not repeat it and
+  skips periodic apply under `public_task_source_projection_unavailable`.
+- The exact-SHA release canary performs periodic preview and exact-grant
+  negotiation but skips periodic applies because the public Task Workflow plan
+  is metadata-only and exposes no pre-apply task-source path. The stable reason
+  is `public_task_source_projection_unavailable`. This is a destructive-canary
+  containment/certification boundary, not a runtime tool disablement; working-
+  tree periodic runs remain historical/diagnostic and do not certify the final
+  SHA. Core startup, adoption, media, Frontmatter Date Manager, idempotence and
+  restoration gates remain mandatory. Upstream public path projection is a
+  nonblocking follow-up; no full periodic certification is claimed.
+
 ### Security
 
 - External move is now fail-closed on every platform: scan, plan and status

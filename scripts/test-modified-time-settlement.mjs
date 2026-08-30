@@ -115,6 +115,121 @@ assert.equal(
   "modification",
 );
 
+const missingPropertyExpected = [
+  "---",
+  "statut: actif",
+  "---",
+  "contenu",
+  "",
+].join("\n");
+const insertionCases = [
+  {
+    pluginId: "frontmatter-date-manager",
+    propertyName: "changed_by_fdm",
+    timestamp: "2026-08-17T10:00",
+    newline: "\n",
+  },
+  {
+    pluginId: "update-time",
+    propertyName: "lastChanged",
+    timestamp: "2026-08-17T10:00:01",
+    newline: "\n",
+  },
+  {
+    pluginId: "update-time-on-edit",
+    propertyName: "edited-at",
+    timestamp: "2026-08-17T10:00",
+    newline: "\r\n",
+  },
+];
+
+for (const insertionCase of insertionCases) {
+  const expectedForCase = missingPropertyExpected.replaceAll(
+    "\n",
+    insertionCase.newline,
+  );
+  const insertedLine = `${insertionCase.propertyName}: ${insertionCase.timestamp}`;
+  const observedForCase = expectedForCase.replace(
+    `statut: actif${insertionCase.newline}`,
+    `statut: actif${insertionCase.newline}${insertedLine}${insertionCase.newline}`,
+  );
+  const dynamicPolicy = {
+    contractVersion: 1,
+    integrations: [
+      {
+        pluginId: insertionCase.pluginId,
+        propertyName: insertionCase.propertyName,
+        settlementObservationDelayMs: 0,
+      },
+    ],
+    utcOffsetMinutes: 0,
+  };
+  const evidence = resolveModifiedTimeSettlement(
+    expectedForCase,
+    observedForCase,
+    dynamicPolicy,
+    window,
+  );
+  assert.equal(evidence?.pluginId, insertionCase.pluginId);
+  assert.equal(evidence?.propertyName, insertionCase.propertyName);
+}
+
+const dynamicPolicy = {
+  contractVersion: 1,
+  integrations: [
+    {
+      pluginId: "frontmatter-date-manager",
+      propertyName: "customModified",
+      settlementObservationDelayMs: 0,
+    },
+  ],
+  utcOffsetMinutes: 0,
+};
+const validInserted = missingPropertyExpected.replace(
+  "statut: actif\n",
+  "statut: actif\ncustomModified: 2026-08-17T10:00\n",
+);
+const insertionRejections = [
+  validInserted.replace("contenu", "édition concurrente"),
+  validInserted.replace("statut: actif", "statut: concurrent"),
+  validInserted.replace(
+    "customModified: 2026-08-17T10:00",
+    "customModified: 2026-08-17T10:00\nautre: dérive",
+  ),
+  missingPropertyExpected.replace(
+    "---\ncontenu",
+    "---\ncustomModified: 2026-08-17T10:00\ncontenu",
+  ),
+  validInserted.replace("customModified:", "wrongModified:"),
+  validInserted.replace("2026-08-17T10:00", "2026-08-17T09:59"),
+  validInserted.replace("2026-08-17T10:00", "2026-08-17T10:00:03"),
+  validInserted.replace("2026-08-17T10:00", "2026-02-30T10:00"),
+  validInserted.replace("customModified:", "  customModified:"),
+  validInserted.replace(
+    "customModified: 2026-08-17T10:00",
+    "customModified: 2026-08-17T10:00\ncustomModified: 2026-08-17T10:00",
+  ),
+  validInserted.replace(
+    "customModified: 2026-08-17T10:00",
+    "création: 2026-08-17T10:00\ncustomModified: 2026-08-17T10:00",
+  ),
+  validInserted.replace(
+    "customModified: 2026-08-17T10:00",
+    "lastViewed: 2026-08-17T10:00\ncustomModified: 2026-08-17T10:00",
+  ),
+];
+for (const rejected of insertionRejections) {
+  assert.equal(
+    resolveModifiedTimeSettlement(
+      missingPropertyExpected,
+      rejected,
+      dynamicPolicy,
+      window,
+    ),
+    undefined,
+  );
+}
+
 console.log(
-  "PASS: modified-time settlement admits one bounded configured timestamp and rejects all unrelated drift.",
+  "PASS: modified-time settlement admits one bounded configured timestamp replacement or insertion and rejects all unrelated drift.",
 );

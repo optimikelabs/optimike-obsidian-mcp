@@ -114,7 +114,7 @@ N’activer que les surfaces utilisées :
 - **Bases Bridge** inclus pour Bases live et le CAS de formules gouvernées ;
 - **Optimike Atomic Write Bridge** inclus pour les cycles Note, Frontmatter et Canvas `plan → apply → status → recover` ;
 - **Smart Connections** pour l’index sémantique local ;
-- **Operon Developer API V1** et **Optimike Operon Bridge 0.8.2** pour les tâches gouvernées. Operon 3.5.3 et CLI 1.2.0 forment la cible live courante. Une release Operon inconnue mais non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ;
+- **Operon Developer API V1** et **Optimike Operon Bridge 0.8.3** pour les tâches gouvernées. Optimike MCP `3.2.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture.
 - **Obsidian Tasks** pour le parsing Markdown Tasks-compatible.
 
 Les mutations Operon exigent le réglage de mutation du Bridge plus :
@@ -124,6 +124,16 @@ OPERON_MUTATIONS_ENABLED=true
 ```
 
 Les snapshots Operon obsolètes restent read-only. Aucune route Operon ne retombe sur du Markdown brut ou des API privées. L’adoption officielle et le routage Daily/Weekly négocient leur grant additif exact au premier usage, y compris après un démarrage MCP à froid ; un grant en attente ou refusé échoue toujours fermé. Operon reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan. Task Type et Task Image restent scalaires, Task Gallery reste un tableau ordonné et `__taskDataType` est read-only. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
+
+Operon `3.6.0` expose le plan public Task Workflow périodique uniquement sous
+forme de métadonnées, sans chemin de source des tâches avant apply. La canary de
+release sur le SHA exact négocie et prévisualise les opérations périodiques, mais
+saute les applies périodiques avec la raison
+`public_task_source_projection_unavailable`. Cela confine la canary destructive
+sans désactiver les outils runtime ; la projection publique du chemin de source
+reste un suivi amont non bloquant et aucune certification périodique complète
+n’est revendiquée. Les gates startup, adoption, médias, Frontmatter Date Manager,
+idempotence et restauration restent obligatoires.
 
 ## Opérations gouvernées
 

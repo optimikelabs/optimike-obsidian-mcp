@@ -114,7 +114,7 @@ Enable only the surfaces you use:
 - bundled **Bases Bridge** for live Bases and governed formula CAS;
 - bundled **Optimike Atomic Write Bridge** for governed Note, Frontmatter and Canvas `plan → apply → status → recover`;
 - **Smart Connections** for the local semantic index;
-- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.8.2** for governed task operations. Operon 3.5.3 and CLI 1.2.0 are the current live target. Unknown non-denied Operon releases remain writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate;
+- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.8.3** for governed task operations. Optimike MCP `3.2.0` targets official Operon `3.6.0`, Operon CLI `1.2.0`, and Local REST API `5.1.0`; release admission requires the repository's exact-SHA Pilot 2 gate. Operon `3.6.0` remains `compatible-provisional`: a non-denied release is writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate; product version is not a positive write allowlist.
 - **Obsidian Tasks** for Tasks-compatible Markdown parsing.
 
 Operon mutations require the Bridge mutation setting plus:
@@ -124,6 +124,14 @@ OPERON_MUTATIONS_ENABLED=true
 ```
 
 Stale Operon snapshots remain read-only. No Operon route falls back to raw Markdown or private APIs. Official adoption and Daily/Weekly routing negotiate their exact additive grant on first use, including after a cold MCP start; a pending or refused grant still fails closed. Operon owns every opaque sealed plan and same-plan recovery. Task Type and Task Image stay scalar, Task Gallery stays an ordered array, and `__taskDataType` is read-only. Full compatibility, certified/provisional versions, recovery semantics and current API gaps live in the [Operon MCP contract](docs/operon-mcp-contract.md) and [CLI / Developer API audit](docs/operon-cli-audit.md).
+
+Operon `3.6.0` exposes the public periodic Task Workflow plan as metadata-only,
+without a pre-apply task-source path. The exact-SHA release canary negotiates and
+previews periodic operations but skips periodic applies with reason
+`public_task_source_projection_unavailable`. This contains the destructive canary
+without disabling runtime tools; upstream public path projection is a nonblocking
+follow-up, and no full periodic certification is claimed. Core startup, adoption,
+media, Frontmatter Date Manager, idempotence and restoration gates remain mandatory.
 
 ## Governed operations
 

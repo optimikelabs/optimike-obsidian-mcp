@@ -178,6 +178,8 @@ const state = {
   workflowCold: false,
   filterCold: false,
   workflowGrantPending: false,
+  preDispatchUpdatePending: false,
+  preDispatchReceiptOverride: null,
 };
 
 function statusPayload() {
@@ -484,6 +486,10 @@ const server = http.createServer((request, response) => {
     });
     request.on("end", () => {
       const params = body ? JSON.parse(body) : {};
+      if (state.preDispatchReceiptOverride) {
+        sendJson(response, 503, state.preDispatchReceiptOverride(params));
+        return;
+      }
       sendJson(response, 200, {
         ok: true,
         contractVersion: "1",
@@ -533,6 +539,10 @@ const server = http.createServer((request, response) => {
     });
     request.on("end", () => {
       const params = body ? JSON.parse(body) : {};
+      if (state.preDispatchReceiptOverride) {
+        sendJson(response, 503, state.preDispatchReceiptOverride(params));
+        return;
+      }
       state.lastTaskWorkflowRecoveryBody = params;
       const nativeProof = {
         contractVersion: 1,
@@ -584,12 +594,19 @@ const server = http.createServer((request, response) => {
         sendJson(response, 503, {
           ok: false,
           contractVersion: "1",
+          operationId: "2d50a121-7d6e-43ad-895d-2f8772d4a6dd",
+          idempotencyKey: params.idempotencyKey,
+          status: "not-ready",
+          requested: {},
           error: {
             code: "task_workflow_capability_unavailable",
+            reasonCode: "workflow_capability_unavailable",
             message: "The exact periodic-create grant is pending.",
           },
           retryable: true,
           mutationMayHaveApplied: false,
+          source: "operon-live",
+          stale: false,
         });
         return;
       }
@@ -672,6 +689,31 @@ const server = http.createServer((request, response) => {
       const params = body ? JSON.parse(body) : {};
       const operonId =
         /\/tasks\/([^/]+)\/update$/u.exec(url.pathname)?.[1] ?? "abc1234";
+      if (state.preDispatchReceiptOverride) {
+        sendJson(response, 503, state.preDispatchReceiptOverride(params));
+        return;
+      }
+      if (state.preDispatchUpdatePending) {
+        sendJson(response, 503, {
+          ok: false,
+          contractVersion: "1",
+          operationId: "0a7f1eb6-529a-4dd2-861c-9152e6054ff0",
+          idempotencyKey: params.idempotencyKey,
+          status: "not-ready",
+          requested: {},
+          retryable: true,
+          mutationMayHaveApplied: false,
+          source: "operon-live",
+          stale: false,
+          error: {
+            code: "operon_index_not_settled",
+            reasonCode: "index_not_settled",
+            message:
+              "The Operon live index is not settled yet; retry the mutation.",
+          },
+        });
+        return;
+      }
       if (params.idempotencyKey === "test-public-outcome-unknown") {
         sendJson(response, 500, {
           // This is the exact safe shape produced by the Bridge's public
@@ -1390,6 +1432,21 @@ try {
   assert.equal(publicFailure.recoveryRequired, true);
   assert.equal(publicFailure.planDigest, "e".repeat(64));
   assert.equal(publicFailure.recoveryRef, `dvr1_${"f".repeat(48)}`);
+  const publicFailureDb = new DatabaseSync(dbPath);
+  try {
+    const entry = publicFailureDb
+      .prepare(
+        "SELECT status FROM operon_mutation_journal WHERE idempotency_key = ?",
+      )
+      .get(publicFailureInput.idempotencyKey);
+    assert.equal(
+      entry?.status,
+      "outcome-unknown",
+      "a post-dispatch uncertainty must remain journaled for replay/recovery",
+    );
+  } finally {
+    publicFailureDb.close();
+  }
   const publicFailureReplay = await new OperonService().updateTask(
     publicFailureInput,
   );
@@ -1411,7 +1468,401 @@ try {
     publicFailure.recoveryRef,
     "the public failure recovery reference must reach the recovery route",
   );
+
+  // The durable target is intentionally separate from requested intent here.
+  // This models journal rows written by callers that pass task identity via
+  // the route rather than duplicating it in the request body.
+  const journalTargetA = "abc1234";
+  const journalTargetB = "bcd2345";
+  const sameTargetIndependentIntent = {
+    dryRun: false,
+    expectedRevision: tasks[0].revision,
+    patch: { fields: { priority: "B" } },
+  };
+  const executeTargetIntent = (instance, operonId, idempotencyKey) =>
+    instance.executeMutation(
+      "update",
+      operonId,
+      idempotencyKey,
+      false,
+      `/extensions/optimike-operon-bridge/v1/tasks/${operonId}/update`,
+      { idempotencyKey, ...sameTargetIndependentIntent },
+    );
+  const readJournalTarget = (idempotencyKey) => {
+    const db = new DatabaseSync(dbPath);
+    try {
+      return db
+        .prepare(
+          `SELECT operon_id as operonId, status
+           FROM operon_mutation_journal WHERE idempotency_key = ?`,
+        )
+        .get(idempotencyKey);
+    } finally {
+      db.close();
+    }
+  };
+
+  const terminalTargetKey = "test-idempotency-target-terminal";
+  const callsBeforeTargetTerminal = state.mutationCalls;
+  const terminalTargetA = await executeTargetIntent(
+    service,
+    journalTargetA,
+    terminalTargetKey,
+  );
+  await assert.rejects(
+    executeTargetIntent(new OperonService(), journalTargetB, terminalTargetKey),
+    (error) => error?.code === "CONFLICT",
+    "a terminal Task A result must not replay for Task B with the same intent",
+  );
+  assert.equal(
+    state.mutationCalls,
+    callsBeforeTargetTerminal + 1,
+    "a target-mismatched terminal replay must not mutate Task B",
+  );
+  assert.equal(terminalTargetA.after.operonId, journalTargetA);
+
+  const inProgressTargetKey = "test-idempotency-target-in-progress";
+  const journalService = service;
+  assert.equal(
+    journalService.reserveMutationJournal(
+      "update",
+      journalTargetA,
+      inProgressTargetKey,
+      { idempotencyKey: inProgressTargetKey, ...sameTargetIndependentIntent },
+    ),
+    null,
+  );
+  const callsBeforeTargetInProgress = state.mutationCalls;
+  await assert.rejects(
+    executeTargetIntent(
+      new OperonService(),
+      journalTargetB,
+      inProgressTargetKey,
+    ),
+    (error) => error?.code === "CONFLICT",
+    "a concurrent Task B request must not join Task A's in-progress reservation",
+  );
+  assert.equal(state.mutationCalls, callsBeforeTargetInProgress);
+
+  const preDispatchTargetKey = "test-idempotency-target-pre-dispatch";
+  const preDispatchTargetIntent = {
+    idempotencyKey: preDispatchTargetKey,
+    ...sameTargetIndependentIntent,
+  };
+  assert.equal(
+    journalService.reserveMutationJournal(
+      "update",
+      journalTargetA,
+      preDispatchTargetKey,
+      preDispatchTargetIntent,
+    ),
+    null,
+  );
+  assert.equal(
+    journalService.releasePreDispatchMutationReservation(
+      "transition",
+      journalTargetA,
+      preDispatchTargetKey,
+      preDispatchTargetIntent,
+    ),
+    false,
+    "a mismatched action must not release another mutation reservation",
+  );
+  assert.equal(
+    journalService.releasePreDispatchMutationReservation(
+      "update",
+      journalTargetA,
+      preDispatchTargetKey,
+      {
+        ...preDispatchTargetIntent,
+        patch: { fields: { priority: "C" } },
+      },
+    ),
+    false,
+    "a mismatched intent must not release another mutation reservation",
+  );
+  assert.equal(
+    journalService.releasePreDispatchMutationReservation(
+      "update",
+      journalTargetB,
+      preDispatchTargetKey,
+      preDispatchTargetIntent,
+    ),
+    false,
+    "a Task B pre-dispatch release must not delete Task A's reservation",
+  );
+  assert.equal(
+    readJournalTarget(preDispatchTargetKey)?.operonId,
+    journalTargetA,
+  );
+  assert.equal(readJournalTarget(preDispatchTargetKey)?.status, "in_progress");
+  assert.equal(
+    journalService.releasePreDispatchMutationReservation(
+      "update",
+      journalTargetA,
+      preDispatchTargetKey,
+      preDispatchTargetIntent,
+    ),
+    true,
+  );
+
+  const finalizationTargetKey = "test-idempotency-target-finalization";
+  const finalizationTargetIntent = {
+    idempotencyKey: finalizationTargetKey,
+    ...sameTargetIndependentIntent,
+  };
+  assert.equal(
+    journalService.reserveMutationJournal(
+      "update",
+      journalTargetA,
+      finalizationTargetKey,
+      finalizationTargetIntent,
+    ),
+    null,
+  );
+  const finalizationTargetResult = {
+    ...terminalTargetA,
+    operationId: "operation-target-finalization",
+    idempotencyKey: finalizationTargetKey,
+  };
+  assert.throws(
+    () =>
+      journalService.writeMutationJournal(
+        "transition",
+        journalTargetA,
+        finalizationTargetIntent,
+        finalizationTargetResult,
+      ),
+    (error) => error?.code === "CONFLICT",
+    "a mismatched action must not finalize another mutation reservation",
+  );
+  assert.throws(
+    () =>
+      journalService.writeMutationJournal(
+        "update",
+        journalTargetA,
+        {
+          ...finalizationTargetIntent,
+          patch: { fields: { priority: "C" } },
+        },
+        finalizationTargetResult,
+      ),
+    (error) => error?.code === "CONFLICT",
+    "a mismatched intent must not finalize another mutation reservation",
+  );
+  assert.throws(
+    () =>
+      journalService.writeMutationJournal(
+        "update",
+        journalTargetB,
+        finalizationTargetIntent,
+        finalizationTargetResult,
+      ),
+    (error) => error?.code === "CONFLICT",
+    "a Task B finalization must not complete Task A's reservation",
+  );
+  assert.equal(
+    readJournalTarget(finalizationTargetKey)?.operonId,
+    journalTargetA,
+  );
+  assert.equal(readJournalTarget(finalizationTargetKey)?.status, "in_progress");
+  journalService.writeMutationJournal(
+    "update",
+    journalTargetA,
+    finalizationTargetIntent,
+    finalizationTargetResult,
+  );
+
+  const restartTargetKey = "test-idempotency-target-restart";
+  await executeTargetIntent(service, journalTargetA, restartTargetKey);
+  const callsBeforeTargetRestart = state.mutationCalls;
+  await assert.rejects(
+    executeTargetIntent(new OperonService(), journalTargetB, restartTargetKey),
+    (error) => error?.code === "CONFLICT",
+    "a restarted service must retain the durable task identity fence",
+  );
+  assert.equal(
+    state.mutationCalls,
+    callsBeforeTargetRestart,
+    "a restarted target-mismatched replay must not mutate Task B",
+  );
   config.operonMutationAllowedPathPrefixes = configuredMutationPrefixes;
+
+  const preDispatchInput = {
+    idempotencyKey: "test-pre-dispatch-update-same-key",
+    dryRun: false,
+    operonId: "abc1234",
+    expectedRevision: tasks[0].revision,
+    patch: { fields: { priority: "B" } },
+  };
+  const callsBeforePreDispatch = state.mutationCalls;
+  state.preDispatchUpdatePending = true;
+  await assert.rejects(
+    service.updateTask(preDispatchInput),
+    (error) =>
+      error?.code === "SERVICE_UNAVAILABLE" &&
+      /live index is not settled/u.test(error.message) &&
+      error?.details?.preDispatchReason === "operon_index_not_settled",
+  );
+  assert.equal(state.mutationCalls, callsBeforePreDispatch + 1);
+  const preDispatchDb = new DatabaseSync(dbPath);
+  try {
+    const entry = preDispatchDb
+      .prepare(
+        "SELECT status FROM operon_mutation_journal WHERE idempotency_key = ?",
+      )
+      .get(preDispatchInput.idempotencyKey);
+    assert.equal(
+      entry,
+      undefined,
+      "pre-dispatch failures must not strand a journal row",
+    );
+  } finally {
+    preDispatchDb.close();
+  }
+  state.preDispatchUpdatePending = false;
+  const preDispatchReplay = await service.updateTask(preDispatchInput);
+  assert.equal(preDispatchReplay.status, "applied");
+  assert.equal(
+    state.mutationCalls,
+    callsBeforePreDispatch + 2,
+    "the same key must reach the Bridge again after a proven pre-dispatch failure",
+  );
+
+  const preDispatchReceipt = (params, overrides = {}) => ({
+    ok: false,
+    contractVersion: "1",
+    operationId: "5e4a9e98-1a59-4db6-9c91-2d8a0f9f6b48",
+    idempotencyKey: params.idempotencyKey,
+    status: "not-ready",
+    requested: {},
+    retryable: true,
+    mutationMayHaveApplied: false,
+    source: "operon-live",
+    stale: false,
+    error: {
+      code: "operon_index_not_settled",
+      reasonCode: "index_not_settled",
+      message: "The Operon live index is not settled yet; retry the mutation.",
+    },
+    ...overrides,
+  });
+  const readJournalStatus = (idempotencyKey) => {
+    const db = new DatabaseSync(dbPath);
+    try {
+      return db
+        .prepare(
+          "SELECT status FROM operon_mutation_journal WHERE idempotency_key = ?",
+        )
+        .get(idempotencyKey)?.status;
+    } finally {
+      db.close();
+    }
+  };
+  const prefixesBeforePreDispatchRecovery = [
+    ...config.operonMutationAllowedPathPrefixes,
+  ];
+  config.operonMutationAllowedPathPrefixes = [];
+
+  const developerRecoveryPreDispatch = {
+    idempotencyKey: "test-recovery-pre-dispatch-same-key",
+    recoveryRef: `dvr1_${"9".repeat(48)}`,
+    recovery: { kind: "developer-api" },
+  };
+  state.preDispatchReceiptOverride = (params) => preDispatchReceipt(params);
+  await assert.rejects(
+    service.recoverMutation(developerRecoveryPreDispatch),
+    (error) =>
+      error?.code === "SERVICE_UNAVAILABLE" &&
+      error?.details?.preDispatch === true,
+  );
+  assert.equal(
+    readJournalStatus(developerRecoveryPreDispatch.idempotencyKey),
+    undefined,
+    "a proven recovery pre-dispatch failure must release its journal row",
+  );
+  state.preDispatchReceiptOverride = null;
+  const developerRecoveryReplay = await service.recoverMutation(
+    developerRecoveryPreDispatch,
+  );
+  assert.equal(developerRecoveryReplay.status, "already-applied");
+
+  const workflowRecoveryPreDispatch = {
+    idempotencyKey: "test-workflow-recovery-pre-dispatch-same-key",
+    recoveryRef: `dvr1_${"8".repeat(48)}`,
+    recovery: {
+      kind: "periodic-update",
+      planDigest: taskWorkflowPlanDigest,
+    },
+  };
+  state.preDispatchReceiptOverride = (params) => preDispatchReceipt(params);
+  await assert.rejects(
+    service.recoverMutation(workflowRecoveryPreDispatch),
+    (error) =>
+      error?.code === "SERVICE_UNAVAILABLE" &&
+      error?.details?.preDispatchReason === "operon_index_not_settled",
+  );
+  assert.equal(
+    readJournalStatus(workflowRecoveryPreDispatch.idempotencyKey),
+    undefined,
+    "a proven workflow-recovery pre-dispatch failure must release its journal row",
+  );
+  state.preDispatchReceiptOverride = null;
+  const workflowRecoveryReplay = await service.recoverMutation(
+    workflowRecoveryPreDispatch,
+  );
+  assert.equal(workflowRecoveryReplay.status, "already-applied");
+
+  const hostilePreDispatchCases = [
+    ["wrong-key", { idempotencyKey: "other-key" }],
+    ["wrong-version", { contractVersion: "2" }],
+    ["wrong-status", { status: "outcome-unknown" }],
+    ["wrong-code", { error: { code: "unapproved", message: "ignored" } }],
+    ["wrong-retryable", { retryable: false }],
+    ["recovery-evidence", { recoveryRef: `dvr1_${"7".repeat(48)}` }],
+    ["malformed-shape", { requested: { unexpected: true } }],
+  ];
+  for (const [name, overrides] of hostilePreDispatchCases) {
+    const idempotencyKey = `test-hostile-pre-dispatch-${name}`;
+    state.preDispatchReceiptOverride = (params) =>
+      preDispatchReceipt(params, overrides);
+    await assert.rejects(
+      service.updateTask({
+        idempotencyKey,
+        dryRun: false,
+        operonId: "abc1234",
+        expectedRevision: tasks[0].revision,
+        patch: { fields: { priority: "B" } },
+      }),
+      (error) => error?.code === "PARSING_ERROR",
+      `${name} must not be accepted as pre-dispatch proof`,
+    );
+    assert.equal(
+      readJournalStatus(idempotencyKey),
+      "in_progress",
+      `${name} must preserve the uncertain MCP reservation`,
+    );
+  }
+  state.preDispatchReceiptOverride = null;
+
+  const hostileRecoveryKey = "test-hostile-recovery-pre-dispatch";
+  state.preDispatchReceiptOverride = (params) =>
+    preDispatchReceipt(params, { idempotencyKey: "misrouted-recovery-key" });
+  await assert.rejects(
+    service.recoverMutation({
+      idempotencyKey: hostileRecoveryKey,
+      recoveryRef: `dvr1_${"6".repeat(48)}`,
+      recovery: { kind: "developer-api" },
+    }),
+    (error) => error?.code === "PARSING_ERROR",
+  );
+  assert.equal(
+    readJournalStatus(hostileRecoveryKey),
+    "in_progress",
+    "a misrouted recovery receipt must not release the recovery journal",
+  );
+  state.preDispatchReceiptOverride = null;
+  config.operonMutationAllowedPathPrefixes = prefixesBeforePreDispatchRecovery;
 
   const orderedGallery = ["media/a,b.png", "media\\c;d.png", "media/a,b.png"];
   const normalizedOrderedGallery = ["media/a,b.png", "media\\c;d.png"];
@@ -1443,6 +1894,49 @@ try {
   );
   state.mode = "normal";
 
+  const mutationCallsBeforeScheduledDateExclusivity = state.mutationCalls;
+  await assert.rejects(
+    service.createTask({
+      idempotencyKey: "test-create-scheduled-date-rejected",
+      dryRun: false,
+      task: {
+        source: "inline",
+        description: "Scheduled task must use the periodic update workflow",
+        fields: { dateScheduled: "2026-08-30" },
+      },
+    }),
+    /dateScheduled.*operon_update_periodic_scheduling/u,
+    "task creation must reject dateScheduled before any Bridge POST",
+  );
+  await assert.rejects(
+    service.updateRecurrence({
+      idempotencyKey: "test-recurrence-scheduled-date-rejected",
+      dryRun: false,
+      operonId: "abc1234",
+      expectedRevision: tasks[0].revision,
+      scope: "this-task",
+      changes: { dateScheduled: "2026-08-30" },
+    }),
+    /Unrecognized key/u,
+    "recurrence updates must reject dateScheduled before any Bridge POST",
+  );
+  await assert.rejects(
+    service.updateTask({
+      idempotencyKey: "test-update-scheduled-date-rejected",
+      dryRun: false,
+      operonId: "abc1234",
+      expectedRevision: tasks[0].revision,
+      patch: { fields: { dateScheduled: "2026-08-30" } },
+    }),
+    /dateScheduled.*operon_update_periodic_scheduling/u,
+    "generic updates must reject dateScheduled before any Bridge POST",
+  );
+  assert.equal(
+    state.mutationCalls,
+    mutationCallsBeforeScheduledDateExclusivity,
+    "non-periodic dateScheduled inputs must not reach the Bridge",
+  );
+
   const periodicUpdated = await service.updatePeriodicScheduling({
     idempotencyKey: "test-periodic-update-apply",
     dryRun: false,
@@ -1451,6 +1945,11 @@ try {
     patch: { fields: { dateScheduled: "2026-08-30" } },
   });
   assert.equal(periodicUpdated.after.dates.scheduled, "2026-08-30");
+  assert.equal(
+    state.mutationCalls,
+    mutationCallsBeforeScheduledDateExclusivity + 1,
+    "only periodic scheduling may send a dateScheduled update to the Bridge",
+  );
 
   const pendingCallsBeforeScopedRecovery = state.pendingRecoveryCalls;
   const recoveryCallsBeforeScopedRecovery = state.recoveryCalls;

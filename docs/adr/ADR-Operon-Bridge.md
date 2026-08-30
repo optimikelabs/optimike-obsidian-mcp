@@ -2,13 +2,13 @@
 
 - Status: accepted and implemented on `main`
 - Date: 2026-07-21
-- Amended: 2026-08-25
+- Amended: 2026-08-30
 - MCP baseline: `optimikelabs/optimike-obsidian-mcp@77322f84903fddfdc1bb056981b997a96bdeebca`
-- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and released provisional `3.5.3` / CLI `1.2.0`
+- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and Optimike MCP `3.2.0` targeting provisional official `3.6.0` / CLI `1.2.0` / Local REST API `5.1.0` behind an exact-SHA Pilot 2 release gate
 
 ## Problem
 
-Operon unifies inline and file tasks around stable identity and one domain model. Earlier releases exposed no public versioned mutation API; official Operon `3.5.3` exposes Developer API V1 plus additive saved-filter, adoption and Daily/Weekly task workflows. Agent writes must still preserve workflow normalization, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, conversions, ordered task media and index/view reconciliation. Direct Markdown edits or direct `TaskWriter` calls do not satisfy that contract.
+Operon unifies inline and file tasks around stable identity and one domain model. Official Operon `3.6.0` retains Developer API V1 plus additive saved-filter, adoption and Daily/Weekly task workflows; its public contract directory did not drift from `3.5.3`. Agent writes must still preserve workflow normalization, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, conversions, ordered task media and index/view reconciliation. Direct Markdown edits or direct `TaskWriter` calls do not satisfy that contract.
 
 ## Decision
 
@@ -41,7 +41,7 @@ Official Operon `2.4.0` and `2.5.0` remain supported for reads. Official Operon 
 
 ## Public API boundary
 
-`OperonPublicApiV1` remains the legacy Kairélys boundary. Official Operon `3.x` exposes host-verified Developer API V1 reads plus preview/apply/recovery for typed create, update, transition, relationship replacement, recurrence update, conversion, and inline relocation. Operon `3.5.3` exposes exact-grant adoption and Daily/Weekly workflows through the additive task-workflow API. Those plans are opaque and session-bound; recovery continues only the same `recoveryRef`. Task Type and Task Image remain scalar, Task Gallery remains ordered, and `__taskDataType` remains read-only. Elevated or destructive applies require fresh host-owned consent in the owning vault window and fail closed after a bounded timeout.
+`OperonPublicApiV1` remains the legacy Kairélys boundary. Official Operon `3.x` exposes host-verified Developer API V1 reads plus preview/apply/recovery for typed create, update, transition, relationship replacement, recurrence update, conversion, and inline relocation. Operon `3.5.3` introduced exact-grant adoption and Daily/Weekly workflows through the additive task-workflow API; `3.6.0` retains that negotiated boundary. Those plans are opaque and session-bound; recovery continues only the same `recoveryRef`. Task Type and Task Image remain scalar, Task Gallery remains ordered, and `__taskDataType` remains read-only. Elevated or destructive applies require fresh host-owned consent in the owning vault window and fail closed after a bounded timeout.
 
 No ÉLYSIA-specific workflow, UX, view, calendar, Kanban, or data-model logic belongs in Operon. Compatibility fixes remain generic upstream PRs; the MCP never depends on private methods or an ÉLYSIA-specific Operon fork.
 
@@ -78,9 +78,35 @@ periodic scheduling with a configured modified-time plugin, same-source graph
 ordering, durable concurrent replay, zero validation violations, zero pending
 recoveries and exact restoration. This remains historical evidence for the
 unpublished patched candidate; Operon `3.5.3` ships superseding implementations,
-passed the same complete gate with Bridge `0.8.1`; Bridge `0.8.2` retains that
-contract and adds exact first-use workflow negotiation as the current released
-official validation target.
+passed the same complete gate with Bridge `0.8.1`; Bridge `0.8.2` retained that
+contract and added exact first-use workflow negotiation. Bridge `0.8.3` keeps
+that boundary while hardening public failure and replay semantics. Working-tree
+Pilot 2 runs for MCP `3.2.0` exercised stock Operon `3.6.0`, CLI `1.2.0` and
+Local REST API `5.1.0`: same-connection startup-order recovery, adoption,
+replay, stale conflict, recovery, Frontmatter Date Manager settlement, zero
+validation violations and exact restoration. Periodic working-tree runs are
+historical/diagnostic only: the exact-SHA canary performs periodic preview and
+exact-grant negotiation but skips periodic applies because the public plan is
+metadata-only and exposes no pre-apply task-source path
+(`public_task_source_projection_unavailable`). The tools remain available; this
+is a destructive-canary containment/certification boundary, not full periodic
+certification. Upstream public path projection is a nonblocking follow-up. The
+release still requires the same gate on the clean final SHA. `3.6.0` remains provisional by explicit certification metadata,
+not because mutations are allowed by product-version allowlist.
+
+Operon `3.6.0` also changes observable product behavior outside the API
+contract. A working-tree Pilot 2 behavior gate exercised a Scheduled Date on a blocked task
+through the dedicated periodic workflow while preserving `blockedBy` and its
+inverse edge; its run-owned periodic parent artifact was removed during exact
+restoration. Task Editor deletion cleanup remains `SKIP` without a public MCP
+delete surface. Parent-date expansion remains `SKIP` while the public
+configuration does not announce the opt-in automation as active. Release checks
+must exercise those skipped cases when their public surfaces/configuration make
+them observable. The Scheduled Date apply remains historical/diagnostic
+worktree evidence; the exact-SHA release canary does not repeat it, and instead
+skips periodic apply with `public_task_source_projection_unavailable` after
+preview and exact-grant negotiation. These are behavior checks, not permission
+to accept unrelated postflight drift.
 
 Still outside this local acceptance proof:
 

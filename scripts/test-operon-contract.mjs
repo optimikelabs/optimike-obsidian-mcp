@@ -591,7 +591,7 @@ const galleryMatch = queryOperonSnapshot(
     snapshotAt: "2026-07-20T12:00:00.000Z",
     snapshotAgeMs: 0,
     operonVersion: "3.5.3",
-    bridgeVersion: "0.8.2",
+    bridgeVersion: "0.8.3",
     contractVersion: OPERON_CONTRACT_VERSION,
     snapshotSchemaVersion: 2,
     settingsSignature: "fnv1a32:01234567",
@@ -643,6 +643,18 @@ const create = OperonCreateTaskSchema.parse({
   },
 });
 assert.equal(create.dryRun, true);
+assert.equal(
+  OperonCreateTaskSchema.safeParse({
+    idempotencyKey: "contract-create-scheduled-date",
+    task: {
+      source: "inline",
+      description: "Scheduled task must use the periodic update workflow",
+      fields: { dateScheduled: "2026-08-30" },
+    },
+  }).success,
+  false,
+  "task creation must not bypass periodic scheduling for dateScheduled",
+);
 
 const createWithGallery = OperonCreateTaskSchema.parse({
   idempotencyKey: "contract-create-gallery",
@@ -852,6 +864,24 @@ const updatePeriodic = OperonUpdatePeriodicSchedulingSchema.parse({
   patch: { fields: { dateScheduled: null } },
 });
 assert.equal(updatePeriodic.patch.fields.dateScheduled, null);
+const updatePeriodicSet = OperonUpdatePeriodicSchedulingSchema.parse({
+  ...updatePeriodic,
+  idempotencyKey: "contract-periodic-update-set",
+  patch: { fields: { dateScheduled: "2026-08-30" } },
+});
+assert.equal(updatePeriodicSet.patch.fields.dateScheduled, "2026-08-30");
+assert.equal(
+  OperonCreatePeriodicTaskSchema.safeParse({
+    idempotencyKey: "contract-periodic-create-scheduled-date",
+    periodic: {
+      description: "Periodic task with an initial scheduled date",
+      periodicKind: "daily",
+      fields: { dateScheduled: "2026-08-30" },
+    },
+  }).success,
+  true,
+  "the native periodic-create workflow may set an initial dateScheduled value",
+);
 
 const adopt = OperonAdoptTaskSchema.parse({
   idempotencyKey: "contract-adopt-1",
@@ -1101,6 +1131,14 @@ assert.equal(recurrenceMutation.dryRun, true);
 assert.equal(
   OperonUpdateRecurrenceSchema.safeParse({
     ...recurrenceMutation,
+    changes: { dateScheduled: "2026-08-30" },
+  }).success,
+  false,
+  "recurrence updates must not bypass periodic scheduling for dateScheduled",
+);
+assert.equal(
+  OperonUpdateRecurrenceSchema.safeParse({
+    ...recurrenceMutation,
     scope: "all-tasks",
   }).success,
   false,
@@ -1115,6 +1153,45 @@ assert.equal(
   false,
   "general updates must not simulate recurrence mutations",
 );
+const genericScheduledDate = OperonUpdateTaskSchema.safeParse({
+  operonId: "abc1234",
+  expectedRevision: task.revision,
+  idempotencyKey: "contract-update-scheduled-date",
+  patch: { fields: { dateScheduled: "2026-08-30" } },
+});
+assert.equal(
+  genericScheduledDate.success,
+  false,
+  "general updates must route scheduled dates through the periodic workflow",
+);
+if (genericScheduledDate.success) {
+  throw new Error("Expected generic dateScheduled update to be rejected.");
+}
+assert.deepEqual(genericScheduledDate.error.issues, [
+  {
+    code: "custom",
+    path: ["patch", "fields", "dateScheduled"],
+    message:
+      "Managed field 'dateScheduled' must use 'operon_update_periodic_scheduling'.",
+  },
+]);
+for (const [field, value] of Object.entries({
+  dateDue: "2026-08-31",
+  dateStarted: "2026-08-30",
+  datetimeStart: "2026-08-30T09:00:00",
+  datetimeEnd: "2026-08-30T10:00:00",
+})) {
+  assert.equal(
+    OperonUpdateTaskSchema.safeParse({
+      operonId: "abc1234",
+      expectedRevision: task.revision,
+      idempotencyKey: `contract-update-temporal-${field}`,
+      patch: { fields: { [field]: value } },
+    }).success,
+    true,
+    `general updates must continue to accept ${field}`,
+  );
+}
 assert.equal(
   OperonRelocateTaskSchema.safeParse({
     ...relocation,

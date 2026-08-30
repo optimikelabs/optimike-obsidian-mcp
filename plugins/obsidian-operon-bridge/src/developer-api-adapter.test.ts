@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OperonDeveloperApiRuntimeAdapter } from "./developer-api-adapter";
+import {
+  genericDateScheduledBoundaryError,
+  genericMutationSnapshot,
+  OperonDeveloperApiRuntimeAdapter,
+} from "./developer-api-adapter";
 
 const consumer = {
   manifest: {
     id: "optimike-operon-bridge",
     name: "Optimike Operon Bridge",
-    version: "0.8.2",
+    version: "0.8.3",
   },
 };
 
@@ -22,6 +26,199 @@ function readyStatus(): Record<string, unknown> {
     },
   };
 }
+
+test("adapter blocks generic scheduled dates before its native API and preserves periodic workflows", async () => {
+  const blockedAdapter = Object.create(
+    OperonDeveloperApiRuntimeAdapter.prototype,
+  ) as OperonDeveloperApiRuntimeAdapter;
+  Object.defineProperty(blockedAdapter, "mutationApis", {
+    get: () => {
+      throw new Error("generic date rejection must precede native API lookup");
+    },
+  });
+  const genericRequests = [
+    ["create", null, { fields: { dateScheduled: "2026-09-01" } }],
+    ["update", "abc1234", { fields: { dateScheduled: "2026-09-01" } }],
+    [
+      "recurrence",
+      "abc1234",
+      { scope: "this-task", changes: { dateScheduled: "2026-09-01" } },
+    ],
+  ] as const;
+  for (const [capability, operonId, requested] of genericRequests) {
+    const result = await blockedAdapter.executeMutation(
+      capability,
+      operonId,
+      requested,
+      true,
+    );
+    assert.equal(result.code, "invalid-input");
+    assert.equal(result.mutationMayHaveApplied, false);
+  }
+  for (const invalidValue of [
+    undefined,
+    () => undefined,
+    Symbol("x"),
+    1n,
+    NaN,
+  ]) {
+    const result = await blockedAdapter.executeMutation(
+      "create",
+      null,
+      { invalidValue },
+      true,
+    );
+    assert.equal(result.code, "invalid-input");
+    assert.equal(result.mutationMayHaveApplied, false);
+  }
+
+  assert.match(
+    genericDateScheduledBoundaryError({
+      fields: { dateScheduled: "2026-09-01" },
+    }) ?? "",
+    /periodic/u,
+    "only executeMutation invokes the generic scanner; typed periodic workflows remain separate",
+  );
+
+  const previewInputs: Record<string, unknown>[] = [];
+  const plan = (suffix: string) => ({
+    contractVersion: 1,
+    kind: "task-workflow-developer-mutation-plan",
+    recoveryRef: `dvr1_${suffix.repeat(48)}`,
+    planDigest: suffix.repeat(64),
+    createdAt: "2026-08-30T00:00:00.000Z",
+    expiresAt: "2026-08-30T00:05:00.000Z",
+    riskLevel: "routine",
+    requiresConsent: false,
+  });
+  const preview = async (input: Record<string, unknown>) => {
+    previewInputs.push(input);
+    return {
+      contractVersion: 1,
+      kind: "task-workflow-developer-mutation-preview-result",
+      requestId: `periodic-${previewInputs.length}`,
+      ok: true,
+      plan: plan(previewInputs.length === 1 ? "a" : "b"),
+      warnings: [],
+    };
+  };
+  const periodicTask = {
+    identity: { operonId: "abc1234" },
+    description: "Scheduled task",
+    representation: "inline" as const,
+    locator: {
+      representation: "inline" as const,
+      filePath: "Tasks.md",
+      lineNumber: 4,
+    },
+    checkbox: "open" as const,
+  };
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, {});
+  (adapter as any).taskWorkflowApis.set("periodic-create", {
+    contractVersion: 1,
+    runtimeApi: 1,
+    tasks: { createPeriodicNote: { preview, apply: async () => ({}) } },
+  });
+  (adapter as any).taskWorkflowApis.set("periodic-update", {
+    contractVersion: 1,
+    runtimeApi: 1,
+    tasks: { updatePeriodicNote: { preview, apply: async () => ({}) } },
+  });
+  (adapter as any).readApi = {
+    tasks: { get: async () => ({ ok: true, task: periodicTask }) },
+  };
+
+  const periodicCreate = await adapter.executeTaskWorkflow(
+    "periodic-create",
+    {
+      description: "Initial periodic task",
+      periodicKind: "daily",
+      fields: { dateScheduled: "2026-09-01" },
+    },
+    true,
+  );
+  const periodicUpdate = await adapter.executeTaskWorkflow(
+    "periodic-update",
+    { operonId: "abc1234", fields: { dateScheduled: null } },
+    true,
+  );
+  assert.equal(periodicCreate.code, "planned");
+  assert.equal(periodicUpdate.code, "planned");
+  assert.equal(previewInputs.length, 2);
+  assert.match(JSON.stringify(previewInputs), /dateScheduled/u);
+});
+
+test("generic mutation snapshots are bounded JSON values and never inherit caller state", () => {
+  const depth = (count: number): Record<string, unknown> => {
+    const root: Record<string, unknown> = {};
+    let cursor = root;
+    for (let index = 0; index < count; index += 1) {
+      const nested: Record<string, unknown> = {};
+      cursor.nested = nested;
+      cursor = nested;
+    }
+    return root;
+  };
+  const oversized: Record<string, unknown> = {};
+  for (let index = 0; index <= 10_000; index += 1) {
+    oversized[`field${index}`] = index;
+  }
+  const originalFields = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    "fields",
+  );
+  Object.defineProperty(Object.prototype, "fields", {
+    configurable: true,
+    enumerable: true,
+    value: { dateScheduled: "2026-09-01" },
+  });
+  try {
+    const clean = genericMutationSnapshot({ description: "Own data only" });
+    assert.equal(clean.ok, true);
+    if (!clean.ok) return;
+    assert.equal(Object.getPrototypeOf(clean.snapshot as object), null);
+    assert.equal(
+      Object.hasOwn(clean.snapshot as object, "fields"),
+      false,
+      "prototype-polluted fields must not enter the immutable snapshot",
+    );
+  } finally {
+    if (originalFields) {
+      Object.defineProperty(Object.prototype, "fields", originalFields);
+    } else {
+      delete (Object.prototype as Record<string, unknown>).fields;
+    }
+  }
+  assert.equal(genericMutationSnapshot(depth(32)).ok, true);
+  assert.equal(genericMutationSnapshot(depth(33)).ok, false);
+  assert.equal(genericMutationSnapshot(oversized).ok, false);
+  for (const value of [
+    undefined,
+    () => undefined,
+    Symbol("x"),
+    1n,
+    NaN,
+    Infinity,
+  ]) {
+    assert.equal(genericMutationSnapshot({ value }).ok, false);
+  }
+
+  let ownKeysCalls = 0;
+  const changingProxy = new Proxy(
+    { task: { description: "never read" } },
+    {
+      ownKeys: () => {
+        ownKeysCalls += 1;
+        return ownKeysCalls === 1 ? ["task"] : ["task", "dateScheduled"];
+      },
+      get: () => {
+        throw new Error("snapshot must never read proxy values");
+      },
+    },
+  );
+  assert.equal(genericMutationSnapshot(changingProxy).ok, false);
+  assert.equal(ownKeysCalls, 2);
+});
 
 test("Operon 3 Developer API adapter reads a live task snapshot through the official accessor", async () => {
   let receivedConsumer: unknown;
@@ -1889,7 +2086,10 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
       periodicKind: "daily",
       routeDate: "2026-08-23",
       priorityId: "priority-a",
-      fields: { taskGallery: ["[[One;A.png]]", "[[Two.png]]"] },
+      fields: {
+        dateScheduled: "2026-08-24",
+        taskGallery: ["[[One;A.png]]", "[[Two.png]]"],
+      },
     },
     true,
   );
@@ -1906,6 +2106,11 @@ test("Operon 3.5 negotiates exact additive workflow grants and keeps opaque plan
   assert.deepEqual(
     (previewInputs[1]?.items as Record<string, unknown>[])[0]?.fields,
     [
+      {
+        kind: "date",
+        field: "dateScheduled",
+        value: "2026-08-24",
+      },
       {
         kind: "list",
         field: "taskGallery",

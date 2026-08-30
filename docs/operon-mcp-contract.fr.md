@@ -159,13 +159,23 @@ révision périmée renvoie `conflict` sans écriture. Une réservation restée
 l’aveugle.
 
 Bridge 0.8 réserve aussi les clés d’idempotence atomiquement et persiste son
-journal version 1 dans les données locales du plugin Obsidian avant tout dispatch
+journal version 2 dans les données locales du plugin Obsidian avant tout dispatch
 natif. Ce journal est borné à 500 entrées et 30 jours. Une entrée `in-progress`
 restaurée devient `outcome-unknown`, non rejouable, avec
-`recoveryRequired: true`. Cette garantie couvre seulement le replay/redémarrage
-local borné : aucune promesse après expiration, éviction, perte/reset des données
-plugin, échec de persistance ou transfert vers un autre coffre/appareil. Si la
-réservation ne peut pas être persistée, aucune mutation native n’est envoyée.
+`recoveryRequired: true`. La version 2 stocke une provenance de dispatch
+explicite. Le Bridge ne peut libérer un reçu de même requête que si ce marqueur
+durable prouve un résultat `not-ready` avant dispatch de la mutation et que la
+réponse indique explicitement `ok: false` et
+`mutationMayHaveApplied: false` ; il persiste alors la suppression avant toute
+nouvelle réservation. Les entrées version 1 sont
+conservées pendant la migration mais classées `unknown-or-dispatched`, car le
+Bridge 0.8.2 pouvait persister ces champs après le début du dispatch natif. Une
+provenance absente ou malformée reste donc rejouable uniquement et ne peut pas
+provoquer un nouvel appel natif. Cette garantie couvre seulement le
+replay/redémarrage local borné : aucune promesse après expiration, éviction,
+perte/reset des données plugin, échec de persistance ou transfert vers un autre
+coffre/appareil. Si la réservation initiale ou la libération sûre ne peut pas
+être persistée avant le dispatch, aucune mutation native n’est envoyée.
 
 L’apply exige aussi `OPERON_MUTATIONS_ENABLED=true` et le réglage Bridge
 **Allow task mutations**. Une mise à jour de package ne peut donc pas activer les
@@ -208,27 +218,54 @@ du moteur. Operon `3.2.0` accepte les champs typés, tags, `statusId`, relations
 `targetPath` inline et templates configurés. Les propriétés YAML non gérées et
 les `targetFolder` arbitraires restent legacy-only.
 
+`operon_create_task` crée une tâche inline ou fichier par les services de
+création d’Operon. `dateScheduled` n’est pas accepté à la création : il faut le
+fixer ou l’effacer ensuite exclusivement via
+`operon_update_periodic_scheduling`.
+
 `operon_create_periodic_task` crée exactement une tâche inline dans la Daily ou
 Weekly Note configurée après les grants périodiques preview/apply exacts. Operon
 reste propriétaire du routage par date, des templates, de l’identité du
-conteneur et du reçu ; le MCP ne peut pas imposer un chemin ou un parent. Le
+conteneur et du reçu ; le MCP ne peut pas imposer un chemin ni un parent.
+`routeDate` sélectionne la Daily ou Weekly Note, tandis que
+`fields.dateScheduled` peut définir la date planifiée initiale de la tâche dans
+ce même workflow natif. Le
 postflight vérifie `priorityId` contre la priorité stable projetée. Si l’apply a
 pu réussir sans qu’une identité créée unique puisse être prouvée, le résultat
 reste `outcome-unknown` et le MCP ne rejoue jamais cette création ambiguë.
-`operon_update_periodic_scheduling` fixe ou efface la date planifiée d’une tâche
-exacte. Operon décide de la conserver, la détacher ou la réaligner, sans déplacer
-le Markdown source.
+`operon_update_periodic_scheduling` fixe ou efface `dateScheduled` sur une tâche
+exacte déjà créée. C’est le seul outil MCP pour modifier ensuite ce champ :
+Operon peut avoir besoin de son workflow périodique additif pour conserver,
+détacher ou réaligner la tâche, sans déplacer le Markdown source.
+
+Avec Operon officiel `3.6.0`, le plan public Task Workflow périodique est
+uniquement composé de métadonnées : il n’expose aucun chemin de source des
+tâches avant apply. La canary de release sur le SHA exact effectue donc la
+prévisualisation périodique et la négociation du grant exact, mais saute les
+applies périodiques avec la raison `public_task_source_projection_unavailable`.
+C’est une limite de confinement et de certification de la canary destructive,
+pas une désactivation de l’outil runtime ; la projection publique du chemin de
+source reste un suivi amont non bloquant. Ne pas revendiquer une certification
+périodique complète à partir de cette gate.
 
 Les champs gérés conservent leur forme officielle : `taskType` et `taskImage`
 sont des chaînes scalaires, `taskGallery` est un tableau ordonné sans perte et
 les chaînes à séparateurs sont refusées. Le champ dérivé `__taskDataType` est
 read-only et ne peut pas entrer dans une création ou une mise à jour.
 
-`operon_update_task` accepte un seul groupe par appel : description, champs
-gérés/tags ou propriété fichier non gérée lorsque le moteur l’autorise. Les
-statuts passent par l’outil de transition. Une description différente sur une
-File Task doit rester refusée tant qu’un contrat de renommage explicite n’existe
-pas.
+`operon_update_task` accepte un seul groupe ordinaire par appel : description,
+champs gérés/tags ou propriété fichier non gérée lorsque le moteur l’autorise.
+Il refuse `dateScheduled`, les relations et la récurrence ; l’appelant doit
+utiliser respectivement `operon_update_periodic_scheduling`,
+`operon_set_relationships` ou `operon_update_recurrence`. Les statuts passent
+par l’outil de transition. Une description différente sur une File Task doit
+rester refusée tant qu’un contrat de renommage explicite n’existe pas.
+
+`operon_update_recurrence` modifie uniquement la surface officielle de
+récurrence avec un scope explicite `this-task` ou `this-and-following`.
+`dateScheduled` n’y est pas accepté : seul
+`operon_update_periodic_scheduling` peut le fixer ou l’effacer. `null` efface
+un champ de récurrence pris en charge.
 
 `operon_transition_task` préfère un `statusId` stable et accepte un libellé de
 workflow exact uniquement pour compatibilité. Les dépendances, récurrences,
@@ -305,10 +342,11 @@ La suppression reste une action opérateur dans la CLI. Un futur
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
 
-## Admission de la release 3.1.2
+## Admission 3.2.0
 
-Optimike MCP `3.1.2`, Bridge `0.8.2`, Operon `3.5.3` et Operon CLI `1.2.0`
-forment l’ensemble publié courant. Operon `3.5.3` reste
+Optimike MCP `3.2.0`, Bridge `0.8.3`, Operon `3.6.0`,
+Operon CLI `1.2.0` et Local REST API `5.1.0` forment l’ensemble de validation
+courant ; ils ne revendiquent aucun tag `3.2.0` publié. Operon `3.6.0` reste
 `compatible-provisional` jusqu’à son entrée dans l’ensemble explicite de preuves
 certifiées, mais ce libellé ne masque plus les mutations valides. La version
 produit reste une métadonnée diagnostique pouvant sélectionner un refus ou une
@@ -333,3 +371,10 @@ erreur ambiguë de transport ou post-dispatch reste durable et échoue fermé. U
 statut ordinaire, sain ou dégradé, ne négocie jamais les grants additifs de
 filtre, workflow ou recovery ; seules l’opération exacte ou la surface de
 récupération dédiée peuvent le faire.
+
+Le contrat public Developer API V1 n’a pas dérivé entre Operon `3.5.3` et
+`3.6.0`. Cette dernière modifie néanmoins le nettoyage relationnel via Task
+Editor, autorise une Scheduled Date sur une tâche bloquée et peut étendre, par
+automatisation opt-in, la plage de dates d’un parent après la mutation d’un
+enfant. Ces comportements doivent être testés dans la configuration active du
+coffre ; ils n’autorisent jamais l’acceptation d’une dérive postflight non liée.

@@ -65,42 +65,29 @@ const ADMISSION_REASONS = new Set([
   "timeout",
   "cancelled",
 ]);
-const ADMISSION_MESSAGES = new Map([
-  ["queue-full", "The HTTP operation queue is full."],
-  [
-    "identity-queue-full",
-    "This client identity already has the maximum number of queued operations.",
-  ],
-  ["timeout", "The operation was not admitted before its queue timeout."],
-  ["cancelled", "The operation was cancelled before admission."],
-]);
-const STREAMABLE_HTTP_POST_ERROR_PREFIX =
-  "Streamable HTTP error: Error POSTing to endpoint: ";
-
+const ADMISSION_MESSAGE =
+  "The service is temporarily unavailable. Retry later.";
 function admissionReason(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  const payloadOffset = message.indexOf(STREAMABLE_HTTP_POST_ERROR_PREFIX);
-  if (payloadOffset < 0) {
-    return undefined;
+  const data = error?.data;
+  if (
+    typeof error?.code === "number" &&
+    error.code === -32015 &&
+    typeof data === "object" &&
+    data !== null &&
+    !Array.isArray(data) &&
+    Object.keys(data).length === 3 &&
+    Object.keys(data).every((key) =>
+      ["applicationCode", "admission", "retryable"].includes(key),
+    ) &&
+    data.applicationCode === "SERVICE_UNAVAILABLE" &&
+    typeof data.admission === "string" &&
+    ADMISSION_REASONS.has(data.admission) &&
+    error.message === `MCP error -32015: ${ADMISSION_MESSAGE}` &&
+    data.retryable === (data.admission !== "cancelled")
+  ) {
+    return data.admission;
   }
-  try {
-    const body = JSON.parse(
-      message.slice(payloadOffset + STREAMABLE_HTTP_POST_ERROR_PREFIX.length),
-    );
-    const reason = body?.error?.data?.admission;
-    if (
-      typeof reason !== "string" ||
-      !ADMISSION_REASONS.has(reason) ||
-      body?.error?.code !== "SERVICE_UNAVAILABLE" ||
-      body?.error?.message !== ADMISSION_MESSAGES.get(reason) ||
-      body?.error?.data?.retryable !== (reason !== "cancelled")
-    ) {
-      return undefined;
-    }
-    return reason;
-  } catch {
-    return undefined;
-  }
+  return undefined;
 }
 
 const transport = new StdioClientTransport({

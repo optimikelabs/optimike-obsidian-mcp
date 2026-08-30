@@ -26,7 +26,8 @@ const TOOL_NAMES = [
   "obsidian_frontmatter_patch_status",
 ];
 const SECRET = "sealed-frontmatter-value-MUST-NOT-LEAK";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const PUBLIC_MESSAGES = {
   VALIDATION_ERROR: "The request could not be validated.",
   FORBIDDEN: "This request is not authorized.",
@@ -145,18 +146,43 @@ function assertNoPrivateData(value, label) {
 
 function assertPublicError(payload, code, forbiddenMarker, label) {
   assert.equal(payload.error.code, code, `${label} error code`);
-  assert.equal(payload.error.message, PUBLIC_MESSAGES[code], `${label} catalog message`);
+  assert.equal(
+    payload.error.message,
+    PUBLIC_MESSAGES[code],
+    `${label} catalog message`,
+  );
   const requestId = payload.requestId ?? payload.error.details?.requestId;
   assert.match(requestId ?? "", UUID, `${label} request id`);
-  assert.equal(payload.error.details?.requestId, requestId, `${label} request id details`);
-  assert.doesNotMatch(JSON.stringify(payload), new RegExp(forbiddenMarker, "u"), `${label} leaked marker`);
+  assert.equal(
+    payload.error.details?.requestId,
+    requestId,
+    `${label} request id details`,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(payload),
+    new RegExp(forbiddenMarker, "u"),
+    `${label} leaked marker`,
+  );
   for (const field of ["reasonCode", "phase", "outcome"]) {
     if (field in (payload.error.details ?? {})) {
       const value = payload.error.details[field];
       assert.equal(typeof value, "string");
       if (field === "reasonCode") assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
-      if (field === "phase") assert.ok(["planned", "applying", "recovering", "terminal"].includes(value));
-      if (field === "outcome") assert.ok(["committed", "compensated", "conflict", "rejected", "failed", "outcome_unknown"].includes(value));
+      if (field === "phase")
+        assert.ok(
+          ["planned", "applying", "recovering", "terminal"].includes(value),
+        );
+      if (field === "outcome")
+        assert.ok(
+          [
+            "committed",
+            "compensated",
+            "conflict",
+            "rejected",
+            "failed",
+            "outcome_unknown",
+          ].includes(value),
+        );
     }
   }
 }
@@ -237,7 +263,12 @@ try {
     },
     true,
   );
-  assertPublicError(malformedUnicodeKey.payload, "VALIDATION_ERROR", "well-formed Unicode", "malformed Unicode");
+  assertPublicError(
+    malformedUnicodeKey.payload,
+    "VALIDATION_ERROR",
+    "well-formed Unicode",
+    "malformed Unicode",
+  );
 
   const replacementCharacterKey = await call(
     session,
@@ -264,7 +295,12 @@ try {
     ],
   ]) {
     const missing = await call(session, name, args, true);
-    assertPublicError(missing.payload, "NOT_FOUND", "note_replace_plan_not_found", "unknown plan");
+    assertPublicError(
+      missing.payload,
+      "NOT_FOUND",
+      "note_replace_plan_not_found",
+      "unknown plan",
+    );
   }
 
   fake.reset();
@@ -278,7 +314,12 @@ try {
     },
     true,
   );
-  assertPublicError(protectedAttempt.payload, "FORBIDDEN", "protected frontmatter", "protected frontmatter");
+  assertPublicError(
+    protectedAttempt.payload,
+    "FORBIDDEN",
+    "protected frontmatter",
+    "protected frontmatter",
+  );
   assert.equal(fake.casRequests, 0);
 
   fake.reset();
@@ -297,7 +338,12 @@ try {
     },
     true,
   );
-  assertPublicError(drift.payload, "CONFLICT", "changed after.*compiled", "source drift");
+  assertPublicError(
+    drift.payload,
+    "CONFLICT",
+    "changed after.*compiled",
+    "source drift",
+  );
   assert.equal(fake.casRequests, 0);
   fake.reset();
   const afterRejectedDrift = await call(
@@ -398,7 +444,12 @@ try {
     },
     true,
   );
-  assertPublicError(reservedNamespaceAttempt.payload, "VALIDATION_ERROR", "reserved_projection_idempotency_namespace", "reserved namespace");
+  assertPublicError(
+    reservedNamespaceAttempt.payload,
+    "VALIDATION_ERROR",
+    "reserved_projection_idempotency_namespace",
+    "reserved namespace",
+  );
 
   fake.reset();
   const nominalOperations = [
@@ -461,7 +512,12 @@ try {
     },
     true,
   );
-  assertPublicError(rebound.payload, "CONFLICT", "different frontmatter intent", "idempotency rebound");
+  assertPublicError(
+    rebound.payload,
+    "CONFLICT",
+    "different frontmatter intent",
+    "idempotency rebound",
+  );
 
   const forgedChildPlanRef = nominalPlan.payload.planRef.replace(
     /^obsidian-frontmatter-patch:v1:/u,
@@ -479,7 +535,12 @@ try {
     ],
   ]) {
     const blockedChildReplay = await call(session, name, args, true);
-    assertPublicError(blockedChildReplay.payload, "NOT_FOUND", "note_replace_plan_not_found", "forged child plan");
+    assertPublicError(
+      blockedChildReplay.payload,
+      "NOT_FOUND",
+      "note_replace_plan_not_found",
+      "forged child plan",
+    );
   }
   assert.equal(fake.successfulWrites, 0);
   assert.equal(fake.content, FRONTMATTER_INITIAL_CONTENT);
@@ -628,6 +689,18 @@ try {
       utcOffsetMinutes: 0,
     },
   };
+  fake.protection = {
+    contractVersion: 1,
+    frontmatterDateProperties: {
+      integrations: [
+        {
+          pluginId: "frontmatter-date-manager",
+          modifiedPropertyName: "modification",
+        },
+      ],
+      unsupportedIntegrations: [],
+    },
+  };
   fake.modifiedTimePropertyAfterWrite = "modification";
   fake.loseResponseAfterWriteNext = true;
   const settledPlan = await call(session, "obsidian_frontmatter_patch_plan", {
@@ -696,7 +769,12 @@ try {
     },
     true,
   );
-  assertPublicError(policyBlocked.payload, "FORBIDDEN", "read-only mode", "read-only policy");
+  assertPublicError(
+    policyBlocked.payload,
+    "FORBIDDEN",
+    "read-only mode",
+    "read-only policy",
+  );
   assert.equal(fake.casRequests, policyCasBefore);
   await session.close();
   session = await startClient();

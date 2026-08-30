@@ -180,6 +180,7 @@ for (const [name, content] of [
 const matrix = await text("docs/runtime-capability-matrix.md");
 const matrixFr = await text("docs/runtime-capability-matrix.fr.md");
 const operonLocalValidation = await text("docs/operon-local-validation.md");
+const operonLiveCanary = await text("scripts/smoke-operon-35-live.mjs");
 const taskRuntimeReference = await text(
   "profiles/elysia-tasks/skills/elysia-task-gouverneur/references/runtime-et-mutations.md",
 );
@@ -190,9 +191,136 @@ for (const content of [
   taskRuntimeReference,
 ]) {
   assert.match(content, /3\.5\.3/u);
+  assert.match(content, /3\.6\.0/u);
   assert.match(content, /Developer API V1/u);
   assert.match(content, /contract|contrat/iu);
 }
+assert.match(
+  operonLiveCanary,
+  /OPERON_35_CANARY_EXPECTED_OPERON_VERSION \?\? "3\.6\.0"/u,
+  "the historical canary entry point must default to the current live target",
+);
+assert.match(
+  operonLocalValidation,
+  /OPERON_35_CANARY_EXPECTED_OPERON_VERSION = "3\.6\.0"/u,
+  "the copied Pilot 2 recipe must pin its expected Operon runtime",
+);
+assert.match(
+  operonLocalValidation,
+  /OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION = "0\.8\.3"/u,
+  "the copied Pilot 2 recipe must pin its expected Bridge runtime",
+);
+assert.match(
+  operonLocalValidation,
+  /OPERON_35_CANARY_EXPECTED_MCP_VERSION = "3\.2\.0"/u,
+  "the copied Pilot 2 recipe must pin its expected MCP runtime",
+);
+assert.match(
+  operonLocalValidation,
+  /OPERON_35_CANARY_RELEASE_CANDIDATE = "true"/u,
+  "the copied Pilot 2 recipe must require the clean exact-SHA release gate",
+);
+for (const invariant of [
+  /rebuilds both MCP and[\s\S]{0,40}Bridge/iu,
+  /bundle[\s\S]{0,40}manifest[\s\S]{0,80}installed/iu,
+  /rechecked immediately before every native dispatch/iu,
+  /symlink, junction or reparse point/iu,
+  /single-link regular file/iu,
+  /does not expose all task-source[\s\S]{0,20}paths is refused before dispatch/iu,
+]) {
+  assert.match(
+    operonLocalValidation,
+    invariant,
+    "the Pilot 2 recipe omits a candidate-provenance or physical-path gate",
+  );
+}
+const operonCandidateEvidenceDocs = [
+  ["README.md", readme],
+  ["README.fr.md", readmeFr],
+  ["CHANGELOG.md", await text("CHANGELOG.md")],
+  ["ADR-Operon-Bridge.md", await text("docs/adr/ADR-Operon-Bridge.md")],
+  ["obsidian_mcp_tools_spec.md", await text("docs/obsidian_mcp_tools_spec.md")],
+  ["operon-cli-audit.md", await text("docs/operon-cli-audit.md")],
+  ["operon-cli-audit.fr.md", await text("docs/operon-cli-audit.fr.md")],
+  ["operon-decision-report.md", await text("docs/operon-decision-report.md")],
+  ["operon-local-validation.md", operonLocalValidation],
+  ["operon-mcp-contract.md", await text("docs/operon-mcp-contract.md")],
+  ["operon-mcp-contract.fr.md", await text("docs/operon-mcp-contract.fr.md")],
+  ["operon-rest-contract.md", await text("docs/operon-rest-contract.md")],
+  ["runtime-capability-matrix.md", matrix],
+  ["runtime-capability-matrix.fr.md", matrixFr],
+  [
+    "plugins/obsidian-operon-bridge/README.md",
+    await text("plugins/obsidian-operon-bridge/README.md"),
+  ],
+];
+const staleCandidateEvidence = [
+  /Optimike MCP `3\.2\.0` has been validated/iu,
+  /Optimike MCP `3\.2\.0` a été validé/iu,
+  /Optimike MCP `3\.2\.0` is validated/iu,
+  /Optimike MCP `3\.2\.0` passed Pilot 2/iu,
+  /Optimike MCP `3\.2\.0` a passé Pilot 2/iu,
+  /Optimike MCP `3\.2\.0` and Bridge `0\.8\.3` passed/iu,
+  /Stock Operon `3\.6\.0`[\s\S]{0,80}passed[\s\S]{0,80}Bridge `0\.8\.3`/iu,
+];
+for (const [name, content] of operonCandidateEvidenceDocs) {
+  for (const pattern of staleCandidateEvidence) {
+    assert.doesNotMatch(
+      content,
+      pattern,
+      `${name} presents working-tree evidence as exact-candidate acceptance`,
+    );
+  }
+  assert.match(
+    content,
+    /public_task_source_projection_unavailable/u,
+    `${name} must disclose the exact-SHA periodic apply skip`,
+  );
+  assert.match(
+    content,
+    /(?:no|not|do not claim)[\s\S]{0,80}periodic[\s\S]{0,30}certification|(?:aucune|pas une|ne pas revendiquer)[\s\S]{0,80}certification[\s\S]{0,30}périodique/iu,
+    `${name} must reject a full periodic-certification claim`,
+  );
+}
+const workingTreePeriodicEvidenceDocs = operonCandidateEvidenceDocs.filter(
+  ([name]) =>
+    ![
+      "README.md",
+      "README.fr.md",
+      "operon-mcp-contract.md",
+      "operon-mcp-contract.fr.md",
+    ].includes(name),
+);
+for (const [name, content] of workingTreePeriodicEvidenceDocs) {
+  assert.match(
+    content,
+    /historical\/\s*diagnostic|historique(?:s)?\/\s*diagnostique(?:s)?/iu,
+    `${name} must label working-tree periodic applies as historical/diagnostic`,
+  );
+}
+const periodicCertificationClaims = operonCandidateEvidenceDocs
+  .map(([, content]) => content)
+  .join("\n");
+assert.doesNotMatch(
+  periodicCertificationClaims,
+  /exact-SHA[^\n]{0,160}(?:must|doit)[^\n]{0,80}(?:repeat|répéter)[^\n]{0,80}(?:Scheduled Date|periodic apply)/iu,
+  "exact-SHA documentation must not promise to repeat a periodic apply that the gate skips",
+);
+assert.match(
+  periodicCertificationClaims,
+  /historical\/diagnostic|historique\/diagnostique/iu,
+  "working-tree periodic applies must remain explicitly historical/diagnostic",
+);
+assert.match(
+  periodicCertificationClaims,
+  /no full periodic certification|aucune certification périodique complète/iu,
+  "the candidate documentation must not claim full periodic certification",
+);
+assert.match(
+  operonCandidateEvidenceDocs.map(([, content]) => content).join("\n"),
+  /exact-SHA|SHA exact|clean final SHA|SHA final propre/iu,
+  "the Operon 3.6 candidate documentation must preserve the exact-SHA release boundary",
+);
 assert.match(
   matrix,
   /not forced into read-only mode solely because its product[\s\S]{0,30}version is unknown/iu,
@@ -252,8 +380,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.1.2",
-  "package metadata must match the 3.1.2 cold-negotiation Operon release",
+  "3.2.0",
+  "package metadata must match the 3.2.0 Operon 3.6 candidate",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
@@ -329,6 +457,21 @@ assert.doesNotMatch(
   /POST \/tasks\/:operonId\/periodic-scheduling/u,
   "Operon REST documentation must not revive the obsolete periodic-scheduling route",
 );
+assert.match(
+  operonRestContract,
+  /direct REST boundary rejects `fields\.dateScheduled` before it creates an idempotency reservation or requests a native preview\/apply/iu,
+  "standard task creation must reject scheduled dates before native coordination",
+);
+assert.match(
+  operonRestContract,
+  /direct REST boundary rejects `patch\.fields\.dateScheduled` before it creates an idempotency reservation or requests a native preview\/apply/iu,
+  "generic updates must reject scheduled dates before native coordination",
+);
+assert.match(
+  operonRestContract,
+  /direct REST boundary rejects `changes\.dateScheduled` before it creates an idempotency reservation or requests a native preview\/apply/iu,
+  "recurrence updates must reject scheduled dates before native coordination",
+);
 assert.match(operonRestContract, /POST \/mutations\/recover/u);
 assert.match(operonRestContract, /POST \/task-workflows\/recover/u);
 assert.match(
@@ -350,14 +493,49 @@ assert.doesNotMatch(operonAudit, /acceptance remains pending/i);
 assert.doesNotMatch(operonAuditFr, /acceptation (?:live )?reste en attente/i);
 assert.match(operonAudit, /no\s+residual relationship\/recurrence state/i);
 assert.match(operonAuditFr, /aucun résidu/i);
+assert.match(operonAudit, /Task Editor deletion remains `SKIP`/u);
+assert.match(operonAuditFr, /suppression Task Editor reste `SKIP`/u);
+assert.match(operonAudit, /Parent-date expansion remains `SKIP`/u);
+assert.match(operonAuditFr, /dates parent reste `SKIP`/u);
+assert.match(
+  operonLocalValidation,
+  /npm run test:operon-36-behavior-contract/u,
+);
+assert.match(operonLocalValidation, /npm run smoke:operon-36-behaviors-live/u);
+assert.match(operonLocalValidation, /validation P0\/P1\/P2/u);
+assert.match(
+  operonLocalValidation,
+  /working-tree diagnostic run \(not accepted release evidence\)/iu,
+);
+assert.match(operonLocalValidation, /exact release SHA/iu);
 assert.match(operonContract, /generic CLI passthrough/i);
 assert.match(operonContractFr, /passthrough CLI générique/i);
 assert.match(operonContract, /structured unavailable result/i);
 assert.match(operonContractFr, /indisponibilité structurée/i);
+assert.match(
+  operonContract,
+  /only MCP tool that sets or clears `dateScheduled` on an existing task/iu,
+  "English Operon contract must route existing-task dateScheduled changes only through the periodic tool",
+);
+assert.match(
+  operonContractFr,
+  /seul outil MCP pour modifier ensuite ce champ/iu,
+  "French Operon contract must route existing-task dateScheduled changes only through the periodic tool",
+);
+for (const content of [
+  await text("docs/obsidian_mcp_tools_spec.md"),
+  await text(
+    "profiles/elysia-tasks/skills/elysia-task-gouverneur/references/operations-ponctuelles.md",
+  ),
+]) {
+  assert.match(content, /dateScheduled/u);
+  assert.match(content, /operon_update_periodic_scheduling/u);
+  assert.match(content, /operon_update_task/u);
+}
 for (const content of [operonContract, operonAudit]) {
   assert.match(content, /Operon `3\.5\.3`/u);
   assert.match(content, /Operon CLI `1\.2\.0`/u);
-  assert.match(content, /Bridge\s+`0\.8\.2`/u);
+  assert.match(content, /Bridge\s+`0\.8\.3`/u);
   assert.match(content, /compatible-provisional/u);
   assert.match(content, /opaque sealed\s+plan/iu);
   assert.match(content, /(?:same-plan|même\s+plan)/iu);
@@ -367,7 +545,7 @@ for (const content of [operonContract, operonAudit]) {
 for (const content of [operonContractFr, operonAuditFr]) {
   assert.match(content, /Operon `3\.5\.3`/u);
   assert.match(content, /Operon CLI `1\.2\.0`/u);
-  assert.match(content, /Bridge\s+`0\.8\.2`/u);
+  assert.match(content, /Bridge\s+`0\.8\.3`/u);
   assert.match(content, /compatible-provisional/u);
   assert.match(content, /plan opaque\s+scellé/iu);
   assert.match(content, /(?:same-plan|même\s+plan)/iu);
@@ -384,7 +562,9 @@ assert.match(operonContractFr, /chaînes scalaires/u);
 assert.match(operonContractFr, /tableau ordonné/u);
 for (const content of [operonContract, operonRestContract]) {
   assert.match(content, /reserv(?:e|es).*atomically/isu);
-  assert.match(content, /version[- ]1 journal/iu);
+  assert.match(content, /version[- ]2 journal/iu);
+  assert.match(content, /proven-pre-dispatch/u);
+  assert.match(content, /version-1.*unknown-or-dispatched/isu);
   assert.match(content, /500 entries/iu);
   assert.match(content, /30 days/iu);
   assert.match(content, /in-progress.*outcome-unknown/isu);
@@ -403,7 +583,9 @@ for (const content of [operonContract, operonRestContract]) {
   assert.match(content, /compatible-provisional/u);
 }
 assert.match(operonContractFr, /réserve.*atomiquement/isu);
-assert.match(operonContractFr, /journal version 1/iu);
+assert.match(operonContractFr, /journal version 2/iu);
+assert.match(operonContractFr, /provenance de dispatch/iu);
+assert.match(operonContractFr, /entrées version 1.*unknown-or-dispatched/isu);
 assert.match(operonContractFr, /500 entrées/iu);
 assert.match(operonContractFr, /30 jours/iu);
 assert.match(operonContractFr, /in-progress.*outcome-unknown/isu);

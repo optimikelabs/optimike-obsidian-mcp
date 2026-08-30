@@ -1,9 +1,11 @@
 # Operon integration decision report
 
-## Current release — 2026-08-25
+## 3.2.0 candidate admission — 2026-08-30
 
-Optimike MCP `3.1.2` and Bridge `0.8.2` target official Operon `3.5.3` with
-Operon CLI `1.2.0`. The release preserves ordered `taskGallery` values,
+The Optimike MCP `3.2.0` candidate and Bridge `0.8.3` target official Operon
+`3.6.0`, Operon CLI `1.2.0` and Local REST API `5.1.0`. This is not yet a
+published Optimike MCP release, and only an exact-SHA Pilot 2 run after a clean
+rebuild is release evidence. The candidate preserves ordered `taskGallery` values,
 keeps `taskType` and `taskImage` scalar, rejects writes to `__taskDataType`, and
 adds two bounded Daily/Weekly operations. Official adoption and periodic
 workflows negotiate their exact additive grants on first use; missing grants fail closed and
@@ -22,11 +24,36 @@ degraded status and became live after Pilot 2 opened. The final patched
 candidate (`#182` + `#183` + `#184`, combined code head `4412a20`, local
 attested manifest version `3.5.240438`) also passed the
 complete canary with exact restoration, zero retained periodic artifacts and
-zero pending recoveries. Operon `3.5.3` ships superseding implementations of
-those fixes. The stock 3.5.3 artifact and Bridge 0.8.1 subsequently passed the
-same complete Pilot 2 gate, including exact restoration and zero retained
-periodic artifacts. The detailed execution journal lives in
-[the local validation recipe](operon-local-validation.md).
+zero pending recoveries. Operon `3.5.3` historically ships superseding
+implementations of those fixes. Working-tree Pilot 2 runs subsequently exercised
+stock Operon `3.6.0` with Bridge `0.8.3`, including startup-order continuity on
+one MCP connection, mutation/replay/stale-conflict/recovery, adoption,
+Frontmatter Date Manager settlement, zero validation violations and exact
+restoration. Periodic runs are historical/diagnostic only: the exact-SHA canary
+performs periodic preview and exact-grant negotiation but skips periodic applies
+because the public plan exposes no pre-apply task-source path
+(`public_task_source_projection_unavailable`). The tools remain available; this
+is a destructive-canary containment/certification boundary, not full periodic
+certification. The upstream public path projection is a nonblocking follow-up.
+Those runs are diagnostic rather than evidence for the final
+candidate SHA. The exact release gate and execution journal live in [the local
+validation recipe](operon-local-validation.md).
+
+The `3.6.0` public Developer API V1 contract directory is unchanged from
+`3.5.3`, so its provisional admission remains contract-first rather than a
+product-version allowlist. Its Task Editor relation cleanup, Scheduled Date on
+blocked tasks and opt-in parent-date expansion are observable product behavior.
+The dedicated working-tree Pilot 2 gate historically exercised the Scheduled
+Date case through the periodic workflow while preserving `blockedBy` and inverse
+`blocking`, then restored the fixture and removed the run-owned periodic parent
+artifact. This apply is historical/diagnostic evidence only. The exact-SHA
+release canary does not repeat Scheduled Date apply: it performs periodic preview
+and exact-grant negotiation, then records `SKIP` with reason
+`public_task_source_projection_unavailable` because the public plan exposes no
+pre-apply task-source path. Task Editor deletion is explicitly `SKIP` without a
+public delete surface, and parent-date expansion is explicitly `SKIP` while the
+public configuration does not announce the opt-in automation as active. These
+are bounded behavior results, not broadened MCP postflight acceptance.
 
 ## Historical status — 2026-08-17
 
@@ -139,8 +166,9 @@ reconciliation remains fixture evidence, not part of this live acceptance
 claim.
 
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
-remain historical. The current target is Operon `3.5.3` with Bridge `0.8.2`;
-CLI `1.2.0` is the paired operator-reference target.
+remain historical. The `3.5.3` / Bridge `0.8.2` evidence is historical;
+Optimike MCP `3.2.0` targets Operon `3.6.0`, Bridge `0.8.3` and CLI `1.2.0`,
+subject to its exact-SHA release gate.
 
 ## Deliberately excluded or unavailable
 
@@ -162,9 +190,11 @@ for rollback until a separate non-dependency proof authorizes removal.
 
 The 3.1.1 implementation is released from merge commit
 `77322f84903fddfdc1bb056981b997a96bdeebca`. Its stock Operon 3.5.3 / Bridge
-0.8.1 Pilot 2 evidence remains valid. Bridge 0.8.2 has repeated the complete
+0.8.1 Pilot 2 evidence remains valid. Bridge 0.8.2 repeated the complete
 Pilot 2 canary with exact fixture and inventory restoration, zero validation
 violations, zero pending recoveries and zero retained periodic artifacts while
-adding cold first-use negotiation for the exact additive workflow grant. The
+adding cold first-use negotiation for the exact additive workflow grant.
+Bridge 0.8.3 is the current 3.2.0 candidate and preserves those gates while
+hardening public failure and replay semantics. The
 separate real
 Sync/non-dependency decision remains outside this integration scope.
