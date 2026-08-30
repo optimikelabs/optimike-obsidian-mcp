@@ -90,8 +90,14 @@ function parseMcpPayload(result, label) {
   }
 }
 
-async function run(command, args, label, timeoutMs = 120_000) {
-  const child = spawn(command, args, {
+export async function runCanaryCommand(
+  command,
+  args,
+  label,
+  timeoutMs = 120_000,
+  { terminateOnTimeout = false, spawnProcess = spawn } = {},
+) {
+  const child = spawnProcess(command, args, {
     cwd: PROJECT_ROOT,
     env: process.env,
     shell: false,
@@ -106,24 +112,45 @@ async function run(command, args, label, timeoutMs = 120_000) {
   child.stderr.on("data", (chunk) => {
     if (stderr.length < 16_384) stderr += chunk.toString("utf8");
   });
-  let timeout;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => {
-      child.unref();
-      reject(new Error(`${label} timed out.`));
-    }, timeoutMs);
+  const completion = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) => resolve(code));
   });
   let exitCode;
-  try {
-    exitCode = await Promise.race([
-      new Promise((resolve, reject) => {
-        child.once("error", reject);
-        child.once("exit", (code) => resolve(code));
-      }),
-      timeoutPromise,
-    ]);
-  } finally {
-    clearTimeout(timeout);
+  if (terminateOnTimeout) {
+    let timedOut = false;
+    let terminateTimer;
+    let hardStopTimer;
+    const hardStop = new Promise((_, reject) => {
+      terminateTimer = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, timeoutMs);
+      hardStopTimer = setTimeout(() => {
+        child.unref();
+        reject(new Error(`${label} did not exit after timeout termination.`));
+      }, timeoutMs + 5_000);
+    });
+    try {
+      exitCode = await Promise.race([completion, hardStop]);
+    } finally {
+      clearTimeout(terminateTimer);
+      clearTimeout(hardStopTimer);
+    }
+    if (timedOut) throw new Error(`${label} timed out and was terminated.`);
+  } else {
+    let timeout;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeout = setTimeout(() => {
+        child.unref();
+        reject(new Error(`${label} timed out.`));
+      }, timeoutMs);
+    });
+    try {
+      exitCode = await Promise.race([completion, timeoutPromise]);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
   if (exitCode !== 0) {
     throw new Error(
@@ -136,23 +163,24 @@ async function run(command, args, label, timeoutMs = 120_000) {
 async function runNpm(args, label) {
   const npmExecPath = process.env.npm_execpath?.trim();
   if (npmExecPath) {
-    return run(process.execPath, [npmExecPath, ...args], label);
+    return runCanaryCommand(process.execPath, [npmExecPath, ...args], label);
   }
-  return run("npm", args, label);
+  return runCanaryCommand("npm", args, label);
 }
 
 async function runGit(args, label) {
-  return run("git", args, label, 30_000);
+  return runCanaryCommand("git", args, label, 30_000);
 }
 
 async function runObsidianEval(code, label) {
   const command =
     process.env.BRIDGE_LIFECYCLE_OBSIDIAN_CLI?.trim() || "obsidian";
-  return run(
+  return runCanaryCommand(
     command,
     ["eval", `vault=${EXPECTED_VAULT_NAME}`, `code=${code}`],
     label,
     45_000,
+    { terminateOnTimeout: true },
   );
 }
 
@@ -327,7 +355,7 @@ async function main() {
   };
   let transport;
   let client;
-  let localRestDisabled = false;
+  let localRestRestoreRequired = false;
   let success = false;
   const evidencePath = path.join(
     os.tmpdir(),
@@ -376,11 +404,11 @@ async function main() {
       true,
     );
 
+    localRestRestoreRequired = true;
     await runObsidianEval(
       "(async()=>{await app.plugins.disablePlugin('obsidian-local-rest-api');return 'disabled';})()",
       "disable Local REST API",
     );
-    localRestDisabled = true;
     await waitForLocalRestClosed(baseUrl);
 
     const degradedResult = await client.callTool({
@@ -401,8 +429,8 @@ async function main() {
       "(async()=>{await app.plugins.enablePlugin('obsidian-local-rest-api');return 'enabled';})()",
       "enable Local REST API",
     );
-    localRestDisabled = false;
     const after = await waitForRoutes(baseUrl, apiKey);
+    localRestRestoreRequired = false;
     for (const bridge of BRIDGES) {
       assertLifecycle(after[bridge.id], bridge, before[bridge.id]);
       evidence.bridges[bridge.id] = {
@@ -436,11 +464,18 @@ async function main() {
     evidence.localRestRestored = true;
     success = true;
   } finally {
-    if (localRestDisabled) {
-      await runObsidianEval(
-        "(async()=>{await app.plugins.enablePlugin('obsidian-local-rest-api');return 'enabled';})()",
-        "restore Local REST API",
-      ).catch(() => undefined);
+    let restorationError;
+    if (localRestRestoreRequired) {
+      try {
+        await runObsidianEval(
+          "(async()=>{await app.plugins.enablePlugin('obsidian-local-rest-api');return 'enabled';})()",
+          "restore Local REST API",
+        );
+        await waitForRoutes(baseUrl, apiKey);
+        evidence.localRestRestored = true;
+      } catch {
+        restorationError = new Error("Local REST API restoration failed.");
+      }
     }
     await client?.close().catch(() => undefined);
     evidence.ok = success && evidence.localRestRestored;
@@ -451,15 +486,21 @@ async function main() {
       "utf8",
     );
     console.log(`Evidence: ${evidencePath}`);
+    if (restorationError) throw restorationError;
   }
   console.log(
     "PASS: all three Bridges remounted after Local REST reload on one MCP client.",
   );
 }
 
-main().catch((error) => {
-  console.error(
-    `FAIL: ${error instanceof Error ? error.message : String(error)}`,
-  );
-  process.exitCode = 1;
-});
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
+) {
+  main().catch((error) => {
+    console.error(
+      `FAIL: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  });
+}
