@@ -830,6 +830,56 @@ test("Bases headless lifecycle follows Bases API disable and reload", async () =
   assert.equal(providers[1].cleanups, 1);
 });
 
+test("Bases public headless lifecycle fences the active core provider generation", async () => {
+  const { loadedModule } = await loadBridgeModule();
+  const Bridge = loadedModule.exports.default;
+  const records = [];
+  const makeProvider = () => {
+    const record = { registrations: new Map(), mounts: 0, cleanups: 0 };
+    records.push(record);
+    return record;
+  };
+  let activeProvider = makeProvider();
+  const bridge = new Bridge();
+  bridge.app = {
+    internalPlugins: {
+      getEnabledPluginById: (id) =>
+        id === "bases" ? activeProvider : null,
+    },
+  };
+  bridge.registerBasesView = function (viewType, spec) {
+    const provider = this.app.internalPlugins.getEnabledPluginById("bases");
+    if (!provider) return false;
+    provider.mounts += 1;
+    provider.registrations.set(viewType, spec);
+    this.register(() => {
+      provider.cleanups += 1;
+      provider.registrations.delete(viewType);
+    });
+    return true;
+  };
+
+  bridge.maybeRegisterHeadlessView();
+  assert.equal(bridge.headlessLifecycle.snapshot().mountGeneration, 1);
+  assert.equal(records[0].mounts, 1);
+  assert.equal(records[0].registrations.has("bases-bridge-headless"), true);
+
+  bridge.headlessLifecycle.probeNow();
+  assert.equal(records[0].mounts, 1, "same provider must not remount");
+
+  activeProvider = makeProvider();
+  bridge.headlessLifecycle.probeNow();
+  assert.equal(records[0].cleanups, 1);
+  assert.equal(records[0].registrations.size, 0);
+  assert.equal(records[1].mounts, 1);
+  assert.equal(bridge.headlessLifecycle.snapshot().mountGeneration, 2);
+  assert.equal(bridge.headlessLifecycle.snapshot().unloadGeneration, 1);
+
+  bridge.headlessLifecycle.stop();
+  assert.equal(records[1].cleanups, 1);
+  assert.equal(records[1].registrations.size, 0);
+});
+
 test("Bases engine toggle retains a failed headless cleanup fence", async () => {
   const { loadedModule } = await loadBridgeModule();
   const Bridge = loadedModule.exports.default;

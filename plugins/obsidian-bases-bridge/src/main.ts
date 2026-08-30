@@ -781,9 +781,21 @@ function splitTopLevelCommas(input: string): string[] {
 export default class BasesBridgePlugin extends Plugin {
   settings: BridgeSettings = { ...DEFAULT_SETTINGS };
   private headlessMounted = false;
+  private headlessRegistrationCollector:
+    | ((cleanup: () => void) => void)
+    | null = null;
   private bindingFingerprint = "";
   private restLifecycle: RestExtensionLifecycle<object> | null = null;
   private headlessLifecycle: RestExtensionLifecycle<object> | null = null;
+
+  register(cleanup: () => void): void {
+    const collector = this.headlessRegistrationCollector;
+    if (collector) {
+      collector(cleanup);
+      return;
+    }
+    super.register(cleanup);
+  }
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -909,7 +921,18 @@ export default class BasesBridgePlugin extends Plugin {
     this.headlessLifecycle = new RestExtensionLifecycle({
       probe: () => {
         const selfRegister: any = (this as any).registerBasesView;
-        if (typeof selfRegister === "function") return this;
+        const coreBases = (this.app as any).internalPlugins
+          ?.getEnabledPluginById?.("bases");
+        if (
+          typeof selfRegister === "function" &&
+          coreBases &&
+          typeof coreBases === "object"
+        ) {
+          // Plugin.registerBasesView() resolves this exact enabled core
+          // provider internally. Its object/registry survives a fast OFF/ON;
+          // a genuine provider replacement changes the lifecycle fence.
+          return coreBases;
+        }
         const basesPlugin =
           (this.app as any).plugins?.plugins?.bases ??
           (this.app as any).plugins?.plugins?.["obsidian-bases"] ??
@@ -925,15 +948,24 @@ export default class BasesBridgePlugin extends Plugin {
       },
       mount: (provider: any) => {
         const selfRegister: any = (this as any).registerBasesView;
-        const registration =
-          provider === this && typeof selfRegister === "function"
-            ? selfRegister.call(this, VIEW_TYPE, this.makeHeadlessSpec())
-            : provider.registerBasesView(
-                this,
-                VIEW_TYPE,
-                this.makeHeadlessSpec(),
-              );
-        const cleanup = cleanupOf(registration);
+        const activeCoreBases = (this.app as any).internalPlugins
+          ?.getEnabledPluginById?.("bases");
+        let cleanup: (() => void) | null = null;
+        if (
+          typeof selfRegister === "function" &&
+          provider === activeCoreBases
+        ) {
+          cleanup = this.registerHeadlessThroughPublicApi(selfRegister);
+        } else {
+          const registration = provider.registerBasesView(
+            this,
+            VIEW_TYPE,
+            this.makeHeadlessSpec(),
+          );
+          if (registration === false) return null;
+          cleanup = cleanupOf(registration);
+        }
+        if (!cleanup) return null;
         this.headlessMounted = true;
         console.log("[bases-bridge] Headless view mounted.");
         return () => {
@@ -948,6 +980,42 @@ export default class BasesBridgePlugin extends Plugin {
       this.stopHeadlessLifecycle();
     });
     this.headlessLifecycle.start();
+  }
+
+  private registerHeadlessThroughPublicApi(
+    registerBasesView: (viewType: string, spec: unknown) => boolean,
+  ): (() => void) | null {
+    let capturedCleanup: (() => void) | null = null;
+    this.headlessRegistrationCollector = (cleanup) => {
+      if (capturedCleanup) {
+        throw new Error("Bases view registration returned multiple cleanups.");
+      }
+      capturedCleanup = cleanup;
+    };
+    try {
+      const accepted = registerBasesView.call(
+        this,
+        VIEW_TYPE,
+        this.makeHeadlessSpec(),
+      );
+      if (!accepted) {
+        if (capturedCleanup) {
+          throw new RestExtensionPartialMountError(capturedCleanup);
+        }
+        return null;
+      }
+      if (!capturedCleanup) {
+        throw new Error("Bases view registration did not expose cleanup.");
+      }
+      return capturedCleanup;
+    } catch (error) {
+      if (capturedCleanup) {
+        throw new RestExtensionPartialMountError(capturedCleanup);
+      }
+      throw error;
+    } finally {
+      this.headlessRegistrationCollector = null;
+    }
   }
 
   private stopHeadlessLifecycle(): void {
