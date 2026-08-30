@@ -31,7 +31,7 @@ assert.ok(localRestBaseUrl, "OBSIDIAN_BASE_URL is required.");
 assert.ok(vault, "OBSIDIAN_VAULT must identify the disposable Pilot 2 vault.");
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
-assert.equal(packageJson.version, "3.4.0");
+assert.equal(packageJson.version, "3.5.0");
 const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: process.cwd(),
   encoding: "utf8",
@@ -196,7 +196,7 @@ try {
         arguments: {},
       }),
     );
-    assert.equal(statuses[profile].runtime.packageVersion, "3.4.0");
+    assert.equal(statuses[profile].runtime.packageVersion, "3.5.0");
     assert.equal(statuses[profile].capabilityManifest.contractVersion, 1);
     assert.equal(statuses[profile].capabilityManifest.profile, profile);
     assert.equal(statuses[profile].capabilityManifest.registrationMode, "live");

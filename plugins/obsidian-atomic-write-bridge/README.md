@@ -38,7 +38,8 @@ Version 0.4.0 adds the separate Canvas read/CAS capability and write gate. It
 does not make the legacy filesystem Canvas helper durable or governed; the MCP
 must still compile a bounded graph intent and seal it before calling CAS.
 
-Version 0.5.0 permanently supervises Local REST registration. Late startup or
+Version 0.5.1 permanently supervises Local REST registration and is distributed
+through the exact-SHA Optimike Bridge bundle. Late startup or
 a Local REST reload remounts exactly one route generation without restarting
 the MCP. The status `lifecycle` field reports registration only and never
 changes the independent Note/Frontmatter or Canvas write gates.

@@ -1,12 +1,12 @@
 # Obsidian Bases Bridge
 
-Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « Bridge (Headless) » et étend **Obsidian Local REST API** avec des routes spécialisées pour les fichiers `.base`. Depuis 1.1.0, il fournit aussi un CAS typé lié au coffre pour la surface gouvernée de formules. La version 1.2.0 supervise durablement Local REST et la vue headless : un démarrage tardif ou un reload remonte une seule génération sans redémarrer le MCP et sans modifier les gates d’écriture.
+Plugin compagnon pour **optimike-obsidian-mcp**. Il ajoute une vue headless « Bridge (Headless) » et étend **Obsidian Local REST API** avec des routes spécialisées pour les fichiers `.base`. Depuis 1.1.0, il fournit aussi un CAS typé lié au coffre pour la surface gouvernée de formules. La version 1.2.1 supervise durablement Local REST et la vue headless, et est distribuée dans le bundle Optimike exact-SHA : un démarrage tardif ou un reload remonte une seule génération sans redémarrer le MCP et sans modifier les gates d’écriture.
 
 ## Installation rapide
 
 1. Télécharger l’artefact CI `obsidian-bases-bridge`, ou construire le plugin avec `npm ci` puis `npm run check` dans ce dossier.
 2. Créer `.obsidian/plugins/obsidian-bases-bridge/` et y copier `main.js` et `manifest.json` depuis l’artefact ou depuis `build/`.
-3. Lancer Obsidian → *Settings → Community plugins* → activer **Bases Bridge (REST)**.
+3. Lancer Obsidian → _Settings → Community plugins_ → activer **Bases Bridge (REST)**.
 4. Vérifier que le plugin **Local REST API** est actif (v3.x) et que le coffre est autorisé.
 5. Dans chaque base ciblée, activer la vue « Bridge (Headless) » pour profiter des valeurs évaluées par l’engine.
 

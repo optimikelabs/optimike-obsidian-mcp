@@ -1,0 +1,57 @@
+name: Bridge Packaging P3
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "plugins/obsidian-operon-bridge/**"
+      - "plugins/obsidian-atomic-write-bridge/**"
+      - "plugins/obsidian-bases-bridge/**"
+      - "scripts/*bridge-bundle*"
+      - "scripts/*bridge-packaging*"
+      - "scripts/verify-bridge-release-assets.mjs"
+      - "docs/bridge-packaging*.md"
+      - "README*.md"
+      - "OPERATIONS*.md"
+      - "CHANGELOG.md"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/bridge-packaging-p3.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Install Operon Bridge dependencies
+        run: npm --prefix plugins/obsidian-operon-bridge ci
+      - name: Install Atomic Write Bridge dependencies
+        run: npm --prefix plugins/obsidian-atomic-write-bridge ci
+      - name: Install Bases Bridge dependencies
+        run: npm --prefix plugins/obsidian-bases-bridge ci
+      - name: Test transactional installer and rollback
+        run: npm run test:bridge-package
+      - name: Test documentation contract
+        run: node scripts/test-bridge-packaging-doc-contract.mjs
+      - name: Build exact-SHA release bundle
+        run: npm run package:bridge-bundle
+      - name: Upload verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimike-bridge-bundle-${{ runner.os }}
+          path: out/bridge-release/*
+          if-no-files-found: error

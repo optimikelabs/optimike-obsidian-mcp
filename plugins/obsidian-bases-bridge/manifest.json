@@ -1,7 +1,7 @@
 {
   "id": "obsidian-bases-bridge",
   "name": "Bases Bridge (REST)",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "minAppVersion": "1.6.0",
   "author": "Optimike",
   "authorUrl": "https://github.com/mickahouan",

@@ -27,9 +27,10 @@ question.
 | Quel profil serveur d’outils faut-il exposer à un client ?                    | [Profils de surface d’outils](tool-surface-profiles.fr.md)                              |
 | Quels outils existent ?                                                       | [Surface des outils](obsidian_mcp_tools_spec.md)                                        |
 | Quels outils sont disponibles dans chaque runtime ?                           | [Matrice des capacités](runtime-capability-matrix.fr.md)                                |
-| Pourquoi une capacité est-elle masquée, indisponible ou non autorisée ?        | [Doctor des capacités runtime](capability-doctor.fr.md)                                 |
+| Pourquoi une capacité est-elle masquée, indisponible ou non autorisée ?       | [Doctor des capacités runtime](capability-doctor.fr.md)                                 |
 | Comment lancer et maintenir le service ?                                      | [Exploitation](../OPERATIONS.fr.md)                                                     |
 | Comment les Bridges récupèrent-ils après un démarrage ou reload Local REST ?  | [Récupération du lifecycle](bridge-lifecycle.fr.md)                                     |
+| Comment installer, mettre à niveau ou restaurer les trois Bridges ?           | [Bundle des Bridges et rollback](bridge-packaging.fr.md)                                |
 | Quel outil un agent doit-il choisir dans son profil ?                         | [Guide de routage](mcp-routing-guide.fr.md)                                             |
 | Comment fonctionner sans Obsidian Desktop ?                                   | [Profil serveur headless](headless-server-profile.fr.md)                                |
 | Comment fonctionnent lecture, handoff, move et réparation de liens externes ? | [Configuration des racines](external-roots-setup.fr.md)                                 |
@@ -70,6 +71,7 @@ Formules Base gouvernées source-preserving : [contrat P2](governed-base-formula
 - modes runtime : [Matrice des capacités](runtime-capability-matrix.fr.md) ;
 - diagnostic live profil/backend/grant : [Doctor des capacités runtime](capability-doctor.fr.md) ;
 - cache, santé et maintenance : [Exploitation](../OPERATIONS.fr.md).
+- bundle de release vérifié et rollback : [Packaging des Bridges](bridge-packaging.fr.md).
 
 ### Documents externes
 

@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A single exact-SHA Bridge bundle now packages the Operon, Atomic Write and
+  Bases Bridges with a versioned manifest, per-file SHA-256 digests and a
+  strict file allowlist that cannot contain `data.json`.
+- The Windows-first installer stages all three Bridges, backs up only managed
+  code files outside the vault, preserves plugin settings and unknown files,
+  and exposes a fenced manual rollback receipt.
+
+### Changed
+
+- Release packaging now emits one zip, one public manifest and `SHA256SUMS`.
+  Installation requires an explicit expected commit and confirmation that
+  Obsidian is closed before the first filesystem mutation.
+
+### Validation
+
+- Deterministic tests cover clean install, upgrade, rich Windows paths,
+  tampered hashes, extra files, wrong commits, partial failure with automatic
+  rollback, abrupt-process recovery through its exact stale lock, resumable
+  interrupted rollback, preserved settings and refusal to overwrite
+  post-install drift or a live transaction owner.
+- A dedicated Windows/Linux workflow builds and verifies the bundle; the live
+  gate upgrades Pilot 2, restarts Obsidian, checks the capability doctor,
+  rolls back byte for byte and then reinstalls the exact candidate.
+
+## [3.4.0] - 2026-08-30
+
+### Added
+
 - `obsidian_runtime_status` now includes the versioned, read-only
   `capabilityManifest` contract. It distinguishes tool discoverability,
   backend availability and authorization for Local REST, vault reads,
