@@ -3,7 +3,10 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
-import { runCanaryCommand } from "./smoke-bridge-lifecycle-live.mjs";
+import {
+  runCanaryCommand,
+  waitForHealthyBaseline,
+} from "./smoke-bridge-lifecycle-live.mjs";
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter();
@@ -25,7 +28,6 @@ class FakeChild extends EventEmitter {
 const child = new FakeChild();
 await assert.rejects(
   runCanaryCommand("fixture", [], "destructive fixture", 10, {
-    terminateOnTimeout: true,
     spawnProcess: () => child,
   }),
   /timed out and was terminated/u,
@@ -35,6 +37,39 @@ assert.equal(
   child.unrefs,
   0,
   "the canary must not abandon a mutating CLI that can complete later",
+);
+
+const defaultChild = new FakeChild();
+await assert.rejects(
+  runCanaryCommand("fixture", [], "default fixture", 10, {
+    spawnProcess: () => defaultChild,
+  }),
+  /timed out and was terminated/u,
+);
+assert.equal(
+  defaultChild.kills,
+  1,
+  "build and git subprocesses must share the terminating timeout policy",
+);
+
+let routeAttempts = 0;
+let fakeNow = 0;
+const healthy = await waitForHealthyBaseline("fixture", "redacted", 60_000, {
+  waitForRoutesImpl: async () => {
+    routeAttempts += 1;
+    if (routeAttempts < 3) throw new Error("route still mounting");
+    return { "optimike-operon-bridge": { ok: true } };
+  },
+  now: () => fakeNow,
+  sleepImpl: async (delayMs) => {
+    fakeNow += delayMs;
+  },
+});
+assert.equal(healthy["optimike-operon-bridge"].ok, true);
+assert.equal(
+  routeAttempts,
+  3,
+  "the healthy-baseline gate must retry inner route timeouts",
 );
 
 const source = await readFile(
@@ -53,5 +88,5 @@ assert.match(source, /if \(localRestRestoreRequired\)/u);
 assert.match(source, /await waitForRoutes\(baseUrl, apiKey\)/u);
 
 console.log(
-  "PASS: a timed-out Local REST disable is terminated and remains restoration-fenced",
+  "PASS: canary subprocesses terminate, baseline retries, and restoration remains fenced",
 );

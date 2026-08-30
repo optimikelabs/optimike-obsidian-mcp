@@ -102,8 +102,7 @@ export class RestExtensionLifecycle<Provider extends object> {
     if (!this.running && !this.cleanup) return;
     this.running = false;
     this.clearTimer();
-    this.disposeMount();
-    this.state = "unavailable";
+    this.state = this.disposeMount() ? "unavailable" : "degraded";
     this.nextProbeDelayMs = null;
   }
 
@@ -115,7 +114,12 @@ export class RestExtensionLifecycle<Provider extends object> {
     try {
       const provider = this.options.probe();
       if (!provider) {
-        this.disposeMount();
+        if (!this.disposeMount()) {
+          this.state = "degraded";
+          this.consecutiveFailures += 1;
+          this.scheduleRetry();
+          return;
+        }
         this.state = "unavailable";
         this.consecutiveFailures += 1;
         this.scheduleRetry();
@@ -129,7 +133,12 @@ export class RestExtensionLifecycle<Provider extends object> {
         return;
       }
 
-      this.disposeMount();
+      if (!this.disposeMount()) {
+        this.state = "degraded";
+        this.consecutiveFailures += 1;
+        this.scheduleRetry();
+        return;
+      }
       this.state = "mounting";
       const cleanup = this.options.mount(provider);
       if (!cleanup) {
@@ -166,19 +175,21 @@ export class RestExtensionLifecycle<Provider extends object> {
     };
   }
 
-  private disposeMount(): void {
+  private disposeMount(): boolean {
     const cleanup = this.cleanup;
     if (!cleanup) {
       this.provider = null;
-      return;
+      return true;
     }
-    this.cleanup = null;
-    this.provider = null;
-    this.unloadGeneration += 1;
     try {
       cleanup();
+      this.cleanup = null;
+      this.provider = null;
+      this.unloadGeneration += 1;
+      return true;
     } catch {
       this.onCleanupError();
+      return false;
     }
   }
 

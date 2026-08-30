@@ -18,8 +18,11 @@ sans redémarrer.
   montée. Le même provider n’est jamais enregistré deux fois.
 - Si le provider disparaît ou change d’identité objet, l’ancienne extension est
   désenregistrée avant de monter la nouvelle.
-- Les échecs de montage ou de nettoyage sont contenus. Ils n’activent aucune
-  écriture et ne modifient aucun grant Operon.
+- Les échecs de montage ou de nettoyage sont contenus. Un nettoyage en échec
+  maintient l’ancienne génération sous fence en état `degraded`, n’incrémente
+  pas `unloadGeneration` et interdit le montage du remplacement jusqu’à la
+  réussite de ce même nettoyage. Aucun échec n’active d’écriture ni ne modifie
+  un grant Operon.
 - L’arrêt ou la désactivation d’un Bridge annule son timer et désenregistre son
   extension courante.
 
@@ -83,5 +86,8 @@ npm run smoke:bridge-lifecycle-live
 Le script exige un worktree propre et vérifie que les bundles et manifests des
 trois Bridges installés sont identiques au candidat local exact. Il écrit un
 reçu JSON expurgé dans le dossier temporaire du système et affiche son chemin
-exact. Après une interruption nécessitant une restauration, réactiver Local
-REST API dans les Community Plugins de Pilot 2 avant tout autre test.
+exact. Chaque processus build, Git ou CLI Obsidian lancé est terminé puis
+attendu si son délai expire ; la fence de restauration Local REST est armée
+avant la commande de désactivation. Après une interruption nécessitant une
+restauration, réactiver Local REST API dans les Community Plugins de Pilot 2
+avant tout autre test.

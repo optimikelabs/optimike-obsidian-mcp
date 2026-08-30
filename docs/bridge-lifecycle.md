@@ -17,8 +17,10 @@ survive an Obsidian or Local REST API reload without being restarted.
   lifecycle. The same provider is never registered twice.
 - When the provider disappears or its object identity changes, the old
   extension is unregistered before the replacement is mounted.
-- Mount and cleanup failures are contained. They never enable writes or change
-  an Operon grant.
+- Mount and cleanup failures are contained. A failed cleanup keeps the old
+  generation fenced in `degraded`, does not advance `unloadGeneration`, and
+  blocks replacement mounting until that same cleanup succeeds. Failures
+  never enable writes or change an Operon grant.
 - Stopping or disabling a Bridge cancels its timer and unregisters its current
   extension.
 
@@ -78,5 +80,8 @@ npm run smoke:bridge-lifecycle-live
 The script requires a clean worktree and verifies that all three installed
 Bridge bundles and manifests equal the exact local candidate. It writes a
 redacted JSON receipt to the operating-system temporary directory and prints
-the exact path. If cleanup is needed after an interruption, re-enable Local
-REST API in the Pilot 2 Community Plugins settings before any other test.
+the exact path. Every spawned build, Git, or Obsidian CLI process is terminated
+and awaited if its timeout expires; the Local REST restoration fence is armed
+before the disable command. If cleanup is needed after an interruption,
+re-enable Local REST API in the Pilot 2 Community Plugins settings before any
+other test.

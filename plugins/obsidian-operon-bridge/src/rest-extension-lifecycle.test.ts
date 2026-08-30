@@ -120,3 +120,45 @@ test("mount failures remain fail-closed and recover without overlapping timers",
   assert.equal(timers.size(), 1);
   lifecycle.stop();
 });
+
+test("failed cleanup is fenced until the same mount is actually removed", () => {
+  const timers = deterministicTimers();
+  const first = {};
+  const second = {};
+  let provider: object | null = first;
+  let mounts = 0;
+  let cleanupAttempts = 0;
+  let cleanupFailures = 0;
+  const lifecycle = new RestExtensionLifecycle<object>({
+    probe: () => provider,
+    mount: () => {
+      mounts += 1;
+      return () => {
+        cleanupAttempts += 1;
+        if (cleanupAttempts === 1) throw new Error("fixture cleanup failure");
+      };
+    },
+    schedule: timers.schedule,
+    cancel: (timer) => timers.cancel(timer as number),
+    onCleanupError: () => {
+      cleanupFailures += 1;
+    },
+  });
+
+  lifecycle.start();
+  assert.equal(mounts, 1);
+  provider = second;
+  timers.runNext();
+  assert.equal(lifecycle.snapshot().state, "degraded");
+  assert.equal(lifecycle.snapshot().unloadGeneration, 0);
+  assert.equal(mounts, 1, "replacement must wait for confirmed cleanup");
+  assert.equal(cleanupFailures, 1);
+
+  timers.runNext();
+  assert.equal(cleanupAttempts, 2, "the failed cleanup must remain retryable");
+  assert.equal(lifecycle.snapshot().unloadGeneration, 1);
+  assert.equal(lifecycle.snapshot().mountGeneration, 2);
+  assert.equal(lifecycle.snapshot().state, "ready");
+  assert.equal(mounts, 2);
+  lifecycle.stop();
+});

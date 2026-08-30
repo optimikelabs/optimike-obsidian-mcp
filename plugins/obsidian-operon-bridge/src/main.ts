@@ -1018,8 +1018,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           if (!cleanup) return null;
           this.restCleanup = cleanup;
           return () => {
-            if (this.restCleanup === cleanup) this.restCleanup = null;
             cleanup();
+            if (this.restCleanup === cleanup) this.restCleanup = null;
           };
         },
         onCleanupError: () =>
@@ -5627,15 +5627,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       }
     });
 
-    const cleanup = () => {
-      try {
-        api.unregister?.();
-      } catch {
-        console.warn(
-          `[${EXTENSION_ID}] Failed to unregister Local REST API routes.`,
-        );
-      }
-    };
+    const cleanup = () => api.unregister?.();
     console.info(
       `[${EXTENSION_ID}] REST contract v${OPERON_BRIDGE_CONTRACT_VERSION} mounted at ${REST_PREFIX}.`,
     );

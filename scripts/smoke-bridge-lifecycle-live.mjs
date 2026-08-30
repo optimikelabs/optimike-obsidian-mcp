@@ -95,7 +95,7 @@ export async function runCanaryCommand(
   args,
   label,
   timeoutMs = 120_000,
-  { terminateOnTimeout = false, spawnProcess = spawn } = {},
+  { spawnProcess = spawn } = {},
 ) {
   const child = spawnProcess(command, args, {
     cwd: PROJECT_ROOT,
@@ -116,42 +116,29 @@ export async function runCanaryCommand(
     child.once("error", reject);
     child.once("exit", (code) => resolve(code));
   });
+  let timedOut = false;
+  let terminateTimer;
+  let hardStopTimer;
+  const hardStop = new Promise((_, reject) => {
+    terminateTimer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
+    hardStopTimer = setTimeout(() => {
+      child.stdout.destroy?.();
+      child.stderr.destroy?.();
+      child.unref();
+      reject(new Error(`${label} did not exit after timeout termination.`));
+    }, timeoutMs + 5_000);
+  });
   let exitCode;
-  if (terminateOnTimeout) {
-    let timedOut = false;
-    let terminateTimer;
-    let hardStopTimer;
-    const hardStop = new Promise((_, reject) => {
-      terminateTimer = setTimeout(() => {
-        timedOut = true;
-        child.kill();
-      }, timeoutMs);
-      hardStopTimer = setTimeout(() => {
-        child.unref();
-        reject(new Error(`${label} did not exit after timeout termination.`));
-      }, timeoutMs + 5_000);
-    });
-    try {
-      exitCode = await Promise.race([completion, hardStop]);
-    } finally {
-      clearTimeout(terminateTimer);
-      clearTimeout(hardStopTimer);
-    }
-    if (timedOut) throw new Error(`${label} timed out and was terminated.`);
-  } else {
-    let timeout;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeout = setTimeout(() => {
-        child.unref();
-        reject(new Error(`${label} timed out.`));
-      }, timeoutMs);
-    });
-    try {
-      exitCode = await Promise.race([completion, timeoutPromise]);
-    } finally {
-      clearTimeout(timeout);
-    }
+  try {
+    exitCode = await Promise.race([completion, hardStop]);
+  } finally {
+    clearTimeout(terminateTimer);
+    clearTimeout(hardStopTimer);
   }
+  if (timedOut) throw new Error(`${label} timed out and was terminated.`);
   if (exitCode !== 0) {
     throw new Error(
       `${label} exited ${String(exitCode)}: ${stderr.trim().slice(0, 500)}`,
@@ -180,7 +167,6 @@ async function runObsidianEval(code, label) {
     ["eval", `vault=${EXPECTED_VAULT_NAME}`, `code=${code}`],
     label,
     45_000,
-    { terminateOnTimeout: true },
   );
 }
 
@@ -207,16 +193,21 @@ async function waitForRoutes(baseUrl, apiKey, timeoutMs = 60_000) {
   let lastError;
   while (Date.now() < deadline) {
     try {
+      const requestTimeoutMs = Math.max(
+        1,
+        Math.min(5_000, deadline - Date.now()),
+      );
       const entries = await Promise.all(
         BRIDGES.map(async (bridge) => [
           bridge.id,
-          await requestJson(baseUrl, apiKey, bridge.route),
+          await requestJson(baseUrl, apiKey, bridge.route, requestTimeoutMs),
         ]),
       );
       return Object.fromEntries(entries);
     } catch (error) {
       lastError = error;
-      await sleep(500);
+      const remainingMs = deadline - Date.now();
+      if (remainingMs > 0) await sleep(Math.min(500, remainingMs));
     }
   }
   throw new Error(
@@ -224,15 +215,33 @@ async function waitForRoutes(baseUrl, apiKey, timeoutMs = 60_000) {
   );
 }
 
-async function waitForHealthyBaseline(baseUrl, apiKey, timeoutMs = 60_000) {
-  const deadline = Date.now() + timeoutMs;
+export async function waitForHealthyBaseline(
+  baseUrl,
+  apiKey,
+  timeoutMs = 60_000,
+  { waitForRoutesImpl = waitForRoutes, now = Date.now, sleepImpl = sleep } = {},
+) {
+  const deadline = now() + timeoutMs;
   let routes;
-  while (Date.now() < deadline) {
-    routes = await waitForRoutes(baseUrl, apiKey, 5_000);
-    if (routes["optimike-operon-bridge"]?.ok === true) return routes;
-    await sleep(500);
+  let lastError;
+  while (now() < deadline) {
+    const remainingMs = deadline - now();
+    try {
+      routes = await waitForRoutesImpl(
+        baseUrl,
+        apiKey,
+        Math.min(5_000, remainingMs),
+      );
+      if (routes["optimike-operon-bridge"]?.ok === true) return routes;
+    } catch (error) {
+      lastError = error;
+    }
+    const sleepMs = Math.min(500, deadline - now());
+    if (sleepMs > 0) await sleepImpl(sleepMs);
   }
-  throw new Error("Operon did not reach a healthy pre-reload baseline.");
+  throw new Error(
+    `Operon did not reach a healthy pre-reload baseline: ${lastError?.message ?? "timeout"}`,
+  );
 }
 
 async function waitForLocalRestClosed(baseUrl, timeoutMs = 45_000) {

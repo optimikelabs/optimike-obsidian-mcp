@@ -21,6 +21,8 @@ for (const [label, document] of [
   assert.match(document, /5 second|5 secondes/u, `${label} guide omits cap.`);
   assert.match(document, /mountGeneration/u);
   assert.match(document, /unloadGeneration/u);
+  assert.match(document, /degraded/u);
+  assert.match(document, /terminated|terminé/u);
   assert.match(document, /I_CONFIRM_PILOT_2_LOCAL_REST_RELOAD/u);
   assert.match(document, /temporary|temporaire/u);
   assert.doesNotMatch(document, /\.tmp\//u);

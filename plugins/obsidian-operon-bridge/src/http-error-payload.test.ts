@@ -53,12 +53,14 @@ test("Operon Bridge lifecycle remounts one Local REST provider generation", asyn
     api: any;
     handlers: Map<string, Function>;
     unregisters: number;
+    failUnregisters: number;
   }> = [];
   const makeProvider = () => {
     const record = {
       api: undefined as any,
       handlers: new Map<string, Function>(),
       unregisters: 0,
+      failUnregisters: 0,
     };
     record.api = {
       addRoute: (path: string) => {
@@ -76,6 +78,10 @@ test("Operon Bridge lifecycle remounts one Local REST provider generation", asyn
       },
       unregister: () => {
         record.unregisters += 1;
+        if (record.failUnregisters > 0) {
+          record.failUnregisters -= 1;
+          throw new Error("fixture cleanup failure");
+        }
       },
     };
     providers.push(record);
@@ -126,8 +132,13 @@ test("Operon Bridge lifecycle remounts one Local REST provider generation", asyn
   );
 
   delete plugins["obsidian-local-rest-api"];
+  providers[0].failUnregisters = 1;
   bridge.restLifecycle.probeNow();
   assert.equal(providers[0].unregisters, 1);
+  assert.equal(bridge.restLifecycle.snapshot().unloadGeneration, 0);
+  assert.equal(bridge.restLifecycle.snapshot().state, "degraded");
+  bridge.restLifecycle.probeNow();
+  assert.equal(providers[0].unregisters, 2);
   assert.equal(bridge.restLifecycle.snapshot().unloadGeneration, 1);
   plugins["obsidian-local-rest-api"] = makeProvider();
   bridge.restLifecycle.probeNow();
