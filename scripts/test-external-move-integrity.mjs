@@ -1485,6 +1485,287 @@ try {
   assert.equal(await readFile(staleRecoverySource, "utf8"), "stale recovery");
   assert.equal(await exists(staleRecoveryTarget), false);
 
+  // The stdio proxy admits a preloaded receipt only after its binding matches
+  // the active coordinator. If another writer swaps that payload before the
+  // coordinator re-opens its writable journal, status must not use the old
+  // admission to durably reconcile the replacement binding.
+  const crossBindingSource = path.join(rootPath, "cross-binding-snapshot.txt");
+  const crossBindingTarget = path.join(
+    rootPath,
+    "archive/cross-binding-snapshot.txt",
+  );
+  await writeFile(crossBindingSource, "cross binding snapshot", "utf8");
+  const crossBindingUri = pathToFileURL(crossBindingSource).href;
+  const crossBindingNotePath = "Efforts/Projets/Cross binding snapshot.md";
+  const crossBindingNote =
+    `[Cross binding snapshot](${crossBindingUri}) ` +
+    "`external-ref:pilot.move::cross-binding-snapshot.txt`\n";
+  const crossBindingJournal = new ExternalMoveJournal(":memory:");
+  const crossBindingFirstCoordinator = new ExternalMoveCoordinator(
+    service,
+    new FakeVault({ [crossBindingNotePath]: crossBindingNote }),
+    crossBindingJournal,
+  );
+  const crossBindingPlan = await crossBindingFirstCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "cross-binding-snapshot.txt",
+    targetRelativePath: "archive/cross-binding-snapshot.txt",
+    idempotencyKey: "coordinator-cross-binding-status-reload",
+  });
+  crossBindingJournal.transition(
+    crossBindingPlan.planId,
+    ["planned"],
+    "file_moved",
+  );
+  const crossBindingPreloaded = crossBindingJournal.get(
+    crossBindingPlan.planId,
+  );
+  const crossBindingReplacementVault = new FakeVault({
+    [crossBindingNotePath]: crossBindingNote,
+  });
+  // The currently active coordinator still has the binding that admitted the
+  // preloaded receipt; only its process-local session changed.
+  crossBindingReplacementVault.backendGeneration = 2;
+  crossBindingReplacementVault.backendSessionId =
+    "00000000-0000-4000-8000-000000000002";
+  assert.equal(
+    crossBindingPreloaded.bindingIdentity.bindingFingerprint,
+    crossBindingReplacementVault.bindingFingerprint,
+  );
+  const crossBindingCoordinator = new ExternalMoveCoordinator(
+    service,
+    crossBindingReplacementVault,
+    crossBindingJournal,
+  );
+  let crossBindingRootCalls = 0;
+  const crossBindingRootMethods = [
+    "inspectMoveSource",
+    "applyMove",
+    "rollbackMove",
+    "recoverMoveToSource",
+  ];
+  const crossBindingRootOriginals = new Map(
+    crossBindingRootMethods.map((method) => [method, service[method]]),
+  );
+  for (const method of crossBindingRootMethods) {
+    service[method] = (...args) => {
+      crossBindingRootCalls += 1;
+      return crossBindingRootOriginals.get(method).apply(service, args);
+    };
+  }
+  const crossBindingObserve =
+    crossBindingJournal.observe.bind(crossBindingJournal);
+  let crossBindingInjected = false;
+  let crossBindingJournalBytesAfterInjection;
+  const foreignBindingFingerprint = hashText("foreign-coordinator-binding");
+  crossBindingJournal.observe = (planId) => {
+    if (!crossBindingInjected) {
+      crossBindingInjected = true;
+      crossBindingJournal.observe = crossBindingObserve;
+      const foreign = structuredClone(crossBindingObserve(planId).plan);
+      foreign.bindingIdentity = {
+        ...foreign.bindingIdentity,
+        backendFingerprint: hashText("foreign-backend"),
+        vaultFingerprint: hashText("foreign-vault"),
+        rootConfigFingerprint: hashText("foreign-roots"),
+        bindingFingerprint: foreignBindingFingerprint,
+      };
+      foreign.destructiveSession = {
+        generation: 91,
+        sessionId: "00000000-0000-4000-8000-000000000091",
+        bindingFingerprint: foreignBindingFingerprint,
+      };
+      crossBindingJournalBytesAfterInjection = JSON.stringify(foreign);
+      crossBindingJournal.db
+        .prepare(
+          "UPDATE external_move_plans SET payload_json = ? WHERE plan_id = ?",
+        )
+        .run(crossBindingJournalBytesAfterInjection, planId);
+    }
+    return crossBindingObserve(planId);
+  };
+  const crossBindingStatus = crossBindingCoordinator.status(
+    crossBindingPlan.planId,
+    crossBindingPreloaded,
+  );
+  for (const method of crossBindingRootMethods) {
+    service[method] = crossBindingRootOriginals.get(method);
+  }
+  assert.equal(crossBindingInjected, true);
+  assert.equal(crossBindingStatus.status, "recovery_required");
+  assert.equal(crossBindingStatus.nextAction, "manual_review");
+  assert.equal(crossBindingStatus.readyToApply, false);
+  assert.equal(crossBindingStatus.failureCode, "backend_session_changed");
+  assert.equal(
+    JSON.stringify(crossBindingStatus).includes(foreignBindingFingerprint),
+    false,
+  );
+  assert.equal(
+    crossBindingJournal.observe(crossBindingPlan.planId).rawPayload,
+    crossBindingJournalBytesAfterInjection,
+    "status must not mutate a cross-binding journal replacement",
+  );
+  assert.equal(crossBindingReplacementVault.openDestructiveSessionCalls, 0);
+  assert.equal(crossBindingRootCalls, 0);
+  assert.equal(
+    await readFile(crossBindingSource, "utf8"),
+    "cross binding snapshot",
+  );
+  assert.equal(await exists(crossBindingTarget), false);
+
+  // A matching backend binding and process session are necessary but not
+  // sufficient: the sealed operation itself must remain identical. Exercise a
+  // structurally-valid swap that preserves plan ID, idempotency key, binding,
+  // and session while replacing every meaningful move/inventory intent.
+  const intentSwapSource = path.join(rootPath, "intent-swap-manual.txt");
+  const intentSwapTarget = path.join(
+    rootPath,
+    "archive/intent-swap-manual.txt",
+  );
+  await writeFile(intentSwapSource, "intent swap manual", "utf8");
+  const intentSwapUri = pathToFileURL(intentSwapSource).href;
+  const intentSwapNotePath = "Efforts/Projets/Intent swap manual.md";
+  const intentSwapNote =
+    `## Historique\n\n[Intent swap](${intentSwapUri}) ` +
+    "`external-ref:pilot.move::intent-swap-manual.txt`\n";
+  const intentSwapJournal = new ExternalMoveJournal(":memory:");
+  const intentSwapFirstCoordinator = new ExternalMoveCoordinator(
+    service,
+    new FakeVault({ [intentSwapNotePath]: intentSwapNote }),
+    intentSwapJournal,
+  );
+  const intentSwapPlan = await intentSwapFirstCoordinator.plan({
+    rootId: "pilot.move",
+    sourceRelativePath: "intent-swap-manual.txt",
+    targetRelativePath: "archive/intent-swap-manual.txt",
+    idempotencyKey: "coordinator-same-binding-intent-swap",
+  });
+  assert.equal(intentSwapPlan.nextAction, "manual_review");
+  intentSwapJournal.transition(
+    intentSwapPlan.planId,
+    ["planned"],
+    "file_moved",
+  );
+  const intentSwapPreloaded = intentSwapJournal.get(intentSwapPlan.planId);
+  const intentSwapReplacementVault = new FakeVault({
+    [intentSwapNotePath]: intentSwapNote,
+  });
+  // The replacement process has a new live session, so status must reload the
+  // durable partial receipt. The injected receipt itself preserves the original
+  // binding and sealed session, so only the full-operation comparator can
+  // reject its changed intent.
+  intentSwapReplacementVault.backendGeneration = 2;
+  intentSwapReplacementVault.backendSessionId =
+    "00000000-0000-4000-8000-000000000002";
+  const intentSwapCoordinator = new ExternalMoveCoordinator(
+    service,
+    intentSwapReplacementVault,
+    intentSwapJournal,
+  );
+  const intentSwapObserve = intentSwapJournal.observe.bind(intentSwapJournal);
+  let intentSwapInjected = false;
+  let intentSwapJournalBytesAfterInjection;
+  const foreignIntentPath = "Private/foreign-intent-sentinel.md";
+  const foreignIntentUri = "file:///private/foreign-intent-sentinel.txt";
+  intentSwapJournal.observe = (planId) => {
+    if (!intentSwapInjected) {
+      intentSwapInjected = true;
+      intentSwapJournal.observe = intentSwapObserve;
+      const foreign = structuredClone(intentSwapObserve(planId).plan);
+      foreign.createdAt = "2026-08-30T00:00:00.000Z";
+      foreign.snapshot = {
+        rootId: "pilot.move",
+        sourceRelativePath: "foreign-intent-sentinel.txt",
+        targetRelativePath: "archive/foreign-intent-sentinel.txt",
+        size: 7,
+        modifiedAt: "2026-08-30T00:00:00.000Z",
+        sha256: hashText("foreign"),
+      };
+      foreign.sourceToken =
+        "external-ref:pilot.move::foreign-intent-sentinel.txt";
+      foreign.targetToken =
+        "external-ref:pilot.move::archive/foreign-intent-sentinel.txt";
+      foreign.oldFileUri = foreignIntentUri;
+      foreign.newFileUri = `${foreignIntentUri}.moved`;
+      foreign.inventoryDigest = hashText("foreign-intent-inventory");
+      foreign.repairs = [
+        {
+          filePath: foreignIntentPath,
+          expectedSha256: hashText("before foreign intent"),
+          before: "before foreign intent",
+          after: "after foreign intent",
+        },
+      ];
+      foreign.manualReview = [
+        {
+          filePath: foreignIntentPath,
+          reason: foreign.manualReview[0].reason,
+        },
+      ];
+      intentSwapJournalBytesAfterInjection = JSON.stringify(foreign);
+      intentSwapJournal.db
+        .prepare(
+          "UPDATE external_move_plans SET payload_json = ? WHERE plan_id = ?",
+        )
+        .run(intentSwapJournalBytesAfterInjection, planId);
+    }
+    return intentSwapObserve(planId);
+  };
+  let intentSwapRootCalls = 0;
+  const intentSwapRootMethods = [
+    "inspectMoveSource",
+    "applyMove",
+    "rollbackMove",
+    "recoverMoveToSource",
+  ];
+  const intentSwapRootOriginals = new Map(
+    intentSwapRootMethods.map((method) => [method, service[method]]),
+  );
+  for (const method of intentSwapRootMethods) {
+    service[method] = (...args) => {
+      intentSwapRootCalls += 1;
+      return intentSwapRootOriginals.get(method).apply(service, args);
+    };
+  }
+  const intentSwapStatus = intentSwapCoordinator.status(
+    intentSwapPlan.planId,
+    intentSwapPreloaded,
+  );
+  for (const method of intentSwapRootMethods) {
+    service[method] = intentSwapRootOriginals.get(method);
+  }
+  assert.equal(intentSwapInjected, true);
+  assert.equal(intentSwapStatus.status, "recovery_required");
+  assert.equal(intentSwapStatus.nextAction, "manual_review");
+  assert.equal(intentSwapStatus.readyToApply, false);
+  assert.equal(intentSwapStatus.manualReview[0].filePath, intentSwapNotePath);
+  assert.equal(
+    JSON.stringify(intentSwapStatus).includes(foreignIntentPath),
+    false,
+  );
+  assert.equal(
+    JSON.stringify(intentSwapStatus).includes(foreignIntentUri),
+    false,
+  );
+  const intentSwapDurable = intentSwapJournal.observe(intentSwapPlan.planId);
+  assert.equal(
+    intentSwapDurable.plan.bindingIdentity.bindingFingerprint,
+    intentSwapPreloaded.bindingIdentity.bindingFingerprint,
+  );
+  assert.deepEqual(
+    intentSwapDurable.plan.destructiveSession,
+    intentSwapPreloaded.destructiveSession,
+  );
+  assert.equal(
+    intentSwapDurable.rawPayload,
+    intentSwapJournalBytesAfterInjection,
+    "status must not mutate a same-binding/session intent replacement",
+  );
+  assert.equal(intentSwapReplacementVault.openDestructiveSessionCalls, 0);
+  assert.equal(intentSwapRootCalls, 0);
+  assert.equal(await readFile(intentSwapSource, "utf8"), "intent swap manual");
+  assert.equal(await exists(intentSwapTarget), false);
+
   // A stale file-backed snapshot may be overtaken by a terminal executor
   // before status re-opens the writable journal. The later terminal state is
   // authoritative: do not overwrite it and do not advertise its rollback to

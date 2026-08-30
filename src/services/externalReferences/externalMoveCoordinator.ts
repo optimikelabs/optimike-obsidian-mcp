@@ -479,6 +479,78 @@ function hasCurrentDestructiveBinding(plan: ExternalMovePlan): boolean {
   );
 }
 
+/**
+ * A file-backed proxy snapshot may have been admitted only because its binding
+ * matched this coordinator. If the writable journal reload returns another
+ * structurally-valid receipt, it is still not this sealed operation: never let
+ * that replacement receipt inherit the snapshot's authority just because it
+ * uses the same plan ID, binding, or session.
+ */
+function hasSameSealedOperationIdentity(
+  expected: ExternalMovePlan,
+  candidate: ExternalMovePlan,
+): boolean {
+  const sameRepairs =
+    expected.repairs.length === candidate.repairs.length &&
+    expected.repairs.every((repair, index) => {
+      const other = candidate.repairs[index];
+      return (
+        other !== undefined &&
+        repair.filePath === other.filePath &&
+        repair.expectedSha256 === other.expectedSha256 &&
+        repair.before === other.before &&
+        repair.after === other.after
+      );
+    });
+  const sameManualReview =
+    expected.manualReview.length === candidate.manualReview.length &&
+    expected.manualReview.every((item, index) => {
+      const other = candidate.manualReview[index];
+      return (
+        other !== undefined &&
+        item.filePath === other.filePath &&
+        item.reason === other.reason
+      );
+    });
+  return (
+    // Every persisted field is either sealed here or is an explicit mutable
+    // execution outcome: status, updatedAt, failure, recoveryErrors,
+    // appliedRepairPaths, and restoredRepairPaths. Do not make a new durable
+    // reconciliation from a receipt whose original intent changed.
+    expected.planId === candidate.planId &&
+    expected.idempotencyKey === candidate.idempotencyKey &&
+    expected.createdAt === candidate.createdAt &&
+    snapshotsMatch(expected.snapshot, candidate.snapshot) &&
+    expected.bindingIdentity.schemaVersion ===
+      candidate.bindingIdentity.schemaVersion &&
+    expected.bindingIdentity.backendFingerprint ===
+      candidate.bindingIdentity.backendFingerprint &&
+    expected.bindingIdentity.vaultFingerprint ===
+      candidate.bindingIdentity.vaultFingerprint &&
+    expected.bindingIdentity.rootConfigFingerprint ===
+      candidate.bindingIdentity.rootConfigFingerprint &&
+    expected.bindingIdentity.bindingFingerprint ===
+      candidate.bindingIdentity.bindingFingerprint &&
+    expected.bindingIdentity.vaultIdentitySource ===
+      candidate.bindingIdentity.vaultIdentitySource &&
+    expected.bindingIdentity.verifiable ===
+      candidate.bindingIdentity.verifiable &&
+    expected.destructiveSession.generation ===
+      candidate.destructiveSession.generation &&
+    expected.destructiveSession.sessionId ===
+      candidate.destructiveSession.sessionId &&
+    expected.destructiveSession.bindingFingerprint ===
+      candidate.destructiveSession.bindingFingerprint &&
+    expected.sourceToken === candidate.sourceToken &&
+    expected.targetToken === candidate.targetToken &&
+    expected.oldFileUri === candidate.oldFileUri &&
+    expected.newFileUri === candidate.newFileUri &&
+    expected.inventoryDigest === candidate.inventoryDigest &&
+    sameRepairs &&
+    sameManualReview
+  );
+}
+
 type Inventory = {
   repairs: ExternalNoteRepair[];
   manualReview: Array<{ filePath: string; reason: string }>;
@@ -924,29 +996,38 @@ export class ExternalMoveCoordinator {
       nextActionRequiresOriginalDestructiveSession(plan.status) &&
       !this.vault.isDestructiveSessionCurrent(plan.destructiveSession)
     ) {
-      return this.projectStaleSessionStatus(
-        planId,
-        plan,
-        Boolean(preloadedPlan),
-        observed,
-      );
+      return this.projectStaleSessionStatus(planId, plan, observed);
     }
     return projectExternalMovePlanForStatus(plan);
   }
 
   private projectStaleSessionStatus(
     planId: string,
-    plan: ExternalMovePlan,
-    preloaded: boolean,
+    validatedPlan: ExternalMovePlan,
     observed?: ExternalMoveJournalObservation,
   ): Record<string, unknown> {
+    let plan = validatedPlan;
     if (needsDurableSessionFailureReconciliation(plan.status)) {
       // A preloaded file-backed receipt came from a read-only SQLite handle.
       // Re-read the writable journal before guarded durable reconciliation.
-      if (preloaded || !observed) observed = this.requireObservation(planId);
+      if (!observed) observed = this.requireObservation(planId);
       plan = observed.plan;
-      if (!isSafeObservedPlan(observed)) {
+      if (
+        !isSafeObservedPlan(observed) ||
+        !hasCurrentDestructiveBinding(plan)
+      ) {
         return projectUnsafeStoredPlan(plan);
+      }
+      // The preloaded receipt was admitted against this coordinator binding by
+      // the stdio proxy. A later writable reload is not entitled to that
+      // authority merely because the plan ID still matches: another process or
+      // a tampered journal could have replaced its binding, session, or sealed
+      // operation intent. This is deliberately projection-only, before any
+      // durable CAS or backend call.
+      if (!hasSameSealedOperationIdentity(validatedPlan, plan)) {
+        return projectExternalMovePlanForUnavailableDestructiveSession(
+          validatedPlan,
+        );
       }
       if (needsDurableSessionFailureReconciliation(plan.status)) {
         try {
@@ -961,8 +1042,20 @@ export class ExternalMoveCoordinator {
           // fresh durable state is authoritative; never retry a stale update.
           observed = this.requireObservation(planId);
           plan = observed.plan;
-          if (!isSafeObservedPlan(observed)) {
+          if (
+            !isSafeObservedPlan(observed) ||
+            !hasCurrentDestructiveBinding(plan)
+          ) {
             return projectUnsafeStoredPlan(plan);
+          }
+          // The loser must apply the same authority fence after its reload. A
+          // concurrent status/recovery process can replace the row between the
+          // failed observed-CAS and this read; do not project or mutate that
+          // other receipt under the original snapshot's authority.
+          if (!hasSameSealedOperationIdentity(validatedPlan, plan)) {
+            return projectExternalMovePlanForUnavailableDestructiveSession(
+              validatedPlan,
+            );
           }
         }
       }
