@@ -92,11 +92,13 @@ It refuses any tracked or untracked non-ignored worktree change. CI runs the tra
 and Linux. Release admission additionally requires an exact-SHA Pilot 2 cycle:
 
 ```text
-attest closed Pilot 2 → upgrade → restart → doctor
+attest closed Pilot 2 → upgrade → restart
+                      → wait for lifecycle/doctor convergence
                       → close → rollback → verify hashes
                       → reinstall candidate → restart → doctor → clean private test backup
 ```
 
+The readiness wait is bounded and fails closed if the doctor never converges.
 The canary owns no note mutation. Its restoration authority is the recorded
 pre-install managed-file hashes plus unchanged hashes for every Bridge
 `data.json` that existed at the start. On failure it restores those bytes and

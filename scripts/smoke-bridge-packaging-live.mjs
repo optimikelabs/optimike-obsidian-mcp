@@ -251,14 +251,33 @@ function rollback(backupPath) {
   return JSON.parse(output);
 }
 
-function runDoctor() {
+function runDoctor(timeoutMs = 60_000) {
   runNpm(["run", "smoke:capability-doctor-live"], "capability doctor", {
-    timeout: 240_000,
+    timeout: timeoutMs,
     env: {
       CAPABILITY_DOCTOR_CANARY_CONFIRM:
         "I_UNDERSTAND_THIS_IS_A_READ_ONLY_PILOT_2_CANARY",
     },
   });
+}
+
+async function waitForDoctorReady(timeoutMs = 90_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      runDoctor(Math.max(1, Math.min(60_000, deadline - Date.now())));
+      return;
+    } catch (error) {
+      lastError = error;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      await sleep(Math.min(1_500, remainingMs));
+    }
+  }
+  throw new Error(
+    `Capability doctor did not converge after the real restart: ${lastError?.message ?? "timeout"}`,
+  );
 }
 
 async function main() {
@@ -334,7 +353,7 @@ async function main() {
     await openPilot();
     pilotClosed = false;
     assert.deepEqual(snapshotInstalled(), expectedCandidate);
-    runDoctor();
+    await waitForDoctorReady();
     evidence.firstDoctor = true;
 
     await closePilot();
@@ -353,7 +372,7 @@ async function main() {
     assert.deepEqual(finalSnapshot, expectedCandidate);
     assertDataUnchanged(baseline, finalSnapshot);
     evidence.dataJsonUnchanged = true;
-    runDoctor();
+    await waitForDoctorReady();
     evidence.finalDoctor = true;
     evidence.ok = true;
     rmSync(privateRoot, { recursive: true, force: true });

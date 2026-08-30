@@ -90,13 +90,15 @@ toute modification suivie ou non suivie et non ignorée. La CI exécute les test
 Linux. L’admission de release exige aussi un cycle exact-SHA dans Pilot 2 :
 
 ```text
-attester Pilot 2 fermé → upgrade → redémarrer → doctor
+attester Pilot 2 fermé → upgrade → redémarrer
+                       → attendre la convergence lifecycle/doctor
                        → fermer → rollback → vérifier les hashes
                        → réinstaller le candidat → redémarrer → doctor → nettoyer le backup de test
 ```
 
-Le canary ne modifie aucune note. Son autorité de restauration repose sur les
-hashes initiaux des fichiers gérés et sur l’invariance de chaque `data.json`
-présent au démarrage. En cas d’échec, il restaure ces octets et laisse Pilot 2
-fermé : la politique de grants de l’API développeur Operon n’observe donc jamais
-une version de Bridge volontairement rétrogradée.
+L’attente de readiness est bornée et échoue fermé si le doctor ne converge
+jamais. Le canary ne modifie aucune note. Son autorité de restauration repose
+sur les hashes initiaux des fichiers gérés et sur l’invariance de chaque
+`data.json` présent au démarrage. En cas d’échec, il restaure ces octets et
+laisse Pilot 2 fermé : la politique de grants de l’API développeur Operon
+n’observe donc jamais une version de Bridge volontairement rétrogradée.

@@ -46,6 +46,11 @@ assert.doesNotMatch(
   /data\.json/,
 );
 assert.match(liveCanary, /waitForLocalRest\(false, 5_000\)/);
+assert.match(liveCanary, /waitForDoctorReady/);
+assert.match(
+  liveCanary,
+  /Capability doctor did not converge after the real restart/,
+);
 assert.match(installer, /Bundle must never contain data\.json/);
 assert.match(installer, /explicit confirmation that Obsidian is closed/);
 assert.match(installer, /Rollback fence rejected/);

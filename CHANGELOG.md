@@ -32,10 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-ignored untracked inputs, and rollback refuses a plugin root that resolves
   outside the attested vault.
 - A dedicated Windows/Linux workflow builds and verifies the bundle; the live
-  gate starts from a closed Pilot 2, upgrades it, checks the capability doctor,
-  rolls back byte for byte while Obsidian remains closed, and then reinstalls
-  the exact candidate before restart so Operon never observes a transient
-  Bridge downgrade.
+  gate starts from a closed Pilot 2, upgrades it, waits for bounded lifecycle
+  and capability-doctor convergence, rolls back byte for byte while Obsidian
+  remains closed, and then reinstalls the exact candidate before restart so
+  Operon never observes a transient Bridge downgrade.
 
 ## [3.4.0] - 2026-08-30
 
