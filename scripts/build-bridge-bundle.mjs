@@ -87,10 +87,10 @@ function readJson(filePath) {
 }
 
 function assertCleanCommit() {
-  const status = git("status", "--porcelain", "--untracked-files=no");
+  const status = git("status", "--porcelain", "--untracked-files=all");
   if (status) {
     throw new Error(
-      "Refusing to attest a Bridge bundle from a dirty tracked worktree.",
+      "Refusing to attest a Bridge bundle from a dirty worktree, including untracked inputs.",
     );
   }
   const commit = git("rev-parse", "HEAD");

@@ -19,8 +19,8 @@ optimike-bridge-bundle-v<version>.manifest.json
 SHA256SUMS
 ```
 
-Le manifeste est généré depuis un worktree propre pour les fichiers suivis. Il
-lie le bundle au commit Git complet de 40 caractères, à la version du MCP, aux
+Le manifeste est généré depuis un worktree entièrement propre, sans entrée
+source non suivie et non ignorée. Il lie le bundle au commit Git complet de 40 caractères, à la version du MCP, aux
 ID/versions des Bridges et au SHA-256 avec la taille de chaque fichier.
 L’installateur accepte uniquement `main.js`, `manifest.json` et un éventuel
 `styles.css` par Bridge. `data.json`, tout fichier inconnu, lien, jonction ou
@@ -86,7 +86,7 @@ tierce.
 
 `npm run package:bridge-bundle` construit les trois Bridges, crée le manifeste
 du commit exact et émet les assets sous `out/bridge-release`. La commande refuse
-un worktree suivi sale. La CI exécute les tests transactionnels sous Windows et
+toute modification suivie ou non suivie et non ignorée. La CI exécute les tests transactionnels sous Windows et
 Linux. L’admission de release exige aussi un cycle exact-SHA dans Pilot 2 :
 
 ```text

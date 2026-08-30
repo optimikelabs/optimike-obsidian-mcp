@@ -19,7 +19,8 @@ optimike-bridge-bundle-v<version>.manifest.json
 SHA256SUMS
 ```
 
-The manifest is generated from a clean tracked worktree. It binds the bundle
+The manifest is generated from a fully clean worktree, including the absence
+of non-ignored untracked source inputs. It binds the bundle
 to the full 40-character Git commit, the MCP version, every Bridge ID/version
 and the SHA-256 plus byte size of every file. The installer accepts only
 `main.js`, `manifest.json` and an optional `styles.css` for each Bridge.
@@ -87,7 +88,7 @@ restored resumably. A rollback interrupted in turn resumes from
 
 `npm run package:bridge-bundle` builds the three Bridges, creates the
 exact-commit manifest and emits the release assets under `out/bridge-release`.
-It refuses a dirty tracked worktree. CI runs the transaction tests on Windows
+It refuses any tracked or untracked non-ignored worktree change. CI runs the transaction tests on Windows
 and Linux. Release admission additionally requires an exact-SHA Pilot 2 cycle:
 
 ```text

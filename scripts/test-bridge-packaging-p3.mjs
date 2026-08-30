@@ -9,7 +9,9 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -493,6 +495,38 @@ try {
   assert.notEqual(hardlinkFailure.status, 0);
   assert.match(hardlinkFailure.stderr, /hard-linked file/);
   unlinkSync(hardlinkTarget);
+
+  const escapedRootInstall = runInstall({ vault, bundle, backupRoot });
+  assert.equal(escapedRootInstall.status, 0, escapedRootInstall.stderr);
+  const escapedRootReceipt = JSON.parse(escapedRootInstall.stdout);
+  const obsidianRoot = path.join(vault, ".obsidian");
+  const realPluginRoot = path.join(obsidianRoot, "plugins");
+  const parkedPluginRoot = path.join(obsidianRoot, "plugins-contained-fixture");
+  const outsidePluginRoot = path.join(tempRoot, "outside plugin root");
+  mkdirSync(outsidePluginRoot, { recursive: true });
+  renameSync(realPluginRoot, parkedPluginRoot);
+  symlinkSync(
+    outsidePluginRoot,
+    realPluginRoot,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  try {
+    const escapedRootRollback = runRollback({
+      vault,
+      backupPath: escapedRootReceipt.backupPath,
+    });
+    assert.notEqual(escapedRootRollback.status, 0);
+    assert.match(escapedRootRollback.stderr, /plugin root escapes the vault/);
+  } finally {
+    rmSync(realPluginRoot, { force: true });
+    renameSync(parkedPluginRoot, realPluginRoot);
+  }
+  const containedRootRollback = runRollback({
+    vault,
+    backupPath: escapedRootReceipt.backupPath,
+  });
+  assert.equal(containedRootRollback.status, 0, containedRootRollback.stderr);
+  assert.deepEqual(snapshot(vault), original);
 
   const wrapperFailure = spawnSync(
     "pwsh",

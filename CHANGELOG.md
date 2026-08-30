@@ -28,7 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tampered hashes, extra files, wrong commits, partial failure with automatic
   rollback, abrupt-process recovery through its exact stale lock, resumable
   interrupted rollback, preserved settings and refusal to overwrite
-  post-install drift or a live transaction owner.
+  post-install drift or a live transaction owner. Exact-SHA packaging rejects
+  non-ignored untracked inputs, and rollback refuses a plugin root that resolves
+  outside the attested vault.
 - A dedicated Windows/Linux workflow builds and verifies the bundle; the live
   gate starts from a closed Pilot 2, upgrades it, checks the capability doctor,
   rolls back byte for byte while Obsidian remains closed, and then reinstalls

@@ -942,6 +942,9 @@ function rollbackBundle(options) {
   }
   const vaultRoot = realpathSync(options.vaultPath);
   const pluginRoot = realpathSync(path.join(vaultRoot, ".obsidian", "plugins"));
+  if (!isWithin(vaultRoot, pluginRoot)) {
+    fail("The rollback plugin root escapes the vault.");
+  }
   const requestedBackupPath = path.resolve(options.backupPath);
   const backupPathInfo = lstatSync(requestedBackupPath);
   if (!backupPathInfo.isDirectory() || backupPathInfo.isSymbolicLink()) {

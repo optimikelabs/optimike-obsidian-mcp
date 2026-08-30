@@ -37,7 +37,8 @@ for (const source of [english, french]) {
   assert.match(source, /closed Pilot 2|Pilot 2 fermé/);
   assert.match(source, /40/);
 }
-assert.match(builder, /status", "--porcelain", "--untracked-files=no"/);
+assert.match(builder, /status", "--porcelain", "--untracked-files=all"/);
+assert.doesNotMatch(builder, /--untracked-files=no/);
 assert.match(builder, /sourceCommit/);
 assert.match(builder, /artifactCount/);
 assert.doesNotMatch(
@@ -48,6 +49,7 @@ assert.match(liveCanary, /waitForLocalRest\(false, 5_000\)/);
 assert.match(installer, /Bundle must never contain data\.json/);
 assert.match(installer, /explicit confirmation that Obsidian is closed/);
 assert.match(installer, /Rollback fence rejected/);
+assert.match(installer, /rollback plugin root escapes the vault/);
 assert.match(installer, /manual_recovery_required/);
 assert.match(installer, /rollback_in_progress/);
 assert.match(installer, /processIsAlive/);
