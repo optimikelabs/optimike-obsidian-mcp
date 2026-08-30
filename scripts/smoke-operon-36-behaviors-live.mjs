@@ -1085,8 +1085,14 @@ async function offlineContract() {
 }
 
 async function offlinePathSafetyContract() {
+  const physicalTempParent = await realpath(os.tmpdir());
   const tempRoot = await mkdtemp(
-    path.join(os.tmpdir(), "operon-36-path-safety-offline-"),
+    path.join(physicalTempParent, "operon-36-path-safety-offline-"),
+  );
+  assert.equal(
+    samePathIdentity(await realpath(tempRoot), tempRoot),
+    true,
+    "Offline path-safety fixtures must start from a physical temporary parent.",
   );
   const previousIdentity = activeVaultIdentity;
   try {

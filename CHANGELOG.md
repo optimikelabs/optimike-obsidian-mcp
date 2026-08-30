@@ -28,8 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SHA-256.
 - Operon create and recovery calls now complete runtime, grant and index gates
   before reserving an idempotency key. Only a schema-valid, key-correlated
-  pre-dispatch receipt can release that exact reservation; malformed `503`
-  responses and post-call ambiguity remain durable for explicit recovery.
+  version-2 receipt carrying explicit pre-dispatch provenance can release that
+  exact reservation. Version-1 receipts are migrated conservatively and never
+  inferred safe from `not-ready` payload fields alone; malformed `503`
+  responses and post-call ambiguity remain durable for explicit recovery. The
+  same replay rule now covers create, adoption, periodic workflows and every
+  existing-task mutation family.
 - `dateScheduled` is no longer accepted by the generic Operon update tool. The
   public schema, tool descriptions and task-governor profile route every such
   change through `operon_update_periodic_scheduling`, whose additive workflow
@@ -38,7 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bind the installed Bridge bundle and manifest to that clean SHA, and recheck
   all hashes immediately before native dispatch. Every planned Markdown source
   is physically validated before apply; missing path projections, junction or
-  symlink parents, and hardlinked targets fail before mutation.
+  symlink parents, and hardlinked targets fail before mutation. Offline safety
+  fixtures are created from the canonical OS temporary directory so legitimate
+  Windows temp aliases do not weaken or falsely trip the strict live-vault
+  identity check.
 
 ### Changed
 

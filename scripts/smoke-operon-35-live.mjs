@@ -1240,8 +1240,14 @@ async function createSymlinkOrReport(target, linkPath, type) {
 }
 
 async function offlinePathSafetyContract() {
+  const physicalTempParent = await realpath(os.tmpdir());
   const tempRoot = await mkdtemp(
-    path.join(os.tmpdir(), "operon-path-safety-offline-"),
+    path.join(physicalTempParent, "operon-path-safety-offline-"),
+  );
+  assert.equal(
+    samePathIdentity(await realpath(tempRoot), tempRoot),
+    true,
+    "Offline path-safety fixtures must start from a physical temporary parent.",
   );
   const previousIdentity = activeVaultIdentity;
   try {

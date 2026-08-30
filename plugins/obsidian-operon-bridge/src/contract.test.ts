@@ -69,7 +69,16 @@ function loadBridgePluginClassForTest(): Promise<any> {
   return bridgePluginClassPromise;
 }
 
-function attachPassThroughCoordination(fake: Record<string, any>): void {
+async function attachPassThroughCoordination(
+  fake: Record<string, any>,
+): Promise<void> {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const replay = BridgePlugin.prototype.mutationReplayOrValidation as Function;
+  const preflight = BridgePlugin.prototype.mutationPreflight as Function;
+  fake.mutationReplayOrValidation ??= (...args: unknown[]) =>
+    replay.call(fake, ...args);
+  fake.mutationPreflight ??= (...args: unknown[]) =>
+    preflight.call(fake, ...args);
   fake.coordinatedMutationPreflight = async (options: {
     idempotencyKey: string;
     signature: string;
@@ -102,6 +111,84 @@ function attachPassThroughCoordination(fake: Record<string, any>): void {
     }
     return { kind: "leader", value: prepared.value };
   };
+}
+
+function existingMutationSignature(
+  capability: string,
+  requested: Record<string, unknown>,
+): string {
+  return JSON.stringify({
+    capability,
+    dryRun: true,
+    expectedRevision: "revision-1",
+    operonId: "task-1",
+    requested,
+  });
+}
+
+async function durableExistingMutationFake(options: {
+  native: () => Record<string, unknown> | Promise<Record<string, unknown>>;
+}): Promise<{ fake: Record<string, any>; nativeCalls: () => number }> {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const cacheMutation = BridgePlugin.prototype.cacheMutation as Function;
+  const mutationHttpStatus = BridgePlugin.prototype
+    .mutationHttpStatus as Function;
+  const mutationJournalEntries = BridgePlugin.prototype
+    .mutationJournalEntries as Function;
+  const taskWorkflowIdentityEntries = BridgePlugin.prototype
+    .taskWorkflowIdentityEntries as Function;
+  const persistPluginData = BridgePlugin.prototype
+    .persistPluginData as Function;
+  const queuePersistPluginData = BridgePlugin.prototype
+    .queuePersistPluginData as Function;
+  let operation = 0;
+  let calls = 0;
+  const fake: Record<string, any> = {
+    settings: { mutationsEnabled: true },
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: new MutationReservationRegistry(),
+    mutationPreflightFlights: new Map(),
+    taskWorkflowIdentities: new Map(),
+    dataWriteChain: Promise.resolve(),
+    dataWriteFailed: false,
+    saved: [] as Record<string, unknown>[],
+    mutationOperationId: () => `receipt-operation-${++operation}`,
+    mutationHttpStatus(payload: Record<string, unknown>) {
+      return mutationHttpStatus.call(this, payload);
+    },
+    mutationJournalEntries() {
+      return mutationJournalEntries.call(this);
+    },
+    taskWorkflowIdentityEntries() {
+      return taskWorkflowIdentityEntries.call(this);
+    },
+    persistPluginData() {
+      return persistPluginData.call(this);
+    },
+    queuePersistPluginData() {
+      return queuePersistPluginData.call(this);
+    },
+    saveData: async (value: Record<string, unknown>) => {
+      fake.saved.push(structuredClone(value));
+    },
+    cacheMutation(...args: unknown[]) {
+      return cacheMutation.call(this, ...args);
+    },
+    requireMutationRuntime: async () => ({
+      developerApi: {
+        executeMutation: async () => {
+          calls += 1;
+          return options.native();
+        },
+      },
+    }),
+    oneTask: async () => ({
+      task: { operonId: "task-1", revision: "revision-1" },
+    }),
+  };
+  await attachPassThroughCoordination(fake);
+  return { fake, nativeCalls: () => calls };
 }
 
 test("stable task reads retry one transient generation or settings change", async () => {
@@ -210,7 +297,7 @@ test("continuous snapshot churn fails not-ready before native dispatch", async (
     cacheMutation: () => undefined,
   };
   fake.oneTask = (...args: unknown[]) => oneTask.call(fake, ...args);
-  attachPassThroughCoordination(fake);
+  await attachPassThroughCoordination(fake);
 
   let churnError: unknown;
   try {
@@ -274,7 +361,7 @@ test("lookup and revision validation happen before durable reservation", async (
       },
       mutationOperationId: () => "fallback-operation",
     };
-    attachPassThroughCoordination(fake);
+    await attachPassThroughCoordination(fake);
     const result = await executeExistingMutation.call(
       fake,
       "update",
@@ -354,7 +441,7 @@ test("an in-flight identical existing mutation joins before transient runtime pr
   fake.activeMutationReservationResponse = (...args: unknown[]) =>
     activeMutationReservationResponse.call(fake, ...args);
   fake.mutationPreflight = async () => ({ kind: "continue" });
-  attachPassThroughCoordination(fake);
+  await attachPassThroughCoordination(fake);
 
   const joined = executeExistingMutation.call(
     fake,
@@ -863,7 +950,7 @@ test("periodic-create negotiates its exact grant before durable reservation", as
       payload: { status: "planned" },
     }),
   };
-  attachPassThroughCoordination(fake);
+  await attachPassThroughCoordination(fake);
   const request = {
     idempotencyKey: "periodic-first-use",
     dryRun: true,
@@ -1015,7 +1102,7 @@ test("an active periodic-create reservation is joined before grant negotiation",
   fake.activeMutationReservationResponse = (...args: unknown[]) =>
     activeMutationReservationResponse.call(fake, ...args);
   fake.mutationPreflight = async () => ({ kind: "continue" });
-  attachPassThroughCoordination(fake);
+  await attachPassThroughCoordination(fake);
 
   const result = await executePeriodicCreateMutation.call(fake, {
     idempotencyKey: "active-periodic-key",
@@ -1054,7 +1141,7 @@ test("periodic update validates lookup and revision before durable reservation",
         return { task };
       },
     };
-    attachPassThroughCoordination(fake);
+    await attachPassThroughCoordination(fake);
     const result = await executePeriodicUpdateMutation.call(fake, "task-1", {
       idempotencyKey: `periodic-${scenario}`,
       ...(scenario === "missing-task"
@@ -1091,7 +1178,7 @@ test("legacy adoption validates the source file before durable reservation", asy
       },
     },
   };
-  attachPassThroughCoordination(fake);
+  await attachPassThroughCoordination(fake);
   const result = await executeAdoptMutation.call(fake, {
     idempotencyKey: "legacy-adoption-missing-file",
     adoption: {
@@ -1103,6 +1190,590 @@ test("legacy adoption validates the source file before durable reservation", asy
 
   assert.equal(result.httpStatus, 404);
   assert.equal(reservationCalls, 0);
+});
+
+test("v1 and unproven v2 not-ready receipts remain terminal after reload", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const executeExisting = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const requested = { description: "retry must stay closed" };
+  const signature = existingMutationSignature("update", requested);
+  const updatedAt = new Date().toISOString();
+
+  for (const journal of [
+    {
+      label: "v1 with injected provenance",
+      version: 1,
+      entry: { dispatchProvenance: "proven-pre-dispatch" },
+      payload: { ok: false },
+    },
+    {
+      label: "v2 without provenance",
+      version: 2,
+      entry: {},
+      payload: { ok: false },
+    },
+    {
+      label: "v2 unknown provenance",
+      version: 2,
+      entry: { dispatchProvenance: "unknown-or-dispatched" },
+      payload: { ok: false },
+    },
+    {
+      label: "v2 proven marker without explicit ok false",
+      version: 2,
+      entry: { dispatchProvenance: "proven-pre-dispatch" },
+      payload: {},
+    },
+    {
+      label: "v2 proven marker with contradictory ok true",
+      version: 2,
+      entry: { dispatchProvenance: "proven-pre-dispatch" },
+      payload: { ok: true },
+    },
+  ]) {
+    const { fake, nativeCalls } = await durableExistingMutationFake({
+      native: () => ({ ok: true, code: "planned", retryable: false }),
+    });
+    restore.call(fake, {
+      version: journal.version,
+      entries: [
+        {
+          idempotencyKey: `terminal-${journal.label}`,
+          signature,
+          state: "terminal",
+          updatedAt,
+          operationId: "prior-operation",
+          payload: {
+            ...journal.payload,
+            operationId: "prior-operation",
+            status: "not-ready",
+            mutationMayHaveApplied: false,
+          },
+          httpStatus: 503,
+          ...journal.entry,
+        },
+      ],
+    });
+
+    const result = await executeExisting.call(
+      fake,
+      "update",
+      "task-1",
+      {
+        idempotencyKey: `terminal-${journal.label}`,
+        expectedRevision: "revision-1",
+        dryRun: true,
+      },
+      requested,
+      async () => {
+        throw new Error("terminal receipts must not use the legacy fallback");
+      },
+    );
+    assert.equal(result.httpStatus, 503, journal.label);
+    assert.equal(result.payload.replayed, true, journal.label);
+    assert.equal(nativeCalls(), 0, journal.label);
+  }
+});
+
+test("journal versions are not coerced into the v2 provenance contract", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const fake = {
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: new MutationReservationRegistry(),
+    taskWorkflowIdentities: new Map(),
+    queuePersistPluginData: () => undefined,
+  };
+  restore.call(fake, {
+    version: "2",
+    entries: [
+      {
+        idempotencyKey: "coerced-version",
+        signature: "coerced-signature",
+        state: "terminal",
+        updatedAt: new Date().toISOString(),
+        operationId: "coerced-operation",
+        payload: {
+          ok: false,
+          status: "not-ready",
+          mutationMayHaveApplied: false,
+        },
+        dispatchProvenance: "proven-pre-dispatch",
+      },
+    ],
+  });
+  assert.equal(fake.mutationResults.size, 0);
+});
+
+test("a proven v2 pre-dispatch receipt is released durably before one native retry", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const executeExisting = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const requested = {
+    description: "retry after restored pre-dispatch receipt",
+  };
+  const signature = existingMutationSignature("update", requested);
+  const { fake, nativeCalls } = await durableExistingMutationFake({
+    native: () => ({ ok: true, code: "planned", retryable: false }),
+  });
+  restore.call(fake, {
+    version: 2,
+    entries: [
+      {
+        idempotencyKey: "proven-reload-key",
+        signature,
+        state: "terminal",
+        updatedAt: new Date().toISOString(),
+        operationId: "pre-dispatch-operation",
+        payload: {
+          ok: false,
+          operationId: "pre-dispatch-operation",
+          status: "not-ready",
+          mutationMayHaveApplied: false,
+        },
+        httpStatus: 503,
+        dispatchProvenance: "proven-pre-dispatch",
+      },
+    ],
+  });
+
+  const result = await executeExisting.call(
+    fake,
+    "update",
+    "task-1",
+    {
+      idempotencyKey: "proven-reload-key",
+      expectedRevision: "revision-1",
+      dryRun: true,
+    },
+    requested,
+    async () => ({ ok: true }),
+  );
+  assert.equal(result.httpStatus, 200);
+  assert.equal(nativeCalls(), 1);
+  assert.ok(
+    fake.saved.some((snapshot: Record<string, any>) => {
+      const entries = snapshot.mutationJournal?.entries ?? [];
+      return (
+        !entries.some(
+          (entry: Record<string, unknown>) =>
+            entry.idempotencyKey === "proven-reload-key" &&
+            entry.state === "terminal",
+        ) &&
+        entries.some(
+          (entry: Record<string, unknown>) =>
+            entry.idempotencyKey === "proven-reload-key" &&
+            entry.state === "in-progress",
+        )
+      );
+    }),
+    "the old terminal receipt must be durably released before native dispatch",
+  );
+});
+
+test("concurrent retries of one restored proven receipt dispatch exactly once", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const executeExisting = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const coordinated = BridgePlugin.prototype
+    .coordinatedMutationPreflight as Function;
+  const active = BridgePlugin.prototype
+    .activeMutationReservationResponse as Function;
+  const settle = BridgePlugin.prototype
+    .settleMutationPreflightFlight as Function;
+  const promote = BridgePlugin.prototype
+    .promoteMutationPreflightFlight as Function;
+  let reportNativeEntered!: () => void;
+  let releaseNative!: () => void;
+  const nativeEntered = new Promise<void>((resolve) => {
+    reportNativeEntered = resolve;
+  });
+  const nativeGate = new Promise<void>((resolve) => {
+    releaseNative = resolve;
+  });
+  const requested = { description: "one concurrent retry" };
+  const signature = existingMutationSignature("update", requested);
+  const runtime = await durableExistingMutationFake({
+    native: async () => {
+      reportNativeEntered();
+      await nativeGate;
+      return { ok: true, code: "planned", retryable: false };
+    },
+  });
+  runtime.fake.activeMutationReservationResponse = (...args: unknown[]) =>
+    active.call(runtime.fake, ...args);
+  runtime.fake.settleMutationPreflightFlight = (...args: unknown[]) =>
+    settle.call(runtime.fake, ...args);
+  runtime.fake.promoteMutationPreflightFlight = (...args: unknown[]) =>
+    promote.call(runtime.fake, ...args);
+  runtime.fake.coordinatedMutationPreflight = (options: unknown) =>
+    coordinated.call(runtime.fake, options);
+  restore.call(runtime.fake, {
+    version: 2,
+    entries: [
+      {
+        idempotencyKey: "concurrent-proven-reload",
+        signature,
+        state: "terminal",
+        updatedAt: new Date().toISOString(),
+        operationId: "prior-proven-operation",
+        payload: {
+          ok: false,
+          status: "not-ready",
+          mutationMayHaveApplied: false,
+        },
+        httpStatus: 503,
+        dispatchProvenance: "proven-pre-dispatch",
+      },
+    ],
+  });
+  const body = {
+    idempotencyKey: "concurrent-proven-reload",
+    expectedRevision: "revision-1",
+    dryRun: true,
+  };
+  const leader = executeExisting.call(
+    runtime.fake,
+    "update",
+    "task-1",
+    body,
+    requested,
+    async () => ({ ok: true }),
+  );
+  await nativeEntered;
+  const follower = executeExisting.call(
+    runtime.fake,
+    "update",
+    "task-1",
+    body,
+    requested,
+    async () => ({ ok: true }),
+  );
+  releaseNative();
+  const [leaderResult, followerResult] = await Promise.all([leader, follower]);
+  assert.equal(runtime.nativeCalls(), 1);
+  assert.equal(leaderResult.httpStatus, 200);
+  assert.equal(followerResult.httpStatus, 200);
+  assert.equal(
+    followerResult.payload.operationId,
+    leaderResult.payload.operationId,
+  );
+});
+
+test("generic existing-task routes retry only proven pre-dispatch not-ready receipts", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executeExisting = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const routes = [
+    ["update", { description: "updated" }],
+    ["transition", { status: "Project.Done" }],
+    ["relationships", { blockedBy: [] }],
+    ["recurrence", { scope: "this-task", changes: {} }],
+    ["convert", { target: "file", targetFolder: "Tasks" }],
+    ["relocate", { targetPath: "Tasks/Relocated.md" }],
+  ] as const;
+
+  for (const [capability, requested] of routes) {
+    const successful = await durableExistingMutationFake({
+      native: (() => {
+        const outcomes = [
+          {
+            ok: false,
+            code: "not-ready",
+            retryable: true,
+            mutationMayHaveApplied: false,
+          },
+          { ok: true, code: "planned", retryable: false },
+        ];
+        return () => outcomes.shift()!;
+      })(),
+    });
+    const body = {
+      idempotencyKey: `${capability}-proven-retry`,
+      expectedRevision: "revision-1",
+      dryRun: true,
+    };
+    const first = await executeExisting.call(
+      successful.fake,
+      capability,
+      "task-1",
+      body,
+      requested,
+      async () => ({ ok: true }),
+    );
+    const retry = await executeExisting.call(
+      successful.fake,
+      capability,
+      "task-1",
+      body,
+      requested,
+      async () => ({ ok: true }),
+    );
+    assert.equal(first.httpStatus, 503, capability);
+    assert.equal(retry.httpStatus, 200, capability);
+    assert.equal(successful.nativeCalls(), 2, capability);
+
+    for (const mutationMayHaveApplied of [true, undefined]) {
+      const ambiguous = await durableExistingMutationFake({
+        native: () => ({
+          ok: false,
+          code: "not-ready",
+          retryable: true,
+          ...(mutationMayHaveApplied === undefined
+            ? {}
+            : { mutationMayHaveApplied }),
+        }),
+      });
+      const ambiguousBody = {
+        ...body,
+        idempotencyKey: `${capability}-ambiguous-${String(
+          mutationMayHaveApplied,
+        )}`,
+      };
+      const ambiguousFirst = await executeExisting.call(
+        ambiguous.fake,
+        capability,
+        "task-1",
+        ambiguousBody,
+        requested,
+        async () => ({ ok: true }),
+      );
+      const ambiguousReplay = await executeExisting.call(
+        ambiguous.fake,
+        capability,
+        "task-1",
+        ambiguousBody,
+        requested,
+        async () => ({ ok: true }),
+      );
+      assert.equal(ambiguousFirst.httpStatus, 503, capability);
+      assert.equal(ambiguousReplay.httpStatus, 503, capability);
+      assert.equal(ambiguousReplay.payload.replayed, true, capability);
+      assert.equal(ambiguous.nativeCalls(), 1, capability);
+    }
+  }
+});
+
+test("malformed native booleans never mint pre-dispatch provenance", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executeExisting = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const requested = { description: "malformed native response" };
+
+  for (const nativeOk of [undefined, 0, true]) {
+    const runtime = await durableExistingMutationFake({
+      native: () => ({
+        ok: nativeOk,
+        code: "not-ready",
+        retryable: true,
+        mutationMayHaveApplied: false,
+      }),
+    });
+    const body = {
+      idempotencyKey: `malformed-native-ok-${String(nativeOk)}`,
+      expectedRevision: "revision-1",
+      dryRun: true,
+    };
+    const first = await executeExisting.call(
+      runtime.fake,
+      "update",
+      "task-1",
+      body,
+      requested,
+      async () => ({ ok: true }),
+    );
+    const replay = await executeExisting.call(
+      runtime.fake,
+      "update",
+      "task-1",
+      body,
+      requested,
+      async () => ({ ok: true }),
+    );
+    assert.equal(runtime.nativeCalls(), 1, String(nativeOk));
+    assert.equal(replay.payload.replayed, true, String(nativeOk));
+    assert.equal(
+      runtime.fake.mutationResults.get(body.idempotencyKey)?.dispatchProvenance,
+      "unknown-or-dispatched",
+      String(nativeOk),
+    );
+    assert.equal(replay.httpStatus, first.httpStatus, String(nativeOk));
+  }
+});
+
+test("a failed durable release preserves the proven receipt and creates no reservation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const preflight = BridgePlugin.prototype.mutationPreflight as Function;
+  const cached = {
+    signature: "safe-release-signature",
+    payload: {
+      ok: false,
+      status: "not-ready",
+      mutationMayHaveApplied: false,
+    },
+    httpStatus: 503,
+    dispatchProvenance: "proven-pre-dispatch",
+  };
+  const fake: Record<string, any> = {
+    mutationResults: new Map([["safe-release-key", cached]]),
+    mutationResultTimes: new Map([
+      ["safe-release-key", new Date().toISOString()],
+    ]),
+    mutationReservations: new MutationReservationRegistry(),
+    dataWriteChain: Promise.resolve(),
+    dataWriteFailed: false,
+    mutationOperationId: () => "must-not-reserve",
+    mutationReplayOrValidation: () => ({ kind: "continue" }),
+    queuePersistPluginData() {
+      this.dataWriteChain = Promise.resolve().then(() => {
+        this.dataWriteFailed = true;
+      });
+    },
+  };
+
+  await assert.rejects(
+    preflight.call(
+      fake,
+      "safe-release-key",
+      "safe-release-signature",
+      { description: "same request" },
+      () => null,
+    ),
+    /could not be released durably/u,
+  );
+  assert.equal(fake.mutationResults.get("safe-release-key"), cached);
+  assert.equal(fake.mutationReservations.get("safe-release-key"), undefined);
+});
+
+test("journal v1 migration preserves terminal receipts and promotes interrupted work to unknown", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const mutationJournalEntries = BridgePlugin.prototype
+    .mutationJournalEntries as Function;
+  const persist = BridgePlugin.prototype.persistPluginData as Function;
+  const queue = BridgePlugin.prototype.queuePersistPluginData as Function;
+  const mutationHttpStatus = BridgePlugin.prototype
+    .mutationHttpStatus as Function;
+  const updatedAt = new Date().toISOString();
+  const fake: Record<string, any> = {
+    settings: { mutationsEnabled: true },
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: new MutationReservationRegistry(),
+    taskWorkflowIdentities: new Map(),
+    dataWriteChain: Promise.resolve(),
+    dataWriteFailed: false,
+    saved: undefined,
+    mutationHttpStatus(payload: Record<string, unknown>) {
+      return mutationHttpStatus.call(this, payload);
+    },
+    mutationJournalEntries() {
+      return mutationJournalEntries.call(this);
+    },
+    taskWorkflowIdentityEntries: () => [],
+    persistPluginData() {
+      return persist.call(this);
+    },
+    queuePersistPluginData() {
+      return queue.call(this);
+    },
+    saveData: async (value: Record<string, unknown>) => {
+      fake.saved = structuredClone(value);
+    },
+  };
+  restore.call(fake, {
+    version: 1,
+    entries: [
+      {
+        idempotencyKey: "v1-applied",
+        signature: "applied-signature",
+        state: "terminal",
+        updatedAt,
+        operationId: "applied-operation",
+        payload: { ok: true, status: "applied" },
+        httpStatus: 200,
+      },
+      {
+        idempotencyKey: "v1-unknown",
+        signature: "unknown-signature",
+        state: "terminal",
+        updatedAt,
+        operationId: "unknown-operation",
+        payload: {
+          ok: false,
+          status: "outcome-unknown",
+          mutationMayHaveApplied: true,
+        },
+        httpStatus: 500,
+      },
+      {
+        idempotencyKey: "v1-interrupted",
+        signature: "interrupted-signature",
+        state: "in-progress",
+        updatedAt,
+        operationId: "interrupted-operation",
+        requested: { description: "interrupted" },
+      },
+    ],
+  });
+  await fake.dataWriteChain;
+
+  assert.equal(
+    fake.mutationResults.get("v1-applied")?.payload.status,
+    "applied",
+  );
+  assert.equal(
+    fake.mutationResults.get("v1-unknown")?.payload.status,
+    "outcome-unknown",
+  );
+  assert.equal(
+    fake.mutationResults.get("v1-interrupted")?.payload.status,
+    "outcome-unknown",
+  );
+  assert.equal(
+    fake.mutationResults.get("v1-interrupted")?.payload.recoveryRequired,
+    true,
+  );
+  const persisted = fake.saved?.mutationJournal;
+  assert.equal(persisted?.version, 2);
+  const persistedStates = new Map(
+    persisted.entries.map((entry: Record<string, unknown>) => {
+      const payload = entry.payload as Record<string, unknown> | undefined;
+      return [entry.idempotencyKey, payload?.status];
+    }),
+  );
+  assert.equal(persistedStates.get("v1-applied"), "applied");
+  assert.equal(persistedStates.get("v1-unknown"), "outcome-unknown");
+  assert.equal(persistedStates.get("v1-interrupted"), "outcome-unknown");
+});
+
+test("adopt, periodic, and generic mutation paths all delegate replay policy to the bridge helper", () => {
+  const mainSource = readFileSync(
+    new URL("./main.ts", import.meta.url),
+    "utf8",
+  );
+  const methods = [
+    "executeAdoptMutation",
+    "executePeriodicCreateMutation",
+    "executePeriodicUpdateMutation",
+    "executeExistingMutation",
+  ];
+  for (const method of methods) {
+    const start = mainSource.indexOf(`private async ${method}(`);
+    const end = mainSource.indexOf("\n  private ", start + 1);
+    assert.notEqual(start, -1, `${method} must exist`);
+    assert.notEqual(end, -1, `${method} must have a bounded source slice`);
+    assert.match(
+      mainSource.slice(start, end),
+      /(?:await\s+)?this\.mutationReplayOrValidation\(/u,
+      `${method} must use the common durable replay policy`,
+    );
+  }
 });
 
 test("task-workflow replay identities survive plugin-data persistence", async () => {

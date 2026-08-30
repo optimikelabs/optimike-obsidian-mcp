@@ -562,7 +562,9 @@ assert.match(operonContractFr, /chaînes scalaires/u);
 assert.match(operonContractFr, /tableau ordonné/u);
 for (const content of [operonContract, operonRestContract]) {
   assert.match(content, /reserv(?:e|es).*atomically/isu);
-  assert.match(content, /version[- ]1 journal/iu);
+  assert.match(content, /version[- ]2 journal/iu);
+  assert.match(content, /proven-pre-dispatch/u);
+  assert.match(content, /version-1.*unknown-or-dispatched/isu);
   assert.match(content, /500 entries/iu);
   assert.match(content, /30 days/iu);
   assert.match(content, /in-progress.*outcome-unknown/isu);
@@ -581,7 +583,9 @@ for (const content of [operonContract, operonRestContract]) {
   assert.match(content, /compatible-provisional/u);
 }
 assert.match(operonContractFr, /réserve.*atomiquement/isu);
-assert.match(operonContractFr, /journal version 1/iu);
+assert.match(operonContractFr, /journal version 2/iu);
+assert.match(operonContractFr, /provenance de dispatch/iu);
+assert.match(operonContractFr, /entrées version 1.*unknown-or-dispatched/isu);
 assert.match(operonContractFr, /500 entrées/iu);
 assert.match(operonContractFr, /30 jours/iu);
 assert.match(operonContractFr, /in-progress.*outcome-unknown/isu);

@@ -51,7 +51,7 @@ const REST_PREFIX = `/extensions/${EXTENSION_ID}/v1`;
 const LOCAL_REST_PLUGIN_ID = "obsidian-local-rest-api";
 const MAX_MOUNT_WAIT_MS = 30_000;
 const MOUNT_RETRY_MS = 500;
-const MUTATION_JOURNAL_VERSION = 1;
+const MUTATION_JOURNAL_VERSION = 2;
 const MUTATION_JOURNAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MUTATION_JOURNAL_LIMIT = 500;
 const TASK_WORKFLOW_IDENTITY_STORE_VERSION = 1;
@@ -69,12 +69,23 @@ interface PersistedMutationJournalEntry {
   requested?: Record<string, unknown>;
   payload?: Record<string, unknown>;
   httpStatus?: number;
+  dispatchProvenance?: "proven-pre-dispatch" | "unknown-or-dispatched";
 }
 
 interface PersistedTaskWorkflowIdentity {
   key: string;
   operonId: string;
   updatedAt: string;
+}
+
+function nativeDispatchProvenance(
+  native: DeveloperApiMutationResult,
+): "proven-pre-dispatch" | "unknown-or-dispatched" {
+  return native.ok === false &&
+    native.code === "not-ready" &&
+    native.mutationMayHaveApplied === false
+    ? "proven-pre-dispatch"
+    : "unknown-or-dispatched";
 }
 
 const DEFAULT_BRIDGE_SETTINGS: OptimikeOperonBridgeSettings = {
@@ -1959,8 +1970,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private restoreMutationJournal(value: unknown): void {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const journal = value as Record<string, unknown>;
+    const journalVersion = journal.version;
     if (
-      journal.version !== MUTATION_JOURNAL_VERSION ||
+      (journalVersion !== 1 && journalVersion !== MUTATION_JOURNAL_VERSION) ||
       !Array.isArray(journal.entries)
     )
       return;
@@ -1995,6 +2007,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           payload: entry.payload,
           httpStatus:
             entry.httpStatus ?? this.mutationHttpStatus(entry.payload),
+          // Bridge 0.8.2 could persist not-ready/false after native dispatch
+          // had begun. Preserve every v1 receipt, but never treat its payload
+          // fields as proof that a same-key retry is safe.
+          dispatchProvenance:
+            journalVersion === MUTATION_JOURNAL_VERSION &&
+            entry.dispatchProvenance === "proven-pre-dispatch"
+              ? "proven-pre-dispatch"
+              : "unknown-or-dispatched",
         });
         this.mutationResultTimes.set(entry.idempotencyKey, entry.updatedAt);
         continue;
@@ -2036,6 +2056,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             payload: cached.payload,
             httpStatus:
               cached.httpStatus ?? this.mutationHttpStatus(cached.payload),
+            dispatchProvenance:
+              cached.dispatchProvenance ?? "unknown-or-dispatched",
           },
         ];
       },
@@ -2159,12 +2181,16 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     idempotencyKey: string,
     signature: string,
     payload: Record<string, unknown>,
+    dispatchProvenance:
+      | "proven-pre-dispatch"
+      | "unknown-or-dispatched" = "unknown-or-dispatched",
   ): void {
     const httpStatus = this.mutationHttpStatus(payload);
     this.mutationResults.set(idempotencyKey, {
       signature,
       payload,
       httpStatus,
+      dispatchProvenance,
     });
     this.mutationResultTimes.set(idempotencyKey, new Date().toISOString());
     this.mutationReservations.complete(idempotencyKey, signature, payload);
@@ -2187,6 +2213,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const cached = this.mutationResults.get(idempotencyKey);
     const provenPreDispatch =
       cached?.signature === signature &&
+      cached.dispatchProvenance === "proven-pre-dispatch" &&
+      safeBooleanField(safeRecord(cached.payload), "ok") === false &&
       safeStringField(safeRecord(cached.payload), "status") === "not-ready" &&
       safeBooleanField(safeRecord(cached.payload), "mutationMayHaveApplied") ===
         false;
@@ -2214,6 +2242,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     // reserve and retry once the transient runtime condition clears.
     if (
       cached?.signature === signature &&
+      cached.dispatchProvenance === "proven-pre-dispatch" &&
+      safeBooleanField(safeRecord(cached.payload), "ok") === false &&
       safeStringField(safeRecord(cached.payload), "status") === "not-ready" &&
       safeBooleanField(safeRecord(cached.payload), "mutationMayHaveApplied") ===
         false
@@ -2891,7 +2921,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       source: "operon-live",
       stale: false,
     };
-    this.cacheMutation(idempotencyKey, signature, payload);
+    this.cacheMutation(
+      idempotencyKey,
+      signature,
+      payload,
+      nativeDispatchProvenance(native),
+    );
     return {
       httpStatus: native.ok
         ? 200
@@ -2996,7 +3031,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       source: "operon-live",
       stale: false,
     };
-    this.cacheMutation(idempotencyKey, signature, payload);
+    this.cacheMutation(
+      idempotencyKey,
+      signature,
+      payload,
+      nativeDispatchProvenance(native),
+    );
     return {
       httpStatus: native.ok
         ? 200
@@ -3039,12 +3079,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const targetPath = requested.targetPath;
     const line = Number(requested.line);
     const expectedLine = String(requested.expectedLine ?? "");
-    const validation = resolveMutationPreflight({
-      cached: this.mutationResults.get(idempotencyKey),
+    const validation = this.mutationReplayOrValidation(
       idempotencyKey,
       signature,
       requested,
-      validate: () =>
+      () =>
         !isCanonicalVaultMarkdownPath(targetPath) ||
         !Number.isInteger(line) ||
         line < 1 ||
@@ -3052,8 +3091,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         /[\r\n]/u.test(expectedLine)
           ? "adoption requires targetPath, a positive one-based line, and one exact expectedLine."
           : null,
-      operationId: () => this.mutationOperationId(),
-    });
+    );
     if (validation.kind === "response") return validation.response;
     if (validation.kind === "validation-error") {
       return {
@@ -3139,7 +3177,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           source: "operon-live",
           stale: false,
         };
-        this.cacheMutation(idempotencyKey, signature, payload);
+        this.cacheMutation(
+          idempotencyKey,
+          signature,
+          payload,
+          nativeDispatchProvenance(native),
+        );
         return {
           httpStatus: native.ok
             ? 200
@@ -3365,20 +3408,18 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       dryRun: body.dryRun !== false,
       requested,
     });
-    const validation = resolveMutationPreflight({
-      cached: this.mutationResults.get(idempotencyKey),
+    const validation = this.mutationReplayOrValidation(
       idempotencyKey,
       signature,
       requested,
-      validate: () =>
+      () =>
         typeof requested.description !== "string" ||
         !requested.description.trim() ||
         (requested.periodicKind !== "daily" &&
           requested.periodicKind !== "weekly")
           ? "periodic creation requires description and periodicKind daily or weekly."
           : null,
-      operationId: () => this.mutationOperationId(),
-    });
+    );
     if (validation.kind === "response") return validation.response;
     if (validation.kind === "validation-error") {
       return {
@@ -3446,16 +3487,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       requested,
     });
     const expectedRevision = String(body.expectedRevision ?? "").trim();
-    const validation = resolveMutationPreflight({
-      cached: this.mutationResults.get(idempotencyKey),
+    const validation = this.mutationReplayOrValidation(
       idempotencyKey,
       signature,
       requested,
-      validate: () =>
+      () =>
         mutationPathValidationError("update", requested) ??
         (expectedRevision ? null : "expectedRevision is required."),
-      operationId: () => this.mutationOperationId(),
-    });
+    );
     if (validation.kind === "response") return validation.response;
     if (validation.kind === "validation-error") {
       return {
@@ -3593,7 +3632,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         source: "operon-live",
         stale: false,
       };
-      this.cacheMutation(idempotencyKey, signature, payload);
+      this.cacheMutation(
+        idempotencyKey,
+        signature,
+        payload,
+        nativeDispatchProvenance(native),
+      );
       return {
         httpStatus: native.ok
           ? 200
@@ -3940,16 +3984,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       requested,
     });
     const expectedRevision = String(body.expectedRevision ?? "").trim();
-    const validation = resolveMutationPreflight({
-      cached: this.mutationResults.get(idempotencyKey),
+    const validation = this.mutationReplayOrValidation(
       idempotencyKey,
       signature,
       requested,
-      validate: () =>
+      () =>
         mutationPathValidationError(capability, requested) ??
         (expectedRevision ? null : "expectedRevision is required."),
-      operationId: () => this.mutationOperationId(),
-    });
+    );
     if (validation.kind === "response") return validation.response;
     if (validation.kind === "validation-error") {
       return {
@@ -4037,12 +4079,20 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
                     native.message ?? "Operon rejected the mutation preview.",
                 },
                 retryable: native.retryable,
+                ...(native.mutationMayHaveApplied !== undefined
+                  ? { mutationMayHaveApplied: native.mutationMayHaveApplied }
+                  : {}),
               }
             : {}),
           source: "operon-live",
           stale: false,
         };
-        this.cacheMutation(idempotencyKey, signature, payload);
+        this.cacheMutation(
+          idempotencyKey,
+          signature,
+          payload,
+          nativeDispatchProvenance(native),
+        );
         return {
           httpStatus: native.ok
             ? 200
@@ -4078,7 +4128,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           source: "operon-live",
           stale: false,
         };
-        this.cacheMutation(idempotencyKey, signature, payload);
+        this.cacheMutation(
+          idempotencyKey,
+          signature,
+          payload,
+          nativeDispatchProvenance(native),
+        );
         return {
           httpStatus:
             native.code === "conflict"
@@ -4338,12 +4393,20 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
                     "Operon rejected the task creation preview.",
                 },
                 retryable: native.retryable,
+                ...(native.mutationMayHaveApplied !== undefined
+                  ? { mutationMayHaveApplied: native.mutationMayHaveApplied }
+                  : {}),
               }
             : {}),
           source: "operon-live",
           stale: false,
         };
-        this.cacheMutation(idempotencyKey, signature, payload);
+        this.cacheMutation(
+          idempotencyKey,
+          signature,
+          payload,
+          nativeDispatchProvenance(native),
+        );
         return {
           httpStatus: native.ok
             ? 200
@@ -4378,7 +4441,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           source: "operon-live",
           stale: false,
         };
-        this.cacheMutation(idempotencyKey, signature, payload);
+        this.cacheMutation(
+          idempotencyKey,
+          signature,
+          payload,
+          nativeDispatchProvenance(native),
+        );
         return {
           httpStatus:
             native.code === "not-ready"

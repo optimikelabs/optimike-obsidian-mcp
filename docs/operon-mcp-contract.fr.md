@@ -159,13 +159,23 @@ révision périmée renvoie `conflict` sans écriture. Une réservation restée
 l’aveugle.
 
 Bridge 0.8 réserve aussi les clés d’idempotence atomiquement et persiste son
-journal version 1 dans les données locales du plugin Obsidian avant tout dispatch
+journal version 2 dans les données locales du plugin Obsidian avant tout dispatch
 natif. Ce journal est borné à 500 entrées et 30 jours. Une entrée `in-progress`
 restaurée devient `outcome-unknown`, non rejouable, avec
-`recoveryRequired: true`. Cette garantie couvre seulement le replay/redémarrage
-local borné : aucune promesse après expiration, éviction, perte/reset des données
-plugin, échec de persistance ou transfert vers un autre coffre/appareil. Si la
-réservation ne peut pas être persistée, aucune mutation native n’est envoyée.
+`recoveryRequired: true`. La version 2 stocke une provenance de dispatch
+explicite. Le Bridge ne peut libérer un reçu de même requête que si ce marqueur
+durable prouve un résultat `not-ready` avant dispatch de la mutation et que la
+réponse indique explicitement `ok: false` et
+`mutationMayHaveApplied: false` ; il persiste alors la suppression avant toute
+nouvelle réservation. Les entrées version 1 sont
+conservées pendant la migration mais classées `unknown-or-dispatched`, car le
+Bridge 0.8.2 pouvait persister ces champs après le début du dispatch natif. Une
+provenance absente ou malformée reste donc rejouable uniquement et ne peut pas
+provoquer un nouvel appel natif. Cette garantie couvre seulement le
+replay/redémarrage local borné : aucune promesse après expiration, éviction,
+perte/reset des données plugin, échec de persistance ou transfert vers un autre
+coffre/appareil. Si la réservation initiale ou la libération sûre ne peut pas
+être persistée avant le dispatch, aucune mutation native n’est envoyée.
 
 L’apply exige aussi `OPERON_MUTATIONS_ENABLED=true` et le réglage Bridge
 **Allow task mutations**. Une mise à jour de package ne peut donc pas activer les
