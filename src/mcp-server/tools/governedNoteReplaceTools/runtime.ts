@@ -16,6 +16,8 @@ import {
 import {
   ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
+  type PendingOperationRowsInput,
+  type PendingOperationRowsPage,
 } from "../../../services/operations/obsidianNoteReplaceJournal.js";
 import { RestAtomicWriteBackend } from "../../../services/operations/restAtomicWriteBackend.js";
 import type { OperationReceipt } from "../../../services/operations/contract.js";
@@ -56,9 +58,7 @@ function assertSupportedMarkdownEnvelope(
   if (!reason) return;
 
   throw new McpError(
-    phase === "plan"
-      ? BaseErrorCode.VALIDATION_ERROR
-      : BaseErrorCode.FORBIDDEN,
+    phase === "plan" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.FORBIDDEN,
     "The sealed note uses an unsupported Markdown encoding or line ending.",
     { reason },
   );
@@ -409,6 +409,25 @@ export class GovernedNoteReplaceRuntime {
 
   readForProjection(path: string) {
     return this.backend.read({ contractVersion: 1, path });
+  }
+
+  listPendingOperationRows(
+    input: Omit<
+      PendingOperationRowsInput,
+      | "fallbackOperationKind"
+      | "admittedProjectionKinds"
+      | "allowUnprojectedFallback"
+    >,
+  ): PendingOperationRowsPage {
+    return this.journal.listPendingOperationRows({
+      ...input,
+      fallbackOperationKind: "obsidian.note.replace",
+      admittedProjectionKinds: [
+        "obsidian.frontmatter.patch",
+        "obsidian.text.patch",
+      ],
+      allowUnprojectedFallback: true,
+    });
   }
 
   findPlanByIdempotencyKey(

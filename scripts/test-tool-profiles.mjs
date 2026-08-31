@@ -12,8 +12,8 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 21, authoring: 32, tasks: 33, full: 76 },
-  "hybrid-live": { standard: 21, authoring: 32, tasks: 33, full: 76 },
+  live: { standard: 22, authoring: 33, tasks: 34, full: 77 },
+  "hybrid-live": { standard: 22, authoring: 33, tasks: 34, full: 77 },
   "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
   "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
   "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
@@ -74,6 +74,17 @@ for (const profile of ["standard", "authoring", "tasks"]) {
       !names.includes("bases_upsert_config"),
       `${profile}/${registrationMode} must keep whole-Base config replacement full-only`,
     );
+    if (registrationMode === "live" || registrationMode === "hybrid-live") {
+      assert.ok(
+        names.includes("obsidian_list_pending_operations"),
+        `${profile}/${registrationMode} lost the readonly operation cockpit`,
+      );
+    } else {
+      assert.ok(
+        !names.includes("obsidian_list_pending_operations"),
+        `${profile}/${registrationMode} exposed a cockpit without live journals`,
+      );
+    }
     for (const hidden of [
       "obsidian_runtime_maintenance",
       "obsidian_admin_filesystem",
@@ -186,7 +197,9 @@ const standardDuringPartialRegistration = selectAvailableToolProfileNames({
   availableNames: partialTextPatch,
 });
 assert.ok(standardDuringPartialRegistration.includes("obsidian_update_note"));
-assert.ok(standardDuringPartialRegistration.includes("obsidian_search_replace"));
+assert.ok(
+  standardDuringPartialRegistration.includes("obsidian_search_replace"),
+);
 assert.ok(
   !standardDuringPartialRegistration.some((name) =>
     name.startsWith("obsidian_text_patch_"),
@@ -296,7 +309,7 @@ const standardWithoutCache = compileToolProfileNames({
   availableStaticRequirements: [],
 });
 assert.ok(!standardWithoutCache.includes("obsidian_global_search"));
-assert.equal(standardWithoutCache.length, 20);
+assert.equal(standardWithoutCache.length, 21);
 
 const readonlyWithoutCache = compileToolProfileNames({
   profile: "standard",

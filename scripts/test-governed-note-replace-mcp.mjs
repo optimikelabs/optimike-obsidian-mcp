@@ -569,6 +569,19 @@ try {
 
   session = await startClient("full", "live");
   const listed = await session.client.listTools();
+  const cockpitTool = listed.tools.find(
+    (tool) => tool.name === "obsidian_list_pending_operations",
+  );
+  assert.ok(
+    cockpitTool,
+    "live standard profile must expose the readonly operation cockpit",
+  );
+  assert.deepEqual(cockpitTool.annotations, {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  });
   for (const genericName of [
     "operation_plan",
     "operation_apply",
@@ -677,8 +690,7 @@ try {
     "obsidian_note_replace_plan",
     {
       path: FIXTURE_PATH,
-      nextContent:
-        "---\rcréation: 2026-08-13\rstatut: actif\r---\rafter\r",
+      nextContent: "---\rcréation: 2026-08-13\rstatut: actif\r---\rafter\r",
       idempotencyKey: "unsupported-bare-cr-source",
     },
     true,
@@ -716,8 +728,7 @@ try {
     "obsidian_note_replace_plan",
     {
       path: FIXTURE_PATH,
-      nextContent:
-        "---\rcréation: 2026-08-13\rstatut: actif\r---\rafter\r",
+      nextContent: "---\rcréation: 2026-08-13\rstatut: actif\r---\rafter\r",
       idempotencyKey: "unsupported-bare-cr-target",
     },
     true,
@@ -1144,6 +1155,35 @@ try {
   assert.equal(planReplay.payload.operationId, firstPlan.payload.operationId);
   assert.equal(planReplay.payload.planDigest, firstPlan.payload.planDigest);
   assertNoSecret(firstPlan.result, "plan receipt");
+  const pendingNominal = await call(
+    session,
+    "obsidian_list_pending_operations",
+    { limit: 100 },
+  );
+  const pendingNominalItem = pendingNominal.payload.operations.find(
+    (item) => item.planRef === firstPlan.payload.planRef,
+  );
+  assert.deepEqual(
+    {
+      operationKind: pendingNominalItem?.operationKind,
+      state: pendingNominalItem?.state,
+      nextAction: pendingNominalItem?.nextAction,
+    },
+    {
+      operationKind: "obsidian.note.replace",
+      state: "planned",
+      nextAction: "apply",
+    },
+  );
+  assertNoSecret(pendingNominal.result, "pending-operation cockpit");
+  assert.equal(
+    JSON.stringify(pendingNominal.result).includes(FIXTURE_PATH),
+    false,
+  );
+  assert.equal(
+    JSON.stringify(pendingNominal.result).includes("nominal-secret"),
+    false,
+  );
   const rebound = await call(
     session,
     "obsidian_note_replace_plan",
@@ -1168,6 +1208,16 @@ try {
     idempotencyKey: "nominal-secret",
   });
   assertTerminal(nominal.payload);
+  const afterNominal = await call(session, "obsidian_list_pending_operations", {
+    limit: 100,
+  });
+  assert.equal(
+    afterNominal.payload.operations.some(
+      (item) => item.planRef === firstPlan.payload.planRef,
+    ),
+    false,
+    "stable terminal operations must disappear from the cockpit",
+  );
   assert.equal(fake.content, secretContent);
   assert.ok(
     fake.vaultReadRequests >= 1,
@@ -1198,6 +1248,13 @@ try {
 
   await session.close();
   session = await startClient("readonly", "live");
+  assert.equal(
+    (await session.client.listTools()).tools.some(
+      (tool) => tool.name === "obsidian_list_pending_operations",
+    ),
+    true,
+    "readonly write mode must retain the readonly operation cockpit",
+  );
   const terminalReplayCas = fake.casRequests;
   const readonlyApplyReplay = await call(
     session,

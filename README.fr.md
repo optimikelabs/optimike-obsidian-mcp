@@ -39,10 +39,10 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 
 | Besoin                                               | Profil      | Taille live/hybrid complète |
 | ---------------------------------------------------- | ----------- | --------------------------: |
-| Travail général sur le coffre                        | `standard`  |                          21 |
-| Notes, tags, Bases et Canvas                         | `authoring` |                          32 |
-| Workflows Tasks / Operon                             | `tasks`     |                          33 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          76 |
+| Travail général sur le coffre                        | `standard`  |                          22 |
+| Notes, tags, Bases et Canvas                         | `authoring` |                          33 |
+| Workflows Tasks / Operon                             | `tasks`     |                          34 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          77 |
 
 En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
@@ -114,7 +114,7 @@ N’activer que les surfaces utilisées :
 - **Bases Bridge** inclus pour Bases live et le CAS de formules gouvernées ;
 - **Optimike Atomic Write Bridge** inclus pour les cycles remplacement de note, patch texte du corps, Frontmatter et Canvas `plan → apply → status → recover` ;
 - **Smart Connections** pour l’index sémantique local ;
-- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.1** pour les tâches gouvernées. Optimike MCP `3.6.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Les trois Bridges inclus [récupèrent désormais leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture. Leur [bundle de release unique et vérifié](docs/bridge-packaging.fr.md) préserve les réglages plugin et permet un rollback clôturé.
+- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.1** pour les tâches gouvernées. Optimike MCP `3.7.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Les trois Bridges inclus [récupèrent désormais leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture. Leur [bundle de release unique et vérifié](docs/bridge-packaging.fr.md) préserve les réglages plugin et permet un rollback clôturé.
 - **Obsidian Tasks** pour le parsing Markdown Tasks-compatible.
 
 Les mutations Operon exigent le réglage de mutation du Bridge plus :
@@ -144,6 +144,8 @@ plan → apply → status → recover
 ```
 
 Après timeout ou perte de transport, appeler `status` avant `recover` ; ne jamais recréer aveuglément une mutation. Les plans durables ne sont pas liés au profil qui les a créés.
+
+Si le client a perdu la référence opaque du plan, appeler `obsidian_list_pending_operations`. Ce cockpit read-only liste uniquement les reçus Obsidian gouvernés en attente ou incertains depuis les journaux déjà ouverts du runtime live, avec le `planRef` métier exact et la prochaine action sûre. Il n'expose ni cible, ni clé d'idempotence, ni contenu, ni hash, ni binding backend, et n'appelle jamais status, apply ou recovery. Voir [Cockpit des opérations en attente](docs/operation-cockpit-p5.fr.md).
 
 ## Racines documentaires externes
 

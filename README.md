@@ -39,10 +39,10 @@ Runtime answers what the backend can execute. It does not decide how many tools 
 
 | Need                                              | Profile     | Full live/hybrid size |
 | ------------------------------------------------- | ----------- | --------------------: |
-| General vault work                                | `standard`  |                    21 |
-| Notes, tags, Bases and Canvas authoring           | `authoring` |                    32 |
-| Tasks / Operon workflows                          | `tasks`     |                    33 |
-| Explicit complete, admin and specialized surfaces | `full`      |                    76 |
+| General vault work                                | `standard`  |                    22 |
+| Notes, tags, Bases and Canvas authoring           | `authoring` |                    33 |
+| Tasks / Operon workflows                          | `tasks`     |                    34 |
+| Explicit complete, admin and specialized surfaces | `full`      |                    77 |
 
 In 3.0, an unspecified profile defaults to `standard`. `smart_semantic_search` is the only registered semantic-search name; the former `smart_search` and `smart-search` aliases have been removed. `full` remains an explicit opt-in for the complete active-runtime surface. `bases_upsert_config` is a `full`-only whole-Base compatibility path; legacy whole-file config writes are default-off, while normal authoring uses bounded Base creation/row writes plus the governed formula family.
 
@@ -114,7 +114,7 @@ Enable only the surfaces you use:
 - bundled **Bases Bridge** for live Bases and governed formula CAS;
 - bundled **Optimike Atomic Write Bridge** for governed Note replacement, body text patch, Frontmatter and Canvas `plan → apply → status → recover`;
 - **Smart Connections** for the local semantic index;
-- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.9.1** for governed task operations. Optimike MCP `3.6.0` targets official Operon `3.6.0`, Operon CLI `1.2.0`, and Local REST API `5.1.0`; release admission requires the repository's exact-SHA Pilot 2 gate. Operon `3.6.0` remains `compatible-provisional`: a non-denied release is writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate; product version is not a positive write allowlist. The three bundled Bridges now [recover their Local REST routes after late startup or reload](docs/bridge-lifecycle.md) without restarting the MCP or changing write authorization. Their [single verified release bundle](docs/bridge-packaging.md) preserves plugin settings and supports fenced rollback.
+- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.9.1** for governed task operations. Optimike MCP `3.7.0` targets official Operon `3.6.0`, Operon CLI `1.2.0`, and Local REST API `5.1.0`; release admission requires the repository's exact-SHA Pilot 2 gate. Operon `3.6.0` remains `compatible-provisional`: a non-denied release is writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate; product version is not a positive write allowlist. The three bundled Bridges now [recover their Local REST routes after late startup or reload](docs/bridge-lifecycle.md) without restarting the MCP or changing write authorization. Their [single verified release bundle](docs/bridge-packaging.md) preserves plugin settings and supports fenced rollback.
 - **Obsidian Tasks** for Tasks-compatible Markdown parsing.
 
 Operon mutations require the Bridge mutation setting plus:
@@ -142,6 +142,8 @@ plan → apply → status → recover
 ```
 
 After timeout or transport loss, call `status` before `recover`; never create a blind replacement mutation. Durable plans are not bound to the profile that created them.
+
+If the client lost the opaque plan reference, call `obsidian_list_pending_operations`. The readonly cockpit lists only pending or uncertain governed Obsidian receipts from the live runtime's already-open journals, with the exact domain `planRef` and the next safe action. It never exposes targets, idempotency keys, content, hashes or backend bindings, and it never invokes status, apply or recovery. See [Pending Operation Cockpit](docs/operation-cockpit-p5.md).
 
 ## External document roots
 

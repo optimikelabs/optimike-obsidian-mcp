@@ -22,6 +22,8 @@ import {
   ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
   type ObsidianNoteReplaceProjection,
+  type PendingOperationRowsInput,
+  type PendingOperationRowsPage,
 } from "./operations/obsidianNoteReplaceJournal.js";
 import { RestCanvasAtomicWriteBackend } from "./operations/restCanvasAtomicWriteBackend.js";
 import { assertWriteAllowed } from "./writePolicy.js";
@@ -140,9 +142,7 @@ function canvasPath(value: string): string {
     value.startsWith("/") ||
     value.includes("\\") ||
     !value.toLowerCase().endsWith(".canvas") ||
-    value
-      .split("/")
-      .some((part) => !part || part === "." || part === "..") ||
+    value.split("/").some((part) => !part || part === "." || part === "..") ||
     value.split("/")[0]?.toLowerCase() === ".obsidian"
   ) {
     throw new McpError(
@@ -303,6 +303,22 @@ export class GovernedCanvasRuntime {
       }
     }, heartbeatMs);
     this.heartbeat.unref();
+  }
+
+  listPendingOperationRows(
+    input: Omit<
+      PendingOperationRowsInput,
+      | "fallbackOperationKind"
+      | "admittedProjectionKinds"
+      | "allowUnprojectedFallback"
+    >,
+  ): PendingOperationRowsPage {
+    return this.journal.listPendingOperationRows({
+      ...input,
+      fallbackOperationKind: OPERATION_KIND,
+      admittedProjectionKinds: [OPERATION_KIND],
+      allowUnprojectedFallback: false,
+    });
   }
 
   async plan(input: GovernedCanvasPlanInput): Promise<GovernedCanvasReceipt> {

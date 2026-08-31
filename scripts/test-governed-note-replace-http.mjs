@@ -307,6 +307,12 @@ try {
   await waitForHealth(`${baseUrl}/healthz`, backend);
   first = await startClient(mcpUrl, "governed-http-first");
   const tools = await first.client.listTools();
+  assert.equal(
+    tools.tools.some(
+      (tool) => tool.name === "obsidian_list_pending_operations",
+    ),
+    true,
+  );
   assert.deepEqual(
     tools.tools
       .map((tool) => tool.name)
@@ -329,6 +335,32 @@ try {
     idempotencyKey: "http-cross-session",
   });
   assert.equal(planned.phase, "planned");
+  const pendingFromFirst = await call(
+    first,
+    "obsidian_list_pending_operations",
+    { limit: 100 },
+  );
+  const pendingPlanned = pendingFromFirst.operations.find(
+    (item) => item.planRef === planned.planRef,
+  );
+  assert.deepEqual(
+    {
+      operationKind: pendingPlanned?.operationKind,
+      state: pendingPlanned?.state,
+      nextAction: pendingPlanned?.nextAction,
+    },
+    {
+      operationKind: "obsidian.note.replace",
+      state: "planned",
+      nextAction: "apply",
+    },
+  );
+  assert.equal(JSON.stringify(pendingFromFirst).includes(SECRET), false);
+  assert.equal(JSON.stringify(pendingFromFirst).includes(FIXTURE_PATH), false);
+  assert.equal(
+    JSON.stringify(pendingFromFirst).includes("http-cross-session"),
+    false,
+  );
   await first.close();
   first = undefined;
 
@@ -346,13 +378,28 @@ try {
     idempotencyKey: "http-cross-session",
   });
   assert.equal(committed.outcome, "committed");
+  const pendingFromSecond = await call(
+    second,
+    "obsidian_list_pending_operations",
+    { limit: 100 },
+  );
+  assert.equal(
+    pendingFromSecond.operations.some(
+      (item) => item.planRef === planned.planRef,
+    ),
+    false,
+  );
   await second.close();
   second = undefined;
 
   third = await startClient(mcpUrl, "governed-http-third");
-  const statusFromThirdSession = await call(third, "obsidian_note_replace_status", {
-    planRef: planned.planRef,
-  });
+  const statusFromThirdSession = await call(
+    third,
+    "obsidian_note_replace_status",
+    {
+      planRef: planned.planRef,
+    },
+  );
   assert.equal(statusFromThirdSession.outcome, "committed");
   assert.equal(statusFromThirdSession.planDigest, planned.planDigest);
   const replay = await call(third, "obsidian_note_replace_apply", {
@@ -363,12 +410,19 @@ try {
   assert.equal(fake.casRequests, 1);
   assert.equal(fake.successfulWrites, 1);
   assert.equal(fake.content, nextContent);
-  assert.equal(JSON.stringify({ planned, committed, replay }).includes(SECRET), false);
+  assert.equal(
+    JSON.stringify({ planned, committed, replay }).includes(SECRET),
+    false,
+  );
 
   const textPatchPlan = await call(third, "obsidian_text_patch_plan", {
     path: FIXTURE_PATH,
     operations: [
-      { op: "replace_literal", search: SECRET, replacement: "patched-over-http" },
+      {
+        op: "replace_literal",
+        search: SECRET,
+        replacement: "patched-over-http",
+      },
     ],
     idempotencyKey: "http-cross-session-text-patch",
   });
@@ -382,6 +436,26 @@ try {
     planRef: textPatchPlan.planRef,
   });
   assert.equal(textPatchStatus.phase, "planned");
+  const pendingTextPatch = await call(
+    first,
+    "obsidian_list_pending_operations",
+    { limit: 100 },
+  );
+  const textPatchItem = pendingTextPatch.operations.find(
+    (item) => item.planRef === textPatchPlan.planRef,
+  );
+  assert.deepEqual(
+    {
+      operationKind: textPatchItem?.operationKind,
+      state: textPatchItem?.state,
+      nextAction: textPatchItem?.nextAction,
+    },
+    {
+      operationKind: "obsidian.text.patch",
+      state: "planned",
+      nextAction: "apply",
+    },
+  );
   const textPatchCommit = await call(first, "obsidian_text_patch_apply", {
     planRef: textPatchPlan.planRef,
     idempotencyKey: "http-cross-session-text-patch",
@@ -390,7 +464,10 @@ try {
   assert.equal(fake.casRequests, 2);
   assert.equal(fake.successfulWrites, 2);
   assert.equal(fake.content.includes("patched-over-http"), true);
-  assert.equal(JSON.stringify({ textPatchPlan, textPatchCommit }).includes(SECRET), false);
+  assert.equal(
+    JSON.stringify({ textPatchPlan, textPatchCommit }).includes(SECRET),
+    false,
+  );
   await first.close();
   first = undefined;
   const processExit = new Promise((resolve, reject) => {

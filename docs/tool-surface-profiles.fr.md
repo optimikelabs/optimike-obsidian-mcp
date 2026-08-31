@@ -13,12 +13,12 @@ Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils
 
 | Profil      | Usage visé                                                              | Surface complète live/hybrid |
 | ----------- | ----------------------------------------------------------------------- | ---------------------------: |
-| `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    21 outils |
-| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    32 outils |
-| `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    33 outils |
-| `full`      | Surface complète/admin explicite du runtime actif                       |                    76 outils |
+| `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    22 outils |
+| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    33 outils |
+| `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    34 outils |
+| `full`      | Surface complète/admin explicite du runtime actif                       |                    77 outils |
 
-Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 76 outils. Le registre canonique couvre 80 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Les deux ajouts 3.1 sont les opérations Operon Daily/Weekly bornées par capacité ; leur visibilité ne remplace jamais un grant live.
+Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 77 outils. Le registre canonique couvre 81 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
 
 ## Noms réservés à la compatibilité
 

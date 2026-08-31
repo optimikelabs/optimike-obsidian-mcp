@@ -13,12 +13,12 @@ Profiles reduce schema volume and routing ambiguity. They are not an authorizati
 
 | Profile     | Intended use                                                                | Full live/hybrid surface |
 | ----------- | --------------------------------------------------------------------------- | -----------------------: |
-| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 21 tools |
-| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 32 tools |
-| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 33 tools |
-| `full`      | Explicit complete/admin surface for the active runtime                      |                 76 tools |
+| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 22 tools |
+| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 33 tools |
+| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 34 tools |
+| `full`      | Explicit complete/admin surface for the active runtime                      |                 77 tools |
 
-Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 76 tools. The canonical registry covers 80 unique names across all runtimes because four names exist only in `headless-filesystem`. The two 3.1 additions are capability-gated Operon Daily/Weekly operations; visibility never substitutes for a live grant.
+Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 77 tools. The canonical registry covers 81 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
 
 ## Compatibility-only names
 

@@ -367,6 +367,12 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
 
   defineTool("obsidian_runtime_status", "runtime.status", "runtime", ALL_MODES),
   defineTool(
+    "obsidian_list_pending_operations",
+    "runtime.status",
+    "operation-cockpit",
+    LIVE_MODES,
+  ),
+  defineTool(
     "obsidian_runtime_maintenance",
     "runtime.maintenance",
     "runtime",

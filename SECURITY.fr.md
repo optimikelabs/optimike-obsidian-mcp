@@ -107,6 +107,24 @@ métadonnées opérationnelles dans les logs. Des champs autorisés comme métho
 classe de route, statut, compteurs, longueurs et durées peuvent rester, tandis
 que les corps de requête et les suffixes de route restent exclus.
 
+## Frontière de confidentialité du cockpit d’opérations P5
+
+Le cockpit read-only `obsidian_list_pending_operations` est une projection
+publique volontairement fermée pour reprendre un travail gouverné. Chaque ligne
+retournée contient uniquement `operationKind`, le `planRef` métier, `state`,
+`admittedAt`, `updatedAt`, `ageSeconds` borné et `nextAction` fermé (`apply`,
+`status` ou `recover`). Le curseur opaque ne contient que la dernière clé
+publique de tri.
+
+Le cockpit ne retourne ni ne journalise de chemins du coffre ou des journaux,
+clés d’idempotence ou autres clés secrètes, noms de cibles, contenu de Note ou
+Canvas, valeurs de formule/frontmatter, hashes ou digests, bindings backend,
+propriétaires d’exécution, détails d’erreur ni payloads d’erreur. Il est
+uniquement un inventaire : il n’appelle aucun backend, status, apply ou recovery,
+ne balaie pas les leases, ne purge pas la rétention et ne modifie aucun journal.
+Les outils de chaque famille restent responsables de leurs propres contrôles
+d’autorisation, de profil, de politique, de Bridge et de binding.
+
 Le contrat est exercé par `npm run test:log-privacy` (fixture des items batch
 incluse) sur Linux et Windows dans la CI. Le job CI `bridge-privacy` exécute
 aussi les contrôles de confidentialité des Bridges Bases, Operon et Atomic

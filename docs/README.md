@@ -22,28 +22,29 @@ French operator guides are linked alongside their English equivalents.
 
 ## Find the authoritative page
 
-| Question                                                         | Authority                                                                             |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Which server tool profile should a client expose?                | [Tool Surface Profiles](tool-surface-profiles.md)                                     |
-| Which tools exist?                                               | [Tool Surface](obsidian_mcp_tools_spec.md)                                            |
-| Which tools are available in each runtime?                       | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
-| Why is a capability hidden, unavailable, or unauthorized?        | [Runtime Capability Doctor](capability-doctor.md)                                     |
-| How do I run and maintain the service?                           | [Operations](../OPERATIONS.md)                                                        |
-| How do Bridges recover after Local REST starts or reloads?       | [Bridge Lifecycle Recovery](bridge-lifecycle.md)                                      |
-| How do I install, upgrade or roll back all three Bridges?        | [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md)                            |
-| Which tool should an agent choose inside its profile?            | [MCP Routing Guide](mcp-routing-guide.md)                                             |
-| How do I run without Obsidian Desktop?                           | [Headless Server Profile](headless-server-profile.md)                                 |
-| How do external reads, handoff, move and link repair work?       | [External Roots Setup](external-roots-setup.md)                                       |
-| What is the supported HTTP security boundary?                    | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
-| Which OSS gateway profile has been proven end to end?            | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
-| How are Operon reads and mutations governed?                     | [Operon MCP Contract](operon-mcp-contract.md)                                         |
-| How does governed atomic note replacement work?                  | [Governed Note Replacement](governed-note-replacement.md)                             |
-| How do I append, prepend or replace body text without a lost update? | [Governed Text Patch P4](governed-text-patch-p4.md)                                |
-| How are named Obsidian Base formulas mutated safely?             | [Governed Base Formula P2](governed-base-formula-p2.md)                               |
-| How is one existing JSON Canvas graph mutated safely?            | [Governed Canvas P3](governed-canvas-p3.md)                                           |
-| Why does MCP expose Operon functions instead of calling the CLI? | [Operon CLI / Developer API audit](operon-cli-audit.md)                               |
-| Why was an architecture decision made?                           | [ADR Index](adr/README.md)                                                            |
-| What changed?                                                    | [Changelog](../CHANGELOG.md)                                                          |
+| Question                                                             | Authority                                                                             |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Which server tool profile should a client expose?                    | [Tool Surface Profiles](tool-surface-profiles.md)                                     |
+| Which tools exist?                                                   | [Tool Surface](obsidian_mcp_tools_spec.md)                                            |
+| Which tools are available in each runtime?                           | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
+| Why is a capability hidden, unavailable, or unauthorized?            | [Runtime Capability Doctor](capability-doctor.md)                                     |
+| How do I run and maintain the service?                               | [Operations](../OPERATIONS.md)                                                        |
+| How do Bridges recover after Local REST starts or reloads?           | [Bridge Lifecycle Recovery](bridge-lifecycle.md)                                      |
+| How do I install, upgrade or roll back all three Bridges?            | [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md)                            |
+| Which tool should an agent choose inside its profile?                | [MCP Routing Guide](mcp-routing-guide.md)                                             |
+| How do I run without Obsidian Desktop?                               | [Headless Server Profile](headless-server-profile.md)                                 |
+| How do external reads, handoff, move and link repair work?           | [External Roots Setup](external-roots-setup.md)                                       |
+| What is the supported HTTP security boundary?                        | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
+| Which OSS gateway profile has been proven end to end?                | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
+| How are Operon reads and mutations governed?                         | [Operon MCP Contract](operon-mcp-contract.md)                                         |
+| How does governed atomic note replacement work?                      | [Governed Note Replacement](governed-note-replacement.md)                             |
+| How do I find a lost pending governed operation?                     | [Pending Operation Cockpit P5](operation-cockpit-p5.md)                               |
+| How do I append, prepend or replace body text without a lost update? | [Governed Text Patch P4](governed-text-patch-p4.md)                                   |
+| How are named Obsidian Base formulas mutated safely?                 | [Governed Base Formula P2](governed-base-formula-p2.md)                               |
+| How is one existing JSON Canvas graph mutated safely?                | [Governed Canvas P3](governed-canvas-p3.md)                                           |
+| Why does MCP expose Operon functions instead of calling the CLI?     | [Operon CLI / Developer API audit](operon-cli-audit.md)                               |
+| Why was an architecture decision made?                               | [ADR Index](adr/README.md)                                                            |
+| What changed?                                                        | [Changelog](../CHANGELOG.md)                                                          |
 
 Governed source-preserving Frontmatter: [P1 contract](governed-frontmatter-p1.md).
 Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2.md).
@@ -65,6 +66,7 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 - bundled Bases implementation: [Bases Bridge README](../plugins/obsidian-bases-bridge/README.md).
 - governed atomic note replacement: [contract](governed-note-replacement.md) and [Atomic Write Bridge README](../plugins/obsidian-atomic-write-bridge/README.md).
 - governed Markdown body text patches: [P4 contract](governed-text-patch-p4.md).
+- lost-plan and uncertain-operation inventory: [P5 cockpit](operation-cockpit-p5.md).
 
 ### Search and runtime
 

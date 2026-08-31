@@ -51,6 +51,11 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
 4. After timeout or transport loss, call \`*_status\` first.
 5. Call \`*_recover\` only when the receipt authorizes recovery of that exact plan.
 
+If the client no longer has the opaque plan reference, call
+\`obsidian_list_pending_operations\`. It is a read-only inventory of the current
+live runtime's pending governed Obsidian journals; follow its domain family and
+closed next action. It never applies or recovers an operation.
+
 There is intentionally no generic public \`operation_*\` surface.
 `;
 

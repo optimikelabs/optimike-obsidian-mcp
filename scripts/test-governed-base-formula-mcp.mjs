@@ -187,6 +187,12 @@ try {
       "bases_formula_patch_status",
     ],
   );
+  assert.equal(
+    tools.tools.some(
+      (tool) => tool.name === "obsidian_list_pending_operations",
+    ),
+    true,
+  );
   const plannedResult = await client.callTool({
     name: "bases_formula_patch_plan",
     arguments: {
@@ -199,6 +205,27 @@ try {
   const planned = parsed(plannedResult);
   assert.equal(planned.phase, "planned");
   assert.equal(writes, 0);
+  const pending = parsed(
+    await client.callTool({
+      name: "obsidian_list_pending_operations",
+      arguments: { limit: 100 },
+    }),
+  );
+  const pendingBase = pending.operations.find(
+    (item) => item.planRef === planned.planRef,
+  );
+  assert.deepEqual(
+    pendingBase && {
+      operationKind: pendingBase.operationKind,
+      state: pendingBase.state,
+      nextAction: pendingBase.nextAction,
+    },
+    {
+      operationKind: "obsidian.base.formula.patch",
+      state: "planned",
+      nextAction: "apply",
+    },
+  );
   const appliedResult = await client.callTool({
     name: "bases_formula_patch_apply",
     arguments: { planRef: planned.planRef, idempotencyKey: "p2-mcp-1" },
@@ -216,6 +243,15 @@ try {
   );
   assert.equal(status.outcome, "committed");
   assert.equal(status.idempotencyKey, undefined);
+  assert.equal(
+    parsed(
+      await client.callTool({
+        name: "obsidian_list_pending_operations",
+        arguments: { limit: 100 },
+      }),
+    ).operations.some((item) => item.planRef === planned.planRef),
+    false,
+  );
 } catch (error) {
   throw new Error(
     `${error instanceof Error ? error.stack : String(error)}\nMCP stderr:\n${childStderr}`,
