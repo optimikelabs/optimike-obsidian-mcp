@@ -97,6 +97,36 @@ function codexCommand() {
   return process.platform === "win32" ? "codex.exe" : "codex";
 }
 
+function codexExecArgs({
+  tempRoot,
+  model,
+  reasoningEffort,
+  schemaPath,
+  outputPath,
+}) {
+  return [
+    "exec",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--skip-git-repo-check",
+    "-C",
+    tempRoot,
+    "-s",
+    "read-only",
+    "-m",
+    model,
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`,
+    "--output-schema",
+    schemaPath,
+    "--output-last-message",
+    outputPath,
+    "-",
+  ];
+}
+
 function runModel({ profile, tools, cases, model, reasoningEffort, tempRoot }) {
   const caseIds = cases.map((testCase) => testCase.id);
   const schemaPath = path.join(tempRoot, `${profile}-schema.json`);
@@ -104,27 +134,13 @@ function runModel({ profile, tools, cases, model, reasoningEffort, tempRoot }) {
   writeFileSync(schemaPath, JSON.stringify(outputSchema(caseIds)), "utf8");
   const result = spawnSync(
     codexCommand(),
-    [
-      "exec",
-      "--ephemeral",
-      "--ignore-user-config",
-      "--skip-git-repo-check",
-      "-C",
+    codexExecArgs({
       tempRoot,
-      "-s",
-      "read-only",
-      "-a",
-      "never",
-      "-m",
       model,
-      "-c",
-      `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`,
-      "--output-schema",
+      reasoningEffort,
       schemaPath,
-      "--output-last-message",
       outputPath,
-      "-",
-    ],
+    }),
     {
       cwd: tempRoot,
       encoding: "utf8",
@@ -173,9 +189,18 @@ async function main() {
       ],
       [{ id: "read", prompt: "Read A.md" }],
     );
+    const args = codexExecArgs({
+      tempRoot: "TEMP",
+      model: "MODEL",
+      reasoningEffort: "high",
+      schemaPath: "SCHEMA",
+      outputPath: "OUTPUT",
+    });
     if (
       !prompt.includes("obsidian_read_note") ||
       !prompt.includes("Read A.md") ||
+      args.includes("-a") ||
+      !args.includes('approval_policy="never"') ||
       selectionIsExposed(
         { toolName: "invented_hidden_tool" },
         new Set(["obsidian_read_note"]),
