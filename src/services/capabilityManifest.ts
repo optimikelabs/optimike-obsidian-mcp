@@ -4,6 +4,7 @@ import {
   compileToolProfileNames,
   type ToolProfileId,
 } from "../mcp-server/toolProfiles.js";
+import { getToolSurfaceEntry } from "../mcp-server/toolSurfaceRegistry.js";
 import type { ToolRegistrationMode } from "../mcp-server/toolSurfaceRegistry.js";
 import { httpAdmissionController } from "../mcp-server/transports/httpBackpressure.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
@@ -210,6 +211,10 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "obsidian_note_replace_apply",
     "obsidian_note_replace_status",
     "obsidian_note_replace_recover",
+    "obsidian_text_patch_plan",
+    "obsidian_text_patch_apply",
+    "obsidian_text_patch_status",
+    "obsidian_text_patch_recover",
   ],
   "governed-frontmatter-write": [
     "obsidian_frontmatter_patch_plan",
@@ -273,7 +278,20 @@ function visible(
   visibleToolNames: ReadonlySet<string>,
   capability: CapabilityId,
 ): boolean {
-  return TOOL_FAMILIES[capability].some((name) => visibleToolNames.has(name));
+  const lifecycleFamilies = new Map<string, string[]>();
+  for (const name of TOOL_FAMILIES[capability]) {
+    const entry = getToolSurfaceEntry(name);
+    if (!entry?.lifecycleRole) {
+      if (visibleToolNames.has(name)) return true;
+      continue;
+    }
+    const familyTools = lifecycleFamilies.get(entry.family) ?? [];
+    familyTools.push(name);
+    lifecycleFamilies.set(entry.family, familyTools);
+  }
+  return [...lifecycleFamilies.values()].some((familyTools) =>
+    familyTools.every((name) => visibleToolNames.has(name)),
+  );
 }
 
 function entry(

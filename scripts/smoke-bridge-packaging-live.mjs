@@ -306,7 +306,7 @@ async function main() {
   const rootPackage = JSON.parse(
     readFileSync(path.join(projectRoot, "package.json"), "utf8"),
   );
-  assert.equal(rootPackage.version, "3.5.0");
+  assert.match(rootPackage.version, /^\d+\.\d+\.\d+$/u);
   const bundleRoot = path.join(
     projectRoot,
     "out",

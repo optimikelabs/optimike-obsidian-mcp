@@ -183,7 +183,7 @@ The final server can expose different capabilities depending on which Obsidian p
 
 ## Bridge bundle upgrade and rollback
 
-Optimike MCP `3.5.0` publishes one exact-SHA bundle for the Operon, Atomic
+Optimike MCP `3.6.0` publishes one exact-SHA bundle for the Operon, Atomic
 Write and Bases Bridges. Verify `SHA256SUMS`, extract the zip outside the
 vault, close Obsidian and use the included PowerShell wrapper. The installer
 validates the complete allowlist before mutation, stages on the vault volume,

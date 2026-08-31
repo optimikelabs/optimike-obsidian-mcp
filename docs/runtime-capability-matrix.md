@@ -50,6 +50,7 @@ Periodic Notes API extension is outside the core MCP contract.
 | Format validation                | Markdown/Base/Canvas    | Markdown/Base/Canvas                    | Markdown/Base/Canvas     | Markdown/Base/Canvas    | Markdown/Base/Canvas             | Markdown/Base/Canvas                                                      |
 | Update note                      | REST full tool          | REST full tool                          | No                       | No                      | Append/prepend only              | Append/prepend only                                                       |
 | Governed atomic note replacement | Atomic Write Bridge CAS | Same while API and Bridge are available | No                       | No                      | No                               | No                                                                        |
+| Governed Markdown body text patch | Same Atomic Write CAS   | Same while API and Bridge are available | No                       | No                      | No                               | No                                                                        |
 | Search/replace                   | REST full tool          | REST full tool                          | No                       | No                      | Exact filePath replacements only | Exact filePath replacements only                                          |
 | Frontmatter                      | REST full tool          | REST full tool                          | No                       | No                      | Single-key `set` only            | `set`, batch frontmatter dry-run/apply, and Bases rows                    |
 | Tags                             | REST full tool          | REST full tool                          | No                       | No                      | No                               | Frontmatter tags, inline tags, local index/audit, dry-run rename          |
@@ -130,13 +131,15 @@ confirmation in the owning Obsidian vault window; unattended consent fails
 closed after 45 seconds. See the [Operon MCP contract](operon-mcp-contract.md)
 and [CLI/API audit](operon-cli-audit.md).
 
-The four governed note-replacement tools are registered only when a shared live
+The governed note-replacement and body text-patch quartets are registered only when a shared live
 Obsidian REST service exists: `live`, or `hybrid` with API credentials. Their
 presence does not open writes. `obsidian_note_replace_plan`,
 `obsidian_note_replace_apply`, `obsidian_note_replace_status`, and
 `obsidian_note_replace_recover` remain bound to MCP write policy, protected
 frontmatter, the default-off Bridge write gate, backend identity, and atomic
-SHA-256 CAS.
+SHA-256 CAS. `obsidian_text_patch_plan/apply/status/recover` projects bounded
+append, prepend and literal body changes onto that same durable authority; it
+adds no journal and refuses frontmatter, task lines, regex and ambiguous paths.
 
 Handoff delivery is a transport contract, not a runtime-mode write capability:
 
@@ -159,7 +162,16 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 | `headless-guarded`              | Everything in `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                                                               |
 | `headless-filesystem`           | Everything in `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                                                           |
 | `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                                                 |
-| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools, governed note, Frontmatter, Base formula and Canvas `plan/apply/status/recover`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools, governed note replacement, text patch, Frontmatter, Base formula and Canvas `plan/apply/status/recover`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+
+## Governed Markdown body text patch P4
+
+`obsidian_text_patch_plan`, `obsidian_text_patch_apply`,
+`obsidian_text_patch_status`, and `obsidian_text_patch_recover` share the exact
+live/hybrid boundary and Atomic Write journal of governed note replacement.
+They compile explicit append, prepend and literal-replacement intent before the
+child plan is created. Curated live profiles expose this quartet and suppress
+the direct update/search-replace fallbacks only after all four tools exist.
 
 ## Governed Frontmatter P1
 

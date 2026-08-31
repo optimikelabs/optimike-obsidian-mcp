@@ -12,8 +12,8 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 19, authoring: 30, tasks: 33, full: 72 },
-  "hybrid-live": { standard: 19, authoring: 30, tasks: 33, full: 72 },
+  live: { standard: 21, authoring: 32, tasks: 33, full: 76 },
+  "hybrid-live": { standard: 21, authoring: 32, tasks: 33, full: 76 },
   "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
   "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
   "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
@@ -158,7 +158,40 @@ for (const profile of ["standard", "authoring"]) {
     `${profile}/headless-guarded must keep the direct frontmatter fallback`,
   );
   assert.ok(!guarded.includes("obsidian_frontmatter_patch_plan"));
+
+  for (const governed of [
+    "obsidian_text_patch_plan",
+    "obsidian_text_patch_apply",
+    "obsidian_text_patch_status",
+    "obsidian_text_patch_recover",
+  ]) {
+    assert.ok(live.includes(governed), `${profile}/live lost ${governed}`);
+  }
+  assert.ok(!live.includes("obsidian_update_note"));
+  assert.ok(!live.includes("obsidian_search_replace"));
 }
+
+const fullLiveNames = compileToolProfileNames({
+  profile: "full",
+  registrationMode: "live",
+  availableStaticRequirements: WITH_CACHE,
+});
+assert.ok(fullLiveNames.includes("obsidian_update_note"));
+assert.ok(fullLiveNames.includes("obsidian_search_replace"));
+const partialTextPatch = fullLiveNames.filter(
+  (name) => name !== "obsidian_text_patch_recover",
+);
+const standardDuringPartialRegistration = selectAvailableToolProfileNames({
+  profile: "standard",
+  availableNames: partialTextPatch,
+});
+assert.ok(standardDuringPartialRegistration.includes("obsidian_update_note"));
+assert.ok(standardDuringPartialRegistration.includes("obsidian_search_replace"));
+assert.ok(
+  !standardDuringPartialRegistration.some((name) =>
+    name.startsWith("obsidian_text_patch_"),
+  ),
+);
 
 const authoringLive = compileToolProfileNames({
   profile: "authoring",
@@ -263,7 +296,7 @@ const standardWithoutCache = compileToolProfileNames({
   availableStaticRequirements: [],
 });
 assert.ok(!standardWithoutCache.includes("obsidian_global_search"));
-assert.equal(standardWithoutCache.length, 18);
+assert.equal(standardWithoutCache.length, 20);
 
 const readonlyWithoutCache = compileToolProfileNames({
   profile: "standard",

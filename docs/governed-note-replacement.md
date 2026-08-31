@@ -83,6 +83,9 @@ vault-relative and content stays within configured limits.
 `MCP_PROTECTED_FRONTMATTER_KEYS` cannot be bypassed by replacing the whole file:
 frontmatter is parsed as YAML and compared structurally, not by regular
 expression. The Markdown body is passed to the Bridge exactly as supplied.
+Because that comparison is line-structural, planning fails closed when either
+the current note or the sealed replacement starts with a UTF-8 BOM or contains
+bare CR line endings. LF, CRLF, and mixed LF/CRLF remain supported.
 
 The note-replacement journal is the sole durable authority for this operation.
 Non-terminal plans retain sealed `nextContent` only for exact-plan recovery.

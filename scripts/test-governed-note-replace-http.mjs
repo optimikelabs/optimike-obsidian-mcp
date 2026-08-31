@@ -23,6 +23,12 @@ const TOOL_NAMES = [
   "obsidian_note_replace_recover",
   "obsidian_note_replace_status",
 ];
+const TEXT_PATCH_TOOL_NAMES = [
+  "obsidian_text_patch_apply",
+  "obsidian_text_patch_plan",
+  "obsidian_text_patch_recover",
+  "obsidian_text_patch_status",
+];
 const FIXTURE_PATH = "Fixture/HTTP Shared Runtime.md";
 const INITIAL_CONTENT = "---\ncréation: 2026-08-13\n---\nbefore\n";
 const SECRET = "http-shared-runtime-sealed-content-MUST-NOT-LEAK";
@@ -308,6 +314,13 @@ try {
       .sort(),
     TOOL_NAMES,
   );
+  assert.deepEqual(
+    tools.tools
+      .map((tool) => tool.name)
+      .filter((name) => name.startsWith("obsidian_text_patch_"))
+      .sort(),
+    TEXT_PATCH_TOOL_NAMES,
+  );
 
   const nextContent = `---\ncréation: 2026-08-13\n---\n${SECRET}\n`;
   const planned = await call(first, "obsidian_note_replace_plan", {
@@ -352,8 +365,34 @@ try {
   assert.equal(fake.content, nextContent);
   assert.equal(JSON.stringify({ planned, committed, replay }).includes(SECRET), false);
 
+  const textPatchPlan = await call(third, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: SECRET, replacement: "patched-over-http" },
+    ],
+    idempotencyKey: "http-cross-session-text-patch",
+  });
+  assert.equal(textPatchPlan.phase, "planned");
+  assert.equal(JSON.stringify(textPatchPlan).includes(SECRET), false);
+
   await third.close();
   third = undefined;
+  first = await startClient(mcpUrl, "governed-http-fourth");
+  const textPatchStatus = await call(first, "obsidian_text_patch_status", {
+    planRef: textPatchPlan.planRef,
+  });
+  assert.equal(textPatchStatus.phase, "planned");
+  const textPatchCommit = await call(first, "obsidian_text_patch_apply", {
+    planRef: textPatchPlan.planRef,
+    idempotencyKey: "http-cross-session-text-patch",
+  });
+  assert.equal(textPatchCommit.outcome, "committed");
+  assert.equal(fake.casRequests, 2);
+  assert.equal(fake.successfulWrites, 2);
+  assert.equal(fake.content.includes("patched-over-http"), true);
+  assert.equal(JSON.stringify({ textPatchPlan, textPatchCommit }).includes(SECRET), false);
+  await first.close();
+  first = undefined;
   const processExit = new Promise((resolve, reject) => {
     backend.once("error", reject);
     backend.once("exit", (code, signal) => resolve({ code, signal }));
@@ -384,7 +423,7 @@ try {
   }
 
   console.log(
-    `PASS: one process-wide governed note runtime carried a sealed plan across three real HTTP MCP sessions, committed once, replayed safely, and terminated deterministically (${process.platform}).`,
+    `PASS: one process-wide governed note runtime carried sealed note-replacement and text-patch plans across real HTTP MCP sessions, committed once per plan, replayed safely, and terminated deterministically (${process.platform}).`,
   );
 } finally {
   await first?.close();

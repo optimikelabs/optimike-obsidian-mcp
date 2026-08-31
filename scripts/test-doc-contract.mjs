@@ -380,8 +380,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.5.0",
-  "package metadata must match the 3.5.0 Bridge packaging candidate",
+  "3.6.0",
+  "package metadata must match the 3.6.0 governed text-patch candidate",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
@@ -617,15 +617,15 @@ assert.doesNotMatch(operonContractFr, /3\.5\.3` stock[\s\S]*lecture seule/iu);
 const profilesEn = await text("docs/tool-surface-profiles.md");
 const profilesFr = await text("docs/tool-surface-profiles.fr.md");
 assert.match(readme, /\| `tasks`\s+\|\s+33\s+\|/u);
-assert.match(readme, /\| `full`\s+\|\s+72\s+\|/u);
+assert.match(readme, /\| `full`\s+\|\s+76\s+\|/u);
 assert.match(readmeFr, /\| `tasks`\s+\|\s+33\s+\|/u);
-assert.match(readmeFr, /\| `full`\s+\|\s+72\s+\|/u);
+assert.match(readmeFr, /\| `full`\s+\|\s+76\s+\|/u);
 assert.match(profilesEn, /\| `tasks`\s+\|[^\n]+33 tools/u);
-assert.match(profilesEn, /\| `full`\s+\|[^\n]+72 tools/u);
-assert.match(profilesEn, /76 unique names/u);
+assert.match(profilesEn, /\| `full`\s+\|[^\n]+76 tools/u);
+assert.match(profilesEn, /80 unique names/u);
 assert.match(profilesFr, /\| `tasks`\s+\|[^\n]+33 outils/u);
-assert.match(profilesFr, /\| `full`\s+\|[^\n]+72 outils/u);
-assert.match(profilesFr, /76 noms uniques/u);
+assert.match(profilesFr, /\| `full`\s+\|[^\n]+76 outils/u);
+assert.match(profilesFr, /80 noms uniques/u);
 
 const backpressureContract = await text(
   "docs/http-concurrency-backpressure.md",

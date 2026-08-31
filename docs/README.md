@@ -38,6 +38,7 @@ French operator guides are linked alongside their English equivalents.
 | Which OSS gateway profile has been proven end to end?            | [OSS Gateway Compatibility](gateway-compatibility.md)                                 |
 | How are Operon reads and mutations governed?                     | [Operon MCP Contract](operon-mcp-contract.md)                                         |
 | How does governed atomic note replacement work?                  | [Governed Note Replacement](governed-note-replacement.md)                             |
+| How do I append, prepend or replace body text without a lost update? | [Governed Text Patch P4](governed-text-patch-p4.md)                                |
 | How are named Obsidian Base formulas mutated safely?             | [Governed Base Formula P2](governed-base-formula-p2.md)                               |
 | How is one existing JSON Canvas graph mutated safely?            | [Governed Canvas P3](governed-canvas-p3.md)                                           |
 | Why does MCP expose Operon functions instead of calling the CLI? | [Operon CLI / Developer API audit](operon-cli-audit.md)                               |
@@ -63,6 +64,7 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 - bundled bridge implementation: [Operon Bridge README](../plugins/obsidian-operon-bridge/README.md);
 - bundled Bases implementation: [Bases Bridge README](../plugins/obsidian-bases-bridge/README.md).
 - governed atomic note replacement: [contract](governed-note-replacement.md) and [Atomic Write Bridge README](../plugins/obsidian-atomic-write-bridge/README.md).
+- governed Markdown body text patches: [P4 contract](governed-text-patch-p4.md).
 
 ### Search and runtime
 

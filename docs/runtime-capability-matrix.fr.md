@@ -44,6 +44,7 @@ bornées du contrôle initial.
 | Validation de format                   | Markdown/Base/Canvas         | Markdown/Base/Canvas                       | Markdown/Base/Canvas      | Markdown/Base/Canvas            | Markdown/Base/Canvas                | Markdown/Base/Canvas                                                       |
 | Update note                            | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | Append/prepend seulement            | Append/prepend seulement                                                   |
 | Remplacement atomique gouverné         | CAS Atomic Write Bridge      | Idem tant que l’API et le Bridge répondent | Non                       | Non                             | Non                                 | Non                                                                        |
+| Patch texte gouverné du corps Markdown | Même CAS Atomic Write        | Idem tant que l’API et le Bridge répondent | Non                       | Non                             | Non                                 | Non                                                                        |
 | Search/replace                         | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | Remplacements exacts par `filePath` | Remplacements exacts par `filePath`                                        |
 | Frontmatter                            | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | `set` d’une clé unique              | `set`, batch frontmatter dry-run/apply, et rows Bases                      |
 | Tags                                   | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | Non                                 | Tags frontmatter, tags inline, index/audit local, rename avec dry-run      |
@@ -126,12 +127,16 @@ certification périodique complète n’est revendiquée.
 Voir le [contrat MCP Operon](operon-mcp-contract.fr.md) et
 l’[audit CLI/API](operon-cli-audit.fr.md).
 
-Les quatre outils `obsidian_note_replace_plan`,
+Les quartets de remplacement gouverné et de patch texte du corps sont
+enregistrés uniquement en `live`, ou en `hybrid` avec API disponible. Leur
+présence n’ouvre aucune écriture. `obsidian_note_replace_plan`,
 `obsidian_note_replace_apply`, `obsidian_note_replace_status` et
-`obsidian_note_replace_recover` sont enregistrés uniquement en `live`, ou en
-`hybrid` avec API disponible. Leur présence n’ouvre aucune écriture : politique
+`obsidian_note_replace_recover` restent soumis à la politique
 MCP courante, frontmatter protégé, write gate du Bridge, identité backend et CAS
-SHA-256 restent effectifs.
+SHA-256. `obsidian_text_patch_plan/apply/status/recover` projette les append,
+prepend et remplacements littéraux bornés sur cette même autorité durable, sans
+nouveau journal, et refuse frontmatter, lignes de tâches, regex et chemins
+ambigus.
 
 La livraison du handoff est un contrat de transport, pas une capacité d’écriture
 du mode runtime :
@@ -156,7 +161,17 @@ du mode runtime :
 | `headless-guarded`               | Tout `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                                                     |
 | `headless-filesystem`            | Tout `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                                                 |
 | `hybrid` API indisponible        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                              |
-| `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique, plans gouvernés note, Frontmatter, formules Base et Canvas, plus outils REST d’écriture et Bases Bridge : `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+| `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique, plans gouvernés remplacement de note, patch texte, Frontmatter, formules Base et Canvas, plus outils REST d’écriture et Bases Bridge : `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+
+## Patch texte gouverné du corps Markdown P4
+
+`obsidian_text_patch_plan`, `obsidian_text_patch_apply`,
+`obsidian_text_patch_status` et `obsidian_text_patch_recover` partagent la même
+frontière live/hybrid et le même journal Atomic Write que le remplacement de
+note gouverné. Ils compilent l’intention explicite append, prepend ou
+remplacement littéral avant la création du plan enfant. Les profils live
+curatés exposent ce quartet et masquent les fallbacks directs update/search-
+replace uniquement lorsque les quatre outils sont présents.
 
 ## Frontmatter gouvernée P1
 

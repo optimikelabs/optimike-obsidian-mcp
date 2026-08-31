@@ -39,10 +39,10 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 
 | Besoin                                               | Profil      | Taille live/hybrid complète |
 | ---------------------------------------------------- | ----------- | --------------------------: |
-| Travail général sur le coffre                        | `standard`  |                          19 |
-| Notes, tags, Bases et Canvas                         | `authoring` |                          30 |
+| Travail général sur le coffre                        | `standard`  |                          21 |
+| Notes, tags, Bases et Canvas                         | `authoring` |                          32 |
 | Workflows Tasks / Operon                             | `tasks`     |                          33 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          72 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          76 |
 
 En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
@@ -112,9 +112,9 @@ N’activer que les surfaces utilisées :
 
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) pour notes, métadonnées et tags en live ;
 - **Bases Bridge** inclus pour Bases live et le CAS de formules gouvernées ;
-- **Optimike Atomic Write Bridge** inclus pour les cycles Note, Frontmatter et Canvas `plan → apply → status → recover` ;
+- **Optimike Atomic Write Bridge** inclus pour les cycles remplacement de note, patch texte du corps, Frontmatter et Canvas `plan → apply → status → recover` ;
 - **Smart Connections** pour l’index sémantique local ;
-- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.1** pour les tâches gouvernées. Optimike MCP `3.5.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Les trois Bridges inclus [récupèrent désormais leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture. Leur [bundle de release unique et vérifié](docs/bridge-packaging.fr.md) préserve les réglages plugin et permet un rollback clôturé.
+- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.1** pour les tâches gouvernées. Optimike MCP `3.6.0` cible Operon officiel `3.6.0`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.0` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Les trois Bridges inclus [récupèrent désormais leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture. Leur [bundle de release unique et vérifié](docs/bridge-packaging.fr.md) préserve les réglages plugin et permet un rollback clôturé.
 - **Obsidian Tasks** pour le parsing Markdown Tasks-compatible.
 
 Les mutations Operon exigent le réglage de mutation du Bridge plus :
@@ -137,7 +137,7 @@ idempotence et restauration restent obligatoires.
 
 ## Opérations gouvernées
 
-Les familles Note, Frontmatter, formule Base et Canvas sont exposées atomiquement :
+Les familles remplacement de note, patch texte du corps, Frontmatter, formule Base et Canvas sont exposées atomiquement :
 
 ```text
 plan → apply → status → recover

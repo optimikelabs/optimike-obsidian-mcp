@@ -208,14 +208,22 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "notes.direct.common",
     "notes-core",
     GUARDED_NOTE_MODES,
-    { surfaceClass: "direct", annotationClass: "destructive" },
+    {
+      surfaceClass: "direct",
+      annotationClass: "destructive",
+      preferredAlternativeFamily: "text-patch",
+    },
   ),
   defineTool(
     "obsidian_search_replace",
     "notes.direct.common",
     "notes-core",
     GUARDED_NOTE_MODES,
-    { surfaceClass: "direct", annotationClass: "destructive" },
+    {
+      surfaceClass: "direct",
+      annotationClass: "destructive",
+      preferredAlternativeFamily: "text-patch",
+    },
   ),
   defineTool(
     "obsidian_delete_note",
@@ -233,6 +241,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
   ),
 
   ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace"),
+  ...governedFamily("obsidian_text_patch", "notes.governed", "text-patch"),
 
   defineTool(
     "obsidian_manage_frontmatter",

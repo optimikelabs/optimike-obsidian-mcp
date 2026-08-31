@@ -59,8 +59,8 @@ assert.ok(
 const routingPairs = [
   ["list_all_tasks", "operon_list_tasks"],
   ["query_tasks", "operon_query_tasks"],
-  ["obsidian_update_note", "obsidian_note_replace_plan"],
-  ["obsidian_search_replace", "obsidian_note_replace_plan"],
+  ["obsidian_update_note", "obsidian_text_patch_plan"],
+  ["obsidian_search_replace", "obsidian_text_patch_plan"],
   ["obsidian_manage_frontmatter", "obsidian_frontmatter_patch_plan"],
   ["bases_upsert_config", "bases_formula_patch_plan"],
   ["obsidian_manage_canvas", "obsidian_canvas_patch_plan"],

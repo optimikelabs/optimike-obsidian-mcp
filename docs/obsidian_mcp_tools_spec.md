@@ -28,7 +28,7 @@ registration and tool-profile exposure are separate filters:
   visibility is not authorization.
 
 The current cross-runtime registry contains 76 unique names. Full live/hybrid
-registration currently contains 72 names. See
+registration currently contains 76 names. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
 ## MCP Resources
@@ -109,6 +109,25 @@ terminal plans cannot be reactivated. The atomic guarantee covers the target
 note transition enforced by Obsidian `Vault.process` CAS; it does not reverse
 emissions to sync, watchers, third-party plugins, indexers, or external
 automations. No generic public `operation_*` surface is introduced.
+
+## Governed Markdown Body Text Patch (P4)
+
+Available on the same live/hybrid Atomic Write boundary. P4 compiles ordered
+`append_body`, `prepend_body`, and exact `replace_literal` intentions into a
+complete next note, preserves frontmatter, refuses real Markdown task lines,
+and delegates one sealed child plan to the existing note runtime.
+
+- `obsidian_text_patch_plan`: compile and seal one body-only patch without
+  writing; `occurrence: all` requires `intent: replace_all`.
+- `obsidian_text_patch_apply`: apply only the sealed patch with its matching
+  public idempotency key.
+- `obsidian_text_patch_status`: reconcile the durable child receipt without
+  exposing the key or sealed text.
+- `obsidian_text_patch_recover`: resume only the same recoverable child plan.
+
+Curated live profiles prefer this complete family over direct
+`obsidian_update_note` and `obsidian_search_replace`. Explicit `full` and
+headless fallback modes retain the direct compatibility tools.
 
 ## Governed Frontmatter Projection (P1)
 

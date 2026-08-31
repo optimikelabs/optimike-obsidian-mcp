@@ -671,6 +671,83 @@ try {
   );
   assert.equal(fake.casRequests, 0);
 
+  fake.reset("---\rcréation: 2026-08-13\rstatut: actif\r---\rbefore\r");
+  const bareCrSourceAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent:
+        "---\rcréation: 2026-08-13\rstatut: actif\r---\rafter\r",
+      idempotencyKey: "unsupported-bare-cr-source",
+    },
+    true,
+  );
+  assertPublicError(
+    bareCrSourceAttempt.payload,
+    "VALIDATION_ERROR",
+    "création|before|after",
+    "bare CR source",
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset(`\uFEFF${INITIAL_CONTENT}`);
+  const bomSourceAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: `\uFEFF${INITIAL_CONTENT.replace("before", "after")}`,
+      idempotencyKey: "unsupported-bom-source",
+    },
+    true,
+  );
+  assertPublicError(
+    bomSourceAttempt.payload,
+    "VALIDATION_ERROR",
+    "création|before|after",
+    "BOM source",
+  );
+  assert.equal(fake.casRequests, 0);
+
+  fake.reset();
+  const bareCrTargetAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent:
+        "---\rcréation: 2026-08-13\rstatut: actif\r---\rafter\r",
+      idempotencyKey: "unsupported-bare-cr-target",
+    },
+    true,
+  );
+  assertPublicError(
+    bareCrTargetAttempt.payload,
+    "VALIDATION_ERROR",
+    "création|after",
+    "bare CR target",
+  );
+  assert.equal(fake.casRequests, 0);
+
+  const bomTargetAttempt = await call(
+    session,
+    "obsidian_note_replace_plan",
+    {
+      path: FIXTURE_PATH,
+      nextContent: `\uFEFF${INITIAL_CONTENT.replace("before", "after")}`,
+      idempotencyKey: "unsupported-bom-target",
+    },
+    true,
+  );
+  assertPublicError(
+    bomTargetAttempt.payload,
+    "VALIDATION_ERROR",
+    "création|after",
+    "BOM target",
+  );
+  assert.equal(fake.casRequests, 0);
+
   fake.reset(
     "---\nbornAt: 2026-08-13\nchangedAt: 2026-08-17T10:00\nviewedAt: 2026-08-17T09:00\nstatut: actif\n---\nbefore\n",
   );

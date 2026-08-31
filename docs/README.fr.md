@@ -38,6 +38,7 @@ question.
 | Quel profil de gateway OSS a été prouvé de bout en bout ?                     | [Compatibilité gateways OSS](gateway-compatibility.fr.md)                               |
 | Comment les lectures et mutations Operon sont-elles gouvernées ?              | [Contrat MCP Operon](operon-mcp-contract.fr.md)                                         |
 | Comment fonctionne le remplacement atomique gouverné ?                        | [Contrat de remplacement gouverné](governed-note-replacement.fr.md)                     |
+| Comment ajouter, préfixer ou remplacer du texte sans écraser une concurrence ? | [Patch texte gouverné P4](governed-text-patch-p4.fr.md)                                 |
 | Comment muter sûrement les formules nommées d’une Base Obsidian ?             | [Formules Base gouvernées P2](governed-base-formula-p2.fr.md)                           |
 | Comment muter sûrement le graphe d’un JSON Canvas existant ?                  | [Canvas gouverné P3](governed-canvas-p3.fr.md)                                          |
 | Pourquoi le MCP expose-t-il des fonctions Operon au lieu d’appeler la CLI ?   | [Audit CLI / Developer API](operon-cli-audit.fr.md)                                     |
@@ -63,6 +64,7 @@ Formules Base gouvernées source-preserving : [contrat P2](governed-base-formula
 - bridge Operon inclus : [README Operon Bridge](../plugins/obsidian-operon-bridge/README.md) ;
 - bridge Bases inclus : [README Bases Bridge](../plugins/obsidian-bases-bridge/README.md) ;
 - remplacement atomique gouverné : [contrat](governed-note-replacement.fr.md) et [README Atomic Write Bridge](../plugins/obsidian-atomic-write-bridge/README.md).
+- patches texte gouvernés du corps Markdown : [contrat P4](governed-text-patch-p4.fr.md).
 
 ### Recherche et runtime
 
