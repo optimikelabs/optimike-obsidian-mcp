@@ -94,7 +94,9 @@ function promptFor(profile, tools, cases) {
 }
 
 function codexCommand() {
-  return process.platform === "win32" ? "codex.exe" : "codex";
+  // The npm shim is the installed CLI authority on Windows. A stale standalone
+  // codex.exe can otherwise shadow the current package in the same directory.
+  return process.platform === "win32" ? "codex.cmd" : "codex";
 }
 
 function codexExecArgs({
@@ -199,6 +201,7 @@ async function main() {
     if (
       !prompt.includes("obsidian_read_note") ||
       !prompt.includes("Read A.md") ||
+      (process.platform === "win32" && codexCommand() !== "codex.cmd") ||
       args.includes("-a") ||
       !args.includes('approval_policy="never"') ||
       selectionIsExposed(
