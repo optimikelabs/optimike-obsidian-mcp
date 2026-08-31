@@ -113,6 +113,10 @@ d'environnement. Les chemins du coffre, clés Local REST, clés API fournisseur
 et autres variables du processus ne sont jamais hérités. Ce harness utilise la
 connexion normale enregistrée par la CLI Codex, pas une clé API d'environnement.
 
+Le harness de sélection reconstruit `dist/` depuis le checkout propre attesté
+avant de mesurer `tools/list`, puis revérifie le commit et l'arbre suivi. Un
+ancien build ignoré ne peut donc jamais être attribué au SHA courant.
+
 ## Règles du catalogue
 
 Chaque nom enregistré appartient à une classe : canonique unique, alias

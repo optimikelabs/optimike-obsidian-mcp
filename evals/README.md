@@ -90,6 +90,9 @@ asks the model to execute a vault tool. CI exercises only its offline contract.
 Focused and `full` measurements receive identical ordered case batches, and the
 Codex subprocess inherits only an explicit non-secret environment allowlist.
 Use the CLI's stored login rather than an environment API key.
+Before discovery, the harness rebuilds `dist/` from the exact clean checkout
+and rechecks the commit and tracked tree, so ignored stale artifacts cannot be
+mistaken for evidence from the attested SHA.
 
 ## Offline scorer
 

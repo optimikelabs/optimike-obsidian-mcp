@@ -109,6 +109,10 @@ paths, Local REST credentials, provider API keys and unrelated process
 variables are never inherited. Use a normal Codex login stored by the CLI; do
 not rely on an environment API key for this harness.
 
+The selection harness rebuilds `dist/` from the attested clean checkout before
+measuring `tools/list`, then rechecks the commit and tracked working tree. A
+stale ignored build can therefore never be attributed to the current SHA.
+
 ## Catalogue rules
 
 Every registered name is classified as one of:

@@ -68,6 +68,43 @@ function assertCleanExactCandidate() {
   return commit;
 }
 
+function exactBuildSteps(repoRoot = process.cwd()) {
+  return [
+    [
+      process.execPath,
+      [path.join(repoRoot, "node_modules", "typescript", "bin", "tsc")],
+    ],
+    [
+      process.execPath,
+      [
+        path.join(repoRoot, "scripts", "make-executable.mjs"),
+        path.join(repoRoot, "dist", "index.js"),
+        path.join(repoRoot, "dist", "stdio-proxy.js"),
+      ],
+    ],
+  ];
+}
+
+function buildExactCandidate(sourceCommit) {
+  for (const [command, args] of exactBuildSteps()) {
+    execFileSync(command, args, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
+  const afterCommit = currentCommit();
+  const afterStatus = execFileSync("git", ["status", "--porcelain"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  }).trim();
+  if (afterCommit !== sourceCommit || afterStatus) {
+    throw new Error(
+      "Exact candidate changed while rebuilding routing evaluation artifacts.",
+    );
+  }
+}
+
 function compactTool(tool) {
   const properties = Object.keys(tool.inputSchema?.properties ?? {}).sort();
   return {
@@ -326,6 +363,7 @@ async function main() {
     ];
     const fullBatches = profileCaseBatches("full", comparisonCases);
     const standardBatch = profileCaseBatches("standard", comparisonCases)[0];
+    const buildSteps = exactBuildSteps("REPO");
     const toolNameEnum =
       schema.properties.choices.items.properties.toolName.enum;
     const firstEvidenceRoot = createEvidenceRoot("a".repeat(40));
@@ -348,6 +386,13 @@ async function main() {
       fullBatches.length !== 2 ||
       caseContextHash(fullBatches[0].cases) !==
         caseContextHash(standardBatch.cases) ||
+      buildSteps.length !== 2 ||
+      !buildSteps[0][1][0].endsWith(
+        path.join("node_modules", "typescript", "bin", "tsc"),
+      ) ||
+      !buildSteps[1][1][0].endsWith(
+        path.join("scripts", "make-executable.mjs"),
+      ) ||
       !codexEntrypointFromWindowsShim("C:\\npm\\codex.cmd").endsWith(
         path.join("@openai", "codex", "bin", "codex.js"),
       ) ||
@@ -365,6 +410,7 @@ async function main() {
   }
 
   const sourceCommit = assertCleanExactCandidate();
+  buildExactCandidate(sourceCommit);
   const runs = Number(option("runs", "2"));
   if (!Number.isInteger(runs) || runs < 2 || runs > 5) {
     throw new Error("--runs must be an integer from 2 to 5.");

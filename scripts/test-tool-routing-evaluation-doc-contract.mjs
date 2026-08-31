@@ -30,6 +30,7 @@ for (const relativePath of [
   assert.match(content, /no network call|aucun appel\s+réseau/u);
   assert.match(content, /allowlist/u);
   assert.match(content, /case-context|contexte de cas/u);
+  assert.match(content, /stale|ancien build/u);
 }
 
 console.log(
