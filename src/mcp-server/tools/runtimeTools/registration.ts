@@ -23,6 +23,7 @@ import {
   type GovernedNoteReplaceRuntime,
 } from "../governedNoteReplaceTools/index.js";
 import { registerGovernedFrontmatterTools } from "../governedFrontmatterTools/index.js";
+import { registerGovernedTextPatchTools } from "../governedTextPatchTools/index.js";
 import { registerGovernedBaseFormulaTools } from "../governedBaseFormulaTools/index.js";
 import type { GovernedBaseFormulaRuntime } from "../../../services/baseFormulaProjectionRuntime.js";
 import type { GovernedCanvasRuntime } from "../../../services/canvasProjectionRuntime.js";
@@ -131,6 +132,7 @@ export async function registerRuntimeTools(
   );
 
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
+  await registerGovernedTextPatchTools(server, governedNoteReplaceRuntime);
   await registerGovernedFrontmatterTools(server, governedNoteReplaceRuntime);
   await registerGovernedBaseFormulaTools(server, governedBaseFormulaRuntime);
   await registerGovernedCanvasTools(server, governedCanvasRuntime);

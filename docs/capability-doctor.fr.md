@@ -38,7 +38,7 @@ Chaque entrée fournit également :
   caller ou du backend.
 
 Le manifeste couvre Local REST, les lectures du coffre, la recherche
-sémantique, les lifecycles gouvernés Note, Frontmatter, Canvas et Base, ainsi
+sémantique, les lifecycles gouvernés remplacement de note, patch texte du corps, Frontmatter, Canvas et Base, ainsi
 que les lectures et écritures Operon. La recherche sémantique n’est utilisable
 que si son runtime d’index et l’embedder de requête sont activés et qu’une
 sonde live bornée charge au moins un vecteur valide depuis la source actuelle.
@@ -60,7 +60,7 @@ séparé du MCP reste coupé, tandis que `write_policy_blocked` et
 `operation_policy_blocked` préservent la frontière globale ou propre à
 l’opération de `MCP_WRITE_MODE`. Les dry-runs peuvent rester disponibles sans
 faire croire qu’apply est autorisé. La même frontière `write_policy_blocked`
-s’applique aux écritures gouvernées Note, Frontmatter, Canvas et Base.
+s’applique aux écritures gouvernées remplacement de note, patch texte du corps, Frontmatter, Canvas et Base.
 `operon_duplicate_conflicts` rend les lectures et écritures Operon
 indisponibles jusqu’à résolution des identités dupliquées.
 `operon_capability_not_advertised` signifie

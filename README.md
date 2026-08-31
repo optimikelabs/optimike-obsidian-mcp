@@ -39,10 +39,10 @@ Runtime answers what the backend can execute. It does not decide how many tools 
 
 | Need                                              | Profile     | Full live/hybrid size |
 | ------------------------------------------------- | ----------- | --------------------: |
-| General vault work                                | `standard`  |                    19 |
-| Notes, tags, Bases and Canvas authoring           | `authoring` |                    30 |
+| General vault work                                | `standard`  |                    21 |
+| Notes, tags, Bases and Canvas authoring           | `authoring` |                    32 |
 | Tasks / Operon workflows                          | `tasks`     |                    33 |
-| Explicit complete, admin and specialized surfaces | `full`      |                    72 |
+| Explicit complete, admin and specialized surfaces | `full`      |                    76 |
 
 In 3.0, an unspecified profile defaults to `standard`. `smart_semantic_search` is the only registered semantic-search name; the former `smart_search` and `smart-search` aliases have been removed. `full` remains an explicit opt-in for the complete active-runtime surface. `bases_upsert_config` is a `full`-only whole-Base compatibility path; legacy whole-file config writes are default-off, while normal authoring uses bounded Base creation/row writes plus the governed formula family.
 
@@ -112,9 +112,9 @@ Enable only the surfaces you use:
 
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) for live note, metadata and tag operations;
 - bundled **Bases Bridge** for live Bases and governed formula CAS;
-- bundled **Optimike Atomic Write Bridge** for governed Note, Frontmatter and Canvas `plan → apply → status → recover`;
+- bundled **Optimike Atomic Write Bridge** for governed Note replacement, body text patch, Frontmatter and Canvas `plan → apply → status → recover`;
 - **Smart Connections** for the local semantic index;
-- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.9.1** for governed task operations. Optimike MCP `3.5.0` targets official Operon `3.6.0`, Operon CLI `1.2.0`, and Local REST API `5.1.0`; release admission requires the repository's exact-SHA Pilot 2 gate. Operon `3.6.0` remains `compatible-provisional`: a non-denied release is writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate; product version is not a positive write allowlist. The three bundled Bridges now [recover their Local REST routes after late startup or reload](docs/bridge-lifecycle.md) without restarting the MCP or changing write authorization. Their [single verified release bundle](docs/bridge-packaging.md) preserves plugin settings and supports fenced rollback.
+- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.9.1** for governed task operations. Optimike MCP `3.6.0` targets official Operon `3.6.0`, Operon CLI `1.2.0`, and Local REST API `5.1.0`; release admission requires the repository's exact-SHA Pilot 2 gate. Operon `3.6.0` remains `compatible-provisional`: a non-denied release is writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate; product version is not a positive write allowlist. The three bundled Bridges now [recover their Local REST routes after late startup or reload](docs/bridge-lifecycle.md) without restarting the MCP or changing write authorization. Their [single verified release bundle](docs/bridge-packaging.md) preserves plugin settings and supports fenced rollback.
 - **Obsidian Tasks** for Tasks-compatible Markdown parsing.
 
 Operon mutations require the Bridge mutation setting plus:
@@ -135,7 +135,7 @@ media, Frontmatter Date Manager, idempotence and restoration gates remain mandat
 
 ## Governed operations
 
-Governed Note, Frontmatter, Base formula and Canvas families are exposed atomically:
+Governed Note replacement, body text patch, Frontmatter, Base formula and Canvas families are exposed atomically:
 
 ```text
 plan → apply → status → recover

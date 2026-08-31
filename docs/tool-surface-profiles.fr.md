@@ -13,12 +13,12 @@ Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils
 
 | Profil      | Usage visé                                                              | Surface complète live/hybrid |
 | ----------- | ----------------------------------------------------------------------- | ---------------------------: |
-| `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    19 outils |
-| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    30 outils |
+| `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    21 outils |
+| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    32 outils |
 | `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    33 outils |
-| `full`      | Surface complète/admin explicite du runtime actif                       |                    72 outils |
+| `full`      | Surface complète/admin explicite du runtime actif                       |                    76 outils |
 
-Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 72 outils. Le registre canonique couvre 76 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Les deux ajouts 3.1 sont les opérations Operon Daily/Weekly bornées par capacité ; leur visibilité ne remplace jamais un grant live.
+Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 76 outils. Le registre canonique couvre 80 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Les deux ajouts 3.1 sont les opérations Operon Daily/Weekly bornées par capacité ; leur visibilité ne remplace jamais un grant live.
 
 ## Noms réservés à la compatibilité
 
@@ -42,7 +42,8 @@ Une famille gouvernée est exposée atomiquement :
 plan → apply → status → recover
 ```
 
-Cela vaut pour le remplacement de Note, la projection Frontmatter, les formules Bases et le patch de graphe Canvas.
+Cela vaut pour le remplacement de Note, le patch texte du corps Markdown, la
+projection Frontmatter, les formules Bases et le patch de graphe Canvas.
 
 L’enregistrement des outils est incrémental dans la factory serveur. Tant que les quatre membres d’une famille ne sont pas enregistrés, toute la famille gouvernée reste masquée et le fallback direct légitime reste visible. À l’arrivée du quatrième membre, le quartet devient visible en une seule réconciliation et le fallback devenu secondaire est masqué. La compilation statique reste stricte et rejette une famille réellement incomplète.
 
@@ -53,6 +54,7 @@ Un profil ne modifie jamais le contenu scellé du plan, les journaux, l’idempo
 Les profils modernes ne masquent une voie directe que lorsque la famille gouvernée correspondante est structurellement complète dans le runtime courant.
 
 - `live` / `hybrid` live : exposer `obsidian_frontmatter_patch_{plan,apply,status,recover}` et masquer `obsidian_manage_frontmatter` ;
+- `live` / `hybrid` live : exposer `obsidian_text_patch_{plan,apply,status,recover}` et masquer `obsidian_update_note` / `obsidian_search_replace` seulement lorsque le quartet est complet ;
 - `headless-guarded` / `headless-filesystem` : la famille Frontmatter gouvernée est absente, donc `obsidian_manage_frontmatter` reste le fallback borné ;
 - les helpers Canvas directs de `headless-filesystem` restent disponibles uniquement lorsque la famille Canvas live gouvernée est structurellement absente ;
 - `bases_upsert_config` n’est jamais un fallback de formule et reste réservé à `full`.

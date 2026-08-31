@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-08-31
+
+### Added
+
+- `obsidian_text_patch_plan/apply/status/recover` provides the first public
+  governed body-only Markdown patch surface. It supports bounded append,
+  prepend and literal replacement while reusing the existing Atomic Write CAS,
+  journal, idempotency, status and recovery authority.
+- The P4 compiler seals ordered, step-local authorized ranges and hashes,
+  preserves frontmatter and line endings byte for byte, and refuses regex,
+  ambiguous paths, note creation and Markdown/Operon task lines.
+
+### Changed
+
+- Curated live `standard` and `authoring` profiles prefer the complete governed
+  text-patch quartet and hide direct note-update/search-replace routes. `full`,
+  headless fallback and incomplete-quartet registration retain those direct
+  compatibility paths.
+
+### Validation
+
+- Deterministic compiler and MCP tests cover LF/CRLF preservation, explicit
+  replace-all intent, stale CAS, concurrent clients, lost responses, recovery,
+  idempotent replay, empty notes, task-line boundaries and secret redaction.
+- The exact-candidate Pilot 2 gate exercises append, prepend, literal replace,
+  stale conflict and dynamic modified-time settlement, then restores the note
+  and supported date-plugin state exactly through the attested Atomic Write
+  binding.
+
+## [3.5.0] - 2026-08-31
+
 ### Added
 
 - A single exact-SHA Bridge bundle now packages the Operon, Atomic Write and

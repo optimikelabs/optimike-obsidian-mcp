@@ -37,7 +37,7 @@ Each entry also provides:
 - `preferredTools`: bounded canonical tool names, never caller or backend data.
 
 The manifest covers Local REST, vault reads, semantic search, the governed
-Note, Frontmatter, Canvas and Base lifecycles, and Operon reads and writes.
+Note replacement, body text patch, Frontmatter, Canvas and Base lifecycles, and Operon reads and writes.
 Semantic search is usable only when its index runtime and query embedder are
 enabled and a bounded live probe loads at least one valid vector from the
 current source. `semantic_query_embedding_disabled` reports an intentionally

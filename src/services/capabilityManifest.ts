@@ -210,6 +210,10 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "obsidian_note_replace_apply",
     "obsidian_note_replace_status",
     "obsidian_note_replace_recover",
+    "obsidian_text_patch_plan",
+    "obsidian_text_patch_apply",
+    "obsidian_text_patch_status",
+    "obsidian_text_patch_recover",
   ],
   "governed-frontmatter-write": [
     "obsidian_frontmatter_patch_plan",
@@ -273,7 +277,7 @@ function visible(
   visibleToolNames: ReadonlySet<string>,
   capability: CapabilityId,
 ): boolean {
-  return TOOL_FAMILIES[capability].some((name) => visibleToolNames.has(name));
+  return TOOL_FAMILIES[capability].every((name) => visibleToolNames.has(name));
 }
 
 function entry(

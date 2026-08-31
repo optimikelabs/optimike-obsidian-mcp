@@ -49,15 +49,18 @@ interchangeables. Appliquer cette priorité :
 | Similarité sémantique                              | `smart_semantic_search`                                   | C’est le seul nom enseigné aux nouveaux agents et exposé dans les profils modernes.                                            |
 | Lecture de tâches gérées par Operon                | `operon_list_tasks`, `operon_query_tasks`                 | `list_all_tasks` et `query_tasks` inspectent le Markdown compatible Obsidian Tasks.                                            |
 | Remplacement complet d’une note Markdown existante | `obsidian_note_replace_plan`, puis apply/status/recover   | L’overwrite de `obsidian_update_note` ne fournit ni reçu durable ni récupération du plan exact.                                |
+| Append, prepend ou remplacement littéral du corps  | `obsidian_text_patch_plan`, puis son cycle associé        | L’update/search-replace direct reste un fallback de compatibilité ou création sans reçu durable.                               |
 | Set/delete du Frontmatter de premier niveau        | `obsidian_frontmatter_patch_plan`, puis son cycle associé | `obsidian_manage_frontmatter` reste utile pour la lecture, la compatibilité ou quand la projection gouvernée live est absente. |
 | Set/delete d’une formule Base nommée               | `bases_formula_patch_plan`, puis son cycle associé        | `bases_upsert_config` reste une voie whole-config de compatibilité.                                                            |
 | Mutation d’un graphe JSON Canvas existant          | `obsidian_canvas_patch_plan`, puis son cycle associé      | `obsidian_manage_canvas` est un helper filesystem headless direct sans recovery durable.                                       |
 
-Les mutations directes append, prepend, search/replace et tags restent exposées
-quand le runtime actif les autorise. Elles ne produisent pas de reçu durable
-plan/status/recovery. Les mutations filesystem headless sont des fallbacks
-bornés pour une copie ou un coffre dédié ; elles ne garantissent pas la
-sémantique Desktop/plugins.
+Les voies directes update note et search/replace restent disponibles dans
+`full`, dans les fallbacks headless et tant que le quartet gouverné est
+incomplet. Les profils live curatés les masquent dès que le quartet text-patch
+complet est enregistré. Les mutations directes de tags restent séparées et ne
+produisent pas de reçu durable. Les mutations filesystem headless sont des
+fallbacks bornés pour une copie ou un coffre dédié ; elles ne garantissent pas
+la sémantique Desktop/plugins.
 
 Le serveur expose la même priorité concise via la ressource MCP
 `optimike://guides/tool-routing`. Un client peut la lister et la lire sans

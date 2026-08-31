@@ -1,0 +1,39 @@
+name: P4 Governed Text Patch
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/p4-governed-text-patch.yml"
+      - "src/services/textPatchCompiler.ts"
+      - "src/services/textPatchProjectionRuntime.ts"
+      - "src/mcp-server/tools/governedTextPatchTools/**"
+      - "src/mcp-server/tools/governedNoteReplaceTools/**"
+      - "src/services/operations/obsidianNoteReplace*.ts"
+      - "src/services/writePolicy.ts"
+      - "src/mcp-server/toolSurfaceRegistry.ts"
+      - "src/mcp-server/toolProfiles.ts"
+      - "scripts/test-text-patch-compiler.mjs"
+      - "scripts/test-governed-text-patch-mcp.mjs"
+      - "scripts/test-governed-text-patch-doc-contract.mjs"
+      - "scripts/smoke-governed-text-patch-live.mjs"
+      - "docs/governed-text-patch-p4*.md"
+  workflow_dispatch:
+
+jobs:
+  p4-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:governed-text-patch
+      - run: node scripts/test-governed-text-patch-doc-contract.mjs
+      - run: node scripts/smoke-governed-text-patch-live.mjs --offline-contract

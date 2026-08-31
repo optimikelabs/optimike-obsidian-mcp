@@ -63,6 +63,10 @@ const governedToolNames = [
   "obsidian_note_replace_apply",
   "obsidian_note_replace_status",
   "obsidian_note_replace_recover",
+  "obsidian_text_patch_plan",
+  "obsidian_text_patch_apply",
+  "obsidian_text_patch_status",
+  "obsidian_text_patch_recover",
   "obsidian_frontmatter_patch_plan",
   "obsidian_frontmatter_patch_apply",
   "obsidian_frontmatter_patch_status",
@@ -96,5 +100,5 @@ for (const name of [
 }
 
 console.log(
-  `PASS: ${registrations.length} MCP tool registrations include annotations; governed note/frontmatter/Base/Canvas tools are unique and generic operation tools remain internal`,
+  `PASS: ${registrations.length} MCP tool registrations include annotations; governed note/text/frontmatter/Base/Canvas tools are unique and generic operation tools remain internal`,
 );

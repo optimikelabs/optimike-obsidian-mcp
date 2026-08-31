@@ -62,15 +62,17 @@ this precedence:
 | Semantic similarity                               | `smart_semantic_search`                                                   | This is the only semantic-search name taught to new agents and exposed by modern profiles.                             |
 | Operon-managed task reads                         | `operon_list_tasks`, `operon_query_tasks`                                 | `list_all_tasks` and `query_tasks` inspect Obsidian Tasks-compatible Markdown.                                         |
 | Complete replacement of an existing Markdown note | `obsidian_note_replace_plan` then its matching apply/status/recover tools | `obsidian_update_note` overwrite has no durable receipt or exact-plan recovery.                                        |
+| Append, prepend, or literal body replacement       | `obsidian_text_patch_plan` then its matching lifecycle                    | Direct update/search-replace remains a compatibility or create fallback without a durable receipt.                    |
 | Top-level frontmatter set/delete                  | `obsidian_frontmatter_patch_plan` then its matching lifecycle             | `obsidian_manage_frontmatter` remains useful for reads, compatibility, or when the governed live projection is absent. |
 | Named Base formula set/delete                     | `bases_formula_patch_plan` then its matching lifecycle                    | `bases_upsert_config` is a default-off whole-config compatibility path.                                                |
 | Existing JSON Canvas graph mutation               | `obsidian_canvas_patch_plan` then its matching lifecycle                  | `obsidian_manage_canvas` is a direct headless-filesystem helper without durable recovery.                              |
 
-Direct append, prepend, search/replace and tag mutations remain intentionally
-available where the active runtime permits them. They do not produce a durable
-plan/status/recovery receipt. Headless filesystem mutations are bounded fallback
-operations for copied or dedicated vaults and do not claim Desktop/plugin
-semantics.
+The direct note-update and search/replace routes remain available in `full`, in
+headless fallback modes, and while the governed quartet is incomplete. Curated
+live profiles suppress them once the complete text-patch quartet is registered.
+Direct tag mutations remain separate and do not produce a durable receipt.
+Headless filesystem mutations are bounded fallback operations for copied or
+dedicated vaults and do not claim Desktop/plugin semantics.
 
 The server exposes the same concise precedence as the MCP resource
 `optimike://guides/tool-routing`. Clients can list and read that resource without

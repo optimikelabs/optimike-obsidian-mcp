@@ -20,12 +20,13 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
   Markdown inspection.
 - Complete replacement of an existing Markdown note in live/hybrid mode: prefer
   \`obsidian_note_replace_plan\`, then apply the sealed plan. After a lost response,
-  call status before recover; never issue a new blind mutation. Use
-  \`obsidian_update_note\` for intentional direct append/prepend/create operations;
-  its overwrite mode is a compatibility path without a durable receipt.
-- \`obsidian_search_replace\` is a direct edit without durable recovery. For a
-  high-assurance replacement, compute the intended complete content and route it
-  through \`obsidian_note_replace_plan\`.
+  call status before recover; never issue a new blind mutation.
+- Deterministic append/prepend/literal replacement in the Markdown body: prefer
+  \`obsidian_text_patch_plan\`, then its matching apply/status/recover tools. It
+  compiles to the same durable note CAS and refuses frontmatter, task lines and
+  ambiguous targets. Use \`obsidian_update_note\` or \`obsidian_search_replace\`
+  only for an intentional direct compatibility/create path when the governed
+  family is unavailable; they have no durable receipt.
 - Top-level frontmatter set/delete in live/hybrid mode: prefer
   \`obsidian_frontmatter_patch_plan\`. Use \`obsidian_manage_frontmatter\` for
   direct reads, compatibility, or a runtime where the governed tool is absent.
