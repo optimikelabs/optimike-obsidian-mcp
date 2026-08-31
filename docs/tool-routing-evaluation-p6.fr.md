@@ -95,7 +95,10 @@ source retenue.
 
 Le rapport lie la version du scorer, `verifierSha`, `candidateSha`, les hashes
 du corpus, des traces et du manifeste, les hashes des artefacts reconstruits et
-ceux des quatre surfaces. La revalidation ne réécrit ni ne réattribue les
+ceux des quatre surfaces. Les `publicTools` du candidat et de la comparaison
+sont tous deux rehashés par le `measureToolsList` versionné du vérificateur ; le
+calcul de digest déclaré par un candidat ne fait jamais autorité pour la
+parité. La revalidation ne réécrit ni ne réattribue les
 octets d'origine des traces, du corpus, du manifeste ou des fixtures.
 `P6_COMPARE_COMMIT` permet d'exiger des surfaces publiques identiques sur un
 candidat ultérieur ; toute dérive impose une nouvelle campagne LLM.

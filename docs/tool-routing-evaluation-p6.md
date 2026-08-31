@@ -89,7 +89,9 @@ identically. The report records both byte hashes and the selected source.
 
 The report binds the scorer version, `verifierSha`, `candidateSha`, corpus,
 trace and manifest hashes, rebuilt artifact hashes and all four rebuilt surface
-hashes. Revalidation never rewrites or reassigns the original trace, corpus,
+hashes. Both candidate and comparison `publicTools` are rehashed by the
+verifier's own versioned `measureToolsList`; candidate-reported digest logic is
+never an authority for parity. Revalidation never rewrites or reassigns the original trace, corpus,
 manifest or fixture bytes. Set `P6_COMPARE_COMMIT` to a later release candidate
 to require byte-identical public surface hashes; any drift requires a fresh LLM
 campaign instead of inheriting the historical result.

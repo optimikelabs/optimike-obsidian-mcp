@@ -116,7 +116,9 @@ keeps `verifierSha` and `candidateSha` distinct and binds the corpus, traces,
 manifest, rebuilt artifacts and surface hashes. It reports first-tool and
 first-family accuracy, safety/forbidden-tool rate, clarification adherence,
 success, calls above the declared minimum, schema bytes, latency, tokens and
-cost. A minimum is not interpreted as proof that additional calls were
+cost. Candidate and comparison `publicTools` are rehashed with the verifier's
+own versioned measurement function before parity is accepted. A minimum is not
+interpreted as proof that additional calls were
 unnecessary. Summaries are partitioned by harness, harness version, model,
 runtime mode and surface.
 

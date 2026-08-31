@@ -235,7 +235,18 @@ async function prepareCandidate(repository, candidateSha, reusableCheckout) {
     );
     assertCleanCheckout(checkout, candidateSha, "candidate checkout");
     const artifactHashes = candidateArtifactHashes(checkout);
-    const measuredProfiles = measureCandidateProfiles(checkout, candidateSha);
+    const reportedProfiles = measureCandidateProfiles(checkout, candidateSha);
+    const measuredProfiles = reportedProfiles.map((profile) => {
+      if (!Array.isArray(profile.publicTools)) {
+        throw new Error(
+          `candidate profile ${profile.profile ?? "unknown"} returned no publicTools`,
+        );
+      }
+      return {
+        ...profile,
+        ...measureToolsList(profile.publicTools),
+      };
+    });
     const runtime = await loadCandidateRuntime(checkout, candidateSha);
     const surfaceHashes = measuredProfiles
       .map((profile) => ({
@@ -1110,6 +1121,7 @@ console.log(
             suppliedCorpusSha256: candidateCorpusBinding.suppliedCorpusSha256,
             candidateCorpusGitBlobSha256:
               candidateCorpusBinding.candidateCorpusGitBlobSha256,
+            surfaceHashAuthority: "verifier-measure-tools-list/v1",
             candidateArtifactHashes: candidate.artifactHashes,
             candidateSurfaceHashes: candidate.surfaceHashes,
             ...(comparison

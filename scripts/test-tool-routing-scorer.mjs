@@ -269,6 +269,10 @@ try {
     report.authority.candidateCorpusGitBlobSha256,
     sha256(corpusGitRaw),
   );
+  assert.equal(
+    report.authority.surfaceHashAuthority,
+    "verifier-measure-tools-list/v1",
+  );
   assert.equal(report.authority.candidateSurfaceHashes.length, 4);
   assert.ok(
     report.authority.candidateSurfaceHashes.every((surface) =>
