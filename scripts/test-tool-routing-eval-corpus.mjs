@@ -6,18 +6,21 @@ import {
 } from "../dist/mcp-server/toolProfiles.js";
 import { getToolSurfaceEntry } from "../dist/mcp-server/toolSurfaceRegistry.js";
 
-const corpus = JSON.parse(
+const corpusEnvelope = JSON.parse(
   fs.readFileSync(
     new URL("../evals/tool-routing-corpus.json", import.meta.url),
     "utf8",
   ),
 );
+const corpus = corpusEnvelope.cases;
 
 assert.ok(Array.isArray(corpus));
 assert.ok(
-  corpus.length >= 25 && corpus.length <= 40,
-  "initial routing corpus must remain 25-40 cases",
+  corpusEnvelope.schemaVersion === "tool-routing-corpus/v1",
+  "routing corpus must use the versioned v1 envelope",
 );
+assert.equal(corpusEnvelope.corpusId, "optimike-tool-routing-v1");
+assert.equal(corpus.length, 31, "P6 must preserve all 31 discriminating cases");
 
 const ids = new Set();
 for (const testCase of corpus) {
@@ -31,6 +34,14 @@ for (const testCase of corpus) {
   assert.ok(
     TOOL_PROFILE_IDS.includes(testCase.recommendedProfile),
     `${testCase.id} uses unknown profile ${testCase.recommendedProfile}`,
+  );
+  assert.equal(typeof testCase.expectedToolFamily, "string");
+  assert.ok(testCase.expectedToolFamily.length > 0);
+  assert.ok(
+    ["none", "required", "before_mutation"].includes(
+      testCase.clarificationExpectation,
+    ),
+    `${testCase.id} has an invalid clarification expectation`,
   );
   assert.ok(Array.isArray(testCase.acceptableFirstTools));
   assert.ok(Array.isArray(testCase.forbiddenTools ?? []));
@@ -81,6 +92,26 @@ for (const testCase of corpus) {
       liveProfile.has(name),
       `${testCase.id} expects ${name}, but recommended live profile ${testCase.recommendedProfile} hides it`,
     );
+  }
+
+  if (!testCase.expectNoTool) {
+    const acceptableFirstToolFamilies =
+      testCase.acceptableFirstToolFamilies ?? [testCase.expectedToolFamily];
+    assert.ok(
+      Array.isArray(acceptableFirstToolFamilies) &&
+        acceptableFirstToolFamilies.length > 0,
+      `${testCase.id} must define at least one acceptable first-tool family`,
+    );
+    assert.ok(
+      testCase.acceptableFirstTools.every((name) =>
+        acceptableFirstToolFamilies.includes(getToolSurfaceEntry(name)?.family),
+      ),
+      `${testCase.id} must classify every accepted first route`,
+    );
+  }
+
+  if (testCase.expectNoTool) {
+    assert.equal(testCase.expectedToolFamily, "none");
   }
 }
 

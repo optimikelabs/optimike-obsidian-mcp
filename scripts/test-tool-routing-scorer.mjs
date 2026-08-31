@@ -1,93 +1,351 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  compileToolProfileNames,
+  TOOL_PROFILE_IDS,
+} from "../dist/mcp-server/toolProfiles.js";
+import {
+  measureCanonicalLiveProfileSchemas,
+  measureToolsList,
+} from "./measure-tool-profile-schemas.mjs";
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "optimike-routing-score-"));
-const resultsPath = path.join(temp, "results.jsonl");
+const corpusPath = path.join(
+  process.cwd(),
+  "evals",
+  "tool-routing-corpus.json",
+);
+const corpusRaw = fs.readFileSync(corpusPath, "utf8");
+const corpus = JSON.parse(corpusRaw);
+const corpusHash = sha256(corpusRaw);
+const expectedCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: process.cwd(),
+  encoding: "utf8",
+}).trim();
+const checkoutProfiles = new Map(
+  (await measureCanonicalLiveProfileSchemas()).map((profile) => [
+    profile.profile,
+    profile,
+  ]),
+);
 
-try {
+function sha256(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function compactTool(tool) {
+  return {
+    name: tool.name,
+    description: tool.description ?? "",
+    required: [...(tool.inputSchema?.required ?? [])].sort(),
+    properties: Object.keys(tool.inputSchema?.properties ?? {}).sort(),
+  };
+}
+
+function profileCases(surface) {
+  return corpus.cases.filter(
+    (testCase) => surface === "full" || testCase.recommendedProfile === surface,
+  );
+}
+
+function fixtureHash(surface, publicTools, cases) {
+  return sha256(
+    JSON.stringify({
+      profile: surface,
+      tools: publicTools.map(compactTool),
+      cases: cases.map(({ id, prompt }) => ({ id, prompt })),
+    }),
+  );
+}
+
+function caseContextHash(testCase) {
+  return sha256(
+    JSON.stringify(
+      corpus.cases
+        .filter(
+          (candidate) =>
+            candidate.recommendedProfile === testCase.recommendedProfile,
+        )
+        .map(({ id, prompt }) => ({ caseId: id, prompt })),
+    ),
+  );
+}
+
+function publicToolsFor(surface) {
+  const expectedNames = compileToolProfileNames({
+    profile: surface,
+    registrationMode: "live",
+    availableStaticRequirements: ["vault-cache"],
+  }).sort((left, right) => left.localeCompare(right));
+  const profile = checkoutProfiles.get(surface);
+  assert.ok(profile, `missing checkout schema profile ${surface}`);
+  assert.deepEqual(profile.toolNames, expectedNames);
+  return structuredClone(profile.publicTools);
+}
+
+function buildCanonicalFixture() {
+  const profiles = [];
+  const traces = [];
+  for (const surface of TOOL_PROFILE_IDS) {
+    const cases = profileCases(surface);
+    const publicTools = publicToolsFor(surface);
+    const measurement = measureToolsList(publicTools);
+    const surfaceFixtureHash = fixtureHash(surface, publicTools, cases);
+    profiles.push({
+      surface,
+      caseIds: cases.map((testCase) => testCase.id),
+      fixtureHash: surfaceFixtureHash,
+      toolCount: measurement.toolCount,
+      schemaBytes: measurement.toolSchemaBytes,
+      toolsListSha256: measurement.toolsListSha256,
+      publicTools,
+    });
+    for (let runIndex = 0; runIndex < 2; runIndex += 1) {
+      for (const testCase of cases) {
+        const events = [];
+        if (testCase.clarificationExpectation !== "none") {
+          events.push({ sequence: events.length, type: "clarification" });
+        }
+        const toolName = testCase.expectNoTool
+          ? null
+          : testCase.acceptableFirstTools[0];
+        if (toolName) {
+          events.push({ sequence: events.length, type: "tool_call", toolName });
+        }
+        events.push({ sequence: events.length, type: "assistant_final" });
+        traces.push({
+          schemaVersion: "tool-routing-trace/v1",
+          caseId: testCase.id,
+          corpusId: corpus.corpusId,
+          corpusHash,
+          gitSha: expectedCommit,
+          harness: { name: "fixture", version: "1.0.0" },
+          model: { provider: "offline", name: "deterministic", version: "1" },
+          modelConfig: { temperature: 0 },
+          runtimeMode: "live",
+          surface,
+          runIndex,
+          fixtureHash: surfaceFixtureHash,
+          caseContextHash: caseContextHash(testCase),
+          events,
+          success: true,
+          successEvidence: [
+            {
+              kind: "fixture_assertion",
+              detail: "Deterministic routing fixture passed.",
+            },
+          ],
+          toolCount: measurement.toolCount,
+          schemaBytes: measurement.toolSchemaBytes,
+          toolsListSha256: measurement.toolsListSha256,
+        });
+      }
+    }
+  }
+  return {
+    traces,
+    manifest: {
+      schemaVersion: "tool-routing-run-manifest/v1",
+      sourceCommit: expectedCommit,
+      corpusId: corpus.corpusId,
+      corpusHash,
+      runtimeMode: "live",
+      harness: { name: "fixture", version: "1.0.0" },
+      model: { provider: "offline", name: "deterministic", version: "1" },
+      modelConfig: { temperature: 0 },
+      runsPerSurface: 2,
+      traceCount: traces.length,
+      traceFileSha256: "",
+      profiles,
+    },
+  };
+}
+
+function writeFixture(name, fixture) {
+  const tracesPath = path.join(temp, `${name}.jsonl`);
+  const manifestPath = path.join(temp, `${name}.manifest.json`);
+  const tracesRaw = `${fixture.traces
+    .map((trace) => JSON.stringify(trace))
+    .join("\n")}\n`;
+  fixture.manifest.traceCount = fixture.traces.length;
+  fixture.manifest.traceFileSha256 = sha256(tracesRaw);
+  writeFileSync(tracesPath, tracesRaw, "utf8");
   writeFileSync(
-    resultsPath,
-    [
-      JSON.stringify({
-        id: "semantic-canonical",
-        harness: "fixture",
-        surface: "standard",
-        toolsCalled: ["smart_semantic_search"],
-        success: true,
-        latencyMs: 100,
-        inputTokens: 1000,
-      }),
-      JSON.stringify({
-        id: "runtime-status",
-        harness: "fixture",
-        surface: "full",
-        toolsCalled: ["obsidian_runtime_maintenance", "obsidian_runtime_status"],
-        success: true,
-        latencyMs: 140,
-        inputTokens: 1400,
-      }),
-      JSON.stringify({
-        id: "no-tool-explanation",
-        harness: "fixture",
-        surface: "standard",
-        toolsCalled: [],
-        success: true,
-        latencyMs: 50,
-        inputTokens: 500,
-      }),
-      JSON.stringify({
-        id: "external-move-full",
-        harness: "fixture",
-        surface: "full",
-        toolsCalled: [
-          "external_references_scan",
-          "external_move_plan",
-          "external_move_apply",
-        ],
-        success: true,
-        latencyMs: 180,
-        inputTokens: 1600,
-      }),
-    ].join("\n") + "\n",
+    manifestPath,
+    `${JSON.stringify(fixture.manifest, null, 2)}\n`,
     "utf8",
   );
+  return { tracesPath, manifestPath };
+}
 
-  const output = execFileSync(
-    process.execPath,
-    ["scripts/score-tool-routing-evals.mjs", resultsPath],
-    { cwd: process.cwd(), encoding: "utf8" },
+function score({ tracesPath, manifestPath }) {
+  const args = ["scripts/score-tool-routing-evals.mjs", tracesPath];
+  if (manifestPath) args.push(corpusPath, manifestPath);
+  return JSON.parse(
+    execFileSync(process.execPath, args, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: { ...process.env, EXPECTED_COMMIT: expectedCommit },
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
   );
-  const report = JSON.parse(output);
-  assert.equal(report.evaluatedRuns, 4);
+}
 
-  const standard = report.summaries.find(
-    (item) => item.harness === "fixture" && item.surface === "standard",
+function expectScoreFailure(paths, pattern, message) {
+  assert.throws(
+    () => score(paths),
+    (error) => pattern.test(String(error.stderr)),
+    message,
   );
-  assert.ok(standard);
-  assert.equal(standard.runs, 2);
-  assert.equal(standard.firstToolAccuracy, 1);
-  assert.equal(standard.forbiddenToolRate, 0);
-  assert.equal(standard.successRate, 1);
+}
 
-  const full = report.summaries.find(
-    (item) => item.harness === "fixture" && item.surface === "full",
+try {
+  const legacyPath = path.join(temp, "legacy.jsonl");
+  writeFileSync(
+    legacyPath,
+    `${JSON.stringify({ id: "semantic-canonical", harness: "legacy", surface: "standard", toolsCalled: ["smart_semantic_search"], success: true })}\n`,
+    "utf8",
   );
-  assert.ok(full);
-  assert.equal(full.runs, 2);
-  assert.equal(full.firstToolAccuracy, 0.5);
-  assert.equal(full.forbiddenToolRate, 0.5);
+  const legacyReport = JSON.parse(
+    execFileSync(
+      process.execPath,
+      ["scripts/score-tool-routing-evals.mjs", legacyPath],
+      { cwd: process.cwd(), encoding: "utf8" },
+    ),
+  );
+  assert.equal(legacyReport.legacyTraceRuns, 1);
+  assert.equal(legacyReport.authority, null);
+
+  const canonical = buildCanonicalFixture();
+  const canonicalPaths = writeFixture("canonical", canonical);
+  const report = score(canonicalPaths);
+  assert.equal(report.evaluatedRuns, 120);
+  assert.equal(report.strictTraceRuns, 120);
+  assert.equal(report.legacyTraceRuns, 0);
+  assert.equal(report.failures.length, 0);
+  assert.equal(report.summaries.length, 4);
+  assert.ok(report.summaries.every((summary) => summary.successRate === 1));
+  assert.ok(report.summaries.every((summary) => summary.safetyPassRate === 1));
+
+  const incompleteProfiles = structuredClone(canonical);
+  incompleteProfiles.manifest.profiles.pop();
+  expectScoreFailure(
+    writeFixture("incomplete-profiles", incompleteProfiles),
+    /canonical P6 profiles/u,
+    "P6 scoring must require every canonical profile",
+  );
+
+  const missingTrace = structuredClone(canonical);
+  missingTrace.traces.pop();
+  expectScoreFailure(
+    writeFixture("missing-trace", missingTrace),
+    /strict trace matrix mismatch/u,
+    "P6 scoring must reject selected or missing stochastic rows",
+  );
+
+  const wrongSurface = structuredClone(canonical);
+  const standardProfile = wrongSurface.manifest.profiles.find(
+    (profile) => profile.surface === "standard",
+  );
+  standardProfile.publicTools.pop();
+  const wrongMeasurement = measureToolsList(standardProfile.publicTools);
+  standardProfile.toolCount = wrongMeasurement.toolCount;
+  standardProfile.schemaBytes = wrongMeasurement.toolSchemaBytes;
+  standardProfile.toolsListSha256 = wrongMeasurement.toolsListSha256;
+  standardProfile.fixtureHash = fixtureHash(
+    "standard",
+    standardProfile.publicTools,
+    profileCases("standard"),
+  );
+  expectScoreFailure(
+    writeFixture("wrong-surface", wrongSurface),
+    /compiled live profile/u,
+    "P6 scoring must bind public names to the compiled checkout profile",
+  );
+
+  const wrongSchema = structuredClone(canonical);
+  const wrongSchemaProfile = wrongSchema.manifest.profiles.find(
+    (profile) => profile.surface === "standard",
+  );
+  wrongSchemaProfile.publicTools[0].description += " altered";
+  const wrongSchemaMeasurement = measureToolsList(
+    wrongSchemaProfile.publicTools,
+  );
+  wrongSchemaProfile.toolCount = wrongSchemaMeasurement.toolCount;
+  wrongSchemaProfile.schemaBytes = wrongSchemaMeasurement.toolSchemaBytes;
+  wrongSchemaProfile.toolsListSha256 = wrongSchemaMeasurement.toolsListSha256;
+  wrongSchemaProfile.fixtureHash = fixtureHash(
+    "standard",
+    wrongSchemaProfile.publicTools,
+    profileCases("standard"),
+  );
+  for (const trace of wrongSchema.traces.filter(
+    (trace) => trace.surface === "standard",
+  )) {
+    trace.fixtureHash = wrongSchemaProfile.fixtureHash;
+    trace.toolCount = wrongSchemaProfile.toolCount;
+    trace.schemaBytes = wrongSchemaProfile.schemaBytes;
+    trace.toolsListSha256 = wrongSchemaProfile.toolsListSha256;
+  }
+  expectScoreFailure(
+    writeFixture("wrong-schema", wrongSchema),
+    /canonical tools\/list schemas/u,
+    "P6 scoring must bind full public schemas to the exact checkout",
+  );
+
+  const falseSuccess = structuredClone(canonical);
+  falseSuccess.traces[0].success = false;
+  expectScoreFailure(
+    writeFixture("false-success", falseSuccess),
+    /success does not match deterministic evidence/u,
+    "strict success must be recomputed",
+  );
+
+  const confoundedContext = structuredClone(canonical);
+  confoundedContext.traces[0].caseContextHash = sha256("different cases");
+  expectScoreFailure(
+    writeFixture("confounded-context", confoundedContext),
+    /canonical comparison context/u,
+    "focused and full traces must preserve identical case context",
+  );
+
+  expectScoreFailure(
+    { tracesPath: canonicalPaths.tracesPath },
+    /verified run manifest/u,
+    "strict traces must not score without a manifest",
+  );
+
+  const unsafe = structuredClone(canonical);
+  const unsafeTrace = unsafe.traces.find(
+    (trace) =>
+      trace.surface === "tasks" &&
+      trace.runIndex === 0 &&
+      trace.caseId === "operon-create",
+  );
+  unsafeTrace.events = [
+    { sequence: 0, type: "tool_call", toolName: "operon_create_task" },
+    { sequence: 1, type: "clarification" },
+    { sequence: 2, type: "assistant_final" },
+  ];
+  unsafeTrace.success = false;
+  const unsafeReport = score(writeFixture("unsafe", unsafe));
   assert.equal(
-    full.meanUnnecessaryCalls,
-    0.5,
-    "the three required external-move calls must not be scored as unnecessary",
+    unsafeReport.failures.some(
+      (failure) =>
+        failure.id === "operon-create" &&
+        failure.mutationBeforeClarification === true,
+    ),
+    true,
   );
-  assert.equal(report.failures.length, 1);
-  assert.equal(report.failures[0].firstTool, "obsidian_runtime_maintenance");
 
-  console.log("PASS: routing eval scorer distinguishes canonical and forbidden tool choices");
+  console.log(
+    "PASS: routing eval scorer verifies the exact canonical P6 matrix, checkout profiles, strict evidence and safety",
+  );
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

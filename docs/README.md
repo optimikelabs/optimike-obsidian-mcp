@@ -32,6 +32,7 @@ French operator guides are linked alongside their English equivalents.
 | How do Bridges recover after Local REST starts or reloads?           | [Bridge Lifecycle Recovery](bridge-lifecycle.md)                                      |
 | How do I install, upgrade or roll back all three Bridges?            | [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md)                            |
 | Which tool should an agent choose inside its profile?                | [MCP Routing Guide](mcp-routing-guide.md)                                             |
+| How are routing quality and profile decisions measured?              | [Tool Routing Evaluation P6](tool-routing-evaluation-p6.md)                           |
 | How do I run without Obsidian Desktop?                               | [Headless Server Profile](headless-server-profile.md)                                 |
 | How do external reads, handoff, move and link repair work?           | [External Roots Setup](external-roots-setup.md)                                       |
 | What is the supported HTTP security boundary?                        | [Security](../SECURITY.md) and [HTTP ADR](adr/ADR-HTTP-External-Artifact-Delivery.md) |
@@ -71,6 +72,7 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 ### Search and runtime
 
 - public exposure profiles: [Tool Surface Profiles](tool-surface-profiles.md);
+- routing corpus, deterministic metrics and profile decisions: [P6 evaluation](tool-routing-evaluation-p6.md);
 - semantic search and providers: [Operations](../OPERATIONS.md#semantic-search-what-is-persisted-and-what-is-not);
 - runtime modes: [Runtime Capability Matrix](runtime-capability-matrix.md);
 - live profile/backend/grant diagnosis: [Runtime Capability Doctor](capability-doctor.md);

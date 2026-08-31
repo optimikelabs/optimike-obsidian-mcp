@@ -20,6 +20,11 @@ Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils
 
 Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 77 outils. Le registre canonique couvre 81 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
 
+L'[évaluation P6 du routage](tool-routing-evaluation-p6.fr.md) mesure ces
+surfaces depuis les schémas `tools/list` réels et une baseline versionnée de 31
+cas. Sa décision 3.8 conserve les quatre profils : l'union live de 60 outils
+authoring et tasks n'est pas promue sans parcours cross-domain mesuré.
+
 ## Noms réservés à la compatibilité
 
 Les profils modernes excluent volontairement les voies de compatibilité qui ajouteraient une décision au modèle sans apporter une capacité normale distincte.

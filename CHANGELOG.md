@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-08-31
+
+### Added
+
+- The 31-case tool-routing baseline now lives in a versioned corpus with
+  expected registry families and clarification rules. Reproducible JSONL traces
+  bind results to the corpus hash, exact Git commit, harness, model
+  configuration, runtime, profile, fixture and run index.
+- The deterministic offline scorer measures exact and family-level routing,
+  forbidden calls, clarification safety, harness-proven success, unnecessary
+  calls and actual `tools/list` schema exposure. A provider-neutral, data-only
+  judge rubric covers only residual response quality.
+- The canonical 81-name cross-runtime registry is exported as a classified,
+  versioned catalogue, and a read-only live probe measures canonical UTF-8
+  schema bytes for all four profiles without opening the user's journals.
+
+### Changed
+
+- `standard`, `authoring`, `tasks` and `full` remain unchanged. Current evidence
+  does not justify a 60-tool combined profile, a tool removal or a new full-only
+  migration. Future incompatible removals require a major release, documented
+  migration and a replacement proven across the affected runtimes.
+
+### Validation
+
+- P6 CI validates corpus, traces, scorer fixtures, catalogue exhaustiveness,
+  schema measurement, profile compilation, routing documentation and package
+  contents on Windows and Linux. Probabilistic model runs remain evidence, not
+  an uncalibrated CI gate.
+
 ## [3.7.0] - 2026-08-31
 
 ### Added
