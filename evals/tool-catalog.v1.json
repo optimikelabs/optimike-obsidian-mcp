@@ -2057,12 +2057,7 @@
       },
       "fallback": {
         "tools": ["obsidian_manage_canvas"],
-        "modes": [
-          "hybrid-degraded",
-          "headless-readonly",
-          "headless-guarded",
-          "headless-filesystem"
-        ]
+        "modes": ["headless-filesystem"]
       }
     },
     {
@@ -2101,12 +2096,7 @@
       },
       "fallback": {
         "tools": ["obsidian_manage_frontmatter"],
-        "modes": [
-          "hybrid-degraded",
-          "headless-readonly",
-          "headless-guarded",
-          "headless-filesystem"
-        ]
+        "modes": ["headless-guarded", "headless-filesystem"]
       }
     },
     {
@@ -2374,12 +2364,7 @@
       },
       "fallback": {
         "tools": ["obsidian_search_replace"],
-        "modes": [
-          "hybrid-degraded",
-          "headless-readonly",
-          "headless-guarded",
-          "headless-filesystem"
-        ]
+        "modes": ["headless-guarded", "headless-filesystem"]
       }
     },
     {
@@ -2486,12 +2471,7 @@
       },
       "fallback": {
         "tools": ["obsidian_update_note"],
-        "modes": [
-          "hybrid-degraded",
-          "headless-readonly",
-          "headless-guarded",
-          "headless-filesystem"
-        ]
+        "modes": ["headless-guarded", "headless-filesystem"]
       }
     },
     {

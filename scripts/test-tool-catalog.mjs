@@ -89,6 +89,19 @@ for (const name of directAlternatives) {
   );
   assert.ok(catalogEntry.replacement);
   assert.ok(catalogEntry.fallback);
+  for (const mode of catalogEntry.fallback.modes) {
+    assert.ok(
+      artifact.modes[mode].includes(name),
+      `${name} cannot be advertised as a fallback when hidden in ${mode}`,
+    );
+    assert.equal(
+      catalogEntry.replacement.tools.some((replacement) =>
+        artifact.modes[mode].includes(replacement),
+      ),
+      false,
+      `${name} cannot be advertised as a fallback beside its governed replacement in ${mode}`,
+    );
+  }
 }
 assert.equal(
   TOOL_SURFACE_REGISTRY.find((entry) => entry.name === "bases_upsert_config")

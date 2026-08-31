@@ -62,6 +62,8 @@ A reproducible JSONL trace records:
 - Git SHA, harness and harness version;
 - model plus explicit model configuration;
 - runtime mode, exposed surface, fixture SHA-256 and run index;
+- a case-context SHA-256 proving that a focused profile and `full` saw the
+  same ordered comparison cases;
 - ordered `tool`, `clarification` and `final` events;
 - harness-derived success evidence;
 - actual `tools/list` count, schema bytes and canonical surface hash.
@@ -72,6 +74,11 @@ every surface measurement and fixture hash, validates the trace-file hash, and
 recalculates success from the deterministic routing and safety evidence. It
 also requires the four canonical profiles, every case assigned to each focused
 profile, all 31 cases on `full`, and two to five complete repetitions.
+
+Model selection is batched by the corpus's recommended profile. The `full`
+surface is evaluated with the same ordered case batch as its focused
+counterpart, so surrounding prompts cannot confound the surface comparison.
+The scorer recomputes and enforces that case-context hash for every trace.
 
 Missing data is reported as `N/A`; an absent clarification case is never
 reported as 100% clarification accuracy.
@@ -96,6 +103,11 @@ node scripts/measure-tool-profile-schemas.mjs --require-live
 The output contains public tool names, counts, canonical schema bytes and a
 SHA-256 per profile. It never prints the API key, vault path, payloads or journal
 contents.
+
+The optional Codex subprocess receives an explicit environment allowlist. Vault
+paths, Local REST credentials, provider API keys and unrelated process
+variables are never inherited. Use a normal Codex login stored by the CLI; do
+not rely on an environment API key for this harness.
 
 ## Catalogue rules
 

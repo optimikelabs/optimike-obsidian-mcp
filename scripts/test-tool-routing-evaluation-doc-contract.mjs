@@ -28,6 +28,8 @@ for (const relativePath of [
   }
   assert.match(content, /major|majeure/u);
   assert.match(content, /no network call|aucun appel\s+réseau/u);
+  assert.match(content, /allowlist/u);
+  assert.match(content, /case-context|contexte de cas/u);
 }
 
 console.log(

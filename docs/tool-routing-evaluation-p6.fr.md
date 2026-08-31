@@ -65,6 +65,8 @@ Une trace JSONL reproductible enregistre :
 - le SHA Git, le harness et sa version ;
 - le modèle et sa configuration explicite ;
 - le mode runtime, la surface exposée, le SHA-256 de fixture et le numéro de run ;
+- un SHA-256 du contexte de cas prouvant qu'un profil ciblé et `full` ont reçu
+  les mêmes cas de comparaison dans le même ordre ;
 - les événements ordonnés `tool`, `clarification` et `final` ;
 - la preuve de succès dérivée du harness ;
 - le nombre réel d'outils, les octets de schéma et le hash canonique de la
@@ -76,6 +78,11 @@ mesure de surface et hash de fixture, valide le hash du fichier de traces et
 recalcule le succès depuis les preuves déterministes de routage et de sûreté.
 Il exige aussi les quatre profils canoniques, tous les cas attribués à chaque
 profil ciblé, les 31 cas sur `full` et deux à cinq répétitions complètes.
+
+La sélection du modèle est regroupée selon le profil recommandé par le corpus.
+La surface `full` reçoit exactement le même lot ordonné que le profil ciblé :
+le contexte voisin ne peut donc pas biaiser la comparaison des surfaces. Le
+scorer recalcule et impose ce hash de contexte pour chaque trace.
 
 Une donnée absente vaut `N/A` ; l'absence de cas de clarification ne produit
 jamais artificiellement une exactitude de 100 %.
@@ -100,6 +107,11 @@ node scripts/measure-tool-profile-schemas.mjs --require-live
 La sortie contient seulement les noms publics, les volumes, les octets de
 schéma canoniques et un SHA-256 par profil. Elle n'affiche jamais la clé API, le
 chemin du coffre, les payloads ni le contenu des journaux.
+
+Le sous-processus Codex optionnel reçoit une allowlist explicite de variables
+d'environnement. Les chemins du coffre, clés Local REST, clés API fournisseur
+et autres variables du processus ne sont jamais hérités. Ce harness utilise la
+connexion normale enregistrée par la CLI Codex, pas une clé API d'environnement.
 
 ## Règles du catalogue
 

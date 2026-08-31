@@ -106,6 +106,7 @@ function buildCatalog() {
         tools: [entry.name],
         modes: registry.TOOL_REGISTRATION_MODES.filter(
           (mode) =>
+            modes[mode].includes(entry.name) &&
             !item.replacement.tools.some((name) => modes[mode].includes(name)),
         ),
       };

@@ -54,6 +54,19 @@ function fixtureHash(surface, publicTools, cases) {
   );
 }
 
+function caseContextHash(testCase) {
+  return sha256(
+    JSON.stringify(
+      corpus.cases
+        .filter(
+          (candidate) =>
+            candidate.recommendedProfile === testCase.recommendedProfile,
+        )
+        .map(({ id, prompt }) => ({ caseId: id, prompt })),
+    ),
+  );
+}
+
 function publicToolsFor(surface) {
   return compileToolProfileNames({
     profile: surface,
@@ -111,6 +124,7 @@ function buildCanonicalFixture() {
           surface,
           runIndex,
           fixtureHash: surfaceFixtureHash,
+          caseContextHash: caseContextHash(testCase),
           events,
           success: true,
           successEvidence: [
@@ -253,6 +267,14 @@ try {
     writeFixture("false-success", falseSuccess),
     /success does not match deterministic evidence/u,
     "strict success must be recomputed",
+  );
+
+  const confoundedContext = structuredClone(canonical);
+  confoundedContext.traces[0].caseContextHash = sha256("different cases");
+  expectScoreFailure(
+    writeFixture("confounded-context", confoundedContext),
+    /canonical comparison context/u,
+    "focused and full traces must preserve identical case context",
   );
 
   expectScoreFailure(

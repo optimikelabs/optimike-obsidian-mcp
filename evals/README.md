@@ -36,6 +36,7 @@ result.
   "surface": "standard",
   "runIndex": 0,
   "fixtureHash": "sha256 of the fixture or deterministic setup",
+  "caseContextHash": "sha256 of the ordered comparison cases",
   "events": [
     { "sequence": 0, "type": "tool_call", "toolName": "smart_semantic_search" },
     { "sequence": 1, "type": "assistant_final" }
@@ -59,7 +60,7 @@ result.
 
 Required v1 anchors are corpus ID/hash, Git SHA, harness/version, model/config,
 runtime mode, surface, run index, fixture hash, ordered events, success evidence,
-tool count, schema bytes, and the measured `tools/list` hash. Strict scoring also
+case-context hash, tool count, schema bytes, and the measured `tools/list` hash. Strict scoring also
 requires the harness-produced run manifest. The scorer recomputes its public
 surface measurements, verifies the trace-file hash and exact checkout SHA, and
 recalculates success from deterministic evidence. A strict P6 manifest must
@@ -86,6 +87,9 @@ node scripts/run-codex-routing-selection-eval.mjs --runs=2 --model=gpt-5.6-luna 
 
 It closes the readonly MCP discovery sessions before model selection and never
 asks the model to execute a vault tool. CI exercises only its offline contract.
+Focused and `full` measurements receive identical ordered case batches, and the
+Codex subprocess inherits only an explicit non-secret environment allowlist.
+Use the CLI's stored login rather than an environment API key.
 
 ## Offline scorer
 
@@ -101,9 +105,10 @@ schema bytes, latency, tokens and cost. A minimum is not interpreted as proof
 that additional calls were unnecessary. Summaries are partitioned by harness,
 harness version, model, runtime mode and surface.
 
-Use the same corpus hash, fixture hash, Git SHA, model configuration and run index
-when comparing two surfaces. Compare at minimum `full` to the smallest intended
-surface (`standard`, `authoring`, or `tasks`) for the same cases and setup.
+Use the same corpus hash, case-context hash, Git SHA, model configuration and run
+index when comparing two surfaces. Compare at minimum `full` to the smallest
+intended surface (`standard`, `authoring`, or `tasks`) for the same cases and
+setup; the surface-specific fixture hash is expected to differ with its tools.
 
 ## Judge rubric
 

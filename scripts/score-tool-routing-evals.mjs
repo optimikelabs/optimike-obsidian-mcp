@@ -110,6 +110,21 @@ function fixtureHashForSurface(surface, publicTools, corpus, caseIds) {
   );
 }
 
+function caseContextHashForCase(corpus, caseId) {
+  const testCase = corpus.cases.find((candidate) => candidate.id === caseId);
+  if (!testCase) throw new Error(`unknown case context ${caseId}`);
+  return sha256(
+    JSON.stringify(
+      corpus.cases
+        .filter(
+          (candidate) =>
+            candidate.recommendedProfile === testCase.recommendedProfile,
+        )
+        .map(({ id, prompt }) => ({ caseId: id, prompt })),
+    ),
+  );
+}
+
 function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
   if (!manifestPath) return null;
   const manifestRaw = fs.readFileSync(manifestPath, "utf8");
@@ -304,6 +319,17 @@ function validateStrictTrace(trace, lineNumber, corpus, runManifest) {
     !/^[0-9a-f]{64}$/u.test(trace.fixtureHash)
   )
     throw new Error(`${label}.fixtureHash must be a SHA-256 hex digest`);
+  if (
+    typeof trace.caseContextHash !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(trace.caseContextHash)
+  ) {
+    throw new Error(`${label}.caseContextHash must be a SHA-256 hex digest`);
+  }
+  if (trace.caseContextHash !== caseContextHashForCase(corpus, trace.caseId)) {
+    throw new Error(
+      `${label}.caseContextHash does not preserve the canonical comparison context`,
+    );
+  }
   if (!Array.isArray(trace.events))
     throw new Error(`${label}.events must be an array`);
   trace.events.forEach((event, index) => {

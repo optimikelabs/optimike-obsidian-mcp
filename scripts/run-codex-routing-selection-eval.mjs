@@ -14,6 +14,22 @@ import os from "node:os";
 import path from "node:path";
 
 const PROFILE_IDS = ["standard", "authoring", "tasks", "full"];
+const CODEX_ENV_ALLOWLIST = [
+  "APPDATA",
+  "CODEX_HOME",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LOCALAPPDATA",
+  "PATH",
+  "PATHEXT",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "USERPROFILE",
+  "WINDIR",
+];
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -62,6 +78,43 @@ function compactTool(tool) {
   };
 }
 
+function codexSubprocessEnvironment(source = process.env) {
+  const environment = { CI: "1", NO_COLOR: "1" };
+  for (const name of CODEX_ENV_ALLOWLIST) {
+    if (typeof source[name] === "string" && source[name] !== "") {
+      environment[name] = source[name];
+    }
+  }
+  return environment;
+}
+
+function compactCases(cases) {
+  return cases.map(({ id, prompt }) => ({ caseId: id, prompt }));
+}
+
+function caseContextHash(cases) {
+  return sha256(JSON.stringify(compactCases(cases)));
+}
+
+function profileCaseBatches(profile, corpusCases) {
+  if (profile !== "full") {
+    return [
+      {
+        id: profile,
+        cases: corpusCases.filter(
+          (testCase) => testCase.recommendedProfile === profile,
+        ),
+      },
+    ];
+  }
+  return PROFILE_IDS.map((profileId) => ({
+    id: profileId,
+    cases: corpusCases.filter(
+      (testCase) => testCase.recommendedProfile === profileId,
+    ),
+  })).filter((batch) => batch.cases.length > 0);
+}
+
 function outputSchema(caseIds, toolNames) {
   return {
     type: "object",
@@ -96,7 +149,7 @@ function promptFor(profile, tools, cases) {
     "Return only the JSON object required by the supplied response schema.",
     `PROFILE=${profile}`,
     `AVAILABLE_TOOLS=${JSON.stringify(tools.map(compactTool))}`,
-    `CASES=${JSON.stringify(cases.map(({ id, prompt }) => ({ caseId: id, prompt })))}`,
+    `CASES=${JSON.stringify(compactCases(cases))}`,
   ].join("\n\n");
 }
 
@@ -162,10 +215,18 @@ function codexExecArgs({
   ];
 }
 
-function runModel({ profile, tools, cases, model, reasoningEffort, tempRoot }) {
+function runModel({
+  profile,
+  batchId,
+  tools,
+  cases,
+  model,
+  reasoningEffort,
+  tempRoot,
+}) {
   const caseIds = cases.map((testCase) => testCase.id);
-  const schemaPath = path.join(tempRoot, `${profile}-schema.json`);
-  const outputPath = path.join(tempRoot, `${profile}-output.json`);
+  const schemaPath = path.join(tempRoot, `${profile}-${batchId}-schema.json`);
+  const outputPath = path.join(tempRoot, `${profile}-${batchId}-output.json`);
   writeFileSync(
     schemaPath,
     JSON.stringify(
@@ -192,6 +253,7 @@ function runModel({ profile, tools, cases, model, reasoningEffort, tempRoot }) {
     {
       cwd: tempRoot,
       encoding: "utf8",
+      env: codexSubprocessEnvironment(),
       input: promptFor(profile, tools, cases),
       maxBuffer: 16 * 1024 * 1024,
     },
@@ -251,6 +313,19 @@ async function main() {
       outputPath: "OUTPUT",
     });
     const schema = outputSchema(["read"], ["obsidian_read_note"]);
+    const sanitizedEnvironment = codexSubprocessEnvironment({
+      PATH: "safe-path",
+      HOME: "safe-home",
+      OBSIDIAN_API_KEY: "must-not-leak",
+      OPENAI_API_KEY: "must-not-leak",
+      OBSIDIAN_VAULT: "must-not-leak",
+    });
+    const comparisonCases = [
+      { id: "standard-a", prompt: "A", recommendedProfile: "standard" },
+      { id: "tasks-a", prompt: "B", recommendedProfile: "tasks" },
+    ];
+    const fullBatches = profileCaseBatches("full", comparisonCases);
+    const standardBatch = profileCaseBatches("standard", comparisonCases)[0];
     const toolNameEnum =
       schema.properties.choices.items.properties.toolName.enum;
     const firstEvidenceRoot = createEvidenceRoot("a".repeat(40));
@@ -265,6 +340,14 @@ async function main() {
       !toolNameEnum.includes("obsidian_read_note") ||
       toolNameEnum.length !== 2 ||
       !uniqueEvidenceRoots ||
+      sanitizedEnvironment.PATH !== "safe-path" ||
+      sanitizedEnvironment.HOME !== "safe-home" ||
+      "OBSIDIAN_API_KEY" in sanitizedEnvironment ||
+      "OPENAI_API_KEY" in sanitizedEnvironment ||
+      "OBSIDIAN_VAULT" in sanitizedEnvironment ||
+      fullBatches.length !== 2 ||
+      caseContextHash(fullBatches[0].cases) !==
+        caseContextHash(standardBatch.cases) ||
       !codexEntrypointFromWindowsShim("C:\\npm\\codex.cmd").endsWith(
         path.join("@openai", "codex", "bin", "codex.js"),
       ) ||
@@ -336,6 +419,7 @@ async function main() {
       const toolNames = new Set(
         profileMeasurement.publicTools.map((tool) => tool.name),
       );
+      const caseBatches = profileCaseBatches(profile, corpus.cases);
       const fixtureHash = sha256(
         JSON.stringify({
           profile,
@@ -353,68 +437,72 @@ async function main() {
         publicTools: profileMeasurement.publicTools,
       });
       for (let runIndex = 0; runIndex < runs; runIndex += 1) {
-        const output = runModel({
-          profile,
-          tools: profileMeasurement.publicTools,
-          cases,
-          model,
-          reasoningEffort,
-          tempRoot,
-        });
-        const choices = new Map(
-          output.choices.map((choice) => [choice.caseId, choice]),
-        );
-        if (choices.size !== cases.length) {
-          throw new Error(
-            `${profile} run ${runIndex} did not return every case.`,
-          );
-        }
-        for (const testCase of cases) {
-          const choice = choices.get(testCase.id);
-          if (!choice) throw new Error(`Missing choice for ${testCase.id}.`);
-          const selectedExposedTool = selectionIsExposed(choice, toolNames);
-          const expectNoTool = testCase.expectNoTool === true;
-          const routeCorrect = expectNoTool
-            ? choice.toolName === null
-            : selectedExposedTool &&
-              testCase.acceptableFirstTools.includes(choice.toolName);
-          const clarificationCorrect =
-            testCase.clarificationExpectation === "none"
-              ? choice.clarificationBeforeTool === false
-              : choice.clarificationBeforeTool === true;
-          traces.push({
-            schemaVersion: "tool-routing-trace/v1",
-            caseId: testCase.id,
-            corpusId: corpus.corpusId,
-            corpusHash: sha256(corpusRaw),
-            gitSha: sourceCommit,
-            harness: { name: "codex-cli-selection", version: harnessVersion },
-            model: { provider: "openai", name: model, version: model },
-            modelConfig: { reasoningEffort },
-            runtimeMode: measurement.runtimeMode,
-            surface: profile,
-            runIndex,
-            fixtureHash,
-            events: traceEvents(choice),
-            success:
-              selectedExposedTool && routeCorrect && clarificationCorrect,
-            successEvidence: [
-              {
-                kind: "routing_fixture_assertion",
-                detail:
-                  "The selected public first tool and clarification decision were checked against the immutable corpus case.",
-              },
-              {
-                kind: "tool_exposure_assertion",
-                detail: selectedExposedTool
-                  ? "The selected tool was present in the measured tools/list surface."
-                  : `The model selected hidden tool ${choice.toolName}.`,
-              },
-            ],
-            toolCount: profileMeasurement.toolCount,
-            schemaBytes: profileMeasurement.toolSchemaBytes,
-            toolsListSha256: profileMeasurement.toolsListSha256,
+        for (const batch of caseBatches) {
+          const output = runModel({
+            profile,
+            batchId: batch.id,
+            tools: profileMeasurement.publicTools,
+            cases: batch.cases,
+            model,
+            reasoningEffort,
+            tempRoot,
           });
+          const choices = new Map(
+            output.choices.map((choice) => [choice.caseId, choice]),
+          );
+          if (choices.size !== batch.cases.length) {
+            throw new Error(
+              `${profile}/${batch.id} run ${runIndex} did not return every case.`,
+            );
+          }
+          for (const testCase of batch.cases) {
+            const choice = choices.get(testCase.id);
+            if (!choice) throw new Error(`Missing choice for ${testCase.id}.`);
+            const selectedExposedTool = selectionIsExposed(choice, toolNames);
+            const expectNoTool = testCase.expectNoTool === true;
+            const routeCorrect = expectNoTool
+              ? choice.toolName === null
+              : selectedExposedTool &&
+                testCase.acceptableFirstTools.includes(choice.toolName);
+            const clarificationCorrect =
+              testCase.clarificationExpectation === "none"
+                ? choice.clarificationBeforeTool === false
+                : choice.clarificationBeforeTool === true;
+            traces.push({
+              schemaVersion: "tool-routing-trace/v1",
+              caseId: testCase.id,
+              corpusId: corpus.corpusId,
+              corpusHash: sha256(corpusRaw),
+              gitSha: sourceCommit,
+              harness: { name: "codex-cli-selection", version: harnessVersion },
+              model: { provider: "openai", name: model, version: model },
+              modelConfig: { reasoningEffort },
+              runtimeMode: measurement.runtimeMode,
+              surface: profile,
+              runIndex,
+              fixtureHash,
+              caseContextHash: caseContextHash(batch.cases),
+              events: traceEvents(choice),
+              success:
+                selectedExposedTool && routeCorrect && clarificationCorrect,
+              successEvidence: [
+                {
+                  kind: "routing_fixture_assertion",
+                  detail:
+                    "The selected public first tool and clarification decision were checked against the immutable corpus case.",
+                },
+                {
+                  kind: "tool_exposure_assertion",
+                  detail: selectedExposedTool
+                    ? "The selected tool was present in the measured tools/list surface."
+                    : `The model selected hidden tool ${choice.toolName}.`,
+                },
+              ],
+              toolCount: profileMeasurement.toolCount,
+              schemaBytes: profileMeasurement.toolSchemaBytes,
+              toolsListSha256: profileMeasurement.toolsListSha256,
+            });
+          }
         }
       }
     }
