@@ -1,21 +1,20 @@
 #!/usr/bin/env node
 
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import { getToolSurfaceEntry } from "../dist/mcp-server/toolSurfaceRegistry.js";
-import {
-  compileToolProfileNames,
-  TOOL_PROFILE_IDS,
-} from "../dist/mcp-server/toolProfiles.js";
-import {
-  measureCanonicalLiveProfileSchemas,
-  measureToolsList,
-} from "./measure-tool-profile-schemas.mjs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
+import { measureToolsList } from "./measure-tool-profile-schemas.mjs";
 
 const TRACE_SCHEMA_VERSION = "tool-routing-trace/v1";
 const CORPUS_SCHEMA_VERSION = "tool-routing-corpus/v1";
 const MANIFEST_SCHEMA_VERSION = "tool-routing-run-manifest/v1";
+const SCORER_SCHEMA_VERSION = "tool-routing-score/v2";
+const SCORER_VERSION = "2.0.0";
+const FULL_SHA = /^[0-9a-f]{40}$/u;
 const TRACE_EVENT_TYPES = new Set([
   "tool_call",
   "clarification",
@@ -29,9 +28,297 @@ const MUTATING_ANNOTATION_CLASSES = new Set([
   "governed-mutation",
 ]);
 
+let getToolSurfaceEntry = () => undefined;
+let compileToolProfileNames;
+let toolProfileIds = [];
+
+function git(repository, args, options = {}) {
+  return execFileSync("git", args, {
+    cwd: repository,
+    encoding: "utf8",
+    stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
+  }).trim();
+}
+
+function gitBlob(repository, objectName) {
+  return execFileSync("git", ["cat-file", "blob", objectName], {
+    cwd: repository,
+    encoding: "buffer",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function repositoryRoot() {
+  return git(process.cwd(), ["rev-parse", "--show-toplevel"]);
+}
+
+function exactCheckoutSha(checkout, label) {
+  const sha = git(checkout, ["rev-parse", "HEAD"]);
+  if (!FULL_SHA.test(sha)) throw new Error(`${label} SHA is not a full commit`);
+  return sha;
+}
+
+function assertCleanCheckout(checkout, expectedSha, label) {
+  const actualSha = exactCheckoutSha(checkout, label);
+  if (actualSha !== expectedSha) {
+    throw new Error(
+      `${label} identifies ${actualSha}, expected ${expectedSha}`,
+    );
+  }
+  const symbolic = spawnSync("git", ["symbolic-ref", "-q", "HEAD"], {
+    cwd: checkout,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (symbolic.status === 0) {
+    throw new Error(`${label} must be a detached checkout or worktree`);
+  }
+  const dirty = git(checkout, [
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+  ]);
+  if (dirty) throw new Error(`${label} must be clean before candidate build`);
+}
+
+function npmInvocation(args) {
+  const npmExecPath = process.env.npm_execpath?.trim();
+  if (npmExecPath) {
+    return {
+      command: process.execPath,
+      args: [npmExecPath, ...args],
+      shell: false,
+    };
+  }
+  if (process.platform === "win32") {
+    return {
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", "npm.cmd", ...args],
+      shell: false,
+    };
+  }
+  return {
+    command: "npm",
+    args,
+    shell: false,
+  };
+}
+
+function candidateCommandEnvironment() {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    const normalized = key.toLowerCase();
+    if (normalized === "node_env" || normalized === "npm_config_omit") {
+      delete environment[key];
+    }
+  }
+  environment.npm_config_include = "dev";
+  return environment;
+}
+
+function runCandidateCommand(checkout, args, label) {
+  const invocation = npmInvocation(args);
+  try {
+    execFileSync(invocation.command, invocation.args, {
+      cwd: checkout,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: candidateCommandEnvironment(),
+      shell: invocation.shell,
+    });
+  } catch (error) {
+    const detail = String(error.stderr ?? error.stdout ?? error.message)
+      .trim()
+      .slice(0, 1_000);
+    throw new Error(`${label} failed${detail ? `: ${detail}` : ""}`);
+  }
+}
+
+function candidateArtifactHashes(checkout) {
+  const files = [
+    "package-lock.json",
+    "dist/index.js",
+    "dist/mcp-server/toolProfiles.js",
+    "dist/mcp-server/toolSurfaceRegistry.js",
+  ];
+  return Object.fromEntries(
+    files.map((relativePath) => {
+      const absolutePath = path.join(checkout, relativePath);
+      if (!fs.existsSync(absolutePath)) {
+        throw new Error(`candidate build artifact is missing: ${relativePath}`);
+      }
+      return [relativePath, sha256(fs.readFileSync(absolutePath))];
+    }),
+  );
+}
+
+function measureCandidateProfiles(checkout, candidateSha) {
+  const measurementUrl = pathToFileURL(
+    path.join(checkout, "scripts", "measure-tool-profile-schemas.mjs"),
+  ).href;
+  const source = `import { measureCanonicalLiveProfileSchemas } from ${JSON.stringify(
+    measurementUrl,
+  )}; const profiles = await measureCanonicalLiveProfileSchemas(); process.stdout.write(JSON.stringify(profiles));`;
+  let profiles;
+  try {
+    profiles = JSON.parse(
+      execFileSync(
+        process.execPath,
+        ["--input-type=module", "--eval", source],
+        {
+          cwd: checkout,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, EXPECTED_COMMIT: candidateSha },
+        },
+      ),
+    );
+  } catch (error) {
+    const detail = String(error.stderr ?? error.stdout ?? error.message)
+      .trim()
+      .slice(0, 1_000);
+    throw new Error(
+      `candidate tools/list reconstruction failed${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  if (!Array.isArray(profiles) || profiles.length === 0) {
+    throw new Error("candidate tools/list reconstruction returned no profiles");
+  }
+  return profiles;
+}
+
+async function loadCandidateRuntime(checkout, candidateSha) {
+  const cacheKey = `candidate=${candidateSha}-${Date.now()}`;
+  const registry = await import(
+    `${
+      pathToFileURL(
+        path.join(checkout, "dist", "mcp-server", "toolSurfaceRegistry.js"),
+      ).href
+    }?${cacheKey}`
+  );
+  const profiles = await import(
+    `${
+      pathToFileURL(
+        path.join(checkout, "dist", "mcp-server", "toolProfiles.js"),
+      ).href
+    }?${cacheKey}`
+  );
+  if (
+    typeof registry.getToolSurfaceEntry !== "function" ||
+    typeof profiles.compileToolProfileNames !== "function" ||
+    !Array.isArray(profiles.TOOL_PROFILE_IDS)
+  ) {
+    throw new Error(
+      "candidate build does not expose the required P6 registries",
+    );
+  }
+  return {
+    getToolSurfaceEntry: registry.getToolSurfaceEntry,
+    compileToolProfileNames: profiles.compileToolProfileNames,
+    toolProfileIds: [...profiles.TOOL_PROFILE_IDS],
+  };
+}
+
+async function prepareCandidate(repository, candidateSha, reusableCheckout) {
+  if (!FULL_SHA.test(candidateSha)) {
+    throw new Error("candidateSha must be a full lowercase 40-character SHA");
+  }
+  git(repository, ["cat-file", "-e", `${candidateSha}^{commit}`]);
+  let temporaryRoot = null;
+  let checkout = reusableCheckout ? path.resolve(reusableCheckout) : null;
+  let ownsWorktree = false;
+  try {
+    if (!checkout) {
+      temporaryRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "optimike-p6-candidate-"),
+      );
+      checkout = path.join(temporaryRoot, "checkout");
+      git(repository, ["worktree", "add", "--detach", checkout, candidateSha]);
+      ownsWorktree = true;
+    }
+    assertCleanCheckout(checkout, candidateSha, "candidate checkout");
+    runCandidateCommand(
+      checkout,
+      ["ci", "--silent", "--include=dev"],
+      "candidate npm ci",
+    );
+    assertCleanCheckout(checkout, candidateSha, "candidate checkout");
+    fs.rmSync(path.join(checkout, "dist"), { recursive: true, force: true });
+    runCandidateCommand(
+      checkout,
+      ["run", "build", "--silent"],
+      "candidate build",
+    );
+    assertCleanCheckout(checkout, candidateSha, "candidate checkout");
+    const artifactHashes = candidateArtifactHashes(checkout);
+    const reportedProfiles = measureCandidateProfiles(checkout, candidateSha);
+    const measuredProfiles = reportedProfiles.map((profile) => {
+      if (!Array.isArray(profile.publicTools)) {
+        throw new Error(
+          `candidate profile ${profile.profile ?? "unknown"} returned no publicTools`,
+        );
+      }
+      return {
+        ...profile,
+        ...measureToolsList(profile.publicTools),
+      };
+    });
+    const runtime = await loadCandidateRuntime(checkout, candidateSha);
+    const surfaceHashes = measuredProfiles
+      .map((profile) => ({
+        profile: profile.profile,
+        toolCount: profile.toolCount,
+        toolSchemaBytes: profile.toolSchemaBytes,
+        toolsListSha256: profile.toolsListSha256,
+      }))
+      .sort((left, right) => left.profile.localeCompare(right.profile));
+    return {
+      candidateSha,
+      checkout,
+      artifactHashes,
+      measuredProfiles,
+      surfaceHashes,
+      runtime,
+      cleanup() {
+        if (!ownsWorktree) return;
+        try {
+          git(repository, ["worktree", "remove", "--force", checkout]);
+        } finally {
+          fs.rmSync(temporaryRoot, { recursive: true, force: true });
+          git(repository, ["worktree", "prune"]);
+        }
+      },
+    };
+  } catch (error) {
+    if (ownsWorktree && checkout) {
+      try {
+        git(repository, ["worktree", "remove", "--force", checkout]);
+      } catch {}
+    }
+    if (temporaryRoot) {
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+      try {
+        git(repository, ["worktree", "prune"]);
+      } catch {}
+    }
+    throw error;
+  }
+}
+
+function versionedCatalogLookup() {
+  const catalog = JSON.parse(
+    fs.readFileSync(
+      new URL("../evals/tool-catalog.v1.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const entries = new Map(catalog.tools.map((entry) => [entry.name, entry]));
+  return (name) => entries.get(name);
+}
+
 function usage() {
   console.error(
-    "Usage: node scripts/score-tool-routing-evals.mjs <results.jsonl> [corpus.json] [manifest.json]",
+    "Usage: node scripts/score-tool-routing-evals.mjs <results.jsonl> [corpus.json] [manifest.json] (strict scoring rebuilds manifest.sourceCommit in a clean detached worktree)",
   );
   process.exit(2);
 }
@@ -59,8 +346,7 @@ function optionalNonNegativeNumber(value, label) {
   return value;
 }
 
-function loadCorpus(corpusPath) {
-  const raw = fs.readFileSync(corpusPath);
+function parseCorpus(raw) {
   const parsed = JSON.parse(raw.toString("utf8"));
   if (Array.isArray(parsed))
     return {
@@ -88,6 +374,57 @@ function loadCorpus(corpusPath) {
     cases: parsed.cases,
     strict: true,
   };
+}
+
+function loadCorpus(corpusPath) {
+  return parseCorpus(fs.readFileSync(corpusPath));
+}
+
+function loadCandidateCorpus(
+  repository,
+  candidateSha,
+  suppliedCorpusPath,
+  manifestCorpusHash,
+) {
+  if (!FULL_SHA.test(candidateSha)) {
+    throw new Error("candidateSha must be a full lowercase 40-character SHA");
+  }
+  if (!/^[0-9a-f]{64}$/u.test(manifestCorpusHash)) {
+    throw new Error("manifest.corpusHash must be a lowercase SHA-256");
+  }
+  const suppliedRaw = fs.readFileSync(suppliedCorpusPath);
+  const candidateRaw = gitBlob(
+    repository,
+    `${candidateSha}:evals/tool-routing-corpus.json`,
+  );
+  const suppliedParsed = JSON.parse(suppliedRaw.toString("utf8"));
+  const candidateParsed = JSON.parse(candidateRaw.toString("utf8"));
+  if (!isDeepStrictEqual(suppliedParsed, candidateParsed)) {
+    throw new Error(
+      "supplied corpus is not semantically identical to the candidate Git blob",
+    );
+  }
+  const suppliedCorpusSha256 = sha256(suppliedRaw);
+  const candidateCorpusGitBlobSha256 = sha256(candidateRaw);
+  if (manifestCorpusHash === suppliedCorpusSha256) {
+    return {
+      corpus: parseCorpus(suppliedRaw),
+      corpusSource: "supplied-campaign-bytes",
+      suppliedCorpusSha256,
+      candidateCorpusGitBlobSha256,
+    };
+  }
+  if (manifestCorpusHash === candidateCorpusGitBlobSha256) {
+    return {
+      corpus: parseCorpus(candidateRaw),
+      corpusSource: "candidate-git-blob",
+      suppliedCorpusSha256,
+      candidateCorpusGitBlobSha256,
+    };
+  }
+  throw new Error(
+    "manifest corpus hash matches neither supplied campaign bytes nor the candidate Git blob",
+  );
 }
 
 function compactTool(tool) {
@@ -128,29 +465,33 @@ function caseContextHashForCase(corpus, caseId) {
   );
 }
 
-async function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
+async function loadRunManifest(
+  manifestPath,
+  corpus,
+  resultsRaw,
+  traceCount,
+  candidate,
+) {
   if (!manifestPath) return null;
   const manifestRaw = fs.readFileSync(manifestPath, "utf8");
   const manifest = JSON.parse(manifestRaw);
   if (manifest.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
     throw new Error(`manifest must use ${MANIFEST_SCHEMA_VERSION}`);
   }
-  const expectedCommit = process.env.EXPECTED_COMMIT?.trim();
-  if (!expectedCommit || !/^[0-9a-f]{40}$/u.test(expectedCommit)) {
+  const expectedCommit = (
+    process.env.EXPECTED_CANDIDATE_COMMIT ?? process.env.EXPECTED_COMMIT
+  )?.trim();
+  if (!expectedCommit || !FULL_SHA.test(expectedCommit)) {
     throw new Error(
-      "EXPECTED_COMMIT must be the exact lowercase candidate SHA when scoring strict traces",
+      "EXPECTED_CANDIDATE_COMMIT (or legacy EXPECTED_COMMIT) must be the exact lowercase candidate SHA when scoring strict traces",
     );
   }
-  const checkoutCommit = execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-  }).trim();
   if (
     manifest.sourceCommit !== expectedCommit ||
-    checkoutCommit !== expectedCommit
+    candidate?.candidateSha !== expectedCommit
   ) {
     throw new Error(
-      "manifest, EXPECTED_COMMIT and current checkout must identify one exact SHA",
+      "manifest sourceCommit, expected candidate and rebuilt candidate checkout must identify one exact candidateSha",
     );
   }
   if (
@@ -178,17 +519,14 @@ async function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
   const declaredSurfaces = manifest.profiles
     .map((profile) => profile.surface)
     .sort();
-  const requiredSurfaces = [...TOOL_PROFILE_IDS].sort();
+  const requiredSurfaces = [...toolProfileIds].sort();
   if (JSON.stringify(declaredSurfaces) !== JSON.stringify(requiredSurfaces)) {
     throw new Error(
       `manifest must contain exactly the canonical P6 profiles: ${requiredSurfaces.join(", ")}`,
     );
   }
   const checkoutProfiles = new Map(
-    (await measureCanonicalLiveProfileSchemas()).map((profile) => [
-      profile.profile,
-      profile,
-    ]),
+    candidate.measuredProfiles.map((profile) => [profile.profile, profile]),
   );
   const profiles = new Map();
   for (const profile of manifest.profiles) {
@@ -496,7 +834,38 @@ const corpusPath =
   process.argv[3] ??
   new URL("../evals/tool-routing-corpus.json", import.meta.url);
 const manifestPath = process.argv[4];
-const corpus = loadCorpus(corpusPath);
+let verifierRepository = null;
+let verifierSha = null;
+let manifestEnvelope = null;
+let manifestCandidateSha = null;
+let candidateCorpusBinding = null;
+let corpus;
+if (manifestPath) {
+  verifierRepository = repositoryRoot();
+  verifierSha = exactCheckoutSha(verifierRepository, "verifier checkout");
+  const verifierDirty = git(verifierRepository, [
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+  ]);
+  if (verifierDirty) {
+    throw new Error("verifier checkout must be clean before strict rescoring");
+  }
+  manifestEnvelope = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  manifestCandidateSha = requiredString(
+    manifestEnvelope.sourceCommit,
+    "manifest.sourceCommit",
+  );
+  candidateCorpusBinding = loadCandidateCorpus(
+    verifierRepository,
+    manifestCandidateSha,
+    corpusPath,
+    requiredString(manifestEnvelope.corpusHash, "manifest.corpusHash"),
+  );
+  corpus = candidateCorpusBinding.corpus;
+} else {
+  corpus = loadCorpus(corpusPath);
+}
 const cases = new Map(corpus.cases.map((item) => [item.id, item]));
 const resultsRaw = fs.readFileSync(resultsPath, "utf8");
 const lines = resultsRaw
@@ -504,11 +873,57 @@ const lines = resultsRaw
   .map((line) => line.trim())
   .filter(Boolean);
 if (lines.length === 0) throw new Error("Routing eval results file is empty.");
-const runManifest = await loadRunManifest(
+let candidate = null;
+let comparison = null;
+let runManifest = null;
+function cleanupCandidates() {
+  const comparisonToClean = comparison;
+  const candidateToClean = candidate;
+  comparison = null;
+  candidate = null;
+  try {
+    comparisonToClean?.cleanup();
+  } finally {
+    candidateToClean?.cleanup();
+  }
+}
+process.once("exit", cleanupCandidates);
+
+if (manifestPath) {
+  const candidateSha = manifestCandidateSha;
+  candidate = await prepareCandidate(
+    verifierRepository,
+    candidateSha,
+    process.env.P6_INTERNAL_CANDIDATE_CHECKOUT?.trim(),
+  );
+  getToolSurfaceEntry = candidate.runtime.getToolSurfaceEntry;
+  compileToolProfileNames = candidate.runtime.compileToolProfileNames;
+  toolProfileIds = candidate.runtime.toolProfileIds;
+  const comparisonSha = process.env.P6_COMPARE_COMMIT?.trim();
+  if (comparisonSha) {
+    comparison = await prepareCandidate(
+      verifierRepository,
+      comparisonSha,
+      process.env.P6_INTERNAL_COMPARE_CHECKOUT?.trim(),
+    );
+    if (
+      JSON.stringify(comparison.surfaceHashes) !==
+      JSON.stringify(candidate.surfaceHashes)
+    ) {
+      throw new Error(
+        "comparison candidate changes one or more canonical P6 tools/list surfaces; a fresh LLM campaign is required",
+      );
+    }
+  }
+} else {
+  getToolSurfaceEntry = versionedCatalogLookup();
+}
+runManifest = await loadRunManifest(
   manifestPath,
   corpus,
   resultsRaw,
   lines.length,
+  candidate,
 );
 
 const rows = lines.map((line, index) => {
@@ -708,7 +1123,8 @@ summaries.sort((a, b) =>
 console.log(
   JSON.stringify(
     {
-      scorerSchemaVersion: "tool-routing-score/v1",
+      scorerSchemaVersion: SCORER_SCHEMA_VERSION,
+      scorerVersion: SCORER_VERSION,
       corpus: {
         schemaVersion: corpus.schemaVersion,
         corpusId: corpus.corpusId,
@@ -717,9 +1133,25 @@ console.log(
       },
       authority: runManifest
         ? {
-            sourceCommit: runManifest.manifest.sourceCommit,
+            verifierSha,
+            candidateSha: candidate.candidateSha,
             manifestSha256: runManifest.manifestSha256,
             traceFileSha256: runManifest.manifest.traceFileSha256,
+            corpusSha256: corpus.corpusHash,
+            corpusSource: candidateCorpusBinding.corpusSource,
+            suppliedCorpusSha256: candidateCorpusBinding.suppliedCorpusSha256,
+            candidateCorpusGitBlobSha256:
+              candidateCorpusBinding.candidateCorpusGitBlobSha256,
+            surfaceHashAuthority: "verifier-measure-tools-list/v1",
+            candidateArtifactHashes: candidate.artifactHashes,
+            candidateSurfaceHashes: candidate.surfaceHashes,
+            ...(comparison
+              ? {
+                  comparisonSha: comparison.candidateSha,
+                  comparisonSurfaceHashes: comparison.surfaceHashes,
+                  surfaceParity: true,
+                }
+              : {}),
           }
         : null,
       evaluatedRuns: rows.length,
@@ -757,3 +1189,4 @@ console.log(
     2,
   ),
 );
+cleanupCandidates();

@@ -20,6 +20,11 @@ for (const relativePath of [
     "measure-tool-profile-schemas.mjs",
     "operon_list_tasks",
     "operon_query_tasks",
+    "EXPECTED_CANDIDATE_COMMIT",
+    "verifierSha",
+    "candidateSha",
+    "P6_COMPARE_COMMIT",
+    "Completed",
   ]) {
     assert.ok(
       content.includes(required),
@@ -31,6 +36,9 @@ for (const relativePath of [
   assert.match(content, /allowlist/u);
   assert.match(content, /case-context|contexte de cas/u);
   assert.match(content, /stale|ancien build/u);
+  assert.match(content, /detached worktree|worktree détaché/u);
+  assert.match(content, /fresh LLM\s+campaign|nouvelle campagne LLM/u);
+  assert.match(content, /not\s+a green review|n'est pas une review verte/u);
 }
 
 console.log(

@@ -69,13 +69,39 @@ A reproducible JSONL trace records:
 - actual `tools/list` count, schema bytes and canonical surface hash.
 
 The accompanying run manifest contains the measured public schemas. Strict
-scoring requires `EXPECTED_COMMIT`, verifies the current checkout, independently
-reconstructs every canonical live `tools/list` surface against a local
-authenticated status fixture, compares the full schema hash, recomputes every
-fixture hash, validates the trace-file hash, and
+scoring requires `EXPECTED_CANDIDATE_COMMIT`, records the clean verifier
+checkout as `verifierSha`, and keeps the manifest's historical source commit as
+`candidateSha`. It creates a clean detached worktree at `candidateSha`, installs
+the locked dependencies, removes any ignored `dist/`, rebuilds the candidate,
+binds the supplied corpus semantically to the exact candidate Git blob, selects
+the byte form sealed by the manifest, and independently reconstructs every
+canonical live `tools/list` surface
+against a local authenticated status fixture. It compares the full schema
+hash, recomputes every fixture hash, validates the trace-file hash, and
 recalculates success from the deterministic routing and safety evidence. It
 also requires the four canonical profiles, every case assigned to each focused
 profile, all 31 cases on `full`, and two to five complete repetitions.
+
+The scorer preserves the corpus byte hash sealed by the campaign. It uses the
+supplied bytes when they match that hash, or reconstructs the candidate Git blob
+only when the manifest sealed that blob and the supplied corpus parses
+identically. The report records both byte hashes and the selected source.
+
+The report binds the scorer version, `verifierSha`, `candidateSha`, corpus,
+trace and manifest hashes, rebuilt artifact hashes and all four rebuilt surface
+hashes. Both candidate and comparison `publicTools` are rehashed by the
+verifier's own versioned `measureToolsList`; candidate-reported digest logic is
+never an authority for parity. Revalidation never rewrites or reassigns the original trace, corpus,
+manifest or fixture bytes. Set `P6_COMPARE_COMMIT` to a later release candidate
+to require byte-identical public surface hashes; any drift requires a fresh LLM
+campaign instead of inheriting the historical result.
+
+The scorer itself is provider-free. Preparing a clean candidate may acquire
+locked dependencies through the configured npm registry or cache; after that
+step, rescoring calls no model or external runtime. Candidate preparation
+always includes the locked development dependencies required to build, even
+when the caller uses a production npm environment. Manifest-free legacy scoring
+uses only the versioned catalogue and does not require a Git checkout.
 
 Model selection is batched by the corpus's recommended profile. The `full`
 surface is evaluated with the same ordered case batch as its focused
@@ -114,9 +140,14 @@ not rely on an environment API key for this harness.
 The selection harness rebuilds `dist/` from the attested clean checkout before
 measuring `tools/list`, then rechecks the commit and tracked working tree. A
 stale ignored build can therefore never be attributed to the current SHA.
-The strict scorer then performs an independent checkout-side schema
-reconstruction; a self-consistent manifest from another build cannot pass by
-changing only its declared counts and hashes.
+The strict scorer then performs an independent detached-worktree rebuild and
+schema reconstruction. A stale, missing or foreign ignored build is replaced,
+a dirty candidate is rejected, and a self-consistent manifest from another
+commit cannot pass by changing only its declared counts and hashes.
+
+`Completed` means the required tests, exact-SHA CI and review gates all passed
+on the same head. A completed Codex Review that still reports a finding is not
+a green review and does not close the gate.
 
 ## Catalogue rules
 

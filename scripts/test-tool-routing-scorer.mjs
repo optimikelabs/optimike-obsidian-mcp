@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -20,13 +20,24 @@ const corpusPath = path.join(
   "evals",
   "tool-routing-corpus.json",
 );
-const corpusRaw = fs.readFileSync(corpusPath, "utf8");
-const corpus = JSON.parse(corpusRaw);
-const corpusHash = sha256(corpusRaw);
 const expectedCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: process.cwd(),
   encoding: "utf8",
 }).trim();
+const corpusRaw = fs.readFileSync(corpusPath);
+const corpusGitRaw = execFileSync(
+  "git",
+  ["cat-file", "blob", `${expectedCommit}:evals/tool-routing-corpus.json`],
+  { cwd: process.cwd(), encoding: "buffer" },
+);
+const corpus = JSON.parse(corpusRaw.toString("utf8"));
+const corpusHash = sha256(corpusRaw);
+const candidateCheckout = path.join(temp, "candidate-checkout");
+execFileSync(
+  "git",
+  ["worktree", "add", "--detach", candidateCheckout, expectedCommit],
+  { cwd: process.cwd(), stdio: "ignore" },
+);
 const checkoutProfiles = new Map(
   (await measureCanonicalLiveProfileSchemas()).map((profile) => [
     profile.profile,
@@ -183,14 +194,31 @@ function writeFixture(name, fixture) {
   return { tracesPath, manifestPath };
 }
 
-function score({ tracesPath, manifestPath }) {
+function score({
+  tracesPath,
+  manifestPath,
+  corpusInputPath = corpusPath,
+  expectedCandidateCommit = expectedCommit,
+  forcePathNpm = false,
+  forceProductionInstall = false,
+}) {
   const args = ["scripts/score-tool-routing-evals.mjs", tracesPath];
-  if (manifestPath) args.push(corpusPath, manifestPath);
+  if (manifestPath) args.push(corpusInputPath, manifestPath);
+  const scorerEnv = {
+    ...process.env,
+    EXPECTED_CANDIDATE_COMMIT: expectedCandidateCommit,
+    P6_INTERNAL_CANDIDATE_CHECKOUT: candidateCheckout,
+  };
+  if (forcePathNpm) delete scorerEnv.npm_execpath;
+  if (forceProductionInstall) {
+    scorerEnv.NODE_ENV = "production";
+    scorerEnv.npm_config_omit = "dev";
+  }
   return JSON.parse(
     execFileSync(process.execPath, args, {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, EXPECTED_COMMIT: expectedCommit },
+      env: scorerEnv,
       stdio: ["ignore", "pipe", "pipe"],
     }),
   );
@@ -214,8 +242,11 @@ try {
   const legacyReport = JSON.parse(
     execFileSync(
       process.execPath,
-      ["scripts/score-tool-routing-evals.mjs", legacyPath],
-      { cwd: process.cwd(), encoding: "utf8" },
+      [
+        path.join(process.cwd(), "scripts/score-tool-routing-evals.mjs"),
+        legacyPath,
+      ],
+      { cwd: temp, encoding: "utf8" },
     ),
   );
   assert.equal(legacyReport.legacyTraceRuns, 1);
@@ -223,14 +254,165 @@ try {
 
   const canonical = buildCanonicalFixture();
   const canonicalPaths = writeFixture("canonical", canonical);
+  const immutableEvidence = {
+    traces: sha256(fs.readFileSync(canonicalPaths.tracesPath)),
+    manifest: sha256(fs.readFileSync(canonicalPaths.manifestPath)),
+    corpus: sha256(fs.readFileSync(corpusPath)),
+  };
   const report = score(canonicalPaths);
   assert.equal(report.evaluatedRuns, 120);
   assert.equal(report.strictTraceRuns, 120);
   assert.equal(report.legacyTraceRuns, 0);
+  assert.equal(report.scorerSchemaVersion, "tool-routing-score/v2");
+  assert.equal(report.scorerVersion, "2.0.0");
+  assert.equal(report.authority.verifierSha, expectedCommit);
+  assert.equal(report.authority.candidateSha, expectedCommit);
+  assert.equal(
+    report.authority.traceFileSha256,
+    canonical.manifest.traceFileSha256,
+  );
+  assert.equal(report.authority.corpusSha256, corpusHash);
+  assert.equal(report.authority.suppliedCorpusSha256, corpusHash);
+  assert.equal(
+    report.authority.candidateCorpusGitBlobSha256,
+    sha256(corpusGitRaw),
+  );
+  assert.equal(
+    report.authority.surfaceHashAuthority,
+    "verifier-measure-tools-list/v1",
+  );
+  assert.equal(report.authority.candidateSurfaceHashes.length, 4);
+  assert.ok(
+    report.authority.candidateSurfaceHashes.every((surface) =>
+      /^[0-9a-f]{64}$/u.test(surface.toolsListSha256),
+    ),
+  );
   assert.equal(report.failures.length, 0);
   assert.equal(report.summaries.length, 4);
   assert.ok(report.summaries.every((summary) => summary.successRate === 1));
   assert.ok(report.summaries.every((summary) => summary.safetyPassRate === 1));
+
+  const pathNpmReport = score({ ...canonicalPaths, forcePathNpm: true });
+  assert.deepEqual(
+    pathNpmReport.authority.candidateArtifactHashes,
+    report.authority.candidateArtifactHashes,
+    "direct scorer runs must resolve npm from PATH when npm_execpath is absent",
+  );
+  const productionInstallReport = score({
+    ...canonicalPaths,
+    forceProductionInstall: true,
+  });
+  assert.deepEqual(
+    productionInstallReport.authority.candidateArtifactHashes,
+    report.authority.candidateArtifactHashes,
+    "candidate rebuilds must include locked development build dependencies",
+  );
+
+  const gitBlobEvidence = structuredClone(canonical);
+  const gitBlobCorpusHash = sha256(corpusGitRaw);
+  gitBlobEvidence.manifest.corpusHash = gitBlobCorpusHash;
+  for (const trace of gitBlobEvidence.traces) {
+    trace.corpusHash = gitBlobCorpusHash;
+  }
+  const alternateCorpusPath = path.join(temp, "alternate-eol-corpus.json");
+  const gitCorpusText = corpusGitRaw.toString("utf8");
+  const alternateCorpusText = gitCorpusText.includes("\r\n")
+    ? gitCorpusText.replace(/\r\n/gu, "\n")
+    : gitCorpusText.replace(/\n/gu, "\r\n");
+  writeFileSync(alternateCorpusPath, alternateCorpusText, "utf8");
+  assert.notEqual(sha256(alternateCorpusText), gitBlobCorpusHash);
+  const gitBlobReport = score({
+    ...writeFixture("git-blob-evidence", gitBlobEvidence),
+    corpusInputPath: alternateCorpusPath,
+  });
+  assert.equal(gitBlobReport.authority.corpusSha256, gitBlobCorpusHash);
+  assert.equal(gitBlobReport.authority.corpusSource, "candidate-git-blob");
+  assert.equal(
+    gitBlobReport.authority.suppliedCorpusSha256,
+    sha256(alternateCorpusText),
+  );
+
+  const foreignDependency = path.join(
+    candidateCheckout,
+    "node_modules",
+    "foreign-dependency",
+  );
+  mkdirSync(foreignDependency, { recursive: true });
+  writeFileSync(
+    path.join(foreignDependency, "package.json"),
+    '{"name":"foreign-dependency","version":"999.0.0"}\n',
+    "utf8",
+  );
+  score(canonicalPaths);
+  assert.equal(
+    fs.existsSync(foreignDependency),
+    false,
+    "reusable candidate checkouts must reinstall from the lockfile",
+  );
+
+  const registryArtifact = path.join(
+    candidateCheckout,
+    "dist",
+    "mcp-server",
+    "toolSurfaceRegistry.js",
+  );
+  writeFileSync(registryArtifact, "throw new Error('foreign dist');\n", "utf8");
+  const rebuiltForeignDist = score(canonicalPaths);
+  assert.deepEqual(
+    rebuiltForeignDist.authority.candidateSurfaceHashes,
+    report.authority.candidateSurfaceHashes,
+    "foreign dist must be removed and rebuilt before measurement",
+  );
+
+  rmSync(path.join(candidateCheckout, "dist"), {
+    recursive: true,
+    force: true,
+  });
+  const rebuiltMissingDist = score(canonicalPaths);
+  assert.deepEqual(
+    rebuiltMissingDist.authority.candidateSurfaceHashes,
+    report.authority.candidateSurfaceHashes,
+    "missing dist must be rebuilt before measurement",
+  );
+
+  const candidateReadme = path.join(candidateCheckout, "README.md");
+  const candidateReadmeBytes = fs.readFileSync(candidateReadme);
+  writeFileSync(
+    candidateReadme,
+    Buffer.concat([candidateReadmeBytes, Buffer.from("\nmodified\n")]),
+  );
+  expectScoreFailure(
+    canonicalPaths,
+    /candidate checkout must be clean/u,
+    "dirty candidate worktrees must be rejected before build",
+  );
+  writeFileSync(candidateReadme, candidateReadmeBytes);
+
+  expectScoreFailure(
+    {
+      ...canonicalPaths,
+      expectedCandidateCommit: "0".repeat(40),
+    },
+    /one exact candidateSha/u,
+    "historical source identity must not be reassigned by the verifier",
+  );
+
+  const differentCorpusPath = path.join(temp, "different-corpus.json");
+  const differentCorpus = structuredClone(corpus);
+  differentCorpus.cases[0].prompt += " changed";
+  writeFileSync(
+    differentCorpusPath,
+    `${JSON.stringify(differentCorpus, null, 2)}\n`,
+    "utf8",
+  );
+  expectScoreFailure(
+    {
+      ...canonicalPaths,
+      corpusInputPath: differentCorpusPath,
+    },
+    /not semantically identical/u,
+    "strict rescoring must bind the supplied corpus to the candidate Git blob",
+  );
 
   const incompleteProfiles = structuredClone(canonical);
   incompleteProfiles.manifest.profiles.pop();
@@ -343,9 +525,31 @@ try {
     true,
   );
 
+  assert.deepEqual(
+    {
+      traces: sha256(fs.readFileSync(canonicalPaths.tracesPath)),
+      manifest: sha256(fs.readFileSync(canonicalPaths.manifestPath)),
+      corpus: sha256(fs.readFileSync(corpusPath)),
+    },
+    immutableEvidence,
+    "strict rescoring must not rewrite traces, manifest, or corpus",
+  );
+
   console.log(
     "PASS: routing eval scorer verifies the exact canonical P6 matrix, checkout profiles, strict evidence and safety",
   );
 } finally {
+  try {
+    execFileSync("git", ["worktree", "remove", "--force", candidateCheckout], {
+      cwd: process.cwd(),
+      stdio: "ignore",
+    });
+  } catch {}
+  try {
+    execFileSync("git", ["worktree", "prune"], {
+      cwd: process.cwd(),
+      stdio: "ignore",
+    });
+  } catch {}
   rmSync(temp, { recursive: true, force: true });
 }
