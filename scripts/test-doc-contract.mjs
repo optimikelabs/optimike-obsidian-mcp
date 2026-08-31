@@ -450,6 +450,29 @@ assert.match(envExample, /MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH=\//u);
 const operonContract = await text("docs/operon-mcp-contract.md");
 const operonContractFr = await text("docs/operon-mcp-contract.fr.md");
 const operonRestContract = await text("docs/operon-rest-contract.md");
+for (const [name, content] of [
+  ["operon-mcp-contract.md", operonContract],
+  ["operon-mcp-contract.fr.md", operonContractFr],
+]) {
+  assert.match(content, /`absent`/u, `${name} omits the fresh journal state`);
+  assert.match(content, /`valid`/u, `${name} omits the valid journal state`);
+  assert.match(content, /`unsafe`/u, `${name} omits the unsafe journal state`);
+  assert.match(
+    content,
+    /mutation_journal_unsafe/u,
+    `${name} omits the stable unsafe-journal reason code`,
+  );
+  assert.match(
+    content,
+    /preserv|préserv/iu,
+    `${name} omits preservation of the unsafe journal`,
+  );
+  assert.match(
+    content,
+    /no native\s+mutation|aucune mutation native/iu,
+    `${name} omits the zero-dispatch safety boundary`,
+  );
+}
 assert.match(
   operonRestContract,
   /POST \/tasks\/:operonId\/periodic-update/u,

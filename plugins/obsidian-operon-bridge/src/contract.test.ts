@@ -1205,34 +1205,44 @@ test("v1 and unproven v2 not-ready receipts remain terminal after reload", async
     {
       label: "v1 with injected provenance",
       version: 1,
+      valid: true,
       entry: { dispatchProvenance: "proven-pre-dispatch" },
       payload: { ok: false },
     },
     {
       label: "v2 without provenance",
       version: 2,
+      valid: true,
       entry: {},
       payload: { ok: false },
     },
     {
       label: "v2 unknown provenance",
       version: 2,
+      valid: true,
       entry: { dispatchProvenance: "unknown-or-dispatched" },
       payload: { ok: false },
     },
     {
       label: "v2 proven marker without explicit ok false",
       version: 2,
+      valid: false,
       entry: { dispatchProvenance: "proven-pre-dispatch" },
       payload: {},
     },
     {
       label: "v2 proven marker with contradictory ok true",
       version: 2,
+      valid: false,
       entry: { dispatchProvenance: "proven-pre-dispatch" },
       payload: { ok: true },
     },
   ]) {
+    const idempotencyKey = `terminal-${journal.label}`.replace(
+      /[^A-Za-z0-9._:-]/gu,
+      "-",
+    );
+    const operationId = "11111111-1111-4111-8111-111111111111";
     const { fake, nativeCalls } = await durableExistingMutationFake({
       native: () => ({ ok: true, code: "planned", retryable: false }),
     });
@@ -1240,14 +1250,15 @@ test("v1 and unproven v2 not-ready receipts remain terminal after reload", async
       version: journal.version,
       entries: [
         {
-          idempotencyKey: `terminal-${journal.label}`,
+          idempotencyKey,
           signature,
           state: "terminal",
           updatedAt,
-          operationId: "prior-operation",
+          operationId,
           payload: {
             ...journal.payload,
-            operationId: "prior-operation",
+            operationId,
+            idempotencyKey,
             status: "not-ready",
             mutationMayHaveApplied: false,
           },
@@ -1262,7 +1273,7 @@ test("v1 and unproven v2 not-ready receipts remain terminal after reload", async
       "update",
       "task-1",
       {
-        idempotencyKey: `terminal-${journal.label}`,
+        idempotencyKey,
         expectedRevision: "revision-1",
         dryRun: true,
       },
@@ -1272,7 +1283,16 @@ test("v1 and unproven v2 not-ready receipts remain terminal after reload", async
       },
     );
     assert.equal(result.httpStatus, 503, journal.label);
-    assert.equal(result.payload.replayed, true, journal.label);
+    assert.equal(
+      result.payload.replayed,
+      journal.valid ? true : undefined,
+      journal.label,
+    );
+    assert.equal(
+      result.payload.error?.code,
+      journal.valid ? undefined : "mutation_journal_unsafe",
+      journal.label,
+    );
     assert.equal(nativeCalls(), 0, journal.label);
   }
 });
@@ -1280,7 +1300,7 @@ test("v1 and unproven v2 not-ready receipts remain terminal after reload", async
 test("journal versions are not coerced into the v2 provenance contract", async () => {
   const BridgePlugin = await loadBridgePluginClassForTest();
   const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
-  const fake = {
+  const fake: Record<string, any> = {
     mutationResults: new Map(),
     mutationResultTimes: new Map(),
     mutationReservations: new MutationReservationRegistry(),
@@ -1306,6 +1326,318 @@ test("journal versions are not coerced into the v2 provenance contract", async (
     ],
   });
   assert.equal(fake.mutationResults.size, 0);
+  assert.equal(fake.mutationJournalState, "unsafe");
+});
+
+test("mutation journal restoration distinguishes absent, valid, and unsafe state", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const fresh = () => ({
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: new MutationReservationRegistry(),
+    taskWorkflowIdentities: new Map(),
+    queuePersistPluginData: () => undefined,
+    mutationHttpStatus(payload: Record<string, unknown>) {
+      return BridgePlugin.prototype.mutationHttpStatus.call(this, payload);
+    },
+  });
+  const validEntry = {
+    idempotencyKey: "valid-terminal-key",
+    signature: "valid-signature",
+    state: "terminal",
+    updatedAt: new Date().toISOString(),
+    operationId: "22222222-2222-4222-8222-222222222222",
+    payload: {
+      ok: true,
+      status: "applied",
+      operationId: "22222222-2222-4222-8222-222222222222",
+      idempotencyKey: "valid-terminal-key",
+    },
+    httpStatus: 200,
+    dispatchProvenance: "unknown-or-dispatched",
+  };
+
+  const absent = fresh() as Record<string, any>;
+  restore.call(absent, undefined, false);
+  assert.equal(absent.mutationJournalState, "absent");
+
+  const valid = fresh() as Record<string, any>;
+  restore.call(valid, { version: 2, entries: [validEntry] }, true);
+  assert.equal(valid.mutationJournalState, "valid");
+  assert.equal(valid.mutationResults.size, 1);
+
+  const malformed = [
+    null,
+    { version: "2", entries: [] },
+    { version: 3, entries: [] },
+    { version: 2, entries: {} },
+    { version: 2, entries: [null] },
+    { version: 2, entries: [{ ...validEntry, updatedAt: "not-a-date" }] },
+    { version: 2, entries: [{ ...validEntry, idempotencyKey: "" }] },
+    { version: 2, entries: [{ ...validEntry, idempotencyKey: "invalid key" }] },
+    { version: 2, entries: [{ ...validEntry, signature: "" }] },
+    { version: 2, entries: [{ ...validEntry, operationId: "" }] },
+    { version: 2, entries: [{ ...validEntry, operationId: "unknown" }] },
+    {
+      version: 2,
+      entries: [
+        {
+          ...validEntry,
+          payload: {
+            ...validEntry.payload,
+            operationId: "33333333-3333-4333-8333-333333333333",
+          },
+        },
+      ],
+    },
+    {
+      version: 2,
+      entries: [
+        {
+          ...validEntry,
+          payload: {
+            ...validEntry.payload,
+            idempotencyKey: "different-terminal-key",
+          },
+        },
+      ],
+    },
+    { version: 2, entries: [{ ...validEntry, state: "future" }] },
+    { version: 2, entries: [{ ...validEntry, payload: null }] },
+    { version: 2, entries: [{ ...validEntry, httpStatus: 99 }] },
+    {
+      version: 2,
+      entries: [
+        validEntry,
+        {
+          ...validEntry,
+          operationId: "44444444-4444-4444-8444-444444444444",
+          payload: {
+            ...validEntry.payload,
+            operationId: "44444444-4444-4444-8444-444444444444",
+          },
+        },
+      ],
+    },
+    {
+      version: 2,
+      entries: Array.from({ length: 501 }, (_, index) => ({
+        ...validEntry,
+        idempotencyKey: `oversized-${index}`,
+      })),
+    },
+    {
+      version: 2,
+      entries: [
+        {
+          ...validEntry,
+          payload: {
+            ok: true,
+            status: "applied",
+            oversized: "x".repeat(16 * 1024 * 1024),
+          },
+        },
+      ],
+    },
+    {
+      version: 2,
+      entries: [
+        {
+          ...validEntry,
+          state: "in-progress",
+          payload: undefined,
+          httpStatus: undefined,
+          dispatchProvenance: undefined,
+          requested: undefined,
+        },
+      ],
+    },
+  ];
+  for (const journal of malformed) {
+    const unsafe = fresh() as Record<string, any>;
+    restore.call(unsafe, journal, true);
+    assert.equal(unsafe.mutationJournalState, "unsafe");
+    assert.equal(unsafe.mutationResults.size, 0);
+    assert.equal(unsafe.unsafeMutationJournalRaw, journal);
+  }
+});
+
+test("unsafe journal is preserved across settings saves and reload", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const persist = BridgePlugin.prototype.persistPluginData as Function;
+  const raw = {
+    version: "future-version",
+    entries: [{ privateSentinel: "must-stay-private-and-preserved" }],
+  };
+  const fake: Record<string, any> = {
+    settings: { mutationsEnabled: true },
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: new MutationReservationRegistry(),
+    taskWorkflowIdentities: new Map(),
+    mutationJournalEntries: () => {
+      throw new Error("unsafe state must not synthesize a replacement journal");
+    },
+    taskWorkflowIdentityEntries: () => [],
+    saveData: async (value: unknown) => {
+      fake.saved = structuredClone(value);
+    },
+  };
+  restore.call(fake, raw, true);
+  await persist.call(fake);
+  assert.deepEqual(fake.saved.mutationJournal, raw);
+
+  fake.settings = { mutationsEnabled: false };
+  await persist.call(fake);
+  assert.deepEqual(fake.saved.mutationJournal, raw);
+
+  const reloaded: Record<string, any> = {
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: new MutationReservationRegistry(),
+    taskWorkflowIdentities: new Map(),
+    queuePersistPluginData: () => undefined,
+  };
+  restore.call(reloaded, fake.saved.mutationJournal, true);
+  assert.equal(reloaded.mutationJournalState, "unsafe");
+  assert.equal(
+    reloaded.unsafeMutationJournalRaw.entries[0].privateSentinel,
+    "must-stay-private-and-preserved",
+  );
+});
+
+test("a fresh absent journal becomes valid only after durable persistence", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const persist = BridgePlugin.prototype.persistPluginData as Function;
+  const fake: Record<string, any> = {
+    settings: { mutationsEnabled: false },
+    mutationResults: new Map(),
+    mutationResultTimes: new Map(),
+    mutationReservations: new MutationReservationRegistry(),
+    taskWorkflowIdentities: new Map(),
+    mutationJournalEntries: () => [],
+    taskWorkflowIdentityEntries: () => [],
+    saveData: async (value: unknown) => {
+      assert.equal(fake.mutationJournalState, "absent");
+      fake.saved = structuredClone(value);
+    },
+  };
+
+  restore.call(fake, undefined, false);
+  assert.equal(fake.mutationJournalState, "absent");
+  await persist.call(fake);
+  assert.equal(fake.mutationJournalState, "valid");
+  assert.deepEqual(fake.saved.mutationJournal, {
+    version: 2,
+    retentionDays: 30,
+    entries: [],
+  });
+});
+
+test("unsafe journal blocks reservations and native dispatch with a value-free receipt", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const executeExisting = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const runtime = await durableExistingMutationFake({
+    native: () => ({ ok: true, code: "planned", retryable: false }),
+  });
+  runtime.fake.mutationJournalState = "unsafe";
+  runtime.fake.unsafeMutationJournalRaw = {
+    secret: "PRIVATE-JOURNAL-SENTINEL",
+  };
+
+  const result = await executeExisting.call(
+    runtime.fake,
+    "update",
+    "task-1",
+    {
+      idempotencyKey: "unsafe-journal-request",
+      expectedRevision: "revision-1",
+      dryRun: true,
+    },
+    { description: "must not dispatch" },
+    async () => {
+      throw new Error("legacy native path must remain unreachable");
+    },
+  );
+
+  assert.equal(result.httpStatus, 503);
+  assert.equal(result.payload.error.code, "mutation_journal_unsafe");
+  assert.equal(result.payload.retryable, false);
+  assert.equal(result.payload.mutationMayHaveApplied, false);
+  assert.equal(runtime.nativeCalls(), 0);
+  assert.equal([...runtime.fake.mutationReservations.entries()].length, 0);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-JOURNAL-SENTINEL/u);
+});
+
+test("a new profile with no journal can reserve and dispatch normally", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const restore = BridgePlugin.prototype.restoreMutationJournal as Function;
+  const executeExisting = BridgePlugin.prototype
+    .executeExistingMutation as Function;
+  const runtime = await durableExistingMutationFake({
+    native: () => ({ ok: true, code: "planned", retryable: false }),
+  });
+  restore.call(runtime.fake, undefined, false);
+
+  const result = await executeExisting.call(
+    runtime.fake,
+    "update",
+    "task-1",
+    {
+      idempotencyKey: "fresh-profile-request",
+      expectedRevision: "revision-1",
+      dryRun: true,
+    },
+    { description: "fresh profile request" },
+    async () => {
+      throw new Error("legacy native path must remain unreachable");
+    },
+  );
+
+  assert.equal(result.httpStatus, 200);
+  assert.equal(runtime.nativeCalls(), 1);
+  assert.equal(runtime.fake.mutationJournalState, "valid");
+  assert.equal([...runtime.fake.mutationReservations.entries()].length, 0);
+});
+
+test("unsafe journal may replay an already-restored terminal receipt without dispatch", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const replay = BridgePlugin.prototype.mutationReplayOrValidation as Function;
+  const cachedPayload = {
+    ok: true,
+    operationId: "existing-terminal-operation",
+    status: "applied",
+  };
+  const fake = {
+    mutationJournalState: "unsafe",
+    mutationResults: new Map([
+      [
+        "existing-terminal-key",
+        {
+          signature: "existing-terminal-signature",
+          payload: cachedPayload,
+          httpStatus: 200,
+          dispatchProvenance: "unknown-or-dispatched",
+        },
+      ],
+    ]),
+    mutationOperationId: () => "must-not-be-needed",
+  };
+  const decision = replay.call(
+    fake,
+    "existing-terminal-key",
+    "existing-terminal-signature",
+    {},
+    () => null,
+  );
+  assert.equal(decision.kind, "response");
+  assert.equal(decision.response.httpStatus, 200);
+  assert.equal(decision.response.payload.replayed, true);
+  assert.equal(decision.response.payload.status, "applied");
 });
 
 test("a proven v2 pre-dispatch receipt is released durably before one native retry", async () => {
@@ -1328,10 +1660,11 @@ test("a proven v2 pre-dispatch receipt is released durably before one native ret
         signature,
         state: "terminal",
         updatedAt: new Date().toISOString(),
-        operationId: "pre-dispatch-operation",
+        operationId: "55555555-5555-4555-8555-555555555555",
         payload: {
           ok: false,
-          operationId: "pre-dispatch-operation",
+          operationId: "55555555-5555-4555-8555-555555555555",
+          idempotencyKey: "proven-reload-key",
           status: "not-ready",
           mutationMayHaveApplied: false,
         },
@@ -1421,9 +1754,11 @@ test("concurrent retries of one restored proven receipt dispatch exactly once", 
         signature,
         state: "terminal",
         updatedAt: new Date().toISOString(),
-        operationId: "prior-proven-operation",
+        operationId: "66666666-6666-4666-8666-666666666666",
         payload: {
           ok: false,
+          operationId: "66666666-6666-4666-8666-666666666666",
+          idempotencyKey: "concurrent-proven-reload",
           status: "not-ready",
           mutationMayHaveApplied: false,
         },
@@ -1694,8 +2029,13 @@ test("journal v1 migration preserves terminal receipts and promotes interrupted 
         signature: "applied-signature",
         state: "terminal",
         updatedAt,
-        operationId: "applied-operation",
-        payload: { ok: true, status: "applied" },
+        operationId: "77777777-7777-4777-8777-777777777777",
+        payload: {
+          ok: true,
+          status: "applied",
+          operationId: "77777777-7777-4777-8777-777777777777",
+          idempotencyKey: "v1-applied",
+        },
         httpStatus: 200,
       },
       {
@@ -1703,10 +2043,12 @@ test("journal v1 migration preserves terminal receipts and promotes interrupted 
         signature: "unknown-signature",
         state: "terminal",
         updatedAt,
-        operationId: "unknown-operation",
+        operationId: "88888888-8888-4888-8888-888888888888",
         payload: {
           ok: false,
           status: "outcome-unknown",
+          operationId: "88888888-8888-4888-8888-888888888888",
+          idempotencyKey: "v1-unknown",
           mutationMayHaveApplied: true,
         },
         httpStatus: 500,
@@ -1716,7 +2058,7 @@ test("journal v1 migration preserves terminal receipts and promotes interrupted 
         signature: "interrupted-signature",
         state: "in-progress",
         updatedAt,
-        operationId: "interrupted-operation",
+        operationId: "99999999-9999-4999-8999-999999999999",
         requested: { description: "interrupted" },
       },
     ],
@@ -1752,26 +2094,40 @@ test("journal v1 migration preserves terminal receipts and promotes interrupted 
   assert.equal(persistedStates.get("v1-interrupted"), "outcome-unknown");
 });
 
-test("adopt, periodic, and generic mutation paths all delegate replay policy to the bridge helper", () => {
+test("every mutation and recovery path delegates replay policy before native coordination", () => {
   const mainSource = readFileSync(
     new URL("./main.ts", import.meta.url),
     "utf8",
   );
   const methods = [
+    "executeRecoveryMutation",
+    "executeTaskWorkflowRecoveryMutation",
     "executeAdoptMutation",
     "executePeriodicCreateMutation",
     "executePeriodicUpdateMutation",
     "executeExistingMutation",
+    "executeCreateMutation",
   ];
   for (const method of methods) {
     const start = mainSource.indexOf(`private async ${method}(`);
     const end = mainSource.indexOf("\n  private ", start + 1);
     assert.notEqual(start, -1, `${method} must exist`);
     assert.notEqual(end, -1, `${method} must have a bounded source slice`);
+    const methodSource = mainSource.slice(start, end);
     assert.match(
-      mainSource.slice(start, end),
+      methodSource,
       /(?:await\s+)?this\.mutationReplayOrValidation\(/u,
       `${method} must use the common durable replay policy`,
+    );
+    const replayIndex = methodSource.indexOf(
+      "this.mutationReplayOrValidation(",
+    );
+    const coordinationIndex = methodSource.indexOf(
+      "this.coordinatedMutationPreflight",
+    );
+    assert.ok(
+      coordinationIndex === -1 || replayIndex < coordinationIndex,
+      `${method} must consult the journal before native coordination`,
     );
   }
 });
@@ -2819,6 +3175,25 @@ test("future contract-compatible Operon releases project read-write capabilities
   assert.equal(capabilities.periodicUpdate, true);
   assert.equal(capabilities.recovery, true);
   assert.equal(capabilities.taskWorkflowRecovery, true);
+
+  const unsafeCapabilities = BridgePlugin.prototype.capabilities.call(
+    {
+      settings: { mutationsEnabled: true },
+      mutationJournalState: "unsafe",
+    },
+    runtime,
+    true,
+  );
+  assert.equal(unsafeCapabilities.list, true);
+  assert.equal(unsafeCapabilities.diagnostics, true);
+  assert.equal(unsafeCapabilities.filterQuery, true);
+  assert.equal(unsafeCapabilities.create, false);
+  assert.equal(unsafeCapabilities.update, false);
+  assert.equal(unsafeCapabilities.adopt, false);
+  assert.equal(unsafeCapabilities.periodicCreate, false);
+  assert.equal(unsafeCapabilities.periodicUpdate, false);
+  assert.equal(unsafeCapabilities.recovery, false);
+  assert.equal(unsafeCapabilities.taskWorkflowRecovery, false);
 
   const dirtyIndexCapabilities = BridgePlugin.prototype.capabilities.call(
     fake,
