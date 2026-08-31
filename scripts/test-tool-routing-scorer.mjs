@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -37,24 +37,6 @@ execFileSync(
   ["worktree", "add", "--detach", candidateCheckout, expectedCommit],
   { cwd: process.cwd(), stdio: "ignore" },
 );
-const nodeDirectory = path.dirname(process.execPath);
-const npmCli =
-  process.env.npm_execpath?.trim() ||
-  (process.platform === "win32"
-    ? path.join(nodeDirectory, "node_modules", "npm", "bin", "npm-cli.js")
-    : path.resolve(
-        nodeDirectory,
-        "..",
-        "lib",
-        "node_modules",
-        "npm",
-        "bin",
-        "npm-cli.js",
-      ));
-execFileSync(process.execPath, [npmCli, "ci", "--silent"], {
-  cwd: candidateCheckout,
-  stdio: "ignore",
-});
 const checkoutProfiles = new Map(
   (await measureCanonicalLiveProfileSchemas()).map((profile) => [
     profile.profile,
@@ -288,6 +270,24 @@ try {
   assert.equal(report.summaries.length, 4);
   assert.ok(report.summaries.every((summary) => summary.successRate === 1));
   assert.ok(report.summaries.every((summary) => summary.safetyPassRate === 1));
+
+  const foreignDependency = path.join(
+    candidateCheckout,
+    "node_modules",
+    "foreign-dependency",
+  );
+  mkdirSync(foreignDependency, { recursive: true });
+  writeFileSync(
+    path.join(foreignDependency, "package.json"),
+    '{"name":"foreign-dependency","version":"999.0.0"}\n',
+    "utf8",
+  );
+  score(canonicalPaths);
+  assert.equal(
+    fs.existsSync(foreignDependency),
+    false,
+    "reusable candidate checkouts must reinstall from the lockfile",
+  );
 
   const registryArtifact = path.join(
     candidateCheckout,

@@ -216,8 +216,9 @@ async function prepareCandidate(repository, candidateSha, reusableCheckout) {
       checkout = path.join(temporaryRoot, "checkout");
       git(repository, ["worktree", "add", "--detach", checkout, candidateSha]);
       ownsWorktree = true;
-      runCandidateCommand(checkout, ["ci", "--silent"], "candidate npm ci");
     }
+    assertCleanCheckout(checkout, candidateSha, "candidate checkout");
+    runCandidateCommand(checkout, ["ci", "--silent"], "candidate npm ci");
     assertCleanCheckout(checkout, candidateSha, "candidate checkout");
     fs.rmSync(path.join(checkout, "dist"), { recursive: true, force: true });
     runCandidateCommand(
