@@ -211,7 +211,12 @@ function writeFixture(name, fixture) {
   return { tracesPath, manifestPath };
 }
 
-function score({ tracesPath, manifestPath, corpusInputPath = corpusPath }) {
+function score({
+  tracesPath,
+  manifestPath,
+  corpusInputPath = corpusPath,
+  expectedCandidateCommit = expectedCommit,
+}) {
   const args = ["scripts/score-tool-routing-evals.mjs", tracesPath];
   if (manifestPath) args.push(corpusInputPath, manifestPath);
   return JSON.parse(
@@ -220,7 +225,7 @@ function score({ tracesPath, manifestPath, corpusInputPath = corpusPath }) {
       encoding: "utf8",
       env: {
         ...process.env,
-        EXPECTED_CANDIDATE_COMMIT: expectedCommit,
+        EXPECTED_CANDIDATE_COMMIT: expectedCandidateCommit,
         P6_INTERNAL_CANDIDATE_CHECKOUT: candidateCheckout,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -322,15 +327,12 @@ try {
   );
   writeFileSync(candidateReadme, candidateReadmeBytes);
 
-  const wrongCandidate = structuredClone(canonical);
-  wrongCandidate.manifest.sourceCommit = execFileSync(
-    "git",
-    ["rev-parse", `${expectedCommit}^`],
-    { cwd: process.cwd(), encoding: "utf8" },
-  ).trim();
   expectScoreFailure(
-    writeFixture("wrong-candidate", wrongCandidate),
-    /candidate checkout identifies|candidateSha/u,
+    {
+      ...canonicalPaths,
+      expectedCandidateCommit: "0".repeat(40),
+    },
+    /one exact candidateSha/u,
     "historical source identity must not be reassigned by the verifier",
   );
 
