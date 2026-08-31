@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-08-31
+
+### Added
+
+- `obsidian_list_pending_operations` provides a read-only, paginated cockpit
+  for governed Note, Frontmatter, Base Formula, Canvas and Text Patch receipts
+  whose durable state is `planned`, `applying` or `outcome_unknown`.
+- Each row returns only the domain operation kind, its exact opaque `planRef`,
+  durable state, timestamps, bounded age and `apply | status | recover` next
+  action. Paths, keys, content, hashes, backend bindings and journal details are
+  never projected.
+
+### Security
+
+- The cockpit reads only the three journals already owned by the current live
+  runtime and never scans another backend/profile namespace. Its SQL projection
+  does not load private `payload_json` in JavaScript and listing performs no
+  backend call, lease sweep, purge, transition, apply or recovery.
+- Stable terminal receipts remain excluded even while retained for replay.
+  Operon and diagnostic external-move inventories retain their independent
+  authorities.
+
+### Validation
+
+- Deterministic fixtures cover global keyset pagination, equal timestamps, all
+  five families, stable-terminal exclusion, privacy sentinels, journal
+  isolation/closure, no-write inspection, real stdio MCP and multiple HTTP MCP
+  sessions.
+
 ## [3.6.0] - 2026-08-31
 
 ### Added

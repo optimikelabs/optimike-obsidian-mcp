@@ -472,6 +472,26 @@ try {
   );
   assert.equal(fake.content, FRONTMATTER_INITIAL_CONTENT);
   assertNoPrivateData(nominalPlan.result, "P1 plan receipt");
+  const pendingFrontmatter = await call(
+    session,
+    "obsidian_list_pending_operations",
+    { limit: 100 },
+  );
+  const pendingFrontmatterItem = pendingFrontmatter.payload.operations.find(
+    (item) => item.planRef === nominalPlan.payload.planRef,
+  );
+  assert.deepEqual(
+    pendingFrontmatterItem && {
+      operationKind: pendingFrontmatterItem.operationKind,
+      state: pendingFrontmatterItem.state,
+      nextAction: pendingFrontmatterItem.nextAction,
+    },
+    {
+      operationKind: "obsidian.frontmatter.patch",
+      state: "planned",
+      nextAction: "apply",
+    },
+  );
 
   const canonicalReplay = await call(
     session,
@@ -565,6 +585,14 @@ try {
   );
   assert.equal(nominalStatus.payload.outcome, "committed");
   assert.equal(Object.hasOwn(nominalStatus.payload, "idempotencyKey"), false);
+  assert.equal(
+    (
+      await call(session, "obsidian_list_pending_operations", { limit: 100 })
+    ).payload.operations.some(
+      (item) => item.planRef === nominalPlan.payload.planRef,
+    ),
+    false,
+  );
   const blockedCommittedChildStatus = await call(
     session,
     "obsidian_note_replace_status",

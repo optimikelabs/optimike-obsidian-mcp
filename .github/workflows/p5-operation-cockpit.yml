@@ -1,0 +1,44 @@
+name: P5 Operation Cockpit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/p5-operation-cockpit.yml"
+      - "src/services/operationCockpit.ts"
+      - "src/mcp-server/tools/operationCockpitTools/**"
+      - "src/mcp-server/toolSurfaceRegistry.ts"
+      - "src/mcp-server/tools/runtimeTools/registration.ts"
+      - "src/mcp-server/resources/toolRoutingResource.ts"
+      - "src/mcp-server/toolProfiles.ts"
+      - "src/services/operations/obsidianNoteReplaceJournal.ts"
+      - "src/services/baseFormulaProjectionRuntime.ts"
+      - "src/services/canvasProjectionRuntime.ts"
+      - "scripts/test-operation-cockpit-*.mjs"
+      - "scripts/smoke-operation-cockpit-live.mjs"
+      - "scripts/test-tool-profiles.mjs"
+      - "docs/operation-cockpit-p5*.md"
+      - "docs/tool-surface-profiles*.md"
+      - "profiles/**"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+jobs:
+  p5-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:operation-cockpit
+      - run: npm run test:profiles
+      - run: node scripts/test-operation-cockpit-doc-contract.mjs

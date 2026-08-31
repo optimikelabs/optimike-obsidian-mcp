@@ -76,6 +76,11 @@ Pour chaque famille gouvernée :
 4. Après timeout ou perte de transport, appeler `*_status` en premier.
 5. Appeler `*_recover` uniquement lorsque le reçu autorise la récupération de ce plan exact.
 
+Si le client a perdu la référence opaque elle-même, appeler
+`obsidian_list_pending_operations`. Router les champs `operationKind` et
+`nextAction` retournés vers la famille métier correspondante ; le cockpit
+n'exécute pas l'action et n'est pas une API générique d'opération.
+
 Un profil expose toujours la famille complète `plan → apply → status → recover`
 ou aucune de ses opérations. Le profil qui a créé le plan ne devient jamais son
 autorité de récupération.

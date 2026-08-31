@@ -10,7 +10,8 @@ import {
   GovernedCanvasAtomicServer,
 } from "./fixtures/governed-canvas-atomic-server.mjs";
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 const fixture = new GovernedCanvasAtomicServer();
 await fixture.listen();
@@ -69,10 +70,22 @@ function assertPublicError(result, code, forbiddenMarker, label) {
   assert.equal(result.isError, true, `${label} MCP error`);
   const payload = parsed(result);
   assert.equal(payload.error.code, code, `${label} error code`);
-  assert.equal(payload.error.message, "The request could not be completed. Use the request id to inspect server diagnostics.", `${label} catalog message`);
+  assert.equal(
+    payload.error.message,
+    "The request could not be completed. Use the request id to inspect server diagnostics.",
+    `${label} catalog message`,
+  );
   assert.match(payload.requestId ?? "", UUID, `${label} request id`);
-  assert.equal(payload.error.details?.requestId, payload.requestId, `${label} request id details`);
-  assert.doesNotMatch(JSON.stringify(payload), new RegExp(forbiddenMarker, "u"), `${label} leaked marker`);
+  assert.equal(
+    payload.error.details?.requestId,
+    payload.requestId,
+    `${label} request id details`,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(payload),
+    new RegExp(forbiddenMarker, "u"),
+    `${label} leaked marker`,
+  );
 }
 
 try {
@@ -90,6 +103,12 @@ try {
       "obsidian_canvas_patch_status",
     ],
   );
+  assert.equal(
+    tools.tools.some(
+      (tool) => tool.name === "obsidian_list_pending_operations",
+    ),
+    true,
+  );
   const paddedPathResult = await client.callTool({
     name: "obsidian_canvas_patch_plan",
     arguments: {
@@ -98,7 +117,12 @@ try {
       idempotencyKey: "p3-mcp-padded-path",
     },
   });
-  assertPublicError(paddedPathResult, "INTERNAL_ERROR", "must not be padded", "padded path");
+  assertPublicError(
+    paddedPathResult,
+    "INTERNAL_ERROR",
+    "must not be padded",
+    "padded path",
+  );
   assert.equal(fixture.writes, 0);
 
   const plannedResult = await client.callTool({
@@ -125,6 +149,27 @@ try {
   const planned = parsed(plannedResult);
   assert.equal(planned.phase, "planned");
   assert.equal(fixture.writes, 0);
+  const pending = parsed(
+    await client.callTool({
+      name: "obsidian_list_pending_operations",
+      arguments: { limit: 100 },
+    }),
+  );
+  const pendingCanvas = pending.operations.find(
+    (item) => item.planRef === planned.planRef,
+  );
+  assert.deepEqual(
+    pendingCanvas && {
+      operationKind: pendingCanvas.operationKind,
+      state: pendingCanvas.state,
+      nextAction: pendingCanvas.nextAction,
+    },
+    {
+      operationKind: "obsidian.canvas.patch",
+      state: "planned",
+      nextAction: "apply",
+    },
+  );
 
   const appliedResult = await client.callTool({
     name: "obsidian_canvas_patch_apply",
@@ -149,6 +194,15 @@ try {
   );
   assert.equal(status.outcome, "committed");
   assert.equal(status.idempotencyKey, undefined);
+  assert.equal(
+    parsed(
+      await client.callTool({
+        name: "obsidian_list_pending_operations",
+        arguments: { limit: 100 },
+      }),
+    ).operations.some((item) => item.planRef === planned.planRef),
+    false,
+  );
 } catch (error) {
   throw new Error(
     `${error instanceof Error ? error.stack : String(error)}\nMCP stderr:\n${childStderr}`,

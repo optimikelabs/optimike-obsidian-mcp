@@ -62,7 +62,7 @@ this precedence:
 | Semantic similarity                               | `smart_semantic_search`                                                   | This is the only semantic-search name taught to new agents and exposed by modern profiles.                             |
 | Operon-managed task reads                         | `operon_list_tasks`, `operon_query_tasks`                                 | `list_all_tasks` and `query_tasks` inspect Obsidian Tasks-compatible Markdown.                                         |
 | Complete replacement of an existing Markdown note | `obsidian_note_replace_plan` then its matching apply/status/recover tools | `obsidian_update_note` overwrite has no durable receipt or exact-plan recovery.                                        |
-| Append, prepend, or literal body replacement       | `obsidian_text_patch_plan` then its matching lifecycle                    | Direct update/search-replace remains a compatibility or create fallback without a durable receipt.                    |
+| Append, prepend, or literal body replacement      | `obsidian_text_patch_plan` then its matching lifecycle                    | Direct update/search-replace remains a compatibility or create fallback without a durable receipt.                     |
 | Top-level frontmatter set/delete                  | `obsidian_frontmatter_patch_plan` then its matching lifecycle             | `obsidian_manage_frontmatter` remains useful for reads, compatibility, or when the governed live projection is absent. |
 | Named Base formula set/delete                     | `bases_formula_patch_plan` then its matching lifecycle                    | `bases_upsert_config` is a default-off whole-config compatibility path.                                                |
 | Existing JSON Canvas graph mutation               | `obsidian_canvas_patch_plan` then its matching lifecycle                  | `obsidian_manage_canvas` is a direct headless-filesystem helper without durable recovery.                              |
@@ -87,6 +87,11 @@ For every governed family:
 3. Call the matching `*_apply` tool with the same key.
 4. After timeout or transport loss, call `*_status` first.
 5. Call `*_recover` only when the receipt authorizes recovery of that exact plan.
+
+If the client lost the opaque reference itself, call
+`obsidian_list_pending_operations`. Route its returned `operationKind` and
+`nextAction` to the matching domain family; the cockpit does not execute the
+action and is not a generic operation API.
 
 A profile always exposes the full `plan → apply → status → recover` family or
 none of it. The profile that created a plan is never recovery authority.

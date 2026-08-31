@@ -29,6 +29,8 @@ import type { GovernedBaseFormulaRuntime } from "../../../services/baseFormulaPr
 import type { GovernedCanvasRuntime } from "../../../services/canvasProjectionRuntime.js";
 import { registerGovernedCanvasTools } from "../governedCanvasTools/index.js";
 import { registerOperonTools } from "../operonTools/index.js";
+import { registerOperationCockpitTool } from "../operationCockpitTools/index.js";
+import type { PendingOperationSource } from "../../../services/operationCockpit.js";
 
 const MaintenanceInputSchema = z.object({
   action: z
@@ -130,6 +132,18 @@ export async function registerRuntimeTools(
       isError: false,
     }),
   );
+
+  const pendingOperationSources: PendingOperationSource[] = [];
+  if (governedNoteReplaceRuntime) {
+    pendingOperationSources.push(governedNoteReplaceRuntime);
+  }
+  if (governedBaseFormulaRuntime) {
+    pendingOperationSources.push(governedBaseFormulaRuntime);
+  }
+  if (governedCanvasRuntime) {
+    pendingOperationSources.push(governedCanvasRuntime);
+  }
+  registerOperationCockpitTool(server, pendingOperationSources);
 
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
   await registerGovernedTextPatchTools(server, governedNoteReplaceRuntime);

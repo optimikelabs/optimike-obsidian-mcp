@@ -75,6 +75,43 @@ export type ObsidianNoteReplaceJournalOptions = {
   startupRetryDelayMs?: number;
 };
 
+export type PendingOperationKind =
+  | "obsidian.note.replace"
+  | "obsidian.frontmatter.patch"
+  | "obsidian.base.formula.patch"
+  | "obsidian.canvas.patch"
+  | "obsidian.text.patch";
+
+export type PendingOperationRow = {
+  operationId: string;
+  status: "planned" | "applying" | "outcome_unknown";
+  createdAt: string;
+  updatedAt: string;
+  operationKind: PendingOperationKind;
+};
+
+export type PendingOperationRowsInput = {
+  /**
+   * The operation kind assigned by the owning journal when its private row has
+   * no admitted projection kind.
+   */
+  fallbackOperationKind: PendingOperationKind;
+  /** Projection kinds that are valid for this specific owning journal. */
+  admittedProjectionKinds: readonly PendingOperationKind[];
+  /** Only the Note journal owns native rows without a projection envelope. */
+  allowUnprojectedFallback: boolean;
+  limit: number;
+  after?: Pick<
+    PendingOperationRow,
+    "updatedAt" | "operationKind" | "operationId"
+  >;
+};
+
+export type PendingOperationRowsPage = {
+  rows: PendingOperationRow[];
+  hasMore: boolean;
+};
+
 const STABLE_TERMINAL = new Set<ObsidianNoteReplaceStatus>([
   "committed",
   "conflict",
@@ -85,7 +122,7 @@ const STABLE_TERMINAL = new Set<ObsidianNoteReplaceStatus>([
 const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 const SQLITE_STARTUP_RETRY_WINDOW_MS = 15_000;
 const SQLITE_STARTUP_RETRY_DELAY_MS = 50;
-
+const MAX_PENDING_OPERATION_ROWS_LIMIT = 100;
 function isTransientSqliteContention(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const sqliteError = error as Error & {
@@ -345,6 +382,99 @@ export class ObsidianNoteReplaceJournal {
       : undefined;
   }
 
+  /**
+   * Read the bounded operation-cockpit projection without parsing a private
+   * plan in JavaScript. This intentionally does not renew leases, sweep
+   * interrupted work, purge retention, or checkpoint the journal.
+   */
+  listPendingOperationRows(
+    input: PendingOperationRowsInput,
+  ): PendingOperationRowsPage {
+    this.assertOpen();
+    if (
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > MAX_PENDING_OPERATION_ROWS_LIMIT
+    ) {
+      throw new RangeError(
+        `Pending operation row limit must be an integer from 1 to ${MAX_PENDING_OPERATION_ROWS_LIMIT}.`,
+      );
+    }
+
+    if (
+      input.admittedProjectionKinds.length < 1 ||
+      input.admittedProjectionKinds.length > 5 ||
+      new Set(input.admittedProjectionKinds).size !==
+        input.admittedProjectionKinds.length
+    ) {
+      throw new RangeError(
+        "Pending operation projection kinds must be a non-empty unique bounded set.",
+      );
+    }
+
+    const projectionKind = "json_extract(payload_json, '$.projection.kind')";
+    const admittedPlaceholders = input.admittedProjectionKinds
+      .map(() => "?")
+      .join(", ");
+    const operationKind = `COALESCE(${projectionKind}, ?)`;
+    const parameters: Array<string | number> = [
+      input.fallbackOperationKind,
+      ...input.admittedProjectionKinds,
+    ];
+    let afterClause = "";
+    if (input.after) {
+      afterClause = `
+        WHERE updated_at < ?
+          OR (updated_at = ? AND operation_kind > ?)
+          OR (updated_at = ? AND operation_kind = ? AND operation_id > ?)`;
+      parameters.push(
+        input.after.updatedAt,
+        input.after.updatedAt,
+        input.after.operationKind,
+        input.after.updatedAt,
+        input.after.operationKind,
+        input.after.operationId,
+      );
+    }
+    parameters.push(input.limit + 1);
+    const rows = this.db
+      .prepare(
+        `WITH pending_operations AS (
+           SELECT operation_id, status, created_at, updated_at,
+                  ${operationKind} AS operation_kind
+           FROM obsidian_note_replace_plans
+           WHERE status IN ('planned', 'applying', 'outcome_unknown')
+             AND (
+               ${projectionKind} IN (${admittedPlaceholders})
+               ${input.allowUnprojectedFallback ? "OR json_type(payload_json, '$.projection') IS NULL" : ""}
+             )
+         )
+         SELECT operation_id, status, created_at, updated_at, operation_kind
+         FROM pending_operations
+         ${afterClause}
+         ORDER BY updated_at DESC, operation_kind ASC, operation_id ASC
+         LIMIT ?`,
+      )
+      .all(...parameters) as Array<{
+      operation_id: string;
+      status: PendingOperationRow["status"];
+      created_at: string;
+      updated_at: string;
+      operation_kind: PendingOperationKind;
+    }>;
+    const hasMore = rows.length > input.limit;
+    return {
+      rows: rows.slice(0, input.limit).map((row) => ({
+        operationId: row.operation_id,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        operationKind: row.operation_kind,
+      })),
+      hasMore,
+    };
+  }
+
   transition(
     operationId: string,
     expected: ObsidianNoteReplaceStatus[],
@@ -507,6 +637,12 @@ export class ObsidianNoteReplaceJournal {
       this.checkpointSensitiveFrames();
     }
     return updated;
+  }
+
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new Error("The note replacement journal is closed.");
+    }
   }
 
   private maybePurgeTerminalPlans(): void {

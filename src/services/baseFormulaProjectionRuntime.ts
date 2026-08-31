@@ -22,6 +22,8 @@ import {
   ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
   type ObsidianNoteReplaceProjection,
+  type PendingOperationRowsInput,
+  type PendingOperationRowsPage,
 } from "./operations/obsidianNoteReplaceJournal.js";
 import { RestBaseAtomicWriteBackend } from "./operations/restBaseAtomicWriteBackend.js";
 import { assertWriteAllowed } from "./writePolicy.js";
@@ -255,6 +257,22 @@ export class GovernedBaseFormulaRuntime {
       }
     }, heartbeatMs);
     this.heartbeat.unref();
+  }
+
+  listPendingOperationRows(
+    input: Omit<
+      PendingOperationRowsInput,
+      | "fallbackOperationKind"
+      | "admittedProjectionKinds"
+      | "allowUnprojectedFallback"
+    >,
+  ): PendingOperationRowsPage {
+    return this.journal.listPendingOperationRows({
+      ...input,
+      fallbackOperationKind: OPERATION_KIND,
+      admittedProjectionKinds: [OPERATION_KIND],
+      allowUnprojectedFallback: false,
+    });
   }
 
   async plan(

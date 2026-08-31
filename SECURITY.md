@@ -105,6 +105,22 @@ metadata. Allowlisted fields such as method, route class, status, counts,
 lengths and timing may remain, while request bodies and route tails remain
 excluded.
 
+## P5 operation cockpit privacy boundary
+
+The read-only `obsidian_list_pending_operations` cockpit is a deliberately
+closed public projection for resuming governed work. Each returned row contains
+only `operationKind`, the domain `planRef`, `state`, `admittedAt`, `updatedAt`,
+bounded `ageSeconds` and the closed `nextAction` (`apply`, `status` or
+`recover`). The opaque cursor contains only the last public ordering key.
+
+The cockpit never returns or logs vault or journal paths, idempotency or other
+secret keys, target names, note or Canvas content, formula/frontmatter values,
+hashes or digests, backend bindings, execution owners, error details or error
+payloads. It is an inventory only: it does not call a backend, status, apply or
+recovery operation, sweep leases, purge retention or mutate a journal. The
+family operation tools remain responsible for their own authorization,
+profile, policy, Bridge and binding checks.
+
 The contract is exercised by `npm run test:log-privacy` (including the batch
 item fixture) on Linux and Windows in CI. The CI `bridge-privacy` job also runs
 privacy checks for the Bases, Operon and Atomic Write Bridges on both platforms.

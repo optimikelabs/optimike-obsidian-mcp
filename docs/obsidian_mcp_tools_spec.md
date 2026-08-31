@@ -10,6 +10,7 @@ Related docs:
 - Runtime modes: [runtime-capability-matrix.md](runtime-capability-matrix.md)
 - Operations: [../OPERATIONS.md](../OPERATIONS.md)
 - Governed atomic note replacement: [governed-note-replacement.md](governed-note-replacement.md)
+- Pending operation cockpit P5: [operation-cockpit-p5.md](operation-cockpit-p5.md)
 - Governed Base formulas P2: [governed-base-formula-p2.md](governed-base-formula-p2.md)
 - Agent routing: [mcp-routing-guide.md](mcp-routing-guide.md)
 - External roots: [external-roots-setup.md](external-roots-setup.md)
@@ -27,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 76 unique names. Full live/hybrid
-registration currently contains 76 names. See
+The current cross-runtime registry contains 81 unique names. Full live/hybrid
+registration currently contains 77 names. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
 ## MCP Resources
@@ -128,6 +129,21 @@ and delegates one sealed child plan to the existing note runtime.
 Curated live profiles prefer this complete family over direct
 `obsidian_update_note` and `obsidian_search_replace`. Explicit `full` and
 headless fallback modes retain the direct compatibility tools.
+
+## Pending Operation Cockpit (P5)
+
+- `obsidian_list_pending_operations`: list only `planned`, `applying`, and
+  `outcome_unknown` receipts from the current live runtime's already-open Note,
+  Base Formula, and Canvas journals. Frontmatter and Text Patch retain their
+  public projected family and `planRef`.
+
+The paginated projection contains the operation family, exact opaque domain
+reference, durable state, timestamps, bounded age and the next safe action. It
+contains no target, path, idempotency key, content, proof, hash, binding,
+backend error or journal path. Listing never calls status/apply/recover and
+never changes leases, retention or journal state. Operon keeps its official
+pending-recovery inventory; diagnostic external moves and direct writes remain
+outside this cockpit. See [the P5 contract](operation-cockpit-p5.md).
 
 ## Governed Frontmatter Projection (P1)
 

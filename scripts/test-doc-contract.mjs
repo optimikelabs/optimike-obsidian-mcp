@@ -365,6 +365,7 @@ const commonTools = [
   "obsidian_note_replace_apply",
   "obsidian_note_replace_status",
   "obsidian_note_replace_recover",
+  "obsidian_list_pending_operations",
   "bases_formula_patch_plan",
   "bases_formula_patch_apply",
   "bases_formula_patch_status",
@@ -380,8 +381,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.6.0",
-  "package metadata must match the 3.6.0 governed text-patch candidate",
+  "3.7.0",
+  "package metadata must match the 3.7.0 pending-operation cockpit candidate",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");
@@ -616,16 +617,16 @@ assert.doesNotMatch(operonContractFr, /3\.5\.3` stock[\s\S]*lecture seule/iu);
 
 const profilesEn = await text("docs/tool-surface-profiles.md");
 const profilesFr = await text("docs/tool-surface-profiles.fr.md");
-assert.match(readme, /\| `tasks`\s+\|\s+33\s+\|/u);
-assert.match(readme, /\| `full`\s+\|\s+76\s+\|/u);
-assert.match(readmeFr, /\| `tasks`\s+\|\s+33\s+\|/u);
-assert.match(readmeFr, /\| `full`\s+\|\s+76\s+\|/u);
-assert.match(profilesEn, /\| `tasks`\s+\|[^\n]+33 tools/u);
-assert.match(profilesEn, /\| `full`\s+\|[^\n]+76 tools/u);
-assert.match(profilesEn, /80 unique names/u);
-assert.match(profilesFr, /\| `tasks`\s+\|[^\n]+33 outils/u);
-assert.match(profilesFr, /\| `full`\s+\|[^\n]+76 outils/u);
-assert.match(profilesFr, /80 noms uniques/u);
+assert.match(readme, /\| `tasks`\s+\|\s+34\s+\|/u);
+assert.match(readme, /\| `full`\s+\|\s+77\s+\|/u);
+assert.match(readmeFr, /\| `tasks`\s+\|\s+34\s+\|/u);
+assert.match(readmeFr, /\| `full`\s+\|\s+77\s+\|/u);
+assert.match(profilesEn, /\| `tasks`\s+\|[^\n]+34 tools/u);
+assert.match(profilesEn, /\| `full`\s+\|[^\n]+77 tools/u);
+assert.match(profilesEn, /81 unique names/u);
+assert.match(profilesFr, /\| `tasks`\s+\|[^\n]+34 outils/u);
+assert.match(profilesFr, /\| `full`\s+\|[^\n]+77 outils/u);
+assert.match(profilesFr, /81 noms uniques/u);
 
 const backpressureContract = await text(
   "docs/http-concurrency-backpressure.md",
