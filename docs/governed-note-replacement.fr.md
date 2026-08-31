@@ -89,6 +89,9 @@ relative au coffre, et le contenu respecte les limites configurées.
 de fichier complet : le frontmatter est parsé comme YAML et comparé
 structurellement, jamais par regexp. Le corps Markdown est transmis au Bridge
 exactement comme fourni.
+Comme cette comparaison dépend des lignes, le planning échoue fermé si la note
+courante ou le remplacement scellé commence par un BOM UTF-8 ou contient des
+fins de ligne CR seules. LF, CRLF et le mélange LF/CRLF restent supportés.
 
 Le journal note-replace est l’unique autorité durable de cette opération. Les
 plans non terminaux conservent `nextContent` scellé uniquement pour la

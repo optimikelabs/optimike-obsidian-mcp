@@ -4,6 +4,7 @@ import {
   compileToolProfileNames,
   type ToolProfileId,
 } from "../mcp-server/toolProfiles.js";
+import { getToolSurfaceEntry } from "../mcp-server/toolSurfaceRegistry.js";
 import type { ToolRegistrationMode } from "../mcp-server/toolSurfaceRegistry.js";
 import { httpAdmissionController } from "../mcp-server/transports/httpBackpressure.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
@@ -277,7 +278,20 @@ function visible(
   visibleToolNames: ReadonlySet<string>,
   capability: CapabilityId,
 ): boolean {
-  return TOOL_FAMILIES[capability].every((name) => visibleToolNames.has(name));
+  const lifecycleFamilies = new Map<string, string[]>();
+  for (const name of TOOL_FAMILIES[capability]) {
+    const entry = getToolSurfaceEntry(name);
+    if (!entry?.lifecycleRole) {
+      if (visibleToolNames.has(name)) return true;
+      continue;
+    }
+    const familyTools = lifecycleFamilies.get(entry.family) ?? [];
+    familyTools.push(name);
+    lifecycleFamilies.set(entry.family, familyTools);
+  }
+  return [...lifecycleFamilies.values()].some((familyTools) =>
+    familyTools.every((name) => visibleToolNames.has(name)),
+  );
 }
 
 function entry(

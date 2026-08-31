@@ -59,8 +59,8 @@ const MAX_AUTHORIZED_RANGES = 64;
 const MAX_NOTE_BYTES = 4 * 1024 * 1024;
 const MAX_OPERATION_TEXT_BYTES = 256 * 1024;
 const MAX_TOTAL_OPERATION_TEXT_BYTES = 1024 * 1024;
-const TASK_LINE = /^[\t ]*[-*+]\s*\[[^\]\r\n]\]/u;
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/u;
+const TASK_LINE = /^[\s\t>]*(?:[-*+]|[0-9]+[.)])[ \t]*\[(.)\]/u;
+const COMMONMARK_FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -77,6 +77,19 @@ function byteLength(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
 
+function assertNoBareCarriageReturns(value: string): void {
+  if (/\r(?!\n)/u.test(value)) {
+    fail("P4 does not support bare carriage-return line endings.", "markdown_line_ending_unsupported");
+  }
+}
+
+function assertSupportedMarkdownEnvelope(value: string): void {
+  assertNoBareCarriageReturns(value);
+  if (value.startsWith("\uFEFF")) {
+    fail("P4 does not support UTF-8 byte order marks.", "markdown_bom_unsupported");
+  }
+}
+
 function detectLineEnding(content: string): "lf" | "crlf" | "mixed" {
   const crlfCount = (content.match(/\r\n/gu) ?? []).length;
   const lfCount = (content.match(/\n/gu) ?? []).length;
@@ -84,16 +97,7 @@ function detectLineEnding(content: string): "lf" | "crlf" | "mixed" {
   return crlfCount === lfCount ? "crlf" : "mixed";
 }
 
-function parseMarkdown(content: string): ParsedMarkdown {
-  if (typeof content !== "string" || byteLength(content) === 0) {
-    fail("A non-empty existing Markdown note is required.", "markdown_note_missing");
-  }
-  if (byteLength(content) > MAX_NOTE_BYTES) {
-    fail("The Markdown note exceeds the P4 compiler size limit.", "markdown_note_too_large", {
-      maxBytes: MAX_NOTE_BYTES,
-    });
-  }
-
+function parseMarkdownStructure(content: string): ParsedMarkdown {
   const opening = content.match(/^---(?:\r\n|\n)/u);
   if (!opening) {
     return { bodyStart: 0, frontmatter: "", body: content };
@@ -119,6 +123,19 @@ function parseMarkdown(content: string): ParsedMarkdown {
   fail("The Markdown frontmatter opening delimiter is not closed.", "frontmatter_unclosed");
 }
 
+function parseMarkdown(content: string): ParsedMarkdown {
+  if (typeof content !== "string") {
+    fail("An existing Markdown note is required.", "markdown_note_missing");
+  }
+  assertSupportedMarkdownEnvelope(content);
+  if (byteLength(content) > MAX_NOTE_BYTES) {
+    fail("The Markdown note exceeds the P4 compiler size limit.", "markdown_note_too_large", {
+      maxBytes: MAX_NOTE_BYTES,
+    });
+  }
+  return parseMarkdownStructure(content);
+}
+
 function validatePath(path: unknown): void {
   if (path === undefined) return;
   if (typeof path !== "string" || !/\.md$/iu.test(path.trim())) {
@@ -136,6 +153,7 @@ function assertString(value: unknown, field: string): asserts value is string {
 }
 
 function assertOperationText(value: string, field: string): void {
+  assertNoBareCarriageReturns(value);
   if (byteLength(value) > MAX_OPERATION_TEXT_BYTES) {
     fail("A text patch value exceeds the P4 compiler size limit.", "text_patch_value_too_large", {
       field,
@@ -210,39 +228,130 @@ function canonicalizeOperations(operations: unknown): TextPatchOperation[] {
   return canonical;
 }
 
-function taskLineRanges(body: string): Array<{ start: number; end: number }> {
-  const ranges: Array<{ start: number; end: number }> = [];
+type TaskLine = {
+  start: number;
+  end: number;
+  normalizedText: string;
+  commonMarkReal: boolean;
+  operonReal: boolean;
+};
+
+type SourceEdit = {
+  start: number;
+  end: number;
+  replacement: string;
+};
+
+type CommonMarkFence = {
+  marker: "`" | "~";
+  length: number;
+};
+
+function commonMarkFenceOpen(line: string): CommonMarkFence | undefined {
+  const opening = COMMONMARK_FENCE_OPEN.exec(line);
+  if (!opening) return undefined;
+  const marker = opening[1][0] as CommonMarkFence["marker"];
+  // CommonMark rejects a backtick-fence opener whose info string itself has a backtick.
+  if (marker === "`" && opening[2].includes("`")) return undefined;
+  return { marker, length: opening[1].length };
+}
+
+function isCommonMarkFenceClose(line: string, fence: CommonMarkFence): boolean {
+  return new RegExp(
+    `^ {0,3}${fence.marker === "`" ? "`" : "~"}{${fence.length},}[\\t ]*$`,
+    "u",
+  ).test(line);
+}
+
+function isOperonFenceDelimiter(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith("```") || trimmed.startsWith("~~~");
+}
+
+function taskLines(body: string): TaskLine[] {
+  const ranges: TaskLine[] = [];
   let cursor = 0;
-  let fence: { marker: "`" | "~"; length: number } | undefined;
+  let commonMarkFence: CommonMarkFence | undefined;
+  let operonFence = false;
   while (cursor < body.length) {
     const newline = body.indexOf("\n", cursor);
     const endWithEol = newline === -1 ? body.length : newline + 1;
     const raw = body.slice(cursor, newline === -1 ? body.length : newline);
     const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-    if (fence) {
-      const closing = new RegExp(
-        `^ {0,3}${fence.marker === "`" ? "`" : "~"}{${fence.length},}[\\t ]*$`,
-        "u",
-      );
-      if (closing.test(line)) fence = undefined;
-    } else {
-      const opening = FENCE_OPEN.exec(line);
-      if (opening) {
-        fence = {
-          marker: opening[1][0] as "`" | "~",
-          length: opening[1].length,
-        };
-      } else if (TASK_LINE.test(line)) {
-        ranges.push({ start: cursor, end: endWithEol });
-      }
+    // P4 protects any task real under CommonMark-like parsing OR Operon's toggle parser.
+    // Model-specific states are part of identity, so a fence edit cannot reclassify one model.
+    const commonMarkReal = !commonMarkFence;
+    const operonReal = !operonFence;
+    if ((commonMarkReal || operonReal) && TASK_LINE.test(line)) {
+      ranges.push({
+        start: cursor,
+        end: endWithEol,
+        normalizedText: line.replace(/\r$/u, ""),
+        commonMarkReal,
+        operonReal,
+      });
     }
+    if (commonMarkFence) {
+      if (isCommonMarkFenceClose(line, commonMarkFence)) commonMarkFence = undefined;
+    } else {
+      commonMarkFence = commonMarkFenceOpen(line);
+    }
+    if (isOperonFenceDelimiter(line)) operonFence = !operonFence;
     cursor = endWithEol;
   }
   return ranges;
 }
 
-function insertedTextHasTaskLine(text: string): boolean {
-  return taskLineRanges(text).length > 0;
+function taskLineRanges(body: string): Array<{ start: number; end: number }> {
+  return taskLines(body).map(({ start, end }) => ({ start, end }));
+}
+
+function mappedTaskStart(start: number, edits: SourceEdit[]): number {
+  return edits.reduce((mappedStart, edit) => {
+    if (edit.end <= start) {
+      return mappedStart + edit.replacement.length - (edit.end - edit.start);
+    }
+    return mappedStart;
+  }, start);
+}
+
+function assertSourceEditsDoNotOverlapTasks(body: string, edits: SourceEdit[]): void {
+  for (const edit of edits) {
+    for (const task of taskLineRanges(body)) {
+      const insertionInsideTask =
+        edit.start === edit.end && edit.start > task.start && edit.start < task.end;
+      const rangeOverlapsTask =
+        edit.start !== edit.end && edit.start < task.end && edit.end > task.start;
+      if (insertionInsideTask || rangeOverlapsTask) {
+        fail("P4 refuses to touch a Markdown task or Operon task line.", "task_line_touched");
+      }
+    }
+  }
+}
+
+function assertTaskIdentityPreserved(
+  beforeBody: string,
+  afterBody: string,
+  edits: SourceEdit[],
+): void {
+  const before = taskLines(beforeBody);
+  assertSourceEditsDoNotOverlapTasks(beforeBody, edits);
+  const after = taskLines(afterBody);
+  if (before.length !== after.length) {
+    fail("P4 refuses to change the parsed Markdown task lines.", "task_line_touched");
+  }
+  for (const [index, task] of before.entries()) {
+    const mappedStart = mappedTaskStart(task.start, edits);
+    const nextTask = after[index];
+    if (
+      nextTask.start !== mappedStart ||
+      nextTask.normalizedText !== task.normalizedText ||
+      nextTask.commonMarkReal !== task.commonMarkReal ||
+      nextTask.operonReal !== task.operonReal
+    ) {
+      fail("P4 refuses to reclassify or reorder parsed Markdown task lines.", "task_line_touched");
+    }
+  }
 }
 
 function assertNoTaskRange(body: string, start: number, end: number): void {
@@ -258,12 +367,6 @@ function assertNoTaskRange(body: string, start: number, end: number): void {
     if (start < task.end && end > task.start) {
       fail("P4 refuses to touch a Markdown task or Operon task line.", "task_line_touched");
     }
-  }
-}
-
-function assertNoInsertedTaskLine(text: string): void {
-  if (insertedTextHasTaskLine(text)) {
-    fail("P4 refuses to introduce a Markdown task or Operon task line.", "task_line_touched");
   }
 }
 
@@ -306,9 +409,9 @@ export function compileTextPatch(
   const authorizedRanges: TextPatchAuthorizedRange[] = [];
 
   for (const [operationIndex, operation] of canonicalOperations.entries()) {
+    const stepBeforeBody = body;
     const stepBeforeBodySha256 = sha256(body);
     if (operation.op === "append_body") {
-      assertNoInsertedTaskLine(operation.text);
       if (
         bodyEndsWithTaskLine(body) &&
         !operation.text.startsWith("\n") &&
@@ -317,7 +420,19 @@ export function compileTextPatch(
         fail("P4 refuses to extend a Markdown task or Operon task line.", "task_line_touched");
       }
       const start = markdown.bodyStart + body.length;
-      body += operation.text;
+      const candidate = body + operation.text;
+      if (
+        !operation.text.startsWith("\n") &&
+        !operation.text.startsWith("\r\n")
+      ) {
+        assertNoTaskRange(candidate, body.length, body.length);
+      }
+      assertTaskIdentityPreserved(body, candidate, [{
+        start: body.length,
+        end: body.length,
+        replacement: operation.text,
+      }]);
+      body = candidate;
       authorizedRanges.push({
         operationIndex,
         coordinateSpace: "operation-input-content",
@@ -333,14 +448,22 @@ export function compileTextPatch(
     }
 
     if (operation.op === "prepend_body") {
-      assertNoInsertedTaskLine(operation.text);
       if (
         bodyStartsWithTaskLine(body) &&
         !operation.text.endsWith("\n")
       ) {
         fail("P4 refuses to extend a Markdown task or Operon task line.", "task_line_touched");
       }
-      body = operation.text + body;
+      const candidate = operation.text + body;
+      if (!operation.text.endsWith("\n")) {
+        assertNoTaskRange(candidate, operation.text.length, operation.text.length);
+      }
+      assertTaskIdentityPreserved(body, candidate, [{
+        start: 0,
+        end: 0,
+        replacement: operation.text,
+      }]);
+      body = candidate;
       authorizedRanges.push({
         operationIndex,
         coordinateSpace: "operation-input-content",
@@ -375,6 +498,11 @@ export function compileTextPatch(
     for (const start of selected) {
       assertNoTaskRange(body, start, start + operation.search.length);
     }
+    const sourceEdits = selected.map((start) => ({
+      start,
+      end: start + operation.search.length,
+      replacement: operation.replacement,
+    }));
     const stepRanges = selected.map((start) => ({
       operationIndex,
       coordinateSpace: "operation-input-content" as const,
@@ -399,6 +527,7 @@ export function compileTextPatch(
       }
       body = candidate;
     }
+    assertTaskIdentityPreserved(stepBeforeBody, body, sourceEdits);
     const stepAfterBodySha256 = sha256(body);
     authorizedRanges.push(
       ...stepRanges.map((range) => ({
@@ -410,9 +539,22 @@ export function compileTextPatch(
   }
 
   const nextContent = markdown.frontmatter + body;
+  assertSupportedMarkdownEnvelope(nextContent);
   const beforeFrontmatterSha256 = sha256(markdown.frontmatter);
-  const afterFrontmatterSha256 = sha256(nextContent.slice(0, markdown.bodyStart));
-  if (beforeFrontmatterSha256 !== afterFrontmatterSha256) {
+  let nextMarkdown: ParsedMarkdown;
+  try {
+    // Reparse structure without path/type admission; existing and resulting
+    // Markdown notes may both contain zero bytes.
+    nextMarkdown = parseMarkdownStructure(nextContent);
+  } catch {
+    fail("P4 cannot alter Markdown frontmatter.", "frontmatter_touched");
+  }
+  const afterFrontmatterSha256 = sha256(nextMarkdown.frontmatter);
+  if (
+    nextMarkdown.bodyStart !== markdown.bodyStart ||
+    nextMarkdown.frontmatter !== markdown.frontmatter ||
+    beforeFrontmatterSha256 !== afterFrontmatterSha256
+  ) {
     fail("P4 cannot alter Markdown frontmatter.", "frontmatter_touched");
   }
 

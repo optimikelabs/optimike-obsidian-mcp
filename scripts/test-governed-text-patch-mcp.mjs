@@ -9,9 +9,9 @@ import path from "node:path";
 // useful Atomic Write/Note Replace seam: the production compiler, projection
 // runtime, quartet registrations, MCP SDK validation, and public error mapper
 // all remain real.
-process.env.MCP_WRITE_MODE = "full";
+process.env.MCP_WRITE_MODE = "guarded";
 process.env.MCP_PROTECTED_FRONTMATTER_KEYS = "création,modification";
-process.env.MCP_GUARDED_MAX_WRITE_CHARS = "100000";
+process.env.MCP_GUARDED_MAX_WRITE_CHARS = "100";
 process.env.NODE_ENV = "test";
 process.env.OBSIDIAN_RUNTIME_MODE = "live";
 process.env.OBSIDIAN_API_KEY = "test-key";
@@ -281,6 +281,7 @@ async function call(session, name, args, expectedError = false) {
   }
 }
 function assertPublicError(payload, code, label) {
+  assert.ok(payload.error, `${label} did not return an MCP error: ${JSON.stringify(payload)}`);
   assert.equal(payload.error.code, code, `${label} code`);
   assert.equal(payload.error.message, PUBLIC_MESSAGES[code], `${label} public message`);
   const requestId = payload.requestId ?? payload.error.details?.requestId;
@@ -304,6 +305,28 @@ try {
   assert.deepEqual(byName.get("obsidian_text_patch_plan")?.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
   assert.deepEqual(byName.get("obsidian_text_patch_status")?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
   for (const name of ["obsidian_text_patch_apply", "obsidian_text_patch_recover"]) assert.deepEqual(byName.get(name)?.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
+
+  // The guarded write limit is expressed in JavaScript string characters, as
+  // it is for the governed note-replace runtime. This fixture is intentionally
+  // below the 100-character limit but above it in UTF-8 bytes.
+  fake.reset(body("needle"));
+  const multibyte = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [{ op: "replace_literal", search: "needle", replacement: "é".repeat(30) }],
+    idempotencyKey: "multibyte-under-character-limit",
+  });
+  assert.equal(multibyte.payload.phase, "planned");
+  assert.ok(multibyte.payload.projection.proof.nextContentSha256);
+  const multibyteContent = body("é".repeat(30));
+  assert.ok(multibyteContent.length <= 100);
+  assert.ok(Buffer.byteLength(multibyteContent, "utf8") > 100);
+
+  const overCharacters = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [{ op: "replace_literal", search: "needle", replacement: "x".repeat(101) }],
+    idempotencyKey: "over-character-limit",
+  }, true);
+  assertPublicError(overCharacters.payload, "FORBIDDEN", "character limit");
 
   fake.reset();
   const operations = [
@@ -350,6 +373,42 @@ try {
       assertPublicError(rejected.payload, "VALIDATION_ERROR", label);
     }
   }
+  for (const [label, content, operations] of [
+    [
+      "bare CR frontmatter source",
+      "---\rtitle: unsafe\r---\rneedle\r",
+      [{ op: "replace_literal", search: "needle", replacement: "patched" }],
+    ],
+    [
+      "bare CR task source",
+      "- [ ] real task\rneedle\r",
+      [{ op: "replace_literal", search: "[ ]", replacement: "[x]" }],
+    ],
+    [
+      "introduced bare CR",
+      body("needle"),
+      [{ op: "append_body", text: "\rintroduced" }],
+    ],
+    [
+      "BOM source",
+      "\uFEFF" + body("needle"),
+      [{ op: "replace_literal", search: "needle", replacement: "patched" }],
+    ],
+    [
+      "BOM prepended",
+      "needle\n",
+      [{ op: "prepend_body", text: "\uFEFFprefix\n" }],
+    ],
+  ]) {
+    fake.reset(content);
+    const rejected = await call(first, "obsidian_text_patch_plan", {
+      path: FIXTURE_PATH,
+      operations,
+      idempotencyKey: `encoding-${label.toLowerCase().replace(/[^a-z0-9]+/gu, "-")}`,
+    }, true);
+    assertPublicError(rejected.payload, "VALIDATION_ERROR", label);
+    assert.equal(fake.casRequests, 0, `${label} fails before CAS`);
+  }
   const runtimeForCompilerBoundary = new GovernedTextPatchRuntime(fake);
   await assert.rejects(
     runtimeForCompilerBoundary.plan({
@@ -361,6 +420,21 @@ try {
     "compiler rejects regular expressions before CAS",
   );
   assert.equal(fake.casRequests, 0, "boundary rejects happen before CAS");
+
+  fake.reset("");
+  const emptyNotePlan = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [{ op: "append_body", text: "content from zero bytes" }],
+    idempotencyKey: "existing-empty-note",
+  });
+  assert.equal(emptyNotePlan.payload.phase, "planned");
+  assert.equal(fake.casRequests, 0, "planning an empty note performs no CAS");
+  const emptyNoteCommit = await call(first, "obsidian_text_patch_apply", {
+    planRef: emptyNotePlan.payload.planRef,
+    idempotencyKey: "existing-empty-note",
+  });
+  assert.equal(emptyNoteCommit.payload.outcome, "committed");
+  assert.equal(fake.content, "content from zero bytes");
 
   fake.reset();
   const raceRuntime = new GovernedTextPatchRuntime(fake);
@@ -450,7 +524,7 @@ try {
   const redacted = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "absent", replacement: SECRET }], idempotencyKey: "redaction" }, true);
   assertPublicError(redacted.payload, "VALIDATION_ERROR", "redacted parameters");
   for (const result of observed) assert.equal(result.includes(SECRET), false, "sealed text leaked in MCP response");
-  console.log("PASS: MCP quartet registration, projection proof, no-write planning, exact replay/conflict fencing, body-only rejection, stale and concurrent CAS, lost-response status, exact recovery, empty-body literal replacement, cache authority, and redaction.");
+  console.log("PASS: MCP quartet registration, guarded character-limit units, projection proof, no-write planning, exact replay/conflict fencing, body-only rejection, stale and concurrent CAS, lost-response status, exact recovery, empty-body literal replacement, cache authority, and redaction.");
 } finally {
   await second.close();
   await first.close();

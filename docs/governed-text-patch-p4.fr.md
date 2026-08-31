@@ -26,6 +26,18 @@ ambiguë sont refusés avant la création du plan enfant. Le frontmatter reste
 identique octet pour octet. Les vraies lignes de tâches Markdown sont
 protégées ; les exemples placés dans un bloc de code fenced restent du texte.
 
+## Représentation du texte et protection des tâches
+
+Les fins de ligne LF, CRLF et mixtes sont supportées. Un CR nu ou un BOM UTF-8
+est refusé fail-closed avant le plan. Les offsets publics et les comptes de
+caractères protégés utilisent des unités de code UTF-16 JavaScript ; les
+limites d’admission en octets utilisent des octets UTF-8.
+
+Les exemples en forme de tâche placés dans un bloc fenced ne sont éditables
+que si le scanner CommonMark-like et le parsing Operon les classent tous deux
+comme fenced. Tout désaccord reste protégé, y compris une ambiguïté de fence
+dans une citation.
+
 ## Concurrence et recovery
 
 Deux plans peuvent sceller le même état initial, mais seul le premier CAS

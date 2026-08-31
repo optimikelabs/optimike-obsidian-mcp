@@ -168,6 +168,8 @@ assert.match(contract, /busy policy is installed before WAL negotiation/);
 assert.match(contract, /each recovery gets a new attempt fence/);
 assert.match(contract, /terminal receipts remain replayable[\s\S]*read-only/i);
 assert.match(contract, /revalidates it again immediately before every/i);
+assert.match(contract, /starts with a UTF-8 BOM or contains\s+bare CR line endings/i);
+assert.match(contract, /LF, CRLF, and mixed LF\/CRLF remain supported/i);
 assert.match(contractFr, /politique de contention SQLite est installée avant/);
 assert.match(
   contractFr,
@@ -175,6 +177,8 @@ assert.match(
 );
 assert.match(contractFr, /reçus terminaux stables restent rejouables/i);
 assert.match(contractFr, /juste avant chaque tentative de/i);
+assert.match(contractFr, /commence par un BOM UTF-8 ou contient des\s+fins de ligne CR seules/i);
+assert.match(contractFr, /LF, CRLF et le mélange LF\/CRLF restent supportés/i);
 assert.match(contract, /loser of the conditional `planned → applying`/i);
 assert.match(contractFr, /perdant de la transition conditionnelle/i);
 assert.match(contract, /empty Markdown note as valid content/i);

@@ -44,6 +44,26 @@ function normalizeKey(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function assertSupportedMarkdownEnvelope(
+  content: string,
+  phase: "plan" | "effect",
+): void {
+  const reason = content.startsWith("\uFEFF")
+    ? "markdown_bom_unsupported"
+    : /\r(?!\n)/u.test(content)
+      ? "markdown_line_ending_unsupported"
+      : undefined;
+  if (!reason) return;
+
+  throw new McpError(
+    phase === "plan"
+      ? BaseErrorCode.VALIDATION_ERROR
+      : BaseErrorCode.FORBIDDEN,
+    "The sealed note uses an unsupported Markdown encoding or line ending.",
+    { reason },
+  );
+}
+
 function parseFrontmatter(content: string): FrontmatterRecord {
   const lines = content.split("\n");
   const line = (index: number): string =>
@@ -130,6 +150,12 @@ function validateReplacement(
     unsupportedIntegrations: [],
   },
 ): void {
+  // Frontmatter and settlement comparisons are line-structural. Reject inputs
+  // that those parsers cannot interpret unambiguously before any policy or CAS
+  // decision, even when the configured protected-key set happens to be empty.
+  assertSupportedMarkdownEnvelope(currentContent, phase);
+  assertSupportedMarkdownEnvelope(nextContent, phase);
+
   let validation: ReturnType<typeof validateObsidianMarkdown>;
   try {
     validation = validateObsidianMarkdown(nextContent);

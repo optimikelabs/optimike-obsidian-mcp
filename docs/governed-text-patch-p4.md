@@ -26,6 +26,17 @@ matches fail before a child plan is created. Frontmatter bytes are preserved.
 Real Markdown task lines are protected, while task examples inside fenced code
 blocks remain ordinary body text.
 
+## Text representation and task protection
+
+LF, CRLF, and mixed line endings are supported. A bare CR or a UTF-8 BOM is
+rejected fail-closed before planning. Public offsets and guarded character
+counts use JavaScript UTF-16 code units; byte admission limits use UTF-8
+bytes.
+
+Task-shaped examples inside a fenced block are editable only when both the
+CommonMark-like scanner and Operon parsing classify that content as fenced.
+Any disagreement remains protected, including a blockquote fence ambiguity.
+
 ## Concurrency and recovery
 
 Two plans may seal the same before state, but only the first matching Atomic

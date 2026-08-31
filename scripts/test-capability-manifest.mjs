@@ -115,11 +115,12 @@ function input({
   baseAtomicWrite = { state: "ready", value: baseReady },
   operon = { state: "ready", value: operonReady() },
   admission = {},
+  availableStaticRequirements = ["vault-cache"],
 } = {}) {
   const toolNames = compileToolProfileNames({
     profile,
     registrationMode,
-    availableStaticRequirements: ["vault-cache"],
+    availableStaticRequirements,
   });
   return {
     profile,
@@ -178,6 +179,42 @@ assert.equal(capability(standard, "governed-canvas-write").authorized, true);
 assert.equal(capability(standard, "governed-base-write").state, "hidden");
 assert.equal(capability(standard, "operon-write").reasonCode, "profile_hidden");
 
+const liveWithoutVaultCacheInput = input({
+  profile: "standard",
+  registrationMode: "live",
+  availableStaticRequirements: [],
+});
+assert.ok(
+  liveWithoutVaultCacheInput.visibleToolNames.includes("obsidian_read_note"),
+);
+assert.ok(
+  liveWithoutVaultCacheInput.visibleToolNames.includes("obsidian_list_notes"),
+);
+assert.ok(
+  !liveWithoutVaultCacheInput.visibleToolNames.includes(
+    "obsidian_global_search",
+  ),
+);
+const liveWithoutVaultCache = projectCapabilityManifest(
+  liveWithoutVaultCacheInput,
+);
+assert.deepEqual(
+  {
+    discoverable: capability(liveWithoutVaultCache, "vault-read").discoverable,
+    available: capability(liveWithoutVaultCache, "vault-read").available,
+    authorized: capability(liveWithoutVaultCache, "vault-read").authorized,
+    state: capability(liveWithoutVaultCache, "vault-read").state,
+    reasonCode: capability(liveWithoutVaultCache, "vault-read").reasonCode,
+  },
+  {
+    discoverable: true,
+    available: true,
+    authorized: true,
+    state: "ready",
+    reasonCode: "ready",
+  },
+);
+
 const headlessStandardInput = input({
   profile: "standard",
   registrationMode: "headless-readonly",
@@ -202,7 +239,9 @@ assert.equal(
 const missingRuntimeInput = input({ profile: "standard" });
 missingRuntimeInput.visibleToolNames =
   missingRuntimeInput.visibleToolNames.filter(
-    (name) => !name.startsWith("obsidian_note_replace_"),
+    (name) =>
+      !name.startsWith("obsidian_note_replace_") &&
+      !name.startsWith("obsidian_text_patch_"),
   );
 const missingRuntime = projectCapabilityManifest(missingRuntimeInput);
 assert.equal(
@@ -213,6 +252,62 @@ assert.equal(
   capability(missingRuntime, "governed-note-write").nextAction,
   "restart_mcp_runtime",
 );
+
+const noteReplaceReadyTextPatchIncompleteInput = input();
+noteReplaceReadyTextPatchIncompleteInput.visibleToolNames =
+  noteReplaceReadyTextPatchIncompleteInput.visibleToolNames.filter(
+    (name) => name !== "obsidian_text_patch_apply",
+  );
+const noteReplaceReadyTextPatchIncomplete = projectCapabilityManifest(
+  noteReplaceReadyTextPatchIncompleteInput,
+);
+assert.deepEqual(
+  {
+    discoverable: capability(
+      noteReplaceReadyTextPatchIncomplete,
+      "governed-note-write",
+    ).discoverable,
+    state: capability(
+      noteReplaceReadyTextPatchIncomplete,
+      "governed-note-write",
+    ).state,
+  },
+  { discoverable: true, state: "ready" },
+  "a complete governed lifecycle must keep the aggregate capability visible",
+);
+
+for (const [id, missingTools] of [
+  [
+    "governed-note-write",
+    ["obsidian_note_replace_apply", "obsidian_text_patch_apply"],
+  ],
+  ["governed-frontmatter-write", ["obsidian_frontmatter_patch_apply"]],
+  ["governed-canvas-write", ["obsidian_canvas_patch_apply"]],
+  ["governed-base-write", ["bases_formula_patch_apply"]],
+]) {
+  const incompleteGovernedInput = input();
+  incompleteGovernedInput.visibleToolNames =
+    incompleteGovernedInput.visibleToolNames.filter(
+      (name) => !missingTools.includes(name),
+    );
+  const incompleteGoverned = projectCapabilityManifest(incompleteGovernedInput);
+  const governed = capability(incompleteGoverned, id);
+  assert.deepEqual(
+    {
+      discoverable: governed.discoverable,
+      state: governed.state,
+      reasonCode: governed.reasonCode,
+      nextAction: governed.nextAction,
+    },
+    {
+      discoverable: false,
+      state: "unavailable",
+      reasonCode: "runtime_not_initialized",
+      nextAction: "restart_mcp_runtime",
+    },
+    `${id} must remain unavailable when its lifecycle is incomplete`,
+  );
+}
 
 const tasksGrantPending = projectCapabilityManifest(
   input({

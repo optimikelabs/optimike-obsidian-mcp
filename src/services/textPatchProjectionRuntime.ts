@@ -343,7 +343,7 @@ export class GovernedTextPatchRuntime {
       publicIdempotencyKey: publicKey,
       intentDigest,
       proof: compiled.proof,
-      nextContentLength: Buffer.byteLength(compiled.nextContent, "utf8"),
+      nextContentLength: compiled.nextContent.length,
     };
     assertDomainWritePolicy("plan", { path }, projection);
     const child = await this.noteRuntime.plan({
