@@ -2159,16 +2159,14 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       if (
         !idempotencyKeyField?.present ||
         typeof idempotencyKey !== "string" ||
-        idempotencyKey.trim().length === 0 ||
-        idempotencyKey.length > 200 ||
+        !PUBLIC_IDEMPOTENCY_KEY.test(idempotencyKey) ||
         !signatureField?.present ||
         typeof signature !== "string" ||
         signature.length === 0 ||
         signature.length > 65_536 ||
         !operationIdField?.present ||
         typeof operationId !== "string" ||
-        operationId.length === 0 ||
-        operationId.length > 200 ||
+        !PUBLIC_OPERATION_ID.test(operationId) ||
         (state !== "terminal" && state !== "in-progress") ||
         retainedKeys.has(idempotencyKey)
       ) {
@@ -2185,6 +2183,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         const provenance = provenanceField?.value;
         const payloadOk = safeBooleanField(payload, "ok");
         const payloadStatus = safeStringField(payload, "status");
+        const payloadOperationId = safeStringField(payload, "operationId");
+        const payloadIdempotencyKey = safeStringField(
+          payload,
+          "idempotencyKey",
+        );
       if (
           !payloadField?.present ||
           !payload ||
@@ -2192,6 +2195,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           !payloadStatus ||
           !MUTATION_TERMINAL_STATUSES.has(payloadStatus) ||
           payloadOk !== MUTATION_SUCCESS_STATUSES.has(payloadStatus) ||
+          payloadOperationId !== operationId ||
+          payloadIdempotencyKey !== idempotencyKey ||
           !httpStatusField?.present ||
           !Number.isInteger(httpStatus) ||
           (httpStatus as number) < 100 ||

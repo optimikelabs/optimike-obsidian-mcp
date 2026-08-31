@@ -1238,6 +1238,11 @@ test("v1 and unproven v2 not-ready receipts remain terminal after reload", async
       payload: { ok: true },
     },
   ]) {
+    const idempotencyKey = `terminal-${journal.label}`.replace(
+      /[^A-Za-z0-9._:-]/gu,
+      "-",
+    );
+    const operationId = "11111111-1111-4111-8111-111111111111";
     const { fake, nativeCalls } = await durableExistingMutationFake({
       native: () => ({ ok: true, code: "planned", retryable: false }),
     });
@@ -1245,14 +1250,15 @@ test("v1 and unproven v2 not-ready receipts remain terminal after reload", async
       version: journal.version,
       entries: [
         {
-          idempotencyKey: `terminal-${journal.label}`,
+          idempotencyKey,
           signature,
           state: "terminal",
           updatedAt,
-          operationId: "prior-operation",
+          operationId,
           payload: {
             ...journal.payload,
-            operationId: "prior-operation",
+            operationId,
+            idempotencyKey,
             status: "not-ready",
             mutationMayHaveApplied: false,
           },
@@ -1267,7 +1273,7 @@ test("v1 and unproven v2 not-ready receipts remain terminal after reload", async
       "update",
       "task-1",
       {
-        idempotencyKey: `terminal-${journal.label}`,
+        idempotencyKey,
         expectedRevision: "revision-1",
         dryRun: true,
       },
@@ -1341,8 +1347,13 @@ test("mutation journal restoration distinguishes absent, valid, and unsafe state
     signature: "valid-signature",
     state: "terminal",
     updatedAt: new Date().toISOString(),
-    operationId: "valid-operation",
-    payload: { ok: true, status: "applied" },
+    operationId: "22222222-2222-4222-8222-222222222222",
+    payload: {
+      ok: true,
+      status: "applied",
+      operationId: "22222222-2222-4222-8222-222222222222",
+      idempotencyKey: "valid-terminal-key",
+    },
     httpStatus: 200,
     dispatchProvenance: "unknown-or-dispatched",
   };
@@ -1364,14 +1375,50 @@ test("mutation journal restoration distinguishes absent, valid, and unsafe state
     { version: 2, entries: [null] },
     { version: 2, entries: [{ ...validEntry, updatedAt: "not-a-date" }] },
     { version: 2, entries: [{ ...validEntry, idempotencyKey: "" }] },
+    { version: 2, entries: [{ ...validEntry, idempotencyKey: "invalid key" }] },
     { version: 2, entries: [{ ...validEntry, signature: "" }] },
     { version: 2, entries: [{ ...validEntry, operationId: "" }] },
+    { version: 2, entries: [{ ...validEntry, operationId: "unknown" }] },
+    {
+      version: 2,
+      entries: [
+        {
+          ...validEntry,
+          payload: {
+            ...validEntry.payload,
+            operationId: "33333333-3333-4333-8333-333333333333",
+          },
+        },
+      ],
+    },
+    {
+      version: 2,
+      entries: [
+        {
+          ...validEntry,
+          payload: {
+            ...validEntry.payload,
+            idempotencyKey: "different-terminal-key",
+          },
+        },
+      ],
+    },
     { version: 2, entries: [{ ...validEntry, state: "future" }] },
     { version: 2, entries: [{ ...validEntry, payload: null }] },
     { version: 2, entries: [{ ...validEntry, httpStatus: 99 }] },
     {
       version: 2,
-      entries: [validEntry, { ...validEntry, operationId: "duplicate" }],
+      entries: [
+        validEntry,
+        {
+          ...validEntry,
+          operationId: "44444444-4444-4444-8444-444444444444",
+          payload: {
+            ...validEntry.payload,
+            operationId: "44444444-4444-4444-8444-444444444444",
+          },
+        },
+      ],
     },
     {
       version: 2,
@@ -1613,10 +1660,11 @@ test("a proven v2 pre-dispatch receipt is released durably before one native ret
         signature,
         state: "terminal",
         updatedAt: new Date().toISOString(),
-        operationId: "pre-dispatch-operation",
+        operationId: "55555555-5555-4555-8555-555555555555",
         payload: {
           ok: false,
-          operationId: "pre-dispatch-operation",
+          operationId: "55555555-5555-4555-8555-555555555555",
+          idempotencyKey: "proven-reload-key",
           status: "not-ready",
           mutationMayHaveApplied: false,
         },
@@ -1706,9 +1754,11 @@ test("concurrent retries of one restored proven receipt dispatch exactly once", 
         signature,
         state: "terminal",
         updatedAt: new Date().toISOString(),
-        operationId: "prior-proven-operation",
+        operationId: "66666666-6666-4666-8666-666666666666",
         payload: {
           ok: false,
+          operationId: "66666666-6666-4666-8666-666666666666",
+          idempotencyKey: "concurrent-proven-reload",
           status: "not-ready",
           mutationMayHaveApplied: false,
         },
@@ -1979,8 +2029,13 @@ test("journal v1 migration preserves terminal receipts and promotes interrupted 
         signature: "applied-signature",
         state: "terminal",
         updatedAt,
-        operationId: "applied-operation",
-        payload: { ok: true, status: "applied" },
+        operationId: "77777777-7777-4777-8777-777777777777",
+        payload: {
+          ok: true,
+          status: "applied",
+          operationId: "77777777-7777-4777-8777-777777777777",
+          idempotencyKey: "v1-applied",
+        },
         httpStatus: 200,
       },
       {
@@ -1988,10 +2043,12 @@ test("journal v1 migration preserves terminal receipts and promotes interrupted 
         signature: "unknown-signature",
         state: "terminal",
         updatedAt,
-        operationId: "unknown-operation",
+        operationId: "88888888-8888-4888-8888-888888888888",
         payload: {
           ok: false,
           status: "outcome-unknown",
+          operationId: "88888888-8888-4888-8888-888888888888",
+          idempotencyKey: "v1-unknown",
           mutationMayHaveApplied: true,
         },
         httpStatus: 500,
@@ -2001,7 +2058,7 @@ test("journal v1 migration preserves terminal receipts and promotes interrupted 
         signature: "interrupted-signature",
         state: "in-progress",
         updatedAt,
-        operationId: "interrupted-operation",
+        operationId: "99999999-9999-4999-8999-999999999999",
         requested: { description: "interrupted" },
       },
     ],

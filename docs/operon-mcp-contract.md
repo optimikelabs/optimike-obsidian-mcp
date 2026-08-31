@@ -121,7 +121,7 @@ Bridge 0.9.2 independently reserves idempotency keys atomically and persists its
 Journal restoration is fail-closed. A missing `mutationJournal` property is a
 new `absent` store, while a supported and fully validated envelope is `valid`.
 Any present unknown version, non-array or oversized envelope, malformed retained
-entry, duplicate key, unsupported state, invalid terminal payload or HTTP status
+entry, duplicate key, unsupported state, mismatched receipt identifiers, invalid terminal payload or HTTP status
 latches the Bridge as `unsafe`. Reads and pending-recovery inspection remain
 available, but every new reservation, native mutation and recovery dispatch
 returns the stable value-free `mutation_journal_unsafe` diagnostic. No native

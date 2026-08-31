@@ -181,7 +181,7 @@ La restauration du journal échoue fermée. L’absence de propriété
 `mutationJournal` correspond à un stockage neuf `absent`, tandis qu’une enveloppe
 supportée et entièrement validée devient `valid`. Toute version présente mais
 inconnue, enveloppe non-tableau ou surdimensionnée, entrée retenue malformée,
-clé dupliquée, état inconnu, payload terminal ou statut HTTP invalide place le
+clé dupliquée, état inconnu, identifiants de reçu discordants, payload terminal ou statut HTTP invalide place le
 Bridge dans l’état persistant `unsafe`. Les lectures et l’inspection des
 recoveries en attente restent disponibles, mais toute nouvelle réservation,
 mutation native ou recovery renvoie le diagnostic stable et sans valeur
