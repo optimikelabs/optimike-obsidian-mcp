@@ -98,7 +98,10 @@ campaign instead of inheriting the historical result.
 
 The scorer itself is provider-free. Preparing a clean candidate may acquire
 locked dependencies through the configured npm registry or cache; after that
-step, rescoring calls no model or external runtime.
+step, rescoring calls no model or external runtime. Candidate preparation
+always includes the locked development dependencies required to build, even
+when the caller uses a production npm environment. Manifest-free legacy scoring
+uses only the versioned catalogue and does not require a Git checkout.
 
 Model selection is batched by the corpus's recommended profile. The `full`
 surface is evaluated with the same ordered case batch as its focused

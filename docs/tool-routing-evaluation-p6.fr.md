@@ -106,7 +106,10 @@ candidat ultérieur ; toute dérive impose une nouvelle campagne LLM.
 Le scorer lui-même ne dépend d'aucun fournisseur. La préparation d'un candidat
 propre peut acquérir les dépendances verrouillées via le registre npm configuré
 ou son cache ; après cette étape, le rescoring n'appelle aucun modèle ni runtime
-externe.
+externe. La préparation inclut toujours les dépendances de développement
+verrouillées nécessaires au build, même si l'appelant utilise un environnement
+npm de production. Le scoring legacy sans manifeste utilise seulement le
+catalogue versionné et n'exige aucun checkout Git.
 
 La sélection du modèle est regroupée selon le profil recommandé par le corpus.
 La surface `full` reçoit exactement le même lot ordonné que le profil ciblé :

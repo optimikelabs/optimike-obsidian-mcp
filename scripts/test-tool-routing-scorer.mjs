@@ -200,6 +200,7 @@ function score({
   corpusInputPath = corpusPath,
   expectedCandidateCommit = expectedCommit,
   forcePathNpm = false,
+  forceProductionInstall = false,
 }) {
   const args = ["scripts/score-tool-routing-evals.mjs", tracesPath];
   if (manifestPath) args.push(corpusInputPath, manifestPath);
@@ -209,6 +210,10 @@ function score({
     P6_INTERNAL_CANDIDATE_CHECKOUT: candidateCheckout,
   };
   if (forcePathNpm) delete scorerEnv.npm_execpath;
+  if (forceProductionInstall) {
+    scorerEnv.NODE_ENV = "production";
+    scorerEnv.npm_config_omit = "dev";
+  }
   return JSON.parse(
     execFileSync(process.execPath, args, {
       cwd: process.cwd(),
@@ -237,8 +242,11 @@ try {
   const legacyReport = JSON.parse(
     execFileSync(
       process.execPath,
-      ["scripts/score-tool-routing-evals.mjs", legacyPath],
-      { cwd: process.cwd(), encoding: "utf8" },
+      [
+        path.join(process.cwd(), "scripts/score-tool-routing-evals.mjs"),
+        legacyPath,
+      ],
+      { cwd: temp, encoding: "utf8" },
     ),
   );
   assert.equal(legacyReport.legacyTraceRuns, 1);
@@ -289,6 +297,15 @@ try {
     pathNpmReport.authority.candidateArtifactHashes,
     report.authority.candidateArtifactHashes,
     "direct scorer runs must resolve npm from PATH when npm_execpath is absent",
+  );
+  const productionInstallReport = score({
+    ...canonicalPaths,
+    forceProductionInstall: true,
+  });
+  assert.deepEqual(
+    productionInstallReport.authority.candidateArtifactHashes,
+    report.authority.candidateArtifactHashes,
+    "candidate rebuilds must include locked development build dependencies",
   );
 
   const gitBlobEvidence = structuredClone(canonical);

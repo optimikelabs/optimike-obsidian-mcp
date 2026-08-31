@@ -122,6 +122,11 @@ interpreted as proof that additional calls were
 unnecessary. Summaries are partitioned by harness, harness version, model,
 runtime mode and surface.
 
+Candidate installation explicitly includes the locked development dependencies
+needed for the build, regardless of inherited `NODE_ENV` or npm omit settings.
+Legacy scoring without a manifest remains catalogue-only and does not require a
+Git checkout; it produces no authority block.
+
 Use the same corpus hash, case-context hash, Git SHA, model configuration and run
 index when comparing two surfaces. Compare at minimum `full` to the smallest
 intended surface (`standard`, `authoring`, or `tasks`) for the same cases and

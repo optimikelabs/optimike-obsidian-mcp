@@ -104,6 +104,18 @@ function npmInvocation(args) {
   };
 }
 
+function candidateCommandEnvironment() {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    const normalized = key.toLowerCase();
+    if (normalized === "node_env" || normalized === "npm_config_omit") {
+      delete environment[key];
+    }
+  }
+  environment.npm_config_include = "dev";
+  return environment;
+}
+
 function runCandidateCommand(checkout, args, label) {
   const invocation = npmInvocation(args);
   try {
@@ -111,7 +123,7 @@ function runCandidateCommand(checkout, args, label) {
       cwd: checkout,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      env: candidateCommandEnvironment(),
       shell: invocation.shell,
     });
   } catch (error) {
@@ -225,7 +237,11 @@ async function prepareCandidate(repository, candidateSha, reusableCheckout) {
       ownsWorktree = true;
     }
     assertCleanCheckout(checkout, candidateSha, "candidate checkout");
-    runCandidateCommand(checkout, ["ci", "--silent"], "candidate npm ci");
+    runCandidateCommand(
+      checkout,
+      ["ci", "--silent", "--include=dev"],
+      "candidate npm ci",
+    );
     assertCleanCheckout(checkout, candidateSha, "candidate checkout");
     fs.rmSync(path.join(checkout, "dist"), { recursive: true, force: true });
     runCandidateCommand(
@@ -818,9 +834,15 @@ const corpusPath =
   process.argv[3] ??
   new URL("../evals/tool-routing-corpus.json", import.meta.url);
 const manifestPath = process.argv[4];
-const verifierRepository = repositoryRoot();
-const verifierSha = exactCheckoutSha(verifierRepository, "verifier checkout");
+let verifierRepository = null;
+let verifierSha = null;
+let manifestEnvelope = null;
+let manifestCandidateSha = null;
+let candidateCorpusBinding = null;
+let corpus;
 if (manifestPath) {
+  verifierRepository = repositoryRoot();
+  verifierSha = exactCheckoutSha(verifierRepository, "verifier checkout");
   const verifierDirty = git(verifierRepository, [
     "status",
     "--porcelain",
@@ -829,22 +851,21 @@ if (manifestPath) {
   if (verifierDirty) {
     throw new Error("verifier checkout must be clean before strict rescoring");
   }
+  manifestEnvelope = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  manifestCandidateSha = requiredString(
+    manifestEnvelope.sourceCommit,
+    "manifest.sourceCommit",
+  );
+  candidateCorpusBinding = loadCandidateCorpus(
+    verifierRepository,
+    manifestCandidateSha,
+    corpusPath,
+    requiredString(manifestEnvelope.corpusHash, "manifest.corpusHash"),
+  );
+  corpus = candidateCorpusBinding.corpus;
+} else {
+  corpus = loadCorpus(corpusPath);
 }
-const manifestEnvelope = manifestPath
-  ? JSON.parse(fs.readFileSync(manifestPath, "utf8"))
-  : null;
-const manifestCandidateSha = manifestEnvelope
-  ? requiredString(manifestEnvelope.sourceCommit, "manifest.sourceCommit")
-  : null;
-const candidateCorpusBinding = manifestCandidateSha
-  ? loadCandidateCorpus(
-      verifierRepository,
-      manifestCandidateSha,
-      corpusPath,
-      requiredString(manifestEnvelope.corpusHash, "manifest.corpusHash"),
-    )
-  : null;
-const corpus = candidateCorpusBinding?.corpus ?? loadCorpus(corpusPath);
 const cases = new Map(corpus.cases.map((item) => [item.id, item]));
 const resultsRaw = fs.readFileSync(resultsPath, "utf8");
 const lines = resultsRaw
