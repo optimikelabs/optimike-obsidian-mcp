@@ -33,14 +33,24 @@ execFileSync(
   ["worktree", "add", "--detach", candidateCheckout, expectedCommit],
   { cwd: process.cwd(), stdio: "ignore" },
 );
-execFileSync(
-  process.platform === "win32" ? "npm.cmd" : "npm",
-  ["ci", "--silent"],
-  {
-    cwd: candidateCheckout,
-    stdio: "ignore",
-  },
-);
+const nodeDirectory = path.dirname(process.execPath);
+const npmCli =
+  process.env.npm_execpath?.trim() ||
+  (process.platform === "win32"
+    ? path.join(nodeDirectory, "node_modules", "npm", "bin", "npm-cli.js")
+    : path.resolve(
+        nodeDirectory,
+        "..",
+        "lib",
+        "node_modules",
+        "npm",
+        "bin",
+        "npm-cli.js",
+      ));
+execFileSync(process.execPath, [npmCli, "ci", "--silent"], {
+  cwd: candidateCheckout,
+  stdio: "ignore",
+});
 const checkoutProfiles = new Map(
   (await measureCanonicalLiveProfileSchemas()).map((profile) => [
     profile.profile,

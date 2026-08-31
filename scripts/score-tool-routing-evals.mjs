@@ -72,13 +72,27 @@ function assertCleanCheckout(checkout, expectedSha, label) {
   if (dirty) throw new Error(`${label} must be clean before candidate build`);
 }
 
-function npmCommand() {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
+function npmCliPath() {
+  const nodeDirectory = path.dirname(process.execPath);
+  return (
+    process.env.npm_execpath?.trim() ||
+    (process.platform === "win32"
+      ? path.join(nodeDirectory, "node_modules", "npm", "bin", "npm-cli.js")
+      : path.resolve(
+          nodeDirectory,
+          "..",
+          "lib",
+          "node_modules",
+          "npm",
+          "bin",
+          "npm-cli.js",
+        ))
+  );
 }
 
 function runCandidateCommand(checkout, args, label) {
   try {
-    execFileSync(npmCommand(), args, {
+    execFileSync(process.execPath, [npmCliPath(), ...args], {
       cwd: checkout,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
