@@ -2,7 +2,13 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -93,10 +99,36 @@ function promptFor(profile, tools, cases) {
   ].join("\n\n");
 }
 
-function codexCommand() {
-  // The npm shim is the installed CLI authority on Windows. A stale standalone
-  // codex.exe can otherwise shadow the current package in the same directory.
-  return process.platform === "win32" ? "codex.cmd" : "codex";
+function codexEntrypointFromWindowsShim(shimPath) {
+  return path.join(
+    path.dirname(shimPath),
+    "node_modules",
+    "@openai",
+    "codex",
+    "bin",
+    "codex.js",
+  );
+}
+
+function codexInvocation() {
+  if (process.platform !== "win32") {
+    return { command: "codex", prefixArgs: [] };
+  }
+  // Resolve the npm shim explicitly: a stale standalone codex.exe can shadow
+  // the current npm package in the same directory, while Node cannot spawn a
+  // .cmd file directly without introducing a shell.
+  const shimPath = execFileSync("where.exe", ["codex.cmd"], {
+    encoding: "utf8",
+  })
+    .split(/\r?\n/u)
+    .map((item) => item.trim())
+    .find(Boolean);
+  if (!shimPath) throw new Error("Unable to locate the Codex npm shim.");
+  const entrypoint = codexEntrypointFromWindowsShim(shimPath);
+  if (!existsSync(entrypoint)) {
+    throw new Error(`Codex npm entrypoint is missing at ${entrypoint}.`);
+  }
+  return { command: process.execPath, prefixArgs: [entrypoint] };
 }
 
 function codexExecArgs({
@@ -134,15 +166,19 @@ function runModel({ profile, tools, cases, model, reasoningEffort, tempRoot }) {
   const schemaPath = path.join(tempRoot, `${profile}-schema.json`);
   const outputPath = path.join(tempRoot, `${profile}-output.json`);
   writeFileSync(schemaPath, JSON.stringify(outputSchema(caseIds)), "utf8");
+  const invocation = codexInvocation();
   const result = spawnSync(
-    codexCommand(),
-    codexExecArgs({
-      tempRoot,
-      model,
-      reasoningEffort,
-      schemaPath,
-      outputPath,
-    }),
+    invocation.command,
+    [
+      ...invocation.prefixArgs,
+      ...codexExecArgs({
+        tempRoot,
+        model,
+        reasoningEffort,
+        schemaPath,
+        outputPath,
+      }),
+    ],
     {
       cwd: tempRoot,
       encoding: "utf8",
@@ -201,7 +237,9 @@ async function main() {
     if (
       !prompt.includes("obsidian_read_note") ||
       !prompt.includes("Read A.md") ||
-      (process.platform === "win32" && codexCommand() !== "codex.cmd") ||
+      !codexEntrypointFromWindowsShim("C:\\npm\\codex.cmd").endsWith(
+        path.join("@openai", "codex", "bin", "codex.js"),
+      ) ||
       args.includes("-a") ||
       !args.includes('approval_policy="never"') ||
       selectionIsExposed(
@@ -243,9 +281,14 @@ async function main() {
   if (measurement.sourceCommit !== sourceCommit) {
     throw new Error("Schema measurement and candidate commit differ.");
   }
-  const harnessVersion = execFileSync(codexCommand(), ["--version"], {
-    encoding: "utf8",
-  }).trim();
+  const invocation = codexInvocation();
+  const harnessVersion = execFileSync(
+    invocation.command,
+    [...invocation.prefixArgs, "--version"],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
   const tempRoot = mkdtempSync(
     path.join(os.tmpdir(), "optimike-p6-codex-routing-"),
   );
