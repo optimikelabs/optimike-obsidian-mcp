@@ -106,7 +106,9 @@ node scripts/score-tool-routing-evals.mjs traces.jsonl evals/tool-routing-corpus
 
 The scorer is deterministic and offline. From a clean verifier checkout it
 creates a detached worktree for the historical candidate, installs from its
-lockfile, rebuilds it, and validates every v1 trace before scoring. The report
+lockfile, rebuilds it, loads the exact corpus Git blob (with a semantic check
+against the supplied checkout file), and validates every v1 trace before
+scoring. The report
 keeps `verifierSha` and `candidateSha` distinct and binds the corpus, traces,
 manifest, rebuilt artifacts and surface hashes. It reports first-tool and
 first-family accuracy, safety/forbidden-tool rate, clarification adherence,

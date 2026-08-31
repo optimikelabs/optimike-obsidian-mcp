@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { measureToolsList } from "./measure-tool-profile-schemas.mjs";
 
 const TRACE_SCHEMA_VERSION = "tool-routing-trace/v1";
@@ -37,6 +38,14 @@ function git(repository, args, options = {}) {
     encoding: "utf8",
     stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
   }).trim();
+}
+
+function gitBlob(repository, objectName) {
+  return execFileSync("git", ["cat-file", "blob", objectName], {
+    cwd: repository,
+    encoding: "buffer",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 function repositoryRoot() {
@@ -302,8 +311,7 @@ function optionalNonNegativeNumber(value, label) {
   return value;
 }
 
-function loadCorpus(corpusPath) {
-  const raw = fs.readFileSync(corpusPath);
+function parseCorpus(raw) {
   const parsed = JSON.parse(raw.toString("utf8"));
   if (Array.isArray(parsed))
     return {
@@ -331,6 +339,26 @@ function loadCorpus(corpusPath) {
     cases: parsed.cases,
     strict: true,
   };
+}
+
+function loadCorpus(corpusPath) {
+  return parseCorpus(fs.readFileSync(corpusPath));
+}
+
+function loadCandidateCorpus(repository, candidateSha, suppliedCorpusPath) {
+  const suppliedRaw = fs.readFileSync(suppliedCorpusPath);
+  const candidateRaw = gitBlob(
+    repository,
+    `${candidateSha}:evals/tool-routing-corpus.json`,
+  );
+  const suppliedParsed = JSON.parse(suppliedRaw.toString("utf8"));
+  const candidateParsed = JSON.parse(candidateRaw.toString("utf8"));
+  if (!isDeepStrictEqual(suppliedParsed, candidateParsed)) {
+    throw new Error(
+      "supplied corpus is not semantically identical to the candidate Git blob",
+    );
+  }
+  return parseCorpus(candidateRaw);
 }
 
 function compactTool(tool) {
@@ -750,7 +778,19 @@ const verifierDirty = git(verifierRepository, [
 if (verifierDirty) {
   throw new Error("verifier checkout must be clean before strict rescoring");
 }
-const corpus = loadCorpus(corpusPath);
+const manifestEnvelope = manifestPath
+  ? JSON.parse(fs.readFileSync(manifestPath, "utf8"))
+  : null;
+const manifestCandidateSha = manifestEnvelope
+  ? requiredString(manifestEnvelope.sourceCommit, "manifest.sourceCommit")
+  : null;
+const corpus = manifestCandidateSha
+  ? loadCandidateCorpus(
+      verifierRepository,
+      manifestCandidateSha,
+      corpusPath,
+    )
+  : loadCorpus(corpusPath);
 const cases = new Map(corpus.cases.map((item) => [item.id, item]));
 const resultsRaw = fs.readFileSync(resultsPath, "utf8");
 const lines = resultsRaw
@@ -775,11 +815,7 @@ function cleanupCandidates() {
 process.once("exit", cleanupCandidates);
 
 if (manifestPath) {
-  const manifestEnvelope = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  const candidateSha = requiredString(
-    manifestEnvelope.sourceCommit,
-    "manifest.sourceCommit",
-  );
+  const candidateSha = manifestCandidateSha;
   candidate = await prepareCandidate(
     verifierRepository,
     candidateSha,

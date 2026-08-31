@@ -20,13 +20,17 @@ const corpusPath = path.join(
   "evals",
   "tool-routing-corpus.json",
 );
-const corpusRaw = fs.readFileSync(corpusPath, "utf8");
-const corpus = JSON.parse(corpusRaw);
-const corpusHash = sha256(corpusRaw);
 const expectedCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: process.cwd(),
   encoding: "utf8",
 }).trim();
+const corpusRaw = execFileSync(
+  "git",
+  ["cat-file", "blob", `${expectedCommit}:evals/tool-routing-corpus.json`],
+  { cwd: process.cwd(), encoding: "buffer" },
+);
+const corpus = JSON.parse(corpusRaw.toString("utf8"));
+const corpusHash = sha256(corpusRaw);
 const candidateCheckout = path.join(temp, "candidate-checkout");
 execFileSync(
   "git",
@@ -207,9 +211,9 @@ function writeFixture(name, fixture) {
   return { tracesPath, manifestPath };
 }
 
-function score({ tracesPath, manifestPath }) {
+function score({ tracesPath, manifestPath, corpusInputPath = corpusPath }) {
   const args = ["scripts/score-tool-routing-evals.mjs", tracesPath];
-  if (manifestPath) args.push(corpusPath, manifestPath);
+  if (manifestPath) args.push(corpusInputPath, manifestPath);
   return JSON.parse(
     execFileSync(process.execPath, args, {
       cwd: process.cwd(),
@@ -328,6 +332,23 @@ try {
     writeFixture("wrong-candidate", wrongCandidate),
     /candidate checkout identifies|candidateSha/u,
     "historical source identity must not be reassigned by the verifier",
+  );
+
+  const differentCorpusPath = path.join(temp, "different-corpus.json");
+  const differentCorpus = structuredClone(corpus);
+  differentCorpus.cases[0].prompt += " changed";
+  writeFileSync(
+    differentCorpusPath,
+    `${JSON.stringify(differentCorpus, null, 2)}\n`,
+    "utf8",
+  );
+  expectScoreFailure(
+    {
+      ...canonicalPaths,
+      corpusInputPath: differentCorpusPath,
+    },
+    /not semantically identical/u,
+    "strict rescoring must bind the supplied corpus to the candidate Git blob",
   );
 
   const incompleteProfiles = structuredClone(canonical);

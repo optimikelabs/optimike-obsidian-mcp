@@ -77,8 +77,10 @@ strict exige `EXPECTED_CANDIDATE_COMMIT`, enregistre le checkout propre du
 vérificateur comme `verifierSha` et conserve le commit source historique du
 manifeste comme `candidateSha`. Il crée un worktree détaché propre sur
 `candidateSha`, installe les dépendances verrouillées, supprime tout ancien
-`dist/` ignoré, reconstruit le candidat et reconstitue indépendamment chaque
-surface live canonique de `tools/list` contre une fixture locale de statut
+`dist/` ignoré, reconstruit le candidat, charge le blob corpus exact de ce
+candidat tout en n'acceptant les différences LF/CRLF du checkout que si le
+corpus parsé est identique, puis reconstitue indépendamment chaque surface live
+canonique de `tools/list` contre une fixture locale de statut
 authentifié. Il compare le hash complet des schémas, recalcule chaque hash de
 fixture, valide le hash du fichier de traces et
 recalcule le succès depuis les preuves déterministes de routage et de sûreté.

@@ -73,7 +73,9 @@ scoring requires `EXPECTED_CANDIDATE_COMMIT`, records the clean verifier
 checkout as `verifierSha`, and keeps the manifest's historical source commit as
 `candidateSha`. It creates a clean detached worktree at `candidateSha`, installs
 the locked dependencies, removes any ignored `dist/`, rebuilds the candidate,
-and independently reconstructs every canonical live `tools/list` surface
+loads the exact corpus blob from that candidate while accepting checkout
+LF/CRLF differences only when the parsed corpus is identical, and independently
+reconstructs every canonical live `tools/list` surface
 against a local authenticated status fixture. It compares the full schema
 hash, recomputes every fixture hash, validates the trace-file hash, and
 recalculates success from the deterministic routing and safety evidence. It
