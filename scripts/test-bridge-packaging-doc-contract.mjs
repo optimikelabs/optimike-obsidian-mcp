@@ -16,7 +16,7 @@ const bridgeBuilds = [
   read("plugins/obsidian-bases-bridge/esbuild.config.mjs"),
 ];
 
-assert.equal(rootPackage.version, "3.7.0");
+assert.equal(rootPackage.version, "3.8.0");
 for (const script of [
   "build:bridge-bundle",
   "archive:bridge-bundle",

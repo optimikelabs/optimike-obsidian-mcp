@@ -20,6 +20,11 @@ Profiles reduce schema volume and routing ambiguity. They are not an authorizati
 
 Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 77 tools. The canonical registry covers 81 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
 
+The [P6 routing evaluation](tool-routing-evaluation-p6.md) measures these
+surfaces from actual `tools/list` schemas and a versioned 31-case baseline. Its
+3.8 decision keeps all four profiles unchanged: the 60-tool live union of
+authoring and tasks is not promoted without a measured cross-domain journey.
+
 ## Compatibility-only names
 
 Modern profiles intentionally exclude compatibility choices that would add ambiguity without adding a distinct normal-use capability.

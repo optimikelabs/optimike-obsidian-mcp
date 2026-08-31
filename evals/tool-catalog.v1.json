@@ -1,0 +1,3408 @@
+{
+  "schemaVersion": "tool-catalog.v1",
+  "version": 1,
+  "source": "src/mcp-server/toolSurfaceRegistry.ts",
+  "toolCount": 81,
+  "classificationCounts": {
+    "canonical-unique": 46,
+    "alias-redundant": 0,
+    "compatibility-historical": 1,
+    "governed-operation": 20,
+    "diagnostic": 10,
+    "administration": 4
+  },
+  "modes": {
+    "live": [
+      "bases_create",
+      "bases_formula_patch_apply",
+      "bases_formula_patch_plan",
+      "bases_formula_patch_recover",
+      "bases_formula_patch_status",
+      "bases_get_schema",
+      "bases_list",
+      "bases_query",
+      "bases_upsert_config",
+      "bases_upsert_rows",
+      "external_handoff",
+      "external_list",
+      "external_move_apply",
+      "external_move_plan",
+      "external_move_rollback",
+      "external_move_status",
+      "external_read",
+      "external_references_scan",
+      "external_roots_list",
+      "external_runtime_status",
+      "external_stat",
+      "list_all_tasks",
+      "obsidian_canvas_patch_apply",
+      "obsidian_canvas_patch_plan",
+      "obsidian_canvas_patch_recover",
+      "obsidian_canvas_patch_status",
+      "obsidian_delete_note",
+      "obsidian_frontmatter_patch_apply",
+      "obsidian_frontmatter_patch_plan",
+      "obsidian_frontmatter_patch_recover",
+      "obsidian_frontmatter_patch_status",
+      "obsidian_global_search",
+      "obsidian_list_notes",
+      "obsidian_list_pending_operations",
+      "obsidian_manage_frontmatter",
+      "obsidian_manage_tags",
+      "obsidian_note_replace_apply",
+      "obsidian_note_replace_plan",
+      "obsidian_note_replace_recover",
+      "obsidian_note_replace_status",
+      "obsidian_read_note",
+      "obsidian_runtime_maintenance",
+      "obsidian_runtime_status",
+      "obsidian_search_replace",
+      "obsidian_text_patch_apply",
+      "obsidian_text_patch_plan",
+      "obsidian_text_patch_recover",
+      "obsidian_text_patch_status",
+      "obsidian_update_note",
+      "obsidian_validate_format",
+      "operon_adopt_task",
+      "operon_build_context",
+      "operon_convert_task",
+      "operon_create_periodic_task",
+      "operon_create_task",
+      "operon_find_tasks",
+      "operon_get_configuration",
+      "operon_get_diagnostics",
+      "operon_get_relationships",
+      "operon_get_task",
+      "operon_get_timer_state",
+      "operon_list_pending_recoveries",
+      "operon_list_tasks",
+      "operon_query_saved_filter",
+      "operon_query_tasks",
+      "operon_recover_mutation",
+      "operon_relocate_task",
+      "operon_resolve_task",
+      "operon_set_relationships",
+      "operon_status",
+      "operon_transition_task",
+      "operon_update_periodic_scheduling",
+      "operon_update_recurrence",
+      "operon_update_task",
+      "operon_validate",
+      "query_tasks",
+      "smart_semantic_search"
+    ],
+    "hybrid-live": [
+      "bases_create",
+      "bases_formula_patch_apply",
+      "bases_formula_patch_plan",
+      "bases_formula_patch_recover",
+      "bases_formula_patch_status",
+      "bases_get_schema",
+      "bases_list",
+      "bases_query",
+      "bases_upsert_config",
+      "bases_upsert_rows",
+      "external_handoff",
+      "external_list",
+      "external_move_apply",
+      "external_move_plan",
+      "external_move_rollback",
+      "external_move_status",
+      "external_read",
+      "external_references_scan",
+      "external_roots_list",
+      "external_runtime_status",
+      "external_stat",
+      "list_all_tasks",
+      "obsidian_canvas_patch_apply",
+      "obsidian_canvas_patch_plan",
+      "obsidian_canvas_patch_recover",
+      "obsidian_canvas_patch_status",
+      "obsidian_delete_note",
+      "obsidian_frontmatter_patch_apply",
+      "obsidian_frontmatter_patch_plan",
+      "obsidian_frontmatter_patch_recover",
+      "obsidian_frontmatter_patch_status",
+      "obsidian_global_search",
+      "obsidian_list_notes",
+      "obsidian_list_pending_operations",
+      "obsidian_manage_frontmatter",
+      "obsidian_manage_tags",
+      "obsidian_note_replace_apply",
+      "obsidian_note_replace_plan",
+      "obsidian_note_replace_recover",
+      "obsidian_note_replace_status",
+      "obsidian_read_note",
+      "obsidian_runtime_maintenance",
+      "obsidian_runtime_status",
+      "obsidian_search_replace",
+      "obsidian_text_patch_apply",
+      "obsidian_text_patch_plan",
+      "obsidian_text_patch_recover",
+      "obsidian_text_patch_status",
+      "obsidian_update_note",
+      "obsidian_validate_format",
+      "operon_adopt_task",
+      "operon_build_context",
+      "operon_convert_task",
+      "operon_create_periodic_task",
+      "operon_create_task",
+      "operon_find_tasks",
+      "operon_get_configuration",
+      "operon_get_diagnostics",
+      "operon_get_relationships",
+      "operon_get_task",
+      "operon_get_timer_state",
+      "operon_list_pending_recoveries",
+      "operon_list_tasks",
+      "operon_query_saved_filter",
+      "operon_query_tasks",
+      "operon_recover_mutation",
+      "operon_relocate_task",
+      "operon_resolve_task",
+      "operon_set_relationships",
+      "operon_status",
+      "operon_transition_task",
+      "operon_update_periodic_scheduling",
+      "operon_update_recurrence",
+      "operon_update_task",
+      "operon_validate",
+      "query_tasks",
+      "smart_semantic_search"
+    ],
+    "hybrid-degraded": [
+      "external_handoff",
+      "external_list",
+      "external_move_apply",
+      "external_move_plan",
+      "external_move_rollback",
+      "external_move_status",
+      "external_read",
+      "external_references_scan",
+      "external_roots_list",
+      "external_runtime_status",
+      "external_stat",
+      "list_all_tasks",
+      "obsidian_global_search",
+      "obsidian_list_notes",
+      "obsidian_read_note",
+      "obsidian_runtime_maintenance",
+      "obsidian_runtime_status",
+      "obsidian_validate_format",
+      "operon_adopt_task",
+      "operon_build_context",
+      "operon_convert_task",
+      "operon_create_periodic_task",
+      "operon_create_task",
+      "operon_find_tasks",
+      "operon_get_configuration",
+      "operon_get_diagnostics",
+      "operon_get_relationships",
+      "operon_get_task",
+      "operon_get_timer_state",
+      "operon_list_pending_recoveries",
+      "operon_list_tasks",
+      "operon_query_saved_filter",
+      "operon_query_tasks",
+      "operon_recover_mutation",
+      "operon_relocate_task",
+      "operon_resolve_task",
+      "operon_set_relationships",
+      "operon_status",
+      "operon_transition_task",
+      "operon_update_periodic_scheduling",
+      "operon_update_recurrence",
+      "operon_update_task",
+      "operon_validate",
+      "query_tasks",
+      "smart_semantic_search"
+    ],
+    "headless-readonly": [
+      "bases_get_schema",
+      "bases_list",
+      "bases_query",
+      "external_handoff",
+      "external_list",
+      "external_move_apply",
+      "external_move_plan",
+      "external_move_rollback",
+      "external_move_status",
+      "external_read",
+      "external_references_scan",
+      "external_roots_list",
+      "external_runtime_status",
+      "external_stat",
+      "list_all_tasks",
+      "obsidian_global_search",
+      "obsidian_list_notes",
+      "obsidian_read_note",
+      "obsidian_runtime_maintenance",
+      "obsidian_runtime_status",
+      "obsidian_validate_format",
+      "operon_adopt_task",
+      "operon_build_context",
+      "operon_convert_task",
+      "operon_create_periodic_task",
+      "operon_create_task",
+      "operon_find_tasks",
+      "operon_get_configuration",
+      "operon_get_diagnostics",
+      "operon_get_relationships",
+      "operon_get_task",
+      "operon_get_timer_state",
+      "operon_list_pending_recoveries",
+      "operon_list_tasks",
+      "operon_query_saved_filter",
+      "operon_query_tasks",
+      "operon_recover_mutation",
+      "operon_relocate_task",
+      "operon_resolve_task",
+      "operon_set_relationships",
+      "operon_status",
+      "operon_transition_task",
+      "operon_update_periodic_scheduling",
+      "operon_update_recurrence",
+      "operon_update_task",
+      "operon_validate",
+      "query_tasks",
+      "smart_semantic_search"
+    ],
+    "headless-guarded": [
+      "bases_get_schema",
+      "bases_list",
+      "bases_query",
+      "external_handoff",
+      "external_list",
+      "external_move_apply",
+      "external_move_plan",
+      "external_move_rollback",
+      "external_move_status",
+      "external_read",
+      "external_references_scan",
+      "external_roots_list",
+      "external_runtime_status",
+      "external_stat",
+      "list_all_tasks",
+      "obsidian_global_search",
+      "obsidian_list_notes",
+      "obsidian_manage_frontmatter",
+      "obsidian_read_note",
+      "obsidian_runtime_maintenance",
+      "obsidian_runtime_status",
+      "obsidian_search_replace",
+      "obsidian_update_note",
+      "obsidian_validate_format",
+      "operon_adopt_task",
+      "operon_build_context",
+      "operon_convert_task",
+      "operon_create_periodic_task",
+      "operon_create_task",
+      "operon_find_tasks",
+      "operon_get_configuration",
+      "operon_get_diagnostics",
+      "operon_get_relationships",
+      "operon_get_task",
+      "operon_get_timer_state",
+      "operon_list_pending_recoveries",
+      "operon_list_tasks",
+      "operon_query_saved_filter",
+      "operon_query_tasks",
+      "operon_recover_mutation",
+      "operon_relocate_task",
+      "operon_resolve_task",
+      "operon_set_relationships",
+      "operon_status",
+      "operon_transition_task",
+      "operon_update_periodic_scheduling",
+      "operon_update_recurrence",
+      "operon_update_task",
+      "operon_validate",
+      "query_tasks",
+      "smart_semantic_search"
+    ],
+    "headless-filesystem": [
+      "bases_create",
+      "bases_get_schema",
+      "bases_list",
+      "bases_query",
+      "bases_upsert_config",
+      "bases_upsert_rows",
+      "external_handoff",
+      "external_list",
+      "external_move_apply",
+      "external_move_plan",
+      "external_move_rollback",
+      "external_move_status",
+      "external_read",
+      "external_references_scan",
+      "external_roots_list",
+      "external_runtime_status",
+      "external_stat",
+      "list_all_tasks",
+      "obsidian_admin_filesystem",
+      "obsidian_batch_frontmatter",
+      "obsidian_delete_note",
+      "obsidian_global_search",
+      "obsidian_list_notes",
+      "obsidian_manage_canvas",
+      "obsidian_manage_frontmatter",
+      "obsidian_manage_tags",
+      "obsidian_move_note",
+      "obsidian_read_note",
+      "obsidian_runtime_maintenance",
+      "obsidian_runtime_status",
+      "obsidian_search_replace",
+      "obsidian_update_note",
+      "obsidian_validate_format",
+      "operon_adopt_task",
+      "operon_build_context",
+      "operon_convert_task",
+      "operon_create_periodic_task",
+      "operon_create_task",
+      "operon_find_tasks",
+      "operon_get_configuration",
+      "operon_get_diagnostics",
+      "operon_get_relationships",
+      "operon_get_task",
+      "operon_get_timer_state",
+      "operon_list_pending_recoveries",
+      "operon_list_tasks",
+      "operon_query_saved_filter",
+      "operon_query_tasks",
+      "operon_recover_mutation",
+      "operon_relocate_task",
+      "operon_resolve_task",
+      "operon_set_relationships",
+      "operon_status",
+      "operon_transition_task",
+      "operon_update_periodic_scheduling",
+      "operon_update_recurrence",
+      "operon_update_task",
+      "operon_validate",
+      "query_tasks",
+      "smart_semantic_search"
+    ]
+  },
+  "profiles": {
+    "standard": {
+      "description": "General Obsidian work: read/search, canonical semantic search, bounded direct note edits, governed note/frontmatter lifecycles when available, Bases reads, format validation and runtime status.",
+      "modes": {
+        "live": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "hybrid-live": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "hybrid-degraded": [
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "headless-readonly": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "headless-guarded": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_manage_frontmatter",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "headless-filesystem": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_manage_frontmatter",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ]
+      }
+    },
+    "authoring": {
+      "description": "Content and structure authoring: standard plus tags, Bases writes/formulas and Canvas mutation surfaces appropriate to the active runtime.",
+      "modes": {
+        "live": [
+          "bases_create",
+          "bases_formula_patch_apply",
+          "bases_formula_patch_plan",
+          "bases_formula_patch_recover",
+          "bases_formula_patch_status",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_upsert_rows",
+          "obsidian_canvas_patch_apply",
+          "obsidian_canvas_patch_plan",
+          "obsidian_canvas_patch_recover",
+          "obsidian_canvas_patch_status",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_manage_tags",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "hybrid-live": [
+          "bases_create",
+          "bases_formula_patch_apply",
+          "bases_formula_patch_plan",
+          "bases_formula_patch_recover",
+          "bases_formula_patch_status",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_upsert_rows",
+          "obsidian_canvas_patch_apply",
+          "obsidian_canvas_patch_plan",
+          "obsidian_canvas_patch_recover",
+          "obsidian_canvas_patch_status",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_manage_tags",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "hybrid-degraded": [
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "headless-readonly": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "headless-guarded": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_manage_frontmatter",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ],
+        "headless-filesystem": [
+          "bases_create",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_upsert_rows",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_manage_canvas",
+          "obsidian_manage_frontmatter",
+          "obsidian_manage_tags",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "smart_semantic_search"
+        ]
+      }
+    },
+    "tasks": {
+      "description": "Task-focused work: note context, Markdown Tasks compatibility, the complete Operon MCP contract when the Desktop Bridge is configured, and only the snapshot-safe Operon read subset in non-live runtimes.",
+      "modes": {
+        "live": [
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "hybrid-live": [
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "hybrid-degraded": [
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_get_configuration",
+          "operon_get_task",
+          "operon_list_tasks",
+          "operon_query_tasks",
+          "operon_status",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-readonly": [
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_get_configuration",
+          "operon_get_task",
+          "operon_list_tasks",
+          "operon_query_tasks",
+          "operon_status",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-guarded": [
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_get_configuration",
+          "operon_get_task",
+          "operon_list_tasks",
+          "operon_query_tasks",
+          "operon_status",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-filesystem": [
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_get_configuration",
+          "operon_get_task",
+          "operon_list_tasks",
+          "operon_query_tasks",
+          "operon_status",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ]
+      }
+    },
+    "full": {
+      "description": "Explicit complete surface: every tool registered by the active runtime, including unavailable fail-closed compatibility tools, admin, maintenance and external-root capabilities.",
+      "modes": {
+        "live": [
+          "bases_create",
+          "bases_formula_patch_apply",
+          "bases_formula_patch_plan",
+          "bases_formula_patch_recover",
+          "bases_formula_patch_status",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_upsert_config",
+          "bases_upsert_rows",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_canvas_patch_apply",
+          "obsidian_canvas_patch_plan",
+          "obsidian_canvas_patch_recover",
+          "obsidian_canvas_patch_status",
+          "obsidian_delete_note",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_manage_frontmatter",
+          "obsidian_manage_tags",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "hybrid-live": [
+          "bases_create",
+          "bases_formula_patch_apply",
+          "bases_formula_patch_plan",
+          "bases_formula_patch_recover",
+          "bases_formula_patch_status",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_upsert_config",
+          "bases_upsert_rows",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_canvas_patch_apply",
+          "obsidian_canvas_patch_plan",
+          "obsidian_canvas_patch_recover",
+          "obsidian_canvas_patch_status",
+          "obsidian_delete_note",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_manage_frontmatter",
+          "obsidian_manage_tags",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "hybrid-degraded": [
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-readonly": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-guarded": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_manage_frontmatter",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-filesystem": [
+          "bases_create",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_upsert_config",
+          "bases_upsert_rows",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_admin_filesystem",
+          "obsidian_batch_frontmatter",
+          "obsidian_delete_note",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_manage_canvas",
+          "obsidian_manage_frontmatter",
+          "obsidian_manage_tags",
+          "obsidian_move_note",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ]
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "bases_create",
+      "canonicalName": "bases_create",
+      "classification": "canonical-unique",
+      "group": "bases.direct",
+      "family": "bases",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["live", "hybrid-live", "headless-filesystem"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live", "headless-filesystem"],
+        "full": ["live", "hybrid-live", "headless-filesystem"]
+      }
+    },
+    {
+      "name": "bases_formula_patch_apply",
+      "canonicalName": "bases_formula_patch_apply",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-formula-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "bases_formula_patch_plan",
+      "canonicalName": "bases_formula_patch_plan",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-formula-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "bases_formula_patch_recover",
+      "canonicalName": "bases_formula_patch_recover",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-formula-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "recover"
+    },
+    {
+      "name": "bases_formula_patch_status",
+      "canonicalName": "bases_formula_patch_status",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-formula-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "status"
+    },
+    {
+      "name": "bases_get_schema",
+      "canonicalName": "bases_get_schema",
+      "classification": "canonical-unique",
+      "group": "bases.read",
+      "family": "bases",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "availabilityRules": [
+        {
+          "modes": ["headless-readonly"],
+          "requires": ["vault-cache"]
+        }
+      ]
+    },
+    {
+      "name": "bases_list",
+      "canonicalName": "bases_list",
+      "classification": "canonical-unique",
+      "group": "bases.read",
+      "family": "bases",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "availabilityRules": [
+        {
+          "modes": ["headless-readonly"],
+          "requires": ["vault-cache"]
+        }
+      ]
+    },
+    {
+      "name": "bases_query",
+      "canonicalName": "bases_query",
+      "classification": "canonical-unique",
+      "group": "bases.read",
+      "family": "bases",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "availabilityRules": [
+        {
+          "modes": ["headless-readonly"],
+          "requires": ["vault-cache"]
+        }
+      ]
+    },
+    {
+      "name": "bases_upsert_config",
+      "canonicalName": "bases_upsert_config",
+      "classification": "compatibility-historical",
+      "group": "bases.compat",
+      "family": "bases",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["live", "hybrid-live", "headless-filesystem"],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": ["live", "hybrid-live", "headless-filesystem"]
+      },
+      "replacement": {
+        "tools": ["bases_formula_patch_plan"]
+      }
+    },
+    {
+      "name": "bases_upsert_rows",
+      "canonicalName": "bases_upsert_rows",
+      "classification": "canonical-unique",
+      "group": "bases.direct",
+      "family": "bases",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["live", "hybrid-live", "headless-filesystem"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live", "headless-filesystem"],
+        "full": ["live", "hybrid-live", "headless-filesystem"]
+      }
+    },
+    {
+      "name": "external_handoff",
+      "canonicalName": "external_handoff",
+      "classification": "canonical-unique",
+      "group": "external.read",
+      "family": "external-roots",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_list",
+      "canonicalName": "external_list",
+      "classification": "canonical-unique",
+      "group": "external.read",
+      "family": "external-roots",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_move_apply",
+      "canonicalName": "external_move_apply",
+      "classification": "diagnostic",
+      "group": "external.move",
+      "family": "external-move",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_move_plan",
+      "canonicalName": "external_move_plan",
+      "classification": "diagnostic",
+      "group": "external.move",
+      "family": "external-move",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_move_rollback",
+      "canonicalName": "external_move_rollback",
+      "classification": "diagnostic",
+      "group": "external.move",
+      "family": "external-move",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_move_status",
+      "canonicalName": "external_move_status",
+      "classification": "diagnostic",
+      "group": "external.move",
+      "family": "external-move",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_read",
+      "canonicalName": "external_read",
+      "classification": "canonical-unique",
+      "group": "external.read",
+      "family": "external-roots",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_references_scan",
+      "canonicalName": "external_references_scan",
+      "classification": "diagnostic",
+      "group": "external.read",
+      "family": "external-roots",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_roots_list",
+      "canonicalName": "external_roots_list",
+      "classification": "canonical-unique",
+      "group": "external.read",
+      "family": "external-roots",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_runtime_status",
+      "canonicalName": "external_runtime_status",
+      "classification": "diagnostic",
+      "group": "external.read",
+      "family": "external-roots",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "external_stat",
+      "canonicalName": "external_stat",
+      "classification": "canonical-unique",
+      "group": "external.read",
+      "family": "external-roots",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "list_all_tasks",
+      "canonicalName": "list_all_tasks",
+      "classification": "canonical-unique",
+      "group": "tasks.markdown",
+      "family": "markdown-tasks",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "replacement": {
+        "tools": ["operon_list_tasks"]
+      }
+    },
+    {
+      "name": "obsidian_admin_filesystem",
+      "canonicalName": "obsidian_admin_filesystem",
+      "classification": "administration",
+      "group": "admin",
+      "family": "filesystem-admin",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["headless-filesystem"],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": ["headless-filesystem"]
+      }
+    },
+    {
+      "name": "obsidian_batch_frontmatter",
+      "canonicalName": "obsidian_batch_frontmatter",
+      "classification": "canonical-unique",
+      "group": "metadata.direct.batch",
+      "family": "frontmatter-batch",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["headless-filesystem"],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": ["headless-filesystem"]
+      }
+    },
+    {
+      "name": "obsidian_canvas_patch_apply",
+      "canonicalName": "obsidian_canvas_patch_apply",
+      "classification": "governed-operation",
+      "group": "canvas.governed",
+      "family": "canvas-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_canvas_patch_plan",
+      "canonicalName": "obsidian_canvas_patch_plan",
+      "classification": "governed-operation",
+      "group": "canvas.governed",
+      "family": "canvas-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_canvas_patch_recover",
+      "canonicalName": "obsidian_canvas_patch_recover",
+      "classification": "governed-operation",
+      "group": "canvas.governed",
+      "family": "canvas-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "recover"
+    },
+    {
+      "name": "obsidian_canvas_patch_status",
+      "canonicalName": "obsidian_canvas_patch_status",
+      "classification": "governed-operation",
+      "group": "canvas.governed",
+      "family": "canvas-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "status"
+    },
+    {
+      "name": "obsidian_delete_note",
+      "canonicalName": "obsidian_delete_note",
+      "classification": "administration",
+      "group": "notes.direct.admin",
+      "family": "notes-admin",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["live", "hybrid-live", "headless-filesystem"],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": ["live", "hybrid-live", "headless-filesystem"]
+      }
+    },
+    {
+      "name": "obsidian_frontmatter_patch_apply",
+      "canonicalName": "obsidian_frontmatter_patch_apply",
+      "classification": "governed-operation",
+      "group": "metadata.governed",
+      "family": "frontmatter-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_frontmatter_patch_plan",
+      "canonicalName": "obsidian_frontmatter_patch_plan",
+      "classification": "governed-operation",
+      "group": "metadata.governed",
+      "family": "frontmatter-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_frontmatter_patch_recover",
+      "canonicalName": "obsidian_frontmatter_patch_recover",
+      "classification": "governed-operation",
+      "group": "metadata.governed",
+      "family": "frontmatter-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "recover"
+    },
+    {
+      "name": "obsidian_frontmatter_patch_status",
+      "canonicalName": "obsidian_frontmatter_patch_status",
+      "classification": "governed-operation",
+      "group": "metadata.governed",
+      "family": "frontmatter-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "status"
+    },
+    {
+      "name": "obsidian_global_search",
+      "canonicalName": "obsidian_global_search",
+      "classification": "canonical-unique",
+      "group": "notes.read",
+      "family": "notes-core",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "tasks", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "availabilityRules": [
+        {
+          "modes": [
+            "live",
+            "hybrid-live",
+            "hybrid-degraded",
+            "headless-readonly",
+            "headless-guarded",
+            "headless-filesystem"
+          ],
+          "requires": ["vault-cache"]
+        }
+      ]
+    },
+    {
+      "name": "obsidian_list_notes",
+      "canonicalName": "obsidian_list_notes",
+      "classification": "canonical-unique",
+      "group": "notes.read",
+      "family": "notes-core",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "tasks", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "obsidian_list_pending_operations",
+      "canonicalName": "obsidian_list_pending_operations",
+      "classification": "diagnostic",
+      "group": "runtime.status",
+      "family": "operation-cockpit",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "tasks", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "tasks": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      }
+    },
+    {
+      "name": "obsidian_manage_canvas",
+      "canonicalName": "obsidian_manage_canvas",
+      "classification": "canonical-unique",
+      "group": "canvas.direct",
+      "family": "canvas",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["headless-filesystem"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["headless-filesystem"],
+        "full": ["headless-filesystem"]
+      },
+      "replacement": {
+        "family": "canvas-patch",
+        "tools": [
+          "obsidian_canvas_patch_apply",
+          "obsidian_canvas_patch_plan",
+          "obsidian_canvas_patch_recover",
+          "obsidian_canvas_patch_status"
+        ]
+      },
+      "fallback": {
+        "tools": ["obsidian_manage_canvas"],
+        "modes": [
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "obsidian_manage_frontmatter",
+      "canonicalName": "obsidian_manage_frontmatter",
+      "classification": "canonical-unique",
+      "group": "metadata.direct.frontmatter",
+      "family": "frontmatter-direct",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["headless-guarded", "headless-filesystem"],
+        "authoring": ["headless-guarded", "headless-filesystem"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "replacement": {
+        "family": "frontmatter-patch",
+        "tools": [
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status"
+        ]
+      },
+      "fallback": {
+        "tools": ["obsidian_manage_frontmatter"],
+        "modes": [
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "obsidian_manage_tags",
+      "canonicalName": "obsidian_manage_tags",
+      "classification": "canonical-unique",
+      "group": "metadata.direct.tags",
+      "family": "tags",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["live", "hybrid-live", "headless-filesystem"],
+      "profiles": ["authoring", "full"],
+      "profileModes": {
+        "authoring": ["live", "hybrid-live", "headless-filesystem"],
+        "full": ["live", "hybrid-live", "headless-filesystem"]
+      }
+    },
+    {
+      "name": "obsidian_move_note",
+      "canonicalName": "obsidian_move_note",
+      "classification": "administration",
+      "group": "notes.direct.admin",
+      "family": "notes-admin",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": ["headless-filesystem"],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": ["headless-filesystem"]
+      }
+    },
+    {
+      "name": "obsidian_note_replace_apply",
+      "canonicalName": "obsidian_note_replace_apply",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "note-replace",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_note_replace_plan",
+      "canonicalName": "obsidian_note_replace_plan",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "note-replace",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_note_replace_recover",
+      "canonicalName": "obsidian_note_replace_recover",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "note-replace",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "recover"
+    },
+    {
+      "name": "obsidian_note_replace_status",
+      "canonicalName": "obsidian_note_replace_status",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "note-replace",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "status"
+    },
+    {
+      "name": "obsidian_read_note",
+      "canonicalName": "obsidian_read_note",
+      "classification": "canonical-unique",
+      "group": "notes.read",
+      "family": "notes-core",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "tasks", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "obsidian_runtime_maintenance",
+      "canonicalName": "obsidian_runtime_maintenance",
+      "classification": "administration",
+      "group": "runtime.maintenance",
+      "family": "runtime",
+      "surfaceClass": "canonical",
+      "annotationClass": "maintenance",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["full"],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "obsidian_runtime_status",
+      "canonicalName": "obsidian_runtime_status",
+      "classification": "diagnostic",
+      "group": "runtime.status",
+      "family": "runtime",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "tasks", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "obsidian_search_replace",
+      "canonicalName": "obsidian_search_replace",
+      "classification": "canonical-unique",
+      "group": "notes.direct.common",
+      "family": "notes-core",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["headless-guarded", "headless-filesystem"],
+        "authoring": ["headless-guarded", "headless-filesystem"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "replacement": {
+        "family": "text-patch",
+        "tools": [
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status"
+        ]
+      },
+      "fallback": {
+        "tools": ["obsidian_search_replace"],
+        "modes": [
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "obsidian_text_patch_apply",
+      "canonicalName": "obsidian_text_patch_apply",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "text-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_text_patch_plan",
+      "canonicalName": "obsidian_text_patch_plan",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "text-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_text_patch_recover",
+      "canonicalName": "obsidian_text_patch_recover",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "text-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "recover"
+    },
+    {
+      "name": "obsidian_text_patch_status",
+      "canonicalName": "obsidian_text_patch_status",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "text-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": ["live", "hybrid-live"],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["live", "hybrid-live"],
+        "authoring": ["live", "hybrid-live"],
+        "full": ["live", "hybrid-live"]
+      },
+      "lifecycleRole": "status"
+    },
+    {
+      "name": "obsidian_update_note",
+      "canonicalName": "obsidian_update_note",
+      "classification": "canonical-unique",
+      "group": "notes.direct.common",
+      "family": "notes-core",
+      "surfaceClass": "direct",
+      "annotationClass": "destructive",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "full"],
+      "profileModes": {
+        "standard": ["headless-guarded", "headless-filesystem"],
+        "authoring": ["headless-guarded", "headless-filesystem"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "replacement": {
+        "family": "text-patch",
+        "tools": [
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status"
+        ]
+      },
+      "fallback": {
+        "tools": ["obsidian_update_note"],
+        "modes": [
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "obsidian_validate_format",
+      "canonicalName": "obsidian_validate_format",
+      "classification": "diagnostic",
+      "group": "validation",
+      "family": "format-validation",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "tasks", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_adopt_task",
+      "canonicalName": "operon_adopt_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_build_context",
+      "canonicalName": "operon_build_context",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_convert_task",
+      "canonicalName": "operon_convert_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "destructive",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_create_periodic_task",
+      "canonicalName": "operon_create_periodic_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_create_task",
+      "canonicalName": "operon_create_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_find_tasks",
+      "canonicalName": "operon_find_tasks",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_get_configuration",
+      "canonicalName": "operon_get_configuration",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_get_diagnostics",
+      "canonicalName": "operon_get_diagnostics",
+      "classification": "diagnostic",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_get_relationships",
+      "canonicalName": "operon_get_relationships",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_get_task",
+      "canonicalName": "operon_get_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_get_timer_state",
+      "canonicalName": "operon_get_timer_state",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_list_pending_recoveries",
+      "canonicalName": "operon_list_pending_recoveries",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_list_tasks",
+      "canonicalName": "operon_list_tasks",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_query_saved_filter",
+      "canonicalName": "operon_query_saved_filter",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_query_tasks",
+      "canonicalName": "operon_query_tasks",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_recover_mutation",
+      "canonicalName": "operon_recover_mutation",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_relocate_task",
+      "canonicalName": "operon_relocate_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_resolve_task",
+      "canonicalName": "operon_resolve_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_set_relationships",
+      "canonicalName": "operon_set_relationships",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_status",
+      "canonicalName": "operon_status",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_transition_task",
+      "canonicalName": "operon_transition_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_update_periodic_scheduling",
+      "canonicalName": "operon_update_periodic_scheduling",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_update_recurrence",
+      "canonicalName": "operon_update_recurrence",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_update_task",
+      "canonicalName": "operon_update_task",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.write",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": ["live", "hybrid-live"],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "operon_validate",
+      "canonicalName": "operon_validate",
+      "classification": "canonical-unique",
+      "group": "tasks.operon.read",
+      "family": "operon",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    },
+    {
+      "name": "query_tasks",
+      "canonicalName": "query_tasks",
+      "classification": "canonical-unique",
+      "group": "tasks.markdown",
+      "family": "markdown-tasks",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["tasks", "full"],
+      "profileModes": {
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      },
+      "replacement": {
+        "tools": ["operon_query_tasks"]
+      }
+    },
+    {
+      "name": "smart_semantic_search",
+      "canonicalName": "smart_semantic_search",
+      "classification": "canonical-unique",
+      "group": "semantic.canonical",
+      "family": "semantic-search",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only-open-world",
+      "registrationModes": [
+        "live",
+        "hybrid-live",
+        "hybrid-degraded",
+        "headless-readonly",
+        "headless-guarded",
+        "headless-filesystem"
+      ],
+      "profiles": ["standard", "authoring", "tasks", "full"],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "tasks": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ]
+      }
+    }
+  ]
+}

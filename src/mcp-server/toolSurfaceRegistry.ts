@@ -38,6 +38,25 @@ export const TOOL_GROUP_IDS = [
 
 export type ToolGroupId = (typeof TOOL_GROUP_IDS)[number];
 
+/**
+ * Stable LLM-routing classification for every public tool name.
+ *
+ * This is intentionally separate from `surfaceClass`: a direct tool can be a
+ * valid canonical entry while still advertising a safer governed alternative,
+ * and a diagnostic tool can be registered on every transport while remaining
+ * fail-closed for mutation.
+ */
+export const TOOL_CLASSIFICATION_IDS = [
+  "canonical-unique",
+  "alias-redundant",
+  "compatibility-historical",
+  "governed-operation",
+  "diagnostic",
+  "administration",
+] as const;
+
+export type ToolClassification = (typeof TOOL_CLASSIFICATION_IDS)[number];
+
 export type ToolSurfaceClass = "canonical" | "direct" | "legacy";
 
 export type ToolAnnotationClass =
@@ -60,6 +79,7 @@ export interface ToolAvailabilityRule {
 export interface ToolSurfaceEntry {
   name: string;
   canonicalName: string;
+  classification: ToolClassification;
   group: ToolGroupId;
   family: string;
   registrationModes: readonly ToolRegistrationMode[];
@@ -69,6 +89,135 @@ export interface ToolSurfaceEntry {
   aliasOf?: string;
   preferredAlternativeFamily?: string;
   availabilityRules?: readonly ToolAvailabilityRule[];
+}
+
+const CANONICAL_UNIQUE_TOOL_NAMES = [
+  "obsidian_read_note",
+  "obsidian_list_notes",
+  "obsidian_global_search",
+  "obsidian_manage_tags",
+  "obsidian_batch_frontmatter",
+  "list_all_tasks",
+  "query_tasks",
+  "bases_list",
+  "bases_get_schema",
+  "bases_query",
+  "bases_create",
+  "bases_upsert_rows",
+  "operon_status",
+  "operon_get_configuration",
+  "operon_list_tasks",
+  "operon_query_tasks",
+  "operon_query_saved_filter",
+  "operon_get_task",
+  "operon_validate",
+  "operon_find_tasks",
+  "operon_resolve_task",
+  "operon_get_relationships",
+  "operon_build_context",
+  "operon_get_timer_state",
+  "operon_list_pending_recoveries",
+  "operon_adopt_task",
+  "operon_create_periodic_task",
+  "operon_update_periodic_scheduling",
+  "operon_create_task",
+  "operon_update_task",
+  "operon_transition_task",
+  "operon_relocate_task",
+  "operon_set_relationships",
+  "operon_update_recurrence",
+  "operon_recover_mutation",
+  "operon_convert_task",
+  "smart_semantic_search",
+  "external_roots_list",
+  "external_list",
+  "external_stat",
+  "external_read",
+  "external_handoff",
+] as const;
+
+const COMPATIBILITY_HISTORICAL_TOOL_NAMES = ["bases_upsert_config"] as const;
+
+const GOVERNED_OPERATION_TOOL_NAMES = [
+  "obsidian_note_replace_plan",
+  "obsidian_note_replace_apply",
+  "obsidian_note_replace_status",
+  "obsidian_note_replace_recover",
+  "obsidian_text_patch_plan",
+  "obsidian_text_patch_apply",
+  "obsidian_text_patch_status",
+  "obsidian_text_patch_recover",
+  "obsidian_frontmatter_patch_plan",
+  "obsidian_frontmatter_patch_apply",
+  "obsidian_frontmatter_patch_status",
+  "obsidian_frontmatter_patch_recover",
+  "bases_formula_patch_plan",
+  "bases_formula_patch_apply",
+  "bases_formula_patch_status",
+  "bases_formula_patch_recover",
+  "obsidian_canvas_patch_plan",
+  "obsidian_canvas_patch_apply",
+  "obsidian_canvas_patch_status",
+  "obsidian_canvas_patch_recover",
+] as const;
+
+const DIAGNOSTIC_TOOL_NAMES = [
+  "obsidian_runtime_status",
+  "obsidian_list_pending_operations",
+  "obsidian_validate_format",
+  "operon_get_diagnostics",
+  "external_runtime_status",
+  "external_references_scan",
+  "external_move_plan",
+  "external_move_status",
+  "external_move_apply",
+  "external_move_rollback",
+] as const;
+
+const ADMINISTRATION_TOOL_NAMES = [
+  "obsidian_admin_filesystem",
+  "obsidian_runtime_maintenance",
+  "obsidian_delete_note",
+  "obsidian_move_note",
+] as const;
+
+const DIRECT_WITH_PREFERRED_ALTERNATIVE_TOOL_NAMES = [
+  "obsidian_update_note",
+  "obsidian_search_replace",
+  "obsidian_manage_frontmatter",
+  "obsidian_manage_canvas",
+] as const;
+
+const TOOL_CLASSIFICATION_GROUPS: Readonly<
+  Record<Exclude<ToolClassification, "alias-redundant">, readonly string[]>
+> = {
+  "canonical-unique": [
+    ...CANONICAL_UNIQUE_TOOL_NAMES,
+    ...DIRECT_WITH_PREFERRED_ALTERNATIVE_TOOL_NAMES,
+  ],
+  "compatibility-historical": COMPATIBILITY_HISTORICAL_TOOL_NAMES,
+  "governed-operation": GOVERNED_OPERATION_TOOL_NAMES,
+  diagnostic: DIAGNOSTIC_TOOL_NAMES,
+  administration: ADMINISTRATION_TOOL_NAMES,
+};
+
+export const TOOL_CLASSIFICATION_BY_NAME: Readonly<
+  Record<string, ToolClassification>
+> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(TOOL_CLASSIFICATION_GROUPS).flatMap(
+      ([classification, names]) =>
+        names.map((name) => [name, classification] as const),
+    ),
+  ) as Record<string, ToolClassification>,
+);
+
+function classificationForTool(name: string): ToolClassification {
+  const classification = TOOL_CLASSIFICATION_BY_NAME[name];
+  if (!classification) {
+    throw new Error(`Tool ${name} has no authoritative classification.`);
+  }
+  return classification;
 }
 
 const ALL_MODES = TOOL_REGISTRATION_MODES;
@@ -121,6 +270,7 @@ function defineTool(
   return {
     name,
     canonicalName: options.canonicalName ?? options.aliasOf ?? name,
+    classification: classificationForTool(name),
     group,
     family,
     registrationModes,
@@ -442,6 +592,27 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     { annotationClass: "read-only" },
   ),
 ] as const;
+
+function assertToolClassificationCoverage(): void {
+  const registryNames = new Set(
+    TOOL_SURFACE_REGISTRY.map((entry) => entry.name),
+  );
+  const classifiedNames = Object.keys(TOOL_CLASSIFICATION_BY_NAME);
+  if (registryNames.size !== TOOL_SURFACE_REGISTRY.length) {
+    throw new Error("Tool surface registry contains duplicate public names.");
+  }
+  const missing = [...registryNames].filter(
+    (name) => !TOOL_CLASSIFICATION_BY_NAME[name],
+  );
+  const extra = classifiedNames.filter((name) => !registryNames.has(name));
+  if (missing.length || extra.length) {
+    throw new Error(
+      `Tool classification coverage mismatch (missing=${missing.join(",")}; extra=${extra.join(",")}).`,
+    );
+  }
+}
+
+assertToolClassificationCoverage();
 
 export interface CompileToolSurfaceInput {
   registrationMode: ToolRegistrationMode;

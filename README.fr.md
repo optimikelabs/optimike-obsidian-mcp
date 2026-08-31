@@ -202,6 +202,7 @@ Les suites runtime utilisent des coffres jetables et s’exécutent en CI Linux/
 - [Doctor des capacités runtime](docs/capability-doctor.fr.md)
 - [Bundle des Bridges, mise à niveau et rollback](docs/bridge-packaging.fr.md)
 - [Guide de routage](docs/mcp-routing-guide.fr.md)
+- [Évaluation du routage et décision sur les profils](docs/tool-routing-evaluation-p6.fr.md)
 - [Contrat MCP Operon](docs/operon-mcp-contract.fr.md)
 - [Configuration External Roots](docs/external-roots-setup.fr.md)
 - [Profil serveur headless](docs/headless-server-profile.fr.md)

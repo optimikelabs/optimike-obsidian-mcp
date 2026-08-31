@@ -198,6 +198,7 @@ Runtime suites use disposable vaults and run in Linux/Windows CI.
 - [Bridge Lifecycle Recovery](docs/bridge-lifecycle.md)
 - [Bridge Bundle, Upgrade and Rollback](docs/bridge-packaging.md)
 - [MCP Routing Guide](docs/mcp-routing-guide.md)
+- [Tool Routing Evaluation and Profile Decision](docs/tool-routing-evaluation-p6.md)
 - [Operon MCP Contract](docs/operon-mcp-contract.md)
 - [External Roots Setup](docs/external-roots-setup.md)
 - [Headless Server Profile](docs/headless-server-profile.md)

@@ -381,8 +381,8 @@ assert.match(matrixFr, /\| Admin filesystem\s+\| Non\s+\| Non/);
 const packageJson = JSON.parse(await text("package.json"));
 assert.equal(
   packageJson.version,
-  "3.7.0",
-  "package metadata must match the 3.7.0 pending-operation cockpit candidate",
+  "3.8.0",
+  "package metadata must match the 3.8.0 tool-routing evaluation candidate",
 );
 assert.equal(packageJson.scripts["start:http"], "node scripts/run-http.mjs");
 assert.equal(packageJson.scripts["start:daemon"], "node scripts/run-http.mjs");

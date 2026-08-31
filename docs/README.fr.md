@@ -32,6 +32,7 @@ question.
 | Comment les Bridges récupèrent-ils après un démarrage ou reload Local REST ?        | [Récupération du lifecycle](bridge-lifecycle.fr.md)                                     |
 | Comment installer, mettre à niveau ou restaurer les trois Bridges ?                 | [Bundle des Bridges et rollback](bridge-packaging.fr.md)                                |
 | Quel outil un agent doit-il choisir dans son profil ?                               | [Guide de routage](mcp-routing-guide.fr.md)                                             |
+| Comment mesurer la qualité du routage et décider des profils ?                      | [Évaluation du routage P6](tool-routing-evaluation-p6.fr.md)                            |
 | Comment fonctionner sans Obsidian Desktop ?                                         | [Profil serveur headless](headless-server-profile.fr.md)                                |
 | Comment fonctionnent lecture, handoff, move et réparation de liens externes ?       | [Configuration des racines](external-roots-setup.fr.md)                                 |
 | Quelle frontière de sécurité HTTP est supportée ?                                   | [Sécurité](../SECURITY.fr.md) et [ADR HTTP](adr/ADR-HTTP-External-Artifact-Delivery.md) |
@@ -71,6 +72,7 @@ Formules Base gouvernées source-preserving : [contrat P2](governed-base-formula
 ### Recherche et runtime
 
 - profils publics d’exposition : [Profils de surface d’outils](tool-surface-profiles.fr.md) ;
+- corpus, métriques déterministes et décisions de profils : [évaluation P6](tool-routing-evaluation-p6.fr.md) ;
 - recherche sémantique et providers : [Exploitation](../OPERATIONS.fr.md) ;
 - modes runtime : [Matrice des capacités](runtime-capability-matrix.fr.md) ;
 - diagnostic live profil/backend/grant : [Doctor des capacités runtime](capability-doctor.fr.md) ;
