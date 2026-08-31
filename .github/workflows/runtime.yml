@@ -13,6 +13,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         node: [22]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,7 +32,9 @@ jobs:
       - run: node scripts/test-governed-note-replace-http.mjs
       - run: npm run test:profiles
       - run: npm run test:tool-annotations
-      - run: npm run test:tool-routing
+      # The hermetic scorer owns its single authoritative rebuild in the P6
+      # workflow. Runtime keeps the cross-platform behavioral contracts only.
+      - run: npm run test:tool-routing:fast
       - run: npm run test:docs
       - run: node scripts/test-governed-note-doc-contract.mjs
       - run: npm run test:launchers

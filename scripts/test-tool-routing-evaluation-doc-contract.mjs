@@ -44,3 +44,41 @@ for (const relativePath of [
 console.log(
   "PASS: bilingual P6 routing, profile, schema-cost and future-major contracts agree",
 );
+
+const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
+assert.ok(packageJson.scripts["test:tool-routing:fast"]);
+assert.match(
+  packageJson.scripts["test:tool-routing"],
+  /test-tool-routing-scorer\.mjs/u,
+);
+assert.doesNotMatch(
+  packageJson.scripts["test:tool-routing:fast"],
+  /test-tool-routing-scorer\.mjs/u,
+);
+
+const runtimeWorkflow = fs.readFileSync(".github/workflows/runtime.yml", "utf8");
+assert.match(runtimeWorkflow, /timeout-minutes:\s*20/u);
+assert.match(runtimeWorkflow, /npm run test:tool-routing:fast/u);
+assert.doesNotMatch(runtimeWorkflow, /run:\s*npm run test:tool-routing\s*$/mu);
+
+const p6Workflow = fs.readFileSync(
+  ".github/workflows/p6-tool-routing-evaluation.yml",
+  "utf8",
+);
+assert.match(p6Workflow, /runner\.os == 'Linux'[\s\S]*npm run test:tool-routing/u);
+assert.match(
+  p6Workflow,
+  /runner\.os == 'Windows'[\s\S]*npm run test:tool-routing:fast/u,
+);
+assert.match(p6Workflow, /timeout-minutes:\s*20/u);
+
+const p4Workflow = fs.readFileSync(
+  ".github/workflows/tool-surface-p4.yml",
+  "utf8",
+);
+assert.doesNotMatch(p4Workflow, /run:\s*node scripts\/test-tool-routing-scorer\.mjs/u);
+assert.match(p4Workflow, /timeout-minutes:\s*15/u);
+
+console.log(
+  "PASS: CI keeps one hermetic routing owner and bounded cross-platform contracts",
+);

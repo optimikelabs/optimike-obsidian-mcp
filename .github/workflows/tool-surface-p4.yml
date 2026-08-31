@@ -30,6 +30,7 @@ permissions:
 jobs:
   docs-and-evals:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +46,8 @@ jobs:
       - run: npm run build
       - run: node scripts/test-tool-profiles.mjs
       - run: node scripts/test-tool-routing-eval-corpus.mjs
-      - run: node scripts/test-tool-routing-scorer.mjs
+      # The P6 Linux workflow is the sole owner of the hermetic scorer. This
+      # workflow validates the corpus and public surface contracts only.
       - run: node scripts/test-tool-surface-profile-docs.mjs
       - run: node scripts/test-tool-routing-contract.mjs
       - name: Install Bases Bridge dependencies

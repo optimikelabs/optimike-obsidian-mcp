@@ -34,6 +34,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         node: [22]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,7 +43,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm run test:tool-routing
+      # One Linux job owns the expensive clean-checkout rebuild. Windows still
+      # exercises every routing contract without repeating npm ci/build for
+      # each hostile scorer fixture.
+      - if: runner.os == 'Linux'
+        run: npm run test:tool-routing
+      - if: runner.os == 'Windows'
+        run: npm run test:tool-routing:fast
       - run: npm run test:profiles
       - run: node scripts/test-tool-routing-evaluation-doc-contract.mjs
       - name: Install Bases Bridge dependencies
