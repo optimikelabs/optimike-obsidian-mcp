@@ -37,17 +37,20 @@
     "forbiddenTools": ["obsidian_runtime_maintenance"]
   },
   {
-    "id": "append-note-direct",
+    "id": "append-note-governed",
     "prompt": "Append this one paragraph to an existing note without replacing the rest of the file.",
     "recommendedProfile": "standard",
-    "acceptableFirstTools": ["obsidian_update_note"],
-    "forbiddenTools": ["obsidian_note_replace_plan"]
+    "acceptableFirstTools": ["obsidian_text_patch_plan"],
+    "minimumToolCalls": 2,
+    "forbiddenTools": ["obsidian_update_note", "obsidian_note_replace_plan"]
   },
   {
-    "id": "search-replace-direct",
+    "id": "search-replace-governed",
     "prompt": "Replace one exact typo occurrence in a note and leave everything else byte-for-byte alone.",
     "recommendedProfile": "standard",
-    "acceptableFirstTools": ["obsidian_search_replace"]
+    "acceptableFirstTools": ["obsidian_text_patch_plan"],
+    "minimumToolCalls": 2,
+    "forbiddenTools": ["obsidian_search_replace"]
   },
   {
     "id": "replace-complete-note",
