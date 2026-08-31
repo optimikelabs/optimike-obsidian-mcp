@@ -32,7 +32,7 @@ const BRIDGES = [
     directory: "obsidian-operon-bridge",
     expectedVersion:
       process.env.BRIDGE_LIFECYCLE_EXPECTED_OPERON_BRIDGE_VERSION?.trim() ||
-      "0.9.1",
+      "0.9.2",
     route: "/extensions/optimike-operon-bridge/v1/status",
     requireStatusOk: false,
     writeProjection(payload) {

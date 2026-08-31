@@ -37,7 +37,7 @@ Project Serial transition edge. Uncertain outcomes
 remain fail-closed; the Bridge never retries blindly or falls back to
 Markdown/private APIs.
 
-Bridge `0.9.1` supports the separate task-workflow Developer API sessions
+Bridge `0.9.2` supports the separate task-workflow Developer API sessions
 introduced by Operon `3.5.3` and retained by the current `3.6.0` target.
 Adoption, daily/weekly periodic-note
 creation, and periodic-note-aware updates each negotiate their own exact grant
@@ -74,7 +74,7 @@ release still requires the applicable gate on the clean final SHA. Operon
 therefore remains `compatible-provisional`, admitted by the same contract-first
 checks rather than by a positive product-version allowlist.
 
-Bridge `0.9.1` permanently supervises its Local REST extension registration
+Bridge `0.9.2` permanently supervises its Local REST extension registration
 and is distributed through the exact-SHA Optimike Bridge bundle.
 It mounts after late Local REST startup, detects a disabled/reloaded provider,
 unregisters the previous generation and remounts without requiring an MCP
@@ -93,6 +93,13 @@ Compatibility is admission, not live readiness. Check top-level `ok`,
 `index.ready`, and the advertised `capabilities` before using a route; an
 admitted runtime can still be temporarily unready while its index settles or
 recovers.
+
+Status also reports `bridge.mutationJournal.state` as `absent`, `valid`, or
+`unsafe`. An unsafe persisted journal never gets ignored or replaced during a
+settings save: reads stay available, all mutation and recovery capabilities are
+withdrawn, and mutation routes return `mutation_journal_unsafe` without a
+reservation or native Operon call. Repair requires an explicit operator edit
+and Bridge reload.
 
 The product version remains diagnostic metadata and may select a narrowly
 documented denylist entry. It is not the primary admission key for Operon 3.x.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The Operon Bridge now distinguishes absent, valid and unsafe persisted
+  mutation journals. A present malformed or ambiguous journal is preserved and
+  latches every mutation and recovery route before reservation or native
+  dispatch, while reads and pending-recovery inspection remain available with
+  a stable value-free diagnostic.
+
 ## [3.8.0] - 2026-08-31
 
 ### Added

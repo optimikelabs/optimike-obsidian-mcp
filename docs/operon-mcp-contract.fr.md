@@ -158,7 +158,7 @@ révision périmée renvoie `conflict` sans écriture. Une réservation restée
 `in_progress` après timeout ou redémarrage bloque toute nouvelle mutation à
 l’aveugle.
 
-Bridge 0.8 réserve aussi les clés d’idempotence atomiquement et persiste son
+Bridge 0.9.2 réserve aussi les clés d’idempotence atomiquement et persiste son
 journal version 2 dans les données locales du plugin Obsidian avant tout dispatch
 natif. Ce journal est borné à 500 entrées et 30 jours. Une entrée `in-progress`
 restaurée devient `outcome-unknown`, non rejouable, avec
@@ -176,6 +176,19 @@ replay/redémarrage local borné : aucune promesse après expiration, éviction,
 perte/reset des données plugin, échec de persistance ou transfert vers un autre
 coffre/appareil. Si la réservation initiale ou la libération sûre ne peut pas
 être persistée avant le dispatch, aucune mutation native n’est envoyée.
+
+La restauration du journal échoue fermée. L’absence de propriété
+`mutationJournal` correspond à un stockage neuf `absent`, tandis qu’une enveloppe
+supportée et entièrement validée devient `valid`. Toute version présente mais
+inconnue, enveloppe non-tableau ou surdimensionnée, entrée retenue malformée,
+clé dupliquée, état inconnu, payload terminal ou statut HTTP invalide place le
+Bridge dans l’état persistant `unsafe`. Les lectures et l’inspection des
+recoveries en attente restent disponibles, mais toute nouvelle réservation,
+mutation native ou recovery renvoie le diagnostic stable et sans valeur
+`mutation_journal_unsafe`. Aucune mutation native n’est dispatchée tant que ce
+verrou est actif. Une sauvegarde ordinaire des réglages conserve la
+valeur unsafe inchangée ; seule une réparation opérateur explicite suivie d’un
+rechargement du Bridge lève le blocage.
 
 L’apply exige aussi `OPERON_MUTATIONS_ENABLED=true` et le réglage Bridge
 **Allow task mutations**. Une mise à jour de package ne peut donc pas activer les

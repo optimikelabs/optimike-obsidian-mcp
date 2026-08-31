@@ -56,7 +56,27 @@ const LOCAL_REST_PLUGIN_ID = "obsidian-local-rest-api";
 const MUTATION_JOURNAL_VERSION = 2;
 const MUTATION_JOURNAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MUTATION_JOURNAL_LIMIT = 500;
+const MUTATION_JOURNAL_MAX_SERIALIZED_CHARS = 16 * 1024 * 1024;
 const TASK_WORKFLOW_IDENTITY_STORE_VERSION = 1;
+const MUTATION_TERMINAL_STATUSES = new Set([
+  "already-applied",
+  "applied",
+  "conflict",
+  "failed",
+  "invalid-input",
+  "not-found",
+  "not-ready",
+  "outcome-unknown",
+  "planned",
+  "rejected",
+]);
+const MUTATION_SUCCESS_STATUSES = new Set([
+  "already-applied",
+  "applied",
+  "planned",
+]);
+
+type MutationJournalState = "absent" | "valid" | "unsafe";
 
 interface OptimikeOperonBridgeSettings {
   mutationsEnabled: boolean;
@@ -384,6 +404,14 @@ const OPERON_PUBLIC_ERRORS: Record<string, OperonPublicErrorDescriptor> = {
     retryable: false,
     message:
       "The mutation receipt could not be persisted. Inspect recovery before retrying.",
+  },
+  mutation_journal_unsafe: {
+    code: "mutation_journal_unsafe",
+    reasonCode: "mutation_journal_unsafe",
+    status: "unavailable",
+    retryable: false,
+    message:
+      "The persisted mutation journal is unsafe. Repair it explicitly before requesting another mutation.",
   },
   task_workflow_capability_unavailable: {
     code: "task_workflow_capability_unavailable",
@@ -734,6 +762,50 @@ function publicIdempotencyKey(value: unknown): string | undefined {
     : undefined;
 }
 
+function mutationJournalDiagnostic(
+  state: MutationJournalState | undefined,
+): Record<string, unknown> {
+  return state === "unsafe"
+    ? {
+        state: "unsafe",
+        reasonCode: "mutation_journal_unsafe",
+        nextAction:
+          "Back up and repair or remove the mutation journal explicitly, then reload the Bridge.",
+      }
+    : { state: state ?? "absent" };
+}
+
+function unsafeMutationJournalResponse(
+  idempotencyKey: string,
+  operationId: string,
+): {
+  httpStatus: number;
+  payload: Record<string, unknown>;
+} {
+  return {
+    httpStatus: 503,
+    payload: {
+      ok: false,
+      contractVersion: OPERON_BRIDGE_CONTRACT_VERSION,
+      operationId,
+      ...(publicIdempotencyKey(idempotencyKey) ? { idempotencyKey } : {}),
+      status: "not-ready",
+      before: null,
+      requested: {},
+      after: null,
+      error: {
+        code: "mutation_journal_unsafe",
+        message:
+          "The persisted mutation journal is unsafe. Repair it explicitly before requesting another mutation.",
+      },
+      retryable: false,
+      mutationMayHaveApplied: false,
+      source: "operon-live",
+      stale: false,
+    },
+  };
+}
+
 type OperationIdCrypto = {
   readonly randomUUID?: () => string;
   readonly getRandomValues?: (values: Uint8Array) => Uint8Array;
@@ -987,6 +1059,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   private mutationResults = new Map<string, CachedMutation>();
   private mutationResultTimes = new Map<string, string>();
   private mutationReservations = new MutationReservationRegistry();
+  private mutationJournalState: MutationJournalState = "absent";
+  private unsafeMutationJournalRaw: unknown = undefined;
   /**
    * Process-local coordination for the asynchronous gates that must precede a
    * durable reservation. These flights are deliberately absent from the
@@ -1010,7 +1084,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ? (stored.settings as Partial<OptimikeOperonBridgeSettings>)
         : (stored as Partial<OptimikeOperonBridgeSettings> | null);
     this.settings = { ...DEFAULT_BRIDGE_SETTINGS, ...(storedSettings ?? {}) };
-    this.restoreMutationJournal(stored?.mutationJournal);
+    this.restoreMutationJournal(
+      stored?.mutationJournal,
+      Boolean(
+        stored &&
+          Object.prototype.hasOwnProperty.call(stored, "mutationJournal"),
+      ),
+    );
     this.restoreTaskWorkflowIdentities(stored?.taskWorkflowIdentities);
     this.addSettingTab(new OptimikeOperonBridgeSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
@@ -1353,13 +1433,19 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     runtime: OperonRuntime | null,
     ready = false,
   ): BridgeCapabilities {
+    const journalAllowsMutations = this.mutationJournalState !== "unsafe";
     if (runtime?.developerApi) {
       const readable = Boolean(runtime.compatible && ready);
       const mutationEnabled = Boolean(
-        runtime.compatible && ready && this.settings.mutationsEnabled,
+        runtime.compatible &&
+          ready &&
+          this.settings.mutationsEnabled &&
+          journalAllowsMutations,
       );
       const recoveryEnabled = Boolean(
-        runtime.compatible && this.settings.mutationsEnabled,
+        runtime.compatible &&
+          this.settings.mutationsEnabled &&
+          journalAllowsMutations,
       );
       const supports = (capability: DeveloperApiMutationCapability): boolean =>
         mutationEnabled &&
@@ -1429,7 +1515,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     const readable = Boolean(runtime?.compatible && ready);
     const publicCapabilities =
       readable && runtime?.api ? runtime.api.capabilities() : null;
-    const mutation = this.settings.mutationsEnabled ? publicCapabilities : null;
+    const mutation =
+      this.settings.mutationsEnabled && journalAllowsMutations
+        ? publicCapabilities
+        : null;
     return {
       status: true,
       configuration: Boolean(runtime?.compatible),
@@ -1462,6 +1551,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   }
 
   private limitations(runtime: OperonRuntime | null, ready: boolean): string[] {
+    if (this.mutationJournalState === "unsafe") {
+      return [
+        ...READ_ONLY_LIMITATIONS,
+        "The persisted mutation journal is unsafe; reads remain available, but every mutation is blocked until explicit operator repair and Bridge reload.",
+      ];
+    }
     const capabilities = this.capabilities(runtime, ready);
     return capabilities.create ||
       capabilities.update ||
@@ -1647,6 +1742,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         id: this.manifest.id,
         version: this.manifest.version,
         mutationsEnabled: this.settings.mutationsEnabled,
+        mutationJournal: mutationJournalDiagnostic(this.mutationJournalState),
         mode:
           capabilities.update ||
           capabilities.transition ||
@@ -1738,6 +1834,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       bridge: {
         id: this.manifest.id,
         version: this.manifest.version,
+        mutationJournal: mutationJournalDiagnostic(this.mutationJournalState),
       },
       operon: {
         present: Boolean(runtime || loadedEngine),
@@ -2001,46 +2098,150 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     }
   }
 
-  private restoreMutationJournal(value: unknown): void {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return;
-    const journal = value as Record<string, unknown>;
-    const journalVersion = journal.version;
-    if (
-      (journalVersion !== 1 && journalVersion !== MUTATION_JOURNAL_VERSION) ||
-      !Array.isArray(journal.entries)
-    )
-      return;
-    const cutoff = Date.now() - MUTATION_JOURNAL_RETENTION_MS;
-    const entries = journal.entries.slice(-MUTATION_JOURNAL_LIMIT);
-    let interrupted = false;
-    for (const candidate of entries) {
+  private restoreMutationJournal(
+    value: unknown,
+    present = value !== undefined,
+  ): void {
+    this.mutationJournalState = present ? "unsafe" : "absent";
+    this.unsafeMutationJournalRaw = present ? value : undefined;
+    if (!present) return;
+
+    const journal = safePlainRecord(value);
+    if (!journal) return;
+    try {
+      const serialized = JSON.stringify(journal);
       if (
-        !candidate ||
-        typeof candidate !== "object" ||
-        Array.isArray(candidate)
-      )
-        continue;
-      const entry = candidate as unknown as PersistedMutationJournalEntry;
-      const updatedAtMs = Date.parse(String(entry.updatedAt ?? ""));
-      if (
-        typeof entry.idempotencyKey !== "string" ||
-        !entry.idempotencyKey ||
-        typeof entry.signature !== "string" ||
-        !entry.signature ||
-        !Number.isFinite(updatedAtMs) ||
-        updatedAtMs < cutoff
-      )
-        continue;
-      if (
-        entry.state === "terminal" &&
-        entry.payload &&
-        typeof entry.payload === "object"
+        typeof serialized !== "string" ||
+        serialized.length > MUTATION_JOURNAL_MAX_SERIALIZED_CHARS
       ) {
+        return;
+      }
+    } catch {
+      return;
+    }
+    const versionField = ownDataField(journal, "version");
+    const entriesField = ownDataField(journal, "entries");
+    const journalVersion = versionField?.value;
+    if (
+      !versionField?.present ||
+      (journalVersion !== 1 && journalVersion !== MUTATION_JOURNAL_VERSION) ||
+      !entriesField?.present ||
+      !safeArray(entriesField.value)
+    ) {
+      return;
+    }
+
+    const entries = entriesField.value as unknown[];
+    if (entries.length > MUTATION_JOURNAL_LIMIT) return;
+
+    const cutoff = Date.now() - MUTATION_JOURNAL_RETENTION_MS;
+    const retainedKeys = new Set<string>();
+    const terminalEntries: PersistedMutationJournalEntry[] = [];
+    const interruptedEntries: PersistedMutationJournalEntry[] = [];
+    for (const candidate of entries) {
+      const entry = safePlainRecord(candidate);
+      if (!entry) return;
+      const updatedAtField = ownDataField(entry, "updatedAt");
+      const updatedAt = updatedAtField?.value;
+      if (!updatedAtField?.present || typeof updatedAt !== "string") return;
+      const updatedAtMs = Date.parse(updatedAt);
+      if (!Number.isFinite(updatedAtMs)) return;
+      if (updatedAtMs < cutoff) continue;
+
+      const idempotencyKeyField = ownDataField(entry, "idempotencyKey");
+      const signatureField = ownDataField(entry, "signature");
+      const stateField = ownDataField(entry, "state");
+      const operationIdField = ownDataField(entry, "operationId");
+      const idempotencyKey = idempotencyKeyField?.value;
+      const signature = signatureField?.value;
+      const state = stateField?.value;
+      const operationId = operationIdField?.value;
+      if (
+        !idempotencyKeyField?.present ||
+        typeof idempotencyKey !== "string" ||
+        idempotencyKey.trim().length === 0 ||
+        idempotencyKey.length > 200 ||
+        !signatureField?.present ||
+        typeof signature !== "string" ||
+        signature.length === 0 ||
+        signature.length > 65_536 ||
+        !operationIdField?.present ||
+        typeof operationId !== "string" ||
+        operationId.length === 0 ||
+        operationId.length > 200 ||
+        (state !== "terminal" && state !== "in-progress") ||
+        retainedKeys.has(idempotencyKey)
+      ) {
+        return;
+      }
+      retainedKeys.add(idempotencyKey);
+
+      if (state === "terminal") {
+        const payloadField = ownDataField(entry, "payload");
+        const httpStatusField = ownDataField(entry, "httpStatus");
+        const provenanceField = ownDataField(entry, "dispatchProvenance");
+        const payload = safePlainRecord(payloadField?.value);
+        const httpStatus = httpStatusField?.value;
+        const provenance = provenanceField?.value;
+        const payloadOk = safeBooleanField(payload, "ok");
+        const payloadStatus = safeStringField(payload, "status");
+      if (
+          !payloadField?.present ||
+          !payload ||
+          payloadOk === undefined ||
+          !payloadStatus ||
+          !MUTATION_TERMINAL_STATUSES.has(payloadStatus) ||
+          payloadOk !== MUTATION_SUCCESS_STATUSES.has(payloadStatus) ||
+          !httpStatusField?.present ||
+          !Number.isInteger(httpStatus) ||
+          (httpStatus as number) < 100 ||
+          (httpStatus as number) > 599 ||
+          httpStatus !== this.mutationHttpStatus(payload) ||
+          (provenanceField?.present &&
+            provenance !== "proven-pre-dispatch" &&
+            provenance !== "unknown-or-dispatched")
+      ) {
+          return;
+        }
+        terminalEntries.push({
+          idempotencyKey,
+          signature,
+          state,
+          updatedAt,
+          operationId,
+          payload,
+          httpStatus: httpStatus as number,
+          ...(provenanceField?.present
+            ? {
+                dispatchProvenance: provenance as
+                  | "proven-pre-dispatch"
+                  | "unknown-or-dispatched",
+              }
+            : {}),
+        });
+        continue;
+      }
+
+      const requestedField = ownDataField(entry, "requested");
+      const requested = safePlainRecord(requestedField?.value);
+      if (!requestedField?.present || !requested) return;
+      interruptedEntries.push({
+        idempotencyKey,
+        signature,
+        state,
+        updatedAt,
+        operationId,
+        requested,
+      });
+    }
+
+    this.mutationJournalState = "valid";
+    this.unsafeMutationJournalRaw = undefined;
+    for (const entry of terminalEntries) {
         this.mutationResults.set(entry.idempotencyKey, {
           signature: entry.signature,
-          payload: entry.payload,
-          httpStatus:
-            entry.httpStatus ?? this.mutationHttpStatus(entry.payload),
+        payload: entry.payload!,
+        httpStatus: entry.httpStatus,
           // Bridge 0.8.2 could persist not-ready/false after native dispatch
           // had begun. Preserve every v1 receipt, but never treat its payload
           // fields as proof that a same-key retry is safe.
@@ -2051,13 +2252,12 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
               : "unknown-or-dispatched",
         });
         this.mutationResultTimes.set(entry.idempotencyKey, entry.updatedAt);
-        continue;
       }
-      if (entry.state === "in-progress") {
+    for (const entry of interruptedEntries) {
         const payload = interruptedMutationPayload({
           idempotencyKey: entry.idempotencyKey,
           operationId: entry.operationId,
-          requested: entry.requested ?? {},
+        requested: entry.requested!,
         });
         this.mutationResults.set(entry.idempotencyKey, {
           signature: entry.signature,
@@ -2068,10 +2268,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           entry.idempotencyKey,
           new Date().toISOString(),
         );
-        interrupted = true;
-      }
     }
-    if (interrupted) this.queuePersistPluginData();
+    if (interruptedEntries.length > 0) this.queuePersistPluginData();
   }
 
   private mutationJournalEntries(): PersistedMutationJournalEntry[] {
@@ -2183,9 +2381,13 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   }
 
   private async persistPluginData(): Promise<void> {
+    const journalWasAbsent = this.mutationJournalState === "absent";
     await this.saveData({
       settings: this.settings,
-      mutationJournal: {
+      mutationJournal:
+        this.mutationJournalState === "unsafe"
+          ? this.unsafeMutationJournalRaw
+          : {
         version: MUTATION_JOURNAL_VERSION,
         retentionDays: 30,
         entries: this.mutationJournalEntries(),
@@ -2196,6 +2398,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         entries: this.taskWorkflowIdentityEntries(),
       },
     });
+    if (journalWasAbsent && this.mutationJournalState === "absent") {
+      this.mutationJournalState = "valid";
+    }
   }
 
   private queuePersistPluginData(): void {
@@ -2252,6 +2457,25 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       safeStringField(safeRecord(cached.payload), "status") === "not-ready" &&
       safeBooleanField(safeRecord(cached.payload), "mutationMayHaveApplied") ===
         false;
+    if (this.mutationJournalState === "unsafe") {
+      if (cached && !provenPreDispatch) {
+        return resolveMutationPreflight({
+          cached,
+          idempotencyKey,
+          signature,
+          requested,
+          validate,
+          operationId: () => this.mutationOperationId(),
+        });
+      }
+      return {
+        kind: "response" as const,
+        response: unsafeMutationJournalResponse(
+          idempotencyKey,
+          this.mutationOperationId(),
+        ),
+      };
+    }
     return resolveMutationPreflight({
       cached: provenPreDispatch ? undefined : cached,
       idempotencyKey,
@@ -2269,6 +2493,15 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     validate: () => string | null,
     failureScope?: MutationFailureScope,
   ) {
+    if (this.mutationJournalState === "unsafe") {
+      return {
+        kind: "response" as const,
+        response: unsafeMutationJournalResponse(
+          idempotencyKey,
+          this.mutationOperationId(),
+        ),
+      };
+    }
     const cached = this.mutationResults.get(idempotencyKey);
     // A prior receipt that proves no native mutation was dispatched is not a
     // terminal idempotency outcome. Keep it durable long enough to tell the
@@ -2429,6 +2662,15 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
   > {
     const { idempotencyKey, signature, requested, failureScope, prepare } =
       options;
+    if (this.mutationJournalState === "unsafe") {
+      return {
+        kind: "response",
+        response: unsafeMutationJournalResponse(
+          idempotencyKey,
+          this.mutationOperationId(),
+        ),
+      };
+    }
     const current = this.mutationPreflightFlights.get(idempotencyKey);
     if (current) {
       if (current.signature !== signature) {
@@ -4770,11 +5012,17 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           );
           sendJson(res, result.httpStatus, result.payload);
         } catch (error) {
-          sendJson(res, 400, errorPayload(error, "operon_relationships_error"));
+            sendJson(
+              res,
+              400,
+              errorPayload(error, "operon_relationships_error"),
+            );
         }
       });
 
-    api.addRoute(`${REST_PREFIX}/context`).post(async (req: any, res: any) => {
+      api
+        .addRoute(`${REST_PREFIX}/context`)
+        .post(async (req: any, res: any) => {
       try {
         const body = this.bodyRecord(req);
         const requested = pickDefined(body, [
@@ -4849,7 +5097,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         const body = this.bodyRecord(req);
         const failureScope: MutationFailureScope = {};
         try {
-          const result = await this.executeRecoveryMutation(body, failureScope);
+            const result = await this.executeRecoveryMutation(
+              body,
+              failureScope,
+            );
           await this.sendDurableMutationResponse(res, result);
         } catch (error) {
           await this.sendMutationFailure(
@@ -5234,7 +5485,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           const orderedTasks = nativeResult.operonIds
             .map((operonId) => taskById.get(operonId))
             .filter((task): task is OperonBridgeTask => Boolean(task));
-          const cursor = Math.max(0, Math.trunc(numberValue(body.cursor) ?? 0));
+            const cursor = Math.max(
+              0,
+              Math.trunc(numberValue(body.cursor) ?? 0),
+            );
           const limit = Math.min(
             500,
             Math.max(1, Math.trunc(numberValue(body.limit) ?? 100)),
@@ -5356,7 +5610,10 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             return;
           }
           body = snapshot.body;
-          const boundaryError = restDateScheduledBoundaryError("update", body);
+            const boundaryError = restDateScheduledBoundaryError(
+              "update",
+              body,
+            );
           if (boundaryError) {
             sendJson(
               res,
@@ -5569,7 +5826,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             ...(body.fileTemplateId
               ? { fileTemplateId: String(body.fileTemplateId) }
               : {}),
-            ...(body.targetPath ? { targetPath: String(body.targetPath) } : {}),
+              ...(body.targetPath
+                ? { targetPath: String(body.targetPath) }
+                : {}),
             ...(body.targetFolder
               ? { targetFolder: String(body.targetFolder) }
               : {}),
@@ -5626,7 +5885,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         }
       });
 
-    api.addRoute(`${REST_PREFIX}/validate`).get(async (req: any, res: any) => {
+      api
+        .addRoute(`${REST_PREFIX}/validate`)
+        .get(async (req: any, res: any) => {
       try {
         sendJson(
           res,
