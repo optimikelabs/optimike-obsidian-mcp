@@ -76,10 +76,11 @@
       "id": "replace-complete-note",
       "prompt": "Replace the complete contents with this final version using the safest durable path, but I have not identified which Markdown note. Ask for the note path before planning the replacement.",
       "recommendedProfile": "standard",
-      "expectedToolFamily": "note-replace",
+      "expectedToolFamily": "none",
       "clarificationExpectation": "required",
-      "acceptableFirstTools": ["obsidian_note_replace_plan"],
-      "minimumToolCalls": 2,
+      "expectNoTool": true,
+      "acceptableFirstTools": [],
+      "minimumToolCalls": 0,
       "forbiddenTools": ["obsidian_update_note"]
     },
     {
@@ -215,10 +216,11 @@
       "id": "operon-create",
       "prompt": "Create a new Operon task named Review launch, but I have not said which project should own it. Ask for the project before creating it.",
       "recommendedProfile": "tasks",
-      "expectedToolFamily": "operon",
+      "expectedToolFamily": "none",
       "clarificationExpectation": "before_mutation",
-      "acceptableFirstTools": ["operon_create_task"],
-      "minimumToolCalls": 2
+      "expectNoTool": true,
+      "acceptableFirstTools": [],
+      "minimumToolCalls": 0
     },
     {
       "id": "operon-transition",

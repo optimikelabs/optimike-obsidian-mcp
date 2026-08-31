@@ -61,7 +61,7 @@ function compactTool(tool) {
   };
 }
 
-function outputSchema(caseIds) {
+function outputSchema(caseIds, toolNames) {
   return {
     type: "object",
     additionalProperties: false,
@@ -77,7 +77,7 @@ function outputSchema(caseIds) {
           required: ["caseId", "toolName", "clarificationBeforeTool"],
           properties: {
             caseId: { type: "string", enum: caseIds },
-            toolName: { type: ["string", "null"] },
+            toolName: { enum: [null, ...toolNames] },
             clarificationBeforeTool: { type: "boolean" },
           },
         },
@@ -165,7 +165,16 @@ function runModel({ profile, tools, cases, model, reasoningEffort, tempRoot }) {
   const caseIds = cases.map((testCase) => testCase.id);
   const schemaPath = path.join(tempRoot, `${profile}-schema.json`);
   const outputPath = path.join(tempRoot, `${profile}-output.json`);
-  writeFileSync(schemaPath, JSON.stringify(outputSchema(caseIds)), "utf8");
+  writeFileSync(
+    schemaPath,
+    JSON.stringify(
+      outputSchema(
+        caseIds,
+        tools.map((tool) => tool.name),
+      ),
+    ),
+    "utf8",
+  );
   const invocation = codexInvocation();
   const result = spawnSync(
     invocation.command,
@@ -234,9 +243,15 @@ async function main() {
       schemaPath: "SCHEMA",
       outputPath: "OUTPUT",
     });
+    const schema = outputSchema(["read"], ["obsidian_read_note"]);
+    const toolNameEnum =
+      schema.properties.choices.items.properties.toolName.enum;
     if (
       !prompt.includes("obsidian_read_note") ||
       !prompt.includes("Read A.md") ||
+      !toolNameEnum.includes(null) ||
+      !toolNameEnum.includes("obsidian_read_note") ||
+      toolNameEnum.length !== 2 ||
       !codexEntrypointFromWindowsShim("C:\\npm\\codex.cmd").endsWith(
         path.join("@openai", "codex", "bin", "codex.js"),
       ) ||
