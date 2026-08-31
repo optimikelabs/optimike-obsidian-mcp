@@ -434,4 +434,46 @@ for (const canarySource of [
   );
 }
 
+const frenchReadme = await readFile(
+  path.join(projectRoot, "README.fr.md"),
+  "utf8",
+);
+assert.match(
+  frenchReadme,
+  /Optimike MCP `3\.8\.1` cible Operon officiel `3\.6\.1`/u,
+  "The French entrypoint must name the current MCP and Operon targets.",
+);
+
+const validationRunbook = await readFile(
+  path.join(projectRoot, "docs", "operon-local-validation.md"),
+  "utf8",
+);
+for (const required of [
+  "official Operon `3.6.1` reports",
+  "official Operon `3.6.1` exposes mutations",
+  "target, Operon `3.6.1`",
+  "Operon 3.6.1 grant reapproval gate (mandatory)",
+  "temporary `1.0.0`",
+  "`0.9.2` grant became active",
+  "stale source revisions",
+  "revoked authority",
+  "binding drift",
+]) {
+  assert.ok(
+    validationRunbook.includes(required),
+    `The Operon 3.6.1 runbook is missing ${required}.`,
+  );
+}
+
+const decisionReport = await readFile(
+  path.join(projectRoot, "docs", "operon-decision-report.md"),
+  "utf8",
+);
+assert.match(
+  decisionReport,
+  /Current authority: Optimike MCP `3\.8\.1` targets Operon `3\.6\.1`/u,
+);
+assert.match(decisionReport, /Historical 3\.2\.0 candidate admission/u);
+assert.match(decisionReport, /Bridge 0\.8\.3 was the historical 3\.2\.0 candidate/u);
+
 console.log("Operon 3.6 behavior canary contract tests passed.");

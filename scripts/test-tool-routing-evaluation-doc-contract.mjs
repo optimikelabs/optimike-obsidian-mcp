@@ -71,6 +71,13 @@ assert.match(
   /runner\.os == 'Windows'[\s\S]*npm run test:tool-routing:fast/u,
 );
 assert.match(p6Workflow, /timeout-minutes:\s*20/u);
+assert.match(p6Workflow, /push:[\s\S]*branches:\s*\[main\]/u);
+assert.match(p6Workflow, /pull_request:\s*\n/u);
+assert.doesNotMatch(
+  p6Workflow,
+  /pull_request:[\s\S]{0,80}paths:/u,
+  "The authoritative P6 scorer must not rely on an incomplete PR path allowlist",
+);
 
 const p4Workflow = fs.readFileSync(
   ".github/workflows/tool-surface-p4.yml",

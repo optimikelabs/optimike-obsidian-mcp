@@ -1,26 +1,12 @@
 name: P6 Tool Routing Evaluation
 
 on:
+  push:
+    branches: [main]
+  # Tool registration is distributed across the server and feature modules.
+  # Running on every PR avoids a fragile path allowlist that could silently
+  # omit the authoritative scorer after a new registration site is added.
   pull_request:
-    paths:
-      - ".github/workflows/p6-tool-routing-evaluation.yml"
-      - "src/mcp-server/toolSurfaceRegistry.ts"
-      - "src/mcp-server/toolProfiles.ts"
-      - "evals/**"
-      - "scripts/score-tool-routing-evals.mjs"
-      - "scripts/generate-tool-catalog.mjs"
-      - "scripts/measure-tool-profile-schemas.mjs"
-      - "scripts/run-codex-routing-selection-eval.mjs"
-      - "scripts/test-tool-catalog.mjs"
-      - "scripts/test-tool-profile-schema-measurement.mjs"
-      - "scripts/test-codex-routing-selection-eval.mjs"
-      - "scripts/test-tool-routing-eval-corpus.mjs"
-      - "scripts/test-tool-routing-scorer.mjs"
-      - "scripts/test-tool-routing-evaluation-doc-contract.mjs"
-      - "docs/tool-routing-evaluation-p6*.md"
-      - "docs/tool-surface-profiles*.md"
-      - "package.json"
-      - "package-lock.json"
   workflow_dispatch:
 
 permissions:
