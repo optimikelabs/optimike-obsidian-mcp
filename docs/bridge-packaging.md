@@ -1,6 +1,6 @@
 # Bridge bundle, upgrade and rollback
 
-Optimike MCP `3.6.0` ships one release bundle for the three Obsidian Bridges:
+Optimike MCP releases ship one verified bundle for the three Obsidian Bridges:
 
 - `optimike-operon-bridge`;
 - `obsidian-atomic-write-bridge`;
