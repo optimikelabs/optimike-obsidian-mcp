@@ -73,8 +73,10 @@ Une trace JSONL reproductible enregistre :
   surface `tools/list`.
 
 Le manifeste de run associé contient les schémas publics mesurés. Le scoring
-strict exige `EXPECTED_COMMIT`, vérifie le checkout courant, recalcule chaque
-mesure de surface et hash de fixture, valide le hash du fichier de traces et
+strict exige `EXPECTED_COMMIT`, vérifie le checkout courant, reconstruit
+indépendamment chaque surface live canonique de `tools/list` contre une fixture
+locale de statut authentifié, compare le hash complet des schémas, recalcule
+chaque hash de fixture, valide le hash du fichier de traces et
 recalcule le succès depuis les preuves déterministes de routage et de sûreté.
 Il exige aussi les quatre profils canoniques, tous les cas attribués à chaque
 profil ciblé, les 31 cas sur `full` et deux à cinq répétitions complètes.
@@ -116,6 +118,9 @@ connexion normale enregistrée par la CLI Codex, pas une clé API d'environnemen
 Le harness de sélection reconstruit `dist/` depuis le checkout propre attesté
 avant de mesurer `tools/list`, puis revérifie le commit et l'arbre suivi. Un
 ancien build ignoré ne peut donc jamais être attribué au SHA courant.
+Le scorer strict effectue ensuite sa propre reconstruction des schémas depuis
+le checkout : un manifeste auto-cohérent venu d'un autre build ne peut pas
+passer en ne modifiant que ses volumes et ses hashes déclarés.
 
 ## Règles du catalogue
 

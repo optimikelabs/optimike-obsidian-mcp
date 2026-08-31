@@ -61,8 +61,10 @@ result.
 Required v1 anchors are corpus ID/hash, Git SHA, harness/version, model/config,
 runtime mode, surface, run index, fixture hash, ordered events, success evidence,
 case-context hash, tool count, schema bytes, and the measured `tools/list` hash. Strict scoring also
-requires the harness-produced run manifest. The scorer recomputes its public
-surface measurements, verifies the trace-file hash and exact checkout SHA, and
+requires the harness-produced run manifest. The scorer independently rebuilds
+each canonical live `tools/list` surface from the exact checkout against a
+local authenticated status fixture, compares its full schema hash to the
+manifest, verifies the trace-file hash and exact checkout SHA, and
 recalculates success from deterministic evidence. A strict P6 manifest must
 contain exactly `standard`, `authoring`, `tasks`, and `full`; each focused
 surface covers every case assigned to it, `full` covers all 31 cases, and every

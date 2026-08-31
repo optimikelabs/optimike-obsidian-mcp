@@ -8,7 +8,10 @@ import {
   compileToolProfileNames,
   TOOL_PROFILE_IDS,
 } from "../dist/mcp-server/toolProfiles.js";
-import { measureToolsList } from "./measure-tool-profile-schemas.mjs";
+import {
+  measureCanonicalLiveProfileSchemas,
+  measureToolsList,
+} from "./measure-tool-profile-schemas.mjs";
 
 const TRACE_SCHEMA_VERSION = "tool-routing-trace/v1";
 const CORPUS_SCHEMA_VERSION = "tool-routing-corpus/v1";
@@ -125,7 +128,7 @@ function caseContextHashForCase(corpus, caseId) {
   );
 }
 
-function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
+async function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
   if (!manifestPath) return null;
   const manifestRaw = fs.readFileSync(manifestPath, "utf8");
   const manifest = JSON.parse(manifestRaw);
@@ -181,6 +184,12 @@ function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
       `manifest must contain exactly the canonical P6 profiles: ${requiredSurfaces.join(", ")}`,
     );
   }
+  const checkoutProfiles = new Map(
+    (await measureCanonicalLiveProfileSchemas()).map((profile) => [
+      profile.profile,
+      profile,
+    ]),
+  );
   const profiles = new Map();
   for (const profile of manifest.profiles) {
     requiredString(profile.surface, "manifest profile surface");
@@ -235,6 +244,17 @@ function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
     ) {
       throw new Error(
         `manifest surface ${profile.surface} does not match the checkout's compiled live profile`,
+      );
+    }
+    const checkoutProfile = checkoutProfiles.get(profile.surface);
+    if (
+      !checkoutProfile ||
+      checkoutProfile.toolCount !== measured.toolCount ||
+      checkoutProfile.toolSchemaBytes !== measured.toolSchemaBytes ||
+      checkoutProfile.toolsListSha256 !== measured.toolsListSha256
+    ) {
+      throw new Error(
+        `manifest surface ${profile.surface} does not match the exact checkout's canonical tools/list schemas`,
       );
     }
     if (
@@ -484,7 +504,7 @@ const lines = resultsRaw
   .map((line) => line.trim())
   .filter(Boolean);
 if (lines.length === 0) throw new Error("Routing eval results file is empty.");
-const runManifest = loadRunManifest(
+const runManifest = await loadRunManifest(
   manifestPath,
   corpus,
   resultsRaw,

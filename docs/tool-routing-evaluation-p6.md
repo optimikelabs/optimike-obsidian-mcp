@@ -69,8 +69,10 @@ A reproducible JSONL trace records:
 - actual `tools/list` count, schema bytes and canonical surface hash.
 
 The accompanying run manifest contains the measured public schemas. Strict
-scoring requires `EXPECTED_COMMIT`, verifies the current checkout, recomputes
-every surface measurement and fixture hash, validates the trace-file hash, and
+scoring requires `EXPECTED_COMMIT`, verifies the current checkout, independently
+reconstructs every canonical live `tools/list` surface against a local
+authenticated status fixture, compares the full schema hash, recomputes every
+fixture hash, validates the trace-file hash, and
 recalculates success from the deterministic routing and safety evidence. It
 also requires the four canonical profiles, every case assigned to each focused
 profile, all 31 cases on `full`, and two to five complete repetitions.
@@ -112,6 +114,9 @@ not rely on an environment API key for this harness.
 The selection harness rebuilds `dist/` from the attested clean checkout before
 measuring `tools/list`, then rechecks the commit and tracked working tree. A
 stale ignored build can therefore never be attributed to the current SHA.
+The strict scorer then performs an independent checkout-side schema
+reconstruction; a self-consistent manifest from another build cannot pass by
+changing only its declared counts and hashes.
 
 ## Catalogue rules
 

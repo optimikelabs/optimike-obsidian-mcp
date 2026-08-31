@@ -9,7 +9,10 @@ import {
   compileToolProfileNames,
   TOOL_PROFILE_IDS,
 } from "../dist/mcp-server/toolProfiles.js";
-import { measureToolsList } from "./measure-tool-profile-schemas.mjs";
+import {
+  measureCanonicalLiveProfileSchemas,
+  measureToolsList,
+} from "./measure-tool-profile-schemas.mjs";
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "optimike-routing-score-"));
 const corpusPath = path.join(
@@ -24,6 +27,12 @@ const expectedCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: process.cwd(),
   encoding: "utf8",
 }).trim();
+const checkoutProfiles = new Map(
+  (await measureCanonicalLiveProfileSchemas()).map((profile) => [
+    profile.profile,
+    profile,
+  ]),
+);
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -68,17 +77,15 @@ function caseContextHash(testCase) {
 }
 
 function publicToolsFor(surface) {
-  return compileToolProfileNames({
+  const expectedNames = compileToolProfileNames({
     profile: surface,
     registrationMode: "live",
     availableStaticRequirements: ["vault-cache"],
-  })
-    .sort((left, right) => left.localeCompare(right))
-    .map((name) => ({
-      name,
-      description: `Fixture schema for ${name}`,
-      inputSchema: { type: "object", properties: {} },
-    }));
+  }).sort((left, right) => left.localeCompare(right));
+  const profile = checkoutProfiles.get(surface);
+  assert.ok(profile, `missing checkout schema profile ${surface}`);
+  assert.deepEqual(profile.toolNames, expectedNames);
+  return structuredClone(profile.publicTools);
 }
 
 function buildCanonicalFixture() {
@@ -259,6 +266,36 @@ try {
     writeFixture("wrong-surface", wrongSurface),
     /compiled live profile/u,
     "P6 scoring must bind public names to the compiled checkout profile",
+  );
+
+  const wrongSchema = structuredClone(canonical);
+  const wrongSchemaProfile = wrongSchema.manifest.profiles.find(
+    (profile) => profile.surface === "standard",
+  );
+  wrongSchemaProfile.publicTools[0].description += " altered";
+  const wrongSchemaMeasurement = measureToolsList(
+    wrongSchemaProfile.publicTools,
+  );
+  wrongSchemaProfile.toolCount = wrongSchemaMeasurement.toolCount;
+  wrongSchemaProfile.schemaBytes = wrongSchemaMeasurement.toolSchemaBytes;
+  wrongSchemaProfile.toolsListSha256 = wrongSchemaMeasurement.toolsListSha256;
+  wrongSchemaProfile.fixtureHash = fixtureHash(
+    "standard",
+    wrongSchemaProfile.publicTools,
+    profileCases("standard"),
+  );
+  for (const trace of wrongSchema.traces.filter(
+    (trace) => trace.surface === "standard",
+  )) {
+    trace.fixtureHash = wrongSchemaProfile.fixtureHash;
+    trace.toolCount = wrongSchemaProfile.toolCount;
+    trace.schemaBytes = wrongSchemaProfile.schemaBytes;
+    trace.toolsListSha256 = wrongSchemaProfile.toolsListSha256;
+  }
+  expectScoreFailure(
+    writeFixture("wrong-schema", wrongSchema),
+    /canonical tools\/list schemas/u,
+    "P6 scoring must bind full public schemas to the exact checkout",
   );
 
   const falseSuccess = structuredClone(canonical);
