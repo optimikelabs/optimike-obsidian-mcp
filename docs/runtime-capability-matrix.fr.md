@@ -100,7 +100,7 @@ Tous les modes enregistrent aussi les 25 outils du contrat Operon :
 `operon_relocate_task`, `operon_list_pending_recoveries` et
 `operon_recover_mutation`. Hors mode live, ils restent limités aux snapshots
 validés en lecture seule ; toute mutation échoue fermée. L’enregistrement ne
-garantit pas la disponibilité runtime : Operon officiel `3.6.0` conserve
+garantit pas la disponibilité runtime : Operon officiel `3.6.1` conserve
 l’exécution des filtres, l’adoption et les workflows Daily/Weekly après leurs
 grants exacts. Une future version non refusée ne bascule pas en lecture seule
 uniquement parce que son numéro est inconnu : le Bridge n’admet chaque mutation
@@ -114,9 +114,11 @@ ont passé le pilote live dédié 3.2.0. Les limites bornées #99/#101 et #139
 restent ouvertes. Le renderer Settings manquant en 3.2.1 est suivi dans #145/#146.
 Operon `3.5.3` reste une preuve historique du déploiement de l’adoption et des
 workflows périodiques ; il n’est pas la cible candidate actuelle. Des runs
-Pilot 2 sur le worktree ont exercé Optimike MCP `3.2.0` avec Operon
-`3.6.0`, CLI `1.2.0`, Local REST API `5.1.0` et Bridge `0.8.3` ; l’admission de
-la release exige la même gate sur le SHA final propre.
+La gate Pilot 2 actuelle cible Optimike MCP `3.8.1` avec Operon `3.6.1`,
+CLI `1.2.0`, Local REST API `5.1.0` et Bridge `0.9.2` ; l’admission de
+la release exige le SHA final propre. Un grant suspendu récupérable peut être
+réapprouvé explicitement dans les réglages Operon ; un binding périmé, révoqué
+ou ayant dérivé reste bloqué.
 Les applies périodiques de ces runs sur le worktree sont uniquement des preuves
 historiques/diagnostiques. La canary sur le SHA exact effectue la prévisualisation
 périodique et la négociation du grant exact, puis saute les applies périodiques

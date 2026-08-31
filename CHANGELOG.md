@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.1] - 2026-08-31
+
 ### Changed
 
 - Strict P6 rescoring now keeps `verifierSha` distinct from the historical
@@ -14,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binds the report to the original evidence plus rebuilt artifact and public
   surface hashes. Optional release-candidate parity refuses inherited P6
   evidence when any `tools/list` surface changes.
+- The provisional live target is now official Operon `3.6.1` with Operon CLI
+  `1.2.0`, Local REST API `5.1.0`, and Bridge `0.9.2`. The Developer API V1
+  boundary is unchanged; Pilot 2 additionally verifies the repaired explicit
+  reapproval path for recoverably suspended grants.
 
 ### Security
 

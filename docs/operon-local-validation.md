@@ -7,8 +7,8 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.7.5`
 - Obsidian Desktop
 - Local REST API enabled
-- Optimike MCP `3.2.0`, targeting Operon `3.6.0`, Operon CLI `1.2.0` and Local REST API `5.1.0` behind the exact-SHA release gate below; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
-- Optimike Operon Bridge `0.8.3`
+- Optimike MCP `3.8.1`, targeting Operon `3.6.1`, Operon CLI `1.2.0` and Local REST API `5.1.0` behind the exact-SHA release gate below; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Optimike Operon Bridge `0.9.2`
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
 - a backup or disposable vault
@@ -131,7 +131,7 @@ PASS when:
 - index generation is greater than zero;
 - diagnostics report `health=healthy`, `runtimePhase=idle`,
   `verifiedThisSession=true`, and `dirtySourceCount=0`;
-- official Operon `3.6.0` reports the exact Developer API V1 and additive
+- official Operon `3.6.1` reports the exact Developer API V1 and additive
   task-workflow grants; the Bridge advertises only the mutation capabilities
   that the live runtime proves and bounds uncertain applies without a blind
   retry;
@@ -245,7 +245,7 @@ operon_recover_mutation
 PASS when:
 
 - all twenty-five tools are registered;
-- official Operon `3.6.0` exposes mutations after Developer API V1 negotiation,
+- official Operon `3.6.1` exposes mutations after Developer API V1 negotiation,
   exact grants, valid response schemas, live health, a settled index, write
   policy and recovery checks; a missing or malformed gate returns a structured
   unavailable result without a Markdown fallback;
@@ -280,9 +280,9 @@ $env:OBSIDIAN_VAULT = "<exact disposable Pilot 2 path required by the script>"
 $env:OBSIDIAN_BASE_URL = "http://127.0.0.1:27233"
 $env:OBSIDIAN_API_KEY = "<Pilot 2 Local REST API key>"
 $env:OPERON_MUTATIONS_ENABLED = "true"
-$env:OPERON_35_CANARY_EXPECTED_OPERON_VERSION = "3.6.0"
-$env:OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION = "0.8.3"
-$env:OPERON_35_CANARY_EXPECTED_MCP_VERSION = "3.2.0"
+$env:OPERON_35_CANARY_EXPECTED_OPERON_VERSION = "3.6.1"
+$env:OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION = "0.9.2"
+$env:OPERON_35_CANARY_EXPECTED_MCP_VERSION = "3.8.1"
 $env:OPERON_35_CANARY_RELEASE_CANDIDATE = "true"
 $env:OPERON_35_CANARY_CONFIRM = "I_CONFIRM_PILOT_2_DISPOSABLE_LIVE_MUTATIONS"
 $env:OPERON_35_CANARY_OPEN_VAULT = "true"
@@ -297,11 +297,37 @@ If `obsidian` is not on `PATH`, set
 `OPERON_35_CANARY_OBSIDIAN_CLI` to its exact executable or launcher first. The
 historical script name remains stable; it validates the negotiated contract, not
 a product-version allowlist. Its default expected runtime is the current live
-target, Operon `3.6.0`; set the explicit variable above so copied acceptance
+target, Operon `3.6.1`; set the explicit variable above so copied acceptance
 recipes remain self-describing. To
 test an already-open Pilot 2 instead, remove the two `OPEN_VAULT` variables and
 set `OPERON_35_CANARY_CONFIRM_PILOT_ALREADY_OPEN=true`; that mode does not prove
 the startup-order contract.
+
+### Operon 3.6.1 grant reapproval gate (mandatory)
+
+The automated behavior canary does not click Operon's Settings UI. Before
+admitting `3.6.1`, the disposable Pilot 2 vault must therefore record this
+operator-gated check:
+
+1. start from an active Bridge `0.9.2` grant and record its consumer version,
+   approved major, revision, exact grants and pending-request count;
+2. load a test Bridge with a different consumer major so Operon suspends the
+   otherwise coherent grant; prove that a mutation remains unavailable and that
+   no effect occurred;
+3. in **Developer API integrations**, approve the exact pending selection and
+   prove that the grant becomes active only for that binding;
+4. restore the release Bridge `0.9.2`, repeat the explicit approval, and verify
+   `read-write`, zero pending requests, a ready index and zero pending
+   recoveries;
+5. retain the automated negative contracts that reject stale source revisions,
+   revoked authority and binding drift. Reapproval of a coherently suspended
+   grant must never broaden those fail-closed cases.
+
+The 2026-08-31 Pilot 2 release gate passed this sequence: the temporary `1.0.0`
+Bridge grant became active only after explicit approval, then the restored
+`0.9.2` grant became active only after a second explicit approval. The final
+runtime reported Operon `3.6.1`, Bridge `0.9.2`, `read-write`, 30 exact grants,
+zero pending requests, a ready index and zero pending recoveries.
 
 The script refuses to start unless all of these gates hold:
 

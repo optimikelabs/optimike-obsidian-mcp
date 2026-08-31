@@ -202,6 +202,15 @@ function score({
   forcePathNpm = false,
   forceProductionInstall = false,
 }) {
+  const scoreLabel = [
+    path.basename(tracesPath),
+    forcePathNpm ? "path-npm" : null,
+    forceProductionInstall ? "production-env" : null,
+  ]
+    .filter(Boolean)
+    .join(":");
+  const scoreStartedAt = Date.now();
+  console.log(`[routing-scorer] start ${scoreLabel}`);
   const args = ["scripts/score-tool-routing-evals.mjs", tracesPath];
   if (manifestPath) args.push(corpusInputPath, manifestPath);
   const scorerEnv = {
@@ -214,14 +223,20 @@ function score({
     scorerEnv.NODE_ENV = "production";
     scorerEnv.npm_config_omit = "dev";
   }
-  return JSON.parse(
-    execFileSync(process.execPath, args, {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: scorerEnv,
-      stdio: ["ignore", "pipe", "pipe"],
-    }),
-  );
+  try {
+    return JSON.parse(
+      execFileSync(process.execPath, args, {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: scorerEnv,
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+  } finally {
+    console.log(
+      `[routing-scorer] finish ${scoreLabel} (${Date.now() - scoreStartedAt} ms)`,
+    );
+  }
 }
 
 function expectScoreFailure(paths, pattern, message) {

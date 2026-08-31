@@ -16,7 +16,17 @@ const bridgeBuilds = [
   read("plugins/obsidian-bases-bridge/esbuild.config.mjs"),
 ];
 
-assert.equal(rootPackage.version, "3.8.0");
+assert.equal(rootPackage.version, "3.8.1");
+assert.match(
+  english,
+  /Optimike MCP releases ship one verified bundle/,
+  "the packaging guide must describe the version-independent release contract",
+);
+assert.match(
+  french,
+  /Les releases Optimike MCP livrent un bundle vérifié unique/,
+  "the French packaging guide must describe the same durable release contract",
+);
 for (const script of [
   "build:bridge-bundle",
   "archive:bridge-bundle",

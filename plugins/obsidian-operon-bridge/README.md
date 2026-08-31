@@ -16,7 +16,7 @@ If both plugins are enabled, the Bridge refuses to choose an owner. Disable one 
 - Obsidian Desktop
 - Operon `2.4.0` or `2.5.0` for legacy reads
 - Operon exposing the negotiated Developer API V1 contract (`contractVersion: 1`, `runtimeApi: 1`)
-- certified Developer API releases: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`; later non-denied releases such as the current live target Operon `3.6.0` are admitted provisionally through the same negotiated Developer API V1 contract
+- certified Developer API releases: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`; later non-denied releases such as the current live target Operon `3.6.1` are admitted provisionally through the same negotiated Developer API V1 contract
 - Kairélys `2.5.1` through `2.5.3` (based on Operon `2.5.0`) and Kairélys `2.6.1` through `2.6.3`
   (based on Operon `2.6.0`) with Public API v1 for mutations
 - Obsidian Local REST API
@@ -38,7 +38,7 @@ remain fail-closed; the Bridge never retries blindly or falls back to
 Markdown/private APIs.
 
 Bridge `0.9.2` supports the separate task-workflow Developer API sessions
-introduced by Operon `3.5.3` and retained by the current `3.6.0` target.
+introduced by Operon `3.5.3` and retained by the current `3.6.1` target.
 Adoption, daily/weekly periodic-note
 creation, and periodic-note-aware updates each negotiate their own exact grant
 on first use, even when the last status snapshot reported the capability cold;
@@ -51,7 +51,7 @@ workflow kind. The Bridge converts its public one-based adoption line to the
 official zero-based locator exactly once. `taskType` and `taskImage` remain
 scalars, while `taskGallery` crosses the Bridge as an ordered `string[]`; the
 Bridge never guesses media boundaries by splitting a string. Operon `3.5.3`
-remains historical rollout evidence, while the current `3.6.0` target reports
+remains historical rollout evidence, while the current `3.6.1` target reports
 `compatible-provisional` because certification metadata remains explicit; product-
 version membership is not a second mutation gate. A
 non-denied future release remains writable only after the exact negotiated

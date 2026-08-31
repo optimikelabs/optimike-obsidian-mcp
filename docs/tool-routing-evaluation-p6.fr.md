@@ -175,9 +175,18 @@ remplaçant prouvé dans chaque runtime où l'ancien outil reste nécessaire.
 
 ## Vérification
 
+La CI possède une seule autorité pour la preuve coûteuse : le job P6 Linux
+effectue l'unique reconstruction hermétique dans un checkout propre. Windows et
+les workflows généraux Runtime/P4 exécutent `test:tool-routing:fast`, qui
+préserve les contrats multiplateformes du corpus, du catalogue, des schémas, de
+la sélection et du routage sans réinstaller et reconstruire le même candidat
+pour chaque fixture hostile. Des timeouts explicites empêchent un processus
+enfant silencieux de consommer un runner pendant plusieurs heures.
+
 ```bash
 npm run build
 npm run test:tool-routing
+npm run test:tool-routing:fast
 npm run test:profiles
 npm run test:docs
 ```

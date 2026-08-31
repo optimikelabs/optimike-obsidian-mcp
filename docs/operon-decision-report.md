@@ -1,10 +1,15 @@
 # Operon integration decision report
 
-## 3.2.0 candidate admission — 2026-08-30
+Current authority: Optimike MCP `3.8.1` targets Operon `3.6.1`, Bridge `0.9.2`
+and Operon CLI `1.2.0`, subject to the exact-SHA release gate. The material below
+records earlier admissions and remains historical evidence rather than the
+current release decision.
+
+## Historical 3.2.0 candidate admission — 2026-08-30
 
 The Optimike MCP `3.2.0` candidate and Bridge `0.8.3` target official Operon
-`3.6.0`, Operon CLI `1.2.0` and Local REST API `5.1.0`. This is not yet a
-published Optimike MCP release, and only an exact-SHA Pilot 2 run after a clean
+`3.6.0`, Operon CLI `1.2.0` and Local REST API `5.1.0`. At that time this was not
+yet a published Optimike MCP release, and only an exact-SHA Pilot 2 run after a clean
 rebuild is release evidence. The candidate preserves ordered `taskGallery` values,
 keeps `taskType` and `taskImage` scalar, rejects writes to `__taskDataType`, and
 adds two bounded Daily/Weekly operations. Official adoption and periodic
@@ -167,7 +172,7 @@ claim.
 
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
 remain historical. The `3.5.3` / Bridge `0.8.2` evidence is historical;
-Optimike MCP `3.2.0` targets Operon `3.6.0`, Bridge `0.8.3` and CLI `1.2.0`,
+Optimike MCP `3.8.1` targets Operon `3.6.1`, Bridge `0.9.2` and CLI `1.2.0`,
 subject to its exact-SHA release gate.
 
 ## Deliberately excluded or unavailable
@@ -194,7 +199,7 @@ The 3.1.1 implementation is released from merge commit
 Pilot 2 canary with exact fixture and inventory restoration, zero validation
 violations, zero pending recoveries and zero retained periodic artifacts while
 adding cold first-use negotiation for the exact additive workflow grant.
-Bridge 0.8.3 is the current 3.2.0 candidate and preserves those gates while
+Bridge 0.8.3 was the historical 3.2.0 candidate and preserved those gates while
 hardening public failure and replay semantics. The
 separate real
 Sync/non-dependency decision remains outside this integration scope.

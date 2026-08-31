@@ -2,13 +2,13 @@
 
 - Status: accepted and implemented on `main`
 - Date: 2026-07-21
-- Amended: 2026-08-30
+- Amended: 2026-08-31
 - MCP baseline: `optimikelabs/optimike-obsidian-mcp@77322f84903fddfdc1bb056981b997a96bdeebca`
-- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and Optimike MCP `3.2.0` targeting provisional official `3.6.0` / CLI `1.2.0` / Local REST API `5.1.0` behind an exact-SHA Pilot 2 release gate
+- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and Optimike MCP `3.8.1` targeting provisional official `3.6.1` / CLI `1.2.0` / Local REST API `5.1.0` behind an exact-SHA Pilot 2 release gate
 
 ## Problem
 
-Operon unifies inline and file tasks around stable identity and one domain model. Official Operon `3.6.0` retains Developer API V1 plus additive saved-filter, adoption and Daily/Weekly task workflows; its public contract directory did not drift from `3.5.3`. Agent writes must still preserve workflow normalization, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, conversions, ordered task media and index/view reconciliation. Direct Markdown edits or direct `TaskWriter` calls do not satisfy that contract.
+Operon unifies inline and file tasks around stable identity and one domain model. Official Operon `3.6.1` retains Developer API V1 plus additive saved-filter, adoption and Daily/Weekly task workflows; its public contract directory did not drift from the validated `3.6.0` boundary. It restores explicit, binding-checked reapproval for recoverably suspended grants while revoked or stale authority remains fail-closed. Agent writes must still preserve workflow normalization, dependencies, recurrence, aggregates, project serials, archiving, auto-unpin, conversions, ordered task media and index/view reconciliation. Direct Markdown edits or direct `TaskWriter` calls do not satisfy that contract.
 
 ## Decision
 
@@ -91,7 +91,7 @@ metadata-only and exposes no pre-apply task-source path
 (`public_task_source_projection_unavailable`). The tools remain available; this
 is a destructive-canary containment/certification boundary, not full periodic
 certification. Upstream public path projection is a nonblocking follow-up. The
-release still requires the same gate on the clean final SHA. `3.6.0` remains provisional by explicit certification metadata,
+release still requires the same gate on the clean final SHA. `3.6.1` remains provisional by explicit certification metadata,
 not because mutations are allowed by product-version allowlist.
 
 Operon `3.6.0` also changes observable product behavior outside the API

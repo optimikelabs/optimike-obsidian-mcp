@@ -1,6 +1,6 @@
 # Bundle des Bridges, mise à niveau et rollback
 
-Optimike MCP `3.6.0` livre un bundle unique pour les trois Bridges Obsidian :
+Les releases Optimike MCP livrent un bundle vérifié unique pour les trois Bridges Obsidian :
 
 - `optimike-operon-bridge` ;
 - `obsidian-atomic-write-bridge` ;

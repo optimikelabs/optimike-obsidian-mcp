@@ -171,9 +171,17 @@ every runtime where the old tool remains necessary.
 
 ## Verification
 
+CI has one owner for the expensive proof: the P6 Linux job performs the single
+hermetic clean-checkout rebuild. Windows and the general Runtime/P4 workflows
+run `test:tool-routing:fast`, which preserves the cross-platform corpus,
+catalog, schema, selection and routing contracts without reinstalling and
+rebuilding the same candidate for every hostile fixture. Explicit job timeouts
+prevent a silent child process from consuming a runner for hours.
+
 ```bash
 npm run build
 npm run test:tool-routing
+npm run test:tool-routing:fast
 npm run test:profiles
 npm run test:docs
 ```

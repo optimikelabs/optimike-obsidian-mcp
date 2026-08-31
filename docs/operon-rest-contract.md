@@ -2,7 +2,7 @@
 
 ## Scope
 
-The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with later non-denied releases such as `3.6.0` when the Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use official opaque preview/apply/recovery plans; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
+The Bridge projects the active Operon-compatible engine's live index through Obsidian Local REST API. Reads work with official Operon `2.4.0` and `2.5.0`, with certified official Operon `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`, and provisionally with later non-denied releases such as `3.6.1` when the Developer API V1 accessor is present. Kairélys legacy support remains bounded to the documented allowlist. Developer API mutations use official opaque preview/apply/recovery plans; legacy Kairélys mutations use Public API v1. There is no raw Markdown or private-reflection fallback.
 
 Prefix:
 
@@ -15,7 +15,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 ## Compatibility and capabilities
 
 - Bridge contract: `1`
-- Certified compatibility through official Operon `3.2.1`; completed provisional live pilot: `3.3.2` with CLI `1.1.2`; Optimike MCP `3.2.0` target behind an exact-SHA Pilot 2 release gate: Operon `3.6.0`, CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.8.3`
+- Certified compatibility through official Operon `3.2.1`; completed provisional live pilot: `3.3.2` with CLI `1.1.2`; Optimike MCP `3.8.1` target behind an exact-SHA Pilot 2 release gate: Operon `3.6.1`, CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.9.2`
 - Official Operon legacy read allowlist: `2.4.0`, `2.5.0`
 - Official Operon Developer API V1 allowlist: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, `3.2.1`
 - Kairélys read allowlist: `2.5.1`, `2.5.2`, `2.5.3`, `2.6.1`, `2.6.2`, `2.6.3`
@@ -26,7 +26,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 
 `GET /status` reports `bridge.mode` as `read-only` or `read-write` and exposes each capability independently. A future non-denied Operon version is admitted provisionally when its Developer API V1 accessor is present; Markdown similarity is irrelevant. Reads and new writes remain independently gated by successful negotiation, `developerApi`, top-level `ok`, `index.ready`, and the exact advertised capability. Recovery is the deliberate exception: `GET /recovery-status` negotiates only exact core and task-workflow recovery sessions without awaiting health, catalog or task-index reads, allowing same-plan recovery when those surfaces are degraded or hung.
 
-The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The `3.5.3` / CLI `1.2.0` integration historically added official adoption, periodic-note routing and typed task media fields; Bridge `0.8.2` also negotiated the exact additive workflow grant on first use when the cached capability was cold. Working-tree Pilot 2 runs exercised Optimike MCP `3.2.0`, Bridge `0.8.3`, Operon `3.6.0` and Local REST API `5.1.0`; release admission still requires the same gate on the clean final SHA. The Developer API V1 contract did not drift. Product-version certification remains explicit, but valid mutations are admitted by negotiated contract, exact capabilities, schemas, live health, settled index and recovery support rather than a second version allowlist. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
+The adapter certifies official `3.2.1` and provisionally admits later non-denied V1 releases. The complete `3.3.2` live acceptance remains historical green evidence with Bridge `0.7.0` and CLI `1.1.2`. The `3.5.3` / CLI `1.2.0` integration historically added official adoption, periodic-note routing and typed task media fields; Bridge `0.8.2` also negotiated the exact additive workflow grant on first use when the cached capability was cold. The current Pilot 2 target is Optimike MCP `3.8.1`, Bridge `0.9.2`, Operon `3.6.1` and Local REST API `5.1.0`. The Developer API V1 contract did not drift from `3.6.0`; `3.6.1` repairs explicit reapproval of recoverably suspended grants without admitting stale or revoked authority. Product-version certification remains explicit, but valid mutations are admitted by negotiated contract, exact capabilities, schemas, live health, settled index and recovery support rather than a second version allowlist. Task Type and Task Image are scalar, Task Gallery is an ordered array and `__taskDataType` is read-only. No Markdown or private-API fallback is introduced.
 
 Periodic applies observed in working-tree Pilot 2 runs are historical/diagnostic
 evidence only. For official Operon `3.6.0`, the public Task Workflow plan is
