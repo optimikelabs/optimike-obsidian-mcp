@@ -199,18 +199,21 @@ function score({
   manifestPath,
   corpusInputPath = corpusPath,
   expectedCandidateCommit = expectedCommit,
+  forcePathNpm = false,
 }) {
   const args = ["scripts/score-tool-routing-evals.mjs", tracesPath];
   if (manifestPath) args.push(corpusInputPath, manifestPath);
+  const scorerEnv = {
+    ...process.env,
+    EXPECTED_CANDIDATE_COMMIT: expectedCandidateCommit,
+    P6_INTERNAL_CANDIDATE_CHECKOUT: candidateCheckout,
+  };
+  if (forcePathNpm) delete scorerEnv.npm_execpath;
   return JSON.parse(
     execFileSync(process.execPath, args, {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: {
-        ...process.env,
-        EXPECTED_CANDIDATE_COMMIT: expectedCandidateCommit,
-        P6_INTERNAL_CANDIDATE_CHECKOUT: candidateCheckout,
-      },
+      env: scorerEnv,
       stdio: ["ignore", "pipe", "pipe"],
     }),
   );
@@ -276,6 +279,13 @@ try {
   assert.equal(report.summaries.length, 4);
   assert.ok(report.summaries.every((summary) => summary.successRate === 1));
   assert.ok(report.summaries.every((summary) => summary.safetyPassRate === 1));
+
+  const pathNpmReport = score({ ...canonicalPaths, forcePathNpm: true });
+  assert.deepEqual(
+    pathNpmReport.authority.candidateArtifactHashes,
+    report.authority.candidateArtifactHashes,
+    "direct scorer runs must resolve npm from PATH when npm_execpath is absent",
+  );
 
   const gitBlobEvidence = structuredClone(canonical);
   const gitBlobCorpusHash = sha256(corpusGitRaw);

@@ -81,31 +81,38 @@ function assertCleanCheckout(checkout, expectedSha, label) {
   if (dirty) throw new Error(`${label} must be clean before candidate build`);
 }
 
-function npmCliPath() {
-  const nodeDirectory = path.dirname(process.execPath);
-  return (
-    process.env.npm_execpath?.trim() ||
-    (process.platform === "win32"
-      ? path.join(nodeDirectory, "node_modules", "npm", "bin", "npm-cli.js")
-      : path.resolve(
-          nodeDirectory,
-          "..",
-          "lib",
-          "node_modules",
-          "npm",
-          "bin",
-          "npm-cli.js",
-        ))
-  );
+function npmInvocation(args) {
+  const npmExecPath = process.env.npm_execpath?.trim();
+  if (npmExecPath) {
+    return {
+      command: process.execPath,
+      args: [npmExecPath, ...args],
+      shell: false,
+    };
+  }
+  if (process.platform === "win32") {
+    return {
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", "npm.cmd", ...args],
+      shell: false,
+    };
+  }
+  return {
+    command: "npm",
+    args,
+    shell: false,
+  };
 }
 
 function runCandidateCommand(checkout, args, label) {
+  const invocation = npmInvocation(args);
   try {
-    execFileSync(process.execPath, [npmCliPath(), ...args], {
+    execFileSync(invocation.command, invocation.args, {
       cwd: checkout,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
+      shell: invocation.shell,
     });
   } catch (error) {
     const detail = String(error.stderr ?? error.stdout ?? error.message)
