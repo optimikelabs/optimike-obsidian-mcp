@@ -139,13 +139,15 @@ async function main() {
     }
   }
 
-  const privateRoot = mkdtempSync(
-    path.join(os.tmpdir(), "optimike-p6-tool-schemas-"),
-  );
   const logsParent = path.join(process.cwd(), "logs", "p6-tool-schemas");
-  mkdirSync(logsParent, { recursive: true });
-  const logsRoot = mkdtempSync(path.join(logsParent, "run-"));
+  let privateRoot;
+  let logsRoot;
   try {
+    privateRoot = mkdtempSync(
+      path.join(os.tmpdir(), "optimike-p6-tool-schemas-"),
+    );
+    mkdirSync(logsParent, { recursive: true });
+    logsRoot = mkdtempSync(path.join(logsParent, "run-"));
     const profiles = [];
     for (const profile of PROFILE_IDS) {
       profiles.push(await listProfile(profile, privateRoot, logsRoot));
@@ -164,7 +166,8 @@ async function main() {
       )}\n`,
     );
   } finally {
-    rmSync(logsRoot, { recursive: true, force: true });
+    if (logsRoot) rmSync(logsRoot, { recursive: true, force: true });
+    if (privateRoot) rmSync(privateRoot, { recursive: true, force: true });
     try {
       rmdirSync(logsParent);
     } catch (error) {
@@ -173,7 +176,6 @@ async function main() {
       }
       // Another concurrent measurement may still own a sibling run directory.
     }
-    rmSync(privateRoot, { recursive: true, force: true });
   }
 }
 

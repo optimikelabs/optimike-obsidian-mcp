@@ -74,6 +74,8 @@ Le manifeste de run associé contient les schémas publics mesurés. Le scoring
 strict exige `EXPECTED_COMMIT`, vérifie le checkout courant, recalcule chaque
 mesure de surface et hash de fixture, valide le hash du fichier de traces et
 recalcule le succès depuis les preuves déterministes de routage et de sûreté.
+Il exige aussi les quatre profils canoniques, tous les cas attribués à chaque
+profil ciblé, les 31 cas sur `full` et deux à cinq répétitions complètes.
 
 Une donnée absente vaut `N/A` ; l'absence de cas de clarification ne produit
 jamais artificiellement une exactitude de 100 %.

@@ -69,7 +69,9 @@ A reproducible JSONL trace records:
 The accompanying run manifest contains the measured public schemas. Strict
 scoring requires `EXPECTED_COMMIT`, verifies the current checkout, recomputes
 every surface measurement and fixture hash, validates the trace-file hash, and
-recalculates success from the deterministic routing and safety evidence.
+recalculates success from the deterministic routing and safety evidence. It
+also requires the four canonical profiles, every case assigned to each focused
+profile, all 31 cases on `full`, and two to five complete repetitions.
 
 Missing data is reported as `N/A`; an absent clarification case is never
 reported as 100% clarification accuracy.

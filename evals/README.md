@@ -62,9 +62,12 @@ runtime mode, surface, run index, fixture hash, ordered events, success evidence
 tool count, schema bytes, and the measured `tools/list` hash. Strict scoring also
 requires the harness-produced run manifest. The scorer recomputes its public
 surface measurements, verifies the trace-file hash and exact checkout SHA, and
-recalculates success from deterministic evidence. Latency, token counts and cost
-are optional. When an optional measure is absent, the scorer emits literal
-`"N/A"`, never synthetic zero.
+recalculates success from deterministic evidence. A strict P6 manifest must
+contain exactly `standard`, `authoring`, `tasks`, and `full`; each focused
+surface covers every case assigned to it, `full` covers all 31 cases, and every
+surface has two to five complete repetitions. Latency, token counts and cost are
+optional. When an optional measure is absent, the scorer emits literal `"N/A"`,
+never synthetic zero.
 
 `events` are deliberately minimal: no prompts, private arguments, model reasoning,
 vault content, or credentials. A `clarification` event records a user-facing

@@ -4,6 +4,10 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { getToolSurfaceEntry } from "../dist/mcp-server/toolSurfaceRegistry.js";
+import {
+  compileToolProfileNames,
+  TOOL_PROFILE_IDS,
+} from "../dist/mcp-server/toolProfiles.js";
 import { measureToolsList } from "./measure-tool-profile-schemas.mjs";
 
 const TRACE_SCHEMA_VERSION = "tool-routing-trace/v1";
@@ -145,12 +149,22 @@ function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
   }
   if (
     !Number.isInteger(manifest.runsPerSurface) ||
-    manifest.runsPerSurface < 1
+    manifest.runsPerSurface < 2 ||
+    manifest.runsPerSurface > 5
   ) {
-    throw new Error("manifest runsPerSurface must be a positive integer");
+    throw new Error("manifest runsPerSurface must be an integer from 2 to 5");
   }
   if (!Array.isArray(manifest.profiles) || manifest.profiles.length === 0) {
     throw new Error("manifest profiles must be a non-empty array");
+  }
+  const declaredSurfaces = manifest.profiles
+    .map((profile) => profile.surface)
+    .sort();
+  const requiredSurfaces = [...TOOL_PROFILE_IDS].sort();
+  if (JSON.stringify(declaredSurfaces) !== JSON.stringify(requiredSurfaces)) {
+    throw new Error(
+      `manifest must contain exactly the canonical P6 profiles: ${requiredSurfaces.join(", ")}`,
+    );
   }
   const profiles = new Map();
   for (const profile of manifest.profiles) {
@@ -183,7 +197,31 @@ function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
         `manifest surface ${profile.surface} references unknown case ${unknownCaseId}`,
       );
     }
+    const expectedCaseIds = corpus.cases
+      .filter(
+        (testCase) =>
+          profile.surface === "full" ||
+          testCase.recommendedProfile === profile.surface,
+      )
+      .map((testCase) => testCase.id);
+    if (JSON.stringify(profile.caseIds) !== JSON.stringify(expectedCaseIds)) {
+      throw new Error(
+        `manifest surface ${profile.surface} does not contain its complete canonical case set`,
+      );
+    }
     const measured = measureToolsList(profile.publicTools);
+    const expectedToolNames = compileToolProfileNames({
+      profile: profile.surface,
+      registrationMode: "live",
+      availableStaticRequirements: ["vault-cache"],
+    }).sort((left, right) => left.localeCompare(right));
+    if (
+      JSON.stringify(measured.toolNames) !== JSON.stringify(expectedToolNames)
+    ) {
+      throw new Error(
+        `manifest surface ${profile.surface} does not match the checkout's compiled live profile`,
+      );
+    }
     if (
       profile.toolCount !== measured.toolCount ||
       profile.schemaBytes !== measured.toolSchemaBytes ||
