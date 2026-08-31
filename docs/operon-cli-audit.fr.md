@@ -2,14 +2,15 @@
 
 English version: [operon-cli-audit.md](operon-cli-audit.md)
 
-Mise à jour : 2026-08-30
+Mise à jour : 2026-08-31
 
-Cible candidate : Optimike MCP `3.2.0` utilise le Bridge `0.8.3` avec Operon
-officiel `3.6.0`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1
-et API task-workflow additive. Des runs Pilot 2 sur le worktree ont exercé cette
-stack ; l’admission de la release exige encore la même gate sur le SHA final
-propre. Le contrat public Developer API V1 n’a pas dérivé entre Operon
-`3.5.3` et `3.6.0`. `compatible-provisional` décrit le niveau de certification,
+Cible candidate : Optimike MCP `3.8.1` utilise le Bridge `0.9.2` avec Operon
+officiel `3.6.1`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1
+et API task-workflow additive. L’admission Pilot 2 reste liée au SHA final
+propre. Le contrat public Developer API V1 n’a pas dérivé depuis la frontière
+validée en `3.6.0`. Operon `3.6.1` restaure aussi la réapprobation explicite,
+dans les réglages, d’un grant suspendu cohérent ; une tentative périmée,
+révoquée ou dont le binding a dérivé reste bloquée. `compatible-provisional` décrit le niveau de certification,
 pas une allowlist de mutation : l’admission dépend du contrat et des capacités
 live exactes. Les workflows additifs négocient leur grant exact au premier usage
 après un démarrage à froid ; un grant absent, refusé ou malformé échoue toujours

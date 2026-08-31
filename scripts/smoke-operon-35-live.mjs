@@ -32,13 +32,13 @@ const EXPECTED_VAULT = path.resolve(
 );
 const EXPECTED_VAULT_NAME = "operon-bridge-pilot-vault-2.5.0";
 const EXPECTED_OPERON_VERSION = (
-  process.env.OPERON_35_CANARY_EXPECTED_OPERON_VERSION ?? "3.6.0"
+  process.env.OPERON_35_CANARY_EXPECTED_OPERON_VERSION ?? "3.6.1"
 ).trim();
 const EXPECTED_BRIDGE_VERSION = (
-  process.env.OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.8.3"
+  process.env.OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.9.2"
 ).trim();
 const EXPECTED_MCP_VERSION = (
-  process.env.OPERON_35_CANARY_EXPECTED_MCP_VERSION ?? "3.2.0"
+  process.env.OPERON_35_CANARY_EXPECTED_MCP_VERSION ?? "3.8.1"
 ).trim();
 const EXPECTED_BASE_URL = "http://127.0.0.1:27233";
 const FIXTURE_PATH = "Canary/Operon-3.5-Live-Canary.md";

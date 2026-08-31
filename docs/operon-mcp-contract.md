@@ -207,11 +207,11 @@ operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.2.0 admission
+## 3.8.1 admission
 
-Optimike MCP `3.2.0`, Bridge `0.8.3`, Operon `3.6.0`,
-Operon CLI `1.2.0` and Local REST API `5.1.0` form the current validation set;
-they do not claim a published `3.2.0` tag. Operon `3.6.0` remains
+Optimike MCP `3.8.1`, Bridge `0.9.2`, Operon `3.6.1`,
+Operon CLI `1.2.0` and Local REST API `5.1.0` form the current validation set.
+Operon `3.6.1` remains
 `compatible-provisional` until it joins the explicit certified evidence set,
 but that label no longer masks valid mutation capabilities. Product version is
 diagnostic metadata and may select an explicit deny or narrowly blocked path;
@@ -235,8 +235,10 @@ Ordinary healthy or degraded status polls never negotiate additive filter,
 workflow, or recovery grants; only the exact operation or dedicated recovery
 surface may do so.
 
-The public Developer API V1 contract did not drift from Operon `3.5.3` to
-`3.6.0`. The latter nevertheless changes Task Editor relation cleanup, permits
+The public Developer API V1 contract did not drift from Operon `3.5.3` through
+`3.6.1`. Operon `3.6.0` nevertheless changes Task Editor relation cleanup, permits
 Scheduled Date on a blocked task, and optionally expands a parent's date range
-after a child mutation. These behaviors must be tested in the enabled vault
-configuration; they never authorize accepting unrelated postflight drift.
+after a child mutation. Operon `3.6.1` additionally repairs explicit reapproval
+of recoverably suspended Developer API grants while stale or revoked authority
+remains blocked. These behaviors must be tested in the enabled vault configuration;
+they never authorize accepting unrelated postflight drift.

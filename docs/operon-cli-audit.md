@@ -2,8 +2,8 @@
 
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
-Updated: 2026-08-30
-Candidate target: Optimike MCP `3.2.0` uses Bridge `0.8.3` with official Operon `3.6.0`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1 and the additive task-workflow API. Working-tree Pilot 2 runs exercised that stack; release admission still requires the same gate on the clean final SHA. The public Developer API V1 contract did not drift between Operon `3.5.3` and `3.6.0`. `compatible-provisional` describes certification evidence only; mutation admission follows the negotiated contract and exact live capabilities rather than a product-version allowlist. Additive task workflows negotiate their exact grant on first use after a cold start.
+Updated: 2026-08-31
+Candidate target: Optimike MCP `3.8.1` uses Bridge `0.9.2` with official Operon `3.6.1`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1 and the additive task-workflow API. Pilot 2 admission remains bound to the clean final SHA. The public Developer API V1 contract did not drift from the validated `3.6.0` boundary. Operon `3.6.1` restores the explicit Settings reapproval path for coherently suspended grants while stale, revoked or binding-drifted attempts remain blocked. `compatible-provisional` describes certification evidence only; mutation admission follows the negotiated contract and exact live capabilities rather than a product-version allowlist.
 
 Operon CLI `1.2.0` adds operator access to Daily/Weekly routing and the typed
 Task Type, Task Image and ordered Task Gallery fields. The MCP does not relay

@@ -162,8 +162,9 @@ for (const requiredTool of [
   );
 }
 for (const invariant of [
-  'const EXPECTED_MCP_VERSION = "3.2.0"',
-  'const EXPECTED_BRIDGE_VERSION = "0.8.3"',
+  'const EXPECTED_OPERON_VERSION = "3.6.1"',
+  'const EXPECTED_MCP_VERSION = "3.8.1"',
+  'const EXPECTED_BRIDGE_VERSION = "0.9.2"',
   "I_CONFIRM_PILOT_2_OPERON_36_BEHAVIOR_MUTATIONS",
   "public_delete_surface_unavailable",
   "public_configuration_not_announced",
