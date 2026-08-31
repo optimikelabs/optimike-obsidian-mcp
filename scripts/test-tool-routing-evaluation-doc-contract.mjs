@@ -38,7 +38,7 @@ for (const relativePath of [
   assert.match(content, /stale|ancien build/u);
   assert.match(content, /detached worktree|worktree détaché/u);
   assert.match(content, /fresh LLM\s+campaign|nouvelle campagne LLM/u);
-  assert.match(content, /not a green review|n'est pas une review verte/u);
+  assert.match(content, /not\s+a green review|n'est pas une review verte/u);
 }
 
 console.log(
