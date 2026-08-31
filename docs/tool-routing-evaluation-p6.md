@@ -73,14 +73,19 @@ scoring requires `EXPECTED_CANDIDATE_COMMIT`, records the clean verifier
 checkout as `verifierSha`, and keeps the manifest's historical source commit as
 `candidateSha`. It creates a clean detached worktree at `candidateSha`, installs
 the locked dependencies, removes any ignored `dist/`, rebuilds the candidate,
-loads the exact corpus blob from that candidate while accepting checkout
-LF/CRLF differences only when the parsed corpus is identical, and independently
-reconstructs every canonical live `tools/list` surface
+binds the supplied corpus semantically to the exact candidate Git blob, selects
+the byte form sealed by the manifest, and independently reconstructs every
+canonical live `tools/list` surface
 against a local authenticated status fixture. It compares the full schema
 hash, recomputes every fixture hash, validates the trace-file hash, and
 recalculates success from the deterministic routing and safety evidence. It
 also requires the four canonical profiles, every case assigned to each focused
 profile, all 31 cases on `full`, and two to five complete repetitions.
+
+The scorer preserves the corpus byte hash sealed by the campaign. It uses the
+supplied bytes when they match that hash, or reconstructs the candidate Git blob
+only when the manifest sealed that blob and the supplied corpus parses
+identically. The report records both byte hashes and the selected source.
 
 The report binds the scorer version, `verifierSha`, `candidateSha`, corpus,
 trace and manifest hashes, rebuilt artifact hashes and all four rebuilt surface

@@ -77,15 +77,21 @@ strict exige `EXPECTED_CANDIDATE_COMMIT`, enregistre le checkout propre du
 vérificateur comme `verifierSha` et conserve le commit source historique du
 manifeste comme `candidateSha`. Il crée un worktree détaché propre sur
 `candidateSha`, installe les dépendances verrouillées, supprime tout ancien
-`dist/` ignoré, reconstruit le candidat, charge le blob corpus exact de ce
-candidat tout en n'acceptant les différences LF/CRLF du checkout que si le
-corpus parsé est identique, puis reconstitue indépendamment chaque surface live
-canonique de `tools/list` contre une fixture locale de statut
+`dist/` ignoré, reconstruit le candidat, lie sémantiquement le corpus fourni au
+blob Git exact du candidat, sélectionne la forme d'octets scellée par le
+manifeste, puis reconstitue indépendamment chaque surface live canonique de
+`tools/list` contre une fixture locale de statut
 authentifié. Il compare le hash complet des schémas, recalcule chaque hash de
 fixture, valide le hash du fichier de traces et
 recalcule le succès depuis les preuves déterministes de routage et de sûreté.
 Il exige aussi les quatre profils canoniques, tous les cas attribués à chaque
 profil ciblé, les 31 cas sur `full` et deux à cinq répétitions complètes.
+
+Le scorer préserve le hash des octets du corpus scellé par la campagne. Il
+utilise les octets fournis quand ils correspondent à ce hash, ou reconstruit le
+blob Git du candidat seulement si le manifeste a scellé ce blob et si le corpus
+fourni se parse à l'identique. Le rapport enregistre les deux hashes et la
+source retenue.
 
 Le rapport lie la version du scorer, `verifierSha`, `candidateSha`, les hashes
 du corpus, des traces et du manifeste, les hashes des artefacts reconstruits et

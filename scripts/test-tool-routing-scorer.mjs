@@ -24,7 +24,8 @@ const expectedCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: process.cwd(),
   encoding: "utf8",
 }).trim();
-const corpusRaw = execFileSync(
+const corpusRaw = fs.readFileSync(corpusPath);
+const corpusGitRaw = execFileSync(
   "git",
   ["cat-file", "blob", `${expectedCommit}:evals/tool-routing-corpus.json`],
   { cwd: process.cwd(), encoding: "buffer" },
@@ -260,6 +261,11 @@ try {
     canonical.manifest.traceFileSha256,
   );
   assert.equal(report.authority.corpusSha256, corpusHash);
+  assert.equal(report.authority.suppliedCorpusSha256, corpusHash);
+  assert.equal(
+    report.authority.candidateCorpusGitBlobSha256,
+    sha256(corpusGitRaw),
+  );
   assert.equal(report.authority.candidateSurfaceHashes.length, 4);
   assert.ok(
     report.authority.candidateSurfaceHashes.every((surface) =>
@@ -270,6 +276,30 @@ try {
   assert.equal(report.summaries.length, 4);
   assert.ok(report.summaries.every((summary) => summary.successRate === 1));
   assert.ok(report.summaries.every((summary) => summary.safetyPassRate === 1));
+
+  const gitBlobEvidence = structuredClone(canonical);
+  const gitBlobCorpusHash = sha256(corpusGitRaw);
+  gitBlobEvidence.manifest.corpusHash = gitBlobCorpusHash;
+  for (const trace of gitBlobEvidence.traces) {
+    trace.corpusHash = gitBlobCorpusHash;
+  }
+  const alternateCorpusPath = path.join(temp, "alternate-eol-corpus.json");
+  const gitCorpusText = corpusGitRaw.toString("utf8");
+  const alternateCorpusText = gitCorpusText.includes("\r\n")
+    ? gitCorpusText.replace(/\r\n/gu, "\n")
+    : gitCorpusText.replace(/\n/gu, "\r\n");
+  writeFileSync(alternateCorpusPath, alternateCorpusText, "utf8");
+  assert.notEqual(sha256(alternateCorpusText), gitBlobCorpusHash);
+  const gitBlobReport = score({
+    ...writeFixture("git-blob-evidence", gitBlobEvidence),
+    corpusInputPath: alternateCorpusPath,
+  });
+  assert.equal(gitBlobReport.authority.corpusSha256, gitBlobCorpusHash);
+  assert.equal(gitBlobReport.authority.corpusSource, "candidate-git-blob");
+  assert.equal(
+    gitBlobReport.authority.suppliedCorpusSha256,
+    sha256(alternateCorpusText),
+  );
 
   const foreignDependency = path.join(
     candidateCheckout,

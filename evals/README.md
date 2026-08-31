@@ -106,9 +106,10 @@ node scripts/score-tool-routing-evals.mjs traces.jsonl evals/tool-routing-corpus
 
 The scorer is deterministic and provider-free. From a clean verifier checkout
 it creates a detached worktree for the historical candidate, installs from its
-lockfile, rebuilds it, loads the exact corpus Git blob (with a semantic check
-against the supplied checkout file), and validates every v1 trace before
-scoring. Dependency acquisition may use the configured npm registry or cache;
+lockfile, rebuilds it, and binds the supplied corpus semantically to the exact
+candidate Git blob. It preserves the byte hash sealed by the campaign and
+reports both the supplied and candidate-blob hashes before validating every v1
+trace. Dependency acquisition may use the configured npm registry or cache;
 after that installation step, scoring invokes no model or external service. The
 report
 keeps `verifierSha` and `candidateSha` distinct and binds the corpus, traces,

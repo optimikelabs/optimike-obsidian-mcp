@@ -346,9 +346,17 @@ function loadCorpus(corpusPath) {
   return parseCorpus(fs.readFileSync(corpusPath));
 }
 
-function loadCandidateCorpus(repository, candidateSha, suppliedCorpusPath) {
+function loadCandidateCorpus(
+  repository,
+  candidateSha,
+  suppliedCorpusPath,
+  manifestCorpusHash,
+) {
   if (!FULL_SHA.test(candidateSha)) {
     throw new Error("candidateSha must be a full lowercase 40-character SHA");
+  }
+  if (!/^[0-9a-f]{64}$/u.test(manifestCorpusHash)) {
+    throw new Error("manifest.corpusHash must be a lowercase SHA-256");
   }
   const suppliedRaw = fs.readFileSync(suppliedCorpusPath);
   const candidateRaw = gitBlob(
@@ -362,7 +370,27 @@ function loadCandidateCorpus(repository, candidateSha, suppliedCorpusPath) {
       "supplied corpus is not semantically identical to the candidate Git blob",
     );
   }
-  return parseCorpus(candidateRaw);
+  const suppliedCorpusSha256 = sha256(suppliedRaw);
+  const candidateCorpusGitBlobSha256 = sha256(candidateRaw);
+  if (manifestCorpusHash === suppliedCorpusSha256) {
+    return {
+      corpus: parseCorpus(suppliedRaw),
+      corpusSource: "supplied-campaign-bytes",
+      suppliedCorpusSha256,
+      candidateCorpusGitBlobSha256,
+    };
+  }
+  if (manifestCorpusHash === candidateCorpusGitBlobSha256) {
+    return {
+      corpus: parseCorpus(candidateRaw),
+      corpusSource: "candidate-git-blob",
+      suppliedCorpusSha256,
+      candidateCorpusGitBlobSha256,
+    };
+  }
+  throw new Error(
+    "manifest corpus hash matches neither supplied campaign bytes nor the candidate Git blob",
+  );
 }
 
 function compactTool(tool) {
@@ -790,9 +818,15 @@ const manifestEnvelope = manifestPath
 const manifestCandidateSha = manifestEnvelope
   ? requiredString(manifestEnvelope.sourceCommit, "manifest.sourceCommit")
   : null;
-const corpus = manifestCandidateSha
-  ? loadCandidateCorpus(verifierRepository, manifestCandidateSha, corpusPath)
-  : loadCorpus(corpusPath);
+const candidateCorpusBinding = manifestCandidateSha
+  ? loadCandidateCorpus(
+      verifierRepository,
+      manifestCandidateSha,
+      corpusPath,
+      requiredString(manifestEnvelope.corpusHash, "manifest.corpusHash"),
+    )
+  : null;
+const corpus = candidateCorpusBinding?.corpus ?? loadCorpus(corpusPath);
 const cases = new Map(corpus.cases.map((item) => [item.id, item]));
 const resultsRaw = fs.readFileSync(resultsPath, "utf8");
 const lines = resultsRaw
@@ -1065,6 +1099,10 @@ console.log(
             manifestSha256: runManifest.manifestSha256,
             traceFileSha256: runManifest.manifest.traceFileSha256,
             corpusSha256: corpus.corpusHash,
+            corpusSource: candidateCorpusBinding.corpusSource,
+            suppliedCorpusSha256: candidateCorpusBinding.suppliedCorpusSha256,
+            candidateCorpusGitBlobSha256:
+              candidateCorpusBinding.candidateCorpusGitBlobSha256,
             candidateArtifactHashes: candidate.artifactHashes,
             candidateSurfaceHashes: candidate.surfaceHashes,
             ...(comparison
