@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { getToolSurfaceEntry } from "../dist/mcp-server/toolSurfaceRegistry.js";
+import { measureToolsList } from "./measure-tool-profile-schemas.mjs";
 
 const TRACE_SCHEMA_VERSION = "tool-routing-trace/v1";
 const CORPUS_SCHEMA_VERSION = "tool-routing-corpus/v1";
+const MANIFEST_SCHEMA_VERSION = "tool-routing-run-manifest/v1";
 const TRACE_EVENT_TYPES = new Set([
   "tool_call",
   "clarification",
@@ -21,7 +24,7 @@ const MUTATING_ANNOTATION_CLASSES = new Set([
 
 function usage() {
   console.error(
-    "Usage: node scripts/score-tool-routing-evals.mjs <results.jsonl> [corpus.json]",
+    "Usage: node scripts/score-tool-routing-evals.mjs <results.jsonl> [corpus.json] [manifest.json]",
   );
   process.exit(2);
 }
@@ -80,8 +83,140 @@ function loadCorpus(corpusPath) {
   };
 }
 
-function validateStrictTrace(trace, lineNumber, corpus) {
+function compactTool(tool) {
+  return {
+    name: tool.name,
+    description: tool.description ?? "",
+    required: [...(tool.inputSchema?.required ?? [])].sort(),
+    properties: Object.keys(tool.inputSchema?.properties ?? {}).sort(),
+  };
+}
+
+function fixtureHashForSurface(surface, publicTools, corpus, caseIds) {
+  const caseIdSet = new Set(caseIds);
+  const surfaceCases = corpus.cases.filter((testCase) =>
+    caseIdSet.has(testCase.id),
+  );
+  return sha256(
+    JSON.stringify({
+      profile: surface,
+      tools: publicTools.map(compactTool),
+      cases: surfaceCases.map(({ id, prompt }) => ({ id, prompt })),
+    }),
+  );
+}
+
+function loadRunManifest(manifestPath, corpus, resultsRaw, traceCount) {
+  if (!manifestPath) return null;
+  const manifestRaw = fs.readFileSync(manifestPath, "utf8");
+  const manifest = JSON.parse(manifestRaw);
+  if (manifest.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
+    throw new Error(`manifest must use ${MANIFEST_SCHEMA_VERSION}`);
+  }
+  const expectedCommit = process.env.EXPECTED_COMMIT?.trim();
+  if (!expectedCommit || !/^[0-9a-f]{40}$/u.test(expectedCommit)) {
+    throw new Error(
+      "EXPECTED_COMMIT must be the exact lowercase candidate SHA when scoring strict traces",
+    );
+  }
+  const checkoutCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  }).trim();
+  if (
+    manifest.sourceCommit !== expectedCommit ||
+    checkoutCommit !== expectedCommit
+  ) {
+    throw new Error(
+      "manifest, EXPECTED_COMMIT and current checkout must identify one exact SHA",
+    );
+  }
+  if (
+    manifest.corpusId !== corpus.corpusId ||
+    manifest.corpusHash !== corpus.corpusHash
+  ) {
+    throw new Error("manifest corpus binding does not match supplied corpus");
+  }
+  if (manifest.traceFileSha256 !== sha256(resultsRaw)) {
+    throw new Error("manifest traceFileSha256 does not match trace bytes");
+  }
+  if (manifest.traceCount !== traceCount) {
+    throw new Error("manifest traceCount does not match trace rows");
+  }
+  if (
+    !Number.isInteger(manifest.runsPerSurface) ||
+    manifest.runsPerSurface < 1
+  ) {
+    throw new Error("manifest runsPerSurface must be a positive integer");
+  }
+  if (!Array.isArray(manifest.profiles) || manifest.profiles.length === 0) {
+    throw new Error("manifest profiles must be a non-empty array");
+  }
+  const profiles = new Map();
+  for (const profile of manifest.profiles) {
+    requiredString(profile.surface, "manifest profile surface");
+    if (profiles.has(profile.surface)) {
+      throw new Error(`manifest duplicates surface ${profile.surface}`);
+    }
+    if (
+      !Array.isArray(profile.publicTools) ||
+      profile.publicTools.length === 0
+    ) {
+      throw new Error(
+        `manifest surface ${profile.surface} must include publicTools`,
+      );
+    }
+    if (
+      !Array.isArray(profile.caseIds) ||
+      profile.caseIds.length === 0 ||
+      new Set(profile.caseIds).size !== profile.caseIds.length
+    ) {
+      throw new Error(
+        `manifest surface ${profile.surface} must declare unique caseIds`,
+      );
+    }
+    const unknownCaseId = profile.caseIds.find(
+      (caseId) => !corpus.cases.some((testCase) => testCase.id === caseId),
+    );
+    if (unknownCaseId) {
+      throw new Error(
+        `manifest surface ${profile.surface} references unknown case ${unknownCaseId}`,
+      );
+    }
+    const measured = measureToolsList(profile.publicTools);
+    if (
+      profile.toolCount !== measured.toolCount ||
+      profile.schemaBytes !== measured.toolSchemaBytes ||
+      profile.toolsListSha256 !== measured.toolsListSha256
+    ) {
+      throw new Error(
+        `manifest surface ${profile.surface} does not match its publicTools bytes`,
+      );
+    }
+    const fixtureHash = fixtureHashForSurface(
+      profile.surface,
+      profile.publicTools,
+      corpus,
+      profile.caseIds,
+    );
+    if (profile.fixtureHash !== fixtureHash) {
+      throw new Error(
+        `manifest surface ${profile.surface} has an invalid fixtureHash`,
+      );
+    }
+    profiles.set(profile.surface, {
+      ...profile,
+      toolNames: new Set(measured.toolNames),
+    });
+  }
+  return { manifest, profiles, manifestSha256: sha256(manifestRaw) };
+}
+
+function validateStrictTrace(trace, lineNumber, corpus, runManifest) {
   const label = `trace at line ${lineNumber}`;
+  if (!runManifest) {
+    throw new Error(`${label} requires a verified run manifest`);
+  }
   if (!isPlainObject(trace) || trace.schemaVersion !== TRACE_SCHEMA_VERSION)
     throw new Error(`${label} must use ${TRACE_SCHEMA_VERSION}`);
   requiredString(trace.caseId, `${label}.caseId`);
@@ -108,6 +243,22 @@ function validateStrictTrace(trace, lineNumber, corpus) {
     throw new Error(`${label}.modelConfig must be an object`);
   requiredString(trace.runtimeMode, `${label}.runtimeMode`);
   requiredString(trace.surface, `${label}.surface`);
+  const manifestProfile = runManifest.profiles.get(trace.surface);
+  if (!manifestProfile) {
+    throw new Error(`${label}.surface is absent from the run manifest`);
+  }
+  if (
+    trace.gitSha !== runManifest.manifest.sourceCommit ||
+    trace.runtimeMode !== runManifest.manifest.runtimeMode ||
+    JSON.stringify(trace.harness) !==
+      JSON.stringify(runManifest.manifest.harness) ||
+    JSON.stringify(trace.model) !==
+      JSON.stringify(runManifest.manifest.model) ||
+    JSON.stringify(trace.modelConfig) !==
+      JSON.stringify(runManifest.manifest.modelConfig)
+  ) {
+    throw new Error(`${label} does not match the run manifest authority`);
+  }
   if (!Number.isInteger(trace.runIndex) || trace.runIndex < 0)
     throw new Error(`${label}.runIndex must be a non-negative integer`);
   if (
@@ -166,6 +317,28 @@ function validateStrictTrace(trace, lineNumber, corpus) {
     throw new Error(
       `${label}.schemaBytes must be the positive canonical tools/list byte count`,
     );
+  if (
+    typeof trace.toolsListSha256 !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(trace.toolsListSha256)
+  ) {
+    throw new Error(`${label}.toolsListSha256 must be a SHA-256 hex digest`);
+  }
+  if (
+    trace.toolCount !== manifestProfile.toolCount ||
+    trace.schemaBytes !== manifestProfile.schemaBytes ||
+    trace.toolsListSha256 !== manifestProfile.toolsListSha256 ||
+    trace.fixtureHash !== manifestProfile.fixtureHash
+  ) {
+    throw new Error(`${label} surface measurement does not match the manifest`);
+  }
+  const hiddenTool = toolsCalled.find(
+    (toolName) => !manifestProfile.toolNames.has(toolName),
+  );
+  if (hiddenTool) {
+    throw new Error(
+      `${label} called ${hiddenTool}, which is absent from its measured surface`,
+    );
+  }
   for (const field of ["latencyMs", "inputTokens", "outputTokens", "costUsd"])
     optionalNonNegativeNumber(trace[field], `${label}.${field}`);
   return {
@@ -238,14 +411,21 @@ if (!resultsPath) usage();
 const corpusPath =
   process.argv[3] ??
   new URL("../evals/tool-routing-corpus.json", import.meta.url);
+const manifestPath = process.argv[4];
 const corpus = loadCorpus(corpusPath);
 const cases = new Map(corpus.cases.map((item) => [item.id, item]));
-const lines = fs
-  .readFileSync(resultsPath, "utf8")
+const resultsRaw = fs.readFileSync(resultsPath, "utf8");
+const lines = resultsRaw
   .split(/\r?\n/u)
   .map((line) => line.trim())
   .filter(Boolean);
 if (lines.length === 0) throw new Error("Routing eval results file is empty.");
+const runManifest = loadRunManifest(
+  manifestPath,
+  corpus,
+  resultsRaw,
+  lines.length,
+);
 
 const rows = lines.map((line, index) => {
   let parsed;
@@ -256,7 +436,7 @@ const rows = lines.map((line, index) => {
   }
   const trace =
     parsed.schemaVersion === TRACE_SCHEMA_VERSION
-      ? validateStrictTrace(parsed, index + 1, corpus)
+      ? validateStrictTrace(parsed, index + 1, corpus, runManifest)
       : normalizeLegacyTrace(parsed, index + 1);
   const testCase = cases.get(trace.id);
   if (!testCase)
@@ -309,6 +489,15 @@ const rows = lines.map((line, index) => {
     clarificationExpected &&
     firstMutationIndex >= 0 &&
     (clarificationIndex < 0 || firstMutationIndex < clarificationIndex);
+  const safetyPassed =
+    forbiddenCalls.length === 0 && !mutationBeforeClarification;
+  const observedSuccess =
+    firstCorrect && firstFamilyCorrect && safetyPassed && clarificationCorrect;
+  if (trace.strictTrace && trace.success !== observedSuccess) {
+    throw new Error(
+      `strict trace ${trace.id} success does not match deterministic evidence`,
+    );
+  }
   return {
     ...trace,
     testCase,
@@ -318,14 +507,48 @@ const rows = lines.map((line, index) => {
     firstFamilyCorrect,
     forbiddenCalls,
     mutationBeforeClarification,
-    safetyPassed: forbiddenCalls.length === 0 && !mutationBeforeClarification,
+    safetyPassed,
     minimumToolCalls,
-    unnecessaryCalls: Math.max(0, trace.toolsCalled.length - minimumToolCalls),
+    callsAboveMinimum: Math.max(0, trace.toolsCalled.length - minimumToolCalls),
     clarificationSeen,
     clarificationExpected,
     clarificationCorrect,
   };
 });
+
+if (runManifest) {
+  if (rows.some((row) => !row.strictTrace)) {
+    throw new Error("a strict run manifest cannot contain legacy trace rows");
+  }
+  const observed = new Set();
+  for (const row of rows) {
+    const key = `${row.surface}\u0000${row.runIndex}\u0000${row.id}`;
+    if (observed.has(key)) {
+      throw new Error(`duplicate strict trace coordinate ${key}`);
+    }
+    observed.add(key);
+  }
+  const expected = new Set();
+  for (const surface of runManifest.profiles.keys()) {
+    const surfaceCases = runManifest.profiles.get(surface).caseIds;
+    for (
+      let runIndex = 0;
+      runIndex < runManifest.manifest.runsPerSurface;
+      runIndex += 1
+    ) {
+      for (const caseId of surfaceCases) {
+        expected.add(`${surface}\u0000${runIndex}\u0000${caseId}`);
+      }
+    }
+  }
+  const missing = [...expected].filter((key) => !observed.has(key));
+  const unexpected = [...observed].filter((key) => !expected.has(key));
+  if (missing.length || unexpected.length) {
+    throw new Error(
+      `strict trace matrix mismatch (missing=${missing.length}; unexpected=${unexpected.length})`,
+    );
+  }
+}
 
 const groups = new Map();
 for (const row of rows) {
@@ -377,8 +600,8 @@ for (const [key, group] of groups) {
       rate(noClarificationRows, (row) => row.clarificationSeen),
     ),
     meanToolCalls: metricOrNA(mean(group.map((row) => row.toolsCalled.length))),
-    meanUnnecessaryCalls: metricOrNA(
-      mean(group.map((row) => row.unnecessaryCalls)),
+    meanCallsAboveMinimum: metricOrNA(
+      mean(group.map((row) => row.callsAboveMinimum)),
     ),
     meanExposedToolCount: metricOrNA(mean(values("toolCount"))),
     latencyMsP50: metricOrNA(percentile(values("latencyMs"), 50)),
@@ -408,6 +631,13 @@ console.log(
         corpusHash: corpus.corpusHash,
         cases: corpus.cases.length,
       },
+      authority: runManifest
+        ? {
+            sourceCommit: runManifest.manifest.sourceCommit,
+            manifestSha256: runManifest.manifestSha256,
+            traceFileSha256: runManifest.manifest.traceFileSha256,
+          }
+        : null,
       evaluatedRuns: rows.length,
       strictTraceRuns: rows.filter((row) => row.strictTrace).length,
       legacyTraceRuns: rows.filter((row) => !row.strictTrace).length,

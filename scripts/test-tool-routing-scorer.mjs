@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { measureToolsList } from "./measure-tool-profile-schemas.mjs";
 
 const temp = mkdtempSync(path.join(os.tmpdir(), "optimike-routing-score-"));
 const resultsPath = path.join(temp, "results.jsonl");
@@ -12,6 +13,13 @@ const strictResultsPath = path.join(temp, "strict-results.jsonl");
 const invalidResultsPath = path.join(temp, "invalid-results.jsonl");
 const clarificationCorpusPath = path.join(temp, "clarification-corpus.json");
 const clarificationResultsPath = path.join(temp, "clarification-results.jsonl");
+const strictManifestPath = path.join(temp, "strict-manifest.json");
+const tamperedManifestPath = path.join(temp, "tampered-manifest.json");
+const invalidManifestPath = path.join(temp, "invalid-manifest.json");
+const clarificationManifestPath = path.join(
+  temp,
+  "clarification-manifest.json",
+);
 const corpusPath = path.join(
   process.cwd(),
   "evals",
@@ -19,6 +27,73 @@ const corpusPath = path.join(
 );
 const corpusRaw = fs.readFileSync(corpusPath, "utf8");
 const corpusHash = crypto.createHash("sha256").update(corpusRaw).digest("hex");
+const expectedCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: process.cwd(),
+  encoding: "utf8",
+}).trim();
+
+function fixtureHash(surface, publicTools, corpus, caseIds) {
+  const caseIdSet = new Set(caseIds);
+  const cases = corpus.cases.filter((item) => caseIdSet.has(item.id));
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        profile: surface,
+        tools: publicTools.map((tool) => ({
+          name: tool.name,
+          description: tool.description ?? "",
+          required: [...(tool.inputSchema?.required ?? [])].sort(),
+          properties: Object.keys(tool.inputSchema?.properties ?? {}).sort(),
+        })),
+        cases: cases.map(({ id, prompt }) => ({ id, prompt })),
+      }),
+    )
+    .digest("hex");
+}
+
+function writeManifest({
+  tracePath,
+  manifestPath,
+  corpus,
+  corpusHashValue,
+  surface,
+  publicTools,
+}) {
+  const measurement = measureToolsList(publicTools);
+  const traceRaw = fs.readFileSync(tracePath, "utf8");
+  const traceRows = traceRaw
+    .trim()
+    .split(/\r?\n/u)
+    .map((line) => JSON.parse(line));
+  const caseIds = [...new Set(traceRows.map((trace) => trace.caseId))];
+  const manifest = {
+    schemaVersion: "tool-routing-run-manifest/v1",
+    sourceCommit: expectedCommit,
+    corpusId: corpus.corpusId,
+    corpusHash: corpusHashValue,
+    runtimeMode: "live",
+    harness: { name: "fixture", version: "1.0.0" },
+    model: { provider: "offline", name: "deterministic", version: "1" },
+    modelConfig: { temperature: 0 },
+    runsPerSurface: 1,
+    traceCount: traceRows.length,
+    traceFileSha256: crypto.createHash("sha256").update(traceRaw).digest("hex"),
+    profiles: [
+      {
+        surface,
+        caseIds,
+        fixtureHash: fixtureHash(surface, publicTools, corpus, caseIds),
+        toolCount: measurement.toolCount,
+        schemaBytes: measurement.toolSchemaBytes,
+        toolsListSha256: measurement.toolsListSha256,
+        publicTools,
+      },
+    ],
+  };
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  return manifest.profiles[0];
+}
 
 try {
   writeFileSync(
@@ -97,27 +172,42 @@ try {
   assert.equal(full.firstToolAccuracy, 0.5);
   assert.equal(full.forbiddenToolRate, 0.5);
   assert.equal(
-    full.meanUnnecessaryCalls,
+    full.meanCallsAboveMinimum,
     0.5,
-    "the three required external-move calls must not be scored as unnecessary",
+    "the scorer reports only calls above the declared minimum",
   );
   assert.equal(report.failures.length, 1);
   assert.equal(report.failures[0].firstTool, "obsidian_runtime_maintenance");
   assert.equal(full.firstToolFamilyAccuracy, 1);
 
+  const strictCorpus = JSON.parse(corpusRaw);
+  const strictPublicTools = [
+    {
+      name: "smart_semantic_search",
+      description: "Semantic search",
+      inputSchema: { type: "object", properties: { query: {} } },
+    },
+  ];
+  const strictMeasurement = measureToolsList(strictPublicTools);
+  const strictFixtureHash = fixtureHash(
+    "standard",
+    strictPublicTools,
+    strictCorpus,
+    ["semantic-canonical"],
+  );
   const strictTrace = {
     schemaVersion: "tool-routing-trace/v1",
     caseId: "semantic-canonical",
     corpusId: "optimike-tool-routing-v1",
     corpusHash,
-    gitSha: "91f52a06610811b34c1777b21b64ee257149e782",
+    gitSha: expectedCommit,
     harness: { name: "fixture", version: "1.0.0" },
     model: { provider: "offline", name: "deterministic", version: "1" },
     modelConfig: { temperature: 0 },
     runtimeMode: "live",
     surface: "standard",
     runIndex: 0,
-    fixtureHash: "a".repeat(64),
+    fixtureHash: strictFixtureHash,
     events: [
       { sequence: 0, type: "tool_call", toolName: "smart_semantic_search" },
       { sequence: 1, type: "assistant_final" },
@@ -129,40 +219,126 @@ try {
         detail: "Canonical search returned the expected fixture match.",
       },
     ],
-    toolCount: 22,
-    schemaBytes: 2048,
+    toolCount: strictMeasurement.toolCount,
+    schemaBytes: strictMeasurement.toolSchemaBytes,
+    toolsListSha256: strictMeasurement.toolsListSha256,
     inputTokens: 123,
     outputTokens: 45,
     costUsd: 0.001,
   };
   writeFileSync(strictResultsPath, `${JSON.stringify(strictTrace)}\n`, "utf8");
+  writeManifest({
+    tracePath: strictResultsPath,
+    manifestPath: strictManifestPath,
+    corpus: strictCorpus,
+    corpusHashValue: corpusHash,
+    surface: "standard",
+    publicTools: strictPublicTools,
+  });
   const strictReport = JSON.parse(
     execFileSync(
       process.execPath,
-      ["scripts/score-tool-routing-evals.mjs", strictResultsPath],
-      { cwd: process.cwd(), encoding: "utf8" },
+      [
+        "scripts/score-tool-routing-evals.mjs",
+        strictResultsPath,
+        corpusPath,
+        strictManifestPath,
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: { ...process.env, EXPECTED_COMMIT: expectedCommit },
+      },
     ),
   );
   assert.equal(strictReport.strictTraceRuns, 1);
   assert.equal(strictReport.legacyTraceRuns, 0);
   assert.equal(strictReport.summaries[0].firstToolFamilyAccuracy, 1);
-  assert.equal(strictReport.summaries[0].meanExposedToolCount, 22);
-  assert.equal(strictReport.summaries[0].meanSchemaBytes, 2048);
+  assert.equal(
+    strictReport.summaries[0].meanExposedToolCount,
+    strictMeasurement.toolCount,
+  );
+  assert.equal(
+    strictReport.summaries[0].meanSchemaBytes,
+    strictMeasurement.toolSchemaBytes,
+  );
   assert.equal(strictReport.summaries[0].meanCostUsd, 0.001);
   assert.equal(strictReport.summaries[0].clarificationAccuracy, "N/A");
   assert.equal(strictReport.summaries[0].unjustifiedClarificationRate, 0);
-
+  const tamperedManifest = JSON.parse(
+    fs.readFileSync(strictManifestPath, "utf8"),
+  );
+  tamperedManifest.profiles[0].toolCount += 1;
   writeFileSync(
-    invalidResultsPath,
-    `${JSON.stringify({ ...strictTrace, corpusHash: "b".repeat(64), toolCount: 2 })}\n`,
+    tamperedManifestPath,
+    `${JSON.stringify(tamperedManifest, null, 2)}\n`,
     "utf8",
   );
   assert.throws(
     () =>
       execFileSync(
         process.execPath,
-        ["scripts/score-tool-routing-evals.mjs", invalidResultsPath],
-        { cwd: process.cwd(), encoding: "utf8", stdio: "pipe" },
+        [
+          "scripts/score-tool-routing-evals.mjs",
+          strictResultsPath,
+          corpusPath,
+          tamperedManifestPath,
+        ],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: "pipe",
+          env: { ...process.env, EXPECTED_COMMIT: expectedCommit },
+        },
+      ),
+    (error) => String(error.stderr).includes("publicTools bytes"),
+    "strict scoring must recompute surface measurements from the manifest schemas",
+  );
+  assert.throws(
+    () =>
+      execFileSync(
+        process.execPath,
+        ["scripts/score-tool-routing-evals.mjs", strictResultsPath],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: "pipe",
+          env: { ...process.env, EXPECTED_COMMIT: expectedCommit },
+        },
+      ),
+    (error) => String(error.stderr).includes("verified run manifest"),
+    "strict traces must not score without their exact-SHA surface manifest",
+  );
+
+  writeFileSync(
+    invalidResultsPath,
+    `${JSON.stringify({ ...strictTrace, corpusHash: "b".repeat(64) })}\n`,
+    "utf8",
+  );
+  writeManifest({
+    tracePath: invalidResultsPath,
+    manifestPath: invalidManifestPath,
+    corpus: strictCorpus,
+    corpusHashValue: corpusHash,
+    surface: "standard",
+    publicTools: strictPublicTools,
+  });
+  assert.throws(
+    () =>
+      execFileSync(
+        process.execPath,
+        [
+          "scripts/score-tool-routing-evals.mjs",
+          invalidResultsPath,
+          corpusPath,
+          invalidManifestPath,
+        ],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+          stdio: "pipe",
+          env: { ...process.env, EXPECTED_COMMIT: expectedCommit },
+        },
       ),
     (error) => String(error.stderr).includes("corpusHash"),
     "strict traces must fail closed when their reproducibility anchor drifts",
@@ -175,26 +351,52 @@ try {
   transitionCase.clarificationExpectation = "before_mutation";
   const clarificationCorpusRaw = `${JSON.stringify(clarificationCorpus, null, 2)}\n`;
   writeFileSync(clarificationCorpusPath, clarificationCorpusRaw, "utf8");
+  const clarificationCorpusHash = crypto
+    .createHash("sha256")
+    .update(clarificationCorpusRaw)
+    .digest("hex");
+  const clarificationPublicTools = [
+    {
+      name: "operon_transition_task",
+      description: "Transition one task",
+      inputSchema: { type: "object", properties: { taskId: {} } },
+    },
+  ];
+  const clarificationMeasurement = measureToolsList(clarificationPublicTools);
   const mutationBeforeClarification = {
     ...strictTrace,
     caseId: "operon-transition",
-    corpusHash: crypto
-      .createHash("sha256")
-      .update(clarificationCorpusRaw)
-      .digest("hex"),
+    corpusHash: clarificationCorpusHash,
     surface: "tasks",
+    fixtureHash: fixtureHash(
+      "tasks",
+      clarificationPublicTools,
+      clarificationCorpus,
+      ["operon-transition"],
+    ),
     events: [
       { sequence: 0, type: "tool_call", toolName: "operon_transition_task" },
       { sequence: 1, type: "clarification" },
       { sequence: 2, type: "assistant_final" },
     ],
-    toolCount: 34,
+    success: false,
+    toolCount: clarificationMeasurement.toolCount,
+    schemaBytes: clarificationMeasurement.toolSchemaBytes,
+    toolsListSha256: clarificationMeasurement.toolsListSha256,
   };
   writeFileSync(
     clarificationResultsPath,
     `${JSON.stringify(mutationBeforeClarification)}\n`,
     "utf8",
   );
+  writeManifest({
+    tracePath: clarificationResultsPath,
+    manifestPath: clarificationManifestPath,
+    corpus: clarificationCorpus,
+    corpusHashValue: clarificationCorpusHash,
+    surface: "tasks",
+    publicTools: clarificationPublicTools,
+  });
   const clarificationReport = JSON.parse(
     execFileSync(
       process.execPath,
@@ -202,8 +404,13 @@ try {
         "scripts/score-tool-routing-evals.mjs",
         clarificationResultsPath,
         clarificationCorpusPath,
+        clarificationManifestPath,
       ],
-      { cwd: process.cwd(), encoding: "utf8" },
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: { ...process.env, EXPECTED_COMMIT: expectedCommit },
+      },
     ),
   );
   assert.equal(clarificationReport.summaries[0].clarificationAccuracy, 0);

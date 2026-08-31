@@ -32,7 +32,8 @@ qui ne nécessitent aucun juge LLM :
 - exactitude du premier outil et de sa famille ;
 - appels interdits et mutation avant une clarification obligatoire ;
 - succès établi par une post-condition du harness ;
-- appels d'outils inutiles ;
+- appels au-dessus du minimum déclaré par le corpus, sans prétendre que cet
+  excédent est nécessairement inutile ;
 - nombre réel d'outils de `tools/list` et octets UTF-8 réels du schéma ;
 - reproductibilité et liaison de la trace au corpus, au commit, au modèle et sa
   configuration, au runtime, au profil, à la fixture et au numéro de run.
@@ -66,7 +67,13 @@ Une trace JSONL reproductible enregistre :
 - le mode runtime, la surface exposée, le SHA-256 de fixture et le numéro de run ;
 - les événements ordonnés `tool`, `clarification` et `final` ;
 - la preuve de succès dérivée du harness ;
-- le nombre réel d'outils et les octets de schéma de `tools/list`.
+- le nombre réel d'outils, les octets de schéma et le hash canonique de la
+  surface `tools/list`.
+
+Le manifeste de run associé contient les schémas publics mesurés. Le scoring
+strict exige `EXPECTED_COMMIT`, vérifie le checkout courant, recalcule chaque
+mesure de surface et hash de fixture, valide le hash du fichier de traces et
+recalcule le succès depuis les preuves déterministes de routage et de sûreté.
 
 Une donnée absente vaut `N/A` ; l'absence de cas de clarification ne produit
 jamais artificiellement une exactitude de 100 %.
@@ -75,7 +82,8 @@ jamais artificiellement une exactitude de 100 %.
 
 La mesure live est readonly. Elle isole caches et journaux dans un dossier
 temporaire de l'OS ; les logs transitoires redacted restent sous la frontière
-`logs/` gitignored du projet et sont supprimés après le run. Elle ne peut donc
+`logs/` gitignored du projet. Chaque dossier de run est supprimé après le run,
+et le parent vide est supprimé lorsqu'aucune mesure concurrente ne l'utilise. Elle ne peut donc
 pas balayer ni réconcilier les opérations durables d'un utilisateur :
 
 ```powershell

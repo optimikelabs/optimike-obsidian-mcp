@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -223,6 +224,12 @@ function selectionIsExposed(choice, toolNames) {
   return choice.toolName === null || toolNames.has(choice.toolName);
 }
 
+function createEvidenceRoot(sourceCommit) {
+  return mkdtempSync(
+    path.join(os.tmpdir(), `optimike-p6-routing-${sourceCommit.slice(0, 12)}-`),
+  );
+}
+
 async function main() {
   if (process.argv.includes("--offline-contract")) {
     const prompt = promptFor(
@@ -246,12 +253,18 @@ async function main() {
     const schema = outputSchema(["read"], ["obsidian_read_note"]);
     const toolNameEnum =
       schema.properties.choices.items.properties.toolName.enum;
+    const firstEvidenceRoot = createEvidenceRoot("a".repeat(40));
+    const secondEvidenceRoot = createEvidenceRoot("a".repeat(40));
+    const uniqueEvidenceRoots = firstEvidenceRoot !== secondEvidenceRoot;
+    rmSync(firstEvidenceRoot, { recursive: true, force: true });
+    rmSync(secondEvidenceRoot, { recursive: true, force: true });
     if (
       !prompt.includes("obsidian_read_note") ||
       !prompt.includes("Read A.md") ||
       !toolNameEnum.includes(null) ||
       !toolNameEnum.includes("obsidian_read_note") ||
       toolNameEnum.length !== 2 ||
+      !uniqueEvidenceRoots ||
       !codexEntrypointFromWindowsShim("C:\\npm\\codex.cmd").endsWith(
         path.join("@openai", "codex", "bin", "codex.js"),
       ) ||
@@ -308,6 +321,7 @@ async function main() {
     path.join(os.tmpdir(), "optimike-p6-codex-routing-"),
   );
   const traces = [];
+  const profileFixtures = [];
   try {
     for (const profile of PROFILE_IDS) {
       const profileMeasurement = measurement.profiles.find(
@@ -329,6 +343,15 @@ async function main() {
           cases: cases.map(({ id, prompt }) => ({ id, prompt })),
         }),
       );
+      profileFixtures.push({
+        surface: profile,
+        caseIds: cases.map((testCase) => testCase.id),
+        fixtureHash,
+        toolCount: profileMeasurement.toolCount,
+        schemaBytes: profileMeasurement.toolSchemaBytes,
+        toolsListSha256: profileMeasurement.toolsListSha256,
+        publicTools: profileMeasurement.publicTools,
+      });
       for (let runIndex = 0; runIndex < runs; runIndex += 1) {
         const output = runModel({
           profile,
@@ -390,21 +413,40 @@ async function main() {
             ],
             toolCount: profileMeasurement.toolCount,
             schemaBytes: profileMeasurement.toolSchemaBytes,
+            toolsListSha256: profileMeasurement.toolsListSha256,
           });
         }
       }
     }
-    const outputPath = path.join(
-      os.tmpdir(),
-      `optimike-p6-routing-${sourceCommit.slice(0, 12)}.jsonl`,
-    );
-    writeFileSync(
-      outputPath,
-      `${traces.map((trace) => JSON.stringify(trace)).join("\n")}\n`,
-      "utf8",
-    );
+    const evidenceRoot = createEvidenceRoot(sourceCommit);
+    const outputPath = path.join(evidenceRoot, "traces.jsonl");
+    const manifestPath = path.join(evidenceRoot, "manifest.json");
+    const tracesRaw = `${traces
+      .map((trace) => JSON.stringify(trace))
+      .join("\n")}\n`;
+    const temporaryOutputPath = `${outputPath}.tmp`;
+    writeFileSync(temporaryOutputPath, tracesRaw, "utf8");
+    renameSync(temporaryOutputPath, outputPath);
+    const manifest = {
+      schemaVersion: "tool-routing-run-manifest/v1",
+      sourceCommit,
+      corpusId: corpus.corpusId,
+      corpusHash: sha256(corpusRaw),
+      runtimeMode: measurement.runtimeMode,
+      harness: { name: "codex-cli-selection", version: harnessVersion },
+      model: { provider: "openai", name: model, version: model },
+      modelConfig: { reasoningEffort },
+      runsPerSurface: runs,
+      traceCount: traces.length,
+      traceFileSha256: sha256(tracesRaw),
+      profiles: profileFixtures,
+    };
+    const temporaryManifestPath = `${manifestPath}.tmp`;
+    const manifestRaw = `${JSON.stringify(manifest, null, 2)}\n`;
+    writeFileSync(temporaryManifestPath, manifestRaw, "utf8");
+    renameSync(temporaryManifestPath, manifestPath);
     process.stdout.write(
-      `${JSON.stringify({ ok: true, sourceCommit, runsPerSurface: runs, traces: traces.length, outputPath }, null, 2)}\n`,
+      `${JSON.stringify({ ok: true, sourceCommit, runsPerSurface: runs, traces: traces.length, outputPath, manifestPath, manifestSha256: sha256(manifestRaw) }, null, 2)}\n`,
     );
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });

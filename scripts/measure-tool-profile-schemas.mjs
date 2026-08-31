@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -165,6 +165,14 @@ async function main() {
     );
   } finally {
     rmSync(logsRoot, { recursive: true, force: true });
+    try {
+      rmdirSync(logsParent);
+    } catch (error) {
+      if (!["EBUSY", "EEXIST", "ENOENT", "ENOTEMPTY"].includes(error?.code)) {
+        throw error;
+      }
+      // Another concurrent measurement may still own a sibling run directory.
+    }
     rmSync(privateRoot, { recursive: true, force: true });
   }
 }

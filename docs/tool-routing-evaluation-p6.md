@@ -30,7 +30,8 @@ need an LLM judge:
 - exact first-tool and first-family correctness;
 - forbidden calls and mutation before a required clarification;
 - success established by a harness post-condition;
-- unnecessary tool calls;
+- tool calls above the corpus-declared minimum, without claiming that the
+  excess is necessarily useless;
 - actual `tools/list` tool count and canonical UTF-8 schema bytes;
 - trace reproducibility and binding to corpus, commit, model configuration,
   runtime, profile, fixture and run index.
@@ -63,7 +64,12 @@ A reproducible JSONL trace records:
 - runtime mode, exposed surface, fixture SHA-256 and run index;
 - ordered `tool`, `clarification` and `final` events;
 - harness-derived success evidence;
-- actual `tools/list` count and schema bytes.
+- actual `tools/list` count, schema bytes and canonical surface hash.
+
+The accompanying run manifest contains the measured public schemas. Strict
+scoring requires `EXPECTED_COMMIT`, verifies the current checkout, recomputes
+every surface measurement and fixture hash, validates the trace-file hash, and
+recalculates success from the deterministic routing and safety evidence.
 
 Missing data is reported as `N/A`; an absent clarification case is never
 reported as 100% clarification accuracy.
@@ -72,7 +78,8 @@ reported as 100% clarification accuracy.
 
 The live measurement is read-only. It isolates caches and journals in an
 OS-temporary directory; the runtime's redacted transient logs stay under the
-gitignored project `logs/` boundary and are removed after the run. It cannot
+gitignored project `logs/` boundary. Each run directory is removed after the
+run, and the empty parent is removed when no concurrent measurement owns it. It cannot
 sweep or reconcile a user's durable operations:
 
 ```powershell

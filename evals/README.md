@@ -49,6 +49,7 @@ result.
   ],
   "toolCount": 22,
   "schemaBytes": 2048,
+  "toolsListSha256": "sha256 of the canonical measured tools/list surface",
   "latencyMs": 842,
   "inputTokens": 2100,
   "outputTokens": 320,
@@ -58,8 +59,12 @@ result.
 
 Required v1 anchors are corpus ID/hash, Git SHA, harness/version, model/config,
 runtime mode, surface, run index, fixture hash, ordered events, success evidence,
-tool count, and schema bytes. Latency, token counts and cost are optional. When an
-optional measure is absent, the scorer emits literal `"N/A"`, never synthetic zero.
+tool count, schema bytes, and the measured `tools/list` hash. Strict scoring also
+requires the harness-produced run manifest. The scorer recomputes its public
+surface measurements, verifies the trace-file hash and exact checkout SHA, and
+recalculates success from deterministic evidence. Latency, token counts and cost
+are optional. When an optional measure is absent, the scorer emits literal
+`"N/A"`, never synthetic zero.
 
 `events` are deliberately minimal: no prompts, private arguments, model reasoning,
 vault content, or credentials. A `clarification` event records a user-facing
@@ -69,7 +74,8 @@ clarification request. `toolCount` is the actual number of tools exposed by
 ## Optional live selection harness
 
 The Codex CLI selection harness runs only on an explicitly attested, clean
-candidate and writes raw traces outside the repository:
+candidate and writes an atomically published, unique trace file plus manifest
+outside the repository:
 
 ```text
 node scripts/run-codex-routing-selection-eval.mjs --runs=2 --model=gpt-5.6-luna --reasoning=high
@@ -81,14 +87,16 @@ asks the model to execute a vault tool. CI exercises only its offline contract.
 ## Offline scorer
 
 ```text
-node scripts/score-tool-routing-evals.mjs results.jsonl
+$env:EXPECTED_COMMIT = (git rev-parse HEAD)
+node scripts/score-tool-routing-evals.mjs traces.jsonl evals/tool-routing-corpus.json manifest.json
 ```
 
 The scorer is deterministic and offline. It validates every v1 trace before
 scoring, then reports first-tool and first-family accuracy, safety/forbidden-tool
-rate, clarification adherence, success, calls, schema bytes, latency, tokens and
-cost. Summaries are partitioned by harness, harness version, model, runtime mode
-and surface.
+rate, clarification adherence, success, calls above the declared minimum,
+schema bytes, latency, tokens and cost. A minimum is not interpreted as proof
+that additional calls were unnecessary. Summaries are partitioned by harness,
+harness version, model, runtime mode and surface.
 
 Use the same corpus hash, fixture hash, Git SHA, model configuration and run index
 when comparing two surfaces. Compare at minimum `full` to the smallest intended
