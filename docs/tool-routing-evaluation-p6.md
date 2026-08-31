@@ -89,6 +89,10 @@ manifest or fixture bytes. Set `P6_COMPARE_COMMIT` to a later release candidate
 to require byte-identical public surface hashes; any drift requires a fresh LLM
 campaign instead of inheriting the historical result.
 
+The scorer itself is provider-free. Preparing a clean candidate may acquire
+locked dependencies through the configured npm registry or cache; after that
+step, rescoring calls no model or external runtime.
+
 Model selection is batched by the corpus's recommended profile. The `full`
 surface is evaluated with the same ordered case batch as its focused
 counterpart, so surrounding prompts cannot confound the surface comparison.

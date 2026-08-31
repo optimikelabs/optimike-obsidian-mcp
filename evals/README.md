@@ -104,11 +104,13 @@ $env:P6_COMPARE_COMMIT = (git rev-parse HEAD) # optional release-surface parity 
 node scripts/score-tool-routing-evals.mjs traces.jsonl evals/tool-routing-corpus.json manifest.json
 ```
 
-The scorer is deterministic and offline. From a clean verifier checkout it
-creates a detached worktree for the historical candidate, installs from its
+The scorer is deterministic and provider-free. From a clean verifier checkout
+it creates a detached worktree for the historical candidate, installs from its
 lockfile, rebuilds it, loads the exact corpus Git blob (with a semantic check
 against the supplied checkout file), and validates every v1 trace before
-scoring. The report
+scoring. Dependency acquisition may use the configured npm registry or cache;
+after that installation step, scoring invokes no model or external service. The
+report
 keeps `verifierSha` and `candidateSha` distinct and binds the corpus, traces,
 manifest, rebuilt artifacts and surface hashes. It reports first-tool and
 first-family accuracy, safety/forbidden-tool rate, clarification adherence,

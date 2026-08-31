@@ -94,6 +94,11 @@ octets d'origine des traces, du corpus, du manifeste ou des fixtures.
 `P6_COMPARE_COMMIT` permet d'exiger des surfaces publiques identiques sur un
 candidat ultérieur ; toute dérive impose une nouvelle campagne LLM.
 
+Le scorer lui-même ne dépend d'aucun fournisseur. La préparation d'un candidat
+propre peut acquérir les dépendances verrouillées via le registre npm configuré
+ou son cache ; après cette étape, le rescoring n'appelle aucun modèle ni runtime
+externe.
+
 La sélection du modèle est regroupée selon le profil recommandé par le corpus.
 La surface `full` reçoit exactement le même lot ordonné que le profil ciblé :
 le contexte voisin ne peut donc pas biaiser la comparaison des surfaces. Le

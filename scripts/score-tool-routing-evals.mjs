@@ -346,6 +346,9 @@ function loadCorpus(corpusPath) {
 }
 
 function loadCandidateCorpus(repository, candidateSha, suppliedCorpusPath) {
+  if (!FULL_SHA.test(candidateSha)) {
+    throw new Error("candidateSha must be a full lowercase 40-character SHA");
+  }
   const suppliedRaw = fs.readFileSync(suppliedCorpusPath);
   const candidateRaw = gitBlob(
     repository,
@@ -770,13 +773,15 @@ const corpusPath =
 const manifestPath = process.argv[4];
 const verifierRepository = repositoryRoot();
 const verifierSha = exactCheckoutSha(verifierRepository, "verifier checkout");
-const verifierDirty = git(verifierRepository, [
-  "status",
-  "--porcelain",
-  "--untracked-files=all",
-]);
-if (verifierDirty) {
-  throw new Error("verifier checkout must be clean before strict rescoring");
+if (manifestPath) {
+  const verifierDirty = git(verifierRepository, [
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+  ]);
+  if (verifierDirty) {
+    throw new Error("verifier checkout must be clean before strict rescoring");
+  }
 }
 const manifestEnvelope = manifestPath
   ? JSON.parse(fs.readFileSync(manifestPath, "utf8"))
