@@ -790,11 +790,7 @@ const manifestCandidateSha = manifestEnvelope
   ? requiredString(manifestEnvelope.sourceCommit, "manifest.sourceCommit")
   : null;
 const corpus = manifestCandidateSha
-  ? loadCandidateCorpus(
-      verifierRepository,
-      manifestCandidateSha,
-      corpusPath,
-    )
+  ? loadCandidateCorpus(verifierRepository, manifestCandidateSha, corpusPath)
   : loadCorpus(corpusPath);
 const cases = new Map(corpus.cases.map((item) => [item.id, item]));
 const resultsRaw = fs.readFileSync(resultsPath, "utf8");
