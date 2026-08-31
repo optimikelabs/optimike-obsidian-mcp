@@ -219,8 +219,10 @@ bypass.
 
 - Operon keeps its official Developer API plan and recovery contract; this
   runtime does not wrap or replace it.
-- Frontmatter and Base formulas are upgraded only through their bounded public
-  projections. Other Base sections and Canvas remain outside the guarantee.
+- Frontmatter, Base formulas and Canvas graph patches are upgraded only through
+  their bounded public projections. Other Base sections remain outside the
+  guarantee; Canvas nodes, edges and viewport changes are covered only when
+  admitted by the governed Canvas validator and Atomic Write CAS.
 - A receipt is evidence of the adapter's checks, not evidence of business
   correctness outside its domain validator.
 

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Strict P6 rescoring now keeps `verifierSha` distinct from the historical
+  `candidateSha`, rebuilds the candidate in a clean detached worktree, and
+  binds the report to the original evidence plus rebuilt artifact and public
+  surface hashes. Optional release-candidate parity refuses inherited P6
+  evidence when any `tools/list` surface changes.
+
 ### Security
 
 - The Operon Bridge now distinguishes absent, valid and unsafe persisted

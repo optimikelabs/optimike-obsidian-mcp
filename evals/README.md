@@ -99,16 +99,21 @@ mistaken for evidence from the attested SHA.
 ## Offline scorer
 
 ```text
-$env:EXPECTED_COMMIT = (git rev-parse HEAD)
+$env:EXPECTED_CANDIDATE_COMMIT = "<manifest.sourceCommit>"
+$env:P6_COMPARE_COMMIT = (git rev-parse HEAD) # optional release-surface parity gate
 node scripts/score-tool-routing-evals.mjs traces.jsonl evals/tool-routing-corpus.json manifest.json
 ```
 
-The scorer is deterministic and offline. It validates every v1 trace before
-scoring, then reports first-tool and first-family accuracy, safety/forbidden-tool
-rate, clarification adherence, success, calls above the declared minimum,
-schema bytes, latency, tokens and cost. A minimum is not interpreted as proof
-that additional calls were unnecessary. Summaries are partitioned by harness,
-harness version, model, runtime mode and surface.
+The scorer is deterministic and offline. From a clean verifier checkout it
+creates a detached worktree for the historical candidate, installs from its
+lockfile, rebuilds it, and validates every v1 trace before scoring. The report
+keeps `verifierSha` and `candidateSha` distinct and binds the corpus, traces,
+manifest, rebuilt artifacts and surface hashes. It reports first-tool and
+first-family accuracy, safety/forbidden-tool rate, clarification adherence,
+success, calls above the declared minimum, schema bytes, latency, tokens and
+cost. A minimum is not interpreted as proof that additional calls were
+unnecessary. Summaries are partitioned by harness, harness version, model,
+runtime mode and surface.
 
 Use the same corpus hash, case-context hash, Git SHA, model configuration and run
 index when comparing two surfaces. Compare at minimum `full` to the smallest

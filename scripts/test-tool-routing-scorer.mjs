@@ -27,6 +27,20 @@ const expectedCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: process.cwd(),
   encoding: "utf8",
 }).trim();
+const candidateCheckout = path.join(temp, "candidate-checkout");
+execFileSync(
+  "git",
+  ["worktree", "add", "--detach", candidateCheckout, expectedCommit],
+  { cwd: process.cwd(), stdio: "ignore" },
+);
+execFileSync(
+  process.platform === "win32" ? "npm.cmd" : "npm",
+  ["ci", "--silent"],
+  {
+    cwd: candidateCheckout,
+    stdio: "ignore",
+  },
+);
 const checkoutProfiles = new Map(
   (await measureCanonicalLiveProfileSchemas()).map((profile) => [
     profile.profile,
@@ -190,7 +204,11 @@ function score({ tracesPath, manifestPath }) {
     execFileSync(process.execPath, args, {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, EXPECTED_COMMIT: expectedCommit },
+      env: {
+        ...process.env,
+        EXPECTED_CANDIDATE_COMMIT: expectedCommit,
+        P6_INTERNAL_CANDIDATE_CHECKOUT: candidateCheckout,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     }),
   );
@@ -223,14 +241,84 @@ try {
 
   const canonical = buildCanonicalFixture();
   const canonicalPaths = writeFixture("canonical", canonical);
+  const immutableEvidence = {
+    traces: sha256(fs.readFileSync(canonicalPaths.tracesPath)),
+    manifest: sha256(fs.readFileSync(canonicalPaths.manifestPath)),
+    corpus: sha256(fs.readFileSync(corpusPath)),
+  };
   const report = score(canonicalPaths);
   assert.equal(report.evaluatedRuns, 120);
   assert.equal(report.strictTraceRuns, 120);
   assert.equal(report.legacyTraceRuns, 0);
+  assert.equal(report.scorerSchemaVersion, "tool-routing-score/v2");
+  assert.equal(report.scorerVersion, "2.0.0");
+  assert.equal(report.authority.verifierSha, expectedCommit);
+  assert.equal(report.authority.candidateSha, expectedCommit);
+  assert.equal(
+    report.authority.traceFileSha256,
+    canonical.manifest.traceFileSha256,
+  );
+  assert.equal(report.authority.corpusSha256, corpusHash);
+  assert.equal(report.authority.candidateSurfaceHashes.length, 4);
+  assert.ok(
+    report.authority.candidateSurfaceHashes.every((surface) =>
+      /^[0-9a-f]{64}$/u.test(surface.toolsListSha256),
+    ),
+  );
   assert.equal(report.failures.length, 0);
   assert.equal(report.summaries.length, 4);
   assert.ok(report.summaries.every((summary) => summary.successRate === 1));
   assert.ok(report.summaries.every((summary) => summary.safetyPassRate === 1));
+
+  const registryArtifact = path.join(
+    candidateCheckout,
+    "dist",
+    "mcp-server",
+    "toolSurfaceRegistry.js",
+  );
+  writeFileSync(registryArtifact, "throw new Error('foreign dist');\n", "utf8");
+  const rebuiltForeignDist = score(canonicalPaths);
+  assert.deepEqual(
+    rebuiltForeignDist.authority.candidateSurfaceHashes,
+    report.authority.candidateSurfaceHashes,
+    "foreign dist must be removed and rebuilt before measurement",
+  );
+
+  rmSync(path.join(candidateCheckout, "dist"), {
+    recursive: true,
+    force: true,
+  });
+  const rebuiltMissingDist = score(canonicalPaths);
+  assert.deepEqual(
+    rebuiltMissingDist.authority.candidateSurfaceHashes,
+    report.authority.candidateSurfaceHashes,
+    "missing dist must be rebuilt before measurement",
+  );
+
+  const candidateReadme = path.join(candidateCheckout, "README.md");
+  const candidateReadmeBytes = fs.readFileSync(candidateReadme);
+  writeFileSync(
+    candidateReadme,
+    Buffer.concat([candidateReadmeBytes, Buffer.from("\nmodified\n")]),
+  );
+  expectScoreFailure(
+    canonicalPaths,
+    /candidate checkout must be clean/u,
+    "dirty candidate worktrees must be rejected before build",
+  );
+  writeFileSync(candidateReadme, candidateReadmeBytes);
+
+  const wrongCandidate = structuredClone(canonical);
+  wrongCandidate.manifest.sourceCommit = execFileSync(
+    "git",
+    ["rev-parse", `${expectedCommit}^`],
+    { cwd: process.cwd(), encoding: "utf8" },
+  ).trim();
+  expectScoreFailure(
+    writeFixture("wrong-candidate", wrongCandidate),
+    /candidate checkout identifies|candidateSha/u,
+    "historical source identity must not be reassigned by the verifier",
+  );
 
   const incompleteProfiles = structuredClone(canonical);
   incompleteProfiles.manifest.profiles.pop();
@@ -343,9 +431,31 @@ try {
     true,
   );
 
+  assert.deepEqual(
+    {
+      traces: sha256(fs.readFileSync(canonicalPaths.tracesPath)),
+      manifest: sha256(fs.readFileSync(canonicalPaths.manifestPath)),
+      corpus: sha256(fs.readFileSync(corpusPath)),
+    },
+    immutableEvidence,
+    "strict rescoring must not rewrite traces, manifest, or corpus",
+  );
+
   console.log(
     "PASS: routing eval scorer verifies the exact canonical P6 matrix, checkout profiles, strict evidence and safety",
   );
 } finally {
+  try {
+    execFileSync("git", ["worktree", "remove", "--force", candidateCheckout], {
+      cwd: process.cwd(),
+      stdio: "ignore",
+    });
+  } catch {}
+  try {
+    execFileSync("git", ["worktree", "prune"], {
+      cwd: process.cwd(),
+      stdio: "ignore",
+    });
+  } catch {}
   rmSync(temp, { recursive: true, force: true });
 }

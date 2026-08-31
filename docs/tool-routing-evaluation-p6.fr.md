@@ -73,13 +73,24 @@ Une trace JSONL reproductible enregistre :
   surface `tools/list`.
 
 Le manifeste de run associé contient les schémas publics mesurés. Le scoring
-strict exige `EXPECTED_COMMIT`, vérifie le checkout courant, reconstruit
-indépendamment chaque surface live canonique de `tools/list` contre une fixture
-locale de statut authentifié, compare le hash complet des schémas, recalcule
-chaque hash de fixture, valide le hash du fichier de traces et
+strict exige `EXPECTED_CANDIDATE_COMMIT`, enregistre le checkout propre du
+vérificateur comme `verifierSha` et conserve le commit source historique du
+manifeste comme `candidateSha`. Il crée un worktree détaché propre sur
+`candidateSha`, installe les dépendances verrouillées, supprime tout ancien
+`dist/` ignoré, reconstruit le candidat et reconstitue indépendamment chaque
+surface live canonique de `tools/list` contre une fixture locale de statut
+authentifié. Il compare le hash complet des schémas, recalcule chaque hash de
+fixture, valide le hash du fichier de traces et
 recalcule le succès depuis les preuves déterministes de routage et de sûreté.
 Il exige aussi les quatre profils canoniques, tous les cas attribués à chaque
 profil ciblé, les 31 cas sur `full` et deux à cinq répétitions complètes.
+
+Le rapport lie la version du scorer, `verifierSha`, `candidateSha`, les hashes
+du corpus, des traces et du manifeste, les hashes des artefacts reconstruits et
+ceux des quatre surfaces. La revalidation ne réécrit ni ne réattribue les
+octets d'origine des traces, du corpus, du manifeste ou des fixtures.
+`P6_COMPARE_COMMIT` permet d'exiger des surfaces publiques identiques sur un
+candidat ultérieur ; toute dérive impose une nouvelle campagne LLM.
 
 La sélection du modèle est regroupée selon le profil recommandé par le corpus.
 La surface `full` reçoit exactement le même lot ordonné que le profil ciblé :
@@ -118,9 +129,14 @@ connexion normale enregistrée par la CLI Codex, pas une clé API d'environnemen
 Le harness de sélection reconstruit `dist/` depuis le checkout propre attesté
 avant de mesurer `tools/list`, puis revérifie le commit et l'arbre suivi. Un
 ancien build ignoré ne peut donc jamais être attribué au SHA courant.
-Le scorer strict effectue ensuite sa propre reconstruction des schémas depuis
-le checkout : un manifeste auto-cohérent venu d'un autre build ne peut pas
-passer en ne modifiant que ses volumes et ses hashes déclarés.
+Le scorer strict reconstruit ensuite le candidat dans un worktree détaché et
+recalcule ses schémas. Un build ignoré ancien, absent ou étranger est remplacé,
+un candidat sale est refusé et un manifeste auto-cohérent venu d'un autre
+commit ne peut pas passer en ne modifiant que ses volumes et hashes déclarés.
+
+`Completed` signifie que les tests requis, la CI sur SHA exact et les gates de
+review sont tous passés sur la même tête. Une Codex Review terminée qui contient
+encore un finding n'est pas une review verte et ne ferme pas la gate.
 
 ## Règles du catalogue
 
