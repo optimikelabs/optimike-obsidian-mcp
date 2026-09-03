@@ -32,7 +32,7 @@ const EXPECTED_VAULT = path.resolve(
 );
 const EXPECTED_VAULT_NAME = "operon-bridge-pilot-vault-2.5.0";
 const EXPECTED_OPERON_VERSION = (
-  process.env.OPERON_35_CANARY_EXPECTED_OPERON_VERSION ?? "3.6.1"
+  process.env.OPERON_35_CANARY_EXPECTED_OPERON_VERSION ?? "3.6.2"
 ).trim();
 const EXPECTED_BRIDGE_VERSION = (
   process.env.OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.9.2"
