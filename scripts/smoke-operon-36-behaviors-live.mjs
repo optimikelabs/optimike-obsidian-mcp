@@ -1547,7 +1547,7 @@ async function main() {
     }
   }
 
-  async function callMutation(name, args, label) {
+  async function callMutation(name, args, label, { beforeDispatch } = {}) {
     const requiredCapability = TOOL_MUTATION_CAPABILITIES[name] ?? null;
     for (let attempt = 1; attempt <= MUTATION_RETRY_LIMIT; attempt += 1) {
       await waitForLiveStatus(requiredCapability);
@@ -1575,6 +1575,7 @@ async function main() {
       if (args.dryRun === false) await assertCandidateStillExact(candidate);
       if (args.dryRun === false) {
         await assertVaultRootStillSame(`${label} native apply`);
+        await beforeDispatch?.(physicalPreflight);
       }
       const observed = await callRaw(name, args, {
         allowError: true,
@@ -2186,37 +2187,7 @@ async function main() {
       dryRunNoDiff: true,
     };
 
-    const blockerOwnershipPlan = await callMutation(
-      "operon_create_task",
-      {
-        idempotencyKey: `${runId}:blocked:blocker:create:ownership`,
-        dryRun: true,
-        task: {
-          source: "file",
-          description: `Operon 3.6 blocker ${runId}`,
-        },
-      },
-      "blocked-task blocker ownership preflight",
-    );
-    const blockerProjectedPaths = await assertSafePlannedTaskSourceArtifacts(
-      blockerOwnershipPlan?.plan,
-      "blocked-task blocker ownership preflight",
-      { requirePaths: true },
-    );
-    assert.equal(
-      blockerProjectedPaths.size,
-      1,
-      "File-task blocker ownership preflight must project one source.",
-    );
-    const [blockerProjectedPath] = blockerProjectedPaths;
-    assert.equal(
-      baseline.has(blockerProjectedPath),
-      false,
-      "File-task blocker ownership path already exists in the baseline.",
-    );
-    createdArtifactPaths.add(blockerProjectedPath);
-    createdArtifactMarkers.set(blockerProjectedPath, runId);
-
+    let blockerProjectedPath = null;
     const blockerCreate = assertApplied(
       await callMutation(
         "operon_create_task",
@@ -2229,6 +2200,21 @@ async function main() {
           },
         },
         "blocked-task blocker create",
+        {
+          beforeDispatch: async (physicalPreflight) => {
+            const projectedPaths = [...physicalPreflight.paths].filter(
+              (relativePath) => !baseline.has(relativePath),
+            );
+            assert.equal(
+              projectedPaths.length,
+              1,
+              "File-task blocker pre-dispatch must project one new source.",
+            );
+            blockerProjectedPath = projectedPaths[0];
+            createdArtifactPaths.add(blockerProjectedPath);
+            createdArtifactMarkers.set(blockerProjectedPath, runId);
+          },
+        },
       ),
       "blocked-task blocker create",
     );

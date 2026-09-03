@@ -221,6 +221,7 @@ for (const invariant of [
   "const expectedPaths = new Set();",
   "expectedPaths.add(fixturePath);",
   "expectedPaths.add(task.path);",
+  "await beforeDispatch?.(physicalPreflight);",
   "createdArtifactPaths.add(blockerProjectedPath);",
   "File-task blocker applied outside its ownership preflight path.",
   "await assertCandidateStillExact(candidate)",
@@ -257,10 +258,10 @@ assert.equal(
   "Run-marker reconciliation must include owned file-task sources outside the fixture.",
 );
 assert.equal(
-  source.indexOf("createdArtifactPaths.add(blockerProjectedPath);") <
-    source.indexOf("const blockerCreate = assertApplied("),
+  source.indexOf("await beforeDispatch?.(physicalPreflight);") <
+    source.indexOf("const observed = await callRaw(name, args"),
   true,
-  "The projected file-task artifact must be owned before destructive dispatch.",
+  "The current physical projection must be owned immediately before destructive dispatch.",
 );
 const candidateAttestationIndex = source.indexOf(
   "const candidate = await attestLiveCandidate(vaultReal);",
