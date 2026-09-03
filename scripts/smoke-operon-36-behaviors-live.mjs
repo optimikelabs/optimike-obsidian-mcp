@@ -1360,13 +1360,14 @@ async function main() {
       `${label} addresses a task outside the sealed canary sources.`,
     );
     await safeVaultRegularFile(task.path, `${label} physical source`);
+    return task;
   }
 
   async function assertPhysicalPreDispatch(name, args, label) {
     // Every operation in this canary is deliberately confined to its existing
     // fixture. Re-read its real filesystem identity immediately before the
     // native call, not merely when the canary started.
-    const expectedPaths = new Set([fixturePath, ...createdArtifactPaths]);
+    const expectedPaths = new Set([fixturePath]);
     await safeVaultRegularFile(fixturePath, `${label} fixture pre-dispatch`);
     const hasExplicitTaskSource = args?.task?.targetPath !== undefined;
     if (hasExplicitTaskSource) {
@@ -1386,7 +1387,8 @@ async function main() {
     );
     let resolvedTaskSourceCount = 0;
     for (const operonId of taskIds) {
-      await assertKnownMutationTaskSource(operonId, label);
+      const task = await assertKnownMutationTaskSource(operonId, label);
+      expectedPaths.add(task.path);
       resolvedTaskSourceCount += 1;
     }
 
@@ -1466,9 +1468,7 @@ async function main() {
     for (const change of changes) {
       if (change.path === fixturePath) continue;
       assert.equal(
-        change.change === "created" ||
-          (change.change === "modified" &&
-            createdArtifactPaths.has(change.path)),
+        change.change === "created" || change.change === "modified",
         true,
         `${label} changed an unowned non-fixture Markdown path after physical preflight.`,
       );
@@ -2187,6 +2187,37 @@ async function main() {
       dryRunNoDiff: true,
     };
 
+    const blockerOwnershipPlan = await callMutation(
+      "operon_create_task",
+      {
+        idempotencyKey: `${runId}:blocked:blocker:create:ownership`,
+        dryRun: true,
+        task: {
+          source: "file",
+          description: `Operon 3.6 blocker ${runId}`,
+        },
+      },
+      "blocked-task blocker ownership preflight",
+    );
+    const blockerProjectedPaths = await assertSafePlannedTaskSourceArtifacts(
+      blockerOwnershipPlan?.plan,
+      "blocked-task blocker ownership preflight",
+      { requirePaths: true },
+    );
+    assert.equal(
+      blockerProjectedPaths.size,
+      1,
+      "File-task blocker ownership preflight must project one source.",
+    );
+    const [blockerProjectedPath] = blockerProjectedPaths;
+    assert.equal(
+      baseline.has(blockerProjectedPath),
+      false,
+      "File-task blocker ownership path already exists in the baseline.",
+    );
+    createdArtifactPaths.add(blockerProjectedPath);
+    createdArtifactMarkers.set(blockerProjectedPath, runId);
+
     const blockerCreate = assertApplied(
       await callMutation(
         "operon_create_task",
@@ -2209,6 +2240,11 @@ async function main() {
       "Multi-source regression requires the blocker and child to use distinct sources.",
     );
     if (!baseline.has(blocker.path)) {
+      assert.equal(
+        blocker.path,
+        blockerProjectedPath,
+        "File-task blocker applied outside its ownership preflight path.",
+      );
       createdArtifactPaths.add(blocker.path);
       createdArtifactMarkers.set(blocker.path, blocker.operonId);
     }

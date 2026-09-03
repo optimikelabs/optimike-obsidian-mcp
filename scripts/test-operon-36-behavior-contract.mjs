@@ -218,6 +218,10 @@ for (const invariant of [
   "did not seal every periodic source path; refusing a physically unbounded mutation.",
   "async function assertPhysicalPreDispatch",
   "async function assertPhysicalPostDispatch",
+  "const expectedPaths = new Set([fixturePath]);",
+  "expectedPaths.add(task.path);",
+  "createdArtifactPaths.add(blockerProjectedPath);",
+  "File-task blocker applied outside its ownership preflight path.",
   "await assertCandidateStillExact(candidate)",
   'await runNpmCommand(["run", "build"], "MCP candidate rebuild")',
   "Operon Bridge candidate rebuild",
@@ -235,6 +239,18 @@ for (const invariant of [
     `Missing contract: ${invariant}`,
   );
 }
+
+assert.equal(
+  source.includes("new Set([fixturePath, ...createdArtifactPaths])"),
+  false,
+  "A mutation preflight must not inherit unrelated artifacts from earlier operations.",
+);
+assert.equal(
+  source.indexOf("createdArtifactPaths.add(blockerProjectedPath);") <
+    source.indexOf("const blockerCreate = assertApplied("),
+  true,
+  "The projected file-task artifact must be owned before destructive dispatch.",
+);
 const candidateAttestationIndex = source.indexOf(
   "const candidate = await attestLiveCandidate(vaultReal);",
 );

@@ -4,7 +4,7 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 
 ## Preconditions
 
-- Node.js `>=22.7.5`
+- Node.js `>=22.12.0`
 - Obsidian Desktop
 - Local REST API enabled
 - Optimike MCP `3.8.2`, targeting Operon `3.6.2`, Operon CLI `1.2.0` and Local REST API `5.1.0` behind the exact-SHA release gate below; `3.2.1` remains in the explicit certified set, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
