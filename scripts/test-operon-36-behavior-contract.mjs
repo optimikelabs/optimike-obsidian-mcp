@@ -163,7 +163,7 @@ for (const requiredTool of [
 }
 for (const invariant of [
   'const EXPECTED_OPERON_VERSION = "3.6.2"',
-  'const EXPECTED_MCP_VERSION = "3.8.1"',
+  'const EXPECTED_MCP_VERSION = "3.8.2"',
   'const EXPECTED_BRIDGE_VERSION = "0.9.2"',
   "I_CONFIRM_PILOT_2_OPERON_36_BEHAVIOR_MUTATIONS",
   "public_delete_surface_unavailable",
@@ -440,7 +440,7 @@ const frenchReadme = await readFile(
 );
 assert.match(
   frenchReadme,
-  /Optimike MCP `3\.8\.1` cible Operon officiel `3\.6\.1`/u,
+  /Optimike MCP `3\.8\.2` cible Operon officiel `3\.6\.2`/u,
   "The French entrypoint must name the current MCP and Operon targets.",
 );
 
@@ -449,9 +449,9 @@ const validationRunbook = await readFile(
   "utf8",
 );
 for (const required of [
-  "official Operon `3.6.1` reports",
-  "official Operon `3.6.1` exposes mutations",
-  "target, Operon `3.6.1`",
+  "official Operon `3.6.2` reports",
+  "official Operon `3.6.2` exposes mutations",
+  "target, Operon `3.6.2`",
   "Operon 3.6.1 grant reapproval gate (mandatory)",
   "temporary `1.0.0`",
   "`0.9.2` grant became active",
@@ -471,7 +471,7 @@ const decisionReport = await readFile(
 );
 assert.match(
   decisionReport,
-  /Current authority: Optimike MCP `3\.8\.1` targets Operon `3\.6\.1`/u,
+  /Current authority: Optimike MCP `3\.8\.2` targets Operon `3\.6\.2`/u,
 );
 assert.match(decisionReport, /Historical 3\.2\.0 candidate admission/u);
 assert.match(decisionReport, /Bridge 0\.8\.3 was the historical 3\.2\.0 candidate/u);

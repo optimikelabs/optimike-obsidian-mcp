@@ -207,11 +207,11 @@ operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.8.1 admission
+## 3.8.2 admission
 
-Optimike MCP `3.8.1`, Bridge `0.9.2`, Operon `3.6.1`,
+Optimike MCP `3.8.2`, Bridge `0.9.2`, Operon `3.6.2`,
 Operon CLI `1.2.0` and Local REST API `5.1.0` form the current validation set.
-Operon `3.6.1` remains
+Operon `3.6.2` remains
 `compatible-provisional` until it joins the explicit certified evidence set,
 but that label no longer masks valid mutation capabilities. Product version is
 diagnostic metadata and may select an explicit deny or narrowly blocked path;
@@ -236,9 +236,12 @@ workflow, or recovery grants; only the exact operation or dedicated recovery
 surface may do so.
 
 The public Developer API V1 contract did not drift from Operon `3.5.3` through
-`3.6.1`. Operon `3.6.0` nevertheless changes Task Editor relation cleanup, permits
+`3.6.2`. Operon `3.6.0` nevertheless changes Task Editor relation cleanup, permits
 Scheduled Date on a blocked task, and optionally expands a parent's date range
 after a child mutation. Operon `3.6.1` additionally repairs explicit reapproval
 of recoverably suspended Developer API grants while stale or revoked authority
-remains blocked. These behaviors must be tested in the enabled vault configuration;
+remains blocked. Operon `3.6.2` canonicalizes sealed-plan resource ordering with
+locale-independent UTF-16 code-unit comparison; Pilot 2 exercises this through a
+relationship apply spanning two source notes. These behaviors must be tested in
+the enabled vault configuration;
 they never authorize accepting unrelated postflight drift.
