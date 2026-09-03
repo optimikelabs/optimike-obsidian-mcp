@@ -67,7 +67,7 @@ Le chemin `/mcp` sans qualificatif utilise désormais `standard` ; `/mcp/full` r
 
 Pré-requis :
 
-- Node.js `>=22.7.5` ;
+- Node.js `>=22.12.0` ;
 - Obsidian Desktop uniquement pour les fonctions live ;
 - plugins correspondant aux capacités activées.
 
@@ -114,7 +114,7 @@ N’activer que les surfaces utilisées :
 - **Bases Bridge** inclus pour Bases live et le CAS de formules gouvernées ;
 - **Optimike Atomic Write Bridge** inclus pour les cycles remplacement de note, patch texte du corps, Frontmatter et Canvas `plan → apply → status → recover` ;
 - **Smart Connections** pour l’index sémantique local ;
-- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.2** pour les tâches gouvernées. Optimike MCP `3.8.1` cible Operon officiel `3.6.1`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.1` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Les trois Bridges inclus [récupèrent désormais leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture. Leur [bundle de release unique et vérifié](docs/bridge-packaging.fr.md) préserve les réglages plugin et permet un rollback clôturé.
+- **Operon Developer API V1** et **Optimike Operon Bridge 0.9.2** pour les tâches gouvernées. Optimike MCP `3.8.2` cible Operon officiel `3.6.2`, Operon CLI `1.2.0` et Local REST API `5.1.0` ; l’admission de la release exige la gate Pilot 2 du dépôt sur le SHA exact. Operon `3.6.2` reste `compatible-provisional` : une release non refusée reste inscriptible uniquement si la négociation du contrat, les capacités exactes, les schémas, la santé, l’index et le recovery sont tous valides ; la version produit n’est pas une allowlist positive d’écriture. Pilot 2 vérifie le correctif `3.6.2` d’ordre canonique des plans scellés multi-source par une mutation de relation `preview → apply` sur deux sources et une restauration octet pour octet de la fixture. Les trois Bridges inclus [récupèrent leurs routes Local REST après un démarrage tardif ou un rechargement](docs/bridge-lifecycle.fr.md), sans redémarrer le MCP ni modifier les autorisations d’écriture. Leur [bundle de release unique et vérifié](docs/bridge-packaging.fr.md) préserve les réglages plugin et permet un rollback clôturé.
 - **Obsidian Tasks** pour le parsing Markdown Tasks-compatible.
 
 Les mutations Operon exigent le réglage de mutation du Bridge plus :

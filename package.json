@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "3.8.1",
+  "version": "3.8.2",
   "description": "Unified Obsidian MCP server with shared local cache, Operon and Tasks tools, Bases support, semantic search, runtime observability, and degraded read mode for durable agent workflows.",
   "main": "dist/index.js",
   "files": [
@@ -216,14 +216,14 @@
     "ignore": "^7.0.5",
     "jose": "^6.0.11",
     "js-yaml": "^4.1.0",
-    "jsonc-parser": "^3.3.1",
     "json5": "^2.2.3",
+    "jsonc-parser": "^3.3.1",
     "mdast-util-from-markdown": "^2.0.3",
     "mdast-util-gfm": "^3.1.0",
     "micromark-extension-gfm": "^3.0.0",
     "openai": "^5.6.0",
     "partial-json": "^0.1.7",
-    "sanitize-html": "2.17.5",
+    "sanitize-html": "2.17.7",
     "tiktoken": "^1.0.21",
     "validator": "^13.15.35",
     "winston": "^3.17.0",
@@ -251,7 +251,7 @@
   "author": "Optimike (Mickael Ahouansou)",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=22.7.5"
+    "node": ">=22.12.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/inspector": "^0.21.2",

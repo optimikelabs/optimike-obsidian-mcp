@@ -67,7 +67,7 @@ Unqualified `/mcp` now uses `standard`; `/mcp/full` remains the explicit complet
 
 Requirements:
 
-- Node.js `>=22.7.5`;
+- Node.js `>=22.12.0`;
 - Obsidian Desktop only for live features;
 - capability-specific plugins listed below.
 
@@ -114,7 +114,7 @@ Enable only the surfaces you use:
 - bundled **Bases Bridge** for live Bases and governed formula CAS;
 - bundled **Optimike Atomic Write Bridge** for governed Note replacement, body text patch, Frontmatter and Canvas `plan → apply → status → recover`;
 - **Smart Connections** for the local semantic index;
-- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.9.2** for governed task operations. Optimike MCP `3.8.1` targets official Operon `3.6.1`, Operon CLI `1.2.0`, and Local REST API `5.1.0`; release admission requires the repository's exact-SHA Pilot 2 gate. Operon `3.6.1` remains `compatible-provisional`: a non-denied release is writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate; product version is not a positive write allowlist. The three bundled Bridges now [recover their Local REST routes after late startup or reload](docs/bridge-lifecycle.md) without restarting the MCP or changing write authorization. Their [single verified release bundle](docs/bridge-packaging.md) preserves plugin settings and supports fenced rollback.
+- **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.9.2** for governed task operations. Optimike MCP `3.8.2` targets official Operon `3.6.2`, Operon CLI `1.2.0`, and Local REST API `5.1.0`; release admission requires the repository's exact-SHA Pilot 2 gate. Operon `3.6.2` remains `compatible-provisional`: a non-denied release is writable only when contract negotiation, exact capabilities, schemas, health, index readiness and recovery support all validate; product version is not a positive write allowlist. Pilot 2 verifies the `3.6.2` canonical multi-source sealed-plan ordering fix through a two-source `preview → apply` relationship mutation and byte-exact fixture restoration. The three bundled Bridges [recover their Local REST routes after late startup or reload](docs/bridge-lifecycle.md) without restarting the MCP or changing write authorization. Their [single verified release bundle](docs/bridge-packaging.md) preserves plugin settings and supports fenced rollback.
 - **Obsidian Tasks** for Tasks-compatible Markdown parsing.
 
 Operon mutations require the Bridge mutation setting plus:

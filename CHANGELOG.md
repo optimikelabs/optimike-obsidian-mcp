@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.2] - 2026-09-03
+
+### Changed
+
+- The provisional live target is now official Operon `3.6.2` with Operon CLI
+  `1.2.0`, Local REST API `5.1.0`, and Bridge `0.9.2`. The Developer API V1
+  boundary remains unchanged.
+- The destructive Pilot 2 behavior canary now proves Operon's canonical
+  multi-source sealed-plan ordering fix with a relationship mutation spanning
+  two Markdown sources, followed by byte-exact fixture restoration.
+- Operon behavior smoke tests default to `3.6.2`; no product-version write
+  allowlist or second mutation path was introduced.
+- Production dependency locks now include the patched `fast-uri`, `qs`, and
+  `sanitize-html` releases required by the release audit gate.
+
 ## [3.8.1] - 2026-08-31
 
 ### Changed

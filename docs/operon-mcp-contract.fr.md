@@ -355,11 +355,11 @@ La suppression reste une action opérateur dans la CLI. Un futur
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
 
-## Admission 3.8.1
+## Admission 3.8.2
 
-Optimike MCP `3.8.1`, Bridge `0.9.2`, Operon `3.6.1`,
+Optimike MCP `3.8.2`, Bridge `0.9.2`, Operon `3.6.2`,
 Operon CLI `1.2.0` et Local REST API `5.1.0` forment l’ensemble de validation
-courant. Operon `3.6.1` reste
+courant. Operon `3.6.2` reste
 `compatible-provisional` jusqu’à son entrée dans l’ensemble explicite de preuves
 certifiées, mais ce libellé ne masque plus les mutations valides. La version
 produit reste une métadonnée diagnostique pouvant sélectionner un refus ou une
@@ -386,10 +386,13 @@ filtre, workflow ou recovery ; seules l’opération exacte ou la surface de
 récupération dédiée peuvent le faire.
 
 Le contrat public Developer API V1 n’a pas dérivé entre Operon `3.5.3` et
-`3.6.1`. Operon `3.6.0` modifie néanmoins le nettoyage relationnel via Task
+`3.6.2`. Operon `3.6.0` modifie néanmoins le nettoyage relationnel via Task
 Editor, autorise une Scheduled Date sur une tâche bloquée et peut étendre, par
 automatisation opt-in, la plage de dates d’un parent après la mutation d’un
 enfant. Operon `3.6.1` corrige en plus la réapprobation explicite d’un grant
 Developer API suspendu récupérable, tout en refusant une autorité périmée ou
-révoquée. Ces comportements doivent être testés dans la configuration active
+révoquée. Operon `3.6.2` rend canonique l’ordre des ressources d’un plan scellé
+avec une comparaison des unités de code UTF-16 indépendante de la locale ; Pilot 2
+le vérifie par une relation appliquée sur deux notes sources. Ces comportements
+doivent être testés dans la configuration active
 du coffre ; ils n’autorisent jamais l’acceptation d’une dérive postflight non liée.

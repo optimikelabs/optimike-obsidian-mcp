@@ -104,7 +104,7 @@ Every mode also registers the 25 Operon contract tools:
 `operon_relocate_task`, `operon_list_pending_recoveries`, and
 `operon_recover_mutation`. In non-live modes they remain limited to validated
 read-only snapshots; mutation calls fail closed. Registration does not imply
-runtime availability: official Operon `3.6.1` retains saved-filter evaluation,
+runtime availability: official Operon `3.6.2` retains saved-filter evaluation,
 adoption and Daily/Weekly workflows after their exact grants. A non-denied
 future release is not forced into read-only mode solely because its product
 version is unknown: the Bridge admits each mutation only after Developer API V1
@@ -117,7 +117,7 @@ remains unavailable. Relationship and recurrence apply passed the dedicated
 3.2.0 live pilot. The bounded upstream limits in #99/#101 and #139 remain.
 Operon `3.5.3` is retained as historical evidence for the adoption and
 periodic-workflow rollout; it is not the current candidate target. The
-current Pilot 2 gate targets Optimike MCP `3.8.1` with Operon `3.6.1`,
+current Pilot 2 gate targets Optimike MCP `3.8.2` with Operon `3.6.2`,
 CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.9.2`; release admission
 requires the clean final SHA. Recoverably suspended grants may be explicitly
 reapproved in Operon Settings; stale, revoked or drifted bindings remain blocked.

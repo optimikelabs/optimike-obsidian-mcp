@@ -30,8 +30,8 @@ const EXPECTED_VAULT = path.resolve(
 );
 const EXPECTED_VAULT_NAME = "operon-bridge-pilot-vault-2.5.0";
 const EXPECTED_BASE_URL = "http://127.0.0.1:27233";
-const EXPECTED_OPERON_VERSION = "3.6.1";
-const EXPECTED_MCP_VERSION = "3.8.1";
+const EXPECTED_OPERON_VERSION = "3.6.2";
+const EXPECTED_MCP_VERSION = "3.8.2";
 const EXPECTED_BRIDGE_VERSION = "0.9.2";
 const RUN_CONFIRMATION = "I_CONFIRM_PILOT_2_OPERON_36_BEHAVIOR_MUTATIONS";
 const PROJECT_ROOT = path.dirname(
@@ -1355,18 +1355,19 @@ async function main() {
       `${label} physical source task`,
     );
     assert.equal(
-      task.path,
-      fixturePath,
-      `${label} addresses a task outside the dedicated fixture.`,
+      task.path === fixturePath || createdArtifactPaths.has(task.path),
+      true,
+      `${label} addresses a task outside the sealed canary sources.`,
     );
     await safeVaultRegularFile(task.path, `${label} physical source`);
+    return task;
   }
 
   async function assertPhysicalPreDispatch(name, args, label) {
     // Every operation in this canary is deliberately confined to its existing
     // fixture. Re-read its real filesystem identity immediately before the
     // native call, not merely when the canary started.
-    const expectedPaths = new Set([fixturePath]);
+    const expectedPaths = new Set();
     await safeVaultRegularFile(fixturePath, `${label} fixture pre-dispatch`);
     const hasExplicitTaskSource = args?.task?.targetPath !== undefined;
     if (hasExplicitTaskSource) {
@@ -1375,6 +1376,7 @@ async function main() {
         fixturePath,
         `${label} create target is outside the dedicated fixture.`,
       );
+      expectedPaths.add(fixturePath);
     }
     const taskIds = new Set(
       [
@@ -1386,7 +1388,8 @@ async function main() {
     );
     let resolvedTaskSourceCount = 0;
     for (const operonId of taskIds) {
-      await assertKnownMutationTaskSource(operonId, label);
+      const task = await assertKnownMutationTaskSource(operonId, label);
+      expectedPaths.add(task.path);
       resolvedTaskSourceCount += 1;
     }
 
@@ -1448,24 +1451,26 @@ async function main() {
 
   async function assertPhysicalPostDispatch(result, preflight, label) {
     assert.equal(
-      result?.after?.path,
-      fixturePath,
-      `${label} returned a task source outside the dedicated fixture.`,
+      typeof result?.after?.path,
+      "string",
+      `${label} returned no task source.`,
     );
     assert.equal(
       preflight.paths.has(result.after.path),
       true,
       `${label} returned a task source absent from the physical pre-dispatch proof.`,
     );
-    await safeVaultRegularFile(fixturePath, `${label} fixture post-dispatch`);
+    await safeVaultRegularFile(
+      result.after.path,
+      `${label} returned source post-dispatch`,
+    );
     const after = await captureMarkdownInventory();
     const changes = inventoryDiff(preflight.inventory, after);
     for (const change of changes) {
-      if (change.path === fixturePath) continue;
       assert.equal(
-        change.change,
-        "created",
-        `${label} changed a non-fixture Markdown path after physical preflight.`,
+        change.change === "created" || change.change === "modified",
+        true,
+        `${label} changed an unowned Markdown path after physical preflight.`,
       );
       assert.equal(
         preflight.paths.has(change.path),
@@ -1542,7 +1547,7 @@ async function main() {
     }
   }
 
-  async function callMutation(name, args, label) {
+  async function callMutation(name, args, label, { beforeDispatch } = {}) {
     const requiredCapability = TOOL_MUTATION_CAPABILITIES[name] ?? null;
     for (let attempt = 1; attempt <= MUTATION_RETRY_LIMIT; attempt += 1) {
       await waitForLiveStatus(requiredCapability);
@@ -1570,6 +1575,7 @@ async function main() {
       if (args.dryRun === false) await assertCandidateStillExact(candidate);
       if (args.dryRun === false) {
         await assertVaultRootStillSame(`${label} native apply`);
+        await beforeDispatch?.(physicalPreflight);
       }
       const observed = await callRaw(name, args, {
         allowError: true,
@@ -1711,7 +1717,6 @@ async function main() {
   async function queryRunTasks() {
     const result = await call("operon_query_tasks", {
       search: runId,
-      pathIncludes: [fixturePath],
       includeProperties: true,
       forceRefresh: true,
       limit: 100,
@@ -2182,6 +2187,7 @@ async function main() {
       dryRunNoDiff: true,
     };
 
+    let blockerProjectedPath = null;
     const blockerCreate = assertApplied(
       await callMutation(
         "operon_create_task",
@@ -2189,30 +2195,49 @@ async function main() {
           idempotencyKey: `${runId}:blocked:blocker:create`,
           dryRun: false,
           task: {
-            source: "inline",
-            targetPath: fixturePath,
+            source: "file",
             description: `Operon 3.6 blocker ${runId}`,
           },
         },
         "blocked-task blocker create",
+        {
+          beforeDispatch: async (physicalPreflight) => {
+            const projectedPaths = [...physicalPreflight.paths].filter(
+              (relativePath) => !baseline.has(relativePath),
+            );
+            assert.equal(
+              projectedPaths.length,
+              1,
+              "File-task blocker pre-dispatch must project one new source.",
+            );
+            blockerProjectedPath = projectedPaths[0];
+            createdArtifactPaths.add(blockerProjectedPath);
+            createdArtifactMarkers.set(blockerProjectedPath, runId);
+          },
+        },
       ),
       "blocked-task blocker create",
     );
     const blocker = assertTask(blockerCreate.after, "blocker create result");
-    assert.equal(
+    assert.notEqual(
       blocker.path,
       fixturePath,
-      "Blocker was created outside the fixture.",
+      "Multi-source regression requires the blocker and child to use distinct sources.",
     );
     if (!baseline.has(blocker.path)) {
+      assert.equal(
+        blocker.path,
+        blockerProjectedPath,
+        "File-task blocker applied outside its ownership preflight path.",
+      );
       createdArtifactPaths.add(blocker.path);
-      createdArtifactMarkers.set(blocker.path, runId);
+      createdArtifactMarkers.set(blocker.path, blocker.operonId);
     }
     const stableBlockerAfterCreate = await stableTask(blocker.operonId);
     assert.equal(
       stableBlockerAfterCreate.path,
-      fixturePath,
-      "Blocker did not settle in the dedicated fixture.",
+      blocker.path,
+      "File-task blocker did not settle at its sealed source.",
     );
 
     const blockedCreate = assertApplied(

@@ -1,6 +1,6 @@
 # Operon integration decision report
 
-Current authority: Optimike MCP `3.8.1` targets Operon `3.6.1`, Bridge `0.9.2`
+Current authority: Optimike MCP `3.8.2` targets Operon `3.6.2`, Bridge `0.9.2`
 and Operon CLI `1.2.0`, subject to the exact-SHA release gate. The material below
 records earlier admissions and remains historical evidence rather than the
 current release decision.
@@ -172,7 +172,7 @@ claim.
 
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
 remain historical. The `3.5.3` / Bridge `0.8.2` evidence is historical;
-Optimike MCP `3.8.1` targets Operon `3.6.1`, Bridge `0.9.2` and CLI `1.2.0`,
+Optimike MCP `3.8.2` targets Operon `3.6.2`, Bridge `0.9.2` and CLI `1.2.0`,
 subject to its exact-SHA release gate.
 
 ## Deliberately excluded or unavailable
