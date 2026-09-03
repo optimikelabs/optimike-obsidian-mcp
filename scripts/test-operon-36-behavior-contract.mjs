@@ -218,7 +218,8 @@ for (const invariant of [
   "did not seal every periodic source path; refusing a physically unbounded mutation.",
   "async function assertPhysicalPreDispatch",
   "async function assertPhysicalPostDispatch",
-  "const expectedPaths = new Set([fixturePath]);",
+  "const expectedPaths = new Set();",
+  "expectedPaths.add(fixturePath);",
   "expectedPaths.add(task.path);",
   "createdArtifactPaths.add(blockerProjectedPath);",
   "File-task blocker applied outside its ownership preflight path.",
@@ -244,6 +245,11 @@ assert.equal(
   source.includes("new Set([fixturePath, ...createdArtifactPaths])"),
   false,
   "A mutation preflight must not inherit unrelated artifacts from earlier operations.",
+);
+assert.equal(
+  source.includes("if (change.path === fixturePath) continue;"),
+  false,
+  "The physical postflight must not exempt the fixture unless the current plan owns it.",
 );
 assert.equal(
   source.indexOf("createdArtifactPaths.add(blockerProjectedPath);") <

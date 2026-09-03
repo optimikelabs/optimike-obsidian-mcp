@@ -1367,7 +1367,7 @@ async function main() {
     // Every operation in this canary is deliberately confined to its existing
     // fixture. Re-read its real filesystem identity immediately before the
     // native call, not merely when the canary started.
-    const expectedPaths = new Set([fixturePath]);
+    const expectedPaths = new Set();
     await safeVaultRegularFile(fixturePath, `${label} fixture pre-dispatch`);
     const hasExplicitTaskSource = args?.task?.targetPath !== undefined;
     if (hasExplicitTaskSource) {
@@ -1376,6 +1376,7 @@ async function main() {
         fixturePath,
         `${label} create target is outside the dedicated fixture.`,
       );
+      expectedPaths.add(fixturePath);
     }
     const taskIds = new Set(
       [
@@ -1466,11 +1467,10 @@ async function main() {
     const after = await captureMarkdownInventory();
     const changes = inventoryDiff(preflight.inventory, after);
     for (const change of changes) {
-      if (change.path === fixturePath) continue;
       assert.equal(
         change.change === "created" || change.change === "modified",
         true,
-        `${label} changed an unowned non-fixture Markdown path after physical preflight.`,
+        `${label} changed an unowned Markdown path after physical preflight.`,
       );
       assert.equal(
         preflight.paths.has(change.path),
