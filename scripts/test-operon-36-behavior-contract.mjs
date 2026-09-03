@@ -252,6 +252,11 @@ assert.equal(
   "The physical postflight must not exempt the fixture unless the current plan owns it.",
 );
 assert.equal(
+  /search: runId,\s*pathIncludes:/u.test(source),
+  false,
+  "Run-marker reconciliation must include owned file-task sources outside the fixture.",
+);
+assert.equal(
   source.indexOf("createdArtifactPaths.add(blockerProjectedPath);") <
     source.indexOf("const blockerCreate = assertApplied("),
   true,

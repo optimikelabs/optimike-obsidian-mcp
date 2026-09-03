@@ -1716,7 +1716,6 @@ async function main() {
   async function queryRunTasks() {
     const result = await call("operon_query_tasks", {
       search: runId,
-      pathIncludes: [fixturePath],
       includeProperties: true,
       forceRefresh: true,
       limit: 100,
