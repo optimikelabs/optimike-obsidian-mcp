@@ -54,6 +54,7 @@ import {
 import { registerObsidianDeleteNoteTool } from "./tools/obsidianDeleteNoteTool/index.js";
 import { registerObsidianGlobalSearchTool } from "./tools/obsidianGlobalSearchTool/index.js";
 import { registerObsidianListNotesTool } from "./tools/obsidianListNotesTool/index.js";
+import { registerObsidianNoteLinksTool } from "./tools/obsidianNoteLinksTool/index.js";
 import { registerObsidianReadNoteTool } from "./tools/obsidianReadNoteTool/index.js";
 import { registerObsidianSearchReplaceTool } from "./tools/obsidianSearchReplaceTool/index.js";
 import { registerObsidianUpdateNoteTool } from "./tools/obsidianUpdateNoteTool/index.js";
@@ -1907,6 +1908,7 @@ async function createMcpServerInstance(
       await registerBasesGetSchemaTool(server, undefined, localBasesService);
       await registerBasesQueryTool(server, undefined, localBasesService);
     } else if (!isHeadlessReadonly && obsidianService) {
+      await registerObsidianNoteLinksTool(server, obsidianService);
       await registerObsidianDeleteNoteTool(
         server,
         obsidianService,
