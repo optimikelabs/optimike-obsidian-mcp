@@ -28,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 81 unique names. Full live/hybrid
-registration currently contains 77 names. See
+The current cross-runtime registry contains 82 unique names. Full live/hybrid
+registration currently contains 78 names. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
 ## MCP Resources
@@ -76,6 +76,7 @@ dependency of this MCP.
 ## Core Notes
 
 - `obsidian_read_note`: read a vault note by path, with cache fallback.
+- `obsidian_note_links`: live/hybrid-live only. Observe a bounded semantic neighborhood from Obsidian Desktop public `MetadataCache` APIs: outgoing links, embeds and frontmatter links with effective resolution; requested subpaths with heading/block validity when demonstrable; unresolved aggregates; and backlinks reconstructed from resolved relations. It reports provenance, truncation, a best-effort non-atomic snapshot and cache freshness as `unknown` when the public API cannot prove it. It performs no write and makes no graph-preservation claim.
 - `obsidian_list_notes`: list notes and folders, using REST or cache/filesystem.
 - `obsidian_global_search`: text/regex search across cached vault content.
 - `obsidian_update_note`: live REST note update for an explicit `filePath` or
