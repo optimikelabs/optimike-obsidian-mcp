@@ -29,7 +29,19 @@ for (let i = 0; i < cycle.milestones.length; i++) {
   else assert.match(m.knownCandidateSha, /^[a-f0-9]{40}$/u);
   for (const name of m.tools) assert.ok(TOOL_SURFACE_REGISTRY.some(t => t.name === name), `Missing ${name}`);
 }
-for (const value of Object.values(cycle.finalGate)) assert.equal(value, "NOT_RUN");
+const requiredFinalGateKeys = [
+  "orderedLocalQualification",
+  "m1InstalledFixPreserved",
+  "installedExactSha",
+  "secureRead",
+  "mainTagReleaseAlignment",
+];
+assert.deepEqual(
+  Object.keys(cycle.finalGate).sort(),
+  [...requiredFinalGateKeys].sort(),
+  "Final gate manifest must retain every mandatory gate and no unknown substitute",
+);
+for (const key of requiredFinalGateKeys) assert.equal(cycle.finalGate[key], "NOT_RUN");
 assert.equal(cycle.expectedSurface.crossRuntime, TOOL_SURFACE_REGISTRY.length);
 for (const [profile, count] of Object.entries(cycle.expectedSurface.liveProfiles)) {
   assert.equal(compileToolProfileNames({ profile, registrationMode: "live", availableStaticRequirements: ["vault-cache"] }).length, count);

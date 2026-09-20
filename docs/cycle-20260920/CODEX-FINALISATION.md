@@ -50,7 +50,7 @@ Invoke-Checked { npm run build:bridges }
 Invoke-Checked { npm run test:cycle:package }
 ```
 
-Le contrôle `test:cycle` vérifie les sources ; sa sortie `releaseAuthorized:false` est intentionnelle. Les tests hermétiques et leurs fixtures ne sont jamais des canaries Desktop.
+Le contrôle `test:cycle` vérifie les sources ; sa sortie `releaseAuthorized:false` est intentionnelle. Le manifeste doit conserver exactement les cinq marqueurs finaux obligatoires (qualification locale ordonnée, préservation M1, SHA installé, lecture Secure, alignement main/tag/release) : une clé absente est un échec, jamais un gate implicitement satisfait. Les tests hermétiques et leurs fixtures ne sont jamais des canaries Desktop.
 
 Le build de bundle exige un worktree propre, fichiers non suivis compris. Lire `scripts/build-bridge-bundle.mjs` et l’installateur avant usage. Construire le bundle depuis le SHA exact, fermer l’Obsidian du coffre jetable pour installer, et fournir `-ExpectedCommit` ainsi que `-ConfirmObsidianClosed`. Déterminer `-VaultPath`, `-BundlePath` et `-BackupRoot` depuis les artefacts réels : ne pas reprendre un chemin présumé du chat. Ne pas activer de grant dans la production pour qualifier Pilot2.
 

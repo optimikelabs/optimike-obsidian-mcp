@@ -30,6 +30,7 @@ try {
   for (const mutate of [
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.expectedSurface.crossRuntime++;write(p, JSON.stringify(v)); },
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.finalGate.secureRead="PASS";write(p, JSON.stringify(v)); },
+    () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));delete v.finalGate.m1InstalledFixPreserved;write(p, JSON.stringify(v)); },
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.milestones[2].base="main";write(p, JSON.stringify(v)); },
     () => { const p="package.json", v=JSON.parse(originals.get(p));v.files=v.files.filter(f=>f!=="docs/durable-note-create-m4.md");write(p, JSON.stringify(v)); },
     () => fs.unlinkSync(path.join(fixture,"docs/durable-note-create-m4.md")),
