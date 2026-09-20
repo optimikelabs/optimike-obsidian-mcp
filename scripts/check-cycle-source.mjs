@@ -20,6 +20,13 @@ assert.equal(lock.packages[""].version, pkg.version);
 assert.deepEqual(cycle.milestones.map(m => m.id), ["M2", "M3", "M4", "M5", "M6"]);
 assert.equal(new Set(cycle.milestones.map(m => m.branch)).size, 5);
 assert.equal(new Set(cycle.milestones.map(m => m.pr)).size, 5);
+const expectedMilestoneTools = {
+  M2: ["obsidian_note_links"],
+  M3: ["obsidian_note_move_plan", "obsidian_note_move_apply", "obsidian_note_move_status"],
+  M4: ["obsidian_note_create_plan", "obsidian_note_create_apply", "obsidian_note_create_status"],
+  M5: ["bases_rows_patch_plan", "bases_rows_patch_apply", "bases_rows_patch_status"],
+  M6: [],
+};
 for (let i = 0; i < cycle.milestones.length; i++) {
   const m = cycle.milestones[i];
   assert.equal(m.base, i === 0 ? "main" : cycle.milestones[i - 1].branch);
@@ -27,6 +34,11 @@ for (let i = 0; i < cycle.milestones.length; i++) {
   assert.equal(m.localGate, "NOT_RUN", "This preparation manifest must not fabricate local completion");
   if (m.id === "M6") assert.equal(m.knownCandidateSha, null, "Do not embed a self-referential commit SHA");
   else assert.match(m.knownCandidateSha, /^[a-f0-9]{40}$/u);
+  assert.deepEqual(
+    m.tools,
+    expectedMilestoneTools[m.id],
+    `Milestone ${m.id} must retain its exact public tool inventory`,
+  );
   for (const name of m.tools) assert.ok(TOOL_SURFACE_REGISTRY.some(t => t.name === name), `Missing ${name}`);
 }
 const requiredFinalGateKeys = [
