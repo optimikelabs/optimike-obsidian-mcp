@@ -21,7 +21,7 @@ export type NoteCreateApply = {
 };
 export type NoteCreateInspection = {
   contractVersion: 1; path: string; bindingFingerprint: string;
-  policyDigest: string; exists: boolean; content?: string; sha256?: string;
+  exists: boolean; content?: string; sha256?: string;
 };
 export const noteCreateHash = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 const ordinal = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;

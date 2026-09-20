@@ -32,7 +32,7 @@ const Policy = z.object({ version: z.literal(1), utcOffsetMinutes: z.number().in
 const Preflight = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
   absent: z.literal(true), enabled: z.literal(true), policy: Policy, policyDigest: HASH }).strict();
 const Inspection = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
-  policyDigest: HASH, exists: z.boolean(), content: z.string().max(NOTE_CREATE_MAX_BYTES).optional(), sha256: HASH.optional() }).strict();
+  exists: z.boolean(), content: z.string().max(NOTE_CREATE_MAX_BYTES).optional(), sha256: HASH.optional() }).strict();
 const Result = z.object({ contractVersion: z.literal(1), operationId: z.string().uuid(), path: z.string().max(1024),
   bindingFingerprint: HASH, policyDigest: HASH, contentSha256: HASH,
   outcome: z.enum(["created", "conflict", "outcome_unknown"]), reason: z.string().regex(/^[a-z_]{1,96}$/u) }).strict();

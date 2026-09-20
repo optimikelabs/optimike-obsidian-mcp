@@ -23,7 +23,7 @@ const backend = {
   async preflight(path) { return { contractVersion: 1, path, bindingFingerprint, absent: true, enabled: true, policy, policyDigest }; },
   async create(r) { writes++; assert.equal(files.has(r.path), false); files.set(r.path, r.content);
     const { content, ...ids } = r; return { ...ids, outcome: "created", reason: "exclusive_create_fsynced" }; },
-  async inspect(path) { const content = files.get(path); return { contractVersion: 1, path, bindingFingerprint, policyDigest,
+  async inspect(path) { const content = files.get(path); return { contractVersion: 1, path, bindingFingerprint,
     exists: content !== undefined, ...(content !== undefined ? { content, sha256: noteCreateHash(content) } : {}) }; },
 };
 const client = new Client({ name: "m4-hermetic", version: "1" });
