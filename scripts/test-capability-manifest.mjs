@@ -34,6 +34,7 @@ const atomicReady = {
     canvasWriteEnabled: true,
   },
   nativeMove: { supported: true, enabled: true, preferenceReadable: true },
+  noteCreate: { supported: true, enabled: true, exclusiveCreate: true },
   limits: { markdownOnly: true },
 };
 
@@ -161,8 +162,8 @@ function capability(manifest, id) {
 
 const ready = projectCapabilityManifest(input());
 assert.equal(ready.contractVersion, 1);
-assert.equal(ready.capabilities.length, 10);
-assert.equal(ready.summary.ready, 10);
+assert.equal(ready.capabilities.length, 11);
+assert.equal(ready.summary.ready, 11);
 assert.equal(ready.admission.state, "not-applicable");
 for (const item of ready.capabilities) {
   assert.equal(item.discoverable, true, item.id);
@@ -806,3 +807,12 @@ for (const marker of privateMarkers) {
 }
 
 console.log("Capability manifest contract passed.");
+
+// M4 has a separate grant and is absent on legacy Bridges, never implied by CAS writes.
+assert.equal(capability(projectCapabilityManifest(input({ writeMode: "guarded" })), "governed-note-create").state, "ready");
+assert.equal(capability(projectCapabilityManifest(input({ writeMode: "readonly" })), "governed-note-create").reasonCode, "write_policy_blocked");
+assert.equal(capability(projectCapabilityManifest(input({ profile: "tasks" })), "governed-note-create").state, "hidden");
+const noCreate = structuredClone(atomicReady); delete noCreate.noteCreate;
+assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: noCreate } })), "governed-note-create").available, false);
+const disabledCreate = structuredClone(atomicReady); disabledCreate.noteCreate.enabled = false;
+assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: disabledCreate } })), "governed-note-create").reasonCode, "bridge_write_disabled");

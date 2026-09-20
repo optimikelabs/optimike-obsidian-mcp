@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, readSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, realpathSync, readSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { nativeNotePath } from "../../../src/services/nativeNoteMoveContract.js";
 import { NOTE_CREATE_MAX_BYTES, noteCreateHash } from "../../../src/services/noteCreateContract.js";
@@ -33,7 +33,14 @@ export class ExclusiveNoteCreateFiles {
     try {
       const before = fstatSync(fd);
       if (before.dev !== stat.dev || before.ino !== stat.ino || before.size > NOTE_CREATE_MAX_BYTES) throw new Error("create_target_changed");
-      const bytes = readFileSync(fd), after = fstatSync(fd), current = lstatSync(filename);
+      const buffer = Buffer.alloc(before.size + 1);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const count = readSync(fd, buffer, offset, buffer.length - offset, offset);
+        if (!count) break;
+        offset += count;
+      }
+      const bytes = buffer.subarray(0, offset), after = fstatSync(fd), current = lstatSync(filename);
       if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || current.dev !== after.dev || current.ino !== after.ino ||
           current.isSymbolicLink() || after.nlink !== 1 || bytes.length > NOTE_CREATE_MAX_BYTES) throw new Error("create_target_changed");
       const content = bytes.toString("utf8");

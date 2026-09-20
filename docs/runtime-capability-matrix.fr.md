@@ -242,3 +242,7 @@ backend. Ils sont absents de tous les modes headless.
   non-écrasement et de réparation par hash exact.
 - Le remplacement gouverné de note complète est live-only ; `recover` est une réconciliation ou reprise du plan exact, jamais un undo.
 - Une validation d’écriture headless doit créer un nouveau brouillon dans un dossier sandbox. Elle ne doit pas modifier des notes existantes d’un vrai vault.
+
+## Création durable M4
+
+Uniquement live/hybrid-live : trois outils, journal durable existant, autorisation indépendante `allowNoteCreates`, politique guarded/full. Les anciens Bridges refusent cette capacité. Aucun équivalent simulé en mode dégradé/headless. Le résultat certifie l’état observé, pas son auteur ni l’indexation Obsidian. Voir [le contrat](durable-note-create-m4.md).

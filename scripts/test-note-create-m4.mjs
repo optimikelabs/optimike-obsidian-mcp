@@ -134,5 +134,14 @@ try {
     assert.equal((await adapter.status(p.planRef)).outcome, "committed");
     assert.equal(f.calls(), 0); reopened.close(); cases++;
   }
+  {
+    const f = fixture("slow-network", [{ pluginId: "update-time", role: "modified", propertyName: "updated", delayMs: 2250 }]);
+    const p = await f.adapter.plan(input), create = f.backend.create;
+    f.backend.create = async r => { f.tick(10000); return create(r); };
+    assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).postflight, "pending");
+    f.tick(2500);
+    assert.equal((await f.adapter.status(p.planRef)).outcome, "committed");
+    assert.equal(f.calls(), 1); f.journal.close(); cases++;
+  }
   console.log(`PASS: ${cases} durable create scenarios; exclusive intent, shared journal, lost replies/restart, content-free terminal proof and no mutation from status`);
 } finally { rmSync(root, { recursive: true, force: true }); }

@@ -641,15 +641,15 @@ assert.doesNotMatch(operonContractFr, /3\.5\.3` stock[\s\S]*lecture seule/iu);
 const profilesEn = await text("docs/tool-surface-profiles.md");
 const profilesFr = await text("docs/tool-surface-profiles.fr.md");
 assert.match(readme, /\| `tasks`\s+\|\s+35\s+\|/u);
-assert.match(readme, /\| `full`\s+\|\s+81\s+\|/u);
+assert.match(readme, /\| `full`\s+\|\s+84\s+\|/u);
 assert.match(readmeFr, /\| `tasks`\s+\|\s+35\s+\|/u);
-assert.match(readmeFr, /\| `full`\s+\|\s+81\s+\|/u);
+assert.match(readmeFr, /\| `full`\s+\|\s+84\s+\|/u);
 assert.match(profilesEn, /\| `tasks`\s+\|[^\n]+35 tools/u);
-assert.match(profilesEn, /\| `full`\s+\|[^\n]+81 tools/u);
-assert.match(profilesEn, /85 unique names/u);
+assert.match(profilesEn, /\| `full`\s+\|[^\n]+84 tools/u);
+assert.match(profilesEn, /88 unique names/u);
 assert.match(profilesFr, /\| `tasks`\s+\|[^\n]+35 outils/u);
-assert.match(profilesFr, /\| `full`\s+\|[^\n]+81 outils/u);
-assert.match(profilesFr, /85 noms uniques/u);
+assert.match(profilesFr, /\| `full`\s+\|[^\n]+84 outils/u);
+assert.match(profilesFr, /88 noms uniques/u);
 
 const backpressureContract = await text(
   "docs/http-concurrency-backpressure.md",

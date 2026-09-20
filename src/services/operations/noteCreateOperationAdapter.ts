@@ -124,14 +124,20 @@ export class NoteCreateOperationAdapter {
       } else if (observation.exists) {
         const start = row.executionStartedAtEpochMs;
         if (start === undefined) bad("create_execution_timestamp_missing");
-        const match = observeCreateContent(row.nextContent, observation.content!, plan.policy, start, this.now());
+        if (row.settlementObservationStartedAtEpochMs === undefined) {
+          row = this.journal.beginModifiedTimeSettlementObservation(row.operationId,
+            ["applying", "outcome_unknown"], row.executionOwner?.attemptId);
+        }
+        const observationDelay = Math.max(0, ...plan.policy.fields.map(field => field.delayMs));
+        const settled = this.now() - row.settlementObservationStartedAtEpochMs! >= observationDelay;
+        const match = settled ? observeCreateContent(row.nextContent, observation.content!, plan.policy, start, this.now()) : undefined;
         if (match) {
           row = this.journal.commitAfterVerifiedProof(row.operationId, ["applying", "outcome_unknown"], {
             kind: "note-create-observed-state", digest: match.sha256,
             details: { match: match.kind, authorAttribution: "not_proven", observedAt: new Date(this.now()).toISOString() },
           });
           postflight = "verified";
-        } else if (this.now() - start < Math.max(0, ...plan.policy.fields.map(field => field.delayMs))) postflight = "pending";
+        } else if (!settled) postflight = "pending";
       }
     } catch { row = this.require(ref); }
     return this.receipt(row, postflight);

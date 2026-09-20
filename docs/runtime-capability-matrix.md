@@ -241,3 +241,7 @@ binding/SHA-256. They are absent from every headless mode.
   must define no-clobber and exact-hash repair guarantees independently.
 - Governed whole-note replacement is live-only, preserves protected frontmatter, and treats recovery as exact-plan reconciliation/resumption rather than undo.
 - Headless write validation should create a new draft file in a sandbox folder. It should not edit existing notes in a real vault.
+
+## Durable note creation M4
+
+Live/hybrid-live only: three tools, existing durable journal, independent `allowNoteCreates` grant, guarded/full policy. Legacy Bridges fail closed. Headless/degraded modes do not emulate this capability. [Contract, ambiguity and indexing limits](durable-note-create-m4.md).

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
+import type { OperationProof } from "./contract.js";
 import type {
   ModifiedTimeSettlementEvidence,
   ModifiedTimeSettlementPolicy,
@@ -48,6 +49,7 @@ export type ObsidianNoteReplacePlan = {
   executionStartedAtEpochMs?: number;
   settlementObservationStartedAtEpochMs?: number;
   modifiedTimeSettlementEvidence?: ModifiedTimeSettlementEvidence;
+  effectProof?: OperationProof;
 };
 
 export class ObsidianNoteReplaceConcurrencyError extends Error {
@@ -81,7 +83,8 @@ export type PendingOperationKind =
   | "obsidian.base.formula.patch"
   | "obsidian.canvas.patch"
   | "obsidian.text.patch"
-  | "obsidian.note.move";
+  | "obsidian.note.move"
+  | "obsidian.note.create";
 
 export type PendingOperationRow = {
   operationId: string;
@@ -560,6 +563,7 @@ export class ObsidianNoteReplaceJournal {
   commitAfterVerifiedProof(
     operationId: string,
     expected: Array<"applying" | "outcome_unknown">,
+    effectProof?: OperationProof,
   ): ObsidianNoteReplacePlan {
     return this.transitionInternal(
       operationId,
@@ -569,6 +573,7 @@ export class ObsidianNoteReplaceJournal {
       undefined,
       true,
       undefined,
+      effectProof,
     );
   }
 
@@ -580,6 +585,7 @@ export class ObsidianNoteReplaceJournal {
     expectedExecutionAttemptId: string | undefined,
     verifiedCommitWithoutOwner: boolean,
     settlementEvidence: ModifiedTimeSettlementEvidence | undefined,
+    effectProof?: OperationProof,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const current = this.get(operationId);
@@ -611,6 +617,7 @@ export class ObsidianNoteReplaceJournal {
       ...(settlementEvidence
         ? { modifiedTimeSettlementEvidence: settlementEvidence }
         : {}),
+      ...(effectProof ? { effectProof } : {}),
       ...(STABLE_TERMINAL.has(next) ? { nextContent: "" } : {}),
       ...(failure ? { failure } : { failure: undefined }),
     };

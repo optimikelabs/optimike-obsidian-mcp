@@ -179,3 +179,31 @@ test("M3 native paths reject traversal, config, devices, ADS and case-only alias
   assert.throws(() => sealNativeMove({ sourcePath: "A.md", destinationPath: "a.md", updateLinks: true,
     bindingFingerprint: "a".repeat(64), notes: [...f.notes.values()] }), /case_only/);
 });
+
+
+test("M3 completed acknowledgements are bounded without permanently exhausting a long-running Bridge", async () => {
+  const f = fixture(); f.notes.get("Old/Source.md")!.backlinks = [];
+  let source = "Old/Source.md";
+  let first: NativeMoveApply | undefined;
+  for (let n = 0; n < 140; n++) {
+    const destination = `Moved/Note-${n}.md`;
+    const plan = await f.service.preflight(source, destination);
+    const request: NativeMoveApply = { contractVersion: 1, operationId: randomUUID(), sourcePath: source,
+      destinationPath: destination, bindingFingerprint: plan.bindingFingerprint, preconditionDigest: plan.preconditionDigest };
+    if (!first) first = request;
+    assert.equal((await f.service.apply(request)).outcome, "committed");
+    source = destination; f.tick(6000);
+  }
+  assert.equal(f.writes(), 140);
+  assert.equal((await f.service.status(first!.operationId, first!.preconditionDigest)).outcome, "outcome_unknown");
+});
+
+test("M3 eviction never discards an uncertain receipt or turns it into a replay", async () => {
+  const f = fixture(); const p = await f.plan();
+  f.host.rename = async () => { throw new Error("uncertain native effect"); };
+  assert.equal((await f.service.apply(p)).outcome, "outcome_unknown");
+  f.tick(24 * 60 * 60 * 1000);
+  assert.equal((await f.service.apply(p)).outcome, "outcome_unknown");
+  assert.equal((await f.service.status(p.operationId, p.preconditionDigest)).outcome, "outcome_unknown");
+  assert.equal(f.writes(), 0);
+});

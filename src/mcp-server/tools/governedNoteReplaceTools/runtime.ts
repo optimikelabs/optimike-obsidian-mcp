@@ -1,3 +1,5 @@
+import { NoteCreateOperationAdapter, type NoteCreateBackend } from "../../../services/operations/noteCreateOperationAdapter.js";
+import { RestNoteCreateBackend } from "../../../services/operations/restNoteCreateBackend.js";
 import { NativeNoteMoveOperationAdapter, type NativeNoteMoveBackend } from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
 import { RestNativeNoteMoveBackend } from "../../../services/operations/restNativeNoteMoveBackend.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -380,6 +382,7 @@ export type GovernedNoteReplacePlanView = {
 };
 
 export class GovernedNoteReplaceRuntime {
+  readonly noteCreate: NoteCreateOperationAdapter | undefined;
   readonly nativeMove: NativeNoteMoveOperationAdapter | undefined;
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
@@ -392,7 +395,9 @@ export class GovernedNoteReplaceRuntime {
     leaseHeartbeatMs = 5_000,
     private readonly vaultCacheService?: VaultCacheService,
     nativeMoveBackend?: NativeNoteMoveBackend,
+    noteCreateBackend?: NoteCreateBackend,
   ) {
+    this.noteCreate = noteCreateBackend ? new NoteCreateOperationAdapter(noteCreateBackend, journal) : undefined;
     this.nativeMove = nativeMoveBackend ? new NativeNoteMoveOperationAdapter(nativeMoveBackend, journal) : undefined;
     this.leaseHeartbeat = setInterval(() => {
       try {
@@ -431,6 +436,7 @@ export class GovernedNoteReplaceRuntime {
         "obsidian.frontmatter.patch",
         "obsidian.text.patch",
         "obsidian.note.move",
+        "obsidian.note.create",
       ],
       allowUnprojectedFallback: true,
     });
@@ -629,6 +635,7 @@ export function createGovernedNoteReplaceRuntime(
     ),
     vaultCacheService,
     new RestNativeNoteMoveBackend(obsidianService),
+    new RestNoteCreateBackend(obsidianService),
   );
 
   // The application lifecycle closes the runtime explicitly. This synchronous

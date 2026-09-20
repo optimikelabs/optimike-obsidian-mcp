@@ -172,6 +172,11 @@ export class NativeNoteMoveOperationAdapter {
       observed = this.observation(await this.backend.status(row.operationId, row.requestDigest), row);
       if (observed.outcome === "committed" && row.status !== "committed") {
         row = this.journal.commitAfterVerifiedProof(row.operationId, ["applying", "outcome_unknown"]);
+      } else if (observed.outcome === "conflict" && ["applying", "outcome_unknown"].includes(row.status)) {
+        // The identity-checked backend receipt proves rejection before dispatch.
+        // This is status reconciliation, not a second execution or recovery attempt.
+        row = this.journal.transition(row.operationId, ["applying", "outcome_unknown"],
+          "conflict", "native_move_precondition_conflict", row.executionOwner?.attemptId);
       }
     } catch {
       row = this.require(reference);

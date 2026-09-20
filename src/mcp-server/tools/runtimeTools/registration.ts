@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { registerNoteCreateTools } from "../noteCreateTools/index.js";
 import { registerNativeNoteMoveTools } from "../nativeNoteMoveTools/index.js";
 import {
   MAINTENANCE_TOOL_ANNOTATIONS,
@@ -148,6 +149,7 @@ export async function registerRuntimeTools(
 
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
   registerNativeNoteMoveTools(server, governedNoteReplaceRuntime?.nativeMove);
+  registerNoteCreateTools(server, governedNoteReplaceRuntime?.noteCreate);
   await registerGovernedTextPatchTools(server, governedNoteReplaceRuntime);
   await registerGovernedFrontmatterTools(server, governedNoteReplaceRuntime);
   await registerGovernedBaseFormulaTools(server, governedBaseFormulaRuntime);

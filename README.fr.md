@@ -39,10 +39,10 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 
 | Besoin                                               | Profil      | Taille live/hybrid complète |
 | ---------------------------------------------------- | ----------- | --------------------------: |
-| Travail général sur le coffre                        | `standard`  |                          26 |
-| Notes, tags, Bases et Canvas                         | `authoring` |                          37 |
+| Travail général sur le coffre                        | `standard`  |                          29 |
+| Notes, tags, Bases et Canvas                         | `authoring` |                          40 |
 | Workflows Tasks / Operon                             | `tasks`     |                          35 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          81 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          84 |
 
 En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
