@@ -1,0 +1,40 @@
+name: Temporary M4 contract packaging preparation
+on:
+  pull_request:
+    paths: ['.github/workflows/prepare-m4-package.yml']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.repository == 'optimikelabs/optimike-obsidian-mcp' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/m4-durable-note-create'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs=require('node:fs'),crypto=require('node:crypto');
+            const text=fs.readFileSync('package.json','utf8'),b=Buffer.from(text);
+            const sha=crypto.createHash('sha1').update(`blob ${b.length}\0`).update(b).digest('hex');
+            if(sha!=='27b2b278b97fca29d1d0e3014aa0a9ef8ba6165a')throw new Error('Stale package source');
+            const anchor='    "docs/native-note-move-m3.md",';
+            if(text.split(anchor).length!==2)throw new Error('Ambiguous package anchor');
+            fs.writeFileSync('package.json',text.replace(anchor,anchor+'\n    "docs/durable-note-create-m4.md",'));
+      - name: Verify actual npm inclusion
+        run: |
+          npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
+          node --input-type=module -e 'import fs from "node:fs"; const r=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/pack.json","utf8")); if(!r[0].files.some(f=>f.path==="docs/durable-note-create-m4.md"))throw new Error("Contract missing");'
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const text=require('node:fs').readFileSync('package.json','utf8');
+            const {data}=await github.rest.git.createBlob({...context.repo,content:text,encoding:'utf-8'});
+            core.notice('M4_PACKAGE_BLOB '+data.sha);
+            core.notice('No branch write; attach verified package and remove this temporary workflow.');
