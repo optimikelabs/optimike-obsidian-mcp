@@ -10,11 +10,14 @@ import {
   parseCasRequest,
   parseCanvasCasRequest,
   parseCanvasReadRequest,
+  parseNoteLinksRequest,
   parseReadRequest,
   sha256,
   validateVaultMarkdownPath,
   validateVaultCanvasPath,
   MAX_CANVAS_BYTES,
+  NOTE_LINKS_DEFAULT_LIMIT,
+  NOTE_LINKS_MAX_LIMIT,
 } from "./contract.js";
 
 test("validates bounded vault-relative Markdown paths", () => {
@@ -194,6 +197,20 @@ test("rejects oversized Canvas reads and writes before graph processing", () => 
       nextContent: oversized,
     }),
   );
+});
+
+test("note-links request is strict, bounded and versioned", () => {
+  assert.equal(NOTE_LINKS_DEFAULT_LIMIT, 200);
+  assert.equal(NOTE_LINKS_MAX_LIMIT, 1000);
+  assert.deepEqual(
+    parseNoteLinksRequest({ contractVersion: 1, path: "Notes/Test.md", limit: 200 }),
+    { contractVersion: 1, path: "Notes/Test.md", limit: 200 },
+  );
+  for (const limit of [0, 1001, 1.5, "20"]) {
+    assert.throws(() =>
+      parseNoteLinksRequest({ contractVersion: 1, path: "Test.md", limit }),
+    );
+  }
 });
 
 test("read and CAS bodies are strict and versioned", () => {
