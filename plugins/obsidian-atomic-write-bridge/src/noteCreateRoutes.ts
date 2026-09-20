@@ -27,7 +27,9 @@ export function createNoteCreateRoutes(app: App, options: { binding: () => strin
   }
   function inspect(path: string) {
     nativeNotePath(path);
-    return { contractVersion: 1, path, bindingFingerprint, policyDigest: createPolicyDigest(noteCreateDatePolicy(app)), ...files.inspect(path) };
+    // Status reconciliation observes filesystem evidence only. Current date
+    // settings may change or become unsupported after the sealed apply.
+    return { contractVersion: 1, path, bindingFingerprint, ...files.inspect(path) };
   }
   function apply(request: NoteCreateApply) {
     const common = { contractVersion: 1, operationId: request.operationId, path: request.path,

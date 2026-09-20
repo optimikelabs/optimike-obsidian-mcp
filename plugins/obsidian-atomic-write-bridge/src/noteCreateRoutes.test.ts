@@ -33,9 +33,14 @@ test("M4 routes reject stale bindings with request identity and never create or 
     assert.equal(call("apply", request).result.outcome, "created");
     assert.equal(call("apply", request).result.outcome, "conflict");
     assert.deepEqual(readdirSync(root), ["A.md"]);
+    (app as any).plugins = { plugins: { "frontmatter-date-manager": { settings: {
+      enableAutoUpdate: true, enableCreateTime: true, enableModifiedTime: true, enableLastViewed: true,
+      headerCreated: "created", headerUpdated: "updated", dateFormat: "yyyy-MM-dd'T'HH:mm",
+    } } } };
     const found = call("inspect", { contractVersion: 1, path: "A.md" });
     assert.equal(found.result.content, "# A\n");
     assert.equal(found.result.sha256, request.contentSha256);
+    assert.equal("policyDigest" in found.result, false);
     enabled = false;
     const rejected = call("apply", { ...request, operationId: randomUUID(), path: "B.md" });
     assert.equal(rejected.result.outcome, "conflict");
