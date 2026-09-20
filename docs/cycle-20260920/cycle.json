@@ -15,8 +15,8 @@
   "milestones": [
     {"id":"M2","pr":92,"branch":"feat/m2-note-links","base":"main","knownCandidateSha":"8a852d6ecd1d7432f3eb54b14c000766f3f18342","localGate":"NOT_RUN","tools":["obsidian_note_links"]},
     {"id":"M3","pr":94,"branch":"feat/m3-native-note-move","base":"feat/m2-note-links","knownCandidateSha":"4bafce8162c420468c998980e21047ede1fb84ae","localGate":"NOT_RUN","tools":["obsidian_note_move_plan","obsidian_note_move_apply","obsidian_note_move_status"]},
-    {"id":"M4","pr":95,"branch":"feat/m4-durable-note-create","base":"feat/m3-native-note-move","knownCandidateSha":"1d7546343ef272bc13d28ac0a2d20abe4981e102","localGate":"NOT_RUN","tools":["obsidian_note_create_plan","obsidian_note_create_apply","obsidian_note_create_status"]},
-    {"id":"M5","pr":96,"branch":"feat/m5-p7-base-rows","base":"feat/m4-durable-note-create","knownCandidateSha":"c3823f9167d998ec1e894948f0250db0e3f09f3e","localGate":"NOT_RUN","tools":["bases_rows_patch_plan","bases_rows_patch_apply","bases_rows_patch_status"]},
+    {"id":"M4","pr":95,"branch":"feat/m4-durable-note-create","base":"feat/m3-native-note-move","knownCandidateSha":"76914dbaf72700c711d417306f1fb0de3f7890ab","localGate":"NOT_RUN","tools":["obsidian_note_create_plan","obsidian_note_create_apply","obsidian_note_create_status"]},
+    {"id":"M5","pr":96,"branch":"feat/m5-p7-base-rows","base":"feat/m4-durable-note-create","knownCandidateSha":"533307b63fd0b20b523c7bcda3a93f44237cacce","localGate":"NOT_RUN","tools":["bases_rows_patch_plan","bases_rows_patch_apply","bases_rows_patch_status"]},
     {"id":"M6","pr":97,"branch":"chore/m6-optimike-cycle-close","base":"feat/m5-p7-base-rows","knownCandidateSha":null,"localGate":"NOT_RUN","tools":[]}
   ],
   "expectedSurface": {

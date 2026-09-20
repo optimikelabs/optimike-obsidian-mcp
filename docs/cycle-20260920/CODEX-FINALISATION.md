@@ -82,6 +82,8 @@ Tester des clés protégées configurées, y compris YAML cité, casse différen
 
 Avec les plugins réellement installés et reconnus, vérifier les champs créés/modifiés, délais, noms personnalisés dont l’ordre alphabétique diffère de l’ordre d’insertion, insertion entre propriétés et CRLF. Un timestamp tardif hors fenêtre ou une modification de corps ne doit pas être absorbé par le settlement. Reprendre après un délai supérieur à cinq minutes : un timestamp légitime initial doit rester vérifiable sans redispatch. L’attribution de l’auteur reste `not_proven` lors d’une simple réconciliation d’état.
 
+Après une création effectivement réussie dont la réponse est perdue, changer/désactiver le plugin de dates ou changer l’offset UTC avant le status. Après la fenêtre de settlement scellée, des octets exactement égaux au contenu planifié doivent réconcilier l’opération sans redispatch ; la politique courante ne doit pas devenir une identité historique de l’effet.
+
 Vérifier séparément l’apparition dans le cache et l’UI Obsidian : l’écriture fsync exclusive ne certifie pas l’indexation. Une divergence de plugin ou d’éditeur non couverte entraîne correction/restriction, pas une tolérance générique sur les octets.
 
 ## 6. M5 / P7 — une row existante, pas un nouveau modèle de données
@@ -91,6 +93,8 @@ Sur #96, lire `docs/base-row-patch-m5.md`. Créer une Base et une vue de test ex
 Vérifier set/delete de propriétés brutes, suppression d’une propriété sans suppression du fichier, préservation du corps et des autres propriétés, clés protégées/computed/file/formula refusées, homonymes, vue ambiguë, sélection tronquée, filtre non pris en charge et warning : refus sans mutation.
 
 Changer la Base, la note ou la sélection après plan ; vérifier le conflit approprié. Exercer réponse perdue, reprise, deux processus et absence de second apply d’un enfant déjà tenté. Vérifier le cockpit et ses prochaines actions : pas de faux recover exposé. Une propriété modifiée peut faire sortir la note de la vue ; status vérifie l’effet sur la note, pas son appartenance ultérieure.
+
+Vérifier aussi la négociation de capacité : un Bases Bridge 1.2.1 ou une version inconnue/prerelease sans preuve équivalente ne doit pas annoncer `governed-base-rows` comme disponible ; le Bridge candidat 1.2.2 doit l’annoncer lorsque ses autres gates sont prêts.
 
 La sélection est un snapshot du sous-ensemble de filtres du Bridge, fraîcheur inconnue ; comparer à la vue réelle. Le guard Base et le CAS note ne sont pas une transaction. Les tests insert/delete-note/batch/partials multi-cibles sont NOT_APPLICABLE à cette V1, pas des PASS.
 
