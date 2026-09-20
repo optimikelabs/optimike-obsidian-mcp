@@ -82,6 +82,23 @@ try {
     assert.equal(f.calls(), after ? 1 : 0);
     f.journal.close(); assertions++;
   }
+  {
+    const f = setup("lost-conflict"); const p = await f.adapter.plan(request);
+    let attempts = 0;
+    f.backend.apply = async r => {
+      attempts++;
+      f.replies.set(r.operationId, { contractVersion: 1, operationId: r.operationId,
+        bindingFingerprint: r.bindingFingerprint, preconditionDigest: r.preconditionDigest,
+        outcome: "conflict", reason: "precondition_failed_replan_required",
+        graphPostflight: "indeterminate", scope: "sealed_neighborhood_only", replayAllowed: false });
+      throw new Error("lost pre-effect conflict reply");
+    };
+    assert.equal((await f.adapter.apply(p.planRef, request.idempotencyKey)).outcome, "outcome_unknown");
+    assert.equal((await f.adapter.status(p.planRef)).outcome, "conflict");
+    assert.equal((await f.adapter.apply(p.planRef, request.idempotencyKey)).outcome, "conflict");
+    assert.equal(f.journal.get(p.operationId).status, "conflict");
+    assert.equal(attempts, 1); f.journal.close(); assertions++;
+  }
   for (const defect of ["identity", "graph", "shape", "binding", "sourceHash"]) {
     const f = setup("invalid" + defect);
     const p = await f.adapter.plan(request);

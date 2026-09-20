@@ -33,6 +33,8 @@ type Entry = {
   dispatchedAt?: number;
   lastMatch?: { digest: string; at: number; resolved: number };
   bytes: number;
+  settledAt?: number;
+  lastAccess: number;
 };
 
 /** Backend acknowledgements are bounded and process-local; the MCP journal is durable. */
@@ -41,6 +43,25 @@ export class NativeNoteMoveService {
   private executing = false;
   private bytes = 0;
   constructor(private readonly host: NativeMoveHost, private readonly now = Date.now) {}
+
+  /** Keep in-flight/uncertain receipts; bounded completed receipts have a 10-minute TTL.
+   * Under pressure the least recently observed completed receipt may be evicted after
+   * the 5-second graph observation window. Durable MCP rows still prevent replay;
+   * an evicted backend status honestly returns outcome_unknown, never absence proof.
+   */
+  private reserve(extraBytes: number, extraEntries: number): boolean {
+    const now = this.now();
+    const completed = [...this.entries.entries()]
+      .filter(([, entry]) => entry.settledAt !== undefined && now - entry.settledAt >= 5000)
+      .sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+    for (const [id, entry] of completed) {
+      const expired = now - entry.lastAccess >= 10 * 60 * 1000;
+      if (!expired && this.entries.size + extraEntries <= 128 && this.bytes + extraBytes <= 8 * 1024 * 1024) continue;
+      this.entries.delete(id);
+      this.bytes -= entry.bytes;
+    }
+    return this.entries.size + extraEntries <= 128 && this.bytes + extraBytes <= 8 * 1024 * 1024;
+  }
 
   async preflight(source: string, destination: string): Promise<NativeMovePreflight> {
     const paths = nativeMovePaths(source, destination);
@@ -76,10 +97,10 @@ export class NativeNoteMoveService {
       outcome: "outcome_unknown", reason: "in_flight", graphPostflight: "pending",
       scope: "sealed_neighborhood_only", replayAllowed: false,
     };
-    if (this.executing || this.entries.size >= 128 || this.bytes >= 8 * 1024 * 1024) {
+    if (this.executing || !this.reserve(1024, 1)) {
       return { ...observation, outcome: "rejected", reason: "native_move_capacity", graphPostflight: "indeterminate" };
     }
-    const entry: Entry = { request: { ...request }, requestDigest, observation, bytes: 1024 };
+    const entry: Entry = { request: { ...request }, requestDigest, observation, bytes: 1024, lastAccess: this.now() };
     this.entries.set(request.operationId, entry);
     this.bytes += entry.bytes;
     this.executing = true;
@@ -89,7 +110,7 @@ export class NativeNoteMoveService {
       const plan = await this.preflight(request.sourcePath, request.destinationPath);
       if (plan.preconditionDigest !== request.preconditionDigest) throw new NativeMoveBeforeEffectConflict();
       const cost = Buffer.byteLength(JSON.stringify(plan), "utf8");
-      if (this.bytes + cost > 8 * 1024 * 1024) throw new Error("native_move_capacity");
+      if (!this.reserve(cost, 0)) throw new Error("native_move_capacity");
       entry.plan = plan;
       entry.bytes += cost;
       this.bytes += cost;
@@ -113,6 +134,7 @@ export class NativeNoteMoveService {
         graphPostflight: "indeterminate",
       };
     } finally {
+      if (["committed", "conflict", "rejected"].includes(entry.observation.outcome)) entry.settledAt = this.now();
       this.executing = false;
     }
     return { ...entry.observation };
@@ -127,6 +149,7 @@ export class NativeNoteMoveService {
         graphPostflight: "indeterminate", scope: "sealed_neighborhood_only", replayAllowed: false,
       };
     }
+    entry.lastAccess = this.now();
     if (entry.observation.outcome !== "committed" || !entry.plan || !entry.barrier) return { ...entry.observation };
     const elapsed = this.now() - (entry.dispatchedAt ?? this.now());
     const clock = this.host.clock();
