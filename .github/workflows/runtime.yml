@@ -6,6 +6,23 @@ on:
   pull_request:
 
 jobs:
+  audit-lock-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Generate exact production audit lock diff
+        shell: bash
+        run: |
+          npm audit fix --package-lock-only --ignore-scripts || true
+          echo '---AUDIT_LOCK_DIFF_BEGIN---'
+          git diff -- package-lock.json
+          echo '---AUDIT_LOCK_DIFF_END---'
+
   runtime:
     strategy:
       fail-fast: false
