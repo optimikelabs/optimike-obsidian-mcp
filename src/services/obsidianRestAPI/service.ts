@@ -621,6 +621,23 @@ export class ObsidianRestApiService {
   }
 
   /**
+   * Executes a query specifically through the qualified Bases Bridge route.
+   * Governed Base-row selection uses this instead of the legacy public alias.
+   */
+  async queryBaseQualified(
+    baseId: string,
+    payload: BaseQueryRequest,
+    context: RequestContext,
+  ): Promise<BaseQueryResponse> {
+    return basesMethods.queryBaseQualified(
+      this._request.bind(this),
+      baseId,
+      payload,
+      context,
+    );
+  }
+
+  /**
    * Performs a batch upsert against the Bases Bridge.
    */
   async upsertBaseRows(

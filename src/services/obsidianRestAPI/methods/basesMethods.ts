@@ -80,6 +80,29 @@ export async function queryBase(
 }
 
 /**
+ * Security-sensitive query pinned to the qualified Bases Bridge extension.
+ * This keeps row-selection provenance on the same provider whose version and
+ * atomic status were admitted by the capability gate.
+ */
+export async function queryBaseQualified(
+  _request: RequestFunction,
+  baseId: string,
+  payload: BaseQueryRequest,
+  context: RequestContext,
+): Promise<BaseQueryResponse> {
+  return _request<BaseQueryResponse>(
+    {
+      method: "POST",
+      url: `/extensions/obsidian-bases-bridge/bases/${encodeURIComponent(baseId)}/query`,
+      headers: { "Content-Type": "application/json" },
+      data: payload,
+    },
+    context,
+    "queryBaseQualified",
+  );
+}
+
+/**
  * Performs a batch upsert of note properties for rows in a base.
  */
 export async function upsertBaseRows(

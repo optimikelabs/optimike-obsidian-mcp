@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 process.env.NODE_ENV = "test";
 process.env.OBSIDIAN_RUNTIME_MODE = "live";
 process.env.OBSIDIAN_API_KEY = "hermetic-fixture";
-const { BaseRowSelectionReader, baseRowTarget } = await import("../dist/services/baseRowSelection.js");
+const { BaseRowSelectionReader, baseRowTarget, restBaseRowSelection } = await import("../dist/services/baseRowSelection.js");
 const { createHash } = await import("node:crypto");
 const hash = s => createHash("sha256").update(s).digest("hex");
 const target = { baseId: "Views/Work.base", view: "Open", path: "Notes/A.md" };
@@ -59,5 +59,31 @@ for (const proof of [undefined, { contractVersion: 1, path: target.baseId, sha25
   // another binding, or an old Bridge without a snapshot. All fail closed.
   f.transport.query = async (...args) => ({ ...await query(...args), baseSnapshot: proof });
   await assert.rejects(f.reader.select(target)); cases++;
+}
+{
+  const yaml = "views:\n  - name: Open\n    type: table\n";
+  const sha256 = hash(yaml), bindingFingerprint = "a".repeat(64);
+  let qualified = 0, legacy = 0;
+  const rest = {
+    async readAtomicBase({ path }) {
+      return { ok: true, contractVersion: 1, path, yaml, sha256, size: Buffer.byteLength(yaml), bindingFingerprint };
+    },
+    async queryBaseQualified(baseId, payload) {
+      qualified++;
+      assert.equal(baseId, target.baseId);
+      assert.deepEqual(payload, { view: target.view, evaluate: false, limit: 500, page: 1 });
+      return { total: 1, page: 1, rows: [{ file: { path: target.path } }], source: "fallback", evaluate: false, warnings: [],
+        baseSnapshot: { contractVersion: 1, path: baseId, sha256, bindingFingerprint } };
+    },
+    async queryBase() {
+      legacy++;
+      throw new Error("legacy Bases route must not serve governed row selection");
+    },
+  };
+  const reader = restBaseRowSelection(rest);
+  await reader.select(target);
+  assert.equal(qualified, 1);
+  assert.equal(legacy, 0);
+  cases++;
 }
 console.log(`PASS: ${cases} M5 selection fixtures; complete warning-free fallback selection, exact paths, sealed Base/binding and honest freshness`);

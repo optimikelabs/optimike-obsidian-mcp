@@ -80,7 +80,7 @@ export class BaseRowSelectionReader {
 export function restBaseRowSelection(rest: ObsidianRestApiService): BaseRowSelectionReader {
   return new BaseRowSelectionReader({
     read: path => rest.readAtomicBase({ contractVersion: 1, path }, requestContextService.createRequestContext({ operation: "BaseRowSealRead" })),
-    query: (baseId, view) => rest.queryBase(baseId, { view, evaluate: false, limit: 500, page: 1 },
-      requestContextService.createRequestContext({ operation: "BaseRowSelection" })),
+    query: (baseId, view) => rest.queryBaseQualified(baseId, { view, evaluate: false, limit: 500, page: 1 },
+      requestContextService.createRequestContext({ operation: "BaseRowSelectionQualified" })),
   });
 }
