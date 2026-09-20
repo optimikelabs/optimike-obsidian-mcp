@@ -24,7 +24,7 @@ Ces nombres sont des projections du registre actuel et peuvent être plus faible
 
 L'[évaluation P6 du routage](tool-routing-evaluation-p6.fr.md) mesure ces
 surfaces depuis les schémas `tools/list` réels et une baseline versionnée de 31
-cas. Sa décision 3.8 conserve les quatre profils : l'union live de 60 outils
+cas. Sa décision 3.8 conserve les quatre profils : l'union live de 61 outils
 authoring et tasks n'est pas promue sans parcours cross-domain mesuré.
 
 ## Noms réservés à la compatibilité

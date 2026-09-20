@@ -39,10 +39,10 @@ Runtime answers what the backend can execute. It does not decide how many tools 
 
 | Need                                              | Profile     | Full live/hybrid size |
 | ------------------------------------------------- | ----------- | --------------------: |
-| General vault work                                | `standard`  |                    22 |
-| Notes, tags, Bases and Canvas authoring           | `authoring` |                    33 |
-| Tasks / Operon workflows                          | `tasks`     |                    34 |
-| Explicit complete, admin and specialized surfaces | `full`      |                    77 |
+| General vault work                                | `standard`  |                    23 |
+| Notes, tags, Bases and Canvas authoring           | `authoring` |                    34 |
+| Tasks / Operon workflows                          | `tasks`     |                    35 |
+| Explicit complete, admin and specialized surfaces | `full`      |                    78 |
 
 In 3.0, an unspecified profile defaults to `standard`. `smart_semantic_search` is the only registered semantic-search name; the former `smart_search` and `smart-search` aliases have been removed. `full` remains an explicit opt-in for the complete active-runtime surface. `bases_upsert_config` is a `full`-only whole-Base compatibility path; legacy whole-file config writes are default-off, while normal authoring uses bounded Base creation/row writes plus the governed formula family.
 

@@ -24,7 +24,7 @@ Counts are projections of the current registry and may be lower in restricted ru
 
 The [P6 routing evaluation](tool-routing-evaluation-p6.md) measures these
 surfaces from actual `tools/list` schemas and a versioned 31-case baseline. Its
-3.8 decision keeps all four profiles unchanged: the 60-tool live union of
+3.8 decision keeps all four profiles unchanged: the 61-tool live union of
 authoring and tasks is not promoted without a measured cross-domain journey.
 
 ## Compatibility-only names
