@@ -26,12 +26,12 @@ assert.deepEqual(
 );
 assert.equal(artifact.schemaVersion, "tool-catalog.v1");
 assert.equal(artifact.version, 1);
-assert.equal(artifact.toolCount, 88);
+assert.equal(artifact.toolCount, 91);
 assert.equal(artifact.tools.length, TOOL_SURFACE_REGISTRY.length);
 
 const registryNames = TOOL_SURFACE_REGISTRY.map((entry) => entry.name);
 const catalogNames = artifact.tools.map((entry) => entry.name);
-assert.equal(new Set(registryNames).size, 88);
+assert.equal(new Set(registryNames).size, 91);
 assert.deepEqual(
   catalogNames,
   [...registryNames].sort((a, b) => a.localeCompare(b)),
@@ -52,7 +52,7 @@ assert.deepEqual(artifact.classificationCounts, {
   "canonical-unique": 47,
   "alias-redundant": 0,
   "compatibility-historical": 1,
-  "governed-operation": 26,
+  "governed-operation": 29,
   diagnostic: 10,
   administration: 4,
 });
@@ -60,16 +60,16 @@ assert.deepEqual(artifact.classificationCounts, {
 const governed = artifact.tools.filter(
   (entry) => entry.classification === "governed-operation",
 );
-assert.equal(governed.length, 26);
+assert.equal(governed.length, 29);
 const governedFamilies = new Map();
 for (const entry of governed) {
   const roles = governedFamilies.get(entry.family) ?? [];
   roles.push(entry.lifecycleRole);
   governedFamilies.set(entry.family, roles);
 }
-assert.equal(governedFamilies.size, 7);
+assert.equal(governedFamilies.size, 8);
 for (const [family, roles] of governedFamilies) {
-  assert.deepEqual([...roles].sort(), ["note-move", "note-create"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"]);
+  assert.deepEqual([...roles].sort(), ["note-move", "note-create", "base-rows"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"]);
 }
 
 const directAlternatives = [
@@ -123,5 +123,5 @@ for (const profileId of TOOL_PROFILE_IDS) {
 }
 
 console.log(
-  "PASS: deterministic 88-tool catalog is exhaustive, alias-free, profile/mode-complete, and classifies all governed/diagnostic/admin surfaces",
+  "PASS: deterministic 91-tool catalog is exhaustive, alias-free, profile/mode-complete, and classifies all governed/diagnostic/admin surfaces",
 );

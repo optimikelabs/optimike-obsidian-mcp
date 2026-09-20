@@ -28,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 88 unique names. Full live/hybrid
-registration currently contains 84 names. See
+The current cross-runtime registry contains 91 unique names. Full live/hybrid
+registration currently contains 87 names. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
 ## MCP Resources
@@ -436,3 +436,7 @@ exact plugin engine semantics remains outside the current headless surface.
 ### Durable note creation M4
 
 `obsidian_note_create_plan/apply/status` seals one explicit absent Markdown target and reuses the durable journal. The separate Bridge creation grant is required; no overwrite/suffix/recovery replay is permitted. Committed means intended state observed, not authorship. Indexing remains unqualified until Pilot2. See [the exclusive-create contract](durable-note-create-m4.md).
+
+## Governed single-row Base property patch M5 / P7
+
+`bases_rows_patch_plan/apply/status` patch one existing Markdown row selected by exact `baseId`, `view` and `path`. Raw top-level frontmatter `set/delete` only; no note insert/delete, generic batch, native-engine completeness or multi-file atomicity. A warning-free complete supported-filter snapshot (at most 500 rows) seals selection; cache freshness stays unknown. Base hash/binding and membership are rechecked before the existing note-content CAS. A patched row may leave the view; status certifies the note effect, not view membership. Unknown attempts are observed, never replayed through a synthetic recovery tool. Available in live/hybrid-live authoring/full profiles. See [M5 contract](base-row-patch-m5.md).

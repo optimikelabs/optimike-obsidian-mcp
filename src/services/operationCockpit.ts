@@ -19,6 +19,7 @@ const OperationKindSchema = z.enum([
   "obsidian.text.patch",
   "obsidian.note.move",
   "obsidian.note.create",
+  "obsidian.base.rows.patch",
 ]);
 
 const PendingRowSchema = z
@@ -80,6 +81,7 @@ const PLAN_REF_PREFIXES: Readonly<
   "obsidian.text.patch": "obsidian-text-patch:v1:",
   "obsidian.note.move": "obsidian-note-move:v1:",
   "obsidian.note.create": "obsidian-note-create:v1:",
+  "obsidian.base.rows.patch": "obsidian-base-rows-patch:v1:",
 };
 
 function invalidCursor(): McpError {
@@ -132,7 +134,7 @@ function nextAction(
 ): OperationCockpitItem["nextAction"] {
   if (status === "planned") return "apply";
   if (status === "applying") return "status";
-  return ["obsidian.note.move", "obsidian.note.create"].includes(kind) ? "status" : "recover";
+  return ["obsidian.note.move", "obsidian.note.create", "obsidian.base.rows.patch"].includes(kind) ? "status" : "recover";
 }
 
 function publicItem(

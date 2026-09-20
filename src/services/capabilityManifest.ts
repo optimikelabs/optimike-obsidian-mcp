@@ -27,6 +27,7 @@ export type CapabilityId =
   | "governed-note-write"
   | "governed-native-move"
   | "governed-note-create"
+  | "governed-base-rows"
   | "governed-frontmatter-write"
   | "governed-canvas-write"
   | "governed-base-write"
@@ -208,6 +209,7 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "obsidian_global_search",
   ],
   "semantic-search": ["smart_semantic_search"],
+  "governed-base-rows": ["bases_rows_patch_plan", "bases_rows_patch_apply", "bases_rows_patch_status"],
   "governed-note-create": ["obsidian_note_create_plan", "obsidian_note_create_apply", "obsidian_note_create_status"],
   "governed-native-move": ["obsidian_note_move_plan", "obsidian_note_move_apply", "obsidian_note_move_status"],
   "governed-note-write": [
@@ -485,6 +487,7 @@ function atomicCapability(
     | "governed-note-write"
     | "governed-native-move"
   | "governed-note-create"
+  | "governed-base-rows"
     | "governed-frontmatter-write"
     | "governed-canvas-write",
 ): CapabilityManifestEntry {
@@ -557,6 +560,24 @@ function atomicCapability(
             ? "none"
             : "enable_bridge_writes",
   );
+}
+
+/** Row patches need note CAS writes and Base reads, not a grant to rewrite the Base. */
+function baseRowsCapability(input: CapabilityManifestProjectionInput): CapabilityManifestEntry {
+  const note = atomicCapability(input, "governed-base-rows");
+  if (!note.available) return note;
+  const probe = input.baseAtomicWrite;
+  if (probe.state !== "ready") {
+    return entry(input, "governed-base-rows", false, false,
+      probe.state === "unauthorized" ? "local_rest_unauthorized" : "bridge_unavailable",
+      probe.state === "unauthorized" ? "verify_local_rest_credentials" : "install_or_enable_bridge");
+  }
+  const status = record(probe.value), backend = record(status.backend), lifecycle = record(status.lifecycle);
+  const live = lifecycle.state === undefined || lifecycle.state === "ready";
+  const available = live && status.ok === true && status.contractVersion === 1 && backend.atomicCas === true;
+  return entry(input, "governed-base-rows", available, available && note.authorized,
+    !live ? "bridge_lifecycle_not_ready" : !available ? "bridge_contract_incompatible" : note.reasonCode,
+    !live ? "wait_for_bridge" : !available ? "update_bridge_contract" : note.nextAction);
 }
 
 function baseCapability(
@@ -897,6 +918,7 @@ export function projectCapabilityManifest(
     atomicCapability(input, "governed-note-write"),
     atomicCapability(input, "governed-native-move"),
     atomicCapability(input, "governed-note-create"),
+    baseRowsCapability(input),
     atomicCapability(input, "governed-frontmatter-write"),
     atomicCapability(input, "governed-canvas-write"),
     baseCapability(input),
@@ -1102,6 +1124,7 @@ export async function collectCapabilityManifest(options: {
           ...TOOL_FAMILIES["governed-note-write"],
           ...TOOL_FAMILIES["governed-native-move"],
           ...TOOL_FAMILIES["governed-note-create"],
+          ...TOOL_FAMILIES["governed-base-rows"],
           ...TOOL_FAMILIES["governed-frontmatter-write"],
         ]
       : []),

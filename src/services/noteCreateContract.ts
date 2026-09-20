@@ -70,7 +70,17 @@ export function observeCreateContent(expected: string, observed: string, policy:
   if (expected === observed) return { kind: "exact", sha256: noteCreateHash(observed) };
   let current = expected;
   const clean = (line: string) => line.endsWith("\r") ? line.slice(0, -1) : line;
-  for (const field of policy.fields) {
+  const observedLines = observed.split("\n");
+  const observedEnd = observedLines.findIndex((line, i) => i > 0 && clean(line) === "---");
+  const position = (name: string) => {
+    const at = observedLines.findIndex((line, i) => i > 0 && i < observedEnd && clean(line).startsWith(name + ":"));
+    return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+  };
+  // Insert qualified missing fields in their observed order and location. This
+  // does not normalize or reorder existing YAML; each step must still differ
+  // by exactly one timestamp that the shared verifier accepts.
+  const fields = [...policy.fields].sort((a, b) => position(a.propertyName) - position(b.propertyName));
+  for (const field of fields) {
     const before = current.split("\n"), after = observed.split("\n");
     const endBefore = before.findIndex((line, i) => i > 0 && clean(line) === "---");
     const endAfter = after.findIndex((line, i) => i > 0 && clean(line) === "---");
@@ -86,12 +96,14 @@ export function observeCreateContent(expected: string, observed: string, policy:
     if (field.role === "created" && old.length) return undefined;
     const intermediate = [...before];
     if (old.length) intermediate[old[0]] = after[next[0]];
-    else intermediate.splice(endBefore, 0, after[next[0]]);
+    else intermediate.splice(next[0], 0, after[next[0]]);
     const changed = intermediate.join("\n");
     if (!resolveModifiedTimeSettlement(current, changed, {
       contractVersion: 1, utcOffsetMinutes: policy.utcOffsetMinutes,
       integrations: [{ pluginId: field.pluginId, propertyName: field.propertyName, settlementObservationDelayMs: field.delayMs }],
-    }, { applyStartedAtEpochMs: startedAt, settlementObservedAtEpochMs: observedAt })) return undefined;
+    }, { applyStartedAtEpochMs: startedAt, // Persisted apply time anchors this fixed proof window. A late reader may
+      // verify an early plugin timestamp, never a timestamp near its own late read.
+      settlementObservedAtEpochMs: Math.min(observedAt, startedAt + 5 * 60 * 1000) })) return undefined;
     current = changed;
   }
   return current === observed ? { kind: "date-settled", sha256: noteCreateHash(observed) } : undefined;

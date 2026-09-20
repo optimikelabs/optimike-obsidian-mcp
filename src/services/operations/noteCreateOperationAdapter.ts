@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { load } from "js-yaml";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { validateObsidianMarkdown } from "../obsidianFormatService.js";
 import { assertWriteAllowed } from "../writePolicy.js";
@@ -7,6 +8,20 @@ import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCrea
   type NoteCreateApply, type NoteCreatePreflight } from "../noteCreateContract.js";
 import { operationDigest } from "./contract.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "./obsidianNoteReplaceJournal.js";
+
+/** Newly created user-authored frontmatter is a change from the empty document.
+ * Parse YAML, including quoted and merged keys, instead of a regex key scan.
+ */
+export function noteCreateFrontmatterKeys(content: string): string[] {
+  if (!/^---\r?\n/u.test(content)) return [];
+  const lines = content.split(/\r?\n/u);
+  const end = lines.findIndex((line, i) => i > 0 && line === "---");
+  if (end < 0) throw new Error("invalid_create_frontmatter");
+  const value: unknown = load(lines.slice(1, end).join("\n"));
+  if (value === undefined || value === null) return [];
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_create_frontmatter");
+  return Object.keys(value);
+}
 
 const KIND = "obsidian.note.create";
 const HASH = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -41,7 +56,7 @@ export class NoteCreateOperationAdapter {
     private readonly now = Date.now,
     private readonly authorize: (phase: "plan" | "apply", path: string, content: string) => void = (phase, path, content) =>
       assertWriteAllowed({ operation: phase === "plan" ? "obsidian_note_create_plan" : "obsidian_note_create_apply",
-        action: phase, target: path, targetType: "filePath", contentLength: content.length }),
+        action: phase, target: path, targetType: "filePath", contentLength: content.length, frontmatterKeys: noteCreateFrontmatterKeys(content) }),
   ) {}
   private sealed(row: ObsidianNoteReplacePlan): NoteCreatePreflight {
     if (row.projection?.kind !== KIND || row.projection.contractVersion !== 1) bad("create_domain_mismatch");

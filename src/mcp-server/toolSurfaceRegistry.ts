@@ -140,6 +140,9 @@ const CANONICAL_UNIQUE_TOOL_NAMES = [
 const COMPATIBILITY_HISTORICAL_TOOL_NAMES = ["bases_upsert_config"] as const;
 
 const GOVERNED_OPERATION_TOOL_NAMES = [
+  "bases_rows_patch_plan",
+  "bases_rows_patch_apply",
+  "bases_rows_patch_status",
   "obsidian_note_create_plan",
   "obsidian_note_create_apply",
   "obsidian_note_create_status",
@@ -296,7 +299,7 @@ function defineTool(
 
 /** Recovery is a domain contract, not a mandatory synthetic fourth tool. */
 export function governedLifecycleRoles(family: string): readonly GovernedLifecycleRole[] {
-  return ["note-move", "note-create"].includes(family)
+  return ["note-move", "note-create", "base-rows"].includes(family)
     ? ["plan", "apply", "status"]
     : ["plan", "apply", "status", "recover"];
 }
@@ -395,6 +398,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     { surfaceClass: "direct", annotationClass: "destructive" },
   ),
 
+  ...governedFamily("bases_rows_patch", "bases.governed", "base-rows"),
   ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace"),
   ...governedFamily("obsidian_text_patch", "notes.governed", "text-patch"),
   ...governedFamily("obsidian_note_move", "notes.governed", "note-move"),

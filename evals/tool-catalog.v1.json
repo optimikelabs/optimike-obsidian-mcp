@@ -2,12 +2,12 @@
   "schemaVersion": "tool-catalog.v1",
   "version": 1,
   "source": "src/mcp-server/toolSurfaceRegistry.ts",
-  "toolCount": 88,
+  "toolCount": 91,
   "classificationCounts": {
     "canonical-unique": 47,
     "alias-redundant": 0,
     "compatibility-historical": 1,
-    "governed-operation": 26,
+    "governed-operation": 29,
     "diagnostic": 10,
     "administration": 4
   },
@@ -21,6 +21,9 @@
       "bases_get_schema",
       "bases_list",
       "bases_query",
+      "bases_rows_patch_apply",
+      "bases_rows_patch_plan",
+      "bases_rows_patch_status",
       "bases_upsert_config",
       "bases_upsert_rows",
       "external_handoff",
@@ -107,6 +110,9 @@
       "bases_get_schema",
       "bases_list",
       "bases_query",
+      "bases_rows_patch_apply",
+      "bases_rows_patch_plan",
+      "bases_rows_patch_status",
       "bases_upsert_config",
       "bases_upsert_rows",
       "external_handoff",
@@ -524,6 +530,9 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "bases_rows_patch_apply",
+          "bases_rows_patch_plan",
+          "bases_rows_patch_status",
           "bases_upsert_rows",
           "obsidian_canvas_patch_apply",
           "obsidian_canvas_patch_plan",
@@ -566,6 +575,9 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "bases_rows_patch_apply",
+          "bases_rows_patch_plan",
+          "bases_rows_patch_status",
           "bases_upsert_rows",
           "obsidian_canvas_patch_apply",
           "obsidian_canvas_patch_plan",
@@ -807,6 +819,9 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "bases_rows_patch_apply",
+          "bases_rows_patch_plan",
+          "bases_rows_patch_status",
           "bases_upsert_config",
           "bases_upsert_rows",
           "external_handoff",
@@ -893,6 +908,9 @@
           "bases_get_schema",
           "bases_list",
           "bases_query",
+          "bases_rows_patch_apply",
+          "bases_rows_patch_plan",
+          "bases_rows_patch_status",
           "bases_upsert_config",
           "bases_upsert_rows",
           "external_handoff",
@@ -1489,6 +1507,90 @@
           ]
         }
       ]
+    },
+    {
+      "name": "bases_rows_patch_apply",
+      "canonicalName": "bases_rows_patch_apply",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-rows",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "bases_rows_patch_plan",
+      "canonicalName": "bases_rows_patch_plan",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-rows",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "bases_rows_patch_status",
+      "canonicalName": "bases_rows_patch_status",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-rows",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "status"
     },
     {
       "name": "bases_upsert_config",
