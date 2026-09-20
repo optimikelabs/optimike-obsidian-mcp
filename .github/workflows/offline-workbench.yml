@@ -1,0 +1,46 @@
+name: Temporary offline workbench
+on:
+  pull_request:
+    paths: ['.github/workflows/offline-workbench.yml']
+permissions:
+  contents: read
+jobs:
+  source:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm --prefix plugins/obsidian-atomic-write-bridge ci
+      - run: npm --prefix plugins/obsidian-bases-bridge ci
+      - run: npm --prefix plugins/obsidian-operon-bridge ci
+      - name: Export tracked source and installed dependencies only
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/offline-workbench"
+          mkdir -p "$dest"
+          git archive HEAD | tar -x -C "$dest"
+          cp -a node_modules "$dest/node_modules"
+          for bridge in obsidian-atomic-write-bridge obsidian-bases-bridge obsidian-operon-bridge; do
+            cp -a "plugins/$bridge/node_modules" "$dest/plugins/$bridge/node_modules"
+          done
+          git rev-parse HEAD > "$RUNNER_TEMP/source-sha.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-tree.txt"
+          tar -czf "$RUNNER_TEMP/offline-workbench.tgz" -C "$dest" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-workbench
+          path: |
+            ${{ runner.temp }}/offline-workbench.tgz
+            ${{ runner.temp }}/source-sha.txt
+            ${{ runner.temp }}/source-tree.txt
+          retention-days: 1
+          if-no-files-found: error
