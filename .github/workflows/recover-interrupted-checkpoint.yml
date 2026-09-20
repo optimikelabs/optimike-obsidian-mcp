@@ -48,13 +48,14 @@ jobs:
         run: |
           set -uo pipefail
           ulimit -f 20480
-          zstd --test "$RUNNER_TEMP/recovered.zst" > "$RUNNER_TEMP/frame-validation.txt" 2>&1
-          status=$?
+          status=0
+          zstd --test "$RUNNER_TEMP/recovered.zst" > "$RUNNER_TEMP/frame-validation.txt" 2>&1 || status=$?
           echo "frame_validation_exit=$status"
           zstd -dc "$RUNNER_TEMP/recovered.zst" > "$RUNNER_TEMP/recovered.payload" 2>> "$RUNNER_TEMP/frame-validation.txt" || true
           wc -c "$RUNNER_TEMP/recovered.payload"
           file "$RUNNER_TEMP/recovered.payload"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: interrupted-checkpoint-recovery
           path: |
