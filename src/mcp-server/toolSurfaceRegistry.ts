@@ -140,6 +140,9 @@ const CANONICAL_UNIQUE_TOOL_NAMES = [
 const COMPATIBILITY_HISTORICAL_TOOL_NAMES = ["bases_upsert_config"] as const;
 
 const GOVERNED_OPERATION_TOOL_NAMES = [
+  "obsidian_note_move_plan",
+  "obsidian_note_move_apply",
+  "obsidian_note_move_status",
   "obsidian_note_replace_plan",
   "obsidian_note_replace_apply",
   "obsidian_note_replace_status",
@@ -288,28 +291,25 @@ function defineTool(
   };
 }
 
+/** Recovery is a domain contract, not a mandatory synthetic fourth tool. */
+export function governedLifecycleRoles(family: string): readonly GovernedLifecycleRole[] {
+  return family === "note-move"
+    ? ["plan", "apply", "status"]
+    : ["plan", "apply", "status", "recover"];
+}
+
 function governedFamily(
   prefix: string,
   group: ToolGroupId,
   family: string,
 ): readonly ToolSurfaceEntry[] {
-  return [
-    defineTool(`${prefix}_plan`, group, family, LIVE_MODES, {
-      annotationClass: "governed-plan",
-      lifecycleRole: "plan",
+  return governedLifecycleRoles(family).map((role) =>
+    defineTool(`${prefix}_${role}`, group, family, LIVE_MODES, {
+      annotationClass: role === "plan" ? "governed-plan"
+        : role === "status" ? "read-only" : "governed-mutation",
+      lifecycleRole: role,
     }),
-    defineTool(`${prefix}_apply`, group, family, LIVE_MODES, {
-      annotationClass: "governed-mutation",
-      lifecycleRole: "apply",
-    }),
-    defineTool(`${prefix}_status`, group, family, LIVE_MODES, {
-      lifecycleRole: "status",
-    }),
-    defineTool(`${prefix}_recover`, group, family, LIVE_MODES, {
-      annotationClass: "governed-mutation",
-      lifecycleRole: "recover",
-    }),
-  ];
+  );
 }
 
 const OPERON_READ_TOOLS = [
@@ -394,6 +394,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
 
   ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace"),
   ...governedFamily("obsidian_text_patch", "notes.governed", "text-patch"),
+  ...governedFamily("obsidian_note_move", "notes.governed", "note-move"),
 
   defineTool(
     "obsidian_manage_frontmatter",

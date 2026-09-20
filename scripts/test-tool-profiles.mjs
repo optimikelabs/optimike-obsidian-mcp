@@ -12,8 +12,8 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 23, authoring: 34, tasks: 35, full: 78 },
-  "hybrid-live": { standard: 23, authoring: 34, tasks: 35, full: 78 },
+  live: { standard: 26, authoring: 37, tasks: 35, full: 81 },
+  "hybrid-live": { standard: 26, authoring: 37, tasks: 35, full: 81 },
   "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
   "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
   "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
@@ -140,7 +140,7 @@ for (const profile of TOOL_PROFILE_IDS) {
     for (const [family, roles] of lifecycleFamilies) {
       assert.deepEqual(
         roles.sort(),
-        ["apply", "plan", "recover", "status"],
+        family === "note-move" ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"],
         `${profile}/${registrationMode} exposes a partial ${family} lifecycle`,
       );
     }
@@ -330,7 +330,7 @@ const standardWithoutCache = compileToolProfileNames({
   availableStaticRequirements: [],
 });
 assert.ok(!standardWithoutCache.includes("obsidian_global_search"));
-assert.equal(standardWithoutCache.length, 22);
+assert.equal(standardWithoutCache.length, 25);
 
 const readonlyWithoutCache = compileToolProfileNames({
   profile: "standard",

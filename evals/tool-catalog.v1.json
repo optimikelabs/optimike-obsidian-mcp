@@ -2,12 +2,12 @@
   "schemaVersion": "tool-catalog.v1",
   "version": 1,
   "source": "src/mcp-server/toolSurfaceRegistry.ts",
-  "toolCount": 82,
+  "toolCount": 85,
   "classificationCounts": {
     "canonical-unique": 47,
     "alias-redundant": 0,
     "compatibility-historical": 1,
-    "governed-operation": 20,
+    "governed-operation": 23,
     "diagnostic": 10,
     "administration": 4
   },
@@ -50,6 +50,9 @@
       "obsidian_manage_frontmatter",
       "obsidian_manage_tags",
       "obsidian_note_links",
+      "obsidian_note_move_apply",
+      "obsidian_note_move_plan",
+      "obsidian_note_move_status",
       "obsidian_note_replace_apply",
       "obsidian_note_replace_plan",
       "obsidian_note_replace_recover",
@@ -130,6 +133,9 @@
       "obsidian_manage_frontmatter",
       "obsidian_manage_tags",
       "obsidian_note_links",
+      "obsidian_note_move_apply",
+      "obsidian_note_move_plan",
+      "obsidian_note_move_status",
       "obsidian_note_replace_apply",
       "obsidian_note_replace_plan",
       "obsidian_note_replace_recover",
@@ -401,6 +407,9 @@
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_status",
           "obsidian_note_replace_apply",
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
@@ -426,6 +435,9 @@
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_status",
           "obsidian_note_replace_apply",
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
@@ -514,6 +526,9 @@
           "obsidian_list_pending_operations",
           "obsidian_manage_tags",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_status",
           "obsidian_note_replace_apply",
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
@@ -550,6 +565,9 @@
           "obsidian_list_pending_operations",
           "obsidian_manage_tags",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_status",
           "obsidian_note_replace_apply",
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
@@ -800,6 +818,9 @@
           "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_status",
           "obsidian_note_replace_apply",
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
@@ -880,6 +901,9 @@
           "obsidian_manage_frontmatter",
           "obsidian_manage_tags",
           "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_status",
           "obsidian_note_replace_apply",
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
@@ -2530,6 +2554,105 @@
           "hybrid-live"
         ]
       }
+    },
+    {
+      "name": "obsidian_note_move_apply",
+      "canonicalName": "obsidian_note_move_apply",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "note-move",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full"
+      ],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_note_move_plan",
+      "canonicalName": "obsidian_note_move_plan",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "note-move",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full"
+      ],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_note_move_status",
+      "canonicalName": "obsidian_note_move_status",
+      "classification": "governed-operation",
+      "group": "notes.governed",
+      "family": "note-move",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "full"
+      ],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "status"
     },
     {
       "name": "obsidian_note_replace_apply",
