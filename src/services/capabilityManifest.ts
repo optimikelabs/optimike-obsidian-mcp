@@ -568,7 +568,7 @@ function baseRowsSnapshotBridgeReady(status: Record<string, unknown>): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/u.exec(version);
   if (!match) return false;
   const [major, minor, patch] = match.slice(1).map(Number);
-  return major > 1 || (major === 1 && (minor > 2 || (minor === 2 && patch >= 2)));
+  return major === 1 && (minor > 2 || (minor === 2 && patch >= 2));
 }
 
 /** Row patches need note CAS writes and Base reads, not a grant to rewrite the Base. */

@@ -827,3 +827,5 @@ const legacyRowsBridge = structuredClone(baseReady); legacyRowsBridge.plugin.ver
 assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: legacyRowsBridge } })), "governed-base-rows").available, false);
 const futureRowsBridge = structuredClone(baseReady); futureRowsBridge.plugin.version = "1.3.0";
 assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: futureRowsBridge } })), "governed-base-rows").state, "ready");
+const unknownMajorRowsBridge = structuredClone(baseReady); unknownMajorRowsBridge.plugin.version = "2.0.0";
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: unknownMajorRowsBridge } })), "governed-base-rows").available, false);
