@@ -7,6 +7,7 @@ French version: [README.fr.md](README.fr.md) · [Documentation hub](docs/README.
 ![Overview of Optimike Obsidian MCP between agent clients, Obsidian and governed external documents](docs/assets/readme/overview.en.svg)
 
 Optimike Obsidian MCP gives MCP clients a governed operational surface over an Obsidian vault: live Desktop operations, resilient headless modes, Tasks and Operon, Bases and Canvas, semantic search, runtime observability, and bounded access to configured external documents.
+This branch prepares note links, governed native move, durable creation and a single-row Base property patch. These candidates are not a new published 3.8.2 release. Desktop/Pilot2 and installed-state gates remain required. See the [ordered Codex handoff](docs/cycle-20260920/CODEX-FINALISATION.md) and [bounded roadmap](docs/cycle-20260920/ROADMAP.md).
 
 ## Capability map
 

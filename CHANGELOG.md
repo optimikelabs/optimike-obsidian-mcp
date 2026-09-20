@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Candidate cycle M2–M6 (local qualification required)
+
+- Add bounded read-only native note-link observations; cache uncertainty and incomplete coverage remain explicit.
+- Add a three-tool governed native Markdown move lifecycle with a separate bounded graph postflight; no global graph transaction or blind replay.
+- Add absent-only durable note creation with protected-key enforcement, exclusive writes and qualified automatic-date reconciliation; observed state does not establish authorship or indexing.
+- Add a three-tool property patch for one existing Markdown Base row, reusing the note journal/CAS and a sealed supported-filter selection. No implicit file insert/delete or multi-target atomicity.
+- Prepare cross-platform repository/standalone-Bridge gates, packaging checks, a measured-trigger roadmap and one ordered local Codex handoff. No tag/release/install is implied by these entries.
+- Refresh the production dependency lock to Hono 4.13.8 and js-yaml 4.3.2; preserve the separately deployed M1 reconnect fix during final local promotion.
+
 ## [3.8.2] - 2026-09-03
 
 ### Changed

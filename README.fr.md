@@ -7,6 +7,7 @@ English version: [README.md](README.md) · [Hub documentaire](docs/README.fr.md)
 ![Vue d’ensemble d’Optimike Obsidian MCP entre clients agentiques, Obsidian et documents externes gouvernés](docs/assets/readme/overview.fr.svg)
 
 Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouvernée au-dessus d’un coffre Obsidian : opérations Desktop live, modes headless résilients, Tasks et Operon, Bases et Canvas, recherche sémantique, observabilité runtime et accès borné à des documents externes configurés.
+Cette branche prépare les liens de notes, le déplacement natif gouverné, la création durable et le patch d’une row Base. Ces candidats ne sont pas une nouvelle publication 3.8.2. Les gates Desktop/Pilot2 et l’état réellement installé restent à vérifier. Voir le [dossier Codex ordonné](docs/cycle-20260920/CODEX-FINALISATION.md) et la [roadmap bornée](docs/cycle-20260920/ROADMAP.md).
 
 ## Carte des capacités
 

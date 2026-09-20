@@ -31,6 +31,7 @@ jobs:
       - run: npm --prefix plugins/obsidian-bases-bridge ci
       - run: npm --prefix plugins/obsidian-operon-bridge ci
       - run: npm run test:cycle
+      - run: node scripts/test-cycle-source-gates.mjs
       - run: npm run test:base-rows
       - run: npm run test:native-note-move
       - run: node scripts/test-note-create-m4.mjs

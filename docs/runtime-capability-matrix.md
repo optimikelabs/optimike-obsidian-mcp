@@ -21,6 +21,10 @@ endpoints are not part of the supported runtime surface. Periodic notes must be
 addressed by an explicit vault-relative `filePath`; the optional upstream
 Periodic Notes API extension is outside the core MCP contract.
 
+## Candidate cycle M2–M6
+
+These additions are candidates pending ordered local qualification, not a new published 3.8.2 release. In live/hybrid-live, native move and durable creation use their independent Bridge grants; the single-row Base patch uses a Base query snapshot plus note-content CAS. The new lifecycles are plan/apply/status only and are absent from headless/degraded runtimes. [Local qualification and promotion](cycle-20260920/CODEX-FINALISATION.md).
+
 ## Recommended Use
 
 | Runtime mode                | Best for                                                 | Obsidian Desktop                   | Local REST API                             | Writes                                                                                                  | Bases                                   | Default posture         |
@@ -58,7 +62,10 @@ Periodic Notes API extension is outside the core MCP contract.
 | Tags                               | REST full tool          | REST full tool                          | No                       | No                      | No                               | Frontmatter tags, inline tags, local index/audit, dry-run rename          |
 | Admin filesystem                   | No                      | No                                      | No                       | No                      | No                               | Archive, batch move, batch delete; dry-run by default                     |
 | Delete note                        | REST delete             | REST delete                             | No                       | No                      | No                               | Filesystem delete requiring `expectedHash` or `expectedMtime`             |
-| Move/rename                        | No                      | No                                      | No                       | No                      | No                               | Filesystem move requiring `expectedHash` or `expectedMtime`               |
+| Direct filesystem move/rename | No                      | No                                      | No                       | No                      | No                               | Filesystem move requiring `expectedHash` or `expectedMtime`               |
+| Governed native Markdown move M3 | Opt-in, full mode | Same while Desktop is live | No | No | No | No |
+| Durable Markdown creation M4 | Opt-in, guarded/full | Same while Desktop is live | No | No | No | No |
+| Governed existing Base row patch M5 | Note CAS + Base snapshot | Same while Desktop is live | No | No | No | No |
 | Active file / UI / commands        | Via Desktop/plugin      | Via Desktop/plugins while API available | No                       | No                      | No                               | No                                                                        |
 | Bases list/schema/query            | Bases Bridge REST       | Bases Bridge REST                       | No                       | Local readonly fallback | Local readonly fallback          | Local fallback with simple filters (`eq`, `contains`, `in`, comparisons)  |
 | Bases create/upsert                | Bases Bridge REST       | Bases Bridge REST                       | No                       | No                      | No                               | `.base` YAML create/config + rows -> frontmatter `set`                    |
@@ -245,3 +252,5 @@ binding/SHA-256. They are absent from every headless mode.
 ## Durable note creation M4
 
 Live/hybrid-live only: three tools, existing durable journal, independent `allowNoteCreates` grant, guarded/full policy. Legacy Bridges fail closed. Headless/degraded modes do not emulate this capability. [Contract, ambiguity and indexing limits](durable-note-create-m4.md).
+
+M5 patches one existing Markdown row, selected through a warning-free Base query snapshot; it never writes the Base itself. No insert/delete-note, native engine completeness or cross-file atomicity. [Contract](base-row-patch-m5.md).

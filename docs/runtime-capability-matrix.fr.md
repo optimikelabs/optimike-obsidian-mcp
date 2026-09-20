@@ -15,6 +15,10 @@ ce que Local REST réponde. Régler la variable à `true` uniquement si un
 déploiement live doit faire échouer son propre démarrage après les tentatives
 bornées du contrôle initial.
 
+## Cycle candidat M2–M6
+
+Ces ajouts attendent la qualification locale ordonnée ; ils ne constituent pas une nouvelle publication 3.8.2. En live/hybrid-live, move natif et création durable ont chacun une autorisation dédiée du Bridge ; le patch d’une row Base utilise le snapshot de requête Base puis le CAS de la note. Les nouveaux cycles sont plan/apply/status, absents des runtimes headless/dégradés. [Qualification et promotion locales](cycle-20260920/CODEX-FINALISATION.md).
+
 ## Usage recommandé
 
 | Mode runtime                 | Idéal pour                                             | Obsidian Desktop                       | Local REST API                                                | Écritures                                                                                                | Bases                                        | Posture par défaut        |
@@ -52,7 +56,10 @@ bornées du contrôle initial.
 | Tags                                         | Outil REST complet           | Outil REST complet                         | Non                       | Non                             | Non                                 | Tags frontmatter, tags inline, index/audit local, rename avec dry-run      |
 | Admin filesystem                             | Non                          | Non                                        | Non                       | Non                             | Non                                 | Archive, batch move, batch delete en dry-run par défaut                    |
 | Suppression de note                          | Suppression REST             | Suppression REST                           | Non                       | Non                             | Non                                 | Suppression filesystem avec `expectedHash` ou `expectedMtime`              |
-| Déplacement/renommage                        | Non                          | Non                                        | Non                       | Non                             | Non                                 | Déplacement filesystem avec `expectedHash` ou `expectedMtime`              |
+| Move filesystem direct | Non                          | Non                                        | Non                       | Non                             | Non                                 | Déplacement filesystem avec `expectedHash` ou `expectedMtime`              |
+| Déplacement Markdown natif gouverné M3 | Opt-in, mode full | Idem si Desktop est live | Non | Non | Non | Non |
+| Création Markdown durable M4 | Opt-in, guarded/full | Idem si Desktop est live | Non | Non | Non | Non |
+| Patch gouverné d’une row Base existante M5 | CAS note + snapshot Base | Idem si Desktop est live | Non | Non | Non | Non |
 | Active file / UI / commandes                 | Via Desktop/plugin           | Via Desktop/plugin tant que l’API répond   | Non                       | Non                             | Non                                 | Non                                                                        |
 | Bases list/schema/query                      | Bases Bridge REST            | Bases Bridge REST                          | Non                       | Fallback local en lecture seule | Fallback local en lecture seule     | Fallback local avec filtres simples (`eq`, `contains`, `in`, comparaisons) |
 | Bases create/upsert                          | Bases Bridge REST            | Bases Bridge REST                          | Non                       | Non                             | Non                                 | `.base` YAML create/config + rows -> frontmatter `set`                     |
@@ -246,3 +253,5 @@ backend. Ils sont absents de tous les modes headless.
 ## Création durable M4
 
 Uniquement live/hybrid-live : trois outils, journal durable existant, autorisation indépendante `allowNoteCreates`, politique guarded/full. Les anciens Bridges refusent cette capacité. Aucun équivalent simulé en mode dégradé/headless. Le résultat certifie l’état observé, pas son auteur ni l’indexation Obsidian. Voir [le contrat](durable-note-create-m4.md).
+
+M5 modifie une row Markdown existante sélectionnée par un snapshot Base sans avertissement ; la Base elle-même n’est jamais écrite. Pas d’insert/delete-note, de complétude du moteur natif ni d’atomicité multi-fichiers. [Contrat](base-row-patch-m5.md).

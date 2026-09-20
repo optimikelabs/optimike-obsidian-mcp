@@ -25,12 +25,14 @@ Counts are projections of the current registry and may be lower in restricted ru
 The [P6 routing evaluation](tool-routing-evaluation-p6.md) measures these
 surfaces from actual `tools/list` schemas and a versioned 31-case baseline. Its
 3.8 decision retained all four profile definitions on the historical 60-tool
-authoring/tasks union. After M3 the current union has 64 tools; that count is
-a registry projection, not a newly measured LLM routing campaign.
+authoring/tasks union. M3 increased it to 64; the M2–M5 candidate union now has
+70 tools. These later counts are registry projections, not a newly measured
+LLM routing campaign.
 
-The native move family has plan/apply/status only. A recover operation is not
-advertised because an uncertain native rename cannot be safely replayed. Other
-governed families retain their existing four-member lifecycle.
+The native move, durable creation and single-row Base patch families expose
+plan/apply/status only. They deliberately provide no synthetic recovery or
+blind replay. Note replacement, text, Frontmatter, Base formulas and Canvas
+retain their existing four-member lifecycles.
 
 ## Compatibility-only names
 
@@ -44,11 +46,11 @@ smart_semantic_search
 
 The historical `smart_search` and `smart-search` aliases were physically removed in 3.0. Existing clients must call `smart_semantic_search`.
 
-`bases_upsert_config` remains `full`-only. It replaces a whole Base configuration and is not a fallback for governed formula editing. `authoring` keeps `bases_create`, `bases_upsert_rows` and the complete governed `bases_formula_patch_*` family.
+`bases_upsert_config` remains `full`-only. It replaces a whole Base configuration and is not a fallback for governed formula editing. `authoring` keeps `bases_create`, `bases_upsert_rows` and the complete governed `bases_formula_patch_*` and `bases_rows_patch_*` families. The latter patches one existing row; it does not replace the direct batch contract.
 
 ## Governed families
 
-A governed family is exposed atomically:
+Curated profiles expose a governed family only when its declared lifecycle is complete. The existing four-member families are:
 
 ```text
 plan → apply → status → recover
@@ -57,9 +59,9 @@ plan → apply → status → recover
 This applies to governed Note replacement, Markdown body text patching,
 Frontmatter projection, Base formula patching and Canvas graph patching.
 
-Registration is incremental inside the server factory. Until all four members of a governed family have registered, the whole governed family remains hidden and any legitimate direct fallback stays visible. When the fourth member arrives, the quartet becomes visible in one reconciliation and the superseded direct fallback is hidden. Static profile compilation remains strict and rejects an actually incomplete family.
+Registration is incremental inside the server factory. In curated profiles, a family stays hidden until all declared members have registered (three for move/create/rows, four for the older families). Its legitimate direct fallback remains visible until reconciliation. Static profile compilation rejects an incomplete declared family. The explicit `full` profile retains its unsuppressed administrative surface; it is not a partial-registration safety grant.
 
-A profile never changes sealed plan content, journals, idempotency, backend binding or recovery authority. A durable plan created in one session can be inspected or recovered from another session or profile exposing the same complete family, subject to the normal runtime and write/security policies.
+A profile never changes sealed plan content, journals, idempotency, backend binding or recovery authority. A durable plan can be inspected from another session exposing its family, subject to normal runtime and write/security policies. Recovery is available only for families that actually define a recover operation.
 
 ## Canonical versus direct fallback
 
