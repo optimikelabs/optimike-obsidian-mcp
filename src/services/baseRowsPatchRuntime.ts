@@ -102,8 +102,20 @@ export class BaseRowsPatchRuntime {
     if (before.status !== "planned") return this.status(reference);
     authorize("apply", before.path, p.proof.changedKeys);
     const { baseId, view, path } = p.proof.selection;
-    const current = await this.selection.select({ baseId, view, path });
-    if (operationDigest(current) !== operationDigest(p.proof.selection)) fail("base_or_selection_changed");
+    try {
+      const current = await this.selection.select({ baseId, view, path });
+      if (operationDigest(current) !== operationDigest(p.proof.selection)) fail("base_or_selection_changed");
+    } catch (error) {
+      // Another process may have won after this caller observed `planned`.
+      // Its committed patch can legitimately remove the row from the sealed
+      // view, making this caller's revalidation fail. Prefer the durable child
+      // state over that now-stale validation error, but only once ownership has
+      // actually advanced beyond `planned`.
+      const winner = this.notes.inspect(ref);
+      stored(winner, key);
+      if (winner.status !== "planned") return this.status(reference);
+      throw error;
+    }
     // This read guard is intentionally separate from the existing note-content CAS.
     // No Base file is written and no cross-file atomicity is promised.
     const child = await this.notes.apply(ref, before.idempotencyKey);

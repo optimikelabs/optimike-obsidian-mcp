@@ -106,6 +106,31 @@ try {
     assert.equal(fixture.successfulWrites, writes + 1); second.close(); f.notes.close(); cases++;
   }
   {
+    const f = scenario("concurrent-view-exit"), p = await f.runtime.plan(input), writes = fixture.successfulWrites;
+    const second = createGovernedNoteReplaceRuntime(rest);
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise(resolve => { enter = resolve; });
+    const released = new Promise(resolve => { release = resolve; });
+    const delayedSelection = {
+      select: async target => {
+        enter();
+        await released;
+        return f.selection.select(target);
+      },
+    };
+    const runtime2 = new BaseRowsPatchRuntime(second, delayedSelection);
+    const duplicatePromise = runtime2.apply(p.planRef, input.idempotencyKey);
+    await entered;
+    const winner = await f.runtime.apply(p.planRef, input.idempotencyKey);
+    assert.equal(winner.outcome, "committed");
+    f.remove(); // The winning patch may remove the row from the view.
+    release();
+    const duplicate = await duplicatePromise;
+    assert.equal(duplicate.outcome, "committed");
+    assert.equal(fixture.successfulWrites, writes + 1, "the stale caller must not redispatch");
+    second.close(); f.notes.close(); cases++;
+  }
+  {
     const f = scenario("protocol"), server = new McpServer({ name: "rows-fixture", version: "1" }), client = new Client({ name: "test", version: "1" });
     const [ct, st] = InMemoryTransport.createLinkedPair(); registerBaseRowsPatchTools(server, f.runtime);
     await server.connect(st); await client.connect(ct);
