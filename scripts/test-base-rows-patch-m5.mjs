@@ -30,7 +30,7 @@ function scenario(id) {
   let yaml = "views:\n  - name: Open\n    type: table\n", binding = "a".repeat(64), present = true, queries = 0;
   const selection = new BaseRowSelectionReader({
     async read(baseId) { return { ok: true, contractVersion: 1, path: baseId, yaml, sha256: fixtureSha256(yaml), size: Buffer.byteLength(yaml), bindingFingerprint: binding }; },
-    async query() { queries++; return { total: present ? 1 : 0, page: 1, source: "fallback", evaluate: false, warnings: [], rows: present ? [{ file: { path: notePath, name: "Governed Frontmatter" }, props: {} }] : [] }; },
+    async query() { queries++; return { baseSnapshot: { contractVersion: 1, path: input.baseId, sha256: fixtureSha256(yaml), bindingFingerprint: binding }, total: present ? 1 : 0, page: 1, source: "fallback", evaluate: false, warnings: [], rows: present ? [{ file: { path: notePath, name: "Governed Frontmatter" }, props: {} }] : [] }; },
   });
   const notes = createGovernedNoteReplaceRuntime(rest), runtime = new BaseRowsPatchRuntime(notes, selection);
   return { notes, runtime, selection, queries: () => queries,

@@ -1,13 +1,11 @@
-# M4 — durable creation checkpoint
+# M4 — repository candidate checkpoint
 
-Branch: feat/m4-durable-note-create; PR #95; base M3 #94 including 4bafce8162c420468c998980e21047ede1fb84ae. Branch HEAD is the candidate authority.
+Branch feat/m4-durable-note-create; PR #95, stacked on M3 #94 including 4bafce8162c420468c998980e21047ede1fb84ae. Branch HEAD and current PR checks are authoritative.
 
-Integrated: absent-only exclusive creation, shared durable journal, request-bound receipts, qualified date fields, source-free terminal proof, three-tool MCP family, cockpit, profiles/catalogue/capabilities and documentation. No blind replay; no overwrite, suffix, delete or rollback of an uncertain created file.
+Implemented: absent-only exclusive Markdown creation, shared durable journal/ownership/idempotency, qualified date settlement, parsed protected-key authorization at plan/apply, three-tool lifecycle, cockpit/profiles/catalogue/capability/docs. No blind replay, overwrite, auto suffix, arbitrary YAML normalization or certified indexing/authorship.
 
-Local Linux evidence: root build; 13 durable create scenarios; real in-memory MCP surface test; registry, profiles, catalogue, capability manifest and complete documentation contracts; Bridge typecheck, 47 tests, and bundle build. These local results do not substitute for fresh GitHub Windows/Linux CI or Pilot2.
+Codex findings corrected: protected keys on an initially empty document; one-day-late restart reconciliation within the fixed original timestamp window; observed ordering/location for multiple inserted date fields; standalone Bridge dependency boundary; missing creation-contract npm allowlist entry. The last package correction was verified with actual npm pack --dry-run in run 35540896837. Temporary packaging preparation is absent from this tree.
 
-A dedicated M4 Windows/Linux workflow now executes the create tests and Bridge check. The source-export workflow and all integration recipes/object-preparation instrumentation have been removed. No branch-writing workflow remains from this work.
+Local Linux: 13 durable create cases, in-memory MCP surface, protected-key/restart negatives and 49 Bridge tests/typecheck/build, including a standalone check without root node_modules. These proofs are not Desktop canaries. Fresh exact-head Windows/Linux CI and independent rereview must be verified separately.
 
-Status: REWORK pending exact-head CI and independent Codex review/corrections. Pilot2, Obsidian watcher indexing, real plugin settlement and installed state: NOT_RUN. No merge before the final ordered local session.
-
-Limitations: one Markdown file, existing trusted local parents; no directory-fsync/power-loss or adversarial-mount guarantee; observed-state commit does not prove authorship. See docs/durable-note-create-m4.md.
+Pilot2, real automatic-field plugins, watcher indexing, installed state and production Secure: NOT_RUN. No merge before ordered local qualification. See M4-REVIEW.md and docs/durable-note-create-m4.md. Retain explicit ambiguity, no power-loss/hostile-mount guarantee and no replay after uncertain effects.

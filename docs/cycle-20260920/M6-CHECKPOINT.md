@@ -1,13 +1,13 @@
-# M6 — integrated closure preparation
+# M6 — integrated closure candidate
 
-Branch chore/m6-optimike-cycle-close; PR #97 on M5 #96. Branch HEAD is authoritative. This is preparation, not a release or installation.
+Branch chore/m6-optimike-cycle-close; PR #97 on M5 #96 including c3823f9167d998ec1e894948f0250db0e3f09f3e. Branch HEAD is authoritative. This prepares qualification; it is not a release or installation.
 
-Integrated: bilingual current profile/runtime/README descriptions; three-member versus four-member lifecycle boundaries; unchanged historical LLM routing evidence versus current 70-name authoring/tasks union; candidate changelog; Atomic Write Bridge description; contracts and final Codex dossier included in npm; source/manifest/catalogue/package checks; Windows/Linux closure workflow; measured-trigger roadmap and immutable preparation snapshot.
+The complete stack includes corrected native-move stale-generation receipts, durable creation protected-key/date-order/restart/standalone-build fixes, both packaged contracts and Base query provenance against A-B-A changes. Bases Bridge1.2.2, Atomic Write Bridge0.8.0 and Operon Bridge0.9.2 manifests remain aligned. Root3.8.2 is the historical published baseline; a new publication version must be selected only during final promotion.
 
-Local evidence: source checker PASS; seven negative source-gate fixtures PASS; all bilingual documentation contracts PASS; three Bridge builds PASS; npm package contract verifies 59 required artifacts PASS. Sealed preparation run 35541065225 independently executed source/docs/build/package checks before its exact objects were attached here. These are not fresh final-head CI or Desktop proofs.
+M6 integrates bilingual current profile/runtime/README descriptions, actual three-member lifecycles, historical LLM routing evidence versus current70-name authoring/tasks union, candidate changelog, package contracts and the single-session Codex handoff. Source/manifest/catalogue/package checks and seven negative gates run on Windows/Linux without write permissions. No second runtime, public operation facade, profile or new product feature is introduced.
 
-Both coherence recipes and their preparation workflow are removed. No cycle branch-writing/export/object-preparation instrumentation remains in this tree. The permanent closure workflow has read-only repository permissions and never publishes.
+Local source/docs/three-Bridge build/package gates passed; the sealed preparation run35541065225 independently checked source/docs/build/package before exact objects were attached. The newest combined SHA still requires fresh CI and independent Codex review. All temporary recipes/workflows are absent. Main, tags, releases and production were not changed.
 
-Self-review: no product feature or runtime refactor in M6; checks do not claim local PASS or authorize release; fixed known SHAs are historical checkpoints, never live ref authority; final handoff preserves the installed M1 fix and demands ordered local gates, actual installed hashes and final tag/release alignment.
+Self-review: no fabricated local PASS or release authority; current refs and review SHAs override historical checkpoint strings; M1 installed fix must be preserved/reconciled locally. Scope deferred triggers are in ROADMAP.md. No global graph, transaction, power-loss or author-attribution promise.
 
-Status REWORK pending upstream review-fix propagation, exact-head CI and independent Codex review/corrections. Pilot2, M1 installed-fix preservation, Secure final read, installed exact SHA and main/tag/release alignment are NOT_RUN here. See CODEX-FINALISATION.md and ROADMAP.md.
+Verdict: REWORK until exact-head repository gates and independent review/corrections are confirmed. Pilot2, real plugins/indexing/open editors, installed SHA, Secure final read and main/tag/release alignment remain NOT_RUN. Execute CODEX-FINALISATION.md in the final ordered local session, not on a production vault for tests.
