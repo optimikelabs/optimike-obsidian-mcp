@@ -138,7 +138,15 @@ export function projectNoteLinks(
     return left.reference.original.localeCompare(right.reference.original);
   });
 
-  const outgoing = references.map(({ kind, provenance, reference }) => {
+  const outgoingCoverage = {
+    available: true as const,
+    total: references.length,
+    returned: Math.min(references.length, input.limit),
+    truncated: references.length > input.limit,
+  };
+  const outgoing = references
+    .slice(0, input.limit)
+    .map(({ kind, provenance, reference }) => {
     const parsed = input.parseLinktext(reference.link);
     const targetPath =
       parsed.path.length === 0
@@ -169,7 +177,7 @@ export function projectNoteLinks(
       subpathValidation,
       provenance,
     };
-  });
+    });
 
   const unresolved = Object.entries(
     input.unresolvedLinks[input.sourcePath] ?? {},
@@ -187,17 +195,16 @@ export function projectNoteLinks(
     })
     .sort((left, right) => left.sourcePath.localeCompare(right.sourcePath));
 
-  const boundedOutgoing = bounded(outgoing, input.limit);
   const boundedUnresolved = bounded(unresolved, input.limit);
   const boundedBacklinks = bounded(backlinks, input.limit);
 
   return {
-    outgoing: input.cacheAvailable ? boundedOutgoing.values : [],
+    outgoing: input.cacheAvailable ? outgoing : [],
     unresolved: boundedUnresolved.values,
     backlinks: boundedBacklinks.values,
     coverage: {
       outgoing: input.cacheAvailable
-        ? boundedOutgoing.coverage
+        ? outgoingCoverage
         : {
             available: false,
             total: null,

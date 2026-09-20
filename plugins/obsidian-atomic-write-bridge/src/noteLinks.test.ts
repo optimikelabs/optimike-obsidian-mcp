@@ -111,7 +111,8 @@ test("projects GQM26 discriminants without conflating target and anchor validity
   ]);
 });
 
-test("same-note subpaths and limits are deterministic", () => {
+test("same-note subpaths and limits are deterministic and expensive resolution stops at the limit", () => {
+  let resolvedCalls = 0;
   const result = projectNoteLinks({
     sourcePath: "Source.md",
     cacheAvailable: true,
@@ -126,7 +127,10 @@ test("same-note subpaths and limits are deterministic", () => {
     unresolvedLinks: { "Source.md": { Zed: 1, Alpha: 2 } },
     limit: 1,
     parseLinktext,
-    resolveLink: (linkPath) => linkPath + ".md",
+    resolveLink: (linkPath) => {
+      resolvedCalls += 1;
+      return linkPath + ".md";
+    },
     validateSubpath: (targetPath, subpath) => {
       assert.equal(targetPath, "Source.md");
       assert.equal(subpath, "#Heading");
@@ -144,6 +148,11 @@ test("same-note subpaths and limits are deterministic", () => {
   assert.deepEqual(result.backlinks, [{ sourcePath: "A.md", count: 1 }]);
   assert.equal(result.coverage.unresolved.truncated, true);
   assert.equal(result.coverage.backlinks.truncated, true);
+  assert.equal(
+    resolvedCalls,
+    0,
+    "the retained same-note link must not resolve hidden outgoing references",
+  );
 });
 
 test("missing source cache does not fabricate outgoing completeness", () => {
