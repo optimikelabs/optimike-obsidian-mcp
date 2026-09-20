@@ -80,7 +80,8 @@ export type PendingOperationKind =
   | "obsidian.frontmatter.patch"
   | "obsidian.base.formula.patch"
   | "obsidian.canvas.patch"
-  | "obsidian.text.patch";
+  | "obsidian.text.patch"
+  | "obsidian.note.move";
 
 export type PendingOperationRow = {
   operationId: string;

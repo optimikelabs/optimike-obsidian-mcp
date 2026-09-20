@@ -15,7 +15,7 @@ async function run(toolName: string, operation: () => Promise<unknown>) {
   try {
     return { isError: false, content: [{ type: "text" as const, text: JSON.stringify(await operation()) }] };
   } catch (error) {
-    return { isError: true, content: [{ type: "text" as const, text: JSON.stringify(publicMcpToolErrorPayload(error, { operation: toolName, toolName })) }] };
+    return { isError: true, content: [{ type: "text" as const, text: JSON.stringify(publicMcpToolErrorPayload(error, { operation: toolName, toolName, params: {} })) }] };
   }
 }
 export function registerNativeNoteMoveTools(server: McpServer, runtime: NativeNoteMoveOperationAdapter | undefined): void {

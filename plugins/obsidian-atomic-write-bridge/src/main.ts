@@ -24,6 +24,7 @@ import {
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
 import { projectNoteLinks } from "./noteLinks.js";
+import { createNativeNoteMoveRoutes } from "./nativeNoteMoveRoutes.js";
 import {
   RestExtensionLifecycle,
   RestExtensionPartialMountError,
@@ -33,6 +34,7 @@ type PluginData = {
   instanceId: string;
   allowWrites: boolean;
   allowCanvasWrites: boolean;
+  allowNativeMoves: boolean;
 };
 
 type AtomicResource = "note" | "canvas";
@@ -221,6 +223,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   private restLifecycle: RestExtensionLifecycle<object> | null = null;
   allowWrites = false;
   allowCanvasWrites = false;
+  allowNativeMoves = false;
+  private nativeMove: ReturnType<typeof createNativeNoteMoveRoutes>;
 
   async onload(): Promise<void> {
     const stored = (await this.loadData()) as Partial<PluginData> | null;
@@ -230,6 +234,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
         : randomUUID();
     this.allowWrites = stored?.allowWrites === true;
     this.allowCanvasWrites = stored?.allowCanvasWrites === true;
+    this.allowNativeMoves = stored?.allowNativeMoves === true;
     const deviceStorageKey = "optimike-atomic-write-bridge:device-id";
     let deviceId = window.localStorage.getItem(deviceStorageKey);
     if (!deviceId) {
@@ -249,9 +254,20 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     if (
       stored?.instanceId !== this.instanceId ||
       stored?.allowWrites !== this.allowWrites ||
-      stored?.allowCanvasWrites !== this.allowCanvasWrites
+      stored?.allowCanvasWrites !== this.allowCanvasWrites ||
+      stored?.allowNativeMoves !== this.allowNativeMoves
     ) {
       await this.saveSettings();
+    }
+    try {
+      this.nativeMove = createNativeNoteMoveRoutes(this.app, {
+        binding: () => this.bindingFingerprint,
+        enabled: () => this.allowNativeMoves,
+        registerEvent: (event) => this.registerEvent(event),
+      });
+    } catch {
+      // An unsupported native host must not disable the existing atomic CAS routes.
+      this.nativeMove = undefined;
     }
     this.addSettingTab(new AtomicWriteSettingsTab(this.app, this));
     void this.registerRestExtension();
@@ -262,6 +278,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       instanceId: this.instanceId,
       allowWrites: this.allowWrites,
       allowCanvasWrites: this.allowCanvasWrites,
+      allowNativeMoves: this.allowNativeMoves,
     } satisfies PluginData);
   }
 
@@ -336,6 +353,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               canvasAtomicCas: true,
               canvasWriteEnabled: this.allowCanvasWrites,
             },
+            nativeMove: this.nativeMove?.capabilities() ?? { supported: false, enabled: false },
             limits: { markdownOnly: true },
             settlement: {
               contractVersion: 1,
@@ -671,6 +689,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
           }
         });
 
+      this.nativeMove?.mount(api);
       return () => api.unregister?.();
       } catch {
         const rollback = () => api.unregister?.();
@@ -707,6 +726,13 @@ class AtomicWriteSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h3", { text: "Optimike Atomic Write Bridge" });
+    new Setting(containerEl)
+      .setName("Autoriser les déplacements natifs gouvernés")
+      .setDesc("Désactivé par défaut. Une note Markdown à la fois ; le postflight vérifie le voisinage observé, pas tout le graphe. Le serveur exige aussi MCP_WRITE_MODE=full.")
+      .addToggle((toggle) => toggle.setValue(this.bridge.allowNativeMoves).onChange(async (value) => {
+        this.bridge.allowNativeMoves = value;
+        await this.bridge.saveSettings();
+      }));
     new Setting(containerEl)
       .setName("Autoriser les écritures atomiques")
       .setDesc(

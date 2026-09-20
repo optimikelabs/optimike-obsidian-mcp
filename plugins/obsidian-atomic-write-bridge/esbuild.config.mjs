@@ -23,7 +23,7 @@ const buildOptions = {
   platform: "browser",
   outfile,
   banner: { js: "/* Optimike Atomic Write Bridge - build via esbuild */" },
-  external: ["obsidian", "node:crypto"],
+  external: ["obsidian", "node:crypto", "node:fs", "node:path"],
   minify: false,
   logLevel: "info",
 };
