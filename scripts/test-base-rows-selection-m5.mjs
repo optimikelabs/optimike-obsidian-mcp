@@ -11,7 +11,7 @@ function fixture() {
   let query = { total: 1, page: 1, rows: [{ file: { path: target.path, name: "A" }, props: {} }], source: "fallback", warnings: [], evaluate: false };
   const transport = {
     async read(baseId) { reads++; return { ok: true, contractVersion: 1, path: baseId, yaml, sha256: hash(yaml), size: Buffer.byteLength(yaml), bindingFingerprint: binding }; },
-    async query(baseId, view) { assert.equal(baseId, target.baseId); assert.equal(view, target.view); return structuredClone(query); },
+    async query(baseId, view) { assert.equal(baseId, target.baseId); assert.equal(view, target.view); return { ...structuredClone(query), baseSnapshot: { contractVersion: 1, path: baseId, sha256: hash(yaml), bindingFingerprint: binding } }; },
   };
   return { transport, reader: new BaseRowSelectionReader(transport), query: q => { query = q; }, yaml: s => { yaml = s; }, binding: s => { binding = s; }, reads: () => reads };
 }
@@ -52,5 +52,12 @@ for (const yaml of ["views: []\n", "views:\n - name: Open\n - name: Open\n", "vi
 }
 for (const bad of ["../Work.base", "C:/Work.base", ".obsidian/Work.base", "Views/CON.base", "X.md"]) {
   assert.throws(() => baseRowTarget({ ...target, baseId: bad })); cases++;
+}
+for (const proof of [undefined, { contractVersion: 1, path: target.baseId, sha256: "b".repeat(64), bindingFingerprint: "a".repeat(64) }, { contractVersion: 1, path: target.baseId, sha256: hash("views:\n  - name: Open\n    type: table\n"), bindingFingerprint: "c".repeat(64) }]) {
+  const f = fixture(), query = f.transport.query;
+  // Both surrounding reads still return A. The response reports B (ABA),
+  // another binding, or an old Bridge without a snapshot. All fail closed.
+  f.transport.query = async (...args) => ({ ...await query(...args), baseSnapshot: proof });
+  await assert.rejects(f.reader.select(target)); cases++;
 }
 console.log(`PASS: ${cases} M5 selection fixtures; complete warning-free fallback selection, exact paths, sealed Base/binding and honest freshness`);

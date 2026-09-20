@@ -28,6 +28,8 @@ const Document = z.object({
 const Query = z.object({
   total: z.number().int().nonnegative().max(500), page: z.literal(1),
   rows: z.array(z.object({ file: z.object({ path: z.string().min(1).max(1024) }).passthrough() }).passthrough()).max(500),
+  baseSnapshot: z.object({ contractVersion: z.literal(1), path: z.string().min(1).max(1024),
+    sha256: Hash, bindingFingerprint: Hash }).strict(),
   source: z.literal("fallback"), evaluate: z.literal(false),
   warnings: z.array(z.string()).max(0),
 }).passthrough();
@@ -65,6 +67,8 @@ export class BaseRowSelectionReader {
     const before = document(await this.transport.read(target.baseId), target);
     const q = Query.safeParse(await this.transport.query(target.baseId, target.view));
     if (!q.success || q.data.total !== q.data.rows.length) refuse("incomplete_or_unsupported_selection");
+    if (q.data.baseSnapshot.path !== target.baseId || q.data.baseSnapshot.sha256 !== before.sha256 ||
+        q.data.baseSnapshot.bindingFingerprint !== before.bindingFingerprint) refuse("query_base_snapshot_mismatch");
     const paths = q.data.rows.map(row => row.file.path);
     if (new Set(paths).size !== paths.length || !paths.includes(target.path)) refuse("row_not_uniquely_selected");
     const after = document(await this.transport.read(target.baseId), target);

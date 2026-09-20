@@ -1,13 +1,13 @@
-# M5 / historical P7 — integrated candidate
+# M5 / P7 — reviewed selection correction checkpoint
 
-Branch: feat/m5-p7-base-rows. PR #96. Stack base: M4 #95, including 587371452ad515c086d90aa110b4a36e254d1fa0. Branch HEAD is the candidate authority.
+Branch feat/m5-p7-base-rows, PR #96, stacked on M4 #95 including 1d7546343ef272bc13d28ac0a2d20abe4981e102. Branch HEAD is authoritative.
 
-Implemented: one existing Markdown Base row, raw top-level property set/delete, exact Base/view/path selection, SHA/binding seal, complete warning-free supported-filter snapshot (<=500 rows, freshness unknown), shared durable note CAS/frontmatter compiler. No new journal, generic batch, note creation/deletion, synthetic recovery or cross-file atomicity. Base writes are not required.
+Implemented: three-tool plan/apply/status for one exact existing Markdown row; raw top-level property set/delete; complete warning-free supported-filter selection <=500 rows; SHA/binding of the actual evaluated Base bytes; shared durable note journal, frontmatter compiler and CAS. No new profile/journal, implicit insert/delete-note, generic batch, synthetic recovery or multi-file transaction.
 
-Integrated: server registration, three-tool lifecycle, authoring/full-only routing, catalogue, capability diagnostics, cockpit and policy. Counts: 91 cross-runtime names; live/hybrid full 87; standard 29, authoring 43, tasks 35. Unknown outcomes route to status, not a nonexistent recover tool.
+Codex A-B-A finding fixed through Bases Bridge 1.2.2 query snapshot provenance; see M5-REVIEW.md. Old Bridges without the required proof fail closed. Metadata-cache freshness and native-engine equivalence remain unproven. The Base read guard and note CAS remain distinct operations.
 
-Evidence before branch integration: local Linux and GitHub preparation run 35539916670 both passed root build, 20 selection fixtures, 15 durable CAS/MCP scenarios, registry/profiles/catalogue/capability and full documentation contracts. The exact hash-verified objects are now referenced by this commit. All three integration recipes and the object-preparation workflow are removed.
+Tests: 23 hermetic selection fixtures, 15 durable CAS/concurrency/restart/loss and real in-memory MCP scenarios; Bases Bridge 34 tests/typecheck/build. Previous integrated registry/profiles/catalogue/capabilities/docs gates passed. Fresh exact-head CI and independent rereview must still be checked.
 
-Self-review: architecture reuses the governed note journal, source compiler and ownership. Security verifies protected/virtual keys, source CAS, Base guard, idempotency/domain fencing, lost responses/restart and one writer under concurrency. Product scope excludes implicit row/file deletion and insert; batch partials are NOT_APPLICABLE to one target. Remaining limitation: Base guard and note CAS are not transactional, and view freshness/native engine equivalence are not certified.
+All temporary preparation workflows/recipes removed; package includes both M4 and M5 contracts. Counts: 91 cross-runtime, 87 live full; standard29, authoring43, tasks35. M5 is authoring/full-only. No file is deleted by a property delete.
 
-Verdict: REWORK until fresh exact-head Windows/Linux CI and independent Codex review/corrections are confirmed. Pilot2 remains NOT_RUN; no merge before the final ordered local gate. Contract: docs/base-row-patch-m5.md.
+Verdict REWORK pending fresh repository gates. Local Pilot2 and installed-state proof remain NOT_RUN. No merge before the final ordered local session; next work is candidate verification and M6 inheritance.

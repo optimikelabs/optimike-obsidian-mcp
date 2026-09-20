@@ -14,6 +14,7 @@ import {
   parseComparisonLiteral,
 } from "./filter-comparison.mjs";
 import { normalizeLinkish } from "./link-normalization.mjs";
+import { baseQuerySnapshot } from "./base-query-snapshot.mjs";
 import {
   BASE_ATOMIC_CONTRACT_VERSION,
   BASE_ATOMIC_REST_PREFIX,
@@ -602,6 +603,7 @@ type BaseQueryRow = {
   computed?: Record<string, any>;
 };
 type BaseQueryResponse = {
+  baseSnapshot?: ReturnType<typeof baseQuerySnapshot>;
   total: number;
   page: number;
   rows: BaseQueryRow[];
@@ -1092,20 +1094,23 @@ export default class BasesBridgePlugin extends Plugin {
     file: TFile;
     yaml: string;
     json: Record<string, any>;
+    snapshot: ReturnType<typeof baseQuerySnapshot>;
   }> {
     const path = ensureBaseExt(baseId);
     const abstract = this.app.vault.getAbstractFileByPath(path);
     if (!(abstract instanceof TFile)) {
       throw new Error(`Base introuvable: ${path}`);
     }
+    const binding = this.bindingFingerprint;
     const yaml = await this.app.vault.read(abstract);
+    if (binding !== this.bindingFingerprint) throw new Error("Base generation changed during read");
     const jsonRaw = parseYaml(yaml);
     const json =
       jsonRaw && typeof jsonRaw === "object" && !Array.isArray(jsonRaw)
         ? (jsonRaw as Record<string, any>)
         : {};
 
-    return { id: path, file: abstract, yaml, json };
+    return { id: path, file: abstract, yaml, json, snapshot: baseQuerySnapshot(path, yaml, binding) };
   }
 
   private async ensureFoldersFor(path: string): Promise<void> {
@@ -2299,6 +2304,8 @@ export default class BasesBridgePlugin extends Plugin {
             rows,
             evaluate,
             source: "fallback",
+            // Proof comes from the same bytes parsed into config.json, not a reread.
+            baseSnapshot: config.snapshot,
             warnings,
           };
           res.json(response);
