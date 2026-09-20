@@ -132,6 +132,13 @@ try {
     assert.equal(f.calls(), 1); f.journal.close(); cases++;
   }
   {
+    const f = fixture("legacy-inspection-field"), p = await f.adapter.plan(input), create = f.backend.create, inspect = f.backend.inspect;
+    f.backend.create = async request => { await create(request); throw new Error("reply lost"); };
+    f.backend.inspect = async path => ({ ...(await inspect(path)), policyDigest: "f".repeat(64) });
+    assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "committed");
+    assert.equal(f.calls(), 1); f.journal.close(); cases++;
+  }
+  {
     const f = fixture("partial-write"), p = await f.adapter.plan(input);
     f.backend.create = async () => { f.files.set(input.path, "partial"); throw new Error("crash"); };
     assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "outcome_unknown");

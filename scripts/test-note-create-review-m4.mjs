@@ -43,6 +43,27 @@ try {
       assert.equal(f.calls(), 0); assert.equal((await f.adapter.status(p.planRef)).phase, "planned");
     } finally { f.journal.close(); }
   }
+  {
+    const autoFields = [{ pluginId: "update-time", propertyName: "updated", role: "modified", delayMs: 0 }];
+    config.mcpProtectedFrontmatterKeys = ["updated"];
+    const f = fixture("protected-automatic-plan", autoFields);
+    try {
+      await assert.rejects(f.adapter.plan(input));
+      assert.equal(f.calls(), 0);
+    } finally { f.journal.close(); }
+  }
+  {
+    const autoFields = [{ pluginId: "update-time", propertyName: "updated", role: "modified", delayMs: 0 }];
+    config.mcpProtectedFrontmatterKeys = [];
+    const f = fixture("protected-automatic-apply", autoFields);
+    try {
+      const p = await f.adapter.plan(input);
+      config.mcpProtectedFrontmatterKeys = ["updated"];
+      await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey));
+      assert.equal(f.calls(), 0);
+      assert.equal((await f.adapter.status(p.planRef)).phase, "planned");
+    } finally { f.journal.close(); }
+  }
   assert.deepEqual(noteCreateFrontmatterKeys("Body only\n"), []);
   assert.deepEqual(noteCreateFrontmatterKeys("---\n---\nBody\n"), []);
   assert.throws(() => noteCreateFrontmatterKeys("---\n- not-a-map\n---\n"));
