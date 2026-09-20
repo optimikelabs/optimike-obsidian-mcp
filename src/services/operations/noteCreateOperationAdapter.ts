@@ -3,7 +3,7 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { validateObsidianMarkdown } from "../obsidianFormatService.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import { nativeNotePath } from "../nativeNoteMoveContract.js";
-import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCreateHash, observeCreateContent, validateCreatePolicy, validateNoteCreate,
+import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCreateFrontmatterKeys, noteCreateHash, observeCreateContent, validateCreatePolicy, validateNoteCreate,
   type NoteCreateApply, type NoteCreatePreflight } from "../noteCreateContract.js";
 import { operationDigest } from "./contract.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "./obsidianNoteReplaceJournal.js";
@@ -41,7 +41,7 @@ export class NoteCreateOperationAdapter {
     private readonly now = Date.now,
     private readonly authorize: (phase: "plan" | "apply", path: string, content: string) => void = (phase, path, content) =>
       assertWriteAllowed({ operation: phase === "plan" ? "obsidian_note_create_plan" : "obsidian_note_create_apply",
-        action: phase, target: path, targetType: "filePath", contentLength: content.length }),
+        action: phase, target: path, targetType: "filePath", contentLength: content.length, frontmatterKeys: noteCreateFrontmatterKeys(content) }),
   ) {}
   private sealed(row: ObsidianNoteReplacePlan): NoteCreatePreflight {
     if (row.projection?.kind !== KIND || row.projection.contractVersion !== 1) bad("create_domain_mismatch");

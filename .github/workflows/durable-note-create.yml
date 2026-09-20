@@ -25,6 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node scripts/test-note-create-m4.mjs
+      - run: node scripts/test-note-create-review-m4.mjs
       - run: node scripts/test-note-create-surface.mjs
       - run: npm --prefix plugins/obsidian-atomic-write-bridge ci
       - run: npm --prefix plugins/obsidian-atomic-write-bridge run check

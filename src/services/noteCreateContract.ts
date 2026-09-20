@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { load } from "js-yaml";
 import { nativeNotePath } from "./nativeNoteMoveContract.js";
 import { resolveModifiedTimeSettlement } from "./operations/modifiedTimeSettlement.js";
 
@@ -61,6 +62,20 @@ export function validateNoteCreate(path: string, content: string, policy: NoteCr
   }
 }
 
+/** Newly created user-authored frontmatter is a change from the empty document.
+ * Parse YAML, including quoted and merged keys, instead of a regex key scan.
+ */
+export function noteCreateFrontmatterKeys(content: string): string[] {
+  if (!/^---\r?\n/u.test(content)) return [];
+  const lines = content.split(/\r?\n/u);
+  const end = lines.findIndex((line, i) => i > 0 && line === "---");
+  if (end < 0) throw new Error("invalid_create_frontmatter");
+  const value: unknown = load(lines.slice(1, end).join("\n"));
+  if (value === undefined || value === null) return [];
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_create_frontmatter");
+  return Object.keys(value);
+}
+
 /** Reuses the existing single-field timestamp verifier; no arbitrary YAML normalization. */
 export function observeCreateContent(expected: string, observed: string, policy: NoteCreatePolicy,
   startedAt: number, observedAt: number): { kind: "exact" | "date-settled"; sha256: string } | undefined {
@@ -91,7 +106,9 @@ export function observeCreateContent(expected: string, observed: string, policy:
     if (!resolveModifiedTimeSettlement(current, changed, {
       contractVersion: 1, utcOffsetMinutes: policy.utcOffsetMinutes,
       integrations: [{ pluginId: field.pluginId, propertyName: field.propertyName, settlementObservationDelayMs: field.delayMs }],
-    }, { applyStartedAtEpochMs: startedAt, settlementObservedAtEpochMs: observedAt })) return undefined;
+    }, { applyStartedAtEpochMs: startedAt, // Persisted apply time anchors this fixed proof window. A late reader may
+      // verify an early plugin timestamp, never a timestamp near its own late read.
+      settlementObservedAtEpochMs: Math.min(observedAt, startedAt + 5 * 60 * 1000) })) return undefined;
     current = changed;
   }
   return current === observed ? { kind: "date-settled", sha256: noteCreateHash(observed) } : undefined;
