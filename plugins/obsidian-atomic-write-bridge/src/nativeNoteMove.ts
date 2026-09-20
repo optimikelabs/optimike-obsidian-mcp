@@ -93,7 +93,10 @@ export class NativeNoteMoveService {
     }
     const observation: NativeMoveObservation = {
       contractVersion: 1, operationId: request.operationId,
-      bindingFingerprint: this.host.binding(), preconditionDigest: request.preconditionDigest,
+      // This acknowledges this request, including when a new host generation
+      // rejects its stale binding before dispatch. It is not a host-status claim.
+      // The binding check below must still precede every effect.
+      bindingFingerprint: request.bindingFingerprint, preconditionDigest: request.preconditionDigest,
       outcome: "outcome_unknown", reason: "in_flight", graphPostflight: "pending",
       scope: "sealed_neighborhood_only", replayAllowed: false,
     };
