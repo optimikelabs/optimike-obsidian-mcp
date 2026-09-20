@@ -32,6 +32,9 @@ const Policy = z.object({ version: z.literal(1), utcOffsetMinutes: z.number().in
 const Preflight = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
   absent: z.literal(true), enabled: z.literal(true), policy: Policy, policyDigest: HASH }).strict();
 const Inspection = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
+  // Optional only for rolling compatibility with the immediately preceding
+  // Bridge contract. It is deliberately ignored for reconciliation.
+  policyDigest: HASH.optional(),
   exists: z.boolean(), content: z.string().max(NOTE_CREATE_MAX_BYTES).optional(), sha256: HASH.optional() }).strict();
 const Result = z.object({ contractVersion: z.literal(1), operationId: z.string().uuid(), path: z.string().max(1024),
   bindingFingerprint: HASH, policyDigest: HASH, contentSha256: HASH,
@@ -54,9 +57,11 @@ const absence = (p: Pick<NoteCreatePreflight, "path" | "bindingFingerprint">) =>
 export class NoteCreateOperationAdapter {
   constructor(private readonly backend: NoteCreateBackend, private readonly journal: ObsidianNoteReplaceJournal,
     private readonly now = Date.now,
-    private readonly authorize: (phase: "plan" | "apply", path: string, content: string) => void = (phase, path, content) =>
-      assertWriteAllowed({ operation: phase === "plan" ? "obsidian_note_create_plan" : "obsidian_note_create_apply",
-        action: phase, target: path, targetType: "filePath", contentLength: content.length, frontmatterKeys: noteCreateFrontmatterKeys(content) }),
+    private readonly authorize: (phase: "plan" | "apply", path: string, content: string, automaticFields?: string[]) => void =
+      (phase, path, content, automaticFields = []) =>
+        assertWriteAllowed({ operation: phase === "plan" ? "obsidian_note_create_plan" : "obsidian_note_create_apply",
+          action: phase, target: path, targetType: "filePath", contentLength: content.length,
+          frontmatterKeys: [...new Set([...noteCreateFrontmatterKeys(content), ...automaticFields])] }),
   ) {}
   private sealed(row: ObsidianNoteReplacePlan): NoteCreatePreflight {
     if (row.projection?.kind !== KIND || row.projection.contractVersion !== 1) bad("create_domain_mismatch");
@@ -94,7 +99,7 @@ export class NoteCreateOperationAdapter {
     catch (error) { const existing = winner(); if (existing) return this.receipt(existing); throw error; }
     if (plan.path !== input.path || createPolicyDigest(plan.policy) !== plan.policyDigest) bad("create_preflight_identity_mismatch");
     validateNoteCreate(input.path, input.content, plan.policy);
-    this.authorize("plan", input.path, input.content);
+    this.authorize("plan", input.path, input.content, plan.policy.fields.map(field => field.propertyName));
     const row = this.journal.create({ idempotencyKey: key, idempotencyIdentity: identity, path: input.path,
       nextContent: input.content, beforeSha256: absence({ path: input.path, bindingFingerprint: plan.bindingFingerprint }), afterSha256: hash,
       bindingFingerprint: plan.bindingFingerprint, requestDigest: operationDigest({ ...plan, contentSha256: hash }),
@@ -104,14 +109,15 @@ export class NoteCreateOperationAdapter {
   async apply(ref: string, key: string) {
     let row = this.require(ref, key);
     if (row.status !== "planned") return this.status(ref);
-    this.authorize("apply", row.path, row.nextContent);
+    const admitted = this.sealed(row);
+    this.authorize("apply", row.path, row.nextContent, admitted.policy.fields.map(field => field.propertyName));
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }
     catch (error) { if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(ref); throw error; }
     const attempt = row.executionOwner!.attemptId;
     let dispatched = false;
     try {
-      this.authorize("apply", row.path, row.nextContent);
       const plan = this.sealed(row);
+      this.authorize("apply", row.path, row.nextContent, plan.policy.fields.map(field => field.propertyName));
       dispatched = true;
       const result = Result.parse(await this.backend.create({ contractVersion: 1, operationId: row.operationId, path: row.path,
         content: row.nextContent, contentSha256: row.afterSha256, bindingFingerprint: row.bindingFingerprint, policyDigest: plan.policyDigest }));

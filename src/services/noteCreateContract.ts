@@ -21,6 +21,8 @@ export type NoteCreateApply = {
 };
 export type NoteCreateInspection = {
   contractVersion: 1; path: string; bindingFingerprint: string;
+  /** Legacy rolling-upgrade field; ignored by reconciliation. */
+  policyDigest?: string;
   exists: boolean; content?: string; sha256?: string;
 };
 export const noteCreateHash = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");

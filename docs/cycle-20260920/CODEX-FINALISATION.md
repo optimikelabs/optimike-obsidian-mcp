@@ -80,6 +80,8 @@ Sur #95, lire `docs/durable-note-create-m4.md`. L’effet crée un seul chemin a
 
 Tester des clés protégées configurées, y compris YAML cité, casse différente et merge YAML. Elles doivent être refusées avant toute création, également si la politique a changé entre plan/apply.
 
+Inclure un champ de date automatique dont le nom est protégé mais absent du YAML soumis : le plan doit être refusé. Planifier avec ce champ non protégé puis le protéger avant apply : apply doit être refusé avant dispatch. Pendant un rolling upgrade, un Bridge 0.8.0 antérieur pouvant encore renvoyer `policyDigest` sur inspect doit rester lisible ; ce champ legacy ne doit influencer ni l'identité ni la réconciliation.
+
 Avec les plugins réellement installés et reconnus, vérifier les champs créés/modifiés, délais, noms personnalisés dont l’ordre alphabétique diffère de l’ordre d’insertion, insertion entre propriétés et CRLF. Un timestamp tardif hors fenêtre ou une modification de corps ne doit pas être absorbé par le settlement. Reprendre après un délai supérieur à cinq minutes : un timestamp légitime initial doit rester vérifiable sans redispatch. L’attribution de l’auteur reste `not_proven` lors d’une simple réconciliation d’état.
 
 Après une création effectivement réussie dont la réponse est perdue, changer/désactiver le plugin de dates ou changer l’offset UTC avant le status. Après la fenêtre de settlement scellée, des octets exactement égaux au contenu planifié doivent réconcilier l’opération sans redispatch ; la politique courante ne doit pas devenir une identité historique de l’effet.
@@ -95,6 +97,8 @@ Vérifier set/delete de propriétés brutes, suppression d’une propriété san
 Changer la Base, la note ou la sélection après plan ; vérifier le conflit approprié. Exercer réponse perdue, reprise, deux processus et absence de second apply d’un enfant déjà tenté. Vérifier le cockpit et ses prochaines actions : pas de faux recover exposé. Une propriété modifiée peut faire sortir la note de la vue ; status vérifie l’effet sur la note, pas son appartenance ultérieure.
 
 Vérifier aussi la négociation de capacité : un Bases Bridge 1.2.1 ou une version inconnue/prerelease sans preuve équivalente ne doit pas annoncer `governed-base-rows` comme disponible ; le Bridge candidat 1.2.2 doit l’annoncer lorsque ses autres gates sont prêts.
+
+La sélection gouvernée doit passer par la route qualifiée `/extensions/obsidian-bases-bridge/bases/:id/query`, pas par l'alias legacy `/bases/:id/query`. Vérifier qu'un handler legacy concurrent/shadow ne peut pas fournir la réponse attestée par la capability du Bridge qualifié.
 
 La sélection est un snapshot du sous-ensemble de filtres du Bridge, fraîcheur inconnue ; comparer à la vue réelle. Le guard Base et le CAS note ne sont pas une transaction. Les tests insert/delete-note/batch/partials multi-cibles sont NOT_APPLICABLE à cette V1, pas des PASS.
 
