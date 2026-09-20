@@ -21,7 +21,7 @@ function fixture(name, fields = []) {
   const backend = {
     async preflight(path) { return { contractVersion: 1, path, bindingFingerprint, policy, policyDigest, absent: true, enabled: true }; },
     async create(r) { calls++; content = r.content; const { content: ignored, ...rest } = r; return { ...rest, outcome: "created", reason: "created" }; },
-    async inspect(path) { return { contractVersion: 1, path, bindingFingerprint, policyDigest, exists: content !== undefined,
+    async inspect(path) { return { contractVersion: 1, path, bindingFingerprint, exists: content !== undefined,
       ...(content === undefined ? {} : { content, sha256: noteCreateHash(content) }) }; },
   };
   const adapter = new NoteCreateOperationAdapter(backend, journal, clock);

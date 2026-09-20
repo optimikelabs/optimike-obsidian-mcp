@@ -31,7 +31,7 @@ function fixture(name, dateFields = []) {
     },
     async inspect(path) {
       const content = files.get(path);
-      return { contractVersion: 1, path, bindingFingerprint: binding, policyDigest: createPolicyDigest(policy), exists: content !== undefined,
+      return { contractVersion: 1, path, bindingFingerprint: binding, exists: content !== undefined,
         ...(content !== undefined ? { content, sha256: noteCreateHash(content) } : {}) };
     },
   };
