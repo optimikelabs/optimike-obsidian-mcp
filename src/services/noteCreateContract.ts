@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { load } from "js-yaml";
 import { nativeNotePath } from "./nativeNoteMoveContract.js";
 import { resolveModifiedTimeSettlement } from "./operations/modifiedTimeSettlement.js";
 
@@ -62,20 +61,6 @@ export function validateNoteCreate(path: string, content: string, policy: NoteCr
   }
 }
 
-/** Newly created user-authored frontmatter is a change from the empty document.
- * Parse YAML, including quoted and merged keys, instead of a regex key scan.
- */
-export function noteCreateFrontmatterKeys(content: string): string[] {
-  if (!/^---\r?\n/u.test(content)) return [];
-  const lines = content.split(/\r?\n/u);
-  const end = lines.findIndex((line, i) => i > 0 && line === "---");
-  if (end < 0) throw new Error("invalid_create_frontmatter");
-  const value: unknown = load(lines.slice(1, end).join("\n"));
-  if (value === undefined || value === null) return [];
-  if (typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_create_frontmatter");
-  return Object.keys(value);
-}
-
 /** Reuses the existing single-field timestamp verifier; no arbitrary YAML normalization. */
 export function observeCreateContent(expected: string, observed: string, policy: NoteCreatePolicy,
   startedAt: number, observedAt: number): { kind: "exact" | "date-settled"; sha256: string } | undefined {
@@ -85,7 +70,17 @@ export function observeCreateContent(expected: string, observed: string, policy:
   if (expected === observed) return { kind: "exact", sha256: noteCreateHash(observed) };
   let current = expected;
   const clean = (line: string) => line.endsWith("\r") ? line.slice(0, -1) : line;
-  for (const field of policy.fields) {
+  const observedLines = observed.split("\n");
+  const observedEnd = observedLines.findIndex((line, i) => i > 0 && clean(line) === "---");
+  const position = (name: string) => {
+    const at = observedLines.findIndex((line, i) => i > 0 && i < observedEnd && clean(line).startsWith(name + ":"));
+    return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+  };
+  // Insert qualified missing fields in their observed order and location. This
+  // does not normalize or reorder existing YAML; each step must still differ
+  // by exactly one timestamp that the shared verifier accepts.
+  const fields = [...policy.fields].sort((a, b) => position(a.propertyName) - position(b.propertyName));
+  for (const field of fields) {
     const before = current.split("\n"), after = observed.split("\n");
     const endBefore = before.findIndex((line, i) => i > 0 && clean(line) === "---");
     const endAfter = after.findIndex((line, i) => i > 0 && clean(line) === "---");
@@ -101,7 +96,7 @@ export function observeCreateContent(expected: string, observed: string, policy:
     if (field.role === "created" && old.length) return undefined;
     const intermediate = [...before];
     if (old.length) intermediate[old[0]] = after[next[0]];
-    else intermediate.splice(endBefore, 0, after[next[0]]);
+    else intermediate.splice(next[0], 0, after[next[0]]);
     const changed = intermediate.join("\n");
     if (!resolveModifiedTimeSettlement(current, changed, {
       contractVersion: 1, utcOffsetMinutes: policy.utcOffsetMinutes,

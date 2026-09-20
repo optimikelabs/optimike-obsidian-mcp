@@ -1,9 +1,13 @@
 # M4 independent review corrections
 
-Codex reviewed ba12bebfb98392f199270953163d19a2281f62f9 and identified two P1 findings.
+Codex identified two P1 findings on ba12beb and additional P2 findings on ba12beb/01f88e0. All corrections below are in this candidate; fresh exact-head CI and independent rereview remain separate gates.
 
-The creation adapter now supplies parsed top-level YAML keys to the existing MCP protected-key policy at both plan and apply. Quoted keys and YAML merges cannot bypass the check; an empty prior document does not authorize seeding protected metadata. Qualified plugin-generated dates are still a separately sealed settlement allowance, not permission for the caller to set protected keys.
+Protected creation keys: the MCP adapter parses actual top-level YAML keys, including quoted/merged keys, and invokes the existing protected metadata policy at both plan and apply. Creating an empty document does not authorize seeding protected keys. This YAML dependency stays in the MCP adapter, not in the shared dependency-free Bridge contract.
 
-Delayed restart reconciliation now checks plugin timestamps in the bounded window anchored to the durable apply timestamp (at most five minutes), rather than stretching the verifier window to the eventual recovery read. Reading a day later may verify an unchanged early timestamp, but does not admit a timestamp generated a day later. The first-observation quiet delay remains required. No authorship or indefinite timestamp-window guarantee is made.
+Delayed restart: plugin timestamp evidence is restricted to the <=five-minute window anchored to the durable apply timestamp. Reading a day later may verify an early timestamp but cannot admit a timestamp generated near the late read. First-observation settling delay remains required; no author-attribution guarantee is made.
 
-Local Linux affected evidence: root build; protected-key/quoted/merged YAML and policy-change regressions; a one-day-late restart with lost reply and zero redispatch; late timestamp and body drift negatives; 13 prior durable create cases and in-memory MCP protocol tests. Fresh exact-head Windows/Linux CI and independent rereview must be checked separately. Pilot2 remains NOT_RUN.
+Multiple automatic dates: reconcile qualified missing fields in their observed order and position, not alphabetic policy order. Every intermediate delta still passes the shared one-timestamp verifier. Unrelated metadata, body changes, late timestamps and replacement of a preexisting creation date remain rejected. Regression cases cover reversed custom field names, insertion between ordinary fields and CRLF.
+
+Standalone Bridge: moved YAML key parsing to the MCP-only adapter. The shared contract again depends only on Node builtins and local pure modules. Added a separate Windows/Linux job that installs only Bridge dependencies, with no root npm ci. Locally, Bridge check passed with the root node_modules path physically unavailable: typecheck, 49 tests and bundle build.
+
+Additional local evidence: root compilation, protected/quoted/merged-key and policy-change regressions, one-day restart/lost-reply proof and all previous creation/protocol cases. Pilot2 remains NOT_RUN. No temporary workflow or recipe is introduced by these corrections.
