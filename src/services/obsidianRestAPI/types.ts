@@ -184,9 +184,24 @@ export type NoteLinksResponse = {
   unresolved: Array<{ linkText: string; count: number }>;
   backlinks: Array<{ sourcePath: string; count: number }>;
   coverage: {
-    outgoing: { total: number; returned: number; truncated: boolean };
-    unresolved: { total: number; returned: number; truncated: boolean };
-    backlinks: { total: number; returned: number; truncated: boolean };
+    outgoing: {
+      available: boolean;
+      total: number | null;
+      returned: number;
+      truncated: boolean;
+    };
+    unresolved: {
+      available: true;
+      total: number;
+      returned: number;
+      truncated: boolean;
+    };
+    backlinks: {
+      available: true;
+      total: number;
+      returned: number;
+      truncated: boolean;
+    };
   };
 };
 

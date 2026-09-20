@@ -134,7 +134,12 @@ test("same-note subpaths and limits are deterministic", () => {
     },
   });
   assert.deepEqual(result.outgoing[0].resolution, { status: "resolved", targetPath: "Source.md" });
-  assert.deepEqual(result.coverage.outgoing, { total: 3, returned: 1, truncated: true });
+  assert.deepEqual(result.coverage.outgoing, {
+    available: true,
+    total: 3,
+    returned: 1,
+    truncated: true,
+  });
   assert.deepEqual(result.unresolved, [{ linkText: "Alpha", count: 2 }]);
   assert.deepEqual(result.backlinks, [{ sourcePath: "A.md", count: 1 }]);
   assert.equal(result.coverage.unresolved.truncated, true);
@@ -156,7 +161,12 @@ test("missing source cache does not fabricate outgoing completeness", () => {
     validateSubpath: () => ({ status: "unknown", reason: "target_cache_unavailable" }),
   });
   assert.deepEqual(result.outgoing, []);
-  assert.deepEqual(result.coverage.outgoing, { total: 0, returned: 0, truncated: false });
+  assert.deepEqual(result.coverage.outgoing, {
+    available: false,
+    total: null,
+    returned: 0,
+    truncated: false,
+  });
   assert.deepEqual(result.backlinks, [{ sourcePath: "Back.md", count: 1 }]);
   assert.deepEqual(result.unresolved, [{ linkText: "Missing", count: 1 }]);
 });

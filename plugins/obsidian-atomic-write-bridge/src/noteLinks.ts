@@ -46,9 +46,24 @@ export type NoteLinksProjection = {
   unresolved: Array<{ linkText: string; count: number }>;
   backlinks: Array<{ sourcePath: string; count: number }>;
   coverage: {
-    outgoing: { total: number; returned: number; truncated: boolean };
-    unresolved: { total: number; returned: number; truncated: boolean };
-    backlinks: { total: number; returned: number; truncated: boolean };
+    outgoing: {
+      available: boolean;
+      total: number | null;
+      returned: number;
+      truncated: boolean;
+    };
+    unresolved: {
+      available: true;
+      total: number;
+      returned: number;
+      truncated: boolean;
+    };
+    backlinks: {
+      available: true;
+      total: number;
+      returned: number;
+      truncated: boolean;
+    };
   };
 };
 
@@ -73,6 +88,7 @@ function bounded<T>(items: T[], limit: number) {
   return {
     values: items.slice(0, limit),
     coverage: {
+      available: true as const,
       total: items.length,
       returned: Math.min(items.length, limit),
       truncated: items.length > limit,
@@ -182,7 +198,12 @@ export function projectNoteLinks(
     coverage: {
       outgoing: input.cacheAvailable
         ? boundedOutgoing.coverage
-        : { total: 0, returned: 0, truncated: false },
+        : {
+            available: false,
+            total: null,
+            returned: 0,
+            truncated: false,
+          },
       unresolved: boundedUnresolved.coverage,
       backlinks: boundedBacklinks.coverage,
     },

@@ -46,9 +46,24 @@ const response = {
   unresolved: [],
   backlinks: [],
   coverage: {
-    outgoing: { total: 0, returned: 0, truncated: false },
-    unresolved: { total: 0, returned: 0, truncated: false },
-    backlinks: { total: 0, returned: 0, truncated: false },
+    outgoing: {
+      available: true,
+      total: 0,
+      returned: 0,
+      truncated: false,
+    },
+    unresolved: {
+      available: true,
+      total: 0,
+      returned: 0,
+      truncated: false,
+    },
+    backlinks: {
+      available: true,
+      total: 0,
+      returned: 0,
+      truncated: false,
+    },
   },
 };
 
