@@ -1,0 +1,55 @@
+name: Temporary M6 coherence preparation
+on:
+  pull_request:
+    paths: ['.github/workflows/prepare-m6-coherence.yml']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.repository == 'optimikelabs/optimike-obsidian-mcp' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'chore/m6-optimike-cycle-close'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm --prefix plugins/obsidian-atomic-write-bridge ci
+      - run: npm --prefix plugins/obsidian-bases-bridge ci
+      - run: npm --prefix plugins/obsidian-operon-bridge ci
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs=require('node:fs'),crypto=require('node:crypto');
+            const allowed=new Set(['package.json','scripts/test-package-contents.mjs','docs/tool-surface-profiles.md','docs/tool-surface-profiles.fr.md','docs/runtime-capability-matrix.md','docs/runtime-capability-matrix.fr.md','README.md','README.fr.md','plugins/obsidian-atomic-write-bridge/manifest.json','CHANGELOG.md']);
+            const hash=s=>{const b=Buffer.from(s);return crypto.createHash('sha1').update(`blob ${b.length}\0`).update(b).digest('hex');};
+            const seen=new Set(),outputs=[];
+            for(const n of [1,2]){
+              const file=`docs/cycle-20260920/m6-part${n}.json`,recipe=JSON.parse(fs.readFileSync(file,'utf8'));
+              if(recipe.version!==1||!Array.isArray(recipe.files))throw new Error('Invalid recipe');
+              for(const f of recipe.files){
+                if(!allowed.has(f.path)||seen.has(f.path)||!Array.isArray(f.replacements)||f.replacements.length>10)throw new Error('Invalid target');seen.add(f.path);
+                let text=fs.readFileSync(f.path,'utf8');if(hash(text)!==f.beforeSha)throw new Error('Stale input '+f.path);
+                for(const e of f.replacements){if(!e.before||typeof e.after!=='string'||e.count!==1)throw new Error('Invalid edit');const parts=text.split(e.before);if(parts.length!==2)throw new Error('Ambiguous input '+f.path);text=parts.join(e.after);}
+                if(hash(text)!==f.afterSha)throw new Error('Output mismatch '+f.path);fs.writeFileSync(f.path,text);outputs.push({path:f.path,sha:f.afterSha});
+              }
+              fs.unlinkSync(file);
+            }
+            if(seen.size!==allowed.size)throw new Error('Incomplete closure integration');
+            fs.unlinkSync('.github/workflows/prepare-m6-coherence.yml');
+            fs.writeFileSync(process.env.RUNNER_TEMP+'/m6-objects.json',JSON.stringify(outputs));
+      - run: npm run test:cycle
+      - run: npm run test:docs
+      - run: npm run build:bridges
+      - run: npm run test:cycle:package
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs=require('node:fs');const outputs=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/m6-objects.json','utf8')),entries=[];
+            for(const f of outputs){const {data}=await github.rest.git.createBlob({...context.repo,content:fs.readFileSync(f.path,'utf8'),encoding:'utf-8'});if(data.sha!==f.sha)throw new Error('Object mismatch');entries.push({path:f.path,mode:'100644',type:'blob',sha:data.sha});}
+            core.notice('M6_COHERENCE_OBJECTS '+JSON.stringify(entries));
+            core.notice('No branch mutation or publication. Attach objects and remove both recipes and this preparation workflow via the connector.');
