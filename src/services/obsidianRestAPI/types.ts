@@ -191,8 +191,8 @@ export type NoteLinksResponse = {
       truncated: boolean;
     };
     unresolved: {
-      available: true;
-      total: number;
+      available: boolean;
+      total: number | null;
       returned: number;
       truncated: boolean;
     };
@@ -572,7 +572,7 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 /**
- * Destination used when moving a heading (`scope: "parent"`).
+ * Destination used when moving a heading (`scope: "parent").
  */
 export interface PatchDestination {
   parent: string[] | null;

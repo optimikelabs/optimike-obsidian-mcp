@@ -53,8 +53,8 @@ export type NoteLinksProjection = {
       truncated: boolean;
     };
     unresolved: {
-      available: true;
-      total: number;
+      available: boolean;
+      total: number | null;
       returned: number;
       truncated: boolean;
     };
@@ -96,6 +96,10 @@ function bounded<T>(items: T[], limit: number) {
   };
 }
 
+function ordinal(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function sourceOffset(reference: NoteLinkReferenceInput): number {
   return reference.position?.start.offset ?? -1;
 }
@@ -135,7 +139,7 @@ export function projectNoteLinks(
     if (offsetDelta !== 0) return offsetDelta;
     const typeDelta = kindOrder(left.kind) - kindOrder(right.kind);
     if (typeDelta !== 0) return typeDelta;
-    return left.reference.original.localeCompare(right.reference.original);
+    return ordinal(left.reference.original, right.reference.original);
   });
 
   const outgoingCoverage = {
@@ -184,7 +188,7 @@ export function projectNoteLinks(
   )
     .filter(([, count]) => Number.isFinite(count) && count > 0)
     .map(([linkText, count]) => ({ linkText, count }))
-    .sort((left, right) => left.linkText.localeCompare(right.linkText));
+    .sort((left, right) => ordinal(left.linkText, right.linkText));
 
   const backlinks = Object.entries(input.resolvedLinks)
     .flatMap(([sourcePath, destinations]) => {
@@ -193,14 +197,14 @@ export function projectNoteLinks(
         ? [{ sourcePath, count }]
         : [];
     })
-    .sort((left, right) => left.sourcePath.localeCompare(right.sourcePath));
+    .sort((left, right) => ordinal(left.sourcePath, right.sourcePath));
 
   const boundedUnresolved = bounded(unresolved, input.limit);
   const boundedBacklinks = bounded(backlinks, input.limit);
 
   return {
     outgoing: input.cacheAvailable ? outgoing : [],
-    unresolved: boundedUnresolved.values,
+    unresolved: input.cacheAvailable ? boundedUnresolved.values : [],
     backlinks: boundedBacklinks.values,
     coverage: {
       outgoing: input.cacheAvailable
@@ -211,7 +215,9 @@ export function projectNoteLinks(
             returned: 0,
             truncated: false,
           },
-      unresolved: boundedUnresolved.coverage,
+      unresolved: input.cacheAvailable
+        ? boundedUnresolved.coverage
+        : { available: false, total: null, returned: 0, truncated: false },
       backlinks: boundedBacklinks.coverage,
     },
   };

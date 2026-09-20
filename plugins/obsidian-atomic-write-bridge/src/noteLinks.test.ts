@@ -177,5 +177,28 @@ test("missing source cache does not fabricate outgoing completeness", () => {
     truncated: false,
   });
   assert.deepEqual(result.backlinks, [{ sourcePath: "Back.md", count: 1 }]);
-  assert.deepEqual(result.unresolved, [{ linkText: "Missing", count: 1 }]);
+  assert.deepEqual(result.unresolved, []);
+  assert.deepEqual(result.coverage.unresolved, { available: false, total: null, returned: 0, truncated: false });
+});
+
+
+test("M2 code-unit ordering fixes limited subsets independently of host locale", () => {
+  const originalLocaleCompare = String.prototype.localeCompare;
+  String.prototype.localeCompare = function () { throw new Error("host locale must not be consulted"); };
+  try {
+    const values = ["ä", "z", "A", "a", "é", "É"];
+    const result = projectNoteLinks({
+      sourcePath: "Source.md", cacheAvailable: true, limit: 3,
+      links: values.map(link => ({ link, original: link })), embeds: [], frontmatterLinks: [],
+      resolvedLinks: Object.fromEntries(values.map(value => [value + ".md", { "Source.md": 1 }])),
+      unresolvedLinks: { "Source.md": Object.fromEntries(values.map(value => [value, 1])) },
+      parseLinktext, resolveLink: () => null,
+      validateSubpath: () => ({ status: "not_requested" }),
+    });
+    assert.deepEqual(result.outgoing.map(ref => ref.linkText), ["A", "a", "z"]);
+    assert.deepEqual(result.unresolved.map(ref => ref.linkText), ["A", "a", "z"]);
+    assert.deepEqual(result.backlinks.map(ref => ref.sourcePath), ["A.md", "a.md", "z.md"]);
+    assert.equal(result.coverage.unresolved.total, 6);
+    assert.equal(result.coverage.unresolved.truncated, true);
+  } finally { String.prototype.localeCompare = originalLocaleCompare; }
 });
