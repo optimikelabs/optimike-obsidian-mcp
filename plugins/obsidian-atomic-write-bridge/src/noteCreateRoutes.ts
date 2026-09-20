@@ -31,7 +31,7 @@ export function createNoteCreateRoutes(app: App, options: { binding: () => strin
   }
   function apply(request: NoteCreateApply) {
     const common = { contractVersion: 1, operationId: request.operationId, path: request.path,
-      bindingFingerprint, policyDigest: request.policyDigest, contentSha256: request.contentSha256 };
+      bindingFingerprint: request.bindingFingerprint, policyDigest: request.policyDigest, contentSha256: request.contentSha256 };
     let dispatched = false;
     try {
       const current = preflight(request.path);
