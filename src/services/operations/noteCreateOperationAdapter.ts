@@ -132,7 +132,11 @@ export class NoteCreateOperationAdapter {
     let postflight: "pending" | "verified" | "unverified" = "unverified";
     try {
       const plan = this.sealed(row), observation = Inspection.parse(await this.backend.inspect(row.path));
-      if (observation.path !== row.path || observation.bindingFingerprint !== row.bindingFingerprint || observation.policyDigest !== plan.policyDigest ||
+      // The current automatic-date policy is an apply-time fence, not a
+      // reconciliation identity. A lost response can be observed after the
+      // plugin is disabled/reconfigured or the local UTC offset changes.
+      // Reconcile only against the sealed plan policy and the observed bytes.
+      if (observation.path !== row.path || observation.bindingFingerprint !== row.bindingFingerprint ||
           (observation.exists && (observation.content === undefined || noteCreateHash(observation.content) !== observation.sha256))) bad("create_observation_invalid");
       if (row.status === "committed") {
         postflight = observation.exists && observation.sha256 === row.effectProof?.digest ? "verified" : "unverified";

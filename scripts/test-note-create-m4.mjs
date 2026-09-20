@@ -119,6 +119,19 @@ try {
     assert.equal(f.calls(), 1); f.journal.close(); cases++;
   }
   {
+    const fields = [{ pluginId: "update-time", role: "modified", propertyName: "updated", delayMs: 2250 }];
+    const f = fixture("lost-reply-policy-change", fields), p = await f.adapter.plan(input), create = f.backend.create;
+    f.backend.create = async request => { await create(request); throw new Error("reply lost"); };
+    assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "outcome_unknown");
+    // Reconfiguration/DST after dispatch must not poison exact-byte reconciliation.
+    f.policy({ version: 1, utcOffsetMinutes: 60, fields: [] });
+    f.tick(2500);
+    const result = await f.adapter.status(p.planRef);
+    assert.equal(result.outcome, "committed");
+    assert.equal(result.effectProof.details.match, "exact");
+    assert.equal(f.calls(), 1); f.journal.close(); cases++;
+  }
+  {
     const f = fixture("partial-write"), p = await f.adapter.plan(input);
     f.backend.create = async () => { f.files.set(input.path, "partial"); throw new Error("crash"); };
     assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "outcome_unknown");

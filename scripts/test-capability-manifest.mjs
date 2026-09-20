@@ -41,7 +41,7 @@ const atomicReady = {
 const baseReady = {
   ok: true,
   contractVersion: 1,
-  plugin: { id: "optimike-bases-bridge", version: "1.0.0" },
+  plugin: { id: "optimike-bases-bridge", version: "1.2.2" },
   backend: {
     kind: "obsidian-vault-process-base",
     bindingFingerprint: privateMarkers[3],
@@ -823,3 +823,7 @@ assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", 
 assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "missing" } })), "governed-base-rows").available, false);
 assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", writeMode: "readonly" })), "governed-base-rows").authorized, false);
 assert.equal(capability(projectCapabilityManifest(input({ profile: "standard" })), "governed-base-rows").state, "hidden");
+const legacyRowsBridge = structuredClone(baseReady); legacyRowsBridge.plugin.version = "1.2.1";
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: legacyRowsBridge } })), "governed-base-rows").available, false);
+const futureRowsBridge = structuredClone(baseReady); futureRowsBridge.plugin.version = "1.3.0";
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: futureRowsBridge } })), "governed-base-rows").state, "ready");

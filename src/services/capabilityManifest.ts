@@ -562,6 +562,15 @@ function atomicCapability(
   );
 }
 
+function baseRowsSnapshotBridgeReady(status: Record<string, unknown>): boolean {
+  const plugin = record(status.plugin);
+  const version = typeof plugin.version === "string" ? plugin.version : "";
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/u.exec(version);
+  if (!match) return false;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  return major > 1 || (major === 1 && (minor > 2 || (minor === 2 && patch >= 2)));
+}
+
 /** Row patches need note CAS writes and Base reads, not a grant to rewrite the Base. */
 function baseRowsCapability(input: CapabilityManifestProjectionInput): CapabilityManifestEntry {
   const note = atomicCapability(input, "governed-base-rows");
@@ -574,7 +583,8 @@ function baseRowsCapability(input: CapabilityManifestProjectionInput): Capabilit
   }
   const status = record(probe.value), backend = record(status.backend), lifecycle = record(status.lifecycle);
   const live = lifecycle.state === undefined || lifecycle.state === "ready";
-  const available = live && status.ok === true && status.contractVersion === 1 && backend.atomicCas === true;
+  const available = live && status.ok === true && status.contractVersion === 1 &&
+    backend.atomicCas === true && baseRowsSnapshotBridgeReady(status);
   return entry(input, "governed-base-rows", available, available && note.authorized,
     !live ? "bridge_lifecycle_not_ready" : !available ? "bridge_contract_incompatible" : note.reasonCode,
     !live ? "wait_for_bridge" : !available ? "update_bridge_contract" : note.nextAction);
