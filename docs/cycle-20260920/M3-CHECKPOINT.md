@@ -1,17 +1,19 @@
 # M3 — governed native note move
 
-Branch: `feat/m3-native-note-move`. Base candidate: `4a795142b30e0c2c21dea138b088e4f533308386` (#92). The current branch HEAD and PR checkpoint are the resume authority.
+Branch: `feat/m3-native-note-move`; PR #94; stacked on M2 #92. Resume authority: the branch HEAD, this checkpoint, and the PR, not chat history.
 
-## Contract to implement
+## Durable state at resumption
 
-One existing Markdown note is renamed through Obsidian FileManager.renameFile. Seal source/destination, backend binding, source proof, destination absence, native update-links preference, and bounded before-neighborhood evidence. Revalidate immediately before dispatch. Separate native move outcome from graph postflight (pending, verified, failed, indeterminate). Do not assert global graph preservation, global file transactionality, or replay safety for an uncertain effect without proof. Reuse the existing durable journal and process lifecycle, rather than a session-local writer. No general folder/Canvas/delete/external mutation.
+The starting checkpoint was `63d7b1f8ee10ed47c67a0e3b44d12cc815dec2a7`. Native move contract, Bridge, journal adapter, registration and initial tests are versioned. The surface integration remains staged in `m3-surface-part1.json`, `m3-surface-part2.json`, `m3-surface-part3.json`; it has NOT been applied. The attempted self-writing GitHub Action failed with HTTP 403 at tree creation. Its workflow is removed by this checkpoint. No new permissions or credentials are requested.
 
-A missing native preference capability is fail-closed, not an assumed setting. A truncated/unavailable graph cannot prove complete semantic preservation. Local Pilot2 and open-editor behavior remain NOT_RUN until independently exercised.
+The temporary replacement `export-m3-checkpoint.yml` has contents:read only and exports tracked source at the exact PR head, excluding Git credentials. Delete it after local recovery and before candidate readiness. Do not repeat the self-writing workflow approach.
 
-## Current checkpoint
+## Contract
 
-Branch created and verified before new implementation. Investigating previously uploaded Git blobs from the interrupted run to salvage code, not accepting that code as tested or executable. The recovery-only workflow has read permission and must be removed before candidate readiness. Recovered material must be inspected before reuse.
+One existing Markdown note is renamed through Obsidian FileManager.renameFile. Seal source/destination, backend binding, source proof, destination absence, native update-links preference, and bounded before-neighborhood evidence. Revalidate immediately before dispatch. Separate native move outcome from graph postflight (pending, verified, failed, indeterminate). No global graph preservation, global file transaction, or blind replay. Reuse the durable journal and process lifecycle. No folder/Canvas/delete/external mutation.
 
-## Remaining
+## Next work
 
-Native contract + backend, journal adapter/runtime injection, MCP registration, hermetic concurrency/lost-response/postflight tests, Windows/Linux CI, docs/catalog, self-review and independent Codex review. Verdict: REWORK.
+Read and apply the saved surface changes with exact-input checks; publish ordinary source commits through the authorized GitHub connector. Run hermetic regression tests and Windows/Linux CI; review architecture, concurrency/privacy and minimality; request independent Codex review; fix material findings. Keep all useful changes on this branch before starting the next work unit.
+
+Verdict: REWORK. Pilot2 and open-editor qualification: NOT_RUN, reserved for the final ordered Codex session. M4–M6 are still unimplemented; no completion claim is made for them.
