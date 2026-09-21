@@ -271,7 +271,7 @@ const backend = createServer(async (request, response) => {
     if (state.sessionInvalidMutationReplayRequests === 1) {
       json(response, 404, {
         jsonrpc: "2.0",
-        error: { code: -32001, message: "Invalid or expired session ID." },
+        error: { code: -32012, message: "The requested resource was not found.", data: { applicationCode: "NOT_FOUND", transportReason: "mcp_session_invalid", requestId: "12345678-1234-4123-8123-123456789abc" } },
         id: message.id,
       });
       return;
@@ -290,7 +290,7 @@ const backend = createServer(async (request, response) => {
     if (state.sessionInvalidApplicationRequests === 1) {
       json(response, 404, {
         jsonrpc: "2.0",
-        error: { code: -32001, message: "Invalid or expired session ID." },
+        error: { code: -32012, message: "The requested resource was not found.", data: { applicationCode: "NOT_FOUND", transportReason: "mcp_session_invalid", requestId: "12345678-1234-4123-8123-123456789abc" } },
         id: message.id,
       });
       return;
@@ -366,7 +366,7 @@ const backend = createServer(async (request, response) => {
     await awaitDeferred(invalidationRequests, "both session invalidations");
     json(response, 404, {
       jsonrpc: "2.0",
-      error: { code: -32001, message: "Invalid or expired session ID." },
+      error: { code: -32012, message: "The requested resource was not found.", data: { applicationCode: "NOT_FOUND", transportReason: "mcp_session_invalid", requestId: "12345678-1234-4123-8123-123456789abc" } },
       id: message.id,
     });
     return;

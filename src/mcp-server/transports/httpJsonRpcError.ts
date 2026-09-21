@@ -124,6 +124,9 @@ function normalizedPublicDetails(value: unknown) {
       details[field] = candidate;
     }
   }
+  if (ownDataProperty(value, "transportReason") === "mcp_session_invalid") {
+    details.transportReason = "mcp_session_invalid";
+  }
   const admission = ownDataProperty(value, "admission");
   if (
     admission === "queue-full" ||

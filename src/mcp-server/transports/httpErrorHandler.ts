@@ -5,7 +5,16 @@
  */
 
 import { Context } from "hono";
+import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { jsonRpcErrorResponse } from "./httpJsonRpcError.js";
+
+/** Only transport admission may construct this pre-dispatch rejection. */
+export class InvalidHttpSessionError extends McpError {
+  constructor() {
+    super(BaseErrorCode.NOT_FOUND, "Invalid or expired session ID.");
+    Object.setPrototypeOf(this, InvalidHttpSessionError.prototype);
+  }
+}
 
 /**
  * A centralized error handling middleware for Hono.
@@ -17,4 +26,9 @@ import { jsonRpcErrorResponse } from "./httpJsonRpcError.js";
  * @returns A Response object containing the formatted JSON-RPC error.
  */
 export const httpErrorHandler = async (err: Error, c: Context) =>
-  jsonRpcErrorResponse(c, err, { operation: "httpTransport" });
+  jsonRpcErrorResponse(c, err, {
+    operation: "httpTransport",
+    ...(err instanceof InvalidHttpSessionError
+      ? { details: { transportReason: "mcp_session_invalid" } }
+      : {}),
+  });
