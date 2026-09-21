@@ -48,8 +48,9 @@ try {
     config.mcpProtectedFrontmatterKeys = ["updated"];
     const f = fixture("protected-automatic-plan", autoFields);
     try {
-      await assert.rejects(f.adapter.plan(input));
-      assert.equal(f.calls(), 0);
+      const p = await f.adapter.plan(input);
+      assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "committed");
+      assert.equal(f.calls(), 1);
     } finally { f.journal.close(); }
   }
   {
@@ -59,9 +60,17 @@ try {
     try {
       const p = await f.adapter.plan(input);
       config.mcpProtectedFrontmatterKeys = ["updated"];
-      await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey));
+      assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "committed");
+      assert.equal(f.calls(), 1);
+    } finally { f.journal.close(); }
+  }
+  {
+    const autoFields = [{ pluginId: "update-time", propertyName: "updated", role: "modified", delayMs: 0 }];
+    config.mcpProtectedFrontmatterKeys = ["updated"];
+    const f = fixture("protected-automatic-supplied", autoFields);
+    try {
+      await assert.rejects(f.adapter.plan({ ...input, content: "---\ntitle: Test\nupdated: 2026-09-20T10:00:00\n---\nBody\n" }));
       assert.equal(f.calls(), 0);
-      assert.equal((await f.adapter.status(p.planRef)).phase, "planned");
     } finally { f.journal.close(); }
   }
   assert.deepEqual(noteCreateFrontmatterKeys("Body only\n"), []);
@@ -91,5 +100,5 @@ try {
       assert.equal(f.calls(), 1);
     } finally { reopened.close(); }
   }
-  console.log("PASS: M4 configured protected keys at plan/apply, parsed/merged YAML keys and delayed restart date reconciliation with a fixed bounded proof window");
+  console.log("PASS: M4 configured protected user-authored keys at plan/apply, qualified automatic timestamps, parsed/merged YAML keys and delayed restart date reconciliation with a fixed bounded proof window");
 } finally { config.mcpProtectedFrontmatterKeys = originalKeys; rmSync(root, { recursive: true, force: true }); }
