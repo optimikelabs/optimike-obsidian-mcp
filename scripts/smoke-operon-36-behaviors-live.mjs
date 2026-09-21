@@ -30,9 +30,15 @@ const EXPECTED_VAULT = path.resolve(
 );
 const EXPECTED_VAULT_NAME = "operon-bridge-pilot-vault-2.5.0";
 const EXPECTED_BASE_URL = "http://127.0.0.1:27233";
-const EXPECTED_OPERON_VERSION = "3.6.2";
-const EXPECTED_MCP_VERSION = "3.9.0";
-const EXPECTED_BRIDGE_VERSION = "0.9.2";
+const EXPECTED_OPERON_VERSION = (
+  process.env.OPERON_36_BEHAVIOR_CANARY_EXPECTED_OPERON_VERSION ?? "3.9.3"
+).trim();
+const EXPECTED_MCP_VERSION = (
+  process.env.OPERON_36_BEHAVIOR_CANARY_EXPECTED_MCP_VERSION ?? "3.9.1"
+).trim();
+const EXPECTED_BRIDGE_VERSION = (
+  process.env.OPERON_36_BEHAVIOR_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.9.3"
+).trim();
 const RUN_CONFIRMATION = "I_CONFIRM_PILOT_2_OPERON_36_BEHAVIOR_MUTATIONS";
 const PROJECT_ROOT = path.dirname(
   fileURLToPath(new URL("../package.json", import.meta.url)),

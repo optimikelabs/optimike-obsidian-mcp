@@ -158,7 +158,7 @@ révision périmée renvoie `conflict` sans écriture. Une réservation restée
 `in_progress` après timeout ou redémarrage bloque toute nouvelle mutation à
 l’aveugle.
 
-Bridge 0.9.2 réserve aussi les clés d’idempotence atomiquement et persiste son
+Bridge 0.9.3 réserve aussi les clés d’idempotence atomiquement et persiste son
 journal version 2 dans les données locales du plugin Obsidian avant tout dispatch
 natif. Ce journal est borné à 500 entrées et 30 jours. Une entrée `in-progress`
 restaurée devient `outcome-unknown`, non rejouable, avec
@@ -355,13 +355,11 @@ La suppression reste une action opérateur dans la CLI. Un futur
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
 
-## Admission 3.9.0
+## Admission 3.9.1
 
-Optimike MCP `3.9.0`, Bridge `0.9.2`, Operon `3.6.2`,
+Optimike MCP `3.9.1`, Bridge `0.9.3`, Operon `3.9.3`,
 Operon CLI `1.2.0` et Local REST API `5.1.0` forment l’ensemble de validation
-courant. Operon `3.6.2` reste
-`compatible-provisional` jusqu’à son entrée dans l’ensemble explicite de preuves
-certifiées, mais ce libellé ne masque plus les mutations valides. La version
+courant. Operon `3.9.3` appartient à l’ensemble certifié explicite Developer API V1 après la gate Pilot 2 sur SHA exact : preview/apply natifs, replay, conflit, médias typés, restauration et recovery. La certification destructive périodique complète reste exclue faute de projection publique des chemins sources. La version
 produit reste une métadonnée diagnostique pouvant sélectionner un refus ou une
 exception bornée ; elle n’est pas une allowlist positive de mutation. Contrat,
 grants exacts, schémas, santé live, index stabilisé, politique d’écriture et
@@ -386,7 +384,7 @@ filtre, workflow ou recovery ; seules l’opération exacte ou la surface de
 récupération dédiée peuvent le faire.
 
 Le contrat public Developer API V1 n’a pas dérivé entre Operon `3.5.3` et
-`3.6.2`. Operon `3.6.0` modifie néanmoins le nettoyage relationnel via Task
+`3.9.3`. Les sources de contrat `src/agent-runtime` sont inchangées entre `3.6.2` et `3.9.3` ; seuls la persistance des réglages et le raccord interne des conversions UI touchent la zone voisine de l’intégration. Operon `3.6.0` modifie néanmoins le nettoyage relationnel via Task
 Editor, autorise une Scheduled Date sur une tâche bloquée et peut étendre, par
 automatisation opt-in, la plage de dates d’un parent après la mutation d’un
 enfant. Operon `3.6.1` corrige en plus la réapprobation explicite d’un grant

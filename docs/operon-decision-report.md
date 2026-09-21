@@ -1,6 +1,6 @@
 # Operon integration decision report
 
-Current authority: Optimike MCP `3.9.0` targets Operon `3.6.2`, Bridge `0.9.2`
+Current authority: Optimike MCP `3.9.1` certifies Operon `3.9.3`, Bridge `0.9.3`
 and Operon CLI `1.2.0`, subject to the exact-SHA release gate. The material below
 records earlier admissions and remains historical evidence rather than the
 current release decision.
@@ -17,9 +17,9 @@ workflows negotiate their exact additive grants on first use; missing grants fai
 never activate a Markdown fallback. Operon remains the owner of every opaque
 sealed plan and same-plan recovery.
 
-The deterministic contract remains `compatible-provisional`: this label
-describes certification evidence, not mutation admission. A non-denied future
-Operon release remains writable when the exact Developer API V1 contract,
+The current `3.9.3` target is `certified` for Developer API V1. A non-denied future
+release remains `compatible-provisional`: this label describes certification evidence, not mutation admission. Such a
+release remains writable when the exact Developer API V1 contract,
 capabilities, schemas, live health, settled index and recovery support validate.
 Malformed or incomplete negotiation still fails closed.
 The disposable Pilot 2 vault is upgraded and tested directly after recording
@@ -172,7 +172,7 @@ claim.
 
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
 remain historical. The `3.5.3` / Bridge `0.8.2` evidence is historical;
-Optimike MCP `3.9.0` targets Operon `3.6.2`, Bridge `0.9.2` and CLI `1.2.0`,
+Optimike MCP `3.9.1` targets certified Operon `3.9.3`, Bridge `0.9.3` and CLI `1.2.0`,
 subject to its exact-SHA release gate.
 
 ## Deliberately excluded or unavailable

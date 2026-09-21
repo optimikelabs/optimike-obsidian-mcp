@@ -2,8 +2,8 @@
 
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
-Updated: 2026-09-03
-Candidate target: Optimike MCP `3.9.0` uses Bridge `0.9.2` with official Operon `3.6.2`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1 and the additive task-workflow API. Optimike MCP `3.8.2` is the published historical baseline until promotion. Pilot 2 admission remains bound to the clean final SHA. The public Developer API V1 contract did not drift from the validated `3.6.0` boundary. Operon `3.6.1` restores the explicit Settings reapproval path for coherently suspended grants while stale, revoked or binding-drifted attempts remain blocked; `3.6.2` fixes locale-dependent ordering of multi-source sealed-plan resources. `compatible-provisional` describes certification evidence only; mutation admission follows the negotiated contract and exact live capabilities rather than a product-version allowlist. Operon CLI remains at `1.2.0` with no newer stable release observed for this admission.
+Updated: 2026-09-21
+Current target: Optimike MCP `3.9.1` uses Bridge `0.9.3` with certified official Operon `3.9.3`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1 and the additive task-workflow API. Pilot 2 admission remains bound to the clean final SHA. The public `src/agent-runtime` contract sources did not drift between `3.6.2` and `3.9.3`; later releases change UI, recurrence, Canvas and settings persistence around the stable V1 boundary. Future non-denied versions remain `compatible-provisional` until separately evidenced. Mutation admission still requires negotiated exact capabilities rather than relying on the product-version label alone.
 
 Operon CLI `1.2.0` adds operator access to Daily/Weekly routing and the typed
 Task Type, Task Image and ordered Task Gallery fields. The MCP does not relay
@@ -42,8 +42,8 @@ and exact-grant negotiation are followed by `SKIP` with reason
 ## Historical 3.3.2 acceptance
 
 The original 2026-08-01 CLI observations were made against Operon `3.0.1` and
-remain historical evidence. The current MCP adapter certifies `3.2.1` and
-admits `3.3.2` provisionally after contract negotiation. The complete `3.3.2`
+remain historical evidence. The current MCP adapter certifies `3.9.3` and
+admits later non-denied versions provisionally after contract negotiation. The complete `3.3.2`
 live acceptance run is green with CLI `1.1.2`: Settings grant controls, File
 Task rename refusal, and unscoped transition settlement are fixed upstream.
 Adoption was unavailable through that Developer API generation and was tracked

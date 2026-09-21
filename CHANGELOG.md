@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.1] - 2026-09-21
+
+### Changed
+
+- Certify official Operon `3.9.3` against Developer API V1 with Optimike Operon Bridge `0.9.3` after the exact-SHA Pilot 2 gate passed native preview/apply, idempotent replay, stale-revision rejection, typed-media postflight, exact fixture restoration and zero pending recovery.
+- Keep later non-denied Operon versions provisional and preserve every live contract, capability, schema, health, index, write-policy and recovery gate.
+
+### Security
+
+- Keep periodic destructive certification explicitly out of scope while the public periodic plan omits pre-apply task-source path projection; the runtime tools remain gated and no blind mutation retry is introduced.
+
 ## [3.9.0] - 2026-09-21
 
 ### Added
