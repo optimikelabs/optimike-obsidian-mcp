@@ -7,6 +7,8 @@ export type WriteOperation =
   | "obsidian_move_note"
   | "obsidian_note_move_plan"
   | "obsidian_note_move_apply"
+  | "obsidian_note_create_plan"
+  | "obsidian_note_create_apply"
   | "obsidian_admin_filesystem"
   | "obsidian_manage_canvas"
   | "obsidian_update_note"

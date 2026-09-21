@@ -15,6 +15,7 @@ import {
   RequestContext,
   requestContextService,
 } from "../../utils/index.js"; // Added requestContextService
+import type { NoteCreateApply } from "../noteCreateContract.js";
 import type { NativeMoveApply } from "../nativeNoteMoveContract.js";
 import * as activeFileMethods from "./methods/activeFileMethods.js";
 import * as atomicWriteMethods from "./methods/atomicWriteMethods.js";
@@ -330,6 +331,16 @@ export class ObsidianRestApiService {
       payload,
       context,
     );
+  }
+
+  noteCreatePreflight(payload: { contractVersion: 1; path: string }, context: RequestContext): Promise<unknown> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/note-create/preflight", data: payload }, context, "noteCreatePreflight");
+  }
+  noteCreateApply(payload: NoteCreateApply, context: RequestContext): Promise<unknown> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/note-create/apply", data: payload }, context, "noteCreateApply");
+  }
+  noteCreateInspect(payload: { contractVersion: 1; path: string }, context: RequestContext): Promise<unknown> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/note-create/inspect", data: payload }, context, "noteCreateInspect");
   }
 
   nativeNoteMovePreflight(

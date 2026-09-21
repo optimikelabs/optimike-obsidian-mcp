@@ -96,3 +96,7 @@ Copy `build/main.js` and `build/manifest.json` to:
 ```
 
 Enable Local REST API first, then enable Optimike Atomic Write Bridge.
+
+## Version 0.8.0 — exclusive note creation
+
+The independent `allowNoteCreates` setting is false by default. POST `/extensions/obsidian-atomic-write-bridge/note-create/preflight`, `/apply`, and `/inspect` are used by the MCP durable create family. Only apply can create an absent explicit Markdown file. Data is fsynced without overwrite or suffixing; indexing is eventual via the vault watcher. Partial/crashed writes are not automatically repaired or removed. Qualified automatic date fields reuse the existing strict settlement contract. Real Desktop/Pilot2 qualification is mandatory before deployment.

@@ -28,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 85 unique names. Full live/hybrid
-registration currently contains 81 names. See
+The current cross-runtime registry contains 88 unique names. Full live/hybrid
+registration currently contains 84 names. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
 ## MCP Resources
@@ -432,3 +432,7 @@ The following older exploratory names are not the current MCP surface:
 
 Desktop-only behavior such as active file, command palette, UI open actions, and
 exact plugin engine semantics remains outside the current headless surface.
+
+### Durable note creation M4
+
+`obsidian_note_create_plan/apply/status` seals one explicit absent Markdown target and reuses the durable journal. The separate Bridge creation grant is required; no overwrite/suffix/recovery replay is permitted. Committed means intended state observed, not authorship. Indexing remains unqualified until Pilot2. See [the exclusive-create contract](durable-note-create-m4.md).

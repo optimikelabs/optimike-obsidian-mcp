@@ -16,10 +16,10 @@ const repoRoot = path.resolve(
   "..",
 );
 
-const EXPECTED_UNION_COUNT = 85;
+const EXPECTED_UNION_COUNT = 88;
 const EXPECTED_COUNTS_BY_MODE = {
-  live: 81,
-  "hybrid-live": 81,
+  live: 84,
+  "hybrid-live": 84,
   "hybrid-degraded": 45,
   "headless-readonly": 48,
   "headless-guarded": 51,
@@ -56,8 +56,8 @@ for (const mode of TOOL_REGISTRATION_MODES) {
 
 assert.equal(
   compileToolNames({ registrationMode: "live" }).length,
-  81,
-  "81 is the current full live/hybrid surface, not the cross-runtime registry size",
+  84,
+  "84 is the current full live/hybrid surface, not the cross-runtime registry size",
 );
 
 for (const entry of TOOL_SURFACE_REGISTRY) {
@@ -119,14 +119,14 @@ for (const entry of TOOL_SURFACE_REGISTRY) {
 }
 assert.equal(
   governedFamilies.size,
-  6,
-  "exactly six governed lifecycle families are expected",
+  7,
+  "exactly seven governed lifecycle families are expected",
 );
 
 for (const [family, entries] of governedFamilies) {
   assert.deepEqual(
     entries.map((entry) => entry.lifecycleRole).sort(),
-    family === "note-move" ? ["apply", "plan", "status"] : expectedLifecycleRoles,
+    ["note-move", "note-create"].includes(family) ? ["apply", "plan", "status"] : expectedLifecycleRoles,
     `${family} must expose its complete declared lifecycle`,
   );
   assert.equal(
