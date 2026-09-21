@@ -30,7 +30,7 @@ pwsh -NoProfile -File scripts/install-openai-tunnel-client.ps1
 pwsh -NoProfile -File scripts/install-openai-tunnel-client.ps1 -Version 0.0.14
 ```
 
-Le script télécharge l’archive Windows officielle et `SHA256SUMS.txt`, refuse un digest incorrect, contrôle la version annoncée par le binaire et installe dans `%LOCALAPPDATA%\Optimike\tunnel-client\vX.Y.Z\windows-<arch>`. Aucun secret n’est écrit dans le dépôt.
+Le script télécharge l’archive Windows officielle et `SHA256SUMS.txt`, refuse un digest incorrect, contrôle la version annoncée par le binaire et installe dans `%LOCALAPPDATA%\Optimike\tunnel-client\vX.Y.Z\windows-<arch>`. Il crée aussi le lanceur stable `%LOCALAPPDATA%\Optimike\tunnel-client\tunnel-client.cmd` ; une nouvelle exécution retélécharge les entrées officielles et refuse un exécutable existant qui a dérivé. Aucun secret n’est écrit dans le dépôt.
 
 ## Connecter Optimike
 
@@ -43,15 +43,17 @@ npm run build
 
 Utiliser le workflow de profils du client officiel. Conserver la clé API dans l’environnement protégé d’un processus ou d’un service, jamais dans Git, une note du coffre, une transcription de commande ou la commande MCP.
 
-```text
-tunnel-client init \
-  --sample sample_mcp_stdio_local \
-  --profile optimike-full \
-  --tunnel-id tunnel_0123456789abcdef0123456789abcdef \
+```powershell
+$tunnelClient = Join-Path $env:LOCALAPPDATA "Optimike\tunnel-client\tunnel-client.cmd"
+
+& $tunnelClient init `
+  --sample sample_mcp_stdio_local `
+  --profile optimike-full `
+  --tunnel-id tunnel_0123456789abcdef0123456789abcdef `
   --mcp-command "node C:/chemin/vers/optimike-obsidian-mcp/dist/stdio-proxy.js --tool-profile full"
 
-tunnel-client doctor --profile optimike-full --explain
-tunnel-client run --profile optimike-full
+& $tunnelClient doctor --profile optimike-full --explain
+& $tunnelClient run --profile optimike-full
 ```
 
 Créer ensuite une application en mode développeur dans ChatGPT, choisir **Tunnel** comme type de connexion et sélectionner le tunnel associé. Vérifier que le client local est live et ready avant de tester l’application.

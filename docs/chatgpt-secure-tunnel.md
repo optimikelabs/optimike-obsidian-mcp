@@ -30,7 +30,7 @@ Pin a reviewed version when reproducibility matters:
 pwsh -NoProfile -File scripts/install-openai-tunnel-client.ps1 -Version 0.0.14
 ```
 
-The script downloads the official Windows archive and `SHA256SUMS.txt`, refuses a digest mismatch, checks the binary-reported version, and installs into `%LOCALAPPDATA%\Optimike\tunnel-client\vX.Y.Z\windows-<arch>` without placing a secret in the repository.
+The script downloads the official Windows archive and `SHA256SUMS.txt`, refuses a digest mismatch, checks the binary-reported version, and installs into `%LOCALAPPDATA%\Optimike\tunnel-client\vX.Y.Z\windows-<arch>` without placing a secret in the repository. It also creates the stable launcher `%LOCALAPPDATA%\Optimike\tunnel-client\tunnel-client.cmd`; rerunning the installer re-downloads the signed release inputs and refuses a drifted existing executable.
 
 ## Connect Optimike
 
@@ -43,15 +43,17 @@ npm run build
 
 Use the official client profile workflow. Keep the API key in a protected process or service environment, never in Git, a vault note, a command transcript, or the MCP command.
 
-```text
-tunnel-client init \
-  --sample sample_mcp_stdio_local \
-  --profile optimike-full \
-  --tunnel-id tunnel_0123456789abcdef0123456789abcdef \
+```powershell
+$tunnelClient = Join-Path $env:LOCALAPPDATA "Optimike\tunnel-client\tunnel-client.cmd"
+
+& $tunnelClient init `
+  --sample sample_mcp_stdio_local `
+  --profile optimike-full `
+  --tunnel-id tunnel_0123456789abcdef0123456789abcdef `
   --mcp-command "node C:/path/to/optimike-obsidian-mcp/dist/stdio-proxy.js --tool-profile full"
 
-tunnel-client doctor --profile optimike-full --explain
-tunnel-client run --profile optimike-full
+& $tunnelClient doctor --profile optimike-full --explain
+& $tunnelClient run --profile optimike-full
 ```
 
 Then create a developer-mode app in ChatGPT, choose **Tunnel** as the connection type, and select the associated tunnel. Confirm the local client is live and ready before testing the app.

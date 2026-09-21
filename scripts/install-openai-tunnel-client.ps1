@@ -39,14 +39,8 @@ if (-not $zipAsset -or -not $checksumsAsset) {
 
 $target = Join-Path $InstallRoot (Join-Path $tag "windows-$Architecture")
 $targetExe = Join-Path $target "tunnel-client.exe"
-if (Test-Path -LiteralPath $targetExe) {
-  & $targetExe --version
-  Write-Output "Already installed: $targetExe"
-  exit 0
-}
-if (Test-Path -LiteralPath $target) {
-  throw "Install target exists but is incomplete: $target"
-}
+$launcherPath = Join-Path $InstallRoot "tunnel-client.cmd"
+$manifestPath = Join-Path $target "optimike-install-manifest.json"
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("optimike-tunnel-client-" + [guid]::NewGuid().ToString("N"))
 $zipPath = Join-Path $tempRoot $assetName
@@ -79,12 +73,43 @@ try {
   if ($reportedVersion -notmatch [regex]::Escape($tag.TrimStart("v"))) {
     throw "Downloaded binary reports an unexpected version: $reportedVersion"
   }
+  $verifiedExeHash = (Get-FileHash -LiteralPath $stageExe -Algorithm SHA256).Hash.ToLowerInvariant()
 
-  $targetParent = Split-Path -Parent $target
-  New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
-  Move-Item -LiteralPath $stage -Destination $target
-  Write-Output "Installed verified OpenAI tunnel-client ${tag}: $targetExe"
+  if (Test-Path -LiteralPath $target) {
+    if (-not (Test-Path -LiteralPath $targetExe)) {
+      throw "Install target exists but is incomplete: $target"
+    }
+    $existingExeHash = (Get-FileHash -LiteralPath $targetExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    $existingVersion = (& $targetExe --version | Out-String).Trim()
+    if ($existingExeHash -ne $verifiedExeHash -or
+        $existingVersion -notmatch [regex]::Escape($tag.TrimStart("v"))) {
+      throw "Existing tunnel-client does not match the verified $tag release: $targetExe"
+    }
+    Write-Output "Verified existing OpenAI tunnel-client ${tag}: $targetExe"
+  } else {
+    $targetParent = Split-Path -Parent $target
+    New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
+    Move-Item -LiteralPath $stage -Destination $target
+    Write-Output "Installed verified OpenAI tunnel-client ${tag}: $targetExe"
+  }
+
+  $manifest = [ordered]@{
+    schemaVersion = 1
+    tag = $tag
+    architecture = $Architecture
+    asset = $assetName
+    archiveSha256 = $actual
+    executableSha256 = $verifiedExeHash
+    reportedVersion = $reportedVersion
+    source = [string]$zipAsset.browser_download_url
+  }
+  $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding utf8
+  @(
+    "@echo off"
+    ('"' + $targetExe + '" %*')
+  ) | Set-Content -LiteralPath $launcherPath -Encoding ascii
   Write-Output "SHA256($assetName)=$actual"
+  Write-Output "Stable launcher: $launcherPath"
 } finally {
   $resolvedTempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
   $resolvedTempRoot = [IO.Path]::GetFullPath($tempRoot)
