@@ -2,6 +2,7 @@ import {
   TOOL_GROUP_IDS,
   compileToolSurface,
   getToolSurfaceEntry,
+  governedLifecycleRoles,
   type ToolGroupId,
   type ToolRegistrationMode,
   type ToolStaticRequirement,
@@ -65,13 +66,6 @@ const OPERON_LIVE_ONLY_READ_TOOLS = new Set([
   "operon_get_timer_state",
   "operon_list_pending_recoveries",
 ]);
-
-const GOVERNED_LIFECYCLE_ROLES = [
-  "plan",
-  "apply",
-  "status",
-  "recover",
-] as const;
 
 export const TOOL_PROFILES: Readonly<
   Record<ToolProfileId, ToolProfileDefinition>
@@ -149,11 +143,9 @@ function lifecycleRolesByFamily(
   return lifecycleByFamily;
 }
 
-function lifecycleIsComplete(roles: ReadonlySet<string>): boolean {
-  return (
-    roles.size === GOVERNED_LIFECYCLE_ROLES.length &&
-    GOVERNED_LIFECYCLE_ROLES.every((role) => roles.has(role))
-  );
+function lifecycleIsComplete(family: string, roles: ReadonlySet<string>): boolean {
+  const required = governedLifecycleRoles(family);
+  return roles.size === required.length && required.every((role) => roles.has(role));
 }
 
 function hideIncompleteGovernedFamilies(
@@ -162,7 +154,7 @@ function hideIncompleteGovernedFamilies(
   const lifecycleByFamily = lifecycleRolesByFamily(entries);
   const completeFamilies = new Set(
     [...lifecycleByFamily]
-      .filter(([, roles]) => lifecycleIsComplete(roles))
+      .filter(([family, roles]) => lifecycleIsComplete(family, roles))
       .map(([family]) => family),
   );
 
@@ -175,7 +167,7 @@ function assertGovernedFamiliesAtomic(
   entries: readonly ToolSurfaceEntry[],
 ): void {
   for (const [family, roles] of lifecycleRolesByFamily(entries)) {
-    if (!lifecycleIsComplete(roles)) {
+    if (!lifecycleIsComplete(family, roles)) {
       throw new Error(
         `Tool profile exposes an incomplete governed lifecycle for ${family}: ${[...roles].sort().join(", ")}.`,
       );
@@ -219,8 +211,8 @@ function finalizeProfileEntries(
       : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive));
 
   // A concrete McpServer registers tools one at a time. During that transient
-  // construction phase a governed quartet is necessarily incomplete. Keep the
-  // whole family disabled until all four members exist, then expose it in one
+  // construction phase a governed family is necessarily incomplete. Keep the
+  // whole family disabled until all declared members exist, then expose it in one
   // reconciliation. Static profile compilation remains strict and will still
   // fail on an actually incomplete catalogue.
   if (options.tolerateIncompleteRegistration) {

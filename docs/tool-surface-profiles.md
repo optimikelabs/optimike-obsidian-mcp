@@ -13,19 +13,24 @@ Profiles reduce schema volume and routing ambiguity. They are not an authorizati
 
 | Profile     | Intended use                                                                | Full live/hybrid surface |
 | ----------- | --------------------------------------------------------------------------- | -----------------------: |
-| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 23 tools |
-| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 34 tools |
+| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 26 tools |
+| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 37 tools |
 | `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 35 tools |
-| `full`      | Explicit complete/admin surface for the active runtime                      |                 78 tools |
+| `full`      | Explicit complete/admin surface for the active runtime                      |                 81 tools |
 
-Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 78 tools. The canonical registry covers 82 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
+Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 81 tools. The canonical registry covers 85 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
 
 `obsidian_note_links` is live/hybrid-live only because its semantics come from Obsidian Desktop's public `MetadataCache`; degraded and headless profiles omit it rather than simulating graph semantics from filesystem state.
 
 The [P6 routing evaluation](tool-routing-evaluation-p6.md) measures these
 surfaces from actual `tools/list` schemas and a versioned 31-case baseline. Its
-3.8 decision keeps all four profiles unchanged: the 61-tool live union of
-authoring and tasks is not promoted without a measured cross-domain journey.
+3.8 decision retained all four profile definitions on the historical 60-tool
+authoring/tasks union. After M3 the current union has 64 tools; that count is
+a registry projection, not a newly measured LLM routing campaign.
+
+The native move family has plan/apply/status only. A recover operation is not
+advertised because an uncertain native rename cannot be safely replayed. Other
+governed families retain their existing four-member lifecycle.
 
 ## Compatibility-only names
 

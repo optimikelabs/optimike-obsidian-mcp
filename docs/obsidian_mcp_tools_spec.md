@@ -28,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 82 unique names. Full live/hybrid
-registration currently contains 78 names. See
+The current cross-runtime registry contains 85 unique names. Full live/hybrid
+registration currently contains 81 names. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
 ## MCP Resources
@@ -72,6 +72,14 @@ The Local REST API core no longer provides `/periodic/...` routes. Consequently,
 quarterly, or yearly note to its vault-relative path before calling these
 tools. The optional upstream Periodic Notes API extension is not a hidden
 dependency of this MCP.
+
+## Native Markdown Move M3
+
+- `obsidian_note_move_plan`: seal one source/destination and a bounded semantic neighborhood. No note write.
+- `obsidian_note_move_apply`: dispatch the sealed native FileManager rename once; requires the separate Bridge grant and `MCP_WRITE_MODE=full`.
+- `obsidian_note_move_status`: reconcile the durable outcome and separately observe `graph_postflight` without replaying a rename.
+
+The family is live/hybrid-live only and has no recover or undo operation. Missing native preference support is fail-closed; update-links OFF is admitted only for an empty observed neighborhood. Source-content CAS, an OS directory lock, open-editor behavior and a global graph transaction are not promised. See [the M3 contract](native-note-move-m3.md).
 
 ## Core Notes
 

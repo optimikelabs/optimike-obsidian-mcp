@@ -33,6 +33,7 @@ const atomicReady = {
     canvasAtomicCas: true,
     canvasWriteEnabled: true,
   },
+  nativeMove: { supported: true, enabled: true, preferenceReadable: true },
   limits: { markdownOnly: true },
 };
 
@@ -160,8 +161,8 @@ function capability(manifest, id) {
 
 const ready = projectCapabilityManifest(input());
 assert.equal(ready.contractVersion, 1);
-assert.equal(ready.capabilities.length, 9);
-assert.equal(ready.summary.ready, 9);
+assert.equal(ready.capabilities.length, 10);
+assert.equal(ready.summary.ready, 10);
 assert.equal(ready.admission.state, "not-applicable");
 for (const item of ready.capabilities) {
   assert.equal(item.discoverable, true, item.id);
@@ -169,6 +170,23 @@ for (const item of ready.capabilities) {
   assert.equal(item.authorized, true, item.id);
   assert.equal(item.state, "ready", item.id);
 }
+
+for (const [field, value, state] of [
+  ["supported", false, "unavailable"],
+  ["preferenceReadable", false, "unavailable"],
+  ["enabled", false, "blocked"],
+]) {
+  const candidate = input({ atomicWrite: { state: "ready", value: {
+    ...atomicReady, nativeMove: { ...atomicReady.nativeMove, [field]: value },
+  } } });
+  const item = capability(projectCapabilityManifest(candidate), "governed-native-move");
+  assert.equal(item.state, state);
+  assert.equal(item.authorized, false);
+}
+assert.equal(capability(projectCapabilityManifest(input({ writeMode: "guarded" })), "governed-native-move").reasonCode, "write_policy_blocked");
+assert.equal(capability(projectCapabilityManifest(input({ profile: "tasks" })), "governed-native-move").state, "hidden");
+const legacyBridge = { ...atomicReady }; delete legacyBridge.nativeMove;
+assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: legacyBridge } })), "governed-native-move").available, false);
 
 const standard = projectCapabilityManifest(input({ profile: "standard" }));
 assert.equal(capability(standard, "governed-note-write").state, "ready");

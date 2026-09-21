@@ -170,6 +170,10 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 | `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                                                                         |
 | `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools including live-only `obsidian_note_links`, governed note replacement, text patch, Frontmatter, Base formula and Canvas `plan/apply/status/recover`, plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
+## Native note move M3
+
+`obsidian_note_move_plan/apply/status` is live-only, requires an independent native-move Bridge grant and full write mode, and reuses the process-owned journal. The native outcome and bounded semantic postflight are separate. No recover, no undo, no global graph transaction. [Contract and remaining Pilot2 gate](native-note-move-m3.md).
+
 ## Native semantic note links M2
 
 `obsidian_note_links` reads only public Obsidian Desktop `MetadataCache` surfaces (`getFileCache`, `getFirstLinkpathDest`, `resolvedLinks`, `unresolvedLinks`) plus public `resolveSubpath`. Results are bounded and deterministic; backlinks come only from resolved relations. Cache freshness is `unknown` when the public API exposes no timestamp, and the observation is explicitly a best-effort non-atomic snapshot. No write or graph-preservation guarantee is implied.

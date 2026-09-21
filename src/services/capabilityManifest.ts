@@ -25,6 +25,7 @@ export type CapabilityId =
   | "vault-read"
   | "semantic-search"
   | "governed-note-write"
+  | "governed-native-move"
   | "governed-frontmatter-write"
   | "governed-canvas-write"
   | "governed-base-write"
@@ -206,6 +207,7 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "obsidian_global_search",
   ],
   "semantic-search": ["smart_semantic_search"],
+  "governed-native-move": ["obsidian_note_move_plan", "obsidian_note_move_apply", "obsidian_note_move_status"],
   "governed-note-write": [
     "obsidian_note_replace_plan",
     "obsidian_note_replace_apply",
@@ -479,6 +481,7 @@ function atomicCapability(
   input: CapabilityManifestProjectionInput,
   id:
     | "governed-note-write"
+    | "governed-native-move"
     | "governed-frontmatter-write"
     | "governed-canvas-write",
 ): CapabilityManifestEntry {
@@ -511,13 +514,17 @@ function atomicCapability(
     status.contractVersion === 1 &&
     backend.atomicCas === true;
   const canvas = id === "governed-canvas-write";
-  const available = canvas
+  const native = id === "governed-native-move";
+  const nativeMove = record(status.nativeMove);
+  const available = native
+    ? contractReady && lifecycleReady && nativeMove.supported === true && nativeMove.preferenceReadable === true
+    : canvas
     ? contractReady && lifecycleReady && backend.canvasAtomicCas === true
     : contractReady && lifecycleReady;
-  const bridgeAuthorized = canvas
+  const bridgeAuthorized = native ? nativeMove.enabled === true : canvas
     ? backend.canvasWriteEnabled === true
     : backend.writeEnabled === true;
-  const writePolicyAllows = input.writeMode !== "readonly";
+  const writePolicyAllows = native ? input.writeMode === "full" : input.writeMode !== "readonly";
   const authorized = bridgeAuthorized && writePolicyAllows;
   return entry(
     input,
@@ -881,6 +888,7 @@ export function projectCapabilityManifest(
     vaultReadCapability(input),
     semanticCapability(input),
     atomicCapability(input, "governed-note-write"),
+    atomicCapability(input, "governed-native-move"),
     atomicCapability(input, "governed-frontmatter-write"),
     atomicCapability(input, "governed-canvas-write"),
     baseCapability(input),
@@ -1084,6 +1092,7 @@ export async function collectCapabilityManifest(options: {
     ...(!options.governedRuntimes.note
       ? [
           ...TOOL_FAMILIES["governed-note-write"],
+          ...TOOL_FAMILIES["governed-native-move"],
           ...TOOL_FAMILIES["governed-frontmatter-write"],
         ]
       : []),

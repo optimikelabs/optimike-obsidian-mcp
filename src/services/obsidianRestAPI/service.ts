@@ -15,6 +15,7 @@ import {
   RequestContext,
   requestContextService,
 } from "../../utils/index.js"; // Added requestContextService
+import type { NativeMoveApply } from "../nativeNoteMoveContract.js";
 import * as activeFileMethods from "./methods/activeFileMethods.js";
 import * as atomicWriteMethods from "./methods/atomicWriteMethods.js";
 import * as baseAtomicWriteMethods from "./methods/baseAtomicWriteMethods.js";
@@ -329,6 +330,24 @@ export class ObsidianRestApiService {
       payload,
       context,
     );
+  }
+
+  nativeNoteMovePreflight(
+    payload: { contractVersion: 1; sourcePath: string; destinationPath: string },
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/native-note-move/preflight", data: payload }, context, "nativeNoteMovePreflight");
+  }
+
+  nativeNoteMoveApply(payload: NativeMoveApply, context: RequestContext): Promise<unknown> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/native-note-move/apply", data: payload }, context, "nativeNoteMoveApply");
+  }
+
+  nativeNoteMoveStatus(
+    payload: { contractVersion: 1; operationId: string; preconditionDigest: string },
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/native-note-move/status", data: payload }, context, "nativeNoteMoveStatus");
   }
 
   async readNoteLinks(

@@ -170,6 +170,10 @@ du mode runtime :
 | `hybrid` API indisponible        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                                                           |
 | `hybrid` API disponible / `live` | Tools read/search/tasks/runtime/sémantique dont `obsidian_note_links` live-only, plans gouvernés remplacement de note, patch texte, Frontmatter, formules Base et Canvas, plus outils REST d’écriture et Bases Bridge : `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
+## Déplacement natif M3
+
+`obsidian_note_move_plan/apply/status` est live-only, exige une autorisation dédiée du Bridge et le mode d’écriture full, et réutilise le journal du processus. Le résultat du déplacement est séparé de la vérification sémantique bornée. Pas de recover, d’undo ni de transaction globale du graphe. [Contrat et qualification Pilot2 restante](native-note-move-m3.md).
+
 ## Liens sémantiques natifs d’une note M2
 
 `obsidian_note_links` lit uniquement les surfaces publiques du `MetadataCache` d’Obsidian Desktop (`getFileCache`, `getFirstLinkpathDest`, `resolvedLinks`, `unresolvedLinks`) et `resolveSubpath`. Les résultats sont bornés et déterministes ; les backlinks viennent uniquement des relations résolues. La fraîcheur du cache reste `unknown` lorsque l’API publique ne fournit aucun horodatage, et l’observation est explicitement un snapshot best-effort non atomique. Aucun write ni aucune garantie de préservation du graphe n’est implicite.
