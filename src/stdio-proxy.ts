@@ -671,15 +671,35 @@ function streamableHttpApplicationMessage(
   }
 }
 
+/** Server-owned pre-dispatch rejection; never infer replay safety from generic 404. */
+function isPublicInvalidSession(error: StreamableHTTPError): boolean {
+  if (error.code !== 404 || !error.message.startsWith(STREAMABLE_HTTP_POST_ERROR_PREFIX)) return false;
+  const text = error.message.slice(STREAMABLE_HTTP_POST_ERROR_PREFIX.length);
+  if (Buffer.byteLength(text, "utf8") > MAX_HTTP_ADMISSION_ERROR_BODY_BYTES) return false;
+  try {
+    const body: unknown = JSON.parse(text);
+    return isRecord(body) && body.jsonrpc === "2.0" &&
+      hasExactlyKeys(body, ["jsonrpc", "error", "id"]) &&
+      isRecord(body.error) && body.error.code === -32012 &&
+      hasExactlyKeys(body.error, ["code", "message", "data"]) &&
+      isRecord(body.error.data) &&
+      hasExactlyKeys(body.error.data, ["applicationCode", "transportReason", "requestId"]) &&
+      body.error.data.applicationCode === "NOT_FOUND" &&
+      body.error.data.transportReason === "mcp_session_invalid" &&
+      typeof body.error.data.requestId === "string" &&
+      HTTP_ADMISSION_REQUEST_ID.test(body.error.data.requestId);
+  } catch { return false; }
+}
+
 function classifyBackendFailure(error: unknown): BackendFailureKind {
   // HTTP replies are application outcomes. Only the Streamable HTTP session
   // contract gives its exact 404 payload the special meaning that the handler
   // was not entered. A generic 404 can be an application/route outcome.
   if (error instanceof StreamableHTTPError) {
     return error.code === 404 &&
-      SESSION_INVALID_MESSAGES.has(
+      (isPublicInvalidSession(error) || SESSION_INVALID_MESSAGES.has(
         streamableHttpApplicationMessage(error) ?? "",
-      )
+      ))
       ? "session-invalid"
       : "application";
   }
