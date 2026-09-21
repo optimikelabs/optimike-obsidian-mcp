@@ -4,7 +4,7 @@ English version: [operon-cli-audit.md](operon-cli-audit.md)
 
 Mise à jour : 2026-09-03
 
-Cible candidate : Optimike MCP `3.8.2` utilise le Bridge `0.9.2` avec Operon
+Cible candidate : Optimike MCP `3.9.0` utilise le Bridge `0.9.2` avec Operon
 officiel `3.6.2`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1
 et API task-workflow additive. L’admission Pilot 2 reste liée au SHA final
 propre. Le contrat public Developer API V1 n’a pas dérivé depuis la frontière

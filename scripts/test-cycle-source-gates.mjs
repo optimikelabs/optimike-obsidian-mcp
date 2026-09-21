@@ -38,6 +38,7 @@ try {
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.milestones[0].pr=999;write(p, JSON.stringify(v)); },
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));delete v.expectedSurface.liveProfiles.authoring;write(p, JSON.stringify(v)); },
     () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.expectedSurface.threeMemberFamilies=[];write(p, JSON.stringify(v)); },
+    () => { const p="docs/cycle-20260920/cycle.json", v=JSON.parse(originals.get(p));v.contracts=[];write(p, JSON.stringify(v)); },
     () => { const p="package.json", v=JSON.parse(originals.get(p));v.files=v.files.filter(f=>f!=="docs/durable-note-create-m4.md");write(p, JSON.stringify(v)); },
     () => fs.unlinkSync(path.join(fixture,"docs/durable-note-create-m4.md")),
     () => write(".github/workflows/prepare-m6-unremoved.yml", "name: temporary\n"),

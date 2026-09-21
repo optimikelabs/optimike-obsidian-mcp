@@ -207,9 +207,9 @@ operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.8.2 admission
+## 3.9.0 admission
 
-Optimike MCP `3.8.2`, Bridge `0.9.2`, Operon `3.6.2`,
+Optimike MCP `3.9.0`, Bridge `0.9.2`, Operon `3.6.2`,
 Operon CLI `1.2.0` and Local REST API `5.1.0` form the current validation set.
 Operon `3.6.2` remains
 `compatible-provisional` until it joins the explicit certified evidence set,

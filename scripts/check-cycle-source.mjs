@@ -84,7 +84,13 @@ for (const family of cycle.expectedSurface.threeMemberFamilies) {
 const headless = compileToolNames({ registrationMode: "headless-filesystem", availableStaticRequirements: ["vault-cache"] });
 for (const m of cycle.milestones) for (const name of m.tools) assert.ok(!headless.includes(name), `${name} must remain live-only`);
 assert.deepEqual(json("evals/tool-catalog.v1.json"), buildCatalog(), "Regenerate stale tool catalogue");
-const requiredDocs = [...cycle.contracts, "docs/cycle-20260920/CODEX-FINALISATION.md", "docs/cycle-20260920/ROADMAP.md", "docs/cycle-20260920/cycle.json"];
+const requiredContracts = [
+  "docs/native-note-move-m3.md",
+  "docs/durable-note-create-m4.md",
+  "docs/base-row-patch-m5.md",
+];
+assert.deepEqual(cycle.contracts, requiredContracts, "Cycle manifest must retain the exact M3-M5 contract inventory");
+const requiredDocs = [...requiredContracts, "docs/cycle-20260920/CODEX-FINALISATION.md", "docs/cycle-20260920/ROADMAP.md", "docs/cycle-20260920/cycle.json"];
 for (const name of requiredDocs) {
   assert.ok(fs.statSync(path.join(root, name)).isFile(), `Missing ${name}`);
   assert.ok(pkg.files.includes(name), `npm package must include ${name}`);

@@ -4,7 +4,7 @@
 - Date: 2026-07-21
 - Amended: 2026-09-03
 - MCP baseline: `optimikelabs/optimike-obsidian-mcp@77322f84903fddfdc1bb056981b997a96bdeebca`
-- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and Optimike MCP `3.8.2` targeting provisional official `3.6.2` / CLI `1.2.0` / Local REST API `5.1.0` behind an exact-SHA Pilot 2 release gate
+- Operon baselines: upstream `2.4.0@76d251973b149afc69192ef565d626740aa7b7cf`, `2.5.0@31099cc3d5231b320cd8520424fc29449b003778`, certified official `3.2.1`, historical live `3.3.2`, and Optimike MCP `3.9.0` targeting provisional official `3.6.2` / CLI `1.2.0` / Local REST API `5.1.0` behind an exact-SHA Pilot 2 release gate; `3.8.2` remains the published historical baseline until promotion
 
 ## Problem
 
