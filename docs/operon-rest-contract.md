@@ -17,7 +17,7 @@ All routes inherit Local REST API authentication and TLS behavior.
 - Bridge contract: `1`
 - Certified compatibility includes official Operon `3.9.3`; completed historical live pilot: `3.3.2` with CLI `1.1.2`; Optimike MCP `3.9.1` exact-SHA Pilot 2 gate: Operon `3.9.3`, CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.9.3`
 - Official Operon legacy read allowlist: `2.4.0`, `2.5.0`
-- Official Operon Developer API V1 allowlist: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, `3.2.1`
+- Official Operon Developer API V1 allowlist: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, `3.2.1`, `3.9.3`
 - Kairélys read allowlist: `2.5.1`, `2.5.2`, `2.5.3`, `2.6.1`, `2.6.2`, `2.6.3`
 - Legacy mutation contract: Operon Public API `1`
 - Official Operon `2.5.0`: read-only
