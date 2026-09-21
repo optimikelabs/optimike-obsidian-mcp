@@ -5,6 +5,6 @@
   "minAppVersion": "1.1.0",
   "author": "Optimike",
   "authorUrl": "https://github.com/optimikelabs",
-  "description": "Expose des CAS SHA-256 bornés pour les notes et JSON Canvas via l'API d'extension de Local REST API.",
+  "description": "Expose les CAS notes/Canvas, les liens natifs et les opérations opt-in de déplacement/création via Local REST API.",
   "isDesktopOnly": true
 }

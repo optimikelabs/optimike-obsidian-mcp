@@ -25,11 +25,13 @@ Ces nombres sont des projections du registre actuel et peuvent être plus faible
 L'[évaluation P6 du routage](tool-routing-evaluation-p6.fr.md) mesure ces
 surfaces depuis les schémas `tools/list` réels et une baseline versionnée de 31
 cas. Sa décision 3.8 conservait les quatre définitions de profils sur l’union
-historique de 60 outils authoring/tasks. Après M3, l’union courante compte 64
-outils : c’est une projection du registre, pas une nouvelle campagne LLM.
+historique de 60 outils authoring/tasks. M3 la portait à 64 ; le candidat M2–M5
+compte désormais 70 outils dans cette union. Ces nombres sont des projections
+du registre, pas une nouvelle campagne LLM.
 
-Le déplacement natif expose seulement plan/apply/status. Aucun recover ne
-prétend rejouer sûrement un rename incertain. Les autres familles gouvernées
+Le déplacement natif, la création durable et le patch d’une row Base exposent
+seulement plan/apply/status. Aucun recover artificiel ni replay aveugle n’est
+ajouté. Les familles remplacement, texte, Frontmatter, formules Base et Canvas
 conservent leur cycle de quatre outils.
 
 ## Noms réservés à la compatibilité
@@ -44,11 +46,11 @@ smart_semantic_search
 
 Les anciens alias `smart_search` et `smart-search` ont été physiquement supprimés en 3.0. Les clients existants doivent appeler `smart_semantic_search`.
 
-`bases_upsert_config` reste réservé à `full`. Il remplace une configuration Base complète et n’est pas un fallback de l’édition gouvernée des formules. `authoring` conserve `bases_create`, `bases_upsert_rows` et la famille gouvernée complète `bases_formula_patch_*`.
+`bases_upsert_config` reste réservé à `full`. Il remplace une configuration Base complète et n’est pas un fallback de l’édition gouvernée des formules. `authoring` conserve `bases_create`, `bases_upsert_rows` et les familles gouvernées complètes `bases_formula_patch_*` et `bases_rows_patch_*`. Cette dernière modifie une row existante et ne remplace pas le contrat batch direct.
 
 ## Familles gouvernées
 
-Une famille gouvernée est exposée atomiquement :
+Les profils filtrés exposent une famille gouvernée lorsque son cycle déclaré est complet. Les familles historiques à quatre outils suivent :
 
 ```text
 plan → apply → status → recover
@@ -57,9 +59,9 @@ plan → apply → status → recover
 Cela vaut pour le remplacement de Note, le patch texte du corps Markdown, la
 projection Frontmatter, les formules Bases et le patch de graphe Canvas.
 
-L’enregistrement des outils est incrémental dans la factory serveur. Tant que les quatre membres d’une famille ne sont pas enregistrés, toute la famille gouvernée reste masquée et le fallback direct légitime reste visible. À l’arrivée du quatrième membre, le quartet devient visible en une seule réconciliation et le fallback devenu secondaire est masqué. La compilation statique reste stricte et rejette une famille réellement incomplète.
+L’enregistrement est incrémental dans la factory serveur. Dans les profils filtrés, une famille reste masquée jusqu’à l’arrivée de tous ses membres déclarés : trois pour move/create/rows, quatre pour les anciennes familles. Le fallback direct légitime reste visible jusqu’à la réconciliation. La compilation statique rejette un cycle déclaré incomplet. Le profil administratif explicite `full` conserve sa surface sans suppression ; ce n’est pas une autorisation d’appeler une famille partiellement enregistrée.
 
-Un profil ne modifie jamais le contenu scellé du plan, les journaux, l’idempotence, le binding backend ni l’autorité de récupération. Un plan durable créé dans une session peut être inspecté ou récupéré depuis une autre session ou un autre profil exposant la même famille complète, sous réserve des politiques runtime et d’écriture/sécurité habituelles.
+Un profil ne modifie jamais le contenu scellé du plan, les journaux, l’idempotence, le binding backend ni l’autorité de récupération. Un plan durable peut être inspecté depuis une autre session exposant sa famille, sous réserve des politiques runtime et d’écriture/sécurité habituelles. La récupération n’existe que pour les familles qui définissent réellement une opération recover.
 
 ## Canonique et fallback direct
 

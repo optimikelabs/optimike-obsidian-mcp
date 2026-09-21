@@ -1,0 +1,44 @@
+name: M6 Cycle Source and Package
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'plugins/**'
+      - 'docs/**'
+      - 'README*'
+      - 'CHANGELOG.md'
+      - 'package*.json'
+      - 'evals/tool-catalog.v1.json'
+      - '.github/workflows/**'
+permissions:
+  contents: read
+jobs:
+  source-and-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm --prefix plugins/obsidian-atomic-write-bridge ci
+      - run: npm --prefix plugins/obsidian-bases-bridge ci
+      - run: npm --prefix plugins/obsidian-operon-bridge ci
+      - run: npm run test:cycle
+      - run: node scripts/test-cycle-source-gates.mjs
+      - run: npm run test:base-rows
+      - run: npm run test:native-note-move
+      - run: node scripts/test-note-create-m4.mjs
+      - run: node scripts/test-note-create-review-m4.mjs
+      - run: node scripts/test-note-create-surface.mjs
+      - run: npm run test:profiles
+      - run: npm run test:docs
+      - run: npm run audit:production
+      - run: npm run build:bridges
+      - run: npm run test:cycle:package

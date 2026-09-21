@@ -26,6 +26,8 @@ Apply rechecks the Base hash/binding and row membership before the shared note-c
 
 After a partial/lost response, an already attempted plan is observed through status, never blindly reapplied. The underlying note runtime provides ownership, durable idempotency and exact/qualified-settlement postflight. No synthetic recovery tool or internal child recovery reference is exposed. Unknown outcomes that cannot be established remain unknown. Repeating a completed patch must not edit the file again.
 
+If an active Obsidian plugin normalizes unrelated YAML bytes while adding a qualified timestamp, byte-preserving postflight can remain `outcome_unknown` even when the intended property values are visible. This is deliberately fail-closed: status does not certify semantic equivalence, and the Base-row surface exposes no replay or synthetic recovery path.
+
 A successful property update may intentionally make a row leave its view. Postflight certifies the note effect, not continuing Base membership. `status` can update private journal/cache bookkeeping but must never edit a vault note.
 
 ## Evidence and local gate

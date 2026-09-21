@@ -20,6 +20,17 @@ const files = new Set(
   report.flatMap((entry) => entry.files.map((file) => file.path)),
 );
 const requiredFiles = [
+  "docs/native-note-move-m3.md",
+  "docs/durable-note-create-m4.md",
+  "docs/base-row-patch-m5.md",
+  "docs/cycle-20260920/CODEX-FINALISATION.md",
+  "docs/cycle-20260920/ROADMAP.md",
+  "docs/cycle-20260920/cycle.json",
+  "scripts/check-cycle-source.mjs",
+  "dist/services/baseRowsPatchRuntime.js",
+  "dist/services/baseRowSelection.js",
+  "dist/services/operations/nativeNoteMoveOperationAdapter.js",
+  "dist/services/operations/noteCreateOperationAdapter.js",
   "dist/index.js",
   "dist/stdio-proxy.js",
   "README.md",

@@ -355,9 +355,9 @@ La suppression reste une action opérateur dans la CLI. Un futur
 le même `operonId`, relations réconciliées, journal durable et confirmation
 humaine explicite. Il n’est pas implémenté.
 
-## Admission 3.8.2
+## Admission 3.9.0
 
-Optimike MCP `3.8.2`, Bridge `0.9.2`, Operon `3.6.2`,
+Optimike MCP `3.9.0`, Bridge `0.9.2`, Operon `3.6.2`,
 Operon CLI `1.2.0` et Local REST API `5.1.0` forment l’ensemble de validation
 courant. Operon `3.6.2` reste
 `compatible-provisional` jusqu’à son entrée dans l’ensemble explicite de preuves
