@@ -108,7 +108,7 @@ try {
   {
     const f = scenario("concurrent-view-exit"), p = await f.runtime.plan(input), writes = fixture.successfulWrites;
     const second = createGovernedNoteReplaceRuntime(rest);
-    let enter!: () => void, release!: () => void;
+    let enter, release;
     const entered = new Promise(resolve => { enter = resolve; });
     const released = new Promise(resolve => { release = resolve; });
     const delayedSelection = {
