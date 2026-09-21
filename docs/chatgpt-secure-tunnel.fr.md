@@ -58,14 +58,79 @@ $tunnelClient = Join-Path $env:LOCALAPPDATA "Optimike\tunnel-client\tunnel-clien
 
 Créer ensuite une application en mode développeur dans ChatGPT, choisir **Tunnel** comme type de connexion et sélectionner le tunnel associé. Vérifier que le client local est live et ready avant de tester l’application.
 
+## Charger une configuration locale et des racines externes
+
+Le processus lancé par `tunnel-client` doit recevoir la même configuration qu’un client stdio local. Les secrets Obsidian et les chemins privés restent hors Git. Pour injecter proprement le profil d’outils et le fichier de racines, créer un lanceur PowerShell local, par exemple `C:\Users\vous\.config\optimike\start-chatgpt-mcp.ps1` :
+
+```powershell
+$ErrorActionPreference = "Stop"
+$repository = "C:\chemin\vers\optimike-obsidian-mcp"
+$externalRoots = "C:\Users\vous\.config\optimike\external-roots.json"
+
+$env:MCP_TOOL_PROFILE = "full"
+$env:MCP_EXTERNAL_ROOTS_FILE = $externalRoots
+
+Set-Location -LiteralPath $repository
+& node (Join-Path $repository "dist\stdio-proxy.js")
+exit $LASTEXITCODE
+```
+
+Le processus `tunnel-client` hérite de son environnement. Les clés nécessaires peuvent donc être fournies par le gestionnaire de secrets ou le service qui lance le tunnel, sans les écrire dans le script. Référencer ensuite ce lanceur dans le profil :
+
+```powershell
+& $tunnelClient init `
+  --sample sample_mcp_stdio_local `
+  --profile optimike-full `
+  --tunnel-id tunnel_0123456789abcdef0123456789abcdef `
+  --mcp-command 'pwsh -NoProfile -File "C:/Users/vous/.config/optimike/start-chatgpt-mcp.ps1"'
+```
+
+Pour ajouter un dossier, copier d’abord [`external-roots.example.json`](external-roots.example.json) hors du dépôt, puis ajouter une entrée à `roots`. Exemple strictement lecture seule :
+
+```json
+{
+  "id": "mes-documents",
+  "path": "D:\\Documents\\Références",
+  "capabilities": ["visible", "readable"],
+  "include": ["**/*.md", "**/*.txt", "**/*.json"],
+  "exclude": ["**/.git/**", "**/node_modules/**", "**/*.zip"],
+  "limits": {
+    "maxDepth": 8,
+    "maxFileBytes": 1048576,
+    "maxListEntries": 500,
+    "maxTextChars": 200000
+  }
+}
+```
+
+Ne pas remplacer les entrées existantes : ajouter la nouvelle racine dans le même tableau `roots`. Employer `visible` + `readable` tant qu’un déplacement externe n’est pas explicitement nécessaire. Le schéma, les plafonds et les règles de confinement sont détaillés dans [Configuration External Roots](external-roots-setup.fr.md).
+
+La configuration des racines est chargée au démarrage du processus MCP. Après une modification du JSON, arrêter le `tunnel-client` de ce profil, puis relancer :
+
+```powershell
+$healthFile = Join-Path $env:TEMP "optimike-tunnel-health.url"
+
+& $tunnelClient doctor --profile optimike-full --explain
+& $tunnelClient run `
+  --profile optimike-full `
+  --health.listen-addr 127.0.0.1:0 `
+  --health.url-file $healthFile
+```
+
+En exécution au premier plan, `Ctrl+C` arrête proprement ce client avant la relance. Avec un service ou un superviseur, redémarrer uniquement l’instance liée au profil Optimike ; ne pas tuer tous les processus `tunnel-client` de la machine. Lire ensuite l’URL dans `$healthFile`, contrôler `/healthz` et `/readyz`, puis appeler `external_roots_list`, `external_list` et `external_read` sur un petit fichier témoin.
+
+Ajouter une racine externe ne nécessite pas de redémarrer Obsidian ni ses Bridges. Les Bridges concernent les opérations natives dans le coffre. Après une mise à niveau d’un Bridge, suivre [Bundle des Bridges et rollback](bridge-packaging.fr.md), recharger Obsidian, puis vérifier `obsidian_runtime_status`. Un simple reload de Local REST API est récupéré automatiquement par le [superviseur de lifecycle](bridge-lifecycle.fr.md).
+
 ## Actualiser après une mise à niveau d’Optimike
 
 Le runtime serveur et une conversation ChatGPT n’ont pas le même cycle de vie.
 
-1. Redémarrer le backend Optimike et `tunnel-client`.
+1. Redémarrer le backend Optimike et l’instance `tunnel-client` du profil concerné.
 2. Contrôler les endpoints `/healthz` et `/readyz` du client de tunnel.
 3. Dans ChatGPT, ouvrir **Paramètres -> Plugins -> application Optimike -> Actualiser**.
 4. Démarrer une nouvelle conversation et vérifier quelques noms d’outils du profil choisi.
+
+Pour une simple modification du fichier de racines, le redémarrage du `tunnel-client` suffit : il recrée le proxy stdio avec la nouvelle configuration. Pour un nouveau build de `dist`, redémarrer aussi le backend Optimike. Pour de nouveaux noms d’outils, l’actualisation de l’application ChatGPT et une nouvelle conversation sont obligatoires ; une conversation déjà ouverte conserve ses bindings initiaux.
 
 Pendant le pilote Optimike 3.9.1, l’actualisation de l’application a découvert immédiatement les nouveaux outils, tandis que les conversations créées avant l’actualisation ont conservé leurs 77 bindings initiaux. Une nouvelle conversation a reçu les 87 outils du profil `full`. La surface réellement injectée dans la conversation courante fait foi côté client ; `obsidian_runtime_status` décrit les capacités du backend et ne peut pas modifier rétroactivement les bindings d’une conversation.
 
