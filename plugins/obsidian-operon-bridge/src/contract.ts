@@ -1,10 +1,11 @@
 export const OPERON_BRIDGE_CONTRACT_VERSION = "1" as const;
-export const OPERON_BRIDGE_TESTED_VERSION = "3.2.1" as const;
+export const OPERON_BRIDGE_TESTED_VERSION = "3.9.3" as const;
 export const OPERON_BRIDGE_DEVELOPER_API_VERSIONS = [
 	"3.0.1",
 	"3.1.0",
 	"3.1.1",
 	"3.2.0",
+	"3.2.1",
 	OPERON_BRIDGE_TESTED_VERSION,
 ] as const;
 export const OPERON_BRIDGE_LEGACY_VERSIONS = {
@@ -58,6 +59,7 @@ export const OPERON_BRIDGE_BLOCKED_MUTATIONS = {
 	"3.1.1": [],
 	"3.2.0": [],
 	"3.2.1": [],
+	"3.9.3": [],
 } as const;
 
 export function isCertifiedDeveloperApiVersion(version: string): boolean {

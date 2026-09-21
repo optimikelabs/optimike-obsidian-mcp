@@ -16,7 +16,7 @@ If both plugins are enabled, the Bridge refuses to choose an owner. Disable one 
 - Obsidian Desktop
 - Operon `2.4.0` or `2.5.0` for legacy reads
 - Operon exposing the negotiated Developer API V1 contract (`contractVersion: 1`, `runtimeApi: 1`)
-- certified Developer API releases: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, and `3.2.1`; later non-denied releases such as the current live target Operon `3.6.2` are admitted provisionally through the same negotiated Developer API V1 contract
+- certified Developer API releases: `3.0.1`, `3.1.0`, `3.1.1`, `3.2.0`, `3.2.1`, and current target `3.9.3`; later non-denied releases are admitted provisionally through the same negotiated Developer API V1 contract
 - Kairélys `2.5.1` through `2.5.3` (based on Operon `2.5.0`) and Kairélys `2.6.1` through `2.6.3`
   (based on Operon `2.6.0`) with Public API v1 for mutations
 - Obsidian Local REST API
@@ -37,8 +37,8 @@ Project Serial transition edge. Uncertain outcomes
 remain fail-closed; the Bridge never retries blindly or falls back to
 Markdown/private APIs.
 
-Bridge `0.9.2` supports the separate task-workflow Developer API sessions
-introduced by Operon `3.5.3` and retained by the current `3.6.2` target.
+Bridge `0.9.3` supports the separate task-workflow Developer API sessions
+introduced by Operon `3.5.3` and retained by the current certified `3.9.3` target.
 Adoption, daily/weekly periodic-note
 creation, and periodic-note-aware updates each negotiate their own exact grant
 on first use, even when the last status snapshot reported the capability cold;
@@ -51,9 +51,9 @@ workflow kind. The Bridge converts its public one-based adoption line to the
 official zero-based locator exactly once. `taskType` and `taskImage` remain
 scalars, while `taskGallery` crosses the Bridge as an ordered `string[]`; the
 Bridge never guesses media boundaries by splitting a string. Operon `3.5.3`
-remains historical rollout evidence, while the current `3.6.2` target reports
-`compatible-provisional` because certification metadata remains explicit; product-
-version membership is not a second mutation gate. A
+remains historical rollout evidence, while the current `3.9.3` target reports
+`certified` after the exact-SHA Pilot 2 gate; product-version membership is not a
+second mutation gate. A
 non-denied future release remains writable only after the exact negotiated
 contract, capabilities, schemas, health, settled index and recovery checks pass.
 
@@ -70,11 +70,11 @@ plan is metadata-only and exposes no pre-apply task-source path. This is a
 destructive-canary containment/certification boundary, not a runtime tool
 disablement: the runtime tools remain available, upstream public path projection
 is a nonblocking follow-up, and no full periodic certification is claimed. The
-release still requires the applicable gate on the clean final SHA. Operon
-therefore remains `compatible-provisional`, admitted by the same contract-first
-checks rather than by a positive product-version allowlist.
+release still requires the applicable gate on the clean final SHA. Future
+non-denied releases remain `compatible-provisional`, admitted by the same
+contract-first checks until separately evidenced.
 
-Bridge `0.9.2` permanently supervises its Local REST extension registration
+Bridge `0.9.3` permanently supervises its Local REST extension registration
 and is distributed through the exact-SHA Optimike Bridge bundle.
 It mounts after late Local REST startup, detects a disabled/reloaded provider,
 unregisters the previous generation and remounts without requiring an MCP

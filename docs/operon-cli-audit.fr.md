@@ -2,13 +2,13 @@
 
 English version: [operon-cli-audit.md](operon-cli-audit.md)
 
-Mise à jour : 2026-09-03
+Mise à jour : 2026-09-21
 
-Cible candidate : Optimike MCP `3.9.0` utilise le Bridge `0.9.2` avec Operon
-officiel `3.6.2`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1
+Cible courante : Optimike MCP `3.9.1` utilise le Bridge `0.9.3` avec Operon
+officiel `3.9.3` certifié, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1
 et API task-workflow additive. L’admission Pilot 2 reste liée au SHA final
-propre. Le contrat public Developer API V1 n’a pas dérivé depuis la frontière
-validée en `3.6.0`. Operon `3.6.1` restaure aussi la réapprobation explicite,
+propre. Les sources publiques `src/agent-runtime` n’ont pas dérivé entre `3.6.2`
+et `3.9.3`. Operon `3.6.1` restaure aussi la réapprobation explicite,
 dans les réglages, d’un grant suspendu cohérent ; une tentative périmée,
 révoquée ou dont le binding a dérivé reste bloquée. Operon `3.6.2` corrige
 l’ordre des ressources des plans scellés multi-source pour qu’il ne dépende plus
@@ -59,8 +59,8 @@ retourne `SKIP` avec la raison `public_task_source_projection_unavailable`.
 ## Acceptation historique 3.3.2
 
 Les observations CLI initiales du 1er août 2026 utilisaient Operon `3.0.1` et
-restent des preuves historiques. L’adaptateur MCP certifie `3.2.1` et admet
-`3.3.2` provisoirement après négociation du contrat. Le pilote live complet
+restent des preuves historiques. L’adaptateur MCP certifie `3.9.3` et admet
+les versions ultérieures non refusées provisoirement après négociation du contrat. Le pilote live complet
 `3.3.2` avec CLI `1.1.2` est vert : les contrôles de grant dans les réglages,
 le refus des renommages implicites de File Tasks et le règlement des
 transitions sans portée Project Serial sont corrigés upstream. L’adoption était

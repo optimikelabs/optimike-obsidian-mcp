@@ -116,7 +116,7 @@ Common controls:
 
 MCP results are stored in `operon_mutation_journal`. A reservation is committed before the Bridge call. Reusing an idempotency key with the same completed request returns the original `operationId` and result without calling the Bridge again. A restart or timeout that leaves the MCP reservation `in_progress` is treated as an uncertain outcome and blocks blind retry. Reusing a key for a different request is rejected as `CONFLICT`. Revision mismatch returns `conflict` without writing.
 
-Bridge 0.9.2 independently reserves idempotency keys atomically and persists its version-2 journal in local Obsidian plugin data before native dispatch. The journal is bounded to 500 entries and 30 days. A restored `in-progress` entry becomes non-retryable `outcome-unknown` with `recoveryRequired: true`. Version 2 stores explicit dispatch provenance. The Bridge may release a same-request receipt only when its durable `proven-pre-dispatch` marker proves `not-ready` before mutation dispatch and the response explicitly states both `ok: false` and `mutationMayHaveApplied: false`; it then persists the removal before reserving again. Version-1 entries are retained during migration but classified as unknown-or-dispatched, because Bridge 0.8.2 could persist those payload fields after native dispatch had begun. Missing or malformed provenance therefore remains replay-only and cannot cause another native call. This supports bounded local replay/restart only; it promises nothing after expiry, eviction, plugin-data reset/loss, failed persistence, or transfer to another vault/device. Failure to persist either the initial reservation or a proven-safe release prevents native dispatch.
+Bridge 0.9.3 independently reserves idempotency keys atomically and persists its version-2 journal in local Obsidian plugin data before native dispatch. The journal is bounded to 500 entries and 30 days. A restored `in-progress` entry becomes non-retryable `outcome-unknown` with `recoveryRequired: true`. Version 2 stores explicit dispatch provenance. The Bridge may release a same-request receipt only when its durable `proven-pre-dispatch` marker proves `not-ready` before mutation dispatch and the response explicitly states both `ok: false` and `mutationMayHaveApplied: false`; it then persists the removal before reserving again. Version-1 entries are retained during migration but classified as unknown-or-dispatched, because Bridge 0.8.2 could persist those payload fields after native dispatch had begun. Missing or malformed provenance therefore remains replay-only and cannot cause another native call. This supports bounded local replay/restart only; it promises nothing after expiry, eviction, plugin-data reset/loss, failed persistence, or transfer to another vault/device. Failure to persist either the initial reservation or a proven-safe release prevents native dispatch.
 
 Journal restoration is fail-closed. A missing `mutationJournal` property is a
 new `absent` store, while a supported and fully validated envelope is `valid`.
@@ -207,13 +207,14 @@ operator CLI action. A future `operon_trash_task` may be considered only with
 guaranteed restoration under the same `operonId`, reconciled relations, durable
 journal evidence, and an explicit human confirmation; it is not implemented.
 
-## 3.9.0 admission
+## 3.9.1 admission
 
-Optimike MCP `3.9.0`, Bridge `0.9.2`, Operon `3.6.2`,
+Optimike MCP `3.9.1`, Bridge `0.9.3`, Operon `3.9.3`,
 Operon CLI `1.2.0` and Local REST API `5.1.0` form the current validation set.
-Operon `3.6.2` remains
-`compatible-provisional` until it joins the explicit certified evidence set,
-but that label no longer masks valid mutation capabilities. Product version is
+Operon `3.9.3` belongs to the explicit Developer API V1 certified set after
+the exact-SHA Pilot 2 gate passed native preview/apply, replay, conflict,
+typed-media, restoration and recovery checks. Full periodic destructive
+certification remains excluded by the public path-projection limitation. Product version is
 diagnostic metadata and may select an explicit deny or narrowly blocked path;
 it is not a positive mutation allowlist. Contract negotiation, exact grants,
 schemas, live health, settled index, write policy and recovery remain mandatory.
@@ -236,7 +237,7 @@ workflow, or recovery grants; only the exact operation or dedicated recovery
 surface may do so.
 
 The public Developer API V1 contract did not drift from Operon `3.5.3` through
-`3.6.2`. Operon `3.6.0` nevertheless changes Task Editor relation cleanup, permits
+`3.9.3`. The `src/agent-runtime` contract sources are unchanged between `3.6.2` and `3.9.3`; the only integration-adjacent changes are settings persistence and plugin-internal conversion plumbing. Operon `3.6.0` nevertheless changes Task Editor relation cleanup, permits
 Scheduled Date on a blocked task, and optionally expands a parent's date range
 after a child mutation. Operon `3.6.1` additionally repairs explicit reapproval
 of recoverably suspended Developer API grants while stale or revoked authority

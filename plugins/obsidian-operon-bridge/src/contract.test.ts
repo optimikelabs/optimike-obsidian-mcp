@@ -2531,17 +2531,20 @@ test("certified Developer API versions and known mutation exceptions remain expl
     "3.1.1",
     "3.2.0",
     "3.2.1",
+    "3.9.3",
   ]);
   assert.equal(isCertifiedDeveloperApiVersion("3.0.1"), true);
   assert.equal(isCertifiedDeveloperApiVersion("3.1.0"), true);
   assert.equal(isCertifiedDeveloperApiVersion("3.1.1"), true);
   assert.equal(isCertifiedDeveloperApiVersion("3.2.0"), true);
   assert.equal(isCertifiedDeveloperApiVersion("3.2.1"), true);
+  assert.equal(isCertifiedDeveloperApiVersion("3.9.3"), true);
   assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.0.1"], ["transition"]);
   assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.0"], []);
   assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.1.1"], []);
   assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.0"], []);
   assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.2.1"], []);
+  assert.deepEqual(OPERON_BRIDGE_BLOCKED_MUTATIONS["3.9.3"], []);
 });
 
 test("unknown Operon versions are admitted provisionally by the Developer API V1 contract", () => {
@@ -2569,6 +2572,14 @@ test("unknown Operon versions are admitted provisionally by the Developer API V1
 });
 
 test("certified and denied Developer API versions keep deterministic admission", () => {
+  assert.equal(
+    resolveOperonCompatibility({
+      pluginId: "operon",
+      version: "3.9.3",
+      hasDeveloperApiV1: true,
+    }).state,
+    "certified",
+  );
   assert.equal(
     resolveOperonCompatibility({
       pluginId: "operon",
