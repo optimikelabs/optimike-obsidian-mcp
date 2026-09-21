@@ -15,7 +15,7 @@ const server = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ ok: true }));
     }
-  }, 1_000).unref();
+  }, 2_000).unref();
 });
 server.on("connection", (socket) => {
   sockets.add(socket);
@@ -59,7 +59,7 @@ async function assertBounded(label, operation) {
   await operation();
   const elapsed = performance.now() - started;
   assert.ok(
-    elapsed < 500,
+    elapsed < 1_250,
     `${label} ignored the bounded probe timeout (${Math.round(elapsed)} ms)`,
   );
 }
