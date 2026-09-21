@@ -16,6 +16,7 @@ French operator guides are linked alongside their English equivalents.
 | A headless/server operator      | [Headless Server Profile](headless-server-profile.md) | [Runtime Matrix](runtime-capability-matrix.md), [Tool Surface Profiles](tool-surface-profiles.md), [Security](../SECURITY.md)                        |
 | A gateway integrator            | [OSS Gateway Compatibility](gateway-compatibility.md) | [HTTP Security](http-multiclient-security.md), [Backpressure](http-concurrency-backpressure.md)                                                      |
 | An MCP client integrator        | [Tool Surface Profiles](tool-surface-profiles.md)     | [Tool Surface](obsidian_mcp_tools_spec.md), [Runtime Matrix](runtime-capability-matrix.md)                                                           |
+| A ChatGPT private-MCP operator  | [ChatGPT Secure Tunnel](chatgpt-secure-tunnel.md)     | [Tool Surface Profiles](tool-surface-profiles.md), [Security](../SECURITY.md), [Operations](../OPERATIONS.md)                                     |
 | An external-document operator   | [External Roots Setup](external-roots-setup.md)       | [External Roots ADR](adr/ADR-External-Document-Roots.md), [Reference Integrity ADR](adr/ADR-External-Reference-Integrity.md)                         |
 | A Tasks/Operon operator         | [Operon MCP Contract](operon-mcp-contract.md)         | [CLI/API audit](operon-cli-audit.md), [Local Validation](operon-local-validation.md), [public ÉLYSIA profile](../profiles/elysia-tasks/README.fr.md) |
 | A contributor or reviewer       | [Architecture decisions](adr/README.md)               | [Repository tree](tree.md), plugin READMEs                                                                                                           |
@@ -29,6 +30,7 @@ French operator guides are linked alongside their English equivalents.
 | Which tools are available in each runtime?                           | [Runtime Capability Matrix](runtime-capability-matrix.md)                             |
 | Why is a capability hidden, unavailable, or unauthorized?            | [Runtime Capability Doctor](capability-doctor.md)                                     |
 | How do I run and maintain the service?                               | [Operations](../OPERATIONS.md)                                                        |
+| How do I connect a private Optimike runtime to ChatGPT?              | [ChatGPT through Secure MCP Tunnel](chatgpt-secure-tunnel.md)                         |
 | How do Bridges recover after Local REST starts or reloads?           | [Bridge Lifecycle Recovery](bridge-lifecycle.md)                                      |
 | How do I install, upgrade or roll back all three Bridges?            | [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md)                            |
 | Which tool should an agent choose inside its profile?                | [MCP Routing Guide](mcp-routing-guide.md)                                             |

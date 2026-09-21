@@ -16,6 +16,7 @@ question.
 | Opérateur headless/serveur      | [Profil serveur headless](headless-server-profile.fr.md)  | [Matrice runtime](runtime-capability-matrix.fr.md), [Profils d’outils](tool-surface-profiles.fr.md), [Sécurité](../SECURITY.fr.md)                      |
 | Intégrateur d’une gateway       | [Compatibilité gateways OSS](gateway-compatibility.fr.md) | [Sécurité HTTP](http-multiclient-security.fr.md), [Backpressure](http-concurrency-backpressure.fr.md)                                                   |
 | Intégrateur d’un client MCP     | [Profils d’outils](tool-surface-profiles.fr.md)           | [Surface des outils](obsidian_mcp_tools_spec.md), [Matrice runtime](runtime-capability-matrix.fr.md)                                                    |
+| Opérateur MCP privé ChatGPT     | [Tunnel Secure ChatGPT](chatgpt-secure-tunnel.fr.md)      | [Profils d’outils](tool-surface-profiles.fr.md), [Sécurité](../SECURITY.fr.md), [Exploitation](../OPERATIONS.fr.md)                                    |
 | Opérateur de documents externes | [Configuration des racines](external-roots-setup.fr.md)   | [ADR racines externes](adr/ADR-External-Document-Roots.md), [ADR intégrité des références](adr/ADR-External-Reference-Integrity.fr.md)                  |
 | Opérateur Tasks/Operon          | [Contrat MCP Operon](operon-mcp-contract.fr.md)           | [Audit CLI/API](operon-cli-audit.fr.md), [Validation locale](operon-local-validation.md), [profil public ÉLYSIA](../profiles/elysia-tasks/README.fr.md) |
 | Contributeur ou relecteur       | [Décisions d’architecture](adr/README.md)                 | [Arbre du dépôt](tree.md), README des plugins                                                                                                           |
@@ -29,6 +30,7 @@ question.
 | Quels outils sont disponibles dans chaque runtime ?                                 | [Matrice des capacités](runtime-capability-matrix.fr.md)                                |
 | Pourquoi une capacité est-elle masquée, indisponible ou non autorisée ?             | [Doctor des capacités runtime](capability-doctor.fr.md)                                 |
 | Comment lancer et maintenir le service ?                                            | [Exploitation](../OPERATIONS.fr.md)                                                     |
+| Comment connecter un runtime Optimike privé à ChatGPT ?                             | [ChatGPT via Secure MCP Tunnel](chatgpt-secure-tunnel.fr.md)                            |
 | Comment les Bridges récupèrent-ils après un démarrage ou reload Local REST ?        | [Récupération du lifecycle](bridge-lifecycle.fr.md)                                     |
 | Comment installer, mettre à niveau ou restaurer les trois Bridges ?                 | [Bundle des Bridges et rollback](bridge-packaging.fr.md)                                |
 | Quel outil un agent doit-il choisir dans son profil ?                               | [Guide de routage](mcp-routing-guide.fr.md)                                             |
