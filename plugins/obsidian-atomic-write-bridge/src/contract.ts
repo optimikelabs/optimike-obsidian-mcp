@@ -5,10 +5,16 @@ export const ATOMIC_WRITE_REST_PREFIX =
   "/extensions/obsidian-atomic-write-bridge" as const;
 export const MAX_NOTE_BYTES = 5 * 1024 * 1024;
 export const MAX_CANVAS_BYTES = 5 * 1024 * 1024;
+export const NOTE_LINKS_DEFAULT_LIMIT = 200;
+export const NOTE_LINKS_MAX_LIMIT = 1000;
 
 export type NoteReadRequest = {
   contractVersion: typeof ATOMIC_WRITE_CONTRACT_VERSION;
   path: string;
+};
+
+export type NoteLinksRequest = NoteReadRequest & {
+  limit: number;
 };
 
 export type NoteCasRequest = NoteReadRequest & {
@@ -158,6 +164,26 @@ export function parseReadRequest(input: unknown): NoteReadRequest {
   return {
     contractVersion: contractVersion(body.contractVersion),
     path: validateVaultMarkdownPath(body.path),
+  };
+}
+
+export function parseNoteLinksRequest(input: unknown): NoteLinksRequest {
+  const body = bodyRecord(input);
+  assertExactKeys(body, ["contractVersion", "limit", "path"]);
+  if (
+    typeof body.limit !== "number" ||
+    !Number.isInteger(body.limit) ||
+    body.limit < 1 ||
+    body.limit > NOTE_LINKS_MAX_LIMIT
+  ) {
+    throw new Error(
+      "limit must be an integer between 1 and " + NOTE_LINKS_MAX_LIMIT + ".",
+    );
+  }
+  return {
+    contractVersion: contractVersion(body.contractVersion),
+    path: validateVaultMarkdownPath(body.path),
+    limit: body.limit,
   };
 }
 

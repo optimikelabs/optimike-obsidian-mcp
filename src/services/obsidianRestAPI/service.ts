@@ -50,6 +50,8 @@ import {
   BaseUpsertResponse,
   ComplexSearchResult,
   NoteJson,
+  NoteLinksRequest,
+  NoteLinksResponse,
   NoteStat,
   ObsidianCommand,
   PatchOptions,
@@ -323,6 +325,17 @@ export class ObsidianRestApiService {
     context: RequestContext,
   ): Promise<AtomicWriteReadResponse> {
     return atomicWriteMethods.readAtomicWriteNote(
+      this._request.bind(this),
+      payload,
+      context,
+    );
+  }
+
+  async readNoteLinks(
+    payload: NoteLinksRequest,
+    context: RequestContext,
+  ): Promise<NoteLinksResponse> {
+    return atomicWriteMethods.readNoteLinks(
       this._request.bind(this),
       payload,
       context,

@@ -12,8 +12,8 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 22, authoring: 33, tasks: 34, full: 77 },
-  "hybrid-live": { standard: 22, authoring: 33, tasks: 34, full: 77 },
+  live: { standard: 23, authoring: 34, tasks: 35, full: 78 },
+  "hybrid-live": { standard: 23, authoring: 34, tasks: 35, full: 78 },
   "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
   "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
   "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
@@ -303,13 +303,34 @@ const selectedLiveTasks = selectAvailableToolProfileNames({
 });
 assert.deepEqual(selectedLiveTasks, tasksLive);
 
+for (const profile of ["standard", "authoring", "tasks", "full"]) {
+  const live = compileToolProfileNames({
+    profile,
+    registrationMode: "live",
+    availableStaticRequirements: WITH_CACHE,
+  });
+  assert.ok(
+    live.includes("obsidian_note_links"),
+    profile + "/live lost M2 note links",
+  );
+  const degraded = compileToolProfileNames({
+    profile,
+    registrationMode: "hybrid-degraded",
+    availableStaticRequirements: WITH_CACHE,
+  });
+  assert.ok(
+    !degraded.includes("obsidian_note_links"),
+    profile + "/hybrid-degraded exposed Desktop metadata cache",
+  );
+}
+
 const standardWithoutCache = compileToolProfileNames({
   profile: "standard",
   registrationMode: "live",
   availableStaticRequirements: [],
 });
 assert.ok(!standardWithoutCache.includes("obsidian_global_search"));
-assert.equal(standardWithoutCache.length, 21);
+assert.equal(standardWithoutCache.length, 22);
 
 const readonlyWithoutCache = compileToolProfileNames({
   profile: "standard",

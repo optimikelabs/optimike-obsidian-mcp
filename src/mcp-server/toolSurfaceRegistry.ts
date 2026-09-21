@@ -93,6 +93,7 @@ export interface ToolSurfaceEntry {
 
 const CANONICAL_UNIQUE_TOOL_NAMES = [
   "obsidian_read_note",
+  "obsidian_note_links",
   "obsidian_list_notes",
   "obsidian_global_search",
   "obsidian_manage_tags",
@@ -343,6 +344,7 @@ const OPERON_MUTATION_TOOLS = [
 
 export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
   defineTool("obsidian_read_note", "notes.read", "notes-core", ALL_MODES),
+  defineTool("obsidian_note_links", "notes.read", "note-links", LIVE_MODES),
   defineTool("obsidian_list_notes", "notes.read", "notes-core", ALL_MODES),
   defineTool("obsidian_global_search", "notes.read", "notes-core", ALL_MODES, {
     availabilityRules: [

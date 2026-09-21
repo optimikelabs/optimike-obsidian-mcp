@@ -5,6 +5,8 @@ import type {
   AtomicWriteReadRequest,
   AtomicWriteReadResponse,
   AtomicWriteStatusResponse,
+  NoteLinksRequest,
+  NoteLinksResponse,
   CanvasAtomicCasRequest,
   CanvasAtomicCasResponse,
   CanvasAtomicReadRequest,
@@ -35,6 +37,18 @@ export async function readAtomicWriteNote(
     { method: "POST", url: `${PREFIX}/notes/read`, data: payload },
     context,
     "readAtomicWriteNote",
+  );
+}
+
+export async function readNoteLinks(
+  request: RequestFunction,
+  payload: NoteLinksRequest,
+  context: RequestContext,
+): Promise<NoteLinksResponse> {
+  return request<NoteLinksResponse>(
+    { method: "POST", url: PREFIX + "/notes/links", data: payload },
+    context,
+    "readNoteLinks",
   );
 }
 

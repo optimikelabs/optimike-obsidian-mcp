@@ -116,6 +116,95 @@ export type AtomicWriteCasResponse = {
   bindingFingerprint: string;
 };
 
+export type NoteLinksRequest = {
+  contractVersion: 1;
+  path: string;
+  limit: number;
+};
+
+export type NoteSubpathValidation =
+  | { status: "not_requested" }
+  | { status: "valid"; type: "heading" | "block" | "footnote" }
+  | { status: "invalid" }
+  | {
+      status: "unknown";
+      reason: "target_file_unavailable" | "target_cache_unavailable";
+    };
+
+export type NoteLinkObservation = {
+  kind: "link" | "embed" | "frontmatter";
+  linkText: string;
+  original: string;
+  displayText?: string;
+  frontmatterKey?: string;
+  position?: {
+    start: { line: number; col: number; offset: number };
+    end: { line: number; col: number; offset: number };
+  };
+  linkPath: string;
+  subpath: string;
+  resolution:
+    | { status: "resolved"; targetPath: string }
+    | { status: "unresolved" };
+  subpathValidation: NoteSubpathValidation;
+  provenance:
+    | "metadataCache.links"
+    | "metadataCache.embeds"
+    | "metadataCache.frontmatterLinks";
+};
+
+export type NoteLinksResponse = {
+  ok: true;
+  contractVersion: 1;
+  path: string;
+  backend: {
+    kind: "obsidian-metadata-cache";
+    bindingFingerprint: string;
+  };
+  cache: {
+    available: boolean;
+    consistency: "best_effort_non_atomic_snapshot";
+    freshness: {
+      status: "unknown" | "unavailable";
+      observedAt: string;
+      observedFileMtimeMs: number;
+      reason:
+        | "public_metadata_cache_exposes_no_cache_timestamp"
+        | "source_metadata_cache_unavailable";
+    };
+  };
+  provenance: {
+    sourceMetadata: "metadataCache.getFileCache";
+    resolution: "metadataCache.getFirstLinkpathDest";
+    subpath: "resolveSubpath";
+    backlinks: "metadataCache.resolvedLinks";
+    unresolved: "metadataCache.unresolvedLinks";
+  };
+  outgoing: NoteLinkObservation[];
+  unresolved: Array<{ linkText: string; count: number }>;
+  backlinks: Array<{ sourcePath: string; count: number }>;
+  coverage: {
+    outgoing: {
+      available: boolean;
+      total: number | null;
+      returned: number;
+      truncated: boolean;
+    };
+    unresolved: {
+      available: boolean;
+      total: number | null;
+      returned: number;
+      truncated: boolean;
+    };
+    backlinks: {
+      available: true;
+      total: number;
+      returned: number;
+      truncated: boolean;
+    };
+  };
+};
+
 export type CanvasAtomicReadRequest = AtomicWriteReadRequest;
 export type CanvasAtomicCasRequest = AtomicWriteCasRequest;
 export type CanvasAtomicReadResponse = AtomicWriteReadResponse;
@@ -483,7 +572,7 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 /**
- * Destination used when moving a heading (`scope: "parent"`).
+ * Destination used when moving a heading (`scope: "parent").
  */
 export interface PatchDestination {
   parent: string[] | null;

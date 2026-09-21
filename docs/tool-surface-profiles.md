@@ -13,16 +13,18 @@ Profiles reduce schema volume and routing ambiguity. They are not an authorizati
 
 | Profile     | Intended use                                                                | Full live/hybrid surface |
 | ----------- | --------------------------------------------------------------------------- | -----------------------: |
-| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 22 tools |
-| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 33 tools |
-| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 34 tools |
-| `full`      | Explicit complete/admin surface for the active runtime                      |                 77 tools |
+| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 23 tools |
+| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 34 tools |
+| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 35 tools |
+| `full`      | Explicit complete/admin surface for the active runtime                      |                 78 tools |
 
-Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 77 tools. The canonical registry covers 81 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
+Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 78 tools. The canonical registry covers 82 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
+
+`obsidian_note_links` is live/hybrid-live only because its semantics come from Obsidian Desktop's public `MetadataCache`; degraded and headless profiles omit it rather than simulating graph semantics from filesystem state.
 
 The [P6 routing evaluation](tool-routing-evaluation-p6.md) measures these
 surfaces from actual `tools/list` schemas and a versioned 31-case baseline. Its
-3.8 decision keeps all four profiles unchanged: the 60-tool live union of
+3.8 decision keeps all four profiles unchanged: the 61-tool live union of
 authoring and tasks is not promoted without a measured cross-domain journey.
 
 ## Compatibility-only names

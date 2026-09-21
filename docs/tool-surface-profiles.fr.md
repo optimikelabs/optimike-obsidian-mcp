@@ -13,16 +13,18 @@ Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils
 
 | Profil      | Usage visé                                                              | Surface complète live/hybrid |
 | ----------- | ----------------------------------------------------------------------- | ---------------------------: |
-| `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    22 outils |
-| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    33 outils |
-| `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    34 outils |
-| `full`      | Surface complète/admin explicite du runtime actif                       |                    77 outils |
+| `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    23 outils |
+| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    34 outils |
+| `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    35 outils |
+| `full`      | Surface complète/admin explicite du runtime actif                       |                    78 outils |
 
-Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 77 outils. Le registre canonique couvre 81 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
+Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 78 outils. Le registre canonique couvre 82 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
+
+`obsidian_note_links` est limité à `live` / `hybrid-live` : sa sémantique vient du `MetadataCache` public d’Obsidian Desktop. Les profils dégradés et headless l’omettent plutôt que de simuler le graphe depuis l’état filesystem.
 
 L'[évaluation P6 du routage](tool-routing-evaluation-p6.fr.md) mesure ces
 surfaces depuis les schémas `tools/list` réels et une baseline versionnée de 31
-cas. Sa décision 3.8 conserve les quatre profils : l'union live de 60 outils
+cas. Sa décision 3.8 conserve les quatre profils : l'union live de 61 outils
 authoring et tasks n'est pas promue sans parcours cross-domain mesuré.
 
 ## Noms réservés à la compatibilité

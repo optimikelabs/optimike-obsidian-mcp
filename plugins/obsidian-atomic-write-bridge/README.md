@@ -9,6 +9,7 @@ read-modify-write operation.
 
 - `GET /extensions/obsidian-atomic-write-bridge/status`
 - `POST /extensions/obsidian-atomic-write-bridge/notes/read`
+- `POST /extensions/obsidian-atomic-write-bridge/notes/links` (read-only semantic observation)
 - `POST /extensions/obsidian-atomic-write-bridge/notes/cas`
 - `POST /extensions/obsidian-atomic-write-bridge/canvas/read`
 - `POST /extensions/obsidian-atomic-write-bridge/canvas/cas`
@@ -43,6 +44,8 @@ through the exact-SHA Optimike Bridge bundle. Late startup or
 a Local REST reload remounts exactly one route generation without restarting
 the MCP. The status `lifecycle` field reports registration only and never
 changes the independent Note/Frontmatter or Canvas write gates.
+
+Version 0.6.0 adds the read-only `notes/links` route. It observes links, embeds, frontmatter links, resolution, subpaths, unresolved aggregates and resolved backlinks through Obsidian Desktop public `MetadataCache` APIs. Responses are bounded and report cache freshness as unknown when the public API cannot prove it. The route never writes or claims graph preservation.
 
 The protection contract reports each configured active creation, modification
 and last-viewed property. Optimike MCP automatically adds those names to its

@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import {
+  parseLinktext,
+  Plugin,
+  PluginSettingTab,
+  resolveSubpath,
+  Setting,
+  TFile,
+} from "obsidian";
 import {
   ATOMIC_WRITE_CONTRACT_VERSION,
   ATOMIC_WRITE_REST_PREFIX,
@@ -11,10 +18,12 @@ import {
   parseCasRequest,
   parseCanvasCasRequest,
   parseCanvasReadRequest,
+  parseNoteLinksRequest,
   parseReadRequest,
   sha256,
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
+import { projectNoteLinks } from "./noteLinks.js";
 import {
   RestExtensionLifecycle,
   RestExtensionPartialMountError,
@@ -461,6 +470,86 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               res,
               notFound ? 404 : 500,
               errorPayload(notFound ? "canvas_not_found" : "write_error"),
+            );
+          }
+        });
+
+      api
+        .addRoute(ATOMIC_WRITE_REST_PREFIX + "/notes/links")
+        .post(async (req: any, res: any) => {
+          let request: ReturnType<typeof parseNoteLinksRequest>;
+          try {
+            request = parseNoteLinksRequest(req?.body);
+          } catch {
+            sendJson(res, 400, errorPayload("invalid_request"));
+            return;
+          }
+          try {
+            const file = this.file(request.path);
+            const metadataCache = this.app.metadataCache;
+            const cache = metadataCache.getFileCache(file);
+            const projection = projectNoteLinks({
+              sourcePath: file.path,
+              cacheAvailable: cache !== null,
+              links: cache?.links ?? [],
+              embeds: cache?.embeds ?? [],
+              frontmatterLinks: cache?.frontmatterLinks ?? [],
+              resolvedLinks: metadataCache.resolvedLinks,
+              unresolvedLinks: metadataCache.unresolvedLinks,
+              limit: request.limit,
+              parseLinktext,
+              resolveLink: (linkPath, sourcePath) =>
+                metadataCache.getFirstLinkpathDest(linkPath, sourcePath)?.path ?? null,
+              validateSubpath: (targetPath, subpath) => {
+                const target = this.app.vault.getAbstractFileByPath(targetPath);
+                if (!safeInstanceOf(target, TFile)) {
+                  return { status: "unknown", reason: "target_file_unavailable" };
+                }
+                const targetCache = metadataCache.getFileCache(target as TFile);
+                if (!targetCache) {
+                  return { status: "unknown", reason: "target_cache_unavailable" };
+                }
+                const resolved = resolveSubpath(targetCache, subpath);
+                if (!resolved) return { status: "invalid" };
+                return { status: "valid", type: resolved.type };
+              },
+            });
+            sendJson(res, 200, {
+              ok: true,
+              contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
+              path: file.path,
+              backend: {
+                kind: "obsidian-metadata-cache",
+                bindingFingerprint: this.bindingFingerprint,
+              },
+              cache: {
+                available: cache !== null,
+                consistency: "best_effort_non_atomic_snapshot",
+                freshness: {
+                  status: cache === null ? "unavailable" : "unknown",
+                  observedAt: new Date().toISOString(),
+                  observedFileMtimeMs: file.stat.mtime,
+                  reason:
+                    cache === null
+                      ? "source_metadata_cache_unavailable"
+                      : "public_metadata_cache_exposes_no_cache_timestamp",
+                },
+              },
+              provenance: {
+                sourceMetadata: "metadataCache.getFileCache",
+                resolution: "metadataCache.getFirstLinkpathDest",
+                subpath: "resolveSubpath",
+                backlinks: "metadataCache.resolvedLinks",
+                unresolved: "metadataCache.unresolvedLinks",
+              },
+              ...projection,
+            });
+          } catch (error) {
+            const notFound = this.isMissingResource(error, "note");
+            sendJson(
+              res,
+              notFound ? 404 : 500,
+              errorPayload(notFound ? "note_not_found" : "read_error"),
             );
           }
         });
