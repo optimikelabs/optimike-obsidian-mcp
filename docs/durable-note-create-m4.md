@@ -18,6 +18,8 @@ A content-free effect proof is persisted before terminal payload zeroization. La
 
 The existing Bridge date-integration discovery and strict timestamp-settlement verifier are reused. Only qualified created/modified fields with a supported format/delay are eligible. Viewed fields, ambiguous keys and unsupported configurations refuse admission. Active automatic fields require an explicit frontmatter envelope in the sealed content. An explicit creation timestamp is never silently replaced. Body changes or unqualified YAML normalization are not accepted. Status may be pending until the advertised delay passes. No arbitrary plugin rewrite is excused.
 
+Qualified automatic timestamp fields are Bridge-managed postflight effects, not caller-authored keys. A protected timestamp may settle after exclusive creation when it was absent from the sealed content. Supplying that protected key in the requested frontmatter remains forbidden at both plan and apply.
+
 ## Local qualification still required
 
 Real Pilot2 must check Obsidian file-watcher indexing and plugin-created/modified fields, concurrent exclusive creation, no duplicates/suffixes, lost-response/restart status and absence of collateral. The Bridge does not certify Obsidian indexing from filesystem existence. Do not merge/promote until the exact candidate passes the ordered local gate.

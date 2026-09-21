@@ -17,7 +17,7 @@ bornées du contrôle initial.
 
 ## Cycle candidat M2–M6
 
-Ces ajouts attendent la qualification locale ordonnée ; ils ne constituent pas une nouvelle publication 3.8.2. En live/hybrid-live, move natif et création durable ont chacun une autorisation dédiée du Bridge ; le patch d’une row Base utilise le snapshot de requête Base puis le CAS de la note. Les nouveaux cycles sont plan/apply/status, absents des runtimes headless/dégradés. [Qualification et promotion locales](cycle-20260920/CODEX-FINALISATION.md).
+Optimike MCP 3.9.0 ajoute ces capacités après qualification locale ordonnée. En live/hybrid-live, move natif et création durable ont chacun une autorisation dédiée du Bridge ; le patch d’une row Base utilise le snapshot de requête Base puis le CAS de la note. Les cycles sont plan/apply/status, absents des runtimes headless/dégradés. [Protocole de qualification et promotion](cycle-20260920/CODEX-FINALISATION.md).
 
 ## Usage recommandé
 
@@ -122,7 +122,7 @@ ont passé le pilote live dédié 3.2.0. Les limites bornées #99/#101 et #139
 restent ouvertes. Le renderer Settings manquant en 3.2.1 est suivi dans #145/#146.
 Operon `3.5.3` reste une preuve historique du déploiement de l’adoption et des
 workflows périodiques ; il n’est pas la cible candidate actuelle. Des runs
-La gate Pilot 2 actuelle cible Optimike MCP `3.8.2` avec Operon `3.6.2`,
+La gate Pilot 2 actuelle cible Optimike MCP `3.9.0` avec Operon `3.6.2`,
 CLI `1.2.0`, Local REST API `5.1.0` et Bridge `0.9.2` ; l’admission de
 la release exige le SHA final propre. Un grant suspendu récupérable peut être
 réapprouvé explicitement dans les réglages Operon ; un binding périmé, révoqué

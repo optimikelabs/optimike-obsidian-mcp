@@ -23,7 +23,7 @@ Periodic Notes API extension is outside the core MCP contract.
 
 ## Candidate cycle M2–M6
 
-These additions are candidates pending ordered local qualification, not a new published 3.8.2 release. In live/hybrid-live, native move and durable creation use their independent Bridge grants; the single-row Base patch uses a Base query snapshot plus note-content CAS. The new lifecycles are plan/apply/status only and are absent from headless/degraded runtimes. [Local qualification and promotion](cycle-20260920/CODEX-FINALISATION.md).
+Optimike MCP 3.9.0 adds these capabilities after ordered local qualification. In live/hybrid-live, native move and durable creation use their independent Bridge grants; the single-row Base patch uses a Base query snapshot plus note-content CAS. The lifecycles are plan/apply/status only and are absent from headless/degraded runtimes. [Qualification and promotion protocol](cycle-20260920/CODEX-FINALISATION.md).
 
 ## Recommended Use
 
@@ -125,7 +125,7 @@ remains unavailable. Relationship and recurrence apply passed the dedicated
 3.2.0 live pilot. The bounded upstream limits in #99/#101 and #139 remain.
 Operon `3.5.3` is retained as historical evidence for the adoption and
 periodic-workflow rollout; it is not the current candidate target. The
-current Pilot 2 gate targets Optimike MCP `3.8.2` with Operon `3.6.2`,
+current Pilot 2 gate targets Optimike MCP `3.9.0` with Operon `3.6.2`,
 CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.9.2`; release admission
 requires the clean final SHA. Recoverably suspended grants may be explicitly
 reapproved in Operon Settings; stale, revoked or drifted bindings remain blocked.

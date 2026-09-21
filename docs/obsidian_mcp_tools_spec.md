@@ -261,7 +261,7 @@ Operon responses always declare `source`, `stale`, `snapshotAt`, `snapshotAgeMs`
 Operon/Bridge versions, capabilities, and limitations.
 
 Mutations require a live Bridge and the loaded engine's official contract.
-Optimike MCP 3.8.2 targets Bridge 0.9.2 with Operon 3.6.2, CLI 1.2.0 and Local
+Optimike MCP 3.9.0 targets Bridge 0.9.2 with Operon 3.6.2, CLI 1.2.0 and Local
 REST API 5.1.0, subject to the repository's exact-SHA Pilot 2 release gate,
 and remains `compatible-provisional` as certification metadata. Valid mutations
 are admitted by the negotiated contract and exact live gates rather than a

@@ -3,7 +3,7 @@
   "repository": "optimikelabs/optimike-obsidian-mcp",
   "state": "candidate_preparation",
   "publishedBaseline": {
-    "version": "3.8.2",
+    "version": "3.9.0",
     "sha": "5588ba658a966ec486f54a2598c090575e11e054"
   },
   "securityPrerequisite": {
