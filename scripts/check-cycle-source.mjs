@@ -14,7 +14,14 @@ const pkg = json("package.json"), lock = json("package-lock.json");
 assert.equal(cycle.schemaVersion, 1);
 assert.equal(cycle.repository, "optimikelabs/optimike-obsidian-mcp");
 assert.equal(cycle.state, "candidate_preparation");
+assert.equal(cycle.publishedBaseline.version, "3.8.2");
 assert.match(cycle.publishedBaseline.sha, /^[a-f0-9]{40}$/u);
+assert.deepEqual(cycle.securityPrerequisite, {
+  pr: 93,
+  branch: "chore/security-audit-20260920",
+  knownCandidateSha: "708d169d92ab1a5749ce7b8b6ac209157aef1963",
+  includedInStack: true,
+});
 assert.equal(lock.version, pkg.version);
 assert.equal(lock.packages[""].version, pkg.version);
 assert.deepEqual(cycle.milestones.map(m => m.id), ["M2", "M3", "M4", "M5", "M6"]);
@@ -27,10 +34,19 @@ const expectedMilestoneTools = {
   M5: ["bases_rows_patch_plan", "bases_rows_patch_apply", "bases_rows_patch_status"],
   M6: [],
 };
+const expectedMilestones = {
+  M2: { pr: 92, branch: "feat/m2-note-links" },
+  M3: { pr: 94, branch: "feat/m3-native-note-move" },
+  M4: { pr: 95, branch: "feat/m4-durable-note-create" },
+  M5: { pr: 96, branch: "feat/m5-p7-base-rows" },
+  M6: { pr: 97, branch: "chore/m6-optimike-cycle-close" },
+};
 for (let i = 0; i < cycle.milestones.length; i++) {
   const m = cycle.milestones[i];
   assert.equal(m.base, i === 0 ? "main" : cycle.milestones[i - 1].branch);
   assert.ok(Number.isSafeInteger(m.pr) && m.pr > 0);
+  assert.equal(m.pr, expectedMilestones[m.id].pr);
+  assert.equal(m.branch, expectedMilestones[m.id].branch);
   assert.equal(m.localGate, "NOT_RUN", "This preparation manifest must not fabricate local completion");
   if (m.id === "M6") assert.equal(m.knownCandidateSha, null, "Do not embed a self-referential commit SHA");
   else assert.match(m.knownCandidateSha, /^[a-f0-9]{40}$/u);
@@ -55,9 +71,13 @@ assert.deepEqual(
 );
 for (const key of requiredFinalGateKeys) assert.equal(cycle.finalGate[key], "NOT_RUN");
 assert.equal(cycle.expectedSurface.crossRuntime, TOOL_SURFACE_REGISTRY.length);
+const requiredLiveProfiles = ["standard", "authoring", "tasks", "full"];
+assert.deepEqual(Object.keys(cycle.expectedSurface.liveProfiles).sort(), [...requiredLiveProfiles].sort());
 for (const [profile, count] of Object.entries(cycle.expectedSurface.liveProfiles)) {
   assert.equal(compileToolProfileNames({ profile, registrationMode: "live", availableStaticRequirements: ["vault-cache"] }).length, count);
 }
+const requiredLifecycleFamilies = ["note-move", "note-create", "base-rows"];
+assert.deepEqual([...cycle.expectedSurface.threeMemberFamilies].sort(), [...requiredLifecycleFamilies].sort());
 for (const family of cycle.expectedSurface.threeMemberFamilies) {
   assert.deepEqual(governedLifecycleRoles(family), ["plan", "apply", "status"]);
 }
