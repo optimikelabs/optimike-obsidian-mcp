@@ -105,7 +105,7 @@ OBSIDIAN_BASE_URL = "http://127.0.0.1:27123"
 OBSIDIAN_API_KEY = "<cle-local-rest-api>"
 ```
 
-Conserver chemins réels, clés API, journaux et configuration External Roots hors du dépôt et des contenus distribuables.
+Conserver chemins réels, clés API, journaux et configuration External Roots hors du dépôt et des contenus distribuables. Pour connecter un runtime local privé à ChatGPT sans endpoint public ni dépendance à Chat On Steroids, voir [ChatGPT via Secure MCP Tunnel](docs/chatgpt-secure-tunnel.fr.md).
 
 ## Intégrations Obsidian optionnelles
 

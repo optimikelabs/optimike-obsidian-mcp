@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Document the direct ChatGPT path through the official OpenAI Secure MCP Tunnel, including the required app refresh and new-conversation check after a tool-surface upgrade.
+- Add a Windows installer for the official `openai/tunnel-client` release that verifies `SHA256SUMS.txt` and the binary-reported version, removing any need to copy the tunnel executable from another desktop application.
+
 ## [3.9.1] - 2026-09-21
 
 ### Changed
