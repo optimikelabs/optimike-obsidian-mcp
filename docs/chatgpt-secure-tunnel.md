@@ -117,7 +117,7 @@ $healthFile = Join-Path $env:TEMP "optimike-tunnel-health.url"
   --health.url-file $healthFile
 ```
 
-When running in the foreground, use `Ctrl+C` to stop that client cleanly before restarting. With a service or supervisor, restart only the instance tied to the Optimike profile; do not kill every `tunnel-client` process on the machine. Read the URL from `$healthFile`, check `/healthz` and `/readyz`, then call `external_roots_list`, `external_list`, and `external_read` on a small canary file.
+The `run` command stays active in the foreground. Leave it running and open a second PowerShell window to read the URL from `$healthFile`, check `/healthz` and `/readyz`, then call `external_roots_list`, `external_list`, and `external_read` on a small canary file. Use `Ctrl+C` in the first window when the client should stop. With a service or supervisor, restart only the instance tied to the Optimike profile; do not kill every `tunnel-client` process on the machine.
 
 Adding an external root does not require an Obsidian or Bridge restart. Bridges own native vault operations. After a Bridge upgrade, follow [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md), reload Obsidian, then verify `obsidian_runtime_status`. A Local REST API reload by itself is recovered automatically by the [Bridge lifecycle supervisor](bridge-lifecycle.md).
 

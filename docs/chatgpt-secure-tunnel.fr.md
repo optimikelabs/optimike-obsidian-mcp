@@ -117,7 +117,7 @@ $healthFile = Join-Path $env:TEMP "optimike-tunnel-health.url"
   --health.url-file $healthFile
 ```
 
-En exécution au premier plan, `Ctrl+C` arrête proprement ce client avant la relance. Avec un service ou un superviseur, redémarrer uniquement l’instance liée au profil Optimike ; ne pas tuer tous les processus `tunnel-client` de la machine. Lire ensuite l’URL dans `$healthFile`, contrôler `/healthz` et `/readyz`, puis appeler `external_roots_list`, `external_list` et `external_read` sur un petit fichier témoin.
+La commande `run` reste active au premier plan. La laisser tourner et ouvrir une seconde fenêtre PowerShell pour lire l’URL dans `$healthFile`, contrôler `/healthz` et `/readyz`, puis appeler `external_roots_list`, `external_list` et `external_read` sur un petit fichier témoin. `Ctrl+C` arrête proprement le client dans la première fenêtre lorsque l’exploitation doit cesser. Avec un service ou un superviseur, redémarrer uniquement l’instance liée au profil Optimike ; ne pas tuer tous les processus `tunnel-client` de la machine.
 
 Ajouter une racine externe ne nécessite pas de redémarrer Obsidian ni ses Bridges. Les Bridges concernent les opérations natives dans le coffre. Après une mise à niveau d’un Bridge, suivre [Bundle des Bridges et rollback](bridge-packaging.fr.md), recharger Obsidian, puis vérifier `obsidian_runtime_status`. Un simple reload de Local REST API est récupéré automatiquement par le [superviseur de lifecycle](bridge-lifecycle.fr.md).
 
