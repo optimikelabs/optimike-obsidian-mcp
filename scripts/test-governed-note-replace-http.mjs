@@ -201,7 +201,10 @@ async function unusedPort() {
 }
 
 async function waitForHealth(url, child) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  // Shared CI runners can need more than five seconds to start a freshly
+  // built Node process. Keep the poll interval short but give startup a
+  // bounded 15-second window before declaring a product failure.
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     if (child.exitCode !== null) {
       throw new Error(`HTTP MCP exited before health check: ${child.exitCode}`);
     }

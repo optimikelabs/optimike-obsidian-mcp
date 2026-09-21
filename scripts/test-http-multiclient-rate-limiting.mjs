@@ -310,9 +310,10 @@ async function testIdentityIsolation(sandbox) {
     });
     assert.equal(a2.status, 200);
 
+    const privateClientLabel = "PRIVATE_CLIENT_A3_SENTINEL_DO_NOT_ECHO";
     const a3 = await mcpPost(instance.baseUrl, {
       token: tokenA,
-      body: initializeBody(4, "a-3"),
+      body: initializeBody(4, privateClientLabel),
     });
     assert.equal(a3.status, 429);
     assert.ok(Number(a3.headers.get("retry-after")) >= 1);
@@ -323,7 +324,7 @@ async function testIdentityIsolation(sandbox) {
     const a3Body = await a3.json();
     assert.equal(a3Body.error.code, -32014);
     assert.equal(a3Body.error.data.applicationCode, "RATE_LIMITED");
-    assert.equal(JSON.stringify(a3Body).includes("a-3"), false);
+    assert.equal(JSON.stringify(a3Body).includes(privateClientLabel), false);
 
     // Client B remains isolated even though every request came from 127.0.0.1.
     const b2 = await mcpPost(instance.baseUrl, {
