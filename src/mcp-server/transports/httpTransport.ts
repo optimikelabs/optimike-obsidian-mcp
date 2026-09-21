@@ -58,7 +58,7 @@ import {
   HTTP_OBSERVABILITY_STALE_AFTER_MS,
   type LiveApiObservation,
 } from "./httpObservability.js";
-import { httpErrorHandler } from "./httpErrorHandler.js";
+import { httpErrorHandler, InvalidHttpSessionError } from "./httpErrorHandler.js";
 import {
   earlyJsonRpcErrorResponse,
   jsonRpcErrorResponse,
@@ -425,10 +425,7 @@ function sessionForRequest(
         clientIdentity: identity.pseudonym,
       }),
     );
-    throw new McpError(
-      BaseErrorCode.NOT_FOUND,
-      "Invalid or expired session ID.",
-    );
+    throw new InvalidHttpSessionError();
   }
   if (session.toolProfile !== requestedProfile) {
     logger.warning(
@@ -441,10 +438,7 @@ function sessionForRequest(
         requestedToolProfile: requestedProfile,
       }),
     );
-    throw new McpError(
-      BaseErrorCode.NOT_FOUND,
-      "Invalid or expired session ID.",
-    );
+    throw new InvalidHttpSessionError();
   }
   session.lastSeenAt = now;
   return session;
@@ -902,10 +896,7 @@ export async function startHttpTransport(
         throw error;
       }
     } else if (!transport || !session) {
-      throw new McpError(
-        BaseErrorCode.NOT_FOUND,
-        "Invalid or expired session ID.",
-      );
+      throw new InvalidHttpSessionError();
     }
 
     try {
@@ -966,10 +957,7 @@ export async function startHttpTransport(
     const session = sessionForRequest(c, sessionId);
 
     if (!session) {
-      throw new McpError(
-        BaseErrorCode.NOT_FOUND,
-        "Session not found or expired.",
-      );
+      throw new InvalidHttpSessionError();
     }
 
     return await handleWithSessionActivity(session, () =>

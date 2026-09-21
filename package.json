@@ -186,7 +186,7 @@
     "test:http-external-handoff": "npm run build && node scripts/test-http-external-handoff.mjs",
     "test:http-multiclient": "npm run build && node scripts/test-http-multiclient-rate-limiting.mjs && node scripts/test-http-session-bounds.mjs",
     "test:http-backpressure": "npm run build && node scripts/test-http-backpressure.mjs && node scripts/test-obsidian-cas.mjs && node scripts/test-obsidian-search-replace-cas.mjs && node scripts/test-external-move-integrity.mjs && node scripts/test-operon-service.mjs",
-    "test:stdio-proxy-reliability": "npm run build && node scripts/test-stdio-proxy-reliability.mjs",
+    "test:stdio-proxy-reliability": "npm run build && node scripts/test-stdio-proxy-reliability.mjs && node scripts/test-stdio-real-session-recovery.mjs",
     "smoke:stdio-backpressure-live": "npm run build && node scripts/smoke-stdio-backpressure-live.mjs",
     "test:http-observability": "npm run build && node scripts/test-http-observability.mjs && node scripts/test-http-observability-endpoints.mjs",
     "test:http-headless-multiclient": "npm run build && node scripts/test-http-headless-multiclient.mjs",
