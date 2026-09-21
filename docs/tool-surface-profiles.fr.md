@@ -14,11 +14,11 @@ Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils
 | Profil      | Usage visé                                                              | Surface complète live/hybrid |
 | ----------- | ----------------------------------------------------------------------- | ---------------------------: |
 | `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    29 outils |
-| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    40 outils |
+| `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    43 outils |
 | `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    35 outils |
-| `full`      | Surface complète/admin explicite du runtime actif                       |                    84 outils |
+| `full`      | Surface complète/admin explicite du runtime actif                       |                    87 outils |
 
-Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 84 outils. Le registre canonique couvre 88 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
+Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 87 outils. Le registre canonique couvre 91 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
 
 `obsidian_note_links` est limité à `live` / `hybrid-live` : sa sémantique vient du `MetadataCache` public d’Obsidian Desktop. Les profils dégradés et headless l’omettent plutôt que de simuler le graphe depuis l’état filesystem.
 

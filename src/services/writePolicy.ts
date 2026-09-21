@@ -25,6 +25,8 @@ export type WriteOperation =
   | "obsidian_frontmatter_patch_plan"
   | "obsidian_frontmatter_patch_apply"
   | "obsidian_frontmatter_patch_recover"
+  | "bases_rows_patch_plan"
+  | "bases_rows_patch_apply"
   | "bases_formula_patch_plan"
   | "bases_formula_patch_apply"
   | "bases_formula_patch_recover"

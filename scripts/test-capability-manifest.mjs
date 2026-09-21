@@ -41,7 +41,7 @@ const atomicReady = {
 const baseReady = {
   ok: true,
   contractVersion: 1,
-  plugin: { id: "optimike-bases-bridge", version: "1.0.0" },
+  plugin: { id: "optimike-bases-bridge", version: "1.2.2" },
   backend: {
     kind: "obsidian-vault-process-base",
     bindingFingerprint: privateMarkers[3],
@@ -162,8 +162,8 @@ function capability(manifest, id) {
 
 const ready = projectCapabilityManifest(input());
 assert.equal(ready.contractVersion, 1);
-assert.equal(ready.capabilities.length, 11);
-assert.equal(ready.summary.ready, 11);
+assert.equal(ready.capabilities.length, 12);
+assert.equal(ready.summary.ready, 12);
 assert.equal(ready.admission.state, "not-applicable");
 for (const item of ready.capabilities) {
   assert.equal(item.discoverable, true, item.id);
@@ -816,3 +816,16 @@ const noCreate = structuredClone(atomicReady); delete noCreate.noteCreate;
 assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: noCreate } })), "governed-note-create").available, false);
 const disabledCreate = structuredClone(atomicReady); disabledCreate.noteCreate.enabled = false;
 assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: disabledCreate } })), "governed-note-create").reasonCode, "bridge_write_disabled");
+
+// M5 writes a note, never its Base config: Base read readiness and note write grants are independent.
+const baseReadOnlyForRows = structuredClone(baseReady); baseReadOnlyForRows.backend.writeEnabled = false;
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: baseReadOnlyForRows } })), "governed-base-rows").state, "ready");
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "missing" } })), "governed-base-rows").available, false);
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", writeMode: "readonly" })), "governed-base-rows").authorized, false);
+assert.equal(capability(projectCapabilityManifest(input({ profile: "standard" })), "governed-base-rows").state, "hidden");
+const legacyRowsBridge = structuredClone(baseReady); legacyRowsBridge.plugin.version = "1.2.1";
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: legacyRowsBridge } })), "governed-base-rows").available, false);
+const futureRowsBridge = structuredClone(baseReady); futureRowsBridge.plugin.version = "1.3.0";
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: futureRowsBridge } })), "governed-base-rows").state, "ready");
+const unknownMajorRowsBridge = structuredClone(baseReady); unknownMajorRowsBridge.plugin.version = "2.0.0";
+assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: unknownMajorRowsBridge } })), "governed-base-rows").available, false);

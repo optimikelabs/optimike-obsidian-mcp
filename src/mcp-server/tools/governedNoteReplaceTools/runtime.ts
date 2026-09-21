@@ -437,6 +437,7 @@ export class GovernedNoteReplaceRuntime {
         "obsidian.text.patch",
         "obsidian.note.move",
         "obsidian.note.create",
+        "obsidian.base.rows.patch",
       ],
       allowUnprojectedFallback: true,
     });

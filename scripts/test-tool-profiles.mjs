@@ -12,8 +12,8 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 29, authoring: 40, tasks: 35, full: 84 },
-  "hybrid-live": { standard: 29, authoring: 40, tasks: 35, full: 84 },
+  live: { standard: 29, authoring: 43, tasks: 35, full: 87 },
+  "hybrid-live": { standard: 29, authoring: 43, tasks: 35, full: 87 },
   "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
   "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
   "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
@@ -140,7 +140,7 @@ for (const profile of TOOL_PROFILE_IDS) {
     for (const [family, roles] of lifecycleFamilies) {
       assert.deepEqual(
         roles.sort(),
-        ["note-move", "note-create"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"],
+        ["note-move", "note-create", "base-rows"].includes(family) ? ["apply", "plan", "status"] : ["apply", "plan", "recover", "status"],
         `${profile}/${registrationMode} exposes a partial ${family} lifecycle`,
       );
     }
@@ -350,3 +350,13 @@ assert.equal(readonlyWithoutCache.length, 5);
 console.log(
   "PASS: profiles are deterministic, removed semantic aliases stay absent, whole-Base config stays full-only, governed families are atomic, and headless tasks expose only snapshot-safe Operon reads",
 );
+
+// M5 intentionally belongs to authoring/full, not standard/tasks; partial families stay hidden.
+const rowsNames = ["bases_rows_patch_plan", "bases_rows_patch_apply", "bases_rows_patch_status"];
+for (const profile of ["authoring", "full"]) {
+  assert.deepEqual(selectAvailableToolProfileNames({ profile, availableNames: rowsNames }), [...rowsNames].sort());
+  if (profile === "authoring") assert.deepEqual(selectAvailableToolProfileNames({ profile, availableNames: rowsNames.slice(0, 2) }), []);
+}
+for (const profile of ["standard", "tasks"]) {
+  assert.deepEqual(selectAvailableToolProfileNames({ profile, availableNames: rowsNames }), []);
+}
