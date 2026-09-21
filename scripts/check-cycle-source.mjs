@@ -100,11 +100,17 @@ for (const name of requiredDocs) {
   assert.ok(fs.statSync(path.join(root, name)).isFile(), `Missing ${name}`);
   assert.ok(pkg.files.includes(name), `npm package must include ${name}`);
 }
-for (const bridge of ["obsidian-atomic-write-bridge", "obsidian-bases-bridge", "obsidian-operon-bridge"]) {
+const qualifiedBridgeVersions = {
+  "obsidian-atomic-write-bridge": "0.8.0",
+  "obsidian-bases-bridge": "1.2.2",
+  "obsidian-operon-bridge": "0.9.2",
+};
+for (const bridge of Object.keys(qualifiedBridgeVersions)) {
   const dir = `plugins/${bridge}`;
   const source = json(`${dir}/manifest.json`), p = json(`${dir}/package.json`), l = json(`${dir}/package-lock.json`);
   assert.equal(source.version, p.version, `${bridge} manifest drift`);
   assert.equal(l.version, p.version); assert.equal(l.packages[""].version, p.version);
+  assert.equal(source.version, qualifiedBridgeVersions[bridge], `${bridge} must remain pinned to its qualified cycle version`);
   assert.equal(source.isDesktopOnly, true);
 }
 const forbidden = /(?:offline-workbench|export-cycle-source|audit-lock-probe|(?:apply|prepare|recover)-m[2-6]|m[2-6]-(?:part\d|surface-part|.*integration|review-fixes))/iu;

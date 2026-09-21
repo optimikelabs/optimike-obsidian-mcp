@@ -43,6 +43,11 @@ try {
     () => fs.unlinkSync(path.join(fixture,"docs/durable-note-create-m4.md")),
     () => write(".github/workflows/prepare-m6-unremoved.yml", "name: temporary\n"),
     () => { const p="plugins/obsidian-bases-bridge/manifest.json",v=JSON.parse(originals.get(p));v.version="999.0.0";write(p,JSON.stringify(v)); },
+    () => {
+      for (const p of ["plugins/obsidian-atomic-write-bridge/manifest.json", "plugins/obsidian-atomic-write-bridge/package.json", "plugins/obsidian-atomic-write-bridge/package-lock.json"]) {
+        const v=JSON.parse(originals.get(p)); v.version="9.9.9"; if(v.packages?.[""]) v.packages[""].version="9.9.9"; write(p,JSON.stringify(v));
+      }
+    },
   ]) {
     for (const [p, b] of originals) write(p, b);
     fs.rmSync(path.join(fixture,".github/workflows/prepare-m6-unremoved.yml"), { force: true });
