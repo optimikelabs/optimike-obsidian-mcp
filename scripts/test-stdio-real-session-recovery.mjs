@@ -39,11 +39,18 @@ async function start() {
  }
  throw new Error('backend health timeout');
 }
-async function stop() { if(backend && backend.exitCode===null){ const exited=once(backend,'exit');backend.kill();await exited; } }
+async function stop() {
+ if(backend && backend.exitCode===null){
+  const exited=once(backend,'exit');
+  backend.kill();
+  const graceful=await Promise.race([exited.then(()=>true),new Promise(resolve=>setTimeout(()=>resolve(false),2000))]);
+  if(!graceful && backend.exitCode===null){backend.kill('SIGKILL');await exited;}
+ }
+}
 async function post(route,body,session) {
  return fetch(base+route,{method:'POST',headers:{Accept:'application/json, text/event-stream','Content-Type':'application/json',...(session?{'Mcp-Session-Id':session}:{})},body:JSON.stringify(body)});
 }
-const watchdog=setTimeout(()=>{backend?.kill();process.exit(2);},45000);
+const watchdog=setTimeout(()=>{backend?.kill('SIGKILL');process.exit(2);},60000);
 try {
  await start();
  const init=await post('/mcp/full',{jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'wire-test',version:'1'}}});
