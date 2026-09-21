@@ -81,8 +81,13 @@ assert.deepEqual([...cycle.expectedSurface.threeMemberFamilies].sort(), [...requ
 for (const family of cycle.expectedSurface.threeMemberFamilies) {
   assert.deepEqual(governedLifecycleRoles(family), ["plan", "apply", "status"]);
 }
-const headless = compileToolNames({ registrationMode: "headless-filesystem", availableStaticRequirements: ["vault-cache"] });
-for (const m of cycle.milestones) for (const name of m.tools) assert.ok(!headless.includes(name), `${name} must remain live-only`);
+const nonLiveModes = ["hybrid-degraded", "headless-readonly", "headless-guarded", "headless-filesystem"];
+for (const registrationMode of nonLiveModes) {
+  const nonLive = compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache"] });
+  for (const m of cycle.milestones) {
+    for (const name of m.tools) assert.ok(!nonLive.includes(name), `${name} must remain live-only; leaked into ${registrationMode}`);
+  }
+}
 assert.deepEqual(json("evals/tool-catalog.v1.json"), buildCatalog(), "Regenerate stale tool catalogue");
 const requiredContracts = [
   "docs/native-note-move-m3.md",
