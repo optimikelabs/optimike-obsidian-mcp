@@ -57,11 +57,15 @@ const absence = (p: Pick<NoteCreatePreflight, "path" | "bindingFingerprint">) =>
 export class NoteCreateOperationAdapter {
   constructor(private readonly backend: NoteCreateBackend, private readonly journal: ObsidianNoteReplaceJournal,
     private readonly now = Date.now,
-    private readonly authorize: (phase: "plan" | "apply", path: string, content: string, automaticFields?: string[]) => void =
-      (phase, path, content, automaticFields = []) =>
+    private readonly authorize: (phase: "plan" | "apply", path: string, content: string) => void =
+      (phase, path, content) =>
         assertWriteAllowed({ operation: phase === "plan" ? "obsidian_note_create_plan" : "obsidian_note_create_apply",
           action: phase, target: path, targetType: "filePath", contentLength: content.length,
-          frontmatterKeys: [...new Set([...noteCreateFrontmatterKeys(content), ...automaticFields])] }),
+          // The Bridge may add qualified timestamp fields after the exclusive
+          // create. They are observed postflight, not authored by this MCP
+          // request. User-supplied protected keys remain rejected because they
+          // are parsed directly from the sealed content here.
+          frontmatterKeys: noteCreateFrontmatterKeys(content) }),
   ) {}
   private sealed(row: ObsidianNoteReplacePlan): NoteCreatePreflight {
     if (row.projection?.kind !== KIND || row.projection.contractVersion !== 1) bad("create_domain_mismatch");
@@ -99,7 +103,7 @@ export class NoteCreateOperationAdapter {
     catch (error) { const existing = winner(); if (existing) return this.receipt(existing); throw error; }
     if (plan.path !== input.path || createPolicyDigest(plan.policy) !== plan.policyDigest) bad("create_preflight_identity_mismatch");
     validateNoteCreate(input.path, input.content, plan.policy);
-    this.authorize("plan", input.path, input.content, plan.policy.fields.map(field => field.propertyName));
+    this.authorize("plan", input.path, input.content);
     const row = this.journal.create({ idempotencyKey: key, idempotencyIdentity: identity, path: input.path,
       nextContent: input.content, beforeSha256: absence({ path: input.path, bindingFingerprint: plan.bindingFingerprint }), afterSha256: hash,
       bindingFingerprint: plan.bindingFingerprint, requestDigest: operationDigest({ ...plan, contentSha256: hash }),
@@ -110,14 +114,14 @@ export class NoteCreateOperationAdapter {
     let row = this.require(ref, key);
     if (row.status !== "planned") return this.status(ref);
     const admitted = this.sealed(row);
-    this.authorize("apply", row.path, row.nextContent, admitted.policy.fields.map(field => field.propertyName));
+    this.authorize("apply", row.path, row.nextContent);
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }
     catch (error) { if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(ref); throw error; }
     const attempt = row.executionOwner!.attemptId;
     let dispatched = false;
     try {
       const plan = this.sealed(row);
-      this.authorize("apply", row.path, row.nextContent, plan.policy.fields.map(field => field.propertyName));
+      this.authorize("apply", row.path, row.nextContent);
       dispatched = true;
       const result = Result.parse(await this.backend.create({ contractVersion: 1, operationId: row.operationId, path: row.path,
         content: row.nextContent, contentSha256: row.afterSha256, bindingFingerprint: row.bindingFingerprint, policyDigest: plan.policyDigest }));
