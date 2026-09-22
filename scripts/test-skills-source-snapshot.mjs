@@ -45,6 +45,16 @@ try {
     await reject(() => svc.readSkillDirectorySnapshot("test.skills", "sample"), `sensitive member ${name}`);
     await rm(p);
   }
+  // The file exception must never authorize a requested directory component.
+  for (const directory of [".gitattributes", ".gitattributes/nested", "container/.gitattributes/nested"]) {
+    await mkdir(path.join(root, directory), { recursive: true });
+    await writeFile(path.join(root, directory, "SKILL.md"), content);
+    const explicit = source({ include: ["**", `${directory}/SKILL.md`] });
+    await reject(() => explicit.readSkillDirectorySnapshot("test.skills", directory), `attributes component ${directory}`);
+  }
+  await rm(path.join(root, ".gitattributes"), { recursive: true });
+  await rm(path.join(root, "container"), { recursive: true });
+
   // Rich skills remain complete; code is passive content, never executed.
   const attributes = path.join(root, "sample", ".gitattributes");
   const python = path.join(root, "sample", "support.py");

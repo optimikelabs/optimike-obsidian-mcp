@@ -26,13 +26,13 @@ const MAX_ENTRIES = 1024;
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const fingerprint = (s: BigIntStats) => [s.dev, s.ino, s.mode, s.nlink, s.size, s.mtimeNs, s.ctimeNs].join(":");
 
-function allowedMember(name: string): boolean {
+function allowedMember(name: string, allowAttributesFile = false): boolean {
   // Publication policy, not an extension to the Agent Skills format. Reject a
   // whole directory rather than silently omit a sensitive/ambiguous member.
   // .gitattributes is the sole dotfile exception, as passive regular-file bytes;
   // root include/exclude/readable checks still apply before any read.
   return name.length > 0 && name !== "." && name !== ".." &&
-    (!name.startsWith(".") || name === ".gitattributes") && !/[\\:\x00-\x1f]/u.test(name) && !/[. ]$/u.test(name) &&
+    (!name.startsWith(".") || (allowAttributesFile && name === ".gitattributes")) && !/[\\:\x00-\x1f]/u.test(name) && !/[. ]$/u.test(name) &&
     !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name) &&
     !/^(?:credentials|secrets)(?:\.|$)/iu.test(name) &&
     !/\.(?:key|pem|p12|pfx)$/iu.test(name);
@@ -67,7 +67,7 @@ export async function readCompleteSkillDirectory(
       const handle = await opendir(absolute);
       for await (const entry of handle) {
         if (++entries > entryLimit) throw new SkillDirectoryError("source_limit");
-        if (!allowedMember(entry.name)) throw new SkillDirectoryError("source_denied");
+        if (!allowedMember(entry.name, true)) throw new SkillDirectoryError("source_denied");
         const relative = `${current.relative}/${entry.name}`;
         const target = await access.resolve(relative);
         const s = await lstat(target, { bigint: true });
