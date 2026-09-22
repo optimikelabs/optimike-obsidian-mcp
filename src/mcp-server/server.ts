@@ -1,3 +1,5 @@
+import { configuredSkillRegistry, installSkillsExtension } from "./resources/skillsExtension.js";
+import { resolveToolProfile } from "./toolProfileRuntime.js";
 import { installLegacyToolCatalog } from "./legacyToolCatalog.js";
 /**
  * @fileoverview Main entry point for the MCP (Model Context Protocol) server.
@@ -1798,12 +1800,14 @@ async function createMcpServerInstance(
       tools: { listChanged: true },
     },
   });
+  const skillsActive = servingContext?.era === "modern" && Boolean(process.env.MCP_SKILLS_CONFIG_FILE?.trim());
   const server = new McpServer(
     { name: config.mcpServerName, version: config.mcpServerVersion },
     {
       capabilities: {
         logging: {}, // Server can receive logging/setLevel and send notifications/message
-        resources: { listChanged: true }, // Server supports dynamic resource lists
+        // Defer only opted-in modern resources until the public Skills boundary is installed.
+        ...(!skillsActive ? { resources: { listChanged: true } } : {}),
         // Tools are registered after installing the public privacy boundary.
       },
     },
@@ -1826,6 +1830,13 @@ async function createMcpServerInstance(
       ? new LocalBasesService(vaultCacheService)
       : undefined;
 
+    let externalRootsService: ExternalRootsService | undefined;
+    if (skillsActive) {
+      externalRootsService = config.externalRootsFile
+        ? await ExternalRootsService.fromConfigFile(config.externalRootsFile) : undefined;
+      const registry = await configuredSkillRegistry(externalRootsService, resolveToolProfile(), servingContext);
+      if (registry) installSkillsExtension(server.server, registry, { deferResourceRead: true });
+    }
     registerToolRoutingResource(server);
 
     // Register read/cache-friendly tools first. In headless-readonly, the REST
@@ -1867,7 +1878,7 @@ async function createMcpServerInstance(
       governedBaseFormulaRuntime,
       governedCanvasRuntime,
     );
-    const externalRootsService = config.externalRootsFile
+    externalRootsService ??= config.externalRootsFile
       ? await ExternalRootsService.fromConfigFile(config.externalRootsFile)
       : undefined;
     await registerExternalRootsTools(
