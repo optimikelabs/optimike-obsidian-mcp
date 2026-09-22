@@ -12,6 +12,7 @@ on:
       - "profiles/elysia-tasks/skills/**"
       - "scripts/test-skills-*.mjs"
       - "scripts/smoke-mcp-skills-local.mjs"
+      - "scripts/skills-local-proof.mjs"
       - "docs/mcp-skills*.md"
       - "package*.json"
       - ".github/workflows/mcp-skills.yml"
