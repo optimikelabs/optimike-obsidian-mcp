@@ -15,7 +15,7 @@ import { StreamableHTTPClientTransport as LegacyHTTP } from '@modelcontextprotoc
 import { StdioClientTransport as LegacyStdio } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ExternalRootsService } from '../dist/services/externalRootsService.js';
 import { SkillRegistry, readSkillsPublicationConfig } from '../dist/services/skills/skillRegistry.js';
-import { ListSkillsClientResultSchema, GetSkillClientResultSchema } from '../dist/mcp-server/resources/skillsExtension.js';
+import { ListSkillsClientResultSchema, GetSkillClientResultSchema } from '../dist/mcp-server/resources/skillsSchemas.js';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const revision = '2026-07-28';
@@ -64,7 +64,6 @@ export async function snapshotVaultDocuments(vault) {
       try {
         const before = await handle.stat({ bigint: true });
         assert.equal(before.dev, stat.dev); assert.equal(before.ino, stat.ino); assert.equal(before.size, stat.size);
-        // Read only the bounded size observed before opening.
         const bytes = Buffer.alloc(Number(before.size)); let offset = 0;
         while (offset < bytes.length) {
           const read = await handle.read(bytes, offset, bytes.length - offset, offset);
@@ -122,7 +121,7 @@ export async function qualifyLocalSkills(env = process.env) {
         const options = { command: process.execPath, args: [path.join(repo, 'dist', transportMode === 'proxy' ? 'stdio-proxy.js' : 'index.js'), '--tool-profile', profile], cwd: repo,
           env: { ...env, MCP_TRANSPORT_TYPE: 'stdio', MCP_PROTOCOL_MODE: 'dual' }, stderr: 'pipe' };
         transport = legacy ? new LegacyStdio(options) : new StdioClientTransport(options);
-        transport.stderr?.on('data', () => {}); // Never echo private child diagnostics into receipts.
+        transport.stderr?.on('data', () => {});
       }
       await client.connect(transport); return client;
     }

@@ -7,24 +7,13 @@ import { SkillRegistry, SkillRegistryError, isSkillResourceUri, readSkillsPublic
 import type { ToolProfileId } from "../toolProfiles.js";
 import { mcpSchema } from "../mcpSchema.js";
 import { activeHttpRequestId } from "../transports/httpRequestState.js";
+import { ListSkillsResultSchema, GetSkillResultSchema } from "./skillsSchemas.js";
+export { ListSkillsResultSchema, GetSkillResultSchema, ListSkillsClientResultSchema, GetSkillClientResultSchema } from "./skillsSchemas.js";
 
 export const SKILLS_EXTENSION_ID = "io.modelcontextprotocol/skills";
 const meta = z.record(z.unknown()).optional();
 const ListParams = z.object({ cursor: z.string().max(256).optional(), _meta: meta }).strict().optional().transform(v => v ?? {});
 const GetParams = z.object({ uri: z.string().min(1).max(4096), _meta: meta }).strict();
-const Entry = z.object({
-  uri: z.string(), frontmatter: z.record(z.unknown()),
-  resources: z.array(z.object({ uri: z.string(), digest: z.string().regex(/^sha256:[a-f0-9]{64}$/u), size: z.number().int().nonnegative() })),
-});
-const fresh = { resultType: z.literal("complete"), ttlMs: z.literal(0), cacheScope: z.literal("private") };
-const ListResult = z.object({ ...fresh, skills: z.array(Entry), nextCursor: z.string().optional() });
-const GetResult = z.object({ ...fresh, skill: Entry });
-export const ListSkillsResultSchema = mcpSchema(ListResult);
-export const GetSkillResultSchema = mcpSchema(GetResult);
-// SDK v2 strips resultType from its public client result after decoding the
-// modern wire envelope. Keep wire validation distinct from that client view.
-export const ListSkillsClientResultSchema = mcpSchema(ListResult.omit({ resultType: true }));
-export const GetSkillClientResultSchema = mcpSchema(GetResult.omit({ resultType: true }));
 
 function safeParams<S extends z.ZodTypeAny>(schema: S): StandardSchemaWithJSON<z.input<S>, z.output<S>> {
   const wrapped = mcpSchema(schema);
