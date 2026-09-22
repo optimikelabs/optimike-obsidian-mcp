@@ -46,14 +46,14 @@ export const ObsidianListNotesInputSchema = z
       ),
     /**
      * Optional JavaScript-compatible regular expression pattern string to filter results by name.
-     * Only files and directories whose names match the regex will be included.
+     * Matching entries are returned; ancestor directories are retained as path context.
      */
     nameRegexFilter: z
       .string()
       .nullable()
       .optional()
       .describe(
-        "Optional regex pattern (JavaScript syntax) to filter results by name.",
+        "Optional regex pattern (JavaScript syntax) to filter results by name. Ancestor directories are retained as path context, without pruning traversal.",
       ),
     /**
      * The maximum depth of subdirectories to list recursively.
@@ -254,7 +254,7 @@ async function buildFileTree(
     const cleanName = isDirectory ? name.slice(0, -1) : name;
 
     // Apply filters
-    if (regex && !regex.test(cleanName)) {
+    if (!isDirectory && regex && !regex.test(cleanName)) {
       continue;
     }
     if (!isDirectory && fileExtensionFilter && fileExtensionFilter.length > 0) {
@@ -281,7 +281,9 @@ async function buildFileTree(
       );
     }
 
-    treeNodes.push(node);
+    if (!isDirectory || !regex || regex.test(cleanName) || node.children.length > 0) {
+      treeNodes.push(node);
+    }
   }
 
   // Sort entries: directories first, then files, alphabetically
@@ -493,11 +495,7 @@ function buildFileTreeFromCache(
   const getOrCreateDirectory = (
     parent: FileTreeNode[],
     name: string,
-  ): FileTreeNode | null => {
-    if (regex && !regex.test(name)) {
-      return null;
-    }
-
+  ): FileTreeNode => {
     const key = `${name}/`;
     const existing = parent.find(
       (node) => node.type === "directory" && node.name === key,
@@ -519,7 +517,7 @@ function buildFileTreeFromCache(
     const relative =
       normalizedPrefix === "/"
         ? entry.path.replace(/^\/+/u, "")
-        : path.posix.relative(normalizedPrefix, entry.path);
+        : path.posix.relative(normalizedPrefix, `/${entry.path.replace(/^\/+/, "")}`);
     if (!relative || relative.startsWith("..")) {
       continue;
     }
@@ -530,23 +528,14 @@ function buildFileTreeFromCache(
     }
 
     let currentLevel = root;
-    let hiddenByFilter = false;
     const maxDirectoryDepth =
       params.recursionDepth === -1
         ? Math.max(segments.length - 1, 0)
-        : Math.min(params.recursionDepth, Math.max(segments.length - 1, 0));
+        : Math.min(params.recursionDepth + 1, Math.max(segments.length - 1, 0));
 
     for (let index = 0; index < maxDirectoryDepth; index++) {
       const directoryNode = getOrCreateDirectory(currentLevel, segments[index]);
-      if (!directoryNode) {
-        hiddenByFilter = true;
-        break;
-      }
       currentLevel = directoryNode.children;
-    }
-
-    if (hiddenByFilter) {
-      continue;
     }
 
     const fileName = segments[segments.length - 1];
@@ -573,7 +562,11 @@ function buildFileTreeFromCache(
     }
   }
 
-  return sortTreeNodes(root);
+  const prune = (nodes: FileTreeNode[]): FileTreeNode[] => nodes.filter(node => {
+    node.children = prune(node.children);
+    return node.type === "file" || !regex || regex.test(node.name.replace(/\/$/u, "")) || node.children.length > 0;
+  });
+  return sortTreeNodes(prune(root));
 }
 
 function sortTreeNodes(nodes: FileTreeNode[]): FileTreeNode[] {

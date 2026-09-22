@@ -182,6 +182,13 @@ const SAFE_NESTED_LOG_FIELDS = new Set([
 ]);
 
 const SAFE_LOG_ENUM_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
+  reasonCode: new Set([
+    "semantic_index_unavailable",
+    "semantic_embedder_configuration_invalid",
+    "semantic_query_embedding_failed",
+    "semantic_query_vector_invalid",
+    "atomic_write_creation_property_missing",
+  ]),
   errorCode: new Set([
     "UNAUTHORIZED",
     "FORBIDDEN",

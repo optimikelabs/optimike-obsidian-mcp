@@ -116,6 +116,8 @@ export interface GlobalSearchResult {
   path: string;
   filename: string;
   matches: MatchContext[];
+  matchCount: number;
+  returnedMatchCount: number;
   modifiedTime: string; // Formatted string
   createdTime: string; // Formatted string
   numericMtime: number; // Numeric mtime for robust sorting
@@ -139,7 +141,10 @@ export interface ObsidianGlobalSearchResponse {
   currentPage: number;
   pageSize: number;
   totalPages: number;
-  alsoFoundInFiles?: string[]; // List of filenames found but not on the current page
+  alsoFoundInFiles?: string[]; // At most 20 vault-relative paths, detailed mode only
+  alsoFoundInFilesTotal?: number;
+  hasMore: boolean;
+  nextPage?: number;
   responseMode?: "detailed" | "compact";
 }
 
@@ -185,9 +190,7 @@ function findMatchesInContent(
     );
     const contextSnippet = content.substring(startIndex, endIndex);
     // Find position *within* the snippet for consistency with API fallback
-    const positionInSnippet = contextSnippet
-      .toLowerCase()
-      .indexOf(matchText.toLowerCase());
+    const positionInSnippet = matchIndex - startIndex;
 
     matches.push({
       // lineNumber removed
@@ -218,6 +221,8 @@ export const processObsidianGlobalSearch = async (
     params: sanitizeInputForLogging(params),
   });
 
+  // Validate before touching either backend: invalid regex must not become an empty success.
+  findMatchesInContent("", params.query, params.useRegex, params.caseSensitive, params.contextLength, opContext);
   let sinceDate: Date | null = null;
   let untilDate: Date | null = null;
   let strategyMessage = "";
@@ -272,32 +277,47 @@ export const processObsidianGlobalSearch = async (
 
     const apiResults: SimpleSearchResult[] = await retryWithDelay(
       async () => {
-        logger.info("Calling obsidianService.searchSimple.", apiSearchContext);
-
-        const apiCallPromise = obsidianService.searchSimple(
-          params.query,
-          params.contextLength,
-          apiSearchContext,
-        );
-
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `API search timed out after ${API_SEARCH_TIMEOUT_MS}ms`,
-                ),
-              ),
-            API_SEARCH_TIMEOUT_MS,
-          ),
-        );
-
-        return await Promise.race([apiCallPromise, timeoutPromise]);
+        logger.info("Searching live content candidates.", apiSearchContext);
+        let expired = false;
+        const searchAttempt = async (): Promise<SimpleSearchResult[]> => {
+          // The simple-search endpoint does not implement JavaScript regex/case
+          // semantics. Enumerate live Markdown candidates for those modes instead.
+          if (params.useRegex || params.caseSensitive) {
+            const candidates: SimpleSearchResult[] = [];
+            const visit = async (directory: string): Promise<void> => {
+              if (expired) return;
+              const names = await obsidianService.listFiles(directory, apiSearchContext);
+              for (const name of names) {
+                // A delayed read may finish after the timeout/cache fallback.
+                // Do not let an expired attempt dispatch more directory reads.
+                if (expired) return;
+                const filename = path.join(directory === "/" ? "" : directory, name);
+                if (name.endsWith("/")) await visit(filename);
+                else if (name.toLowerCase().endsWith(".md")) candidates.push({ filename, matches: [], score: 0 });
+              }
+            };
+            await visit(searchPathPrefix || "/");
+            return candidates;
+          }
+          return obsidianService.searchSimple(params.query, params.contextLength, apiSearchContext);
+        };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            searchAttempt(),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error("API search timed out")), API_SEARCH_TIMEOUT_MS);
+            }),
+          ]);
+        } finally {
+          expired = true;
+          if (timer) clearTimeout(timer);
+        }
       },
       {
         operationName: "obsidianService.searchSimple",
         context: apiSearchContext,
-        maxRetries: 2, // Total of 3 attempts
+        maxRetries: 2, // The shared retry helper counts total attempts.
         delayMs: 500,
         shouldRetry: (err: unknown) => {
           // Retry on any error during the API call phase
@@ -332,6 +352,7 @@ export const processObsidianGlobalSearch = async (
 
       let mtime: number;
       let ctime: number;
+      let content: string;
 
       // Fetch stats regardless of date filtering to include in results
       try {
@@ -340,6 +361,7 @@ export const processObsidianGlobalSearch = async (
           "json",
           fetchStatsContext,
         )) as NoteJson;
+        content = noteJson.content;
         mtime = noteJson.stat.mtime;
         ctime = noteJson.stat.ctime; // Get ctime
 
@@ -359,15 +381,8 @@ export const processObsidianGlobalSearch = async (
         continue; // Skip if stats cannot be fetched
       }
 
-      // Transform SimpleSearchMatch[] to MatchContext[] - OMITTING matchText and position
-      const transformedMatches: MatchContext[] = [];
-      for (const apiMatch of apiResult.matches) {
-        transformedMatches.push({
-          // lineNumber removed
-          context: apiMatch.context, // Use the context provided by the API
-          // matchText and position are omitted as they cannot be reliably determined from API result
-        });
-      }
+      const transformedMatches = findMatchesInContent(content, params.query,
+        params.useRegex, params.caseSensitive, params.contextLength, fetchStatsContext);
 
       // Apply match limit per file
       const limitedMatches = transformedMatches.slice(
@@ -382,6 +397,8 @@ export const processObsidianGlobalSearch = async (
           path: filePathFromApi,
           filename: path.basename(filePathFromApi),
           matches: limitedMatches, // Use limited matches
+          matchCount: transformedMatches.length,
+          returnedMatchCount: limitedMatches.length,
           modifiedTime: formatTimestamp(mtime, fetchStatsContext), // Format mtime
           createdTime: formatTimestamp(ctime, fetchStatsContext), // Format ctime
           numericMtime: mtime, // Store numeric mtime
@@ -462,6 +479,8 @@ export const processObsidianGlobalSearch = async (
                 cacheSearchContext,
               ),
               matches: limitedMatches, // Use limited matches
+              matchCount: matches.length,
+              returnedMatchCount: limitedMatches.length,
               numericMtime: mtime, // Store numeric mtime from cache
             });
             totalMatchesCount += matches.length; // Count *all* matches before limiting
@@ -506,7 +525,7 @@ export const processObsidianGlobalSearch = async (
 
   // Sort results by numeric modified time (descending) *before* pagination
   allFilteredResults.sort((a, b) => {
-    return b.numericMtime - a.numericMtime; // Descending
+    return b.numericMtime - a.numericMtime || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0); // Descending
   });
 
   const paginatedResults = allFilteredResults.slice(startIndex, endIndex);
@@ -515,7 +534,7 @@ export const processObsidianGlobalSearch = async (
       ? paginatedResults.map((result) => ({
           path: result.path,
           filename: result.filename,
-          matchCount: result.matches.length,
+          matchCount: result.matchCount,
           modifiedTime: result.modifiedTime,
           createdTime: result.createdTime,
         }))
@@ -523,12 +542,12 @@ export const processObsidianGlobalSearch = async (
 
   // 5. Determine alsoFoundInFiles
   let alsoFoundInFiles: string[] | undefined = undefined;
-  if (totalPages > 1) {
+  if (totalPages > 1 && params.responseMode !== "compact") {
     const paginatedFilePaths = new Set(paginatedResults.map((r) => r.path));
     alsoFoundInFiles = allFilteredResults
       .filter((r) => !paginatedFilePaths.has(r.path)) // Get files not on the current page
-      .map((r) => r.filename); // Then get their filenames
-    alsoFoundInFiles = [...new Set(alsoFoundInFiles)]; // Ensure unique filenames in the final list
+      .slice(0, 20)
+      .map((r) => r.path); // Stable identity even for same-named notes
   }
 
   // 6. Construct Final Response
@@ -543,7 +562,10 @@ export const processObsidianGlobalSearch = async (
     currentPage: currentPage,
     pageSize: pageSize,
     totalPages: totalPages,
-    alsoFoundInFiles: alsoFoundInFiles, // Add the list here
+    alsoFoundInFiles,
+    ...(alsoFoundInFiles ? { alsoFoundInFilesTotal: totalFilesFound - paginatedResults.length } : {}),
+    hasMore: currentPage < totalPages,
+    nextPage: currentPage < totalPages ? currentPage + 1 : undefined,
     responseMode: params.responseMode,
   };
 

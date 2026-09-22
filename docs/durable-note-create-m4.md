@@ -14,6 +14,8 @@ A process/OS failure can leave a partial newly created file. Status never repair
 
 A content-free effect proof is persisted before terminal payload zeroization. Later status compares current bytes with that proof; drift does not revoke the historical committed receipt but makes the current postflight unverified. The existing journal's retention window applies; indefinite idempotency after journal purging is not promised.
 
+If the file exists but its observed content matches neither the sealed bytes nor qualified automatic date effects after the settlement delay, status transitions an `applying` attempt to `terminal / outcome_unknown` with `postflight: unverified`. Apply and recovery remain disallowed; status may later reconcile a qualified observation without redispatching creation.
+
 ## Automatic fields
 
 The existing Bridge date-integration discovery and strict timestamp-settlement verifier are reused. Only qualified created/modified fields with a supported format/delay are eligible. Viewed fields, ambiguous keys and unsupported configurations refuse admission. Active automatic fields require an explicit frontmatter envelope in the sealed content. An explicit creation timestamp is never silently replaced. Body changes or unqualified YAML normalization are not accepted. Status may be pending until the advertised delay passes. No arbitrary plugin rewrite is excused.

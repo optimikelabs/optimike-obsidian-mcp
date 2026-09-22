@@ -14,6 +14,13 @@ import path from "path";
 import { type SmartVec } from "../../../services/smartEnv.js";
 import { getSemanticCacheService } from "../../../services/semanticCache.js";
 import { getQueryEmbedder } from "../../../adapters/embed/index.js";
+import { detectOllamaBaseUrlFromSmartEnv, recordSemanticSearch, validQueryVector } from "../../../services/semanticSearchHealth.js";
+import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
+
+async function semanticStage<T>(reasonCode: string, action: () => Promise<T>): Promise<T> {
+  try { return await action(); }
+  catch { throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Semantic search could not complete.", { reasonCode }); }
+}
 import { resolveNoteAbsolutePath } from "./resolvePath.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
@@ -182,80 +189,6 @@ function pickDominantModel(items: SmartVec[]): string | undefined {
   return ranked[0]?.[0];
 }
 
-function wrapLooseObjectToJson(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return "{}";
-  // embedding_models.ajson uses a loose object fragment (no outer braces)
-  const withoutTrailingComma = trimmed.replace(/,\s*$/u, "");
-  return `{${withoutTrailingComma}}`;
-}
-
-async function detectOllamaBaseUrlFromSmartEnv(
-  smartEnvDir: string,
-  preferredModel?: string,
-): Promise<string | undefined> {
-  // 1) Prefer Smart Environment default embedding model host, if present.
-  try {
-    const smartEnvJsonPath = path.join(smartEnvDir, "smart_env.json");
-    const smartEnvRaw = await fs.readFile(smartEnvJsonPath, "utf-8");
-    const smartEnv = JSON.parse(smartEnvRaw) as {
-      embedding_models?: { default_model_key?: string };
-    };
-
-    const defaultKey = smartEnv.embedding_models?.default_model_key;
-    if (defaultKey) {
-      const modelsPath = path.join(
-        smartEnvDir,
-        "embedding_models",
-        "embedding_models.ajson",
-      );
-      const modelsRaw = await fs.readFile(modelsPath, "utf-8");
-      const models = JSON.parse(wrapLooseObjectToJson(modelsRaw)) as Record<
-        string,
-        { host?: unknown; model_key?: unknown }
-      >;
-
-      const rec = models[`embedding_models:${defaultKey}`];
-      if (rec && typeof rec.host === "string" && rec.host.trim()) {
-        return rec.host.trim();
-      }
-    }
-  } catch {
-    // ignore and fall back
-  }
-
-  // 2) Fallback: scan embedding_models.ajson for a matching model_key.
-  if (preferredModel) {
-    try {
-      const modelsPath = path.join(
-        smartEnvDir,
-        "embedding_models",
-        "embedding_models.ajson",
-      );
-      const modelsRaw = await fs.readFile(modelsPath, "utf-8");
-      const models = JSON.parse(wrapLooseObjectToJson(modelsRaw)) as Record<
-        string,
-        { host?: unknown; model_key?: unknown }
-      >;
-
-      for (const rec of Object.values(models)) {
-        if (
-          rec &&
-          typeof rec.model_key === "string" &&
-          rec.model_key === preferredModel &&
-          typeof rec.host === "string" &&
-          rec.host.trim()
-        ) {
-          return rec.host.trim();
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return undefined;
-}
 
 function makeSuccessResult(payload: OutType) {
   return {
@@ -334,7 +267,7 @@ async function performSearch(input: InType): Promise<OutType> {
 
   const semanticCache = getSemanticCacheService();
   const semanticCacheStartedAt = nowMs();
-  const snapshot = await semanticCache.getSnapshot();
+  const snapshot = await semanticStage("semantic_index_unavailable", () => semanticCache.getSnapshot());
   timings.semantic_cache = elapsedSince(semanticCacheStartedAt);
   const items = snapshot.items;
   if (!items.length) {
@@ -358,7 +291,7 @@ async function performSearch(input: InType): Promise<OutType> {
     (await detectOllamaBaseUrlFromSmartEnv(SMART_ENV_DIR, model));
 
   const embedderSetupStartedAt = nowMs();
-  const selection = await getQueryEmbedder({
+  const selection = await semanticStage("semantic_embedder_configuration_invalid", () => getQueryEmbedder({
     provider: QUERY_EMBEDDER,
     modelHint: QUERY_EMBEDDER_MODEL_HINT,
     model: QUERY_EMBEDDER_MODEL,
@@ -368,17 +301,23 @@ async function performSearch(input: InType): Promise<OutType> {
     openaiApiKey: OPENAI_API_KEY,
     openaiBaseUrl: OPENAI_BASE_URL,
     openaiDimensions,
-  });
+  }));
   timings.embedder_setup = elapsedSince(embedderSetupStartedAt);
 
   const queryEmbeddingStartedAt = nowMs();
-  const queryVector = await selection.embed(query);
+  let queryVector: number[];
+  try {
+    queryVector = await semanticStage("semantic_query_embedding_failed", () => selection.embed(query));
+  } catch (error) {
+    recordSemanticSearch(selection.embed, dimension, false);
+    throw error;
+  }
   timings.query_embedding = elapsedSince(queryEmbeddingStartedAt);
 
-  if (queryVector.length !== dimension) {
-    throw new Error(
-      `Query embedder produced ${queryVector.length} dimensions, expected ${dimension}`,
-    );
+  if (!validQueryVector(queryVector, dimension)) {
+    recordSemanticSearch(selection.embed, dimension, false);
+    throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Semantic query vector is incompatible.",
+      { reasonCode: "semantic_query_vector_invalid" });
   }
 
   const filterStartedAt = nowMs();
@@ -436,6 +375,7 @@ async function performSearch(input: InType): Promise<OutType> {
   }
   timings.snippets = elapsedSince(snippetsStartedAt);
   timings.total = elapsedSince(startedAt);
+  recordSemanticSearch(selection.embed, dimension, true);
 
   return {
     model,

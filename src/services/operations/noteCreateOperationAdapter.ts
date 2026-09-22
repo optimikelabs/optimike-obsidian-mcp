@@ -167,6 +167,12 @@ export class NoteCreateOperationAdapter {
           });
           postflight = "verified";
         } else if (!settled) postflight = "pending";
+        else if (row.status === "applying") {
+          // A settled mismatch cannot prove creation, but must not leave the
+          // attempt applying forever. Keep status-only reconciliation possible.
+          row = this.journal.transition(row.operationId, ["applying"], "outcome_unknown",
+            "create_postflight_unverified", row.executionOwner?.attemptId);
+        }
       }
     } catch { row = this.require(ref); }
     return this.receipt(row, postflight);
