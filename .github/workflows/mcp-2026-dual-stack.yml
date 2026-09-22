@@ -20,11 +20,10 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
-    env:
-      MCP_EVIDENCE_DIR: ${{ runner.temp }}/mcp-2026-evidence
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -35,7 +34,13 @@ jobs:
       - run: npm --prefix plugins/obsidian-atomic-write-bridge ci
       - run: npm --prefix plugins/obsidian-bases-bridge ci
       - run: npm run build:bridges
+      - name: Record exact candidate
+        run: node -e "const fs=require('fs'); const cp=require('child_process'); fs.mkdirSync(process.env.MCP_EVIDENCE_DIR,{recursive:true}); fs.writeFileSync(process.env.MCP_EVIDENCE_DIR+'/candidate-sha.txt',cp.execFileSync('git',['rev-parse','HEAD']));"
+        env:
+          MCP_EVIDENCE_DIR: ${{ runner.temp }}/mcp-2026-evidence
       - run: npm run test:mcp-2026:all
+        env:
+          MCP_EVIDENCE_DIR: ${{ runner.temp }}/mcp-2026-evidence
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -48,6 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
