@@ -1,0 +1,66 @@
+name: MCP 2026 dual-stack
+on:
+  pull_request:
+    paths:
+      [
+        "src/**",
+        "scripts/**",
+        "package*.json",
+        ".github/workflows/mcp-2026-dual-stack.yml",
+      ]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      MCP_EVIDENCE_DIR: ${{ runner.temp }}/mcp-2026-evidence
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.16.0"
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix plugins/obsidian-operon-bridge ci
+      - run: npm --prefix plugins/obsidian-atomic-write-bridge ci
+      - run: npm --prefix plugins/obsidian-bases-bridge ci
+      - run: npm run build:bridges
+      - run: npm run test:mcp-2026:all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mcp-2026-evidence-${{ runner.os }}
+          path: ${{ runner.temp }}/mcp-2026-evidence
+          if-no-files-found: error
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.16.0"
+      - run: npm ci
+      - name: Fetch exact upstream gateway asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 https://github.com/agentgateway/agentgateway/releases/download/v1.4.0/agentgateway-linux-amd64 -o "$RUNNER_TEMP/agentgateway"
+          echo 'e17c2d737bde6788e7a3109a7b7e4316d1c0f710b8c7488f821c9e1856fd4b32'"  $RUNNER_TEMP/agentgateway" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/agentgateway"
+      - run: npm run test:gateway:agentgateway
+        env:
+          AGENTGATEWAY_BIN: ${{ runner.temp }}/agentgateway
+          AGENTGATEWAY_SHA256: e17c2d737bde6788e7a3109a7b7e4316d1c0f710b8c7488f821c9e1856fd4b32
