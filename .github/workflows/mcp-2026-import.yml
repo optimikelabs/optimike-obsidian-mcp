@@ -1,0 +1,116 @@
+name: Import verified MCP dual-stack candidate
+on:
+  push:
+    branches: [codex/mcp-2026-dual-stack-4e59b8ec]
+    paths: [.github/workflows/mcp-2026-import.yml]
+permissions:
+  contents: write
+jobs:
+  import:
+    if: github.repository == 'optimikelabs/optimike-obsidian-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Fetch and verify exact candidate bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 499a36df09b45c566d2f403d93ee6ad269535ee6 HEAD
+          test -z "$(git status --porcelain)"
+          node --input-type=module <<'NODE'
+          import {createHash} from 'node:crypto';
+          import {writeFileSync} from 'node:fs';
+          import {brotliDecompressSync} from 'node:zlib';
+          const parts = [
+            '665d2764c9165152b2f7daf140f9d9102d895fee',
+            'a57742a83b553f92a966c51ce784e723ea594aad',
+            'b6fbffd4c76ae29c04d950eae64357f21dc596b4',
+            '53bb44ba28f573876da7d616087e5f795ef91f58',
+            '85fca42e5ce67bddc67f12bcbdd47b5a24a02f64',
+            '35b5de189de21243b029e6e2b198e85de0b7a6ba',
+            'cddb419103e058fe558ce536057384e78b0b49d4',
+            'd53f43d89dd2ffe8c2dabc8a8b77ad2f05283eaf'
+          ];
+          const hash = (algorithm, bytes) => createHash(algorithm).update(bytes).digest('hex');
+          const gitHash = text => hash('sha1', Buffer.concat([Buffer.from(`blob ${Buffer.byteLength(text)}\0`),Buffer.from(text)]));
+          let encoded = '';
+          for (let i=0; i<parts.length; i++) {
+            const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/git/blobs/${parts[i]}`, {headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json'}});
+            if (!response.ok) throw new Error(`Blob ${i+1} unavailable: ${response.status}`);
+            const blob = await response.json();
+            if(blob.encoding !== 'base64') throw new Error('Unexpected blob encoding');
+            let text = Buffer.from(blob.content,'base64').toString('utf8');
+            if(gitHash(text) !== parts[i]) throw new Error(`Blob ${i+1} checksum failed`);
+            if (i===3) {
+              // Repair one explicitly identified copy omission; the corrected
+              // blob and both complete archive digests must match local evidence.
+              const from='QuekJ+Q8Edk5/++DN7AGUFSQSr5MN4R65MNa3gx';
+              const to='QuekJ+Q8Edk5/++DN7AGUFSQ38QLhYt5iA8DbbJ+uwTFQSr5MN4R65MNa3gx';
+              if(text.split(from).length !== 2) throw new Error('Copy repair is not unique');
+              text=text.replace(from,to);
+              if(gitHash(text) !== '8cf2ece0e0b6ed7d02752cb2158da220ec0eaca1') throw new Error('Repaired part checksum failed');
+            }
+            if(text.length !== (i===7?11568:12000) || !/^[A-Za-z0-9+/=]+$/.test(text)) throw new Error('Invalid fragment');
+            encoded+=text;
+          }
+          if(encoded.length !== 95568) throw new Error('Encoded length mismatch');
+          const compressed=Buffer.from(encoded,'base64');
+          if(compressed.length !== 71675 || hash('sha256',compressed) !== '7daeca0c58de66579f46554319ded759093034fa708a1e78d1c7dc3f2ded7d97') throw new Error('Archive checksum mismatch');
+          const patch=brotliDecompressSync(compressed,{maxOutputLength:500000});
+          if(patch.length !== 451808 || hash('sha256',patch) !== 'a984a2ee59ee0b10de744f8687c67fcb00654214438d9d40f196fa2acaebf4df') throw new Error('Patch checksum mismatch');
+          writeFileSync(`${process.env.RUNNER_TEMP}/dual-stack-series.patch`,patch);
+          NODE
+      - name: Apply reviewed series and retire import-only workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'MCP candidate integration'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git am "$RUNNER_TEMP/dual-stack-series.patch"
+          git rm .github/workflows/mcp-2026-import.yml .github/workflows/mcp-2026-qualification.yml
+          git commit -m 'chore(ci): remove one-time isolated qualification and import workflows'
+          npm install --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org/
+          if ! git diff --quiet -- package-lock.json; then
+            git add package-lock.json
+            git commit -m 'chore(deps): normalize SDK v2 lockfile with npm'
+          fi
+          git diff --check
+          test -z "$(git status --porcelain)"
+      - name: Validate reproducible install and build before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          MCP_EVIDENCE_DIR="$RUNNER_TEMP/mcp-evidence" npm run test:mcp-2026
+      - name: Publish candidate branch fast-forward only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref='codex/mcp-2026-dual-stack-4e59b8ec'
+          live=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$ref" --jq '.object.sha')
+          test "$live" = "$GITHUB_SHA"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$ref"
+          git log -7 --format='%H %s' > "$RUNNER_TEMP/mcp-commits.txt"
+          git bundle create "$RUNNER_TEMP/mcp-dual-stack.bundle" HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mcp-dual-stack-import-evidence
+          path: |
+            ${{ runner.temp }}/mcp-evidence/
+            ${{ runner.temp }}/mcp-commits.txt
+            ${{ runner.temp }}/mcp-dual-stack.bundle
+          retention-days: 7
