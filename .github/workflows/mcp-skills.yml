@@ -10,6 +10,9 @@ on:
       - "src/stdio-proxy.ts"
       - "profiles/elysia-tasks/skills/**"
       - "scripts/test-skills-*.mjs"
+      - "scripts/smoke-mcp-skills-local.mjs"
+      - "docs/mcp-skills*.md"
+      - "package*.json"
       - ".github/workflows/mcp-skills.yml"
 
 permissions:
@@ -43,3 +46,4 @@ jobs:
       - run: node scripts/test-skills-protocol.mjs
       - run: node scripts/test-skills-runtime.mjs
       - run: node scripts/test-skills-repo.mjs
+      - run: node scripts/test-skills-smoke.mjs
