@@ -18,19 +18,27 @@ await mkdir(output, { recursive: true });
 const modern = [
   "test-mcp-schema-compatibility.mjs",
   "test-mcp-2026-http.mjs",
+  "test-mcp-2026-version-review.mjs",
   "test-mcp-2026-stdio.mjs",
   "test-mcp-2026-backpressure.mjs",
   "test-mcp-2026-proxy.mjs",
   "test-mcp-2026-governed-loss.mjs",
 ];
 const jobs = [];
+// These are separately required repository gates, never counted as local PASS.
+const delegatedGates = [
+  { script: "test-agentgateway-compatibility.mjs", owner: "MCP 2026 dual-stack / gateway (Linux)" },
+  { script: "test-tool-routing-scorer.mjs", owner: "P6 Tool Routing Evaluation / Linux" },
+];
 if (mode === "all") {
   for (const file of (await readdir("scripts"))
     .filter((f) => /^test-.*\.mjs$/.test(f) && !modern.includes(f))
     .sort()) {
-    // The gateway suite is a separate, checksum-pinned Linux job. Do not count
-    // an unavailable third-party binary as a passing protocol test.
-    if (file === "test-agentgateway-compatibility.mjs") continue;
+    // Match the repository's existing ownership: gateway and the expensive
+    // clean-checkout scorer have one authoritative Linux gate. The scorer's
+    // many nested npm installs exceed this runner's per-script budget and are
+    // intentionally not duplicated on Windows (see the existing P6 workflow).
+    if (delegatedGates.some(gate => gate.script === file)) continue;
     jobs.push({ label: file, file, env: { MCP_PROTOCOL_MODE: "legacy" } });
   }
 }
@@ -91,7 +99,7 @@ for (const job of jobs) {
   await writeFile(
     path.join(output, "results-" + mode + ".json"),
     JSON.stringify(
-      { mode, platform: process.platform, node: process.version, results },
+      { mode, platform: process.platform, node: process.version, delegatedGates, results },
       null,
       2,
     ),
@@ -105,6 +113,7 @@ console.log(
   JSON.stringify({
     passed: results.filter((r) => r.code === 0).length,
     total: results.length,
+    delegatedGates,
     output,
   }),
 );
