@@ -1,0 +1,42 @@
+# TEMPORARY: read-only transfer of already-versioned code to an offline reviewer.
+# Remove before CANDIDATE_READY_REPO. No credentials or runtime configuration exported.
+name: Temporary MCP offline snapshot
+on:
+  pull_request:
+    paths: [".github/workflows/mcp-online-snapshot.yml"]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    if: github.repository == 'optimikelabs/optimike-obsidian-mcp' && github.event.pull_request.number == 103 && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.16.0"
+      - run: npm ci
+      - run: npm --prefix plugins/obsidian-operon-bridge ci
+      - run: npm --prefix plugins/obsidian-atomic-write-bridge ci
+      - run: npm --prefix plugins/obsidian-bases-bridge ci
+      - name: Export tracked source and public dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/mcp-offline"
+          mkdir -p "$out"
+          git rev-parse HEAD > "$out/source-sha.txt"
+          git archive --format=tar.gz HEAD > "$out/source.tar.gz"
+          tar -czf "$out/dependencies.tar.gz" node_modules plugins/obsidian-operon-bridge/node_modules plugins/obsidian-atomic-write-bridge/node_modules plugins/obsidian-bases-bridge/node_modules
+          cd "$out"
+          sha256sum source.tar.gz dependencies.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcp-offline-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/mcp-offline
+          retention-days: 3
+          if-no-files-found: error
