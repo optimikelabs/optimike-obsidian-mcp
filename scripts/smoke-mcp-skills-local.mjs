@@ -16,6 +16,7 @@ import { StdioClientTransport as LegacyStdio } from '@modelcontextprotocol/sdk/c
 import { ExternalRootsService } from '../dist/services/externalRootsService.js';
 import { SkillRegistry, readSkillsPublicationConfig } from '../dist/services/skills/skillRegistry.js';
 import { ListSkillsClientResultSchema, GetSkillClientResultSchema } from '../dist/mcp-server/resources/skillsSchemas.js';
+import { requireObservedDesktop } from './skills-local-proof.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const revision = '2026-07-28';
@@ -140,7 +141,7 @@ export async function qualifyLocalSkills(env = process.env) {
     const runtimeRevision = status.runtime?.git?.revision;
     assert.match(runtimeRevision ?? '', /^[a-f0-9]{7,40}$/u);
     assert.ok(expected.startsWith(runtimeRevision), 'served runtime differs from checkout');
-    if (requireLive) assert.equal(status.runtimeMode, 'live', 'Desktop live gate not exercised');
+    if (requireLive) requireObservedDesktop(status);
     const listed = []; const cursors = new Set(); let cursor;
     do {
       const page = await modern.request({ method: 'skills/list', params: cursor ? { cursor } : {} }, ListSkillsClientResultSchema, requestOptions);

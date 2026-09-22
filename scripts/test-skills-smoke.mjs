@@ -5,14 +5,26 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { qualifyLocalSkills, verifyResourceBytes, snapshotVaultDocuments } from './smoke-mcp-skills-local.mjs';
+import { requireObservedDesktop } from './skills-local-proof.mjs';
 import { fixture, token } from './fixtures/mcp-2026/runtime.mjs';
 
+const live = { runtimeMode: 'live', capabilityManifest: { registrationMode: 'live', capabilities:
+  ['local-rest', 'vault-read'].map(id => ({ id, available: true, authorized: true, state: 'ready', reasonCode: 'ready' })) } };
+requireObservedDesktop(live);
+for (const id of ['local-rest', 'vault-read']) {
+  for (const patch of [{ available: false }, { authorized: false }, { state: 'degraded' }, { reasonCode: 'cache_fallback' }]) {
+    const status = structuredClone(live);
+    Object.assign(status.capabilityManifest.capabilities.find(entry => entry.id === id), patch);
+    assert.throws(() => requireObservedDesktop(status));
+  }
+}
+assert.throws(() => requireObservedDesktop({ runtimeMode: 'live' }));
 const bytes = Buffer.from([0, 255, 10]);
 const resource = { uri: 'skill://sample/SKILL.md', size: bytes.length,
   digest: 'sha256:' + createHash('sha256').update(bytes).digest('hex') };
 const contents = [{ uri: resource.uri, blob: bytes.toString('base64') }];
 assert.equal(verifyResourceBytes(resource, contents), 3);
-for (const wrong of [ { ...resource, size: 4 }, { ...resource, digest: 'sha256:' + '0'.repeat(64) }, { ...resource, uri: 'skill://other/SKILL.md' } ]) {
+for (const wrong of [{ ...resource, size: 4 }, { ...resource, digest: 'sha256:' + '0'.repeat(64) }, { ...resource, uri: 'skill://other/SKILL.md' }]) {
   assert.throws(() => verifyResourceBytes(wrong, contents));
 }
 assert.throws(() => verifyResourceBytes(resource, [{ ...contents[0], blob: 'AP8K ' }]));
@@ -54,5 +66,5 @@ try {
   assert.notDeepEqual(await snapshotVaultDocuments(backend.root), before);
   await writeFile(sentinel, original);
   assert.deepEqual(await snapshotVaultDocuments(backend.root), before);
-  console.log('PASS: reusable local canary exercised over real HTTP/stdio/proxy, digest corruption rejected, source drift detected, wrong SHA/live proof refused');
+  console.log('PASS: reusable local canary over real HTTP/stdio/proxy; digest/source drift, wrong SHA and configured-only live proof rejected');
 } finally { await backend?.close(); await rm(sandbox, { recursive: true, force: true }); }
