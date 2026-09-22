@@ -169,7 +169,14 @@ export class SkillRegistry {
     const candidates = this.publications.filter(pub => uri.startsWith(rootUri(pub) + "/"))
       .sort((a, b) => rootUri(b).length - rootUri(a).length);
     for (const pub of candidates) {
-      const { snapshot } = await this.load(pub);
+      let snapshot: SkillSourceSnapshot;
+      try { ({ snapshot } = await this.load(pub)); }
+      catch (error) {
+        // A refused nested publication cannot shadow a complete, independently
+        // authorized enclosing snapshot. Every candidate still passes load().
+        if (error instanceof SkillRegistryError) continue;
+        throw error;
+      }
       const file = snapshot.files.find(file => uri === fileUri(pub, file.path));
       if (!file) continue;
       const mimeType = mimeTypes[path.posix.extname(file.path).toLowerCase()] ?? "application/octet-stream";

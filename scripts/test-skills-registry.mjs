@@ -104,6 +104,20 @@ try{
  await nested.read(uri('outer/inner'));await reject(()=>nested.get(uri('outer/inner')),'not_found');
  const nestedPublished=new SkillRegistry(roots,config([pub('outer'),pub('outer/inner')]),'full');
  assert.equal((await nestedPublished.get(uri('outer/inner'))).skill.frontmatter.name,'inner');checks++;
+ // An invalid nested publication must not shadow valid parent supporting content.
+ await writeFile(path.join(root,'outer/inner/SKILL.md'),'---\nname: different\ndescription: Supporting content\n---\nNested support\n');
+ const supporting=(await nestedPublished.get(uri('outer'))).skill.resources.find(x=>x.uri===uri('outer/inner'));
+ assert.ok(supporting);
+ const supportingRead=(await nestedPublished.read(supporting.uri)).contents[0];
+ assert.equal(hash(Buffer.from(supportingRead.text)),supporting.digest);checks++;
+ await reject(()=>nestedPublished.get(uri('outer/inner')),'frontmatter_invalid');
+ const nestedOnly=new SkillRegistry(roots,config([pub('outer/inner')]),'full');
+ await reject(()=>nestedOnly.read(uri('outer/inner')),'not_found');
+ // A forbidden member still rejects the complete enclosing snapshot as well.
+ await writeFile(path.join(root,'outer/inner/.env'),'PRIVATE_SECRET');
+ await reject(()=>nestedPublished.read(uri('outer/inner')),'not_found');
+ await reject(()=>nestedPublished.get(uri('outer')),'source_denied');
+ await rm(path.join(root,'outer/inner/.env'));
  const file=path.join(root,'publication.json');await writeFile(file,JSON.stringify(cfg));assert.deepEqual(await readSkillsPublicationConfig(file),cfg);checks++;
  await reject(()=>readSkillsPublicationConfig('relative.json'),'configuration_invalid');
  await writeFile(file,'x'.repeat(65537));await reject(()=>readSkillsPublicationConfig(file),'configuration_invalid');
