@@ -408,7 +408,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     if (field in (payload.error.details ?? {})) {
       const value = payload.error.details[field];
       assert.equal(typeof value, "string");
-      if (field === "reasonCode") assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
+      if (field === "reasonCode" && value !== "atomic_write_creation_property_missing") assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
       if (field === "phase")
         assert.ok(
           ["planned", "applying", "recovering", "terminal"].includes(value),
@@ -990,6 +990,8 @@ try {
     "creation-date properties to exist",
     "missing creation date",
   );
+  assert.equal(missingCreatedAttempt.payload.error.details.reasonCode, "atomic_write_creation_property_missing");
+  assert.doesNotMatch(JSON.stringify(missingCreatedAttempt.payload), /bornAt|missingCreatedProperties/);
   assert.equal(fake.casRequests, 0);
 
   fake.reset("---\nchangedAt: 2026-08-17T10:00\n---\nbefore\n");

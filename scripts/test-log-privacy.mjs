@@ -390,7 +390,9 @@ try {
   logger.alert(`alert ${marker}`, new Error(backendOnlyMarker), rawContext);
   logger.emerg(`emerg ${marker}`, new Error(backendOnlyMarker), rawContext);
 
+  logger.error("Semantic stage failed", { errorDetails: { reasonCode: "semantic_query_embedding_failed" } });
   const serializedLogs = JSON.stringify({ winstonEntries, mcpNotifications });
+  assert.match(serializedLogs, /"reasonCode":"semantic_query_embedding_failed"/u);
   assert.doesNotMatch(serializedLogs, new RegExp(marker, "u"));
   assert.doesNotMatch(serializedLogs, new RegExp(backendOnlyMarker, "u"));
   assert.doesNotMatch(serializedLogs, new RegExp(backendTokenMarker, "u"));

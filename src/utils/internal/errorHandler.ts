@@ -220,6 +220,11 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
 ]);
 
 const SAFE_PUBLIC_REASON_CODES = new Set([
+  "semantic_index_unavailable",
+  "semantic_embedder_configuration_invalid",
+  "semantic_query_embedding_failed",
+  "semantic_query_vector_invalid",
+  "atomic_write_creation_property_missing",
   "REVISION_CONFLICT",
   "OPERON_BRIDGE_REQUEST_INVALID",
   "OPERON_BRIDGE_UNAUTHORIZED",

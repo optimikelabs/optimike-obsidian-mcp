@@ -829,3 +829,16 @@ const futureRowsBridge = structuredClone(baseReady); futureRowsBridge.plugin.ver
 assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: futureRowsBridge } })), "governed-base-rows").state, "ready");
 const unknownMajorRowsBridge = structuredClone(baseReady); unknownMajorRowsBridge.plugin.version = "2.0.0";
 assert.equal(capability(projectCapabilityManifest(input({ profile: "authoring", baseAtomicWrite: { state: "ready", value: unknownMajorRowsBridge } })), "governed-base-rows").available, false);
+
+// VNext R1-C: lack of observation is not proof that Operon is absent.
+for (const observed of [
+  { state: "unavailable" },
+  { state: "ready", value: { ok: false, source: "unavailable" } },
+  { state: "ready", value: { live: { operon: {} } } },
+]) {
+  for (const id of ["operon-read", "operon-write"]) {
+    assert.equal(capability(projectCapabilityManifest(input({ operon: observed })), id).reasonCode, "bridge_unavailable");
+  }
+}
+assert.equal(capability(projectCapabilityManifest(input({ operon: { state: "ready", value: operonReady({ operon: { present: false } }) } })), "operon-read").reasonCode, "operon_not_present");
+console.log("PASS: R1-C unavailable and unknown observations are distinct from explicit Operon absence");

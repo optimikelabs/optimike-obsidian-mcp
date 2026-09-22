@@ -118,6 +118,51 @@ try {
     assert.equal(result.outcome, "committed"); assert.equal(result.effectProof.details.match, "date-settled");
     assert.equal(f.calls(), 1); f.journal.close(); cases++;
   }
+  for (const delayMs of [0, 2250]) {
+    const fields = delayMs ? [{ pluginId: "update-time", role: "modified", propertyName: "updated", delayMs }] : [];
+    const f = fixture("settled-drift-" + delayMs, fields), p = await f.adapter.plan(input), create = f.backend.create;
+    const drifted = input.content.replace("Private prose.", "Unqualified drift.");
+    f.backend.create = async request => {
+      const result = await create(request);
+      f.files.set(request.path, drifted);
+      return result;
+    };
+    try {
+      let result = await f.adapter.apply(p.planRef, input.idempotencyKey);
+      if (delayMs) {
+        assert.equal(result.phase, "applying"); assert.equal(result.postflight, "pending");
+        f.tick(delayMs - 1);
+        result = await f.adapter.status(p.planRef);
+        assert.equal(result.phase, "applying"); assert.equal(result.outcome, null);
+        assert.equal(result.postflight, "pending");
+        f.tick(1);
+        result = await f.adapter.status(p.planRef);
+      }
+      assert.equal(result.phase, "terminal"); assert.equal(result.outcome, "outcome_unknown");
+      assert.equal(result.postflight, "unverified"); assert.equal(result.effectProof, null);
+      assert.equal(result.applyAllowed, false); assert.equal(result.recoveryAllowed, false);
+      assert.equal(result.nextAction, "status");
+      assert.equal(f.journal.get(p.operationId).failure, "create_postflight_unverified");
+      assert.equal((await f.adapter.plan(input)).planRef, p.planRef);
+      assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "outcome_unknown");
+      assert.equal(f.calls(), 1); assert.equal(f.files.get(input.path), drifted);
+    } finally { f.journal.close(); }
+    const reopened = new ObsidianNoteReplaceJournal(f.db, { now: f.clock });
+    const adapter = new NoteCreateOperationAdapter(f.backend, reopened, f.clock, f.authorize);
+    try {
+      assert.equal((await adapter.status(p.planRef)).outcome, "outcome_unknown");
+      assert.equal((await adapter.apply(p.planRef, input.idempotencyKey)).outcome, "outcome_unknown");
+      assert.equal(f.files.get(input.path), drifted); assert.equal(f.calls(), 1);
+      // A later qualified observation can still reconcile, without redispatch.
+      f.files.set(input.path, input.content);
+      const reconciled = await adapter.status(p.planRef);
+      assert.equal(reconciled.outcome, "committed"); assert.equal(reconciled.postflight, "verified");
+      assert.equal(reconciled.effectProof.details.match, "exact");
+      await adapter.apply(p.planRef, input.idempotencyKey);
+      assert.equal(f.calls(), 1);
+    } finally { reopened.close(); }
+    cases++;
+  }
   {
     const fields = [{ pluginId: "update-time", role: "modified", propertyName: "updated", delayMs: 2250 }];
     const f = fixture("lost-reply-policy-change", fields), p = await f.adapter.plan(input), create = f.backend.create;

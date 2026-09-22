@@ -1,5 +1,6 @@
 import { config } from "../config/index.js";
 import { getQueryEmbedder } from "../adapters/embed/index.js";
+import { detectOllamaBaseUrlFromSmartEnv, semanticSearchHealth } from "./semanticSearchHealth.js";
 import {
   compileToolProfileNames,
   type ToolProfileId,
@@ -55,6 +56,7 @@ export type CapabilityReasonCode =
   | "semantic_query_embedding_disabled"
   | "semantic_index_unavailable"
   | "semantic_embedder_unavailable"
+  | "semantic_query_unverified"
   | "bridge_unavailable"
   | "bridge_lifecycle_not_ready"
   | "bridge_contract_incompatible"
@@ -87,6 +89,7 @@ export type CapabilityNextAction =
   | "enable_query_embedding"
   | "refresh_semantic_index"
   | "configure_query_embedder"
+  | "run_semantic_search"
   | "install_or_enable_bridge"
   | "wait_for_bridge"
   | "update_bridge_contract"
@@ -166,6 +169,7 @@ export interface CapabilityManifestProjectionInput {
   semanticIndex: NormalizedProbe<{
     vectorCount: number;
     embedderReady: boolean;
+    queryUnverified?: boolean;
   }>;
   operonMutationsEnabled: boolean;
   writeMode: "readonly" | "guarded" | "full";
@@ -189,6 +193,7 @@ export interface CapabilityProbeDependencies {
   semanticIndex?: () => Promise<{
     vectorCount: number;
     embedderReady: boolean;
+    queryUnverified?: boolean;
   }>;
   atomicWrite?: () => Promise<AtomicWriteStatusResponse>;
   baseAtomicWrite?: () => Promise<BaseAtomicStatusResponse>;
@@ -463,21 +468,26 @@ function semanticCapability(
   const embedderReady =
     input.semanticIndex.state === "ready" &&
     input.semanticIndex.value.embedderReady === true;
+  const queryUnverified = input.semanticIndex.state === "ready" &&
+    input.semanticIndex.value.queryUnverified === true;
   return entry(
     input,
     "semantic-search",
-    validated && embedderReady,
-    validated && embedderReady,
+    validated && (embedderReady || queryUnverified),
+    validated && (embedderReady || queryUnverified),
     !validated
       ? "semantic_index_unavailable"
       : embedderReady
         ? "ready"
-        : "semantic_embedder_unavailable",
+        : queryUnverified
+          ? "semantic_query_unverified" : "semantic_embedder_unavailable",
     !validated
       ? "refresh_semantic_index"
       : embedderReady
         ? "none"
-        : "configure_query_embedder",
+        : queryUnverified
+          ? "run_semantic_search" : "configure_query_embedder",
+    queryUnverified,
   );
 }
 
@@ -699,11 +709,11 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
     const reason: CapabilityReasonCode =
       input.operon.state === "incompatible"
         ? "operon_incompatible"
-        : "operon_not_present";
+        : "bridge_unavailable";
     const action: CapabilityNextAction =
       input.operon.state === "incompatible"
         ? "load_or_update_operon"
-        : "install_or_enable_bridge";
+        : "start_obsidian_and_retry";
     return {
       read: entry(input, "operon-read", false, false, reason, action),
       write: unavailableOperonWrite(input, reason, action),
@@ -756,7 +766,10 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
     reads;
   let readReason: CapabilityReasonCode = "ready";
   let readAction: CapabilityNextAction = "none";
-  if (!present) {
+  if (operon.present !== true && operon.present !== false) {
+    readReason = "bridge_unavailable";
+    readAction = "start_obsidian_and_retry";
+  } else if (!present) {
     readReason = "operon_not_present";
     readAction = "load_or_update_operon";
   } else if (!compatible) {
@@ -1096,13 +1109,13 @@ export async function collectCapabilityManifest(options: {
         (async () => {
           const readiness = await getSemanticCacheService().probeReadiness();
           try {
-            await getQueryEmbedder({
+            const selection = await getQueryEmbedder({
               provider: config.queryEmbedder,
               modelHint: config.queryEmbedderModelHint,
               model: config.queryEmbedderModel,
               vaultModel: readiness.dominantModel,
               dimension: readiness.dominantDimension,
-              ollamaBaseUrl: config.ollamaBaseUrl,
+              ollamaBaseUrl: config.ollamaBaseUrl?.trim() || (config.smartEnvDir ? await detectOllamaBaseUrlFromSmartEnv(config.smartEnvDir, readiness.dominantModel) : undefined),
               openaiApiKey: config.openaiApiKey,
               openaiBaseUrl: config.openaiBaseUrl,
               openaiDimensions: Number.isFinite(
@@ -1111,7 +1124,8 @@ export async function collectCapabilityManifest(options: {
                 ? Number(config.openaiEmbeddingDimensions)
                 : undefined,
             });
-            return { ...readiness, embedderReady: true };
+            const health = semanticSearchHealth(selection.embed, readiness.dominantDimension ?? 0);
+            return { ...readiness, embedderReady: health === "verified", queryUnverified: health === "unverified" };
           } catch {
             return { ...readiness, embedderReady: false };
           }

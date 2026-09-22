@@ -213,7 +213,7 @@ function validateReplacement(
       throw new McpError(
         BaseErrorCode.FORBIDDEN,
         `Atomic note replacement requires active creation-date properties to exist before planning: ${missingCreated.join(", ")}`,
-        { missingCreatedProperties: missingCreated },
+        { reasonCode: "atomic_write_creation_property_missing", missingCreatedProperties: missingCreated },
       );
     }
     if (dateProtection.unsupportedModifiedPropertyNames.length > 0) {
