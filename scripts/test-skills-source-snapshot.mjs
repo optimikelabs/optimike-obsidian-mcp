@@ -39,12 +39,40 @@ try {
   await reject(() => source({ limits: { maxListEntries: 2 } }).readSkillDirectorySnapshot("test.skills", "sample"), "entry limit");
   await reject(() => source({ limits: { maxFileBytes: 4 } }).readSkillDirectorySnapshot("test.skills", "sample"), "file limit");
 
-  for (const name of [".env", "private.key", "credentials.json", "secrets.yaml"]) {
+  for (const name of [".env", ".npmrc", "private.key", "credentials.json", "secrets.yaml"]) {
     const p = path.join(root, "sample", name);
     await writeFile(p, "SECRET_SENTINEL_NOT_PUBLISHED");
     await reject(() => svc.readSkillDirectorySnapshot("test.skills", "sample"), `sensitive member ${name}`);
     await rm(p);
   }
+  // Rich skills remain complete; code is passive content, never executed.
+  const attributes = path.join(root, "sample", ".gitattributes");
+  const python = path.join(root, "sample", "support.py");
+  const json = path.join(root, "sample", "support.json");
+  await writeFile(attributes, "*.md text eol=lf\r\n");
+  await writeFile(python, `raise RuntimeError("MUST_NEVER_EXECUTE")\n`);
+  await writeFile(json, '{"passive":true}\n');
+  const richSource = source({ include: ["**", "sample/.gitattributes"] });
+  const rich = await richSource.readSkillDirectorySnapshot("test.skills", "sample");
+  assert.deepEqual(rich.files.find(f => f.path === ".gitattributes").bytes, await readFile(attributes));
+  assert.ok(rich.files.some(f => f.path === "support.py"));
+  assert.ok(rich.files.some(f => f.path === "support.json")); checks++;
+  await reject(() => source({ include: ["**/*.md"] }).readSkillDirectorySnapshot("test.skills", "sample"), "root include still governs rich skills");
+  await reject(() => source({ exclude: ["**/.gitattributes"] }).readSkillDirectorySnapshot("test.skills", "sample"), "root exclude still governs attributes");
+  await reject(() => source({ capabilities: ["visible"] }).readSkillDirectorySnapshot("test.skills", "sample"), "attributes do not grant readable capability");
+  await rm(attributes);
+  await mkdir(attributes);
+  await reject(() => richSource.readSkillDirectorySnapshot("test.skills", "sample"), "attributes directory is not allowed");
+  await rm(attributes, { recursive: true });
+  for (const name of [".git", ".gitattributes.bak", ".GITATTRIBUTES", ".gitconfig", "node_modules"]) {
+    const member = path.join(root, "sample", name);
+    // node_modules remains subject to the default root exclusion.
+    await mkdir(member);
+    await reject(() => svc.readSkillDirectorySnapshot("test.skills", "sample"), `forbidden directory ${name}`);
+    await rm(member, { recursive: true });
+  }
+  await rm(python); await rm(json);
+
   const linked = path.join(root, "sample", "linked");
   await symlink(outside, linked, process.platform === "win32" ? "junction" : "dir");
   await reject(() => svc.readSkillDirectorySnapshot("test.skills", "sample"), "outgoing directory symlink/junction");

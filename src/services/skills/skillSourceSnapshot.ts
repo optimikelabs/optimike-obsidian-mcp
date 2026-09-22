@@ -29,8 +29,10 @@ const fingerprint = (s: BigIntStats) => [s.dev, s.ino, s.mode, s.nlink, s.size, 
 function allowedMember(name: string): boolean {
   // Publication policy, not an extension to the Agent Skills format. Reject a
   // whole directory rather than silently omit a sensitive/ambiguous member.
+  // .gitattributes is the sole dotfile exception, as passive regular-file bytes;
+  // root include/exclude/readable checks still apply before any read.
   return name.length > 0 && name !== "." && name !== ".." &&
-    !name.startsWith(".") && !/[\\:\x00-\x1f]/u.test(name) && !/[. ]$/u.test(name) &&
+    (!name.startsWith(".") || name === ".gitattributes") && !/[\\:\x00-\x1f]/u.test(name) && !/[. ]$/u.test(name) &&
     !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name) &&
     !/^(?:credentials|secrets)(?:\.|$)/iu.test(name) &&
     !/\.(?:key|pem|p12|pfx)$/iu.test(name);
@@ -70,6 +72,7 @@ export async function readCompleteSkillDirectory(
         const target = await access.resolve(relative);
         const s = await lstat(target, { bigint: true });
         if (s.isSymbolicLink()) throw new SkillDirectoryError("source_denied");
+        if (entry.name === ".gitattributes" && !s.isFile()) throw new SkillDirectoryError("source_denied");
         if (s.isDirectory()) {
           if (current.depth >= access.limits.maxDepth) throw new SkillDirectoryError("source_limit");
           queue.push({ relative, depth: current.depth + 1 });

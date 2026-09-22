@@ -58,7 +58,7 @@ Results use `resultType: complete`, `ttlMs: 0` and `cacheScope: private` on the 
 
 ## Consistency and publication policy
 
-Each load reads a complete bounded directory with before/after membership and opened-file identity checks. A hidden/sensitive-name, excluded, unreadable, linked or over-limit member invalidates the entire skill. Invalid sources are omitted from listing and refused on direct access; the internal operator audit returns logical URIs and closed reasons. The server never publishes a truncated manifest.
+Each load reads a complete bounded directory with before/after membership and opened-file identity checks. A hidden/sensitive-name, excluded, unreadable, linked or over-limit member invalidates the entire skill. The sole dotfile exception is an exact, case-sensitive `.gitattributes` regular file. It is passive content: never interpreted by Git or executed. Root read capabilities and include/exclude policy still apply; directories or links named `.gitattributes` remain denied. Invalid sources are omitted from listing and refused on direct access; the internal operator audit returns logical URIs and closed reasons. The server never publishes a truncated manifest.
 
 Limits are publication policy, not additional Agent Skills format rules: at most 64 publications, page size 1–10 (default 5), at most 512 files and 16 MiB per skill, and at most 1024 scanned entries. Existing external-root limits can be stricter. Markdown/frontmatter parsing is additionally bounded. Explicit local Markdown links must resolve within the complete skill snapshot. References mentioned as external prerequisites are not fetched or given filesystem authority.
 
@@ -95,3 +95,7 @@ Actual ELYSIA sources and Desktop/Pilot2/Secure remain separate local gates. See
 ## Rollback
 
 Unset `MCP_SKILLS_CONFIG_FILE` and restart the candidate to disable Skills without changing source files. Set `MCP_PROTOCOL_MODE=legacy` to also disable modern protocol serving. Full package rollback uses the P0 package/lockfile/build, not a vault rewind. Drain active work and consult status before any uncertain mutation. Do not delete journals or replay apply as part of rollback. No automatic merge or production deployment is authorized.
+
+## Rich skills and narrow root authorization
+
+A skill containing Python/JSON support files can be published as passive resources when the original root explicitly permits every member. Skills never overrides root authorization and never executes support files. Keep the existing Markdown rule and add only reviewed exact paths for the selected skill, for example `selected-skill/.gitattributes`, `selected-skill/tests/validate.py` and `selected-skill/tests/fixtures.json`. Do not open Python/JSON or dotfiles across the whole root. Existing denials for secrets, credentials, keys, `.git`, excluded dependencies, links and incomplete snapshots remain in force. A new or renamed unapproved member causes refusal until explicitly reviewed.

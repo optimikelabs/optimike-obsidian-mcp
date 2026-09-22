@@ -18,6 +18,32 @@ async function put(p,body='Workflow.',fields=''){
 }
 async function reject(work,reason){await assert.rejects(work,e=>e instanceof SkillRegistryError&&(!reason||e.reason===reason)&&!e.message.includes(root));checks++;}
 try{
+ // A fully authorized rich skill remains a byte manifest, never an executable.
+ await put('rich');
+ const marker=path.join(root,'EXECUTED');
+ const script=`from pathlib import Path\nPath(${JSON.stringify(marker)}).write_text("EXECUTED")\n`;
+ await writeFile(path.join(root,'rich/.gitattributes'),'*.md text eol=lf\r\n');
+ await writeFile(path.join(root,'rich/support.py'),script);
+ await writeFile(path.join(root,'rich/support.json'),'{"passive":true}\n');
+ const richRoots=ExternalRootsService.fromConfig({version:1,roots:[{id:'local.skills',path:root,capabilities:['visible','readable'],include:['rich/SKILL.md','rich/.gitattributes','rich/support.py','rich/support.json']}]});
+ const richRegistry=new SkillRegistry(richRoots,config([pub('rich')]),'full');
+ const listedRich=(await richRegistry.list()).skills[0];
+ assert.equal(listedRich.resources.length,4);
+ assert.deepEqual((await richRegistry.get(uri('rich'))).skill,listedRich);
+ for(const resource of listedRich.resources){
+  const bytes=await readFile(path.join(root,'rich',resource.uri.split('/').at(-1)));
+  assert.equal(resource.digest,hash(bytes));assert.equal(resource.size,bytes.length);
+  const item=(await richRegistry.read(resource.uri)).contents[0];
+  assert.deepEqual(item.text===undefined?Buffer.from(item.blob,'base64'):Buffer.from(item.text),bytes);
+ }
+ await assert.rejects(readFile(marker),e=>e.code==='ENOENT');checks++;
+ // Even an explicit root permission cannot waive the Skills sensitive-file policy.
+ await writeFile(path.join(root,'rich/.npmrc'),'AUTH_SENTINEL');
+ const forbiddenRoots=ExternalRootsService.fromConfig({version:1,roots:[{id:'local.skills',path:root,capabilities:['visible','readable'],include:['rich/**','rich/.gitattributes','rich/.npmrc']}]});
+ const forbidden=new SkillRegistry(forbiddenRoots,config([pub('rich')]),'full');
+ assert.deepEqual((await forbidden.list()).skills,[]);
+ await reject(()=>forbidden.get(uri('rich')),'source_denied');
+ await rm(path.join(root,'rich/.npmrc'));
  await put('one','[Reference](references/éclairage%20%231.md) ![asset](assets/raw.bin)','custom:\n  enabled: true\n');
  await mkdir(path.join(root,'one/references'));await mkdir(path.join(root,'one/assets'));
  await writeFile(path.join(root,'one/references/éclairage #1.md'),Buffer.from('\ufeffReference\r\n'));
