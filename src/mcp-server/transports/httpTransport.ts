@@ -1,6 +1,8 @@
 import {
   createMcpHandler,
   isLegacyRequest,
+  SUPPORTED_PROTOCOL_VERSIONS,
+  UnsupportedProtocolVersionError,
   type McpRequestContext,
 } from "@modelcontextprotocol/server";
 import { mcpProtocolMode } from "../protocolMode.js";
@@ -1020,6 +1022,19 @@ export async function startHttpTransport(
   const handleSessionRequest = async (
     c: Context<{ Bindings: HttpBindings }>,
   ) => {
+    // Reject explicit unknown versions before they can touch a legacy session.
+    // SDK SUPPORTED_PROTOCOL_VERSIONS denotes its legacy era; modern is opt-in.
+    const claimedVersion = c.req.header("mcp-protocol-version");
+    if (modern && claimedVersion !== undefined && claimedVersion !== "2026-07-28" &&
+      !SUPPORTED_PROTOCOL_VERSIONS.includes(claimedVersion)) {
+      const error = new UnsupportedProtocolVersionError({
+        supported: ["2026-07-28", ...SUPPORTED_PROTOCOL_VERSIONS],
+        requested: /^\d{4}-\d{2}-\d{2}$/.test(claimedVersion) ? claimedVersion : "unknown",
+      });
+      c.header("Cache-Control", "no-store");
+      return c.json({ jsonrpc: "2.0", id: null,
+        error: { code: error.code, message: error.message, data: error.data } }, 400);
+    }
     // The SDK classifies every bodyless GET/DELETE as legacy. An explicit
     // modern version still belongs on its strict leg, which emits 405 rather
     // than consulting our legacy session store.
