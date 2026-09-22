@@ -1,0 +1,52 @@
+# TEMPORARY exact-patch transport, removed in the integration commit.
+# Creates three hash-verified Git blobs only; cannot update any ref in this recipe.
+name: Temporary sealed Skills integration
+on:
+  pull_request:
+    paths: [".github/workflows/mcp-skills-import-once.yml", "docs/.online-skills-runtime.patch"]
+permissions:
+  contents: write
+jobs:
+  import:
+    if: github.repository == 'optimikelabs/optimike-obsidian-mcp' && github.event.pull_request.number == 104 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/mcp-skills-over-mcp-764a4174'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact bounded patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' '3f714b633f9bdd3722ebe14bf66ecfe61906e6fd566c8c099d81b8d0b5cc9ba9' 'docs/.online-skills-runtime.patch' | sha256sum --check
+          git apply --check docs/.online-skills-runtime.patch
+          git apply docs/.online-skills-runtime.patch
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/test-skills-runtime.mjs
+      - name: Create verified source blobs without publishing a branch
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          import base64, json, os, pathlib, subprocess
+          expected = {
+            'src/mcp-server/server.ts': '04ca6acd257d1355301624d98ff2d1fe1c4fb7e8',
+            'src/stdio-proxy.ts': '58f7142e51229345251fddee8b496ae2441ce5e4',
+            'scripts/test-skills-runtime.mjs': 'dd674c85c4b0f7cb3a52ed427e2e76ff8a286c56',
+          }
+          changed = subprocess.check_output(['git','diff','--name-only'], text=True).splitlines()
+          assert set(changed) == {'src/mcp-server/server.ts','src/stdio-proxy.ts'}
+          for name, expected_sha in expected.items():
+            observed = subprocess.check_output(['git','hash-object',name], text=True).strip()
+            assert observed == expected_sha
+            body = json.dumps({'content':base64.b64encode(pathlib.Path(name).read_bytes()).decode(), 'encoding':'base64'})
+            result = subprocess.run(['gh','api','--method','POST','repos/'+os.environ['GITHUB_REPOSITORY']+'/git/blobs','--input','-'], input=body, text=True, capture_output=True, check=True)
+            assert json.loads(result.stdout)['sha'] == expected_sha
+            print(name+' '+expected_sha)
+          print('Blobs verified. Connector must commit/reference/read-back them and remove this temporary recipe before readiness.')
