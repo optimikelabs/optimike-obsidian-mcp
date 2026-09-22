@@ -1241,3 +1241,31 @@ test("Operon runtime console diagnostics never pass raw error objects", () => {
     /console\.(?:warn|error)\([\s\S]{0,240},\s*(?:error|e)\s*[),]/u,
   );
 });
+
+
+test("partial route registration retains background lease until rollback succeeds", async () => {
+  const Bridge = (await bridgeModule()).default as new () => any;
+  const cleanups: Array<() => void> = [];
+  let routes = 0; let rollbackFailures = 2;
+  const api = {
+    addRoute() { if (++routes > 1) throw new Error("registration failure"); return { get() { return this; } }; },
+    unregister() { if (rollbackFailures-- > 0) throw new Error("rollback failure"); },
+  };
+  const plugins: Record<string, unknown> = { "obsidian-local-rest-api": { getPublicApi: () => api } };
+  const bridge = new Bridge();
+  bridge.loadData = async () => null;
+  bridge.addSettingTab = () => undefined;
+  bridge.register = (cleanup: () => void) => cleanups.push(cleanup);
+  bridge.manifest = { id: "optimike-operon-bridge", version: "test" };
+  bridge.app = { workspace: { onLayoutReady: (cb: () => void) => cb() }, plugins: { plugins } };
+  try {
+    await bridge.onload();
+    assert.equal(bridge.restLifecycle.snapshot().state, "degraded");
+    assert.equal(backgroundPolicy, false, "partially registered routes still require responsive execution");
+    delete plugins["obsidian-local-rest-api"];
+    bridge.restLifecycle.probeNow();
+    assert.equal(backgroundPolicy, false, "failed rollback retains the lease");
+    bridge.restLifecycle.probeNow();
+    assert.equal(backgroundPolicy, true, "completed rollback restores prior policy");
+  } finally { for (const cleanup of cleanups) cleanup(); }
+});

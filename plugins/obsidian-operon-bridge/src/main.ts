@@ -1099,15 +1099,27 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       this.restLifecycle = new RestExtensionLifecycle({
         probe: () => this.getCommunityPlugin(LOCAL_REST_PLUGIN_ID),
         mount: (provider) => {
-          const cleanup = this.mountRestExtension(provider);
-          if (!cleanup) return null;
-          const releaseBackground = acquireBackgroundExecution(Platform.isDesktopApp, require);
+          const releaseBackground = acquireBackgroundExecution(Platform.isDesktopApp, name => require(name));
           if (!releaseBackground) console.warn(`[${EXTENSION_ID}] Desktop background execution is unavailable; hidden-window requests may time out.`);
           this.backgroundCleanup = releaseBackground;
-          const mountedCleanup = () => {
-            cleanup();
+          const release = () => {
             releaseBackground?.();
             if (this.backgroundCleanup === releaseBackground) this.backgroundCleanup = null;
+          };
+          let cleanup: (() => void) | null;
+          try { cleanup = this.mountRestExtension(provider); }
+          catch (error) {
+            if (error instanceof RestExtensionPartialMountError) {
+              // Residual routes remain callable until their rollback succeeds.
+              throw new RestExtensionPartialMountError(() => { error.cleanup(); release(); });
+            }
+            release();
+            throw error;
+          }
+          if (!cleanup) { release(); return null; }
+          const mountedCleanup = () => {
+            cleanup();
+            release();
           };
           this.restCleanup = mountedCleanup;
           return () => {
