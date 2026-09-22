@@ -6,6 +6,7 @@ on:
       - "src/services/skills/**"
       - "src/services/externalRootsService.ts"
       - "src/mcp-server/resources/skillsExtension.ts"
+      - "src/mcp-server/resources/skillsSchemas.ts"
       - "src/mcp-server/server.ts"
       - "src/stdio-proxy.ts"
       - "profiles/elysia-tasks/skills/**"
@@ -47,3 +48,4 @@ jobs:
       - run: node scripts/test-skills-runtime.mjs
       - run: node scripts/test-skills-repo.mjs
       - run: node scripts/test-skills-smoke.mjs
+      - run: node scripts/test-skills-readiness-contract.mjs
