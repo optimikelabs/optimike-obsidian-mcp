@@ -1,4 +1,5 @@
-import { App, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import { acquireBackgroundExecution } from "./background-execution";
+import { App, Platform, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import {
   OPERON_BRIDGE_CONTRACT_VERSION,
   OPERON_BRIDGE_LEGACY_VERSIONS,
@@ -1054,6 +1055,7 @@ function pickDefined(
 export default class OptimikeOperonBridgePlugin extends Plugin {
   settings: OptimikeOperonBridgeSettings = { ...DEFAULT_BRIDGE_SETTINGS };
   private restCleanup: (() => void) | null = null;
+  private backgroundCleanup: (() => void) | null = null;
   private restLifecycle: RestExtensionLifecycle<object> | null = null;
   private indexValidationInFlight: Promise<void> | null = null;
   private mutationResults = new Map<string, CachedMutation>();
@@ -1097,12 +1099,32 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       this.restLifecycle = new RestExtensionLifecycle({
         probe: () => this.getCommunityPlugin(LOCAL_REST_PLUGIN_ID),
         mount: (provider) => {
-          const cleanup = this.mountRestExtension(provider);
-          if (!cleanup) return null;
-          this.restCleanup = cleanup;
-          return () => {
+          const releaseBackground = acquireBackgroundExecution(Platform.isDesktopApp, name => require(name));
+          if (!releaseBackground) console.warn(`[${EXTENSION_ID}] Desktop background execution is unavailable; hidden-window requests may time out.`);
+          this.backgroundCleanup = releaseBackground;
+          const release = () => {
+            releaseBackground?.();
+            if (this.backgroundCleanup === releaseBackground) this.backgroundCleanup = null;
+          };
+          let cleanup: (() => void) | null;
+          try { cleanup = this.mountRestExtension(provider); }
+          catch (error) {
+            if (error instanceof RestExtensionPartialMountError) {
+              // Residual routes remain callable until their rollback succeeds.
+              throw new RestExtensionPartialMountError(() => { error.cleanup(); release(); });
+            }
+            release();
+            throw error;
+          }
+          if (!cleanup) { release(); return null; }
+          const mountedCleanup = () => {
             cleanup();
-            if (this.restCleanup === cleanup) this.restCleanup = null;
+            release();
+          };
+          this.restCleanup = mountedCleanup;
+          return () => {
+            mountedCleanup();
+            if (this.restCleanup === mountedCleanup) this.restCleanup = null;
           };
         },
         onCleanupError: () =>
@@ -1126,6 +1148,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           );
         }
       }
+      this.backgroundCleanup?.();
+      this.backgroundCleanup = null;
       this.restLifecycle = null;
       this.restCleanup = null;
     });

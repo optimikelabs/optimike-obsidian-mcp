@@ -153,3 +153,14 @@ CI publishes `optimike-operon-bridge` containing `main.js` and `manifest.json`. 
 
 The CLI/Developer API comparison and the intentionally limited MCP extension
 plan live in `docs/operon-cli-audit.md`.
+
+## Background execution on Desktop
+
+While its Local REST routes are mounted, the Bridge disables Electron background
+throttling for the owning vault renderer. This lets Operon settle its index and
+answer verified reads when the window is minimized or occluded. It does not
+change task permissions, weaken consistency, add polling, or restart the tunnel.
+The previous renderer policy is restored when the REST mount is removed or the
+Bridge unloads. An already unthrottled window stays unthrottled. Mobile does not
+load Electron; unsupported Desktop hosts emit a bounded warning. This can increase
+background CPU activity for that vault while the Bridge is serving requests.
