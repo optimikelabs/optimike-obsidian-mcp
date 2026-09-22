@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.16.0"
+          node-version: "22"
           cache: npm
       - run: npm ci
       - run: npm --prefix plugins/obsidian-operon-bridge ci
@@ -57,14 +57,14 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.16.0"
+          node-version: "22"
       - run: npm ci
       - name: Fetch exact upstream gateway asset
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --location --retry 2 https://github.com/agentgateway/agentgateway/releases/download/v1.4.0/agentgateway-linux-amd64 -o "$RUNNER_TEMP/agentgateway"
-          echo 'e17c2d737bde6788e7a3109a7b7e4316d1c0f710b8c7488f821c9e1856fd4b32'"  $RUNNER_TEMP/agentgateway" | sha256sum --check
+          printf '%s  %s\n' 'e17c2d737bde6788e7a3109a7b7e4316d1c0f710b8c7488f821c9e1856fd4b32' "$RUNNER_TEMP/agentgateway" | sha256sum --check
           chmod +x "$RUNNER_TEMP/agentgateway"
       - run: npm run test:gateway:agentgateway
         env:

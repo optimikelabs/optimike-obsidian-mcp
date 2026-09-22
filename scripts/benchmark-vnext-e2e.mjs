@@ -216,7 +216,7 @@ let server, modernHandler;
 const client = new Client(
   { name: "vnext-benchmark-client", version: "1" },
   protocolEra === "modern"
-    ? { versionNegotiation: { mode: "pin", protocolVersion: "2026-07-28" } }
+    ? { versionNegotiation: { mode: { pin: "2026-07-28" } } }
     : {},
 );
 async function makeServer() {
@@ -399,6 +399,7 @@ try {
     );
     await client.connect(transport);
     assert.equal(client.getProtocolEra(), "modern");
+    assert.equal(client.getNegotiatedProtocolVersion(), "2026-07-28");
   } else {
     const [ct, st] = InMemoryTransport.createLinkedPair();
     server = await makeServer();
