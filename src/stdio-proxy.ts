@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { configuredSkillRegistry, installSkillsExtension } from "./mcp-server/resources/skillsExtension.js";
+import type { McpRequestContext } from "@modelcontextprotocol/server";
+
 import "./config/toolProfileCli.js";
 import { serveDualStdio } from "./mcp-server/transports/dualStdio.js";
 import { installLegacyToolCatalog } from "./mcp-server/legacyToolCatalog.js";
@@ -1278,12 +1281,14 @@ async function start() {
     }
   }
 
-  const createProxyServer = () => {
+  const createProxyServer = async (servingContext?: McpRequestContext) => {
     const proxyServer = new Server(
       { name: `${packageName}-stdio-proxy`, version: packageVersion },
       { capabilities: { tools: { listChanged: true } } },
     );
     installLegacyToolCatalog(proxyServer);
+    const skills = await configuredSkillRegistry(externalRootsService, toolProfile, servingContext);
+    if (skills) installSkillsExtension(proxyServer, skills);
 
     proxyServer.setRequestHandler("tools/list", async (request) =>
       filteredBackendTools(request.params),
@@ -1514,7 +1519,7 @@ async function start() {
       console.error(`[${packageName}] proxy protocol request rejected.`),
     );
   } else {
-    proxyServer = createProxyServer();
+    proxyServer = await createProxyServer();
     await proxyServer.connect(new StdioServerTransport());
   }
   console.error(

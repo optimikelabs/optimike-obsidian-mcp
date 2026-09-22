@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { readCompleteSkillDirectory, type SkillSourceSnapshot } from "./skills/skillSourceSnapshot.js";
 
 export const ExternalRootCapabilitySchema = z.enum([
   "visible",
@@ -465,6 +466,26 @@ export class ExternalRootsService {
     return response;
   }
 
+  /** Internal, read-only publication primitive. Not a public MCP tool. */
+  async readSkillDirectorySnapshot(rootId: string, requestedPath: string): Promise<SkillSourceSnapshot> {
+    const runtime = this.requireCapability(rootId, "visible");
+    this.assertCapability(runtime, "readable");
+    const relative = normalizeRelativePath(requestedPath);
+    if (!relative || relative !== requestedPath) {
+      throw new ExternalRootError("path_invalid", "A canonical relative skill directory is required.");
+    }
+    return readCompleteSkillDirectory(relative, {
+      limits: runtime.config.limits,
+      resolve: async (member) => {
+        if (member && (matchesAny(member, runtime.config.exclude) || matchesAny(`${member}/`, runtime.config.exclude))) {
+          throw new ExternalRootError("path_not_allowed", "Skill member is excluded by root policy.");
+        }
+        return this.resolvePath(runtime, member);
+      },
+      read: async (member, maxBytes) => (await this.readVerifiedBuffer(runtime, member, maxBytes)).buffer,
+    });
+  }
+
   async readText(
     rootId: string,
     requestedPath: string,
@@ -863,7 +884,7 @@ export class ExternalRootsService {
         heartbeatAt?: unknown;
       };
       if (
-        value.kind !== HANDOFF_OWNER_KIND ||
+        value.kind !== "optimike-external-handoff" ||
         value.version !== 1 ||
         typeof value.pid !== "number" ||
         !Number.isInteger(value.pid) ||

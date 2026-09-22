@@ -16,7 +16,7 @@ const rejectedProfiles = [
   { name: "missing canonical filter", mutate: value => { value.filters.pop(); } },
   { name: "duplicate canonical filter id", mutate: value => { value.filters[4].id = value.filters[0].id; } },
   { name: "filter without conditions", mutate: value => { value.filters[0].where.children = []; } },
-  { name: "condition without field or operator", mutate: value => { value.filters[0].where.children[0] = {}; } },
+  { name: "condition without field or operator", mutate: value => { delete value.filters[0].where.children[0].field; delete value.filters[0].where.children[0].operator; } },
   { name: "folder filter without current-folder scope", mutate: value => { delete value.filters[7].scope; } },
   { name: "non-folder filter with folder scope", mutate: value => { value.filters[0].scope = "current-folder"; } },
 ];
@@ -41,8 +41,11 @@ assert.equal(frontmatter.metadata.version, "1.3.0");
 assert.equal(frontmatter.metadata.skill_structure, "graph");
 assert.equal(frontmatter.metadata.portability_class, "profile-bound-portable");
 assert.equal(frontmatter.metadata.profile_id, profile.profileId);
-assert.equal(frontmatter.metadata.profile_schema_version, profile.schemaVersion);
-assert.equal(frontmatter.metadata.reference_gate, true);
+// Agent Skills metadata is string-to-string. The external profile keeps its
+// original numeric schemaVersion; compare the equivalent published string.
+assert.ok(Object.values(frontmatter.metadata).every(value => typeof value === "string"));
+assert.equal(frontmatter.metadata.profile_schema_version, String(profile.schemaVersion));
+assert.equal(frontmatter.metadata.reference_gate, "true");
 
 const requiredSkillTokens = [
   "operon_get_configuration",

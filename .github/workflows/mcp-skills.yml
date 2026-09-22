@@ -1,0 +1,52 @@
+name: MCP Skills over MCP
+
+on:
+  pull_request:
+    paths:
+      - "src/services/skills/**"
+      - "src/services/externalRootsService.ts"
+      - "src/mcp-server/resources/skillsExtension.ts"
+      - "src/mcp-server/resources/skillsSchemas.ts"
+      - "src/mcp-server/server.ts"
+      - "src/stdio-proxy.ts"
+      - "profiles/elysia-tasks/skills/**"
+      - "scripts/test-skills-*.mjs"
+      - "scripts/smoke-mcp-skills-local.mjs"
+      - "scripts/skills-local-proof.mjs"
+      - "docs/mcp-skills*.md"
+      - "package*.json"
+      - ".github/workflows/mcp-skills.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  skills:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run build
+      - name: Record exact candidate
+        shell: bash
+        run: |
+          printf 'candidate=%s\n' "${{ github.event.pull_request.head.sha }}"
+          node --version
+      - run: node scripts/test-skills-source-snapshot.mjs
+      - run: node scripts/test-skills-validation.mjs
+      - run: node scripts/test-skills-registry.mjs
+      - run: node scripts/test-skills-protocol.mjs
+      - run: node scripts/test-skills-runtime.mjs
+      - run: node scripts/test-skills-repo.mjs
+      - run: node scripts/test-skills-smoke.mjs
+      - run: node scripts/test-skills-readiness-contract.mjs

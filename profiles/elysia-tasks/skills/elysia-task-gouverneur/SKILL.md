@@ -2,13 +2,13 @@
 name: elysia-task-gouverneur
 description: "Orchestre les tâches d’un coffre compatible avec le profil public ÉLYSIA Tasks via les 25 outils operon_* gouvernés : opérations ponctuelles, Daily/Weekly, relations, récurrence, récupération, audits, triage, cycle de vie et santé du runtime, avec capacités live, IDs stables, dry-run et validation humaine."
 metadata:
-  version: 1.3.0
-  skill_structure: graph
-  portability_class: profile-bound-portable
-  profile_id: elysia.tasks
-  profile_schema_version: 1
-  mcp_namespace: operon_*
-  reference_gate: true
+  version: "1.3.0"
+  skill_structure: "graph"
+  portability_class: "profile-bound-portable"
+  profile_id: "elysia.tasks"
+  profile_schema_version: "1"
+  mcp_namespace: "operon_*"
+  reference_gate: "true"
 ---
 
 # Skill — ÉLYSIA Task Gouverneur
@@ -53,9 +53,11 @@ Choisir une seule ligne de la `Reference Gate Map`, ouvrir tous ses modules, pui
 
 ## Profile Gate
 
-La distribution complète contient le contrat machine-readable dans `profiles/elysia-tasks/v1/profile.json` ; depuis le dossier de cette skill, le chemin relatif est `../../v1/profile.json`.
+Le profil public `elysia.tasks` est un contrat externe à cette skill. Dans la distribution complète du dépôt, son fichier canonique est `profiles/elysia-tasks/v1/profile.json` (chemin depuis la racine du dépôt). Il ne fait pas partie des ressources de la skill et ne doit pas être copié dans son manifeste.
 
-- Pour auditer ou installer le profil, ouvrir ce fichier et comparer ses IDs à `operon_get_configuration`.
+Les références internes sont les fichiers `references/*.md`. Le contrat externe se consulte séparément, via un accès autorisé à la distribution ; `operon_get_configuration` et `operon_status` restent les sources de l’état live.
+
+- Pour auditer ou installer le profil, ouvrir le contrat externe et comparer ses IDs à `operon_get_configuration`.
 - Pour une opération ponctuelle sur un coffre déjà configuré, la configuration live et les IDs de la tâche peuvent suffire.
 - Si ni le profil ni une configuration live compatible ne sont accessibles, ne pas appliquer de mutation.
 
