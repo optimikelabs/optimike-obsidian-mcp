@@ -8,6 +8,7 @@ on:
       - "src/mcp-server/resources/skillsExtension.ts"
       - "src/mcp-server/server.ts"
       - "src/stdio-proxy.ts"
+      - "profiles/elysia-tasks/skills/**"
       - "scripts/test-skills-*.mjs"
       - ".github/workflows/mcp-skills.yml"
 
@@ -41,3 +42,4 @@ jobs:
       - run: node scripts/test-skills-registry.mjs
       - run: node scripts/test-skills-protocol.mjs
       - run: node scripts/test-skills-runtime.mjs
+      - run: node scripts/test-skills-repo.mjs
