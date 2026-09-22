@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { BaseRowsPatchRuntime } from "../../../services/baseRowsPatchRuntime.js";
 import { restBaseRowSelection } from "../../../services/baseRowSelection.js";
@@ -36,6 +36,7 @@ import { registerGovernedCanvasTools } from "../governedCanvasTools/index.js";
 import { registerOperonTools } from "../operonTools/index.js";
 import { registerOperationCockpitTool } from "../operationCockpitTools/index.js";
 import type { PendingOperationSource } from "../../../services/operationCockpit.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const MaintenanceInputSchema = z.object({
   action: z
@@ -73,11 +74,14 @@ export async function registerRuntimeTools(
 ): Promise<void> {
   const profile = resolveToolProfile();
   const registrationMode = resolveToolRegistrationMode(obsidianService);
-  server.tool(
+  server.registerTool(
     "obsidian_runtime_status",
-    "Returns redacted runtime diagnostics plus the versioned capability manifest. The manifest distinguishes tool discoverability, backend availability, and authorization, with stable reason codes and safe next actions. Physical paths, URLs, secrets, note content, and raw configuration are never returned.",
-    RuntimeStatusInputSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Returns redacted runtime diagnostics plus the versioned capability manifest. The manifest distinguishes tool discoverability, backend availability, and authorization, with stable reason codes and safe next actions. Physical paths, URLs, secrets, note content, and raw configuration are never returned.",
+      inputSchema: mcpSchema(RuntimeStatusInputSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof RuntimeStatusInputSchema>) => {
       const runtimeStatus = await collectRuntimeStatus(vaultCacheService);
       const capabilityManifest = await collectCapabilityManifest({
@@ -114,12 +118,14 @@ export async function registerRuntimeTools(
       };
     },
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_runtime_maintenance",
-    "Runs integrity checks, maintenance, or cache refresh actions for the local shared runtime.",
-    MaintenanceInputSchema.shape,
-    MAINTENANCE_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Runs integrity checks, maintenance, or cache refresh actions for the local shared runtime.",
+      inputSchema: mcpSchema(MaintenanceInputSchema.shape),
+      annotations: MAINTENANCE_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof MaintenanceInputSchema>) => ({
       content: [
         {
@@ -153,8 +159,15 @@ export async function registerRuntimeTools(
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
   registerNativeNoteMoveTools(server, governedNoteReplaceRuntime?.nativeMove);
   registerNoteCreateTools(server, governedNoteReplaceRuntime?.noteCreate);
-  registerBaseRowsPatchTools(server, governedNoteReplaceRuntime && obsidianService
-    ? new BaseRowsPatchRuntime(governedNoteReplaceRuntime, restBaseRowSelection(obsidianService)) : undefined);
+  registerBaseRowsPatchTools(
+    server,
+    governedNoteReplaceRuntime && obsidianService
+      ? new BaseRowsPatchRuntime(
+          governedNoteReplaceRuntime,
+          restBaseRowSelection(obsidianService),
+        )
+      : undefined,
+  );
   await registerGovernedTextPatchTools(server, governedNoteReplaceRuntime);
   await registerGovernedFrontmatterTools(server, governedNoteReplaceRuntime);
   await registerGovernedBaseFormulaTools(server, governedBaseFormulaRuntime);

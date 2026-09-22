@@ -28,7 +28,7 @@ for (const file of listTypeScriptFiles(sourceRoot)) {
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text === "tool"
+      ["tool", "registerTool"].includes(node.expression.name.text)
     ) {
       const line =
         sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
@@ -42,7 +42,20 @@ for (const file of listTypeScriptFiles(sourceRoot)) {
             : undefined,
       };
       registrations.push(registration);
-      if (node.arguments.length < 5) missingAnnotations.push(registration);
+      const config = node.arguments[1];
+      const annotated =
+        node.expression.name.text === "tool"
+          ? node.arguments.length >= 5
+          : node.arguments.length === 3 &&
+            config &&
+            ts.isObjectLiteralExpression(config) &&
+            config.properties.some(
+              (property) =>
+                ts.isPropertyAssignment(property) &&
+                property.name?.getText(sourceFile) === "annotations" &&
+                property.initializer.getText(sourceFile) !== "undefined",
+            );
+      if (!annotated) missingAnnotations.push(registration);
     }
     ts.forEachChild(node, visit);
   }

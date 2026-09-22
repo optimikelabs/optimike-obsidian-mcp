@@ -3,8 +3,7 @@
  * @description Registers the 'obsidian_global_search' tool with the MCP server.
  * This tool allows searching the Obsidian vault using text/regex queries with optional date filters.
  */
-
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js"; // Import VaultCacheService type
@@ -23,7 +22,8 @@ import type {
 import {
   ObsidianGlobalSearchInputSchemaShape,
   processObsidianGlobalSearch,
-} from "./logic.js"; // Ensure '.js' extension
+} from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 /**
  * Registers the 'obsidian_global_search' tool with the MCP server instance.
@@ -53,11 +53,13 @@ export async function registerObsidianGlobalSearchTool(
 
   await ErrorHandler.tryCatch(
     async () => {
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ObsidianGlobalSearchInputSchemaShape,
-        READ_ONLY_TOOL_ANNOTATIONS,
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ObsidianGlobalSearchInputSchemaShape),
+          annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
         async (
           params: ObsidianGlobalSearchInput,
           handlerInvocationContext: any,

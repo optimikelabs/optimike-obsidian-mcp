@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
-const apply = (process.env.OPERON_MUTATION_SMOKE_APPLY ?? "false").toLowerCase() === "true";
+const apply =
+  (process.env.OPERON_MUTATION_SMOKE_APPLY ?? "false").toLowerCase() === "true";
 const runId = process.env.OPERON_MUTATION_SMOKE_RUN_ID ?? `smoke-${Date.now()}`;
 const targetFolder = process.env.OPERON_MUTATION_TARGET_FOLDER;
 
@@ -59,12 +60,24 @@ async function main() {
       throw new Error(`Unexpected create status: ${JSON.stringify(created)}`);
     }
     if (!apply) {
-      console.log(JSON.stringify({ ok: true, mode: "dry-run", toolCount: listed.tools.length, created }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            mode: "dry-run",
+            toolCount: listed.tools.length,
+            created,
+          },
+          null,
+          2,
+        ),
+      );
       return;
     }
 
     const operonId = created.after?.operonId;
-    if (!operonId || !created.after?.revision) throw new Error("Applied create returned no task identity/revision.");
+    if (!operonId || !created.after?.revision)
+      throw new Error("Applied create returned no task identity/revision.");
     const initialRevision = created.after.revision;
     const updated = await call(client, "operon_update_task", {
       operonId,
@@ -84,7 +97,10 @@ async function main() {
       dryRun: false,
       status: "Project.Finished",
     });
-    if (transitioned.status !== "applied" || transitioned.after?.checkbox !== "done") {
+    if (
+      transitioned.status !== "applied" ||
+      transitioned.after?.checkbox !== "done"
+    ) {
       throw new Error(`Transition failed: ${JSON.stringify(transitioned)}`);
     }
     const replay = await call(client, "operon_transition_task", {
@@ -105,20 +121,28 @@ async function main() {
       status: "Project.Planned",
     });
     if (conflict.status !== "conflict") {
-      throw new Error(`Revision conflict was not detected: ${JSON.stringify(conflict)}`);
+      throw new Error(
+        `Revision conflict was not detected: ${JSON.stringify(conflict)}`,
+      );
     }
 
-    console.log(JSON.stringify({
-      ok: true,
-      mode: "apply",
-      toolCount: listed.tools.length,
-      operonId,
-      create: created.status,
-      update: updated.status,
-      transition: transitioned.status,
-      replayed: replay.replayed,
-      conflict: conflict.status,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          mode: "apply",
+          toolCount: listed.tools.length,
+          operonId,
+          create: created.status,
+          update: updated.status,
+          transition: transitioned.status,
+          replayed: replay.replayed,
+          conflict: conflict.status,
+        },
+        null,
+        2,
+      ),
+    );
   } finally {
     await client.close().catch(() => undefined);
   }

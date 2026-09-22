@@ -1,3 +1,9 @@
+import {
+  createMcpHandler,
+  isLegacyRequest,
+  type McpRequestContext,
+} from "@modelcontextprotocol/server";
+import { mcpProtocolMode } from "../protocolMode.js";
 /**
  * @fileoverview Configures and starts the Streamable HTTP MCP transport using Hono.
  *
@@ -15,9 +21,11 @@
  */
 
 import { HttpBindings, serve, ServerType } from "@hono/node-server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import {
+  McpServer,
+  WebStandardStreamableHTTPServerTransport,
+  isInitializeRequest,
+} from "@modelcontextprotocol/server";
 import { Context, Hono, Next } from "hono";
 import { cors } from "hono/cors";
 import http from "http";
@@ -58,7 +66,10 @@ import {
   HTTP_OBSERVABILITY_STALE_AFTER_MS,
   type LiveApiObservation,
 } from "./httpObservability.js";
-import { httpErrorHandler, InvalidHttpSessionError } from "./httpErrorHandler.js";
+import {
+  httpErrorHandler,
+  InvalidHttpSessionError,
+} from "./httpErrorHandler.js";
 import {
   earlyJsonRpcErrorResponse,
   jsonRpcErrorResponse,
@@ -627,11 +638,35 @@ function startHttpServerWithRetry(
 }
 
 export async function startHttpTransport(
-  createServerInstanceFn: () => Promise<McpServer>,
+  createServerInstanceFn: (context?: McpRequestContext) => Promise<McpServer>,
   parentContext: RequestContext,
   _obsidianService?: ObsidianRestApiService,
   _vaultCacheService?: VaultCacheService,
 ): Promise<ServerType> {
+  const protocolMode = mcpProtocolMode();
+  const modern =
+    protocolMode === "dual"
+      ? createMcpHandler(
+          (context) => {
+            if (!context.requestInfo)
+              throw new Error("Modern HTTP request context is absent.");
+            return withToolProfileContext(
+              toolProfileFromInternalRequest(context.requestInfo),
+              () => createServerInstanceFn(context),
+            );
+          },
+          {
+            legacy: "reject",
+            onerror: () =>
+              logger.warning(
+                "Modern MCP request rejected or unavailable.",
+                requestContextService.createRequestContext({
+                  operation: "modernMcpHttp", // Never log caller metadata or SDK error text.
+                }),
+              ),
+          },
+        )
+      : undefined;
   const app = new Hono<{ Bindings: HttpBindings }>();
   const transportContext = requestContextService.createRequestContext({
     ...parentContext,
@@ -674,6 +709,9 @@ export async function startHttpTransport(
       allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
       allowHeaders: [
         "Content-Type",
+        "MCP-Protocol-Version",
+        "Mcp-Method",
+        "Mcp-Name",
         "Mcp-Session-Id",
         "Last-Event-ID",
         "Authorization",
@@ -802,6 +840,35 @@ export async function startHttpTransport(
       );
     }
     state.rpcId = jsonRpcIdFromBody(body);
+    // The SDK owns era detection and all modern envelope/version validation.
+    // Malformed modern claims never fall through to legacy session handling.
+    if (modern && !(await isLegacyRequest(c.req.raw, body))) {
+      // SDK 2.0.0 checks the other mirrored headers but does not reject an
+      // absent version header on a body claiming the modern era. Close this
+      // HTTP admission gap (2026-07-28, Request Metadata / Server Validation)
+      // before dispatch. All envelope/discovery/negotiation remains SDK-owned;
+      // old clients without this header still take the unchanged legacy leg.
+      if (!c.req.raw.headers.has("mcp-protocol-version")) {
+        return jsonRpcErrorResponse(
+          c,
+          new McpError(
+            BaseErrorCode.VALIDATION_ERROR,
+            "A required MCP request header is missing.",
+          ),
+          {
+            operation: "modernMcpHeaderRequired",
+            status: 400,
+            protocolCode: -32020,
+          },
+        );
+      }
+      return withActiveHttpRequestState(c.req.raw, () =>
+        modern.fetch(c.req.raw, {
+          authInfo: state.authInfo,
+          parsedBody: body,
+        }),
+      );
+    }
     const sessionId = c.req.header("mcp-session-id");
     const session = sessionForRequest(c, sessionId);
     let transport = session?.transport;
@@ -953,6 +1020,20 @@ export async function startHttpTransport(
   const handleSessionRequest = async (
     c: Context<{ Bindings: HttpBindings }>,
   ) => {
+    // The SDK classifies every bodyless GET/DELETE as legacy. An explicit
+    // modern version still belongs on its strict leg, which emits 405 rather
+    // than consulting our legacy session store.
+    if (
+      modern &&
+      (c.req.header("mcp-protocol-version") === "2026-07-28" ||
+        !(await isLegacyRequest(c.req.raw)))
+    ) {
+      return withActiveHttpRequestState(c.req.raw, () =>
+        modern.fetch(c.req.raw, {
+          authInfo: getHttpRequestState(c.req.raw).authInfo,
+        }),
+      );
+    }
     const sessionId = c.req.header("mcp-session-id");
     const session = sessionForRequest(c, sessionId);
 
@@ -986,5 +1067,8 @@ export async function startHttpTransport(
   sessionCleanupTimer.unref?.();
   server.once("close", () => clearInterval(sessionCleanupTimer));
   server.once("close", liveApiProbe.stop);
+  server.once("close", () => {
+    void modern?.close();
+  });
   return server;
 }

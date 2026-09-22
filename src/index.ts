@@ -2,7 +2,8 @@
 
 // Imports MUST be at the top level
 import { ServerType } from "@hono/node-server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import type { StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { config, environment } from "./config/index.js"; // This loads .env via dotenv.config()
 import { initializeAndStartServer } from "./mcp-server/server.js";
 import { requestContextService, retryWithDelay } from "./utils/index.js";
@@ -28,7 +29,7 @@ import {
  * The main MCP server instance (only stored globally for stdio shutdown).
  * @type {McpServer | undefined}
  */
-let server: McpServer | undefined;
+let server: McpServer | StdioServerHandle | undefined;
 /**
  * The main HTTP server instance (only stored globally for http shutdown).
  * @type {ServerType | undefined}
@@ -337,7 +338,8 @@ const start = async () => {
       obsidianService,
       vaultCacheService,
     );
-    governedBaseFormulaRuntime = createGovernedBaseFormulaRuntime(obsidianService);
+    governedBaseFormulaRuntime =
+      createGovernedBaseFormulaRuntime(obsidianService);
     governedCanvasRuntime = createGovernedCanvasRuntime(obsidianService);
     logger.info(
       governedNoteReplaceRuntime
@@ -367,9 +369,10 @@ const start = async () => {
 
     if (
       transportType === "stdio" &&
-      serverOrHttpInstance instanceof McpServer
+      serverOrHttpInstance &&
+      typeof serverOrHttpInstance.close === "function"
     ) {
-      server = serverOrHttpInstance; // Store McpServer for stdio
+      server = serverOrHttpInstance as McpServer | StdioServerHandle; // Retain serving-handle ownership for shutdown
       logger.debug(
         "Stored McpServer instance for stdio transport.",
         startupContext,

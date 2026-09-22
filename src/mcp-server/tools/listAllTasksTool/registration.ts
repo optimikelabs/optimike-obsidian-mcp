@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { VaultCacheService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -14,6 +14,7 @@ import {
   ListAllTasksInputSchemaShape,
   processListAllTasks,
 } from "../tasksShared/logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 export const registerListAllTasksTool = async (
   server: McpServer,
@@ -34,11 +35,13 @@ export const registerListAllTasksTool = async (
 
   await ErrorHandler.tryCatch(
     async () => {
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ListAllTasksInputSchemaShape,
-        READ_ONLY_TOOL_ANNOTATIONS,
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ListAllTasksInputSchemaShape),
+          annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
         async (params: ListAllTasksInput) => {
           const handlerContext = requestContextService.createRequestContext({
             parentContext: registrationContext,

@@ -1,3 +1,4 @@
+import { installLegacyToolCatalog } from "./legacyToolCatalog.js";
 /**
  * @fileoverview Main entry point for the MCP (Model Context Protocol) server.
  * This file orchestrates the server's lifecycle:
@@ -15,7 +16,13 @@
  */
 
 import { ServerType } from "@hono/node-server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  type McpRequestContext,
+} from "@modelcontextprotocol/server";
+import type { StdioServerHandle } from "@modelcontextprotocol/server/stdio";
+import { serveDualStdio } from "./transports/dualStdio.js";
+import { mcpProtocolMode } from "./protocolMode.js";
 import { dump, load } from "js-yaml";
 import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
@@ -81,6 +88,7 @@ import { startHttpTransport } from "./transports/httpTransport.js";
 import { activeHttpRequestId } from "./transports/httpRequestState.js";
 import { connectStdioTransport } from "./transports/stdioTransport.js";
 import { registerToolRoutingResource } from "./resources/toolRoutingResource.js";
+import { mcpSchema } from "./mcpSchema.js";
 
 /**
  * Converts one failed item of a direct batch write into the same public MCP
@@ -129,118 +137,15 @@ export function reportOpaqueServerFailure(
   });
 }
 
-/**
- * MCP SDK 1.30.0 converts every uncaught tool exception into a CallToolResult
- * through its private `createToolError(error.message)` hook. That includes
- * SDK-side input validation and unknown-tool errors, so tool-local boundaries
- * cannot protect every path. Replace the hook before the first registration,
- * when the SDK installs its tools/call request handler.
- *
- * This deliberately does not affect a tool which returns an `isError` result
- * itself: the SDK only calls `createToolError` for thrown failures.
- */
-export function installMcpSdkToolErrorPrivacyBoundary(server: McpServer): void {
-  const privateServer = server as unknown as {
-    createToolError?: unknown;
-    _toolHandlersInitialized?: unknown;
-  };
-
-  if (privateServer._toolHandlersInitialized) {
-    throw new Error(
-      "MCP SDK tool error privacy boundary must be installed before tool registration.",
-    );
-  }
-  if (typeof privateServer.createToolError !== "function") {
-    throw new Error(
-      "Unsupported @modelcontextprotocol/sdk: McpServer.createToolError is unavailable.",
-    );
-  }
-
-  privateServer.createToolError = () => {
-    const requestId = activeHttpRequestId() ?? randomUUID();
-    const handled = ErrorHandler.handleError(
-      new Error("MCP SDK tool execution failed."),
-      {
-        operation: "mcpSdkToolErrorBoundary",
-        context: { requestId, toolName: "mcp_sdk" },
-        includeStack: false,
-      },
-    );
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            ok: false,
-            requestId,
-            error: ErrorHandler.formatError(handled),
-          }),
-        },
-      ],
-      isError: true,
-    };
-  };
-}
-
-/**
- * Make public tool errors the normal control path. The SDK hook above remains
- * necessary for SDK-side validation and unknown tools, but it intentionally
- * cannot see the original error object. Wrapping callbacks before registration
- * preserves the canonical code and allowlisted recovery metadata for every
- * application handler, including the legacy handlers that use
- * ErrorHandler.tryCatch() and rethrow.
- */
-export function installMcpToolPublicErrorBoundary(server: McpServer): void {
-  type ToolRegistrar = (name: string, ...args: unknown[]) => unknown;
-  type ToolCallback = (...args: unknown[]) => unknown;
-  type PrivateServer = {
-    tool: ToolRegistrar;
-    __optimikePublicToolErrorBoundaryInstalled?: boolean;
-  };
-  const privateServer = server as unknown as PrivateServer;
-  if (privateServer.__optimikePublicToolErrorBoundaryInstalled) return;
-
-  const registerTool = privateServer.tool.bind(server);
-  privateServer.tool = (name, ...args) => {
-    const callback = args.at(-1);
-    if (typeof callback !== "function") {
-      // Preserve the SDK's own argument validation and privacy fallback for a
-      // malformed registration rather than introducing a second convention.
-      return registerTool(name, ...args);
-    }
-
-    const wrapped: ToolCallback = async (...callbackArgs) => {
-      try {
-        return await callback(...callbackArgs);
-      } catch (error) {
-        // HTTP requests carry their server-owned correlation UUID through the
-        // SDK dispatch chain. In-memory and stdio transports deliberately have
-        // no HTTP state and receive a bounded UUID in the public error helper.
-        const requestId = activeHttpRequestId();
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(
-                publicMcpToolErrorPayload(error, {
-                  operation: `mcpTool:${name}`,
-                  toolName: name,
-                  params: callbackArgs.length > 1 ? callbackArgs[0] : undefined,
-                  requestId,
-                }),
-              ),
-            },
-          ],
-          isError: true,
-        };
-      }
-    };
-
-    return registerTool(name, ...args.slice(0, -1), wrapped);
-  };
-  privateServer.__optimikePublicToolErrorBoundaryInstalled = true;
-}
+// Public API error boundaries are version-independent and request-scoped.
+import {
+  installMcpSdkToolErrorPrivacyBoundary,
+  installMcpToolPublicErrorBoundary,
+} from "./toolErrorBoundary.js";
+export {
+  installMcpSdkToolErrorPrivacyBoundary,
+  installMcpToolPublicErrorBoundary,
+} from "./toolErrorBoundary.js";
 
 async function updateCacheAfterGuardedWrite(
   vaultCacheService: VaultCacheService | undefined,
@@ -314,15 +219,20 @@ function renderCanvas(canvas: {
 }
 
 function registerFormatValidationTool(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "obsidian_validate_format",
-    "Validate Obsidian-facing file formats before writing. Checks Markdown frontmatter/tags/wikilinks/callouts, .base YAML/formula references/views, and JSON Canvas nodes/edges.",
     {
-      kind: z.enum(["auto", "markdown", "base", "canvas"]).default("auto"),
-      filePath: z.string().optional(),
-      content: z.string().optional(),
+      description:
+        "Validate Obsidian-facing file formats before writing. Checks Markdown frontmatter/tags/wikilinks/callouts, .base YAML/formula references/views, and JSON Canvas nodes/edges.",
+      inputSchema: mcpSchema(
+        z.object({
+          kind: z.enum(["auto", "markdown", "base", "canvas"]).default("auto"),
+          filePath: z.string().optional(),
+          content: z.string().optional(),
+        }),
+      ),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
-    READ_ONLY_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "obsidianValidateFormat",
@@ -364,20 +274,25 @@ function registerHeadlessGuardedWriteTools(
 ): void {
   const vaultFileService = new VaultFileService();
 
-  server.tool(
+  server.registerTool(
     "obsidian_update_note",
-    "Headless-guarded direct filesystem append/prepend for explicit filePath targets on a copied or dedicated vault. Uses atomic file writes, path safety and optional preconditions, but has no durable plan/status/recovery receipt.",
     {
-      targetType: z.literal("filePath"),
-      targetIdentifier: z.string().min(1),
-      modificationType: z.literal("wholeFile"),
-      wholeFileMode: z.enum(["append", "prepend"]),
-      content: z.string(),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
-      returnContent: z.boolean().optional().default(false),
+      description:
+        "Headless-guarded direct filesystem append/prepend for explicit filePath targets on a copied or dedicated vault. Uses atomic file writes, path safety and optional preconditions, but has no durable plan/status/recovery receipt.",
+      inputSchema: mcpSchema(
+        z.object({
+          targetType: z.literal("filePath"),
+          targetIdentifier: z.string().min(1),
+          modificationType: z.literal("wholeFile"),
+          wholeFileMode: z.enum(["append", "prepend"]),
+          content: z.string(),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+          returnContent: z.boolean().optional().default(false),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedUpdateNote",
@@ -432,20 +347,25 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "obsidian_search_replace",
-    "Headless-guarded direct filesystem exact search/replace for explicit filePath targets on a copied or dedicated vault. Optional hash/mtime preconditions prevent stale writes; no durable plan/status/recovery receipt is created.",
     {
-      targetType: z.literal("filePath"),
-      targetIdentifier: z.string().min(1),
-      replacements: z
-        .array(z.object({ search: z.string().min(1), replace: z.string() }))
-        .min(1),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
-      returnContent: z.boolean().optional().default(false),
+      description:
+        "Headless-guarded direct filesystem exact search/replace for explicit filePath targets on a copied or dedicated vault. Optional hash/mtime preconditions prevent stale writes; no durable plan/status/recovery receipt is created.",
+      inputSchema: mcpSchema(
+        z.object({
+          targetType: z.literal("filePath"),
+          targetIdentifier: z.string().min(1),
+          replacements: z
+            .array(z.object({ search: z.string().min(1), replace: z.string() }))
+            .min(1),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+          returnContent: z.boolean().optional().default(false),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedSearchReplace",
@@ -501,18 +421,23 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "obsidian_manage_frontmatter",
-    "Headless-guarded direct filesystem frontmatter setter for one key on a copied or dedicated vault. This fallback is exposed only when the live governed projection is unavailable and creates no durable receipt.",
     {
-      filePath: z.string().min(1),
-      operation: z.literal("set"),
-      key: z.string().min(1),
-      value: z.any(),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
+      description:
+        "Headless-guarded direct filesystem frontmatter setter for one key on a copied or dedicated vault. This fallback is exposed only when the live governed projection is unavailable and creates no durable receipt.",
+      inputSchema: mcpSchema(
+        z.object({
+          filePath: z.string().min(1),
+          operation: z.literal("set"),
+          key: z.string().min(1),
+          value: z.any(),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedManageFrontmatter",
@@ -567,15 +492,20 @@ function registerHeadlessGuardedWriteTools(
     return;
   }
 
-  server.tool(
+  server.registerTool(
     "obsidian_delete_note",
-    "Headless-guarded filesystem delete for explicit filePath targets. Requires expectedHash or expectedMtime.",
     {
-      filePath: z.string().min(1),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
+      description:
+        "Headless-guarded filesystem delete for explicit filePath targets. Requires expectedHash or expectedMtime.",
+      inputSchema: mcpSchema(
+        z.object({
+          filePath: z.string().min(1),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedDeleteNote",
@@ -629,23 +559,35 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "obsidian_manage_tags",
-    "Headless-filesystem tag management for YAML frontmatter tags, inline Markdown tags, and local tag index.",
     {
-      filePath: z.string().min(1).optional(),
-      operation: z.enum(["add", "remove", "list", "index", "audit", "rename"]),
-      tags: z.array(z.string()).default([]),
-      fromTag: z.string().optional(),
-      toTag: z.string().optional(),
-      dryRun: z.boolean().default(true),
-      location: z
-        .enum(["frontmatter", "inline", "both"])
-        .default("frontmatter"),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
+      description:
+        "Headless-filesystem tag management for YAML frontmatter tags, inline Markdown tags, and local tag index.",
+      inputSchema: mcpSchema(
+        z.object({
+          filePath: z.string().min(1).optional(),
+          operation: z.enum([
+            "add",
+            "remove",
+            "list",
+            "index",
+            "audit",
+            "rename",
+          ]),
+          tags: z.array(z.string()).default([]),
+          fromTag: z.string().optional(),
+          toTag: z.string().optional(),
+          dryRun: z.boolean().default(true),
+          location: z
+            .enum(["frontmatter", "inline", "both"])
+            .default("frontmatter"),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedManageTags",
@@ -860,18 +802,23 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "obsidian_move_note",
-    "Headless-filesystem move/rename for explicit filePath targets. Requires expectedHash or expectedMtime.",
     {
-      sourcePath: z.string().min(1),
-      targetPath: z.string().min(1),
-      overwrite: z.boolean().default(false),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
-      dryRun: z.boolean().default(false),
+      description:
+        "Headless-filesystem move/rename for explicit filePath targets. Requires expectedHash or expectedMtime.",
+      inputSchema: mcpSchema(
+        z.object({
+          sourcePath: z.string().min(1),
+          targetPath: z.string().min(1),
+          overwrite: z.boolean().default(false),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+          dryRun: z.boolean().default(false),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessFilesystemMoveNote",
@@ -975,24 +922,29 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "obsidian_batch_frontmatter",
-    "Headless-filesystem batch frontmatter set with dry-run support. Protected keys remain blocked by write policy.",
     {
-      operations: z
-        .array(
-          z.object({
-            filePath: z.string().min(1),
-            set: z.record(z.any()).default({}),
-            expectedHash: z.string().optional(),
-            expectedMtime: z.number().optional(),
-          }),
-        )
-        .min(1),
-      dryRun: z.boolean().default(true),
-      continueOnError: z.boolean().default(false),
+      description:
+        "Headless-filesystem batch frontmatter set with dry-run support. Protected keys remain blocked by write policy.",
+      inputSchema: mcpSchema(
+        z.object({
+          operations: z
+            .array(
+              z.object({
+                filePath: z.string().min(1),
+                set: z.record(z.any()).default({}),
+                expectedHash: z.string().optional(),
+                expectedMtime: z.number().optional(),
+              }),
+            )
+            .min(1),
+          dryRun: z.boolean().default(true),
+          continueOnError: z.boolean().default(false),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessFilesystemBatchFrontmatter",
@@ -1087,26 +1039,31 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "obsidian_admin_filesystem",
-    "Headless-filesystem admin batch operations with dry-run by default. Supports sandbox-safe batch move, archive, and delete with preconditions.",
     {
-      operation: z.enum(["batch_move", "archive", "batch_delete"]),
-      dryRun: z.boolean().default(true),
-      archiveDir: z.string().optional(),
-      items: z
-        .array(
-          z.object({
-            sourcePath: z.string().min(1),
-            targetPath: z.string().optional(),
-            expectedHash: z.string().optional(),
-            expectedMtime: z.number().optional(),
-          }),
-        )
-        .min(1),
-      continueOnError: z.boolean().default(false),
+      description:
+        "Headless-filesystem admin batch operations with dry-run by default. Supports sandbox-safe batch move, archive, and delete with preconditions.",
+      inputSchema: mcpSchema(
+        z.object({
+          operation: z.enum(["batch_move", "archive", "batch_delete"]),
+          dryRun: z.boolean().default(true),
+          archiveDir: z.string().optional(),
+          items: z
+            .array(
+              z.object({
+                sourcePath: z.string().min(1),
+                targetPath: z.string().optional(),
+                expectedHash: z.string().optional(),
+                expectedMtime: z.number().optional(),
+              }),
+            )
+            .min(1),
+          continueOnError: z.boolean().default(false),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessFilesystemAdmin",
@@ -1232,38 +1189,43 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "obsidian_manage_canvas",
-    "Direct headless-filesystem JSON Canvas helper for copied or dedicated vaults. Validates, creates, adds text nodes, and connects nodes with dry-run by default, but has no durable plan/status/recovery receipt. For an existing live Canvas prefer obsidian_canvas_patch_plan and its governed lifecycle.",
     {
-      operation: z.enum([
-        "validate",
-        "create",
-        "add_text_node",
-        "connect_nodes",
-      ]),
-      filePath: z.string().min(1),
-      dryRun: z.boolean().default(true),
-      overwrite: z.boolean().default(false),
-      nodes: z.array(z.record(z.any())).optional(),
-      edges: z.array(z.record(z.any())).optional(),
-      nodeId: z.string().optional(),
-      text: z.string().optional(),
-      x: z.number().optional(),
-      y: z.number().optional(),
-      width: z.number().optional(),
-      height: z.number().optional(),
-      color: z.string().optional(),
-      edgeId: z.string().optional(),
-      fromNode: z.string().optional(),
-      toNode: z.string().optional(),
-      fromSide: z.enum(["top", "right", "bottom", "left"]).optional(),
-      toSide: z.enum(["top", "right", "bottom", "left"]).optional(),
-      label: z.string().optional(),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
+      description:
+        "Direct headless-filesystem JSON Canvas helper for copied or dedicated vaults. Validates, creates, adds text nodes, and connects nodes with dry-run by default, but has no durable plan/status/recovery receipt. For an existing live Canvas prefer obsidian_canvas_patch_plan and its governed lifecycle.",
+      inputSchema: mcpSchema(
+        z.object({
+          operation: z.enum([
+            "validate",
+            "create",
+            "add_text_node",
+            "connect_nodes",
+          ]),
+          filePath: z.string().min(1),
+          dryRun: z.boolean().default(true),
+          overwrite: z.boolean().default(false),
+          nodes: z.array(z.record(z.any())).optional(),
+          edges: z.array(z.record(z.any())).optional(),
+          nodeId: z.string().optional(),
+          text: z.string().optional(),
+          x: z.number().optional(),
+          y: z.number().optional(),
+          width: z.number().optional(),
+          height: z.number().optional(),
+          color: z.string().optional(),
+          edgeId: z.string().optional(),
+          fromNode: z.string().optional(),
+          toNode: z.string().optional(),
+          fromSide: z.enum(["top", "right", "bottom", "left"]).optional(),
+          toSide: z.enum(["top", "right", "bottom", "left"]).optional(),
+          label: z.string().optional(),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessManageCanvas",
@@ -1482,18 +1444,23 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "bases_create",
-    "Headless-filesystem direct .base create/validate for a copied or dedicated vault. It writes YAML without evaluating Obsidian Bases semantics and creates no durable plan/status/recovery receipt.",
     {
-      path: z.string().min(1),
-      spec: z.record(z.any()),
-      overwrite: z.boolean().default(false),
-      validateOnly: z.boolean().default(false),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
+      description:
+        "Headless-filesystem direct .base create/validate for a copied or dedicated vault. It writes YAML without evaluating Obsidian Bases semantics and creates no durable plan/status/recovery receipt.",
+      inputSchema: mcpSchema(
+        z.object({
+          path: z.string().min(1),
+          spec: z.record(z.any()),
+          overwrite: z.boolean().default(false),
+          validateOnly: z.boolean().default(false),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedBasesCreate",
@@ -1575,18 +1542,23 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "bases_upsert_config",
-    "Headless-filesystem direct .base config replacement/validation for a copied or dedicated vault. It does not provide the live governed formula contract or a durable recovery receipt.",
     {
-      base_id: z.string().min(1),
-      yaml: z.string().optional(),
-      json: z.record(z.any()).optional(),
-      validateOnly: z.boolean().default(false),
-      expectedHash: z.string().optional(),
-      expectedMtime: z.number().optional(),
+      description:
+        "Headless-filesystem direct .base config replacement/validation for a copied or dedicated vault. It does not provide the live governed formula contract or a durable recovery receipt.",
+      inputSchema: mcpSchema(
+        z.object({
+          base_id: z.string().min(1),
+          yaml: z.string().optional(),
+          json: z.record(z.any()).optional(),
+          validateOnly: z.boolean().default(false),
+          expectedHash: z.string().optional(),
+          expectedMtime: z.number().optional(),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedBasesUpsertConfig",
@@ -1666,24 +1638,29 @@ function registerHeadlessGuardedWriteTools(
     },
   );
 
-  server.tool(
+  server.registerTool(
     "bases_upsert_rows",
-    "Headless-filesystem direct frontmatter set operations for notes referenced by a .base. Unset is unsupported; the multi-note request is not one atomic batch and has no durable batch recovery receipt.",
     {
-      base_id: z.string().min(1),
-      operations: z
-        .array(
-          z.object({
-            file: z.string().min(1),
-            set: z.record(z.any()).optional(),
-            expectedHash: z.string().optional(),
-            expected_mtime: z.number().optional(),
-          }),
-        )
-        .min(1),
-      continueOnError: z.boolean().default(false),
+      description:
+        "Headless-filesystem direct frontmatter set operations for notes referenced by a .base. Unset is unsupported; the multi-note request is not one atomic batch and has no durable batch recovery receipt.",
+      inputSchema: mcpSchema(
+        z.object({
+          base_id: z.string().min(1),
+          operations: z
+            .array(
+              z.object({
+                file: z.string().min(1),
+                set: z.record(z.any()).optional(),
+                expectedHash: z.string().optional(),
+                expected_mtime: z.number().optional(),
+              }),
+            )
+            .min(1),
+          continueOnError: z.boolean().default(false),
+        }),
+      ),
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
-    DESTRUCTIVE_TOOL_ANNOTATIONS,
     async (params) => {
       const context = requestContextService.createRequestContext({
         operation: "headlessGuardedBasesUpsertRows",
@@ -1796,6 +1773,7 @@ async function createMcpServerInstance(
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
   governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
   governedCanvasRuntime: GovernedCanvasRuntime | undefined,
+  servingContext?: McpRequestContext,
 ): Promise<McpServer> {
   const context = requestContextService.createRequestContext({
     operation: "createMcpServerInstance",
@@ -1826,10 +1804,11 @@ async function createMcpServerInstance(
       capabilities: {
         logging: {}, // Server can receive logging/setLevel and send notifications/message
         resources: { listChanged: true }, // Server supports dynamic resource lists
-        tools: { listChanged: true }, // Server supports dynamic tool lists
+        // Tools are registered after installing the public privacy boundary.
       },
     },
   );
+  installLegacyToolCatalog(server.server);
   installMcpSdkToolErrorPrivacyBoundary(server);
   installMcpToolPublicErrorBoundary(server);
 
@@ -1953,7 +1932,7 @@ async function createMcpServerInstance(
 
     logger.info("Resources and tools registered successfully", context);
 
-    if (vaultCacheService) {
+    if (vaultCacheService && servingContext?.era !== "modern") {
       logger.info(
         "Triggering background vault cache build (if not already built/building)...",
         context,
@@ -2010,7 +1989,8 @@ async function startTransport(
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
   governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
   governedCanvasRuntime: GovernedCanvasRuntime | undefined,
-): Promise<McpServer | ServerType | void> {
+): Promise<McpServer | StdioServerHandle | ServerType | void> {
+  const protocolMode = mcpProtocolMode();
   const transportType = config.mcpTransportType;
   const context = requestContextService.createRequestContext({
     operation: "startTransport",
@@ -2025,13 +2005,14 @@ async function startTransport(
     );
     // For HTTP, startHttpTransport manages its own lifecycle and server instances per session.
     // It needs a factory function to create new McpServer instances, passing along the shared services.
-    const mcpServerFactory = async () =>
+    const mcpServerFactory = async (servingContext?: McpRequestContext) =>
       createMcpServerInstance(
         obsidianService,
         vaultCacheService,
         governedNoteReplaceRuntime,
         governedBaseFormulaRuntime,
         governedCanvasRuntime,
+        servingContext,
       );
     const httpServerInstance = await startHttpTransport(
       mcpServerFactory,
@@ -2040,6 +2021,26 @@ async function startTransport(
       vaultCacheService,
     );
     return httpServerInstance; // Return the http.Server instance.
+  }
+
+  if (transportType === "stdio" && protocolMode === "dual") {
+    return serveDualStdio(
+      (servingContext) =>
+        createMcpServerInstance(
+          obsidianService,
+          vaultCacheService,
+          governedNoteReplaceRuntime,
+          governedBaseFormulaRuntime,
+          governedCanvasRuntime,
+          servingContext,
+        ),
+      (error) =>
+        reportOpaqueServerFailure(error, {
+          operation: "dualStackStdio",
+          context,
+          critical: false,
+        }),
+    );
   }
 
   if (transportType === "stdio") {
@@ -2089,7 +2090,7 @@ export async function initializeAndStartServer(
   governedNoteReplaceRuntime: GovernedNoteReplaceRuntime | undefined,
   governedBaseFormulaRuntime: GovernedBaseFormulaRuntime | undefined,
   governedCanvasRuntime: GovernedCanvasRuntime | undefined,
-): Promise<void | McpServer | ServerType> {
+): Promise<void | McpServer | StdioServerHandle | ServerType> {
   const context = requestContextService.createRequestContext({
     operation: "initializeAndStartServer",
   });

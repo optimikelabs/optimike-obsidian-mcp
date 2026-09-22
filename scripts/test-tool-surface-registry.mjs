@@ -126,7 +126,9 @@ assert.equal(
 for (const [family, entries] of governedFamilies) {
   assert.deepEqual(
     entries.map((entry) => entry.lifecycleRole).sort(),
-    ["note-move", "note-create", "base-rows"].includes(family) ? ["apply", "plan", "status"] : expectedLifecycleRoles,
+    ["note-move", "note-create", "base-rows"].includes(family)
+      ? ["apply", "plan", "status"]
+      : expectedLifecycleRoles,
     `${family} must expose its complete declared lifecycle`,
   );
   assert.equal(
@@ -187,7 +189,7 @@ for (const entry of TOOL_SURFACE_REGISTRY) {
 
 const sourceDeclaredTools = new Set();
 const literalPatterns = [
-  /server\.tool\(\s*["'`]([^"'`]+)["'`]/gu,
+  /server\.(?:tool|registerTool)\(\s*["'`]([^"'`]+)["'`]/gu,
   /const\s+toolName\s*=\s*["'`]([^"'`]+)["'`]/gu,
   /register\(\s*["'`](smart(?:_|-)[^"'`]+)["'`]/gu,
   /name:\s*["'`](external_[^"'`]+)["'`]/gu,

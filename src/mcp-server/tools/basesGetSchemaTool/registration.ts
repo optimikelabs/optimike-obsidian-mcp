@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
@@ -15,6 +15,7 @@ import {
   BasesGetSchemaInputSchema,
   processBasesGetSchema,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const TOOL_NAME = "bases_get_schema";
 const TOOL_DESCRIPTION =
@@ -33,11 +34,13 @@ export async function registerBasesGetSchemaTool(
 
   await ErrorHandler.tryCatch(
     async () => {
-      server.tool(
+      server.registerTool(
         TOOL_NAME,
-        TOOL_DESCRIPTION,
-        BasesGetSchemaInputSchema.shape,
-        READ_ONLY_TOOL_ANNOTATIONS,
+        {
+          description: TOOL_DESCRIPTION,
+          inputSchema: mcpSchema(BasesGetSchemaInputSchema.shape),
+          annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
         async (params: BasesGetSchemaInput) => {
           const handlerContext = requestContextService.createRequestContext({
             parentContext: registrationContext,

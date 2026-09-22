@@ -4,10 +4,15 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { get_encoding } from "tiktoken";
 
+const protocolEra = process.env.MCP_CANARY_PROTOCOL_ERA ?? "legacy";
+assert.ok(
+  ["legacy", "modern"].includes(protocolEra),
+  "Invalid canary protocol era",
+);
 assert.equal(process.env.VNEXT_PILOT_CONFIRM, "DISPOSABLE_VAULT_ONLY");
 const vault = path.resolve(process.env.VNEXT_PILOT_VAULT),
   vaultName = process.env.VNEXT_PILOT_NAME;
@@ -173,6 +178,7 @@ const env = {
   OBSIDIAN_API_KEY: restConfig.apiKey,
   OBSIDIAN_RUNTIME_MODE: "live",
   MCP_TRANSPORT_TYPE: "stdio",
+  MCP_PROTOCOL_MODE: protocolEra === "modern" ? "dual" : "legacy",
   MCP_WRITE_MODE: "full",
   MCP_TOOL_PROFILE: "full",
   OPERON_MUTATIONS_ENABLED: "true",
@@ -194,7 +200,14 @@ delete env.MCP_BACKEND_BEARER_TOKEN;
 delete env.OPENAI_API_KEY;
 let client, transport;
 const connect = async () => {
-  client = new Client({ name: "vnext-disposable-pilot", version: "1" });
+  client = new Client(
+    { name: "vnext-disposable-pilot", version: "1" },
+    {
+      versionNegotiation: {
+        mode: protocolEra === "modern" ? { pin: "2026-07-28" } : "legacy",
+      },
+    },
+  );
   transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.resolve("dist/index.js")],
@@ -203,10 +216,12 @@ const connect = async () => {
     stderr: "pipe",
   });
   await client.connect(transport);
+  assert.equal(client.getProtocolEra(), protocolEra);
 };
 const tokenizer = get_encoding("cl100k_base"),
   evidence = {
     run,
+    protocolEra,
     scope:
       "Disposable Obsidian Desktop Pilot2; candidate stdio MCP; real Bridges; local Ollama on two synthetic fixture embeddings",
     calls: [],
@@ -214,9 +229,12 @@ const tokenizer = get_encoding("cl100k_base"),
   };
 async function call(name, args) {
   const start = performance.now(),
-    r = await client.callTool({ name, arguments: args }, undefined, {
-      timeout: 60000,
-    });
+    r = await client.callTool(
+      { name, arguments: args },
+      {
+        timeout: 60000,
+      },
+    );
   const text = r.content
       .filter((c) => c.type === "text")
       .map((c) => c.text)

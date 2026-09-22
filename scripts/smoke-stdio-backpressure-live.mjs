@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const filePath = process.env.OBSIDIAN_STDIO_BACKPRESSURE_CANARY_PATH?.trim();
 if (!filePath) {

@@ -1,7 +1,4 @@
-import type {
-  McpServer,
-  RegisteredTool,
-} from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer, RegisteredTool } from "@modelcontextprotocol/server";
 import { currentToolProfileContext } from "./toolProfileContext.js";
 import {
   parseToolProfileId,
@@ -38,10 +35,6 @@ export function installToolProfileRegistrationGate(
   if (profile === "full") return;
 
   const handles = new Map<string, RegisteredTool>();
-  const originalTool = server.tool.bind(server) as (
-    name: string,
-    ...rest: unknown[]
-  ) => RegisteredTool;
   const originalRegisterTool = server.registerTool.bind(server) as (
     name: string,
     ...rest: unknown[]
@@ -69,14 +62,7 @@ export function installToolProfileRegistrationGate(
     return handle;
   };
 
-  // The project still uses the v1 convenience `tool()` API extensively, while
-  // future registrations may migrate to `registerTool()`. Intercept both public
-  // entrypoints so the profile contract cannot drift during that migration.
-  (server as unknown as { tool: typeof server.tool }).tool = ((
-    name: string,
-    ...rest: unknown[]
-  ) => remember(name, originalTool(name, ...rest))) as typeof server.tool;
-
+  // One public registration API, for both protocol eras.
   (
     server as unknown as { registerTool: typeof server.registerTool }
   ).registerTool = ((name: string, ...rest: unknown[]) =>

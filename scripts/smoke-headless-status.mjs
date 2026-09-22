@@ -6,8 +6,8 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { SignJWT } from "jose";
 
 const timeoutMs = Number(process.env.MCP_SMOKE_TIMEOUT_MS ?? "60000");

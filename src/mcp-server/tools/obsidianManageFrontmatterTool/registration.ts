@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
@@ -20,6 +20,7 @@ import {
   ObsidianManageFrontmatterInputSchemaShape,
   processObsidianManageFrontmatter,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 export const registerObsidianManageFrontmatterTool = async (
   server: McpServer,
@@ -41,11 +42,13 @@ export const registerObsidianManageFrontmatterTool = async (
 
   await ErrorHandler.tryCatch(
     async () => {
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ObsidianManageFrontmatterInputSchemaShape,
-        DESTRUCTIVE_TOOL_ANNOTATIONS,
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ObsidianManageFrontmatterInputSchemaShape),
+          annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+        },
         async (params: ObsidianManageFrontmatterInput) => {
           const inputMetadata = {
             operation: params.operation,

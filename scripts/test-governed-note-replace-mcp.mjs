@@ -12,8 +12,17 @@ import {
 import http from "node:http";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+const modern = process.env.MCP_TEST_PROTOCOL_ERA === "modern";
+const { Client } = await import(
+  modern
+    ? "@modelcontextprotocol/client"
+    : "@modelcontextprotocol/sdk/client/index.js"
+);
+const { StdioClientTransport } = await import(
+  modern
+    ? "@modelcontextprotocol/client/stdio"
+    : "@modelcontextprotocol/sdk/client/stdio.js"
+);
 
 const TOOL_NAMES = [
   "obsidian_note_replace_apply",
@@ -408,7 +417,11 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     if (field in (payload.error.details ?? {})) {
       const value = payload.error.details[field];
       assert.equal(typeof value, "string");
-      if (field === "reasonCode" && value !== "atomic_write_creation_property_missing") assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
+      if (
+        field === "reasonCode" &&
+        value !== "atomic_write_creation_property_missing"
+      )
+        assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
       if (field === "phase")
         assert.ok(
           ["planned", "applying", "recovering", "terminal"].includes(value),
@@ -463,6 +476,7 @@ function childEnv(writeMode = "full", runtimeMode = "live", overrides = {}) {
   const env = {
     NODE_ENV: "test",
     MCP_TRANSPORT_TYPE: "stdio",
+    MCP_PROTOCOL_MODE: modern ? "dual" : "legacy",
     MCP_LOG_LEVEL: "debug",
     LOGS_DIR: logsPath,
     MCP_WRITE_MODE: writeMode,
@@ -513,9 +527,15 @@ async function startClient(
   });
   const client = new Client(
     { name: "governed-note-replace-integration", version: "1.0.0" },
-    { capabilities: {} },
+    {
+      capabilities: {},
+      ...(modern
+        ? { versionNegotiation: { mode: { pin: "2026-07-28" } } }
+        : {}),
+    },
   );
   await client.connect(transport);
+  if (modern) assert.equal(client.getProtocolEra(), "modern");
   return {
     client,
     transport,
@@ -990,8 +1010,14 @@ try {
     "creation-date properties to exist",
     "missing creation date",
   );
-  assert.equal(missingCreatedAttempt.payload.error.details.reasonCode, "atomic_write_creation_property_missing");
-  assert.doesNotMatch(JSON.stringify(missingCreatedAttempt.payload), /bornAt|missingCreatedProperties/);
+  assert.equal(
+    missingCreatedAttempt.payload.error.details.reasonCode,
+    "atomic_write_creation_property_missing",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(missingCreatedAttempt.payload),
+    /bornAt|missingCreatedProperties/,
+  );
   assert.equal(fake.casRequests, 0);
 
   fake.reset("---\nchangedAt: 2026-08-17T10:00\n---\nbefore\n");

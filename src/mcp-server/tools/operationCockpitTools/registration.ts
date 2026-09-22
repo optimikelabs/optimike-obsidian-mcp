@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   OperationCockpit,
@@ -7,6 +7,7 @@ import {
   type PendingOperationSource,
 } from "../../../services/operationCockpit.js";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const InputSchema = z
   .object({
@@ -31,11 +32,14 @@ export function registerOperationCockpitTool(
 ): void {
   if (sources.length === 0) return;
   const cockpit = new OperationCockpit(sources);
-  server.tool(
+  server.registerTool(
     "obsidian_list_pending_operations",
-    "Lists redacted durable Note, Frontmatter, Base Formula, Canvas and Text Patch operations that still require apply, status or exact-plan recovery. It never returns note payloads, invokes a backend, changes a journal or performs recovery.",
-    InputSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Lists redacted durable Note, Frontmatter, Base Formula, Canvas and Text Patch operations that still require apply, status or exact-plan recovery. It never returns note payloads, invokes a backend, changes a journal or performs recovery.",
+      inputSchema: mcpSchema(InputSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof InputSchema>) => ({
       content: [
         {

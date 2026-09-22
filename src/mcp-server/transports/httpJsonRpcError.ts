@@ -143,7 +143,7 @@ type PublicHttpErrorOptions = {
   operation: string;
   id?: JsonRpcId;
   status?: number;
-  protocolCode?: -32700 | -32600;
+  protocolCode?: -32700 | -32600 | -32020;
   details?: Record<string, string | number | boolean>;
 };
 
@@ -178,7 +178,9 @@ function publicErrorBody(
       jsonrpc: "2.0" as const,
       error: {
         code:
-          options.protocolCode === -32700 || options.protocolCode === -32600
+          options.protocolCode === -32700 ||
+          options.protocolCode === -32600 ||
+          options.protocolCode === -32020
             ? options.protocolCode
             : jsonRpcCodeForErrorCode(code),
         message:

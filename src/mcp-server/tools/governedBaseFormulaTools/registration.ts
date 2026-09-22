@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type {
   GovernedBaseFormulaPlanInput,
@@ -10,6 +10,7 @@ import {
   GOVERNED_PLAN_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const OperationSchema = z.discriminatedUnion("op", [
   z.object({
@@ -81,39 +82,51 @@ export async function registerGovernedBaseFormulaTools(
   runtime: GovernedBaseFormulaRuntime | undefined,
 ): Promise<void> {
   if (!runtime) return;
-  server.tool(
+  server.registerTool(
     "bases_formula_patch_plan",
-    "Plan a source-preserving set/delete patch of named formulas in one existing Obsidian Base. The complete next YAML, backend binding, hashes, and byte-preservation proof are sealed without writing.",
-    PlanSchema.shape,
-    GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Plan a source-preserving set/delete patch of named formulas in one existing Obsidian Base. The complete next YAML, backend binding, hashes, and byte-preservation proof are sealed without writing.",
+      inputSchema: mcpSchema(PlanSchema.shape),
+      annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    },
     async (params: GovernedBaseFormulaPlanInput) =>
       runTool("bases_formula_patch_plan", params, () => runtime.plan(params)),
   );
-  server.tool(
+  server.registerTool(
     "bases_formula_patch_apply",
-    "Apply only the exact sealed Base formula plan through the Bases Bridge atomic CAS. No target, formula, expression, or compiled YAML can change after planning.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Apply only the exact sealed Base formula plan through the Bases Bridge atomic CAS. No target, formula, expression, or compiled YAML can change after planning.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("bases_formula_patch_apply", params, () =>
         runtime.apply(params.planRef, params.idempotencyKey),
       ),
   );
-  server.tool(
+  server.registerTool(
     "bases_formula_patch_status",
-    "Read and reconcile the durable status of one governed Base formula plan without starting a new mutation.",
-    StatusSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Read and reconcile the durable status of one governed Base formula plan without starting a new mutation.",
+      inputSchema: mcpSchema(StatusSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof StatusSchema>) =>
       runTool("bases_formula_patch_status", params, () =>
         runtime.status(params.planRef),
       ),
   );
-  server.tool(
+  server.registerTool(
     "bases_formula_patch_recover",
-    "Recover the exact sealed Base formula plan after an uncertain outcome. Recovery is not undo and accepts no new formula intent.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Recover the exact sealed Base formula plan after an uncertain outcome. Recovery is not undo and accepts no new formula intent.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("bases_formula_patch_recover", params, () =>
         runtime.recover(params.planRef, params.idempotencyKey),

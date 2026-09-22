@@ -79,7 +79,7 @@ assert.equal(
 );
 assert.doesNotMatch(
   registration,
-  /server\.tool\(\s*["'](?:obsidian_)?capability_doctor/gu,
+  /server\.(?:tool|registerTool)\(\s*["'](?:obsidian_)?capability_doctor/gu,
   "P2 must not add a second diagnostic tool",
 );
 assert.match(manifestSource, /CAPABILITY_PROBE_TIMEOUT_MS\s*=\s*2_500/u);

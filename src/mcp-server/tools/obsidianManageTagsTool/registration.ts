@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
@@ -20,6 +20,7 @@ import {
   ObsidianManageTagsInputSchemaShape,
   processObsidianManageTags,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 export const registerObsidianManageTagsTool = async (
   server: McpServer,
@@ -41,11 +42,13 @@ export const registerObsidianManageTagsTool = async (
 
   await ErrorHandler.tryCatch(
     async () => {
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ObsidianManageTagsInputSchemaShape,
-        DESTRUCTIVE_TOOL_ANNOTATIONS,
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ObsidianManageTagsInputSchemaShape),
+          annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+        },
         async (params: ObsidianManageTagsInput) => {
           const inputMetadata = {
             operation: params.operation,

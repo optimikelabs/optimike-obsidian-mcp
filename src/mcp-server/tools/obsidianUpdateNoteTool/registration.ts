@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
@@ -22,6 +22,7 @@ import {
   ObsidianUpdateNoteInputSchemaShape,
   processObsidianUpdateNote,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 /**
  * Registers the 'obsidian_update_note' tool with the MCP server.
@@ -65,19 +66,13 @@ export const registerObsidianUpdateNoteTool = async (
     async () => {
       // Use the high-level SDK method for tool registration.
       // This handles schema generation, validation, and routing automatically.
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ObsidianUpdateNoteInputSchemaShape, // Provide the Zod schema shape for input validation.
-        DESTRUCTIVE_TOOL_ANNOTATIONS,
-        /**
-         * The handler function executed when the 'obsidian_update_note' tool is called.
-         *
-         * @param {ObsidianUpdateNoteRegistrationInput} params - The raw input parameters received from the client,
-         *   matching the structure defined by ObsidianUpdateNoteInputSchemaShape.
-         * @returns {Promise<CallToolResult>} A promise resolving to the structured result for the MCP client,
-         *   containing either the successful response data or an error indication.
-         */
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ObsidianUpdateNoteInputSchemaShape),
+          annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+        },
         async (params: ObsidianUpdateNoteRegistrationInput) => {
           const inputMetadata = {
             targetType: params.targetType,

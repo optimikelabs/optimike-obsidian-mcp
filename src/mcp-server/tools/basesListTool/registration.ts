@@ -1,8 +1,7 @@
 /**
  * @fileoverview Registers the `bases_list` MCP tool.
  */
-
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
@@ -18,11 +17,12 @@ import {
   BasesListInputSchema,
   processBasesList,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const TOOL_NAME = "bases_list";
 const TOOL_DESCRIPTION =
-  "Liste les Bases (.base) disponibles via le bridge REST."
-  + " Utilise l'extension obsidian-bases-bridge du plugin Local REST API.";
+  "Liste les Bases (.base) disponibles via le bridge REST." +
+  " Utilise l'extension obsidian-bases-bridge du plugin Local REST API.";
 
 export async function registerBasesListTool(
   server: McpServer,
@@ -38,11 +38,13 @@ export async function registerBasesListTool(
   await ErrorHandler.tryCatch(
     async () => {
       logger.info(`Enregistrement du tool ${TOOL_NAME}`, registrationContext);
-      server.tool(
+      server.registerTool(
         TOOL_NAME,
-        TOOL_DESCRIPTION,
-        BasesListInputSchema.shape,
-        READ_ONLY_TOOL_ANNOTATIONS,
+        {
+          description: TOOL_DESCRIPTION,
+          inputSchema: mcpSchema(BasesListInputSchema.shape),
+          annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
         async (_params: BasesListInput) => {
           const handlerContext = requestContextService.createRequestContext({
             parentContext: registrationContext,

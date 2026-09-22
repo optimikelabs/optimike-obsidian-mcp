@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
@@ -11,6 +11,7 @@ import {
 } from "../../../services/textPatchProjectionRuntime.js";
 import type { GovernedNoteReplaceRuntime } from "../governedNoteReplaceTools/runtime.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const OperationSchema = z.discriminatedUnion("op", [
   z.object({
@@ -111,43 +112,51 @@ export async function registerGovernedTextPatchTools(
 ): Promise<void> {
   if (!noteRuntime) return;
   const runtime = new GovernedTextPatchRuntime(noteRuntime);
-
-  server.tool(
+  server.registerTool(
     "obsidian_text_patch_plan",
-    "Plan one bounded body-only text patch of an existing Markdown note. The sealed plan preserves the complete note outside its authorized body ranges, binds the current before proof and vault identity, and returns only opaque proof metadata; it never writes the note.",
-    PlanSchema.shape,
-    GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Plan one bounded body-only text patch of an existing Markdown note. The sealed plan preserves the complete note outside its authorized body ranges, binds the current before proof and vault identity, and returns only opaque proof metadata; it never writes the note.",
+      inputSchema: mcpSchema(PlanSchema.shape),
+      annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    },
     async (params: GovernedTextPatchPlanInput) =>
       runTool("obsidian_text_patch_plan", params, () => runtime.plan(params)),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_text_patch_apply",
-    "Apply only the exact sealed text patch. Pass planRef and its matching idempotencyKey; no target, text, operation, or hash can be replaced after planning. After a lost response, call status before any recovery.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Apply only the exact sealed text patch. Pass planRef and its matching idempotencyKey; no target, text, operation, or hash can be replaced after planning. After a lost response, call status before any recovery.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_text_patch_apply", params, () =>
         runtime.apply(params.planRef, params.idempotencyKey),
       ),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_text_patch_status",
-    "Read and reconcile the durable status of one governed text patch without executing a mutation. The response never includes its idempotency key or sealed text.",
-    StatusSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Read and reconcile the durable status of one governed text patch without executing a mutation. The response never includes its idempotency key or sealed text.",
+      inputSchema: mcpSchema(StatusSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof StatusSchema>) =>
       runTool("obsidian_text_patch_status", params, () =>
         runtime.status(params.planRef),
       ),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_text_patch_recover",
-    "Recover the exact same sealed text patch after an uncertain outcome. Recovery is not undo and accepts no new patch intent; it reconciles the existing plan under its original fencing.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Recover the exact same sealed text patch after an uncertain outcome. Recovery is not undo and accepts no new patch intent; it reconciles the existing plan under its original fencing.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_text_patch_recover", params, () =>
         runtime.recover(params.planRef, params.idempotencyKey),

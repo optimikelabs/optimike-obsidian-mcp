@@ -14,8 +14,17 @@ import {
 import http from "node:http";
 import { createServer } from "node:net";
 import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+const modern = process.env.MCP_TEST_PROTOCOL_ERA === "modern";
+const { Client } = await import(
+  modern
+    ? "@modelcontextprotocol/client"
+    : "@modelcontextprotocol/sdk/client/index.js"
+);
+const { StreamableHTTPClientTransport } = await import(
+  modern
+    ? "@modelcontextprotocol/client"
+    : "@modelcontextprotocol/sdk/client/streamableHttp.js"
+);
 
 const TOOL_NAMES = [
   "obsidian_note_replace_apply",
@@ -235,8 +244,20 @@ function parse(result) {
 
 async function startClient(url, name) {
   const transport = new StreamableHTTPClientTransport(new URL(url));
-  const client = new Client({ name, version: "1.0.0" }, { capabilities: {} });
+  const client = new Client(
+    { name, version: "1.0.0" },
+    {
+      capabilities: {},
+      ...(modern
+        ? { versionNegotiation: { mode: { pin: "2026-07-28" } } }
+        : {}),
+    },
+  );
   await client.connect(transport);
+  if (modern) {
+    assert.equal(client.getProtocolEra(), "modern");
+    assert.equal(transport.sessionId, undefined);
+  }
   return {
     client,
     async close() {
@@ -274,6 +295,7 @@ const backend = spawn(process.execPath, ["dist/index.js"], {
     ...process.env,
     NODE_ENV: "test",
     MCP_TRANSPORT_TYPE: "http",
+    MCP_PROTOCOL_MODE: modern ? "dual" : "legacy",
     MCP_HTTP_HOST: "127.0.0.1",
     MCP_HTTP_PORT: String(port),
     MCP_HTTP_PORT_RETRIES: "0",

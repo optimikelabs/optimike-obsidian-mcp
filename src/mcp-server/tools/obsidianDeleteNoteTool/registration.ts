@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
@@ -20,6 +20,7 @@ import {
   ObsidianDeleteNoteInputSchema,
   processObsidianDeleteNote,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 /**
  * Registers the 'obsidian_delete_note' tool with the MCP server.
@@ -61,19 +62,13 @@ export const registerObsidianDeleteNoteTool = async (
   await ErrorHandler.tryCatch(
     async () => {
       // Use the high-level SDK method `server.tool` for registration.
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ObsidianDeleteNoteInputSchema.shape, // Provide the Zod schema shape for input definition.
-        DESTRUCTIVE_TOOL_ANNOTATIONS,
-        /**
-         * The handler function executed when the 'obsidian_delete_note' tool is called by the client.
-         *
-         * @param {ObsidianDeleteNoteInput} params - The input parameters received from the client,
-         *   validated against the ObsidianDeleteNoteInputSchema shape.
-         * @returns {Promise<CallToolResult>} A promise resolving to the structured result for the MCP client,
-         *   containing either the successful response data (serialized JSON) or an error indication.
-         */
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ObsidianDeleteNoteInputSchema.shape),
+          annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+        },
         async (params: ObsidianDeleteNoteInput) => {
           // Type matches the inferred input schema
           // Create a specific context for this handler invocation.

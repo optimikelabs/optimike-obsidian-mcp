@@ -13,8 +13,8 @@ import {
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { SignJWT } from "jose";
 
 const CONFIRMATION = "I_UNDERSTAND_THIS_IS_A_READ_ONLY_PILOT_2_CANARY";

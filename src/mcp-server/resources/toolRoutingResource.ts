@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import "../../config/toolProfileCli.js";
 import { installToolProfileRegistrationGate } from "../toolProfileRuntime.js";
 

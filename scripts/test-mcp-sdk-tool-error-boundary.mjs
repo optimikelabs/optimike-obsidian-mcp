@@ -2,10 +2,10 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
 import { z } from "zod";
+import { mcpSchema } from "../dist/mcp-server/mcpSchema.js";
 
 process.env.OBSIDIAN_RUNTIME_MODE = "hybrid";
 process.env.OBSIDIAN_VAULT = process.cwd();
@@ -13,9 +13,9 @@ process.env.SEMANTIC_SEARCH_PREWARM = "false";
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 assert.equal(
-  packageJson.dependencies["@modelcontextprotocol/sdk"],
-  "1.30.0",
-  "the private createToolError hook requires the exact audited SDK version",
+  packageJson.dependencies["@modelcontextprotocol/server"],
+  "2.0.0",
+  "the public boundary is qualified against the exact SDK release",
 );
 
 const {
@@ -55,25 +55,41 @@ const unsupportedSdkServer = new McpServer({
   name: "mcp-sdk-privacy-unsupported-test",
   version: "1",
 });
-Object.defineProperty(unsupportedSdkServer, "createToolError", {
-  value: undefined,
-});
+Object.defineProperty(
+  unsupportedSdkServer.server,
+  "assertCanSetRequestHandler",
+  {
+    value: undefined,
+  },
+);
 assert.throws(
   () => installMcpSdkToolErrorPrivacyBoundary(unsupportedSdkServer),
-  /createToolError is unavailable/u,
-  "startup must fail rather than run without the audited SDK privacy hook",
+  /Unsupported MCP SDK public request-handler boundary/u,
+  "startup must fail rather than run without the audited SDK public API",
 );
 
+const lateServer = new McpServer({ name: "late-boundary", version: "1" });
+lateServer.registerTool("already_registered", {}, async () => ({
+  content: [],
+}));
+assert.throws(
+  () => installMcpSdkToolErrorPrivacyBoundary(lateServer),
+  /already/u,
+);
 const callerMarker = "P0-SDK-CALLER-MARKER-1c3f";
 const backendMarker = "P0-SDK-BACKEND-MARKER-7a92";
 const server = new McpServer({ name: "mcp-sdk-privacy-test", version: "1" });
 installMcpSdkToolErrorPrivacyBoundary(server);
 installMcpToolPublicErrorBoundary(server);
 
-server.tool("throws_raw_error", { caller: z.string() }, async () => {
-  throw new Error(`backend=${backendMarker}; caller=${callerMarker}`);
-});
-server.tool("throws_conflict", async () => {
+server.registerTool(
+  "throws_raw_error",
+  { inputSchema: mcpSchema(z.object({ caller: z.string() })) },
+  async () => {
+    throw new Error(`backend=${backendMarker}; caller=${callerMarker}`);
+  },
+);
+server.registerTool("throws_conflict", {}, async () => {
   const { BaseErrorCode, McpError } = await import(
     "../dist/types-global/errors.js"
   );
@@ -84,7 +100,7 @@ server.tool("throws_conflict", async () => {
     rawMarker: backendMarker,
   });
 });
-server.tool("throws_timeout", async () => {
+server.registerTool("throws_timeout", {}, async () => {
   const { BaseErrorCode, McpError } = await import(
     "../dist/types-global/errors.js"
   );
@@ -95,7 +111,7 @@ server.tool("throws_timeout", async () => {
     recoveryRef: "dvr1_0123456789abcdef0123456789abcdef0123456789abcdef",
   });
 });
-server.tool("throws_recoverable_unavailable", async () => {
+server.registerTool("throws_recoverable_unavailable", {}, async () => {
   const { BaseErrorCode, McpError } = await import(
     "../dist/types-global/errors.js"
   );
@@ -108,14 +124,14 @@ server.tool("throws_recoverable_unavailable", async () => {
     rawMarker: backendMarker,
   });
 });
-server.tool(
+server.registerTool(
   "validates_input",
-  { expected: z.literal("expected") },
+  { inputSchema: mcpSchema(z.object({ expected: z.literal("expected") })) },
   async () => ({
     content: [{ type: "text", text: "validated" }],
   }),
 );
-server.tool("voluntary_error", async () => ({
+server.registerTool("voluntary_error", {}, async () => ({
   content: [{ type: "text", text: "voluntary client feedback" }],
   isError: true,
 }));

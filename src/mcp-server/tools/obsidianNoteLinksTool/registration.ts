@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -13,6 +13,7 @@ import {
   processObsidianNoteLinks,
   type ObsidianNoteLinksInput,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 export async function registerObsidianNoteLinksTool(
   server: McpServer,
@@ -28,11 +29,14 @@ export async function registerObsidianNoteLinksTool(
 
   await ErrorHandler.tryCatch(
     async () => {
-      server.tool(
+      server.registerTool(
         toolName,
-        "Observe the bounded semantic neighborhood of one Markdown note from Obsidian Desktop public MetadataCache APIs. Returns outgoing links, embeds and frontmatter links with actual resolution; requested subpaths with honest anchor validation; unresolved aggregates; resolved backlinks; truncation; provenance; and cache-freshness limits. Read-only and no graph-preservation claim.",
-        ObsidianNoteLinksInputSchema.shape,
-        READ_ONLY_TOOL_ANNOTATIONS,
+        {
+          description:
+            "Observe the bounded semantic neighborhood of one Markdown note from Obsidian Desktop public MetadataCache APIs. Returns outgoing links, embeds and frontmatter links with actual resolution; requested subpaths with honest anchor validation; unresolved aggregates; resolved backlinks; truncation; provenance; and cache-freshness limits. Read-only and no graph-preservation claim.",
+          inputSchema: mcpSchema(ObsidianNoteLinksInputSchema.shape),
+          annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
         async (params: ObsidianNoteLinksInput) => {
           const context = requestContextService.createRequestContext({
             parentContext: registrationContext,
@@ -46,7 +50,9 @@ export async function registerObsidianNoteLinksTool(
             obsidianService,
           );
           return {
-            content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+            content: [
+              { type: "text", text: JSON.stringify(response, null, 2) },
+            ],
             isError: false,
           };
         },
