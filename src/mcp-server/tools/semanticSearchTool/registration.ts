@@ -6,26 +6,40 @@
  * - Expose the single canonical `smart_semantic_search` tool
  * Schéma JSON "Codex-friendly" (pas d'integer ni d'unions).
  */
-
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { promises as fs } from "fs";
 import path from "path";
 import { type SmartVec } from "../../../services/smartEnv.js";
 import { getSemanticCacheService } from "../../../services/semanticCache.js";
 import { getQueryEmbedder } from "../../../adapters/embed/index.js";
-import { detectOllamaBaseUrlFromSmartEnv, recordSemanticSearch, validQueryVector } from "../../../services/semanticSearchHealth.js";
+import {
+  detectOllamaBaseUrlFromSmartEnv,
+  recordSemanticSearch,
+  validQueryVector,
+} from "../../../services/semanticSearchHealth.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 
-async function semanticStage<T>(reasonCode: string, action: () => Promise<T>): Promise<T> {
-  try { return await action(); }
-  catch { throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Semantic search could not complete.", { reasonCode }); }
+async function semanticStage<T>(
+  reasonCode: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await action();
+  } catch {
+    throw new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      "Semantic search could not complete.",
+      { reasonCode },
+    );
+  }
 }
 import { resolveNoteAbsolutePath } from "./resolvePath.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { READ_ONLY_OPEN_WORLD_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const In = z.object({
   query: z.string().min(2, "query too short"),
@@ -189,7 +203,6 @@ function pickDominantModel(items: SmartVec[]): string | undefined {
   return ranked[0]?.[0];
 }
 
-
 function makeSuccessResult(payload: OutType) {
   return {
     content: [
@@ -267,7 +280,9 @@ async function performSearch(input: InType): Promise<OutType> {
 
   const semanticCache = getSemanticCacheService();
   const semanticCacheStartedAt = nowMs();
-  const snapshot = await semanticStage("semantic_index_unavailable", () => semanticCache.getSnapshot());
+  const snapshot = await semanticStage("semantic_index_unavailable", () =>
+    semanticCache.getSnapshot(),
+  );
   timings.semantic_cache = elapsedSince(semanticCacheStartedAt);
   const items = snapshot.items;
   if (!items.length) {
@@ -291,23 +306,29 @@ async function performSearch(input: InType): Promise<OutType> {
     (await detectOllamaBaseUrlFromSmartEnv(SMART_ENV_DIR, model));
 
   const embedderSetupStartedAt = nowMs();
-  const selection = await semanticStage("semantic_embedder_configuration_invalid", () => getQueryEmbedder({
-    provider: QUERY_EMBEDDER,
-    modelHint: QUERY_EMBEDDER_MODEL_HINT,
-    model: QUERY_EMBEDDER_MODEL,
-    vaultModel: model,
-    dimension,
-    ollamaBaseUrl: inferredOllamaBaseUrl,
-    openaiApiKey: OPENAI_API_KEY,
-    openaiBaseUrl: OPENAI_BASE_URL,
-    openaiDimensions,
-  }));
+  const selection = await semanticStage(
+    "semantic_embedder_configuration_invalid",
+    () =>
+      getQueryEmbedder({
+        provider: QUERY_EMBEDDER,
+        modelHint: QUERY_EMBEDDER_MODEL_HINT,
+        model: QUERY_EMBEDDER_MODEL,
+        vaultModel: model,
+        dimension,
+        ollamaBaseUrl: inferredOllamaBaseUrl,
+        openaiApiKey: OPENAI_API_KEY,
+        openaiBaseUrl: OPENAI_BASE_URL,
+        openaiDimensions,
+      }),
+  );
   timings.embedder_setup = elapsedSince(embedderSetupStartedAt);
 
   const queryEmbeddingStartedAt = nowMs();
   let queryVector: number[];
   try {
-    queryVector = await semanticStage("semantic_query_embedding_failed", () => selection.embed(query));
+    queryVector = await semanticStage("semantic_query_embedding_failed", () =>
+      selection.embed(query),
+    );
   } catch (error) {
     recordSemanticSearch(selection.embed, dimension, false);
     throw error;
@@ -316,8 +337,11 @@ async function performSearch(input: InType): Promise<OutType> {
 
   if (!validQueryVector(queryVector, dimension)) {
     recordSemanticSearch(selection.embed, dimension, false);
-    throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Semantic query vector is incompatible.",
-      { reasonCode: "semantic_query_vector_invalid" });
+    throw new McpError(
+      BaseErrorCode.SERVICE_UNAVAILABLE,
+      "Semantic query vector is incompatible.",
+      { reasonCode: "semantic_query_vector_invalid" },
+    );
   }
 
   const filterStartedAt = nowMs();
@@ -509,11 +533,13 @@ export const registerSemanticSearchTool = async (
   _vaultCacheService: VaultCacheService | undefined,
 ): Promise<void> => {
   const register = (name: string, description: string) => {
-    server.tool(
+    server.registerTool(
       name,
-      description,
-      In.shape,
-      READ_ONLY_OPEN_WORLD_TOOL_ANNOTATIONS,
+      {
+        description: description,
+        inputSchema: mcpSchema(In.shape),
+        annotations: READ_ONLY_OPEN_WORLD_TOOL_ANNOTATIONS,
+      },
       async (params: InType, _extra: unknown) => {
         try {
           const payload = await handleSearchRequest(params);

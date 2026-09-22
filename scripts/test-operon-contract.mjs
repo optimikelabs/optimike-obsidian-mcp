@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
 import {
   OPERON_CONTRACT_VERSION,
   OperonAdoptTaskSchema,
@@ -35,6 +34,7 @@ import {
   resolveOperonPriorityStableId,
   resolveOperonWorkflowStatus,
 } from "../dist/services/operon/contract.js";
+import { mcpSchema } from "../dist/mcp-server/mcpSchema.js";
 
 const planDigestA = "a".repeat(64);
 const validNativeProof = {
@@ -242,9 +242,9 @@ const schemaServer = new McpServer({
   name: "operon-recovery-schema-test",
   version: "0",
 });
-schemaServer.tool(
+schemaServer.registerTool(
   "operon_recover_mutation",
-  OperonRecoverMutationInputSchema.shape,
+  { inputSchema: mcpSchema(OperonRecoverMutationInputSchema.shape) },
   async () => ({ content: [{ type: "text", text: "ok" }] }),
 );
 const [schemaClientTransport, schemaServerTransport] =

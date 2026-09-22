@@ -14,8 +14,8 @@ import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import axios from "axios";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { compileBaseFormulaPatch } from "../dist/services/baseConfigPatchCompiler.js";
 
 const canaryPath = process.env.OBSIDIAN_BASE_FORMULA_CANARY_PATH?.trim();

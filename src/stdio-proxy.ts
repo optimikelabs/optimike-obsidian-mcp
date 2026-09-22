@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import "./config/toolProfileCli.js";
+import { serveDualStdio } from "./mcp-server/transports/dualStdio.js";
+import { installLegacyToolCatalog } from "./mcp-server/legacyToolCatalog.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -16,18 +18,16 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
+  StdioServerTransport,
+  type StdioServerHandle,
+} from "@modelcontextprotocol/server/stdio";
+import { mcpProtocolMode } from "./mcp-server/protocolMode.js";
+import { Server, SdkHttpError } from "@modelcontextprotocol/server";
+import {
+  Client,
   StreamableHTTPClientTransport,
-  StreamableHTTPError,
-} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  CompatibilityCallToolResultSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+} from "@modelcontextprotocol/client";
 import {
   ExternalHandoffSchema,
   ExternalListSchema,
@@ -86,6 +86,7 @@ type BackendClient = {
 type BackendConnection = BackendClient & {
   generation: number;
   sessionId: string;
+  era: "legacy" | "modern";
   inFlight: number;
   retired: boolean;
   retiredTimer?: NodeJS.Timeout;
@@ -104,6 +105,7 @@ class BackendOperationError extends Error {
     readonly generation: number,
     readonly originalError: unknown,
     readonly networkReplayAuthorized: boolean,
+    readonly era: "legacy" | "modern",
   ) {
     super("Backend operation failed");
   }
@@ -160,10 +162,8 @@ function localFailClosedExternalMoveMutationIsVisible(
   return staticallyVisibleLocalExternalMoveMutationTools.has(toolName);
 }
 
-const proxyServer = new Server(
-  { name: `${packageName}-stdio-proxy`, version: packageVersion },
-  { capabilities: { tools: { listChanged: true } } },
-);
+let proxyServer: Server | undefined;
+let stdioServingHandle: StdioServerHandle | undefined;
 
 let backend: BackendConnection | undefined;
 let backendGeneration = 0;
@@ -512,8 +512,6 @@ const NETWORK_ERROR_CODES = new Set([
   "UND_ERR_HEADERS_TIMEOUT",
   "UND_ERR_SOCKET",
 ]);
-const STREAMABLE_HTTP_POST_ERROR_PREFIX =
-  "Streamable HTTP error: Error POSTing to endpoint: ";
 const SESSION_INVALID_MESSAGES = new Set([
   "Invalid or expired session ID.",
   "Session not found or expired.",
@@ -562,24 +560,28 @@ function hasExactlyKeys(
  * stdio. Its request correlation id and any future HTTP-only fields remain on
  * the HTTP boundary; all other application failures stay status-only.
  */
+function httpErrorResponseText(error: SdkHttpError): string | undefined {
+  let text: unknown;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error.data, "text");
+    text = descriptor && "value" in descriptor ? descriptor.value : undefined;
+  } catch {
+    return undefined;
+  }
+  return typeof text === "string" &&
+    Buffer.byteLength(text, "utf8") <= MAX_HTTP_ADMISSION_ERROR_BODY_BYTES
+    ? text
+    : undefined;
+}
+
 function parseHttpAdmissionError(
   error: unknown,
 ): HttpAdmissionError | undefined {
-  if (!(error instanceof StreamableHTTPError) || error.code !== 503) {
+  if (!(error instanceof SdkHttpError) || error.status !== 503) {
     return undefined;
   }
-  if (!error.message.startsWith(STREAMABLE_HTTP_POST_ERROR_PREFIX)) {
-    return undefined;
-  }
-  const responseBody = error.message.slice(
-    STREAMABLE_HTTP_POST_ERROR_PREFIX.length,
-  );
-  if (
-    Buffer.byteLength(responseBody, "utf8") >
-    MAX_HTTP_ADMISSION_ERROR_BODY_BYTES
-  ) {
-    return undefined;
-  }
+  const responseBody = httpErrorResponseText(error);
+  if (responseBody === undefined) return undefined;
   try {
     const body = JSON.parse(responseBody) as unknown;
     if (
@@ -651,14 +653,10 @@ function errorHasNetworkCause(
 }
 
 function streamableHttpApplicationMessage(
-  error: StreamableHTTPError,
+  error: SdkHttpError,
 ): string | undefined {
-  if (!error.message.startsWith(STREAMABLE_HTTP_POST_ERROR_PREFIX)) {
-    return undefined;
-  }
-  const responseBody = error.message.slice(
-    STREAMABLE_HTTP_POST_ERROR_PREFIX.length,
-  );
+  const responseBody = httpErrorResponseText(error);
+  if (responseBody === undefined) return undefined;
   try {
     const parsed = JSON.parse(responseBody) as {
       error?: { message?: unknown };
@@ -672,34 +670,49 @@ function streamableHttpApplicationMessage(
 }
 
 /** Server-owned pre-dispatch rejection; never infer replay safety from generic 404. */
-function isPublicInvalidSession(error: StreamableHTTPError): boolean {
-  if (error.code !== 404 || !error.message.startsWith(STREAMABLE_HTTP_POST_ERROR_PREFIX)) return false;
-  const text = error.message.slice(STREAMABLE_HTTP_POST_ERROR_PREFIX.length);
-  if (Buffer.byteLength(text, "utf8") > MAX_HTTP_ADMISSION_ERROR_BODY_BYTES) return false;
+function isPublicInvalidSession(error: SdkHttpError): boolean {
+  if (error.status !== 404) return false;
+  const text = httpErrorResponseText(error);
+  if (text === undefined) return false;
   try {
     const body: unknown = JSON.parse(text);
-    return isRecord(body) && body.jsonrpc === "2.0" &&
+    return (
+      isRecord(body) &&
+      body.jsonrpc === "2.0" &&
       hasExactlyKeys(body, ["jsonrpc", "error", "id"]) &&
-      isRecord(body.error) && body.error.code === -32012 &&
+      isRecord(body.error) &&
+      body.error.code === -32012 &&
       hasExactlyKeys(body.error, ["code", "message", "data"]) &&
       isRecord(body.error.data) &&
-      hasExactlyKeys(body.error.data, ["applicationCode", "transportReason", "requestId"]) &&
+      hasExactlyKeys(body.error.data, [
+        "applicationCode",
+        "transportReason",
+        "requestId",
+      ]) &&
       body.error.data.applicationCode === "NOT_FOUND" &&
       body.error.data.transportReason === "mcp_session_invalid" &&
       typeof body.error.data.requestId === "string" &&
-      HTTP_ADMISSION_REQUEST_ID.test(body.error.data.requestId);
-  } catch { return false; }
+      HTTP_ADMISSION_REQUEST_ID.test(body.error.data.requestId)
+    );
+  } catch {
+    return false;
+  }
 }
 
-function classifyBackendFailure(error: unknown): BackendFailureKind {
+function classifyBackendFailure(
+  error: unknown,
+  era: "legacy" | "modern" = "legacy",
+): BackendFailureKind {
   // HTTP replies are application outcomes. Only the Streamable HTTP session
   // contract gives its exact 404 payload the special meaning that the handler
   // was not entered. A generic 404 can be an application/route outcome.
-  if (error instanceof StreamableHTTPError) {
-    return error.code === 404 &&
-      (isPublicInvalidSession(error) || SESSION_INVALID_MESSAGES.has(
-        streamableHttpApplicationMessage(error) ?? "",
-      ))
+  if (error instanceof SdkHttpError) {
+    return era === "legacy" &&
+      error.status === 404 &&
+      (isPublicInvalidSession(error) ||
+        SESSION_INVALID_MESSAGES.has(
+          streamableHttpApplicationMessage(error) ?? "",
+        ))
       ? "session-invalid"
       : "application";
   }
@@ -749,7 +762,10 @@ function backendApplicationError(error: unknown): Error {
       data: admission,
     });
   }
-  const rawCode = safelyReadUntrustedErrorField(error, "code");
+  const rawCode =
+    error instanceof SdkHttpError
+      ? error.status
+      : safelyReadUntrustedErrorField(error, "code");
   const numericCode =
     typeof rawCode === "number"
       ? rawCode
@@ -859,14 +875,25 @@ async function createBackendConnection(): Promise<BackendConnection> {
   );
   const client = new Client(
     { name: `${packageName}-stdio-proxy`, version: packageVersion },
-    { capabilities: {} },
+    {
+      capabilities: {},
+      versionNegotiation: {
+        mode: mcpProtocolMode() === "dual" ? "auto" : "legacy",
+      },
+    },
   );
   await client.connect(transport);
+  const era = client.getProtocolEra();
+  if (era !== "legacy" && era !== "modern") {
+    await client.close();
+    throw new Error("Backend protocol era could not be verified.");
+  }
   return {
     client,
     transport,
     generation: ++backendGeneration,
-    sessionId: randomUUID(),
+    sessionId: randomUUID(), // Optimike generation binding, not Mcp-Session-Id.
+    era,
     inFlight: 0,
     retired: false,
   };
@@ -940,6 +967,7 @@ async function withBackendLease<T>(
       connection.generation,
       error,
       options.networkReplayAuthorized,
+      connection.era,
     );
   } finally {
     connection.inFlight -= 1;
@@ -1026,7 +1054,10 @@ async function withBackendRetry<T>(
       error instanceof BackendOperationError
         ? error.networkReplayAuthorized
         : false;
-    const failureKind = classifyBackendFailure(originalError);
+    const failureKind = classifyBackendFailure(
+      originalError,
+      error instanceof BackendOperationError ? error.era : "legacy",
+    );
     if (failureKind === "application") {
       throw backendApplicationError(originalError);
     }
@@ -1062,7 +1093,10 @@ async function withBackendRetry<T>(
         retryError instanceof BackendOperationError
           ? retryError.originalError
           : retryError;
-      const retryFailureKind = classifyBackendFailure(retryOriginal);
+      const retryFailureKind = classifyBackendFailure(
+        retryOriginal,
+        retryError instanceof BackendOperationError ? retryError.era : "legacy",
+      );
       if (retryFailureKind === "application") {
         throw backendApplicationError(retryOriginal);
       }
@@ -1078,6 +1112,19 @@ async function withBackendRetry<T>(
   }
 }
 
+/** Reserved request metadata belongs to each hop, not to the upstream client. */
+function backendParams<T extends { _meta?: Record<string, unknown> }>(
+  params: T,
+): T {
+  if (!params._meta) return params;
+  const metadata = Object.fromEntries(
+    Object.entries(params._meta).filter(
+      ([key]) => !key.startsWith("io.modelcontextprotocol/"),
+    ),
+  );
+  return { ...params, _meta: metadata };
+}
+
 async function filteredBackendTools(
   params?: Record<string, unknown>,
   staleRefreshesRemaining = 1,
@@ -1085,7 +1132,7 @@ async function filteredBackendTools(
   let resultGeneration: number | undefined;
   const result = await withBackendRetry(
     "listTools",
-    (client) => client.listTools(params),
+    (client) => client.listTools(params ? backendParams(params) : undefined),
     {
       replayNetworkFailure: true,
       onSuccess: ({ generation }) => {
@@ -1137,7 +1184,7 @@ async function shutdown(signal: string) {
   const connections = new Set<BackendConnection>(retiredConnections);
   if (backend) connections.add(backend);
   await Promise.allSettled([
-    proxyServer.close(),
+    stdioServingHandle?.close() ?? proxyServer?.close(),
     ...[...connections].map((connection) =>
       closeBackendConnection(connection, "shutdown"),
     ),
@@ -1176,11 +1223,7 @@ async function start() {
             let generation: number | undefined;
             const result = await withBackendRetry(
               `external reference backend adapter: ${name}`,
-              (client) =>
-                client.callTool(
-                  { name, arguments: args },
-                  CompatibilityCallToolResultSchema,
-                ),
+              (client) => client.callTool({ name, arguments: args }),
               {
                 replayNetworkFailure: { toolName: name },
                 onSuccess: ({ generation: completedGeneration }) => {
@@ -1235,227 +1278,245 @@ async function start() {
     }
   }
 
-  proxyServer.setRequestHandler(ListToolsRequestSchema, async (request) =>
-    filteredBackendTools(request.params),
-  );
+  const createProxyServer = () => {
+    const proxyServer = new Server(
+      { name: `${packageName}-stdio-proxy`, version: packageVersion },
+      { capabilities: { tools: { listChanged: true } } },
+    );
+    installLegacyToolCatalog(proxyServer);
 
-  proxyServer.setRequestHandler(CallToolRequestSchema, async (request) => {
-    // Apply and rollback are local retained endpoints. Their visibility is
-    // derivable from the static profile contract, so do not call tools/list
-    // before returning their stable unsupported result. This keeps the
-    // fail-closed boundary deterministic through cold metadata and a backend
-    // outage, while profiles that do not include external.move still see a
-    // hidden tool.
-    if (isLocalFailClosedExternalMoveMutationTool(request.params.name)) {
-      if (!localFailClosedExternalMoveMutationIsVisible(request.params.name)) {
+    proxyServer.setRequestHandler("tools/list", async (request) =>
+      filteredBackendTools(request.params),
+    );
+
+    proxyServer.setRequestHandler("tools/call", async (request) => {
+      // Apply and rollback are local retained endpoints. Their visibility is
+      // derivable from the static profile contract, so do not call tools/list
+      // before returning their stable unsupported result. This keeps the
+      // fail-closed boundary deterministic through cold metadata and a backend
+      // outage, while profiles that do not include external.move still see a
+      // hidden tool.
+      if (isLocalFailClosedExternalMoveMutationTool(request.params.name)) {
+        if (
+          !localFailClosedExternalMoveMutationIsVisible(request.params.name)
+        ) {
+          return hiddenToolResult();
+        }
+        const parsed =
+          request.params.name === "external_move_apply"
+            ? ExternalMoveApplySchema.safeParse(request.params.arguments ?? {})
+            : ExternalMoveRollbackSchema.safeParse(
+                request.params.arguments ?? {},
+              );
+        if (!parsed.success) {
+          return invalidExternalArguments(request.params.name);
+        }
+        return externalRootsResult(() => disabledExternalMoveMutation())();
+      }
+
+      if (!(await toolIsExposed(request.params.name))) {
         return hiddenToolResult();
       }
-      const parsed =
-        request.params.name === "external_move_apply"
-          ? ExternalMoveApplySchema.safeParse(request.params.arguments ?? {})
-          : ExternalMoveRollbackSchema.safeParse(
-              request.params.arguments ?? {},
-            );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
-      }
-      return externalRootsResult(() => disabledExternalMoveMutation())();
-    }
 
-    if (!(await toolIsExposed(request.params.name))) {
-      return hiddenToolResult();
-    }
-
-    if (request.params.name === "external_runtime_status") {
-      return externalRootsResult(async () => ({
-        enabled: Boolean(externalRootsService),
-        mode: "read-only",
-        localHandoffAllowed: true,
-        externalMove: {
-          available: false,
-          ...moveMutationStatus(),
-          transport: "stdio-only",
-          requiresRootCapability: "move",
-          identityVerified: Boolean(externalMoveCoordinator),
-          planningAvailable: Boolean(externalMoveCoordinator),
-          ...(externalMoveCoordinator
-            ? {
-                identitySource:
-                  externalMoveBindingIdentity?.vaultIdentitySource,
-              }
-            : {
-                // This is deliberately separate from mutationUnavailableReason:
-                // the native mutation primitive is unavailable everywhere,
-                // while planning/status can additionally be unavailable when
-                // this process cannot establish a redacted, verifiable
-                // binding. unavailableReason remains a compatibility alias
-                // for older clients; new callers must use the explicit
-                // planningUnavailableReason field.
-                planningUnavailableReason: externalMoveUnavailableReason,
-                unavailableReason: externalMoveUnavailableReason,
-              }),
-        },
-        roots: externalRootsService
-          ? await externalRootsService.listRoots()
-          : [],
-      }))();
-    }
-
-    if (request.params.name === "external_roots_list") {
-      return externalRootsResult(async () => ({
-        roots: externalRootsService
-          ? await externalRootsService.listRoots()
-          : [],
-      }))();
-    }
-
-    if (request.params.name === "external_list") {
-      const parsed = ExternalListSchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
-      }
-      return externalRootsResult(() =>
-        externalRootsService
-          ? externalRootsService.list(
-              parsed.data.rootId,
-              parsed.data.relativePath,
-              parsed.data.depth,
-              parsed.data.maxEntries,
-            )
-          : unavailableExternalMove(),
-      )();
-    }
-
-    if (request.params.name === "external_stat") {
-      const parsed = ExternalStatSchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
-      }
-      return externalRootsResult(() =>
-        externalRootsService
-          ? externalRootsService.getStat(
-              parsed.data.rootId,
-              parsed.data.relativePath,
-              parsed.data.includeHash,
-            )
-          : unavailableExternalMove(),
-      )();
-    }
-
-    if (request.params.name === "external_read") {
-      const parsed = ExternalReadSchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
-      }
-      return externalRootsResult(() =>
-        externalRootsService
-          ? externalRootsService.readText(
-              parsed.data.rootId,
-              parsed.data.relativePath,
-              parsed.data.maxChars,
-            )
-          : unavailableExternalMove(),
-      )();
-    }
-
-    if (request.params.name === "external_handoff") {
-      const parsed = ExternalHandoffSchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
+      if (request.params.name === "external_runtime_status") {
+        return externalRootsResult(async () => ({
+          enabled: Boolean(externalRootsService),
+          mode: "read-only",
+          localHandoffAllowed: true,
+          externalMove: {
+            available: false,
+            ...moveMutationStatus(),
+            transport: "stdio-only",
+            requiresRootCapability: "move",
+            identityVerified: Boolean(externalMoveCoordinator),
+            planningAvailable: Boolean(externalMoveCoordinator),
+            ...(externalMoveCoordinator
+              ? {
+                  identitySource:
+                    externalMoveBindingIdentity?.vaultIdentitySource,
+                }
+              : {
+                  // This is deliberately separate from mutationUnavailableReason:
+                  // the native mutation primitive is unavailable everywhere,
+                  // while planning/status can additionally be unavailable when
+                  // this process cannot establish a redacted, verifiable
+                  // binding. unavailableReason remains a compatibility alias
+                  // for older clients; new callers must use the explicit
+                  // planningUnavailableReason field.
+                  planningUnavailableReason: externalMoveUnavailableReason,
+                  unavailableReason: externalMoveUnavailableReason,
+                }),
+          },
+          roots: externalRootsService
+            ? await externalRootsService.listRoots()
+            : [],
+        }))();
       }
 
-      return externalRootsResult(() =>
-        externalRootsService
-          ? externalRootsService.handoff(
-              parsed.data.rootId,
-              parsed.data.relativePath,
-              parsed.data.includeHash,
-            )
-          : unavailableExternalMove(),
-      )();
-    }
-
-    if (request.params.name === "external_references_scan") {
-      const parsed = ExternalReferencesScanSchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
+      if (request.params.name === "external_roots_list") {
+        return externalRootsResult(async () => ({
+          roots: externalRootsService
+            ? await externalRootsService.listRoots()
+            : [],
+        }))();
       }
-      return externalRootsResult(() =>
-        externalMoveCoordinator
-          ? externalMoveCoordinator.scan(
-              parsed.data.rootId,
-              parsed.data.relativePath,
-            )
-          : unavailableExternalMove(),
-      )();
-    }
 
-    if (request.params.name === "external_move_plan") {
-      const parsed = ExternalMovePlanSchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
+      if (request.params.name === "external_list") {
+        const parsed = ExternalListSchema.safeParse(
+          request.params.arguments ?? {},
+        );
+        if (!parsed.success) {
+          return invalidExternalArguments(request.params.name);
+        }
+        return externalRootsResult(() =>
+          externalRootsService
+            ? externalRootsService.list(
+                parsed.data.rootId,
+                parsed.data.relativePath,
+                parsed.data.depth,
+                parsed.data.maxEntries,
+              )
+            : unavailableExternalMove(),
+        )();
       }
-      return externalRootsResult(() =>
-        externalMoveCoordinator
-          ? externalMoveCoordinator.plan(parsed.data)
-          : unavailableExternalMove(),
-      )();
-    }
 
-    if (request.params.name === "external_move_status") {
-      const parsed = ExternalMoveStatusSchema.safeParse(
-        request.params.arguments ?? {},
-      );
-      if (!parsed.success) {
-        return invalidExternalArguments(request.params.name);
+      if (request.params.name === "external_stat") {
+        const parsed = ExternalStatSchema.safeParse(
+          request.params.arguments ?? {},
+        );
+        if (!parsed.success) {
+          return invalidExternalArguments(request.params.name);
+        }
+        return externalRootsResult(() =>
+          externalRootsService
+            ? externalRootsService.getStat(
+                parsed.data.rootId,
+                parsed.data.relativePath,
+                parsed.data.includeHash,
+              )
+            : unavailableExternalMove(),
+        )();
       }
-      return externalRootsResult(async () => {
-        if (
-          config.externalMoveJournalPath === ":memory:" &&
+
+      if (request.params.name === "external_read") {
+        const parsed = ExternalReadSchema.safeParse(
+          request.params.arguments ?? {},
+        );
+        if (!parsed.success) {
+          return invalidExternalArguments(request.params.name);
+        }
+        return externalRootsResult(() =>
+          externalRootsService
+            ? externalRootsService.readText(
+                parsed.data.rootId,
+                parsed.data.relativePath,
+                parsed.data.maxChars,
+              )
+            : unavailableExternalMove(),
+        )();
+      }
+
+      if (request.params.name === "external_handoff") {
+        const parsed = ExternalHandoffSchema.safeParse(
+          request.params.arguments ?? {},
+        );
+        if (!parsed.success) {
+          return invalidExternalArguments(request.params.name);
+        }
+
+        return externalRootsResult(() =>
+          externalRootsService
+            ? externalRootsService.handoff(
+                parsed.data.rootId,
+                parsed.data.relativePath,
+                parsed.data.includeHash,
+              )
+            : unavailableExternalMove(),
+        )();
+      }
+
+      if (request.params.name === "external_references_scan") {
+        const parsed = ExternalReferencesScanSchema.safeParse(
+          request.params.arguments ?? {},
+        );
+        if (!parsed.success) {
+          return invalidExternalArguments(request.params.name);
+        }
+        return externalRootsResult(() =>
           externalMoveCoordinator
-        ) {
-          return externalMoveCoordinator.status(parsed.data.planId);
-        }
-        const stored = getStoredExternalMovePlan(parsed.data.planId);
-        if (!stored) return unknownExternalMovePlan();
-        const storedBinding = stored.bindingIdentity?.bindingFingerprint;
-        if (
-          externalMoveCoordinator &&
-          typeof storedBinding === "string" &&
-          storedBinding === externalMoveBindingIdentity?.bindingFingerprint
-        ) {
-          return externalMoveCoordinator.status(parsed.data.planId, stored);
-        }
-        // A journal may be readable after restart or from another binding, but
-        // this process cannot authenticate the session that sealed it. Project
-        // all actionable receipts as manual review without opening or changing
-        // the durable journal.
-        return projectExternalMovePlanForUnavailableDestructiveSession(stored);
-      })();
-    }
+            ? externalMoveCoordinator.scan(
+                parsed.data.rootId,
+                parsed.data.relativePath,
+              )
+            : unavailableExternalMove(),
+        )();
+      }
 
-    return withBackendRetry(
-      "callTool",
-      (client) =>
-        client.callTool(request.params, CompatibilityCallToolResultSchema),
-      { replayNetworkFailure: { toolName: request.params.name } },
+      if (request.params.name === "external_move_plan") {
+        const parsed = ExternalMovePlanSchema.safeParse(
+          request.params.arguments ?? {},
+        );
+        if (!parsed.success) {
+          return invalidExternalArguments(request.params.name);
+        }
+        return externalRootsResult(() =>
+          externalMoveCoordinator
+            ? externalMoveCoordinator.plan(parsed.data)
+            : unavailableExternalMove(),
+        )();
+      }
+
+      if (request.params.name === "external_move_status") {
+        const parsed = ExternalMoveStatusSchema.safeParse(
+          request.params.arguments ?? {},
+        );
+        if (!parsed.success) {
+          return invalidExternalArguments(request.params.name);
+        }
+        return externalRootsResult(async () => {
+          if (
+            config.externalMoveJournalPath === ":memory:" &&
+            externalMoveCoordinator
+          ) {
+            return externalMoveCoordinator.status(parsed.data.planId);
+          }
+          const stored = getStoredExternalMovePlan(parsed.data.planId);
+          if (!stored) return unknownExternalMovePlan();
+          const storedBinding = stored.bindingIdentity?.bindingFingerprint;
+          if (
+            externalMoveCoordinator &&
+            typeof storedBinding === "string" &&
+            storedBinding === externalMoveBindingIdentity?.bindingFingerprint
+          ) {
+            return externalMoveCoordinator.status(parsed.data.planId, stored);
+          }
+          // A journal may be readable after restart or from another binding, but
+          // this process cannot authenticate the session that sealed it. Project
+          // all actionable receipts as manual review without opening or changing
+          // the durable journal.
+          return projectExternalMovePlanForUnavailableDestructiveSession(
+            stored,
+          );
+        })();
+      }
+
+      return withBackendRetry(
+        "callTool",
+        (client) => client.callTool(backendParams(request.params)),
+        { replayNetworkFailure: { toolName: request.params.name } },
+      );
+    });
+
+    return proxyServer;
+  };
+  if (mcpProtocolMode() === "dual") {
+    stdioServingHandle = serveDualStdio(createProxyServer, () =>
+      console.error(`[${packageName}] proxy protocol request rejected.`),
     );
-  });
-
-  const stdioTransport = new StdioServerTransport();
-  await proxyServer.connect(stdioTransport);
+  } else {
+    proxyServer = createProxyServer();
+    await proxyServer.connect(new StdioServerTransport());
+  }
   console.error(
     `[${packageName}] stdio proxy connected with tool profile ${toolProfile}`,
   );

@@ -12,8 +12,8 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const CONFIRMATION = "I_UNDERSTAND_THIS_NOTE_WILL_BE_TEMPORARILY_PATCHED";
 const canaryPath = process.env.OBSIDIAN_OPERATION_COCKPIT_CANARY_PATH?.trim();

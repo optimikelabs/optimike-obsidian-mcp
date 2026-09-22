@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
@@ -12,6 +12,7 @@ import {
 import type { FrontmatterJsonValue } from "../../../services/frontmatterPatchCompiler.js";
 import type { GovernedNoteReplaceRuntime } from "../governedNoteReplaceTools/runtime.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const JsonValueSchema: z.ZodType<FrontmatterJsonValue> = z.lazy(() =>
   z.union([
@@ -122,45 +123,53 @@ export async function registerGovernedFrontmatterTools(
 ): Promise<void> {
   if (!noteRuntime) return;
   const runtime = new GovernedFrontmatterRuntime(noteRuntime);
-
-  server.tool(
+  server.registerTool(
     "obsidian_frontmatter_patch_plan",
-    "Plan a source-preserving patch of top-level frontmatter keys in one existing Markdown note. The compiler changes only authorized source ranges, then seals the complete next note through the existing atomic note runtime. It performs no note write and returns an opaque planRef.",
-    PlanSchema.shape,
-    GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Plan a source-preserving patch of top-level frontmatter keys in one existing Markdown note. The compiler changes only authorized source ranges, then seals the complete next note through the existing atomic note runtime. It performs no note write and returns an opaque planRef.",
+      inputSchema: mcpSchema(PlanSchema.shape),
+      annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    },
     async (params: GovernedFrontmatterPlanInput) =>
       runTool("obsidian_frontmatter_patch_plan", params, () =>
         runtime.plan(params),
       ),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_frontmatter_patch_apply",
-    "Apply only the exact sealed frontmatter plan. The target, operations, compiled Markdown, hashes, and projection proof cannot be replaced after planning. After a lost response call status, not a new mutation.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Apply only the exact sealed frontmatter plan. The target, operations, compiled Markdown, hashes, and projection proof cannot be replaced after planning. After a lost response call status, not a new mutation.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_frontmatter_patch_apply", params, () =>
         runtime.apply(params.planRef, params.idempotencyKey),
       ),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_frontmatter_patch_status",
-    "Read and reconcile the durable status of one governed frontmatter plan without executing a new mutation.",
-    StatusSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Read and reconcile the durable status of one governed frontmatter plan without executing a new mutation.",
+      inputSchema: mcpSchema(StatusSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof StatusSchema>) =>
       runTool("obsidian_frontmatter_patch_status", params, () =>
         runtime.status(params.planRef),
       ),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_frontmatter_patch_recover",
-    "Recover the exact same sealed frontmatter plan after an uncertain outcome. Recovery inherits P0 fencing and reconciliation; it is not undo and accepts no new patch intent.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Recover the exact same sealed frontmatter plan after an uncertain outcome. Recovery inherits P0 fencing and reconciliation; it is not undo and accepts no new patch intent.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_frontmatter_patch_recover", params, () =>
         runtime.recover(params.planRef, params.idempotencyKey),

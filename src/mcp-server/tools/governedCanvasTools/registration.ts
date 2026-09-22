@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
@@ -10,6 +10,7 @@ import type {
   GovernedCanvasRuntime,
 } from "../../../services/canvasProjectionRuntime.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const Id = z.string().min(1).max(256);
 const Side = z.enum(["top", "right", "bottom", "left"]);
@@ -132,39 +133,51 @@ export async function registerGovernedCanvasTools(
   runtime: GovernedCanvasRuntime | undefined,
 ): Promise<void> {
   if (!runtime) return;
-  server.tool(
+  server.registerTool(
     "obsidian_canvas_patch_plan",
-    "Plan a governed mutation of one existing JSON Canvas graph. It preserves unknown root/entity values, validates node and edge identity/references, compiles only the sealed entity changes, and performs no write.",
-    PlanSchema.shape,
-    GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Plan a governed mutation of one existing JSON Canvas graph. It preserves unknown root/entity values, validates node and edge identity/references, compiles only the sealed entity changes, and performs no write.",
+      inputSchema: mcpSchema(PlanSchema.shape),
+      annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    },
     async (params: GovernedCanvasPlanInput) =>
       runTool("obsidian_canvas_patch_plan", params, () => runtime.plan(params)),
   );
-  server.tool(
+  server.registerTool(
     "obsidian_canvas_patch_apply",
-    "Apply only the exact sealed Canvas plan through the Atomic Write Bridge with a vault binding and SHA-256 CAS. After a lost response call status, not a new mutation.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Apply only the exact sealed Canvas plan through the Atomic Write Bridge with a vault binding and SHA-256 CAS. After a lost response call status, not a new mutation.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_canvas_patch_apply", params, () =>
         runtime.apply(params.planRef, params.idempotencyKey),
       ),
   );
-  server.tool(
+  server.registerTool(
     "obsidian_canvas_patch_status",
-    "Read and reconcile the durable status of one governed Canvas plan without executing a new mutation.",
-    StatusSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Read and reconcile the durable status of one governed Canvas plan without executing a new mutation.",
+      inputSchema: mcpSchema(StatusSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof StatusSchema>) =>
       runTool("obsidian_canvas_patch_status", params, () =>
         runtime.status(params.planRef),
       ),
   );
-  server.tool(
+  server.registerTool(
     "obsidian_canvas_patch_recover",
-    "Recover the exact same sealed Canvas plan after an uncertain outcome. It accepts no new graph intent and is not undo.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Recover the exact same sealed Canvas plan after an uncertain outcome. It accepts no new graph intent and is not undo.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_canvas_patch_recover", params, () =>
         runtime.recover(params.planRef, params.idempotencyKey),

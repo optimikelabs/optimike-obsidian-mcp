@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import {
   ObsidianRestApiService,
@@ -21,6 +21,7 @@ import {
   ObsidianSearchReplaceInputSchemaShape,
   processObsidianSearchReplace,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 /**
  * Registers the 'obsidian_search_replace' tool with the MCP server.
@@ -65,19 +66,13 @@ export const registerObsidianSearchReplaceTool = async (
     async () => {
       // Use the high-level SDK method `server.tool` for registration.
       // It handles schema generation from the shape, basic validation, and routing.
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ObsidianSearchReplaceInputSchemaShape, // Provide the base Zod schema shape for input definition.
-        DESTRUCTIVE_TOOL_ANNOTATIONS,
-        /**
-         * The handler function executed when the 'obsidian_search_replace' tool is called by the client.
-         *
-         * @param {ObsidianSearchReplaceRegistrationInput} params - The raw input parameters received from the client,
-         *   matching the structure defined by ObsidianSearchReplaceInputSchemaShape.
-         * @returns {Promise<CallToolResult>} A promise resolving to the structured result for the MCP client,
-         *   containing either the successful response data (serialized JSON) or an error indication.
-         */
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ObsidianSearchReplaceInputSchemaShape),
+          annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+        },
         async (params: ObsidianSearchReplaceRegistrationInput) => {
           const inputMetadata = {
             targetType: params.targetType,

@@ -11,8 +11,8 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { compileFrontmatterPatch } from "../dist/services/frontmatterPatchCompiler.js";
 import { assertByteExactCanaryDateIsolation } from "./modified-time-canary-helpers.mjs";
 

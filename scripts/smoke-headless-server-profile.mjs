@@ -2,13 +2,11 @@
 
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const vaultRoot =
-  process.env.HEADLESS_SERVER_VAULT ??
-  process.env.OBSIDIAN_VAULT ??
-  "";
+  process.env.HEADLESS_SERVER_VAULT ?? process.env.OBSIDIAN_VAULT ?? "";
 const cacheDir =
   process.env.HEADLESS_SERVER_CACHE_DIR ??
   path.resolve(".tmp", "headless-server-profile-cache");
@@ -22,7 +20,8 @@ if (!vaultRoot) {
     JSON.stringify(
       {
         ok: false,
-        error: "Set HEADLESS_SERVER_VAULT or OBSIDIAN_VAULT to a dedicated/copy vault path.",
+        error:
+          "Set HEADLESS_SERVER_VAULT or OBSIDIAN_VAULT to a dedicated/copy vault path.",
       },
       null,
       2,
@@ -64,7 +63,10 @@ function jsonOf(result, label) {
 function firstMarkdownPath(entries) {
   for (const entry of entries ?? []) {
     const pathValue = entry.path ?? entry.name ?? "";
-    if (typeof pathValue === "string" && pathValue.toLowerCase().endsWith(".md")) {
+    if (
+      typeof pathValue === "string" &&
+      pathValue.toLowerCase().endsWith(".md")
+    ) {
       return pathValue.replace(/^\/+/u, "");
     }
   }
@@ -124,7 +126,9 @@ async function main() {
       "bases_upsert_rows",
     ]) {
       if (toolNames.includes(forbidden)) {
-        throw new Error(`Unsafe write/live tool registered in readonly server profile: ${forbidden}`);
+        throw new Error(
+          `Unsafe write/live tool registered in readonly server profile: ${forbidden}`,
+        );
       }
     }
 
@@ -245,7 +249,10 @@ async function main() {
 main().catch((error) => {
   console.error(
     JSON.stringify(
-      { ok: false, error: error instanceof Error ? error.message : String(error) },
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
       null,
       2,
     ),

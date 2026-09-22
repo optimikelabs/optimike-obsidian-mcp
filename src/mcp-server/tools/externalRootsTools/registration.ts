@@ -1,5 +1,5 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import type { AuthInfo } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   ExternalRootError,
@@ -11,6 +11,7 @@ import { externalTransferBroker } from "../../../services/externalTransferBroker
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 export const ExternalRootPathSchema = z
   .object({
@@ -252,14 +253,17 @@ export async function registerExternalRootsTools(
   service: ExternalRootsService | undefined,
   localHandoffAllowed: boolean,
 ): Promise<void> {
-  server.tool(
+  server.registerTool(
     "external_runtime_status",
-    "Reports whether explicitly configured external document roots are enabled and available. Physical root paths are never returned.",
-    {},
-    READ_ONLY_TOOL_ANNOTATIONS,
-    async (_params, extra) =>
+    {
+      description:
+        "Reports whether explicitly configured external document roots are enabled and available. Physical root paths are never returned.",
+      inputSchema: mcpSchema(z.object({})),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (_params, ctx) =>
       externalRootsResult("external_runtime_status", {}, async () => {
-        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        assertExternalReadAccess(localHandoffAllowed, ctx?.http?.authInfo);
         return {
           enabled: Boolean(service),
           mode: "read-only",
@@ -293,28 +297,33 @@ export async function registerExternalRootsTools(
       })(),
   );
 
-  server.tool(
+  server.registerTool(
     "external_roots_list",
-    "Lists configured external document root IDs, capabilities, limits, and availability without disclosing physical paths.",
-    {},
-    READ_ONLY_TOOL_ANNOTATIONS,
-    async (_params, extra) =>
+    {
+      description:
+        "Lists configured external document root IDs, capabilities, limits, and availability without disclosing physical paths.",
+      inputSchema: mcpSchema(z.object({})),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (_params, ctx) =>
       externalRootsResult("external_roots_list", {}, async () => {
-        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        assertExternalReadAccess(localHandoffAllowed, ctx?.http?.authInfo);
         return {
           roots: service ? await service.listRoots() : [],
         };
       })(),
   );
-
-  server.tool(
+  server.registerTool(
     "external_list",
-    "Lists bounded directory entries inside one configured external root. Paths are root-relative and links are never followed.",
-    ExternalListSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ExternalListSchema>, extra) =>
+    {
+      description:
+        "Lists bounded directory entries inside one configured external root. Paths are root-relative and links are never followed.",
+      inputSchema: mcpSchema(ExternalListSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (params: z.infer<typeof ExternalListSchema>, ctx) =>
       externalRootsResult("external_list", params, () => {
-        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        assertExternalReadAccess(localHandoffAllowed, ctx?.http?.authInfo);
         return service
           ? service.list(
               params.rootId,
@@ -325,15 +334,17 @@ export async function registerExternalRootsTools(
           : Promise.reject(disabledError());
       })(),
   );
-
-  server.tool(
+  server.registerTool(
     "external_stat",
-    "Returns bounded metadata and optionally a SHA-256 hash for one root-relative external file.",
-    ExternalStatSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ExternalStatSchema>, extra) =>
+    {
+      description:
+        "Returns bounded metadata and optionally a SHA-256 hash for one root-relative external file.",
+      inputSchema: mcpSchema(ExternalStatSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (params: z.infer<typeof ExternalStatSchema>, ctx) =>
       externalRootsResult("external_stat", params, () => {
-        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        assertExternalReadAccess(localHandoffAllowed, ctx?.http?.authInfo);
         return service
           ? service.getStat(
               params.rootId,
@@ -343,15 +354,17 @@ export async function registerExternalRootsTools(
           : Promise.reject(disabledError());
       })(),
   );
-
-  server.tool(
+  server.registerTool(
     "external_read",
-    "Reads bounded UTF-8 text from one explicitly allowed root-relative file. Binary and Office documents require an explicit handoff mode supported by the active transport.",
-    ExternalReadSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ExternalReadSchema>, extra) =>
+    {
+      description:
+        "Reads bounded UTF-8 text from one explicitly allowed root-relative file. Binary and Office documents require an explicit handoff mode supported by the active transport.",
+      inputSchema: mcpSchema(ExternalReadSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (params: z.infer<typeof ExternalReadSchema>, ctx) =>
       externalRootsResult("external_read", params, () => {
-        assertExternalReadAccess(localHandoffAllowed, extra?.authInfo);
+        assertExternalReadAccess(localHandoffAllowed, ctx?.http?.authInfo);
         return service
           ? service.readText(
               params.rootId,
@@ -361,19 +374,21 @@ export async function registerExternalRootsTools(
           : Promise.reject(disabledError());
       })(),
   );
-
-  server.tool(
+  server.registerTool(
     "external_handoff",
-    "Prepares one verified temporary copy of an explicitly allowed file. Stdio returns a local path; an authenticated HTTP profile may return a short-lived opaque download ticket. The source path is never returned over HTTP.",
-    ExternalHandoffSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
-    async (params: z.infer<typeof ExternalHandoffSchema>, extra) =>
+    {
+      description:
+        "Prepares one verified temporary copy of an explicitly allowed file. Stdio returns a local path; an authenticated HTTP profile may return a short-lived opaque download ticket. The source path is never returned over HTTP.",
+      inputSchema: mcpSchema(ExternalHandoffSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (params: z.infer<typeof ExternalHandoffSchema>, ctx) =>
       externalRootsResult("external_handoff", params, () =>
         deliverExternalHandoff(
           service,
           localHandoffAllowed,
           params,
-          extra?.authInfo,
+          ctx?.http?.authInfo,
         ),
       )(),
   );
@@ -418,11 +433,13 @@ export async function registerExternalRootsTools(
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
   ] as const) {
-    server.tool(
+    server.registerTool(
       definition.name,
-      definition.description,
-      definition.schema,
-      definition.annotations,
+      {
+        description: definition.description,
+        inputSchema: mcpSchema(definition.schema),
+        annotations: definition.annotations,
+      },
       externalRootsResult(definition.name, {}, () =>
         Promise.reject(
           definition.name === "external_move_apply" ||

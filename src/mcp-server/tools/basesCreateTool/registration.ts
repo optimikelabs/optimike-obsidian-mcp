@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { DESTRUCTIVE_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -13,6 +13,7 @@ import {
   BasesCreateInputSchema,
   processBasesCreate,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const TOOL_NAME = "bases_create";
 const TOOL_DESCRIPTION =
@@ -30,11 +31,13 @@ export async function registerBasesCreateTool(
 
   await ErrorHandler.tryCatch(
     async () => {
-      server.tool(
+      server.registerTool(
         TOOL_NAME,
-        TOOL_DESCRIPTION,
-        BasesCreateInputSchema.shape,
-        DESTRUCTIVE_TOOL_ANNOTATIONS,
+        {
+          description: TOOL_DESCRIPTION,
+          inputSchema: mcpSchema(BasesCreateInputSchema.shape),
+          annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
+        },
         async (params: BasesCreateInput) => {
           const handlerContext = requestContextService.createRequestContext({
             parentContext: registrationContext,

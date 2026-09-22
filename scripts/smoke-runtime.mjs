@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 const httpUrl = process.env.MCP_SMOKE_HTTP_URL ?? "http://127.0.0.1:3010/mcp";
 const healthUrl =

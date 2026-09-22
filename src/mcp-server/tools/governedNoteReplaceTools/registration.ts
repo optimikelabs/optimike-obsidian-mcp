@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
@@ -7,6 +7,7 @@ import {
 } from "../../toolAnnotations.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import type { GovernedNoteReplaceRuntime } from "./runtime.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 const PlanSchema = z.object({
   path: z
@@ -84,45 +85,53 @@ export async function registerGovernedNoteReplaceTools(
   runtime: GovernedNoteReplaceRuntime | undefined,
 ): Promise<void> {
   if (!runtime) return;
-
-  server.tool(
+  server.registerTool(
     "obsidian_note_replace_plan",
-    "Plan one complete atomic replacement of an existing Markdown note. This reads the live Atomic Write Bridge, validates the future Markdown and protected frontmatter, seals the before/after proofs and next content in the private journal, and performs no note write. planRef is opaque.",
-    PlanSchema.shape,
-    GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Plan one complete atomic replacement of an existing Markdown note. This reads the live Atomic Write Bridge, validates the future Markdown and protected frontmatter, seals the before/after proofs and next content in the private journal, and performs no note write. planRef is opaque.",
+      inputSchema: mcpSchema(PlanSchema.shape),
+      annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof PlanSchema>) =>
       runTool("obsidian_note_replace_plan", params, () =>
         runtime.planPublicDirect(params),
       ),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_note_replace_apply",
-    "Apply only the exact sealed note-replacement plan. Pass planRef and its matching idempotencyKey; do not provide a new target, hash, or content. A lost response must be followed by status, never by a new mutation request.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Apply only the exact sealed note-replacement plan. Pass planRef and its matching idempotencyKey; do not provide a new target, hash, or content. A lost response must be followed by status, never by a new mutation request.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_note_replace_apply", params, () =>
         runtime.applyPublicDirectPlan(params.planRef, params.idempotencyKey),
       ),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_note_replace_status",
-    "Read and reconcile the durable status of one sealed note-replacement plan without executing a new mutation. Use this first after a timeout or lost response.",
-    StatusSchema.shape,
-    READ_ONLY_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Read and reconcile the durable status of one sealed note-replacement plan without executing a new mutation. Use this first after a timeout or lost response.",
+      inputSchema: mcpSchema(StatusSchema.shape),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof StatusSchema>) =>
       runTool("obsidian_note_replace_status", params, () =>
         runtime.statusPublicDirectPlan(params.planRef),
       ),
   );
-
-  server.tool(
+  server.registerTool(
     "obsidian_note_replace_recover",
-    "Recover the exact same sealed note-replacement plan after an uncertain outcome. Recovery reconciles or safely resumes that plan; it is not undo and never accepts replacement mutation inputs.",
-    ApplySchema.shape,
-    GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    {
+      description:
+        "Recover the exact same sealed note-replacement plan after an uncertain outcome. Recovery reconciles or safely resumes that plan; it is not undo and never accepts replacement mutation inputs.",
+      inputSchema: mcpSchema(ApplySchema.shape),
+      annotations: GOVERNED_MUTATION_TOOL_ANNOTATIONS,
+    },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_note_replace_recover", params, () =>
         runtime.recoverPublicDirectPlan(params.planRef, params.idempotencyKey),

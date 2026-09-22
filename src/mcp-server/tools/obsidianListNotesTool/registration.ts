@@ -4,8 +4,7 @@
  * the tool call to its core processing logic.
  * @module src/mcp-server/tools/obsidianListNotesTool/registration
  */
-
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
@@ -26,6 +25,7 @@ import {
   ObsidianListNotesInputSchema,
   processObsidianListNotes,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 /**
  * Registers the 'obsidian_list_notes' tool with the MCP server.
@@ -64,19 +64,13 @@ export const registerObsidianListNotesTool = async (
   await ErrorHandler.tryCatch(
     async () => {
       // Use the high-level SDK method `server.tool` for registration.
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ObsidianListNotesInputSchema.shape, // Provide the Zod schema shape for input definition.
-        READ_ONLY_TOOL_ANNOTATIONS,
-        /**
-         * The handler function executed when the 'obsidian_list_notes' tool is called by the client.
-         *
-         * @param {ObsidianListNotesInput} params - The input parameters received from the client,
-         *   validated against the ObsidianListNotesInputSchema shape.
-         * @returns {Promise<CallToolResult>} A promise resolving to the structured result for the MCP client,
-         *   containing either the successful response data (serialized JSON) or an error indication.
-         */
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ObsidianListNotesInputSchema.shape),
+          annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
         async (params: ObsidianListNotesInput) => {
           // Type matches the inferred input schema
           // Create a specific context for this handler invocation.

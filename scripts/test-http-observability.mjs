@@ -18,7 +18,7 @@ const { BaseErrorCode, McpError } = await import(
   "../dist/types-global/errors.js"
 );
 const { JSONRPCErrorResponseSchema } = await import(
-  "@modelcontextprotocol/sdk/types.js"
+  "@modelcontextprotocol/core"
 );
 const { liveApiProbeIntervalMs } = await import(
   "../dist/mcp-server/transports/httpTransport.js"

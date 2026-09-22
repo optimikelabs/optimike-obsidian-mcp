@@ -99,7 +99,8 @@
     "docs/adr/ADR-Governed-Canvas-P3.md",
     "docs/operon-cli-audit.md",
     "docs/operon-cli-audit.fr.md",
-    "docs/tree.md"
+    "docs/tree.md",
+    "docs/mcp-2026-dual-stack.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
@@ -216,11 +217,13 @@
     "test:governed-frontmatter": "npm run build && node scripts/test-governed-frontmatter-model.mjs && node scripts/test-frontmatter-p1-compiler.mjs && node scripts/test-frontmatter-p1-idempotency.mjs && node scripts/test-governed-frontmatter-mcp.mjs && node scripts/test-governed-frontmatter-http.mjs",
     "smoke:governed-frontmatter-live": "npm run build && node scripts/smoke-governed-frontmatter-live.mjs",
     "test:vnext-reliability": "npm run build && node --test scripts/test-vnext-retrieval.mjs && node scripts/test-vnext-semantic.mjs && node scripts/test-note-create-m4.mjs && node scripts/test-capability-manifest.mjs && node scripts/test-governed-note-replace-mcp.mjs",
-    "benchmark:vnext": "node scripts/benchmark-vnext-e2e.mjs"
+    "benchmark:vnext": "node scripts/benchmark-vnext-e2e.mjs",
+    "test:mcp-2026": "npm run build && node scripts/run-mcp-2026-tests.mjs modern",
+    "test:mcp-2026:all": "npm run build && node scripts/run-mcp-2026-tests.mjs all",
+    "benchmark:vnext:modern": "node scripts/run-mcp-2026-tests.mjs benchmark-modern"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
-    "@modelcontextprotocol/sdk": "1.30.0",
     "@types/sanitize-html": "^2.16.0",
     "@types/validator": "^13.15.10",
     "axios": "^1.16.0",
@@ -244,7 +247,11 @@
     "winston": "^3.17.0",
     "winston-transport": "^4.9.0",
     "yaml": "^2.9.0",
-    "zod": "^3.25.67"
+    "zod": "^3.25.67",
+    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/core": "2.0.0",
+    "zod-to-json-schema": "3.25.2"
   },
   "keywords": [
     "mcp",
@@ -276,6 +283,7 @@
     "prettier": "^3.5.3",
     "ts-node": "^10.9.2",
     "typedoc": "^0.28.5",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "@modelcontextprotocol/sdk": "1.30.0"
   }
 }

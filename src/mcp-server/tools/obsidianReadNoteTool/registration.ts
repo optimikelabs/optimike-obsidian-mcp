@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
@@ -18,6 +18,7 @@ import {
   ObsidianReadNoteInputSchema,
   processObsidianReadNote,
 } from "./logic.js";
+import { mcpSchema } from "../../mcpSchema.js";
 
 /**
  * Registers the 'obsidian_read_note' tool with the MCP server.
@@ -60,21 +61,13 @@ export const registerObsidianReadNoteTool = async (
     async () => {
       // Use the high-level SDK method `server.tool` for registration.
       // It handles schema generation from the shape, basic validation, and routing.
-      server.tool(
+      server.registerTool(
         toolName,
-        toolDescription,
-        ObsidianReadNoteInputSchema.shape, // Provide the Zod schema shape for input definition.
-        READ_ONLY_TOOL_ANNOTATIONS,
-        /**
-         * The handler function executed when the 'obsidian_read_note' tool is called by the client.
-         *
-         * @param {ObsidianReadNoteInput} params - The input parameters received from the client,
-         *   validated against the ObsidianReadNoteInputSchema shape. Note: The handler receives the raw input;
-         *   stricter validation against the full schema should happen inside if needed, though in this case,
-         *   the shape and the full schema are identical.
-         * @returns {Promise<CallToolResult>} A promise resolving to the structured result for the MCP client,
-         *   containing either the successful response data (serialized JSON) or an error indication.
-         */
+        {
+          description: toolDescription,
+          inputSchema: mcpSchema(ObsidianReadNoteInputSchema.shape),
+          annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
         async (params: ObsidianReadNoteInput) => {
           // Type matches the inferred input schema
           // Create a specific context for this handler invocation.

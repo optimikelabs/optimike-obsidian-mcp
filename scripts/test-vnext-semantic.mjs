@@ -4,12 +4,12 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
+
 const dist = pathToFileURL(
   path.resolve(process.env.VNEXT_DIST_ROOT || "dist") + path.sep,
 ).href;
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 const root = await mkdtemp(path.join(os.tmpdir(), "vnext-semantic-"));
 const source = path.join(root, ".smart-env");
 await mkdir(source);

@@ -84,7 +84,7 @@ const source = readFileSync(
 for (const { toolName, operation } of cases) {
   const toolOffset = source.indexOf(`\"${toolName}\"`);
   assert.ok(toolOffset >= 0, `${toolName} must remain registered`);
-  const nextToolOffset = source.indexOf("server.tool(", toolOffset + 1);
+  const nextToolOffset = source.indexOf("server.registerTool(", toolOffset + 1);
   const toolSource = source.slice(
     toolOffset,
     nextToolOffset >= 0 ? nextToolOffset : undefined,

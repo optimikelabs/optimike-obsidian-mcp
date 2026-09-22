@@ -18,21 +18,22 @@ process.env.OBSIDIAN_API_KEY = "test-key";
 process.env.OBSIDIAN_BASE_URL = "http://127.0.0.1:27123";
 process.env.OBSIDIAN_VERIFY_SSL = "false";
 mkdirSync(path.join(process.cwd(), ".tmp"), { recursive: true });
-const testRoot = mkdtempSync(path.join(process.cwd(), ".tmp", "text-patch-test-"));
+const testRoot = mkdtempSync(
+  path.join(process.cwd(), ".tmp", "text-patch-test-"),
+);
 process.env.MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH = path.join(
   testRoot,
   "governed-text-patch.sqlite",
 );
 
-const { InMemoryTransport } = await import(
-  "@modelcontextprotocol/sdk/inMemory.js"
-);
-const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
+const { InMemoryTransport } = await import("@modelcontextprotocol/server");
+const { Client } = await import("@modelcontextprotocol/client");
+const { McpServer } = await import("@modelcontextprotocol/server");
 const { registerGovernedTextPatchTools } = await import(
   "../src/mcp-server/tools/governedTextPatchTools/registration.ts"
-).catch(async () =>
-  import("../dist/mcp-server/tools/governedTextPatchTools/registration.js")
+).catch(
+  async () =>
+    import("../dist/mcp-server/tools/governedTextPatchTools/registration.js"),
 );
 const { GovernedTextPatchRuntime } = await import(
   "../src/services/textPatchProjectionRuntime.ts"
@@ -122,7 +123,8 @@ class FakeGovernedNoteReplaceRuntime {
       path: input.path,
       beforeSha256: input.expectedBeforeSha256 ?? sha256(this.content),
       afterSha256: sha256(input.nextContent),
-      bindingFingerprint: input.expectedBindingFingerprint ?? this.bindingFingerprint,
+      bindingFingerprint:
+        input.expectedBindingFingerprint ?? this.bindingFingerprint,
       nextContent: input.nextContent,
       projection: input.projection,
       status: "planned",
@@ -134,7 +136,11 @@ class FakeGovernedNoteReplaceRuntime {
 
   async apply(reference, idempotencyKey) {
     const plan = this.required(reference, idempotencyKey);
-    if (plan.status === "committed" || plan.status === "conflict" || plan.status === "rejected") {
+    if (
+      plan.status === "committed" ||
+      plan.status === "conflict" ||
+      plan.status === "rejected"
+    ) {
       return this.receipt(plan);
     }
     if (plan.status === "applying" || plan.status === "outcome_unknown") {
@@ -202,12 +208,18 @@ class FakeGovernedNoteReplaceRuntime {
       released,
       release: () => releaseResolve(),
     };
-    return { entered, release: () => this.blocked?.release() ?? releaseResolve() };
+    return {
+      entered,
+      release: () => this.blocked?.release() ?? releaseResolve(),
+    };
   }
 
   required(reference, expectedKey) {
     const plan = this.plans.get(parseId(reference));
-    if (!plan || (expectedKey !== undefined && plan.idempotencyKey !== expectedKey)) {
+    if (
+      !plan ||
+      (expectedKey !== undefined && plan.idempotencyKey !== expectedKey)
+    ) {
       throw new Error("unknown or mismatched fake plan");
     }
     return plan;
@@ -228,8 +240,14 @@ class FakeGovernedNoteReplaceRuntime {
   }
 
   receipt(plan) {
-    const phase = plan.status === "planned" ? "planned" : plan.status === "applying" ? "applying" : "terminal";
-    const recoverable = plan.status === "applying" || plan.status === "outcome_unknown";
+    const phase =
+      plan.status === "planned"
+        ? "planned"
+        : plan.status === "applying"
+          ? "applying"
+          : "terminal";
+    const recoverable =
+      plan.status === "applying" || plan.status === "outcome_unknown";
     return {
       contractVersion: 1,
       operationId: plan.operationId,
@@ -238,12 +256,29 @@ class FakeGovernedNoteReplaceRuntime {
       planRef: childRef(plan.operationId),
       planDigest: sha256(`${plan.operationId}:${plan.afterSha256}`),
       phase,
-      outcome: plan.status === "planned" || plan.status === "applying" ? null : plan.status,
-      backend: { kind: "fake-atomic-write", bindingFingerprint: plan.bindingFingerprint },
+      outcome:
+        plan.status === "planned" || plan.status === "applying"
+          ? null
+          : plan.status,
+      backend: {
+        kind: "fake-atomic-write",
+        bindingFingerprint: plan.bindingFingerprint,
+      },
       target: { kind: "vault-markdown-note", logicalRef: plan.path },
       beforeProof: { kind: "sha256", digest: plan.beforeSha256 },
-      ...(plan.status === "committed" ? { afterProof: { kind: "sha256", digest: plan.afterSha256 } } : {}),
-      postflight: { status: plan.status === "committed" ? "verified" : plan.status === "applying" ? "pending" : phase === "terminal" ? "unverified" : "not_started" },
+      ...(plan.status === "committed"
+        ? { afterProof: { kind: "sha256", digest: plan.afterSha256 } }
+        : {}),
+      postflight: {
+        status:
+          plan.status === "committed"
+            ? "verified"
+            : plan.status === "applying"
+              ? "pending"
+              : phase === "terminal"
+                ? "unverified"
+                : "not_started",
+      },
       admittedAt: "2026-08-31T00:00:00.000Z",
       updatedAt: "2026-08-31T00:00:00.000Z",
       recoveryAllowed: recoverable,
@@ -253,25 +288,39 @@ class FakeGovernedNoteReplaceRuntime {
 }
 
 async function startClient(noteRuntime) {
-  const server = new McpServer({ name: "governed-text-patch-test", version: "1.0.0" });
+  const server = new McpServer({
+    name: "governed-text-patch-test",
+    version: "1.0.0",
+  });
   await registerGovernedTextPatchTools(server, noteRuntime);
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
-  const client = new Client({ name: "governed-text-patch-test-client", version: "1.0.0" }, { capabilities: {} });
+  const client = new Client(
+    { name: "governed-text-patch-test-client", version: "1.0.0" },
+    { capabilities: {} },
+  );
   await client.connect(clientTransport);
   return { client, close: () => client.close().catch(() => undefined) };
 }
 
 const observed = [];
 function parseResult(result) {
-  const text = result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+  const text = result.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
   return JSON.parse(text || "null");
 }
 async function call(session, name, args, expectedError = false) {
   try {
     const result = await session.client.callTool({ name, arguments: args });
     observed.push(JSON.stringify(result));
-    assert.equal(Boolean(result.isError), expectedError, `${name} error status`);
+    assert.equal(
+      Boolean(result.isError),
+      expectedError,
+      `${name} error status`,
+    );
     return { result, payload: parseResult(result) };
   } catch (error) {
     assert.equal(expectedError, true, `${name} unexpected transport error`);
@@ -281,12 +330,23 @@ async function call(session, name, args, expectedError = false) {
   }
 }
 function assertPublicError(payload, code, label) {
-  assert.ok(payload.error, `${label} did not return an MCP error: ${JSON.stringify(payload)}`);
+  assert.ok(
+    payload.error,
+    `${label} did not return an MCP error: ${JSON.stringify(payload)}`,
+  );
   assert.equal(payload.error.code, code, `${label} code`);
-  assert.equal(payload.error.message, PUBLIC_MESSAGES[code], `${label} public message`);
+  assert.equal(
+    payload.error.message,
+    PUBLIC_MESSAGES[code],
+    `${label} public message`,
+  );
   const requestId = payload.requestId ?? payload.error.details?.requestId;
   assert.match(requestId ?? "", UUID, `${label} request id`);
-  assert.equal(payload.error.details?.requestId, requestId, `${label} request id details`);
+  assert.equal(
+    payload.error.details?.requestId,
+    requestId,
+    `${label} request id details`,
+  );
 }
 
 const fake = new FakeGovernedNoteReplaceRuntime();
@@ -294,17 +354,41 @@ const first = await startClient(fake);
 const second = await startClient(fake);
 try {
   const listed = await first.client.listTools();
-  const tools = listed.tools.filter((tool) => tool.name.startsWith("obsidian_text_patch_")).sort((a, b) => a.name.localeCompare(b.name));
-  assert.deepEqual(tools.map((tool) => tool.name), [
-    "obsidian_text_patch_apply",
-    "obsidian_text_patch_plan",
-    "obsidian_text_patch_recover",
-    "obsidian_text_patch_status",
-  ]);
+  const tools = listed.tools
+    .filter((tool) => tool.name.startsWith("obsidian_text_patch_"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  assert.deepEqual(
+    tools.map((tool) => tool.name),
+    [
+      "obsidian_text_patch_apply",
+      "obsidian_text_patch_plan",
+      "obsidian_text_patch_recover",
+      "obsidian_text_patch_status",
+    ],
+  );
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
-  assert.deepEqual(byName.get("obsidian_text_patch_plan")?.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
-  assert.deepEqual(byName.get("obsidian_text_patch_status")?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
-  for (const name of ["obsidian_text_patch_apply", "obsidian_text_patch_recover"]) assert.deepEqual(byName.get(name)?.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
+  assert.deepEqual(byName.get("obsidian_text_patch_plan")?.annotations, {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  });
+  assert.deepEqual(byName.get("obsidian_text_patch_status")?.annotations, {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  });
+  for (const name of [
+    "obsidian_text_patch_apply",
+    "obsidian_text_patch_recover",
+  ])
+    assert.deepEqual(byName.get(name)?.annotations, {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
 
   // The guarded write limit is expressed in JavaScript string characters, as
   // it is for the governed note-replace runtime. This fixture is intentionally
@@ -312,7 +396,9 @@ try {
   fake.reset(body("needle"));
   const multibyte = await call(first, "obsidian_text_patch_plan", {
     path: FIXTURE_PATH,
-    operations: [{ op: "replace_literal", search: "needle", replacement: "é".repeat(30) }],
+    operations: [
+      { op: "replace_literal", search: "needle", replacement: "é".repeat(30) },
+    ],
     idempotencyKey: "multibyte-under-character-limit",
   });
   assert.equal(multibyte.payload.phase, "planned");
@@ -321,11 +407,22 @@ try {
   assert.ok(multibyteContent.length <= 100);
   assert.ok(Buffer.byteLength(multibyteContent, "utf8") > 100);
 
-  const overCharacters = await call(first, "obsidian_text_patch_plan", {
-    path: FIXTURE_PATH,
-    operations: [{ op: "replace_literal", search: "needle", replacement: "x".repeat(101) }],
-    idempotencyKey: "over-character-limit",
-  }, true);
+  const overCharacters = await call(
+    first,
+    "obsidian_text_patch_plan",
+    {
+      path: FIXTURE_PATH,
+      operations: [
+        {
+          op: "replace_literal",
+          search: "needle",
+          replacement: "x".repeat(101),
+        },
+      ],
+      idempotencyKey: "over-character-limit",
+    },
+    true,
+  );
   assertPublicError(overCharacters.payload, "FORBIDDEN", "character limit");
 
   fake.reset();
@@ -334,37 +431,130 @@ try {
     { op: "replace_literal", search: "needle", replacement: "target" },
     { op: "append_body", text: "suffix\n" },
   ];
-  const plan = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations, idempotencyKey: "nominal" });
+  const plan = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations,
+    idempotencyKey: "nominal",
+  });
   assert.equal(plan.payload.phase, "planned");
   assert.equal(plan.payload.operationKind, "obsidian.text.patch");
   assert.equal(plan.payload.projection.proof.operationCount, 3);
   assert.equal(Object.hasOwn(plan.payload.projection, "intentDigest"), false);
-  assert.equal(Object.hasOwn(plan.payload.projection.proof, "patchDigest"), false);
+  assert.equal(
+    Object.hasOwn(plan.payload.projection.proof, "patchDigest"),
+    false,
+  );
   assert.equal(fake.casRequests, 0);
   assert.equal(JSON.stringify(plan.payload).includes("prefix"), false);
-  const replay = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [operations[0], { ...operations[1], occurrence: "unique" }, operations[2]], idempotencyKey: "nominal" });
+  const replay = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      operations[0],
+      { ...operations[1], occurrence: "unique" },
+      operations[2],
+    ],
+    idempotencyKey: "nominal",
+  });
   assert.equal(replay.payload.operationId, plan.payload.operationId);
-  const plannedStatus = await call(first, "obsidian_text_patch_status", { planRef: plan.payload.planRef });
+  const plannedStatus = await call(first, "obsidian_text_patch_status", {
+    planRef: plan.payload.planRef,
+  });
   assert.equal(plannedStatus.payload.phase, "planned");
   assert.equal(Object.hasOwn(plannedStatus.payload, "idempotencyKey"), false);
-  assert.equal(JSON.stringify(plannedStatus.payload).includes("prefix\\n"), false);
-  const rebound = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "different" }], idempotencyKey: "nominal" }, true);
+  assert.equal(
+    JSON.stringify(plannedStatus.payload).includes("prefix\\n"),
+    false,
+  );
+  const rebound = await call(
+    first,
+    "obsidian_text_patch_plan",
+    {
+      path: FIXTURE_PATH,
+      operations: [
+        { op: "replace_literal", search: "needle", replacement: "different" },
+      ],
+      idempotencyKey: "nominal",
+    },
+    true,
+  );
   assertPublicError(rebound.payload, "CONFLICT", "same key/different intent");
-  const wrongKey = await call(first, "obsidian_text_patch_apply", { planRef: plan.payload.planRef, idempotencyKey: "wrong-key" }, true);
+  const wrongKey = await call(
+    first,
+    "obsidian_text_patch_apply",
+    { planRef: plan.payload.planRef, idempotencyKey: "wrong-key" },
+    true,
+  );
   assertPublicError(wrongKey.payload, "CONFLICT", "apply key binding");
-  const applied = await call(first, "obsidian_text_patch_apply", { planRef: plan.payload.planRef, idempotencyKey: "nominal" });
+  const applied = await call(first, "obsidian_text_patch_apply", {
+    planRef: plan.payload.planRef,
+    idempotencyKey: "nominal",
+  });
   assert.equal(applied.payload.outcome, "committed");
-  assert.equal(fake.content, `---\n${PROTECTED}\nstatut: actif\n---\nprefix\nalpha\ntarget\nomega\nsuffix\n`);
+  assert.equal(
+    fake.content,
+    `---\n${PROTECTED}\nstatut: actif\n---\nprefix\nalpha\ntarget\nomega\nsuffix\n`,
+  );
   const writes = fake.successfulWrites;
-  await call(first, "obsidian_text_patch_apply", { planRef: plan.payload.planRef, idempotencyKey: "nominal" });
+  await call(first, "obsidian_text_patch_apply", {
+    planRef: plan.payload.planRef,
+    idempotencyKey: "nominal",
+  });
   assert.equal(fake.successfulWrites, writes);
 
-  fake.reset(`---\n${PROTECTED}\nstatut: actif\n---\n- [ ] do not touch\nbody\n`);
+  fake.reset(
+    `---\n${PROTECTED}\nstatut: actif\n---\n- [ ] do not touch\nbody\n`,
+  );
   for (const [label, args] of [
-    ["frontmatter", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "statut: actif", replacement: "statut: nope" }], idempotencyKey: "reject-frontmatter" }],
-    ["task", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "- [ ] do not touch", replacement: "done" }], idempotencyKey: "reject-task" }],
-    ["path", { path: "../outside.md", operations: [{ op: "append_body", text: "x" }], idempotencyKey: "reject-path" }],
-    ["regex", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: { pattern: "body", marker: SECRET }, replacement: "x" }], idempotencyKey: "reject-regex" }],
+    [
+      "frontmatter",
+      {
+        path: FIXTURE_PATH,
+        operations: [
+          {
+            op: "replace_literal",
+            search: "statut: actif",
+            replacement: "statut: nope",
+          },
+        ],
+        idempotencyKey: "reject-frontmatter",
+      },
+    ],
+    [
+      "task",
+      {
+        path: FIXTURE_PATH,
+        operations: [
+          {
+            op: "replace_literal",
+            search: "- [ ] do not touch",
+            replacement: "done",
+          },
+        ],
+        idempotencyKey: "reject-task",
+      },
+    ],
+    [
+      "path",
+      {
+        path: "../outside.md",
+        operations: [{ op: "append_body", text: "x" }],
+        idempotencyKey: "reject-path",
+      },
+    ],
+    [
+      "regex",
+      {
+        path: FIXTURE_PATH,
+        operations: [
+          {
+            op: "replace_literal",
+            search: { pattern: "body", marker: SECRET },
+            replacement: "x",
+          },
+        ],
+        idempotencyKey: "reject-regex",
+      },
+    ],
   ]) {
     const rejected = await call(first, "obsidian_text_patch_plan", args, true);
     if (label === "regex") {
@@ -401,11 +591,16 @@ try {
     ],
   ]) {
     fake.reset(content);
-    const rejected = await call(first, "obsidian_text_patch_plan", {
-      path: FIXTURE_PATH,
-      operations,
-      idempotencyKey: `encoding-${label.toLowerCase().replace(/[^a-z0-9]+/gu, "-")}`,
-    }, true);
+    const rejected = await call(
+      first,
+      "obsidian_text_patch_plan",
+      {
+        path: FIXTURE_PATH,
+        operations,
+        idempotencyKey: `encoding-${label.toLowerCase().replace(/[^a-z0-9]+/gu, "-")}`,
+      },
+      true,
+    );
     assertPublicError(rejected.payload, "VALIDATION_ERROR", label);
     assert.equal(fake.casRequests, 0, `${label} fails before CAS`);
   }
@@ -413,7 +608,9 @@ try {
   await assert.rejects(
     runtimeForCompilerBoundary.plan({
       path: FIXTURE_PATH,
-      operations: [{ op: "replace_literal", search: /body/u, replacement: "x" }],
+      operations: [
+        { op: "replace_literal", search: /body/u, replacement: "x" },
+      ],
       idempotencyKey: "reject-regex-direct",
     }),
     /Regular expressions are not supported/u,
@@ -459,30 +656,72 @@ try {
   assert.equal(fake.plans.size, 1);
 
   fake.reset();
-  const stalePlan = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "stale" }], idempotencyKey: "stale" });
+  const stalePlan = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: "needle", replacement: "stale" },
+    ],
+    idempotencyKey: "stale",
+  });
   fake.content = body("third-party\nneedle");
-  const stale = await call(first, "obsidian_text_patch_apply", { planRef: stalePlan.payload.planRef, idempotencyKey: "stale" });
+  const stale = await call(first, "obsidian_text_patch_apply", {
+    planRef: stalePlan.payload.planRef,
+    idempotencyKey: "stale",
+  });
   assert.equal(stale.payload.outcome, "conflict");
   assert.equal(fake.successfulWrites, 0);
 
   fake.reset();
-  const clientA = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "client-a" }], idempotencyKey: "client-a" });
-  const clientB = await call(second, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "client-b" }], idempotencyKey: "client-b" });
+  const clientA = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: "needle", replacement: "client-a" },
+    ],
+    idempotencyKey: "client-a",
+  });
+  const clientB = await call(second, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: "needle", replacement: "client-b" },
+    ],
+    idempotencyKey: "client-b",
+  });
   const gate = fake.blockNextCas();
-  const firstApply = call(first, "obsidian_text_patch_apply", { planRef: clientA.payload.planRef, idempotencyKey: "client-a" });
+  const firstApply = call(first, "obsidian_text_patch_apply", {
+    planRef: clientA.payload.planRef,
+    idempotencyKey: "client-a",
+  });
   await gate.entered;
-  const loser = await call(second, "obsidian_text_patch_apply", { planRef: clientB.payload.planRef, idempotencyKey: "client-b" });
+  const loser = await call(second, "obsidian_text_patch_apply", {
+    planRef: clientB.payload.planRef,
+    idempotencyKey: "client-b",
+  });
   gate.release();
   const winner = await firstApply;
-  assert.deepEqual(new Set([winner.payload.outcome, loser.payload.outcome]), new Set(["committed", "conflict"]));
+  assert.deepEqual(
+    new Set([winner.payload.outcome, loser.payload.outcome]),
+    new Set(["committed", "conflict"]),
+  );
   assert.equal(fake.successfulWrites, 1);
 
   fake.reset();
-  const concurrent = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "once" }], idempotencyKey: "concurrent" });
+  const concurrent = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: "needle", replacement: "once" },
+    ],
+    idempotencyKey: "concurrent",
+  });
   const concurrentGate = fake.blockNextCas();
-  const inFlight = call(first, "obsidian_text_patch_apply", { planRef: concurrent.payload.planRef, idempotencyKey: "concurrent" });
+  const inFlight = call(first, "obsidian_text_patch_apply", {
+    planRef: concurrent.payload.planRef,
+    idempotencyKey: "concurrent",
+  });
   await concurrentGate.entered;
-  const observing = await call(second, "obsidian_text_patch_apply", { planRef: concurrent.payload.planRef, idempotencyKey: "concurrent" });
+  const observing = await call(second, "obsidian_text_patch_apply", {
+    planRef: concurrent.payload.planRef,
+    idempotencyKey: "concurrent",
+  });
   assert.equal(observing.payload.phase, "applying");
   concurrentGate.release();
   assert.equal((await inFlight).payload.outcome, "committed");
@@ -490,41 +729,135 @@ try {
 
   fake.reset();
   fake.loseResponseAfterWriteNext = true;
-  const lostPlan = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "lost" }], idempotencyKey: "lost" });
-  const lost = await call(first, "obsidian_text_patch_apply", { planRef: lostPlan.payload.planRef, idempotencyKey: "lost" }, true);
-  const lostStatus = await call(first, "obsidian_text_patch_status", { planRef: lostPlan.payload.planRef });
+  const lostPlan = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: "needle", replacement: "lost" },
+    ],
+    idempotencyKey: "lost",
+  });
+  const lost = await call(
+    first,
+    "obsidian_text_patch_apply",
+    { planRef: lostPlan.payload.planRef, idempotencyKey: "lost" },
+    true,
+  );
+  const lostStatus = await call(first, "obsidian_text_patch_status", {
+    planRef: lostPlan.payload.planRef,
+  });
   assert.equal(lostStatus.payload.outcome, "committed");
   assert.equal(fake.content.includes("lost"), true);
 
   fake.reset();
   fake.failBeforeWriteNext = true;
-  const recoverPlan = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "recovered" }], idempotencyKey: "recover" });
-  const unknown = await call(first, "obsidian_text_patch_apply", { planRef: recoverPlan.payload.planRef, idempotencyKey: "recover" });
+  const recoverPlan = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: "needle", replacement: "recovered" },
+    ],
+    idempotencyKey: "recover",
+  });
+  const unknown = await call(first, "obsidian_text_patch_apply", {
+    planRef: recoverPlan.payload.planRef,
+    idempotencyKey: "recover",
+  });
   assert.equal(unknown.payload.outcome, "outcome_unknown");
-  assert.equal((await call(first, "obsidian_text_patch_status", { planRef: recoverPlan.payload.planRef })).payload.outcome, "outcome_unknown");
-  assert.equal((await call(first, "obsidian_text_patch_recover", { planRef: recoverPlan.payload.planRef, idempotencyKey: "recover" })).payload.outcome, "committed");
+  assert.equal(
+    (
+      await call(first, "obsidian_text_patch_status", {
+        planRef: recoverPlan.payload.planRef,
+      })
+    ).payload.outcome,
+    "outcome_unknown",
+  );
+  assert.equal(
+    (
+      await call(first, "obsidian_text_patch_recover", {
+        planRef: recoverPlan.payload.planRef,
+        idempotencyKey: "recover",
+      })
+    ).payload.outcome,
+    "committed",
+  );
   assert.equal(fake.content.includes("recovered"), true);
 
   fake.reset(`---\n${PROTECTED}\nstatut: actif\n---\nremove-me`);
-  const empty = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "remove-me", replacement: "" }], idempotencyKey: "empty-body" });
-  await call(first, "obsidian_text_patch_apply", { planRef: empty.payload.planRef, idempotencyKey: "empty-body" });
+  const empty = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: "remove-me", replacement: "" },
+    ],
+    idempotencyKey: "empty-body",
+  });
+  await call(first, "obsidian_text_patch_apply", {
+    planRef: empty.payload.planRef,
+    idempotencyKey: "empty-body",
+  });
   assert.equal(fake.content, `---\n${PROTECTED}\nstatut: actif\n---\n`);
 
   // Seed the shared-cache analogue through a commit, then mutate only the live
   // Atomic Write read. Planning must find live-authority, never stale cached.
   fake.reset(body("seed"));
-  const seed = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "seed", replacement: "cached" }], idempotencyKey: "cache-seed" });
-  await call(first, "obsidian_text_patch_apply", { planRef: seed.payload.planRef, idempotencyKey: "cache-seed" });
+  const seed = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      { op: "replace_literal", search: "seed", replacement: "cached" },
+    ],
+    idempotencyKey: "cache-seed",
+  });
+  await call(first, "obsidian_text_patch_apply", {
+    planRef: seed.payload.planRef,
+    idempotencyKey: "cache-seed",
+  });
   fake.content = body("live-authority");
-  assert.notEqual(fake.cachedContent, fake.content, "fixture cache is deliberately stale");
-  const live = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "live-authority", replacement: "read-live" }], idempotencyKey: "live-authority" });
+  assert.notEqual(
+    fake.cachedContent,
+    fake.content,
+    "fixture cache is deliberately stale",
+  );
+  const live = await call(first, "obsidian_text_patch_plan", {
+    path: FIXTURE_PATH,
+    operations: [
+      {
+        op: "replace_literal",
+        search: "live-authority",
+        replacement: "read-live",
+      },
+    ],
+    idempotencyKey: "live-authority",
+  });
   assert.equal(live.payload.phase, "planned");
-  assert.ok(fake.liveReads > 0, "projection planning uses the runtime note read");
+  assert.ok(
+    fake.liveReads > 0,
+    "projection planning uses the runtime note read",
+  );
 
-  const redacted = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "absent", replacement: SECRET }], idempotencyKey: "redaction" }, true);
-  assertPublicError(redacted.payload, "VALIDATION_ERROR", "redacted parameters");
-  for (const result of observed) assert.equal(result.includes(SECRET), false, "sealed text leaked in MCP response");
-  console.log("PASS: MCP quartet registration, guarded character-limit units, projection proof, no-write planning, exact replay/conflict fencing, body-only rejection, stale and concurrent CAS, lost-response status, exact recovery, empty-body literal replacement, cache authority, and redaction.");
+  const redacted = await call(
+    first,
+    "obsidian_text_patch_plan",
+    {
+      path: FIXTURE_PATH,
+      operations: [
+        { op: "replace_literal", search: "absent", replacement: SECRET },
+      ],
+      idempotencyKey: "redaction",
+    },
+    true,
+  );
+  assertPublicError(
+    redacted.payload,
+    "VALIDATION_ERROR",
+    "redacted parameters",
+  );
+  for (const result of observed)
+    assert.equal(
+      result.includes(SECRET),
+      false,
+      "sealed text leaked in MCP response",
+    );
+  console.log(
+    "PASS: MCP quartet registration, guarded character-limit units, projection proof, no-write planning, exact replay/conflict fencing, body-only rejection, stale and concurrent CAS, lost-response status, exact recovery, empty-body literal replacement, cache authority, and redaction.",
+  );
 } finally {
   await second.close();
   await first.close();

@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { McpServer } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
 import { installToolProfileRegistrationGate } from "../dist/mcp-server/toolProfileRuntime.js";
+import { mcpSchema } from "../dist/mcp-server/mcpSchema.js";
 
 async function createVault() {
   const root = await mkdtemp(
@@ -62,15 +63,17 @@ async function listedNames(client) {
 }
 
 function registerSyntheticTool(server, name) {
-  return server.tool(
+  return server.registerTool(
     name,
-    `synthetic ${name}`,
-    {},
     {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
+      description: `synthetic ${name}`,
+      inputSchema: mcpSchema({}),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async () => ({
       content: [{ type: "text", text: "ok" }],
@@ -208,8 +211,9 @@ try {
   {
     const previous = process.env.MCP_TOOL_PROFILE;
     process.env.MCP_TOOL_PROFILE = "full";
-    const { applyToolProfileCliOverride } =
-      await import("../dist/config/toolProfileCli.js");
+    const { applyToolProfileCliOverride } = await import(
+      "../dist/config/toolProfileCli.js"
+    );
     applyToolProfileCliOverride(["--tool-profile=tasks"]);
     assert.equal(process.env.MCP_TOOL_PROFILE, "tasks");
     assert.throws(

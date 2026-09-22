@@ -283,8 +283,8 @@ try {
   const handlers = new Map();
   const annotations = new Map();
   const fakeServer = {
-    tool(name, _description, _schema, toolAnnotations, handler) {
-      annotations.set(name, toolAnnotations);
+    registerTool(name, config, handler) {
+      annotations.set(name, config.annotations);
       handlers.set(name, handler);
     },
   };
@@ -293,10 +293,12 @@ try {
   const runtimeStatus = await handlers.get("external_runtime_status")(
     {},
     {
-      authInfo: {
-        token: "external-roots-test-token",
-        clientId: "external-roots-test-client",
-        scopes: ["external:read"],
+      http: {
+        authInfo: {
+          token: "external-roots-test-token",
+          clientId: "external-roots-test-client",
+          scopes: ["external:read"],
+        },
       },
     },
   );
@@ -469,7 +471,7 @@ try {
   const redactionHandlers = new Map();
   await registerExternalRootsTools(
     {
-      tool(name, _description, _schema, _annotations, handler) {
+      registerTool(name, _config, handler) {
         redactionHandlers.set(name, handler);
       },
     },
