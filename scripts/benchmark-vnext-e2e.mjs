@@ -1,13 +1,47 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { get_encoding } from "tiktoken";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+
+const protocolEra = process.env.MCP_BENCHMARK_PROTOCOL_ERA ?? "legacy";
+assert.ok(
+  ["legacy", "modern"].includes(protocolEra),
+  "Invalid benchmark protocol era",
+);
+// Keep comparisons to the original v1 build executable with the same harness.
+// SDK v1 is a dev-only test dependency, never a production transport dependency.
+const baselinePackage = process.env.VNEXT_DIST_ROOT
+  ? JSON.parse(
+      await readFile(
+        path.resolve(process.env.VNEXT_DIST_ROOT, "..", "package.json"),
+        "utf8",
+      ),
+    )
+  : undefined;
+const legacyBuild =
+  baselinePackage &&
+  !baselinePackage.dependencies?.["@modelcontextprotocol/server"];
+assert.ok(
+  !(legacyBuild && protocolEra === "modern"),
+  "A v1 baseline cannot serve protocol 2026",
+);
+const { McpServer, InMemoryTransport } = legacyBuild
+  ? {
+      ...(await import("@modelcontextprotocol/sdk/server/mcp.js")),
+      ...(await import("@modelcontextprotocol/sdk/inMemory.js")),
+    }
+  : await import("@modelcontextprotocol/server");
+const { Client } = await import(
+  legacyBuild
+    ? "@modelcontextprotocol/sdk/client/index.js"
+    : "@modelcontextprotocol/client"
+);
+
 Object.assign(process.env, {
   NODE_ENV: "test",
   OBSIDIAN_RUNTIME_MODE: "live",
@@ -178,9 +212,21 @@ const facade = {
   apply: (...a) => runtime.apply(...a),
   status: (...a) => runtime.status(...a),
 };
-const server = new McpServer({ name: "vnext-benchmark", version: "1" }),
-  client = new Client({ name: "vnext-benchmark-client", version: "1" });
-const [ct, st] = InMemoryTransport.createLinkedPair();
+let server, modernHandler;
+const client = new Client(
+  { name: "vnext-benchmark-client", version: "1" },
+  protocolEra === "modern"
+    ? { versionNegotiation: { mode: "pin", protocolVersion: "2026-07-28" } }
+    : {},
+);
+async function makeServer() {
+  const instance = new McpServer({ name: "vnext-benchmark", version: "1" });
+  await registerObsidianListNotesTool(instance, live, cache);
+  await registerObsidianGlobalSearchTool(instance, live, cache);
+  await registerObsidianReadNoteTool(instance, live, cache);
+  registerNoteCreateTools(instance, facade);
+  return instance;
+}
 const tokenizer = get_encoding("cl100k_base");
 let metrics;
 async function call(name, args) {
@@ -343,12 +389,22 @@ const flows = [
 ];
 const results = [];
 try {
-  await registerObsidianListNotesTool(server, live, cache);
-  await registerObsidianGlobalSearchTool(server, live, cache);
-  await registerObsidianReadNoteTool(server, live, cache);
-  registerNoteCreateTools(server, facade);
-  await server.connect(st);
-  await client.connect(ct);
+  if (protocolEra === "modern") {
+    modernHandler = createMcpHandler(makeServer, { legacy: "reject" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL("http://127.0.0.1/mcp"),
+      {
+        fetch: (url, init) => modernHandler.fetch(new Request(url, init)),
+      },
+    );
+    await client.connect(transport);
+    assert.equal(client.getProtocolEra(), "modern");
+  } else {
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    server = await makeServer();
+    await server.connect(st);
+    await client.connect(ct);
+  }
   for (const [name, run] of flows) {
     const samples = [];
     for (let iteration = 0; iteration < 5; iteration++) {
@@ -386,8 +442,11 @@ try {
     schemaVersion: 1,
     baseline: "991d0740158ab1fb5154366f5f08f6c7e719abc5",
     candidate: process.env.VNEXT_DIST_ROOT ? "baseline" : "patched",
+    protocolEra,
     surface:
-      "real MCP SDK client/server in-memory transport; simulated vault backend; real SQLite journal",
+      protocolEra === "modern"
+        ? "official MCP 2026 client/server via in-process Web Fetch HTTP; server factory per request; simulated vault backend; real SQLite journal"
+        : "real MCP SDK client/server in-memory transport; simulated vault backend; real SQLite journal",
     tokenizer: "cl100k_base proxy, response text only",
     manualCorrections: 0,
     results,
@@ -419,7 +478,8 @@ try {
     process.exitCode = 1;
 } finally {
   await client.close();
-  await server.close();
+  await server?.close();
+  await modernHandler?.close();
   journal.close();
   tokenizer.free();
   await rm(root, { recursive: true, force: true });
