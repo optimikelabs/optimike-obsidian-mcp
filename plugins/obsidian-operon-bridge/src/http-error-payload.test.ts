@@ -5,6 +5,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
+let backgroundPolicy = true;
+
 let bridgeModulePromise: Promise<Record<string, unknown>> | undefined;
 
 async function bridgeModule(): Promise<Record<string, unknown>> {
@@ -23,13 +25,17 @@ async function bridgeModule(): Promise<Record<string, unknown>> {
     const nativeRequire = createRequire(import.meta.url);
     const obsidianStub = {
       App: class {},
+      Platform: { isDesktopApp: true },
       Plugin: class {},
       PluginSettingTab: class {},
       Setting: class {},
       TFile: class {},
     };
     const testRequire = (id: string) =>
-      id === "obsidian" ? obsidianStub : nativeRequire(id);
+      id === "obsidian" ? obsidianStub : id === "electron" ? { remote: {
+        getCurrentWebContents: () => ({ getBackgroundThrottling: () => backgroundPolicy,
+          setBackgroundThrottling: (value: boolean) => { backgroundPolicy = value; } }),
+      } } : nativeRequire(id);
     new Function("module", "exports", "require", bundle.outputFiles[0].text)(
       loadedModule,
       loadedModule.exports,
@@ -103,6 +109,7 @@ test("Operon Bridge lifecycle remounts one Local REST provider generation", asyn
   plugins["obsidian-local-rest-api"] = makeProvider();
   bridge.restLifecycle.probeNow();
   assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 1);
+  assert.equal(backgroundPolicy, false, "serving routes keeps renderer responsive");
   let statusBody: any;
   await providers[0].handlers.get(
     "GET /extensions/optimike-operon-bridge/v1/status",
@@ -137,9 +144,11 @@ test("Operon Bridge lifecycle remounts one Local REST provider generation", asyn
   assert.equal(providers[0].unregisters, 1);
   assert.equal(bridge.restLifecycle.snapshot().unloadGeneration, 0);
   assert.equal(bridge.restLifecycle.snapshot().state, "degraded");
+  assert.equal(backgroundPolicy, false, "failed unregister must retain the policy");
   bridge.restLifecycle.probeNow();
   assert.equal(providers[0].unregisters, 2);
   assert.equal(bridge.restLifecycle.snapshot().unloadGeneration, 1);
+  assert.equal(backgroundPolicy, true, "successful unregister restores policy");
   plugins["obsidian-local-rest-api"] = makeProvider();
   bridge.restLifecycle.probeNow();
   assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 2);
@@ -154,6 +163,7 @@ test("Operon Bridge lifecycle remounts one Local REST provider generation", asyn
     1,
     "unload must not retry the same cleanup outside the lifecycle boundary",
   );
+  assert.equal(backgroundPolicy, true, "plugin unload restores policy even when route cleanup fails");
   assert.equal(bridge.restLifecycle, null);
   assert.equal(bridge.restCleanup, null);
 });

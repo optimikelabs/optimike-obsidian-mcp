@@ -1,4 +1,5 @@
-import { App, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import { acquireBackgroundExecution } from "./background-execution";
+import { App, Platform, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import {
   OPERON_BRIDGE_CONTRACT_VERSION,
   OPERON_BRIDGE_LEGACY_VERSIONS,
@@ -1054,6 +1055,7 @@ function pickDefined(
 export default class OptimikeOperonBridgePlugin extends Plugin {
   settings: OptimikeOperonBridgeSettings = { ...DEFAULT_BRIDGE_SETTINGS };
   private restCleanup: (() => void) | null = null;
+  private backgroundCleanup: (() => void) | null = null;
   private restLifecycle: RestExtensionLifecycle<object> | null = null;
   private indexValidationInFlight: Promise<void> | null = null;
   private mutationResults = new Map<string, CachedMutation>();
@@ -1099,10 +1101,18 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         mount: (provider) => {
           const cleanup = this.mountRestExtension(provider);
           if (!cleanup) return null;
-          this.restCleanup = cleanup;
-          return () => {
+          const releaseBackground = acquireBackgroundExecution(Platform.isDesktopApp, require);
+          if (!releaseBackground) console.warn(`[${EXTENSION_ID}] Desktop background execution is unavailable; hidden-window requests may time out.`);
+          this.backgroundCleanup = releaseBackground;
+          const mountedCleanup = () => {
             cleanup();
-            if (this.restCleanup === cleanup) this.restCleanup = null;
+            releaseBackground?.();
+            if (this.backgroundCleanup === releaseBackground) this.backgroundCleanup = null;
+          };
+          this.restCleanup = mountedCleanup;
+          return () => {
+            mountedCleanup();
+            if (this.restCleanup === mountedCleanup) this.restCleanup = null;
           };
         },
         onCleanupError: () =>
@@ -1126,6 +1136,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           );
         }
       }
+      this.backgroundCleanup?.();
+      this.backgroundCleanup = null;
       this.restLifecycle = null;
       this.restCleanup = null;
     });
