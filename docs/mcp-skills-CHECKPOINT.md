@@ -1,35 +1,41 @@
-# Skills over MCP — implementation checkpoint
+# Skills over MCP — durable closure checkpoint
 
 ## Authority
-- Branch: `codex/mcp-skills-over-mcp-764a4174`.
-- Parent candidate: `764a417421760570887c502825f3862c9b56901a`, dual-stack PR #103.
-- Parent exact-HEAD global CI/review remains a dependency; do not promote this child independently or reuse historical P0 Desktop evidence.
-- Read current branch refs and PRs before resuming. Never treat this historical parent value as the current candidate.
 
-## Normative qualification
-Skills extension `io.modelcontextprotocol/skills`, stable specification at upstream `modelcontextprotocol/ext-skills` commit `0e85d4db8860a305c857f26fdede64f416675b92`, `specification/stable/skills.mdx`; base protocol `2026-07-28`.
-Agent Skills format: https://agentskills.io/specification (consulted 2026-09-22).
-SDK v2 custom methods/capabilities: https://ts.sdk.modelcontextprotocol.io/v2/advanced/custom-methods.html.
+- Repository: `optimikelabs/optimike-obsidian-mcp`.
+- Skills branch: `codex/mcp-skills-over-mcp-764a4174`, PR #104.
+- Parent branch: `codex/mcp-2026-dual-stack-4e59b8ec`, PR #103.
+- Qualified parent product SHA: `832bc9ed040389075d9367111d4087ae295baca9`.
+- P0/main baseline: `4e59b8ec28d01b8ccde8c04e1b8f53ea1dd13c78`.
+- Last implementation anchor at this checkpoint: `51fafbccc7c36e93ae4174115573306ef110f168`.
+- The enclosing Git commit versions this document. Current candidate authority is the remote branch ref plus exact-head CI/review in PR #104, not the historical anchor above.
 
-Required wire surface: extension capability plus resources; skills/list and skills/get return complete entries, resultType=complete, ttlMs and cacheScope; resources/read serves individual raw files. Static manifests enumerate every file exactly once, including SKILL.md, with raw-byte SHA-256 and size. Reference limits are 512 files and 16 MiB per skill. DirectoryRead remains unadvertised/unimplemented. Same names in different namespaces are not identity collisions; identical resource URIs are.
+## Implemented
 
-## Source and safety decisions
-- Explicit publication allowlist tied to existing external-root IDs and relative skill directories, not a disk/vault scan.
-- Original files remain authoritative. No corpus copy, hidden rewriting, script execution or local-skill mutation.
-- Reuse ExternalRootsService path/capability and opened-file identity checks. A complete skill snapshot must reject an excluded, unreadable, linked or over-limit member rather than silently publish an incomplete manifest.
-- Publication is independently opt-in, modern only. Existing tool profiles and tool registry remain unchanged. Publications may select existing profiles, default full; MCP clientInfo never grants access.
-- Per-request point-in-time manifests, private cacheScope and ttlMs=0. Later resource reads return current verified bytes, never claim an old digest covers changed bytes. Hosts must verify against their approved manifest and re-fetch/re-approve on change as the extension requires.
-- The public task skill currently has numeric/boolean metadata and an out-of-directory profile prerequisite. Only minimal source-format/explicit dependency corrections inside this repo are authorized; local canonical ELYSIA sources remain untouched.
+Read-only source snapshots, Agent Skills validation, complete raw-byte manifests, explicit publication registry, official modern Skills/resource methods, HTTP/direct stdio/proxy integration, legacy/profile isolation and permanent Windows/Linux tests are versioned. Source files are not copied or mutated; scripts inside skills are never executed.
 
-## Cause / impact
-1. ExternalRootsService: narrow internal bounded complete-directory snapshot; no new public tools.
-2. Skill registry: validate exact frontmatter, canonical URIs, raw manifests, pagination, current resource reads and safe diagnostics.
-3. MCP factory / proxy: official public custom-method registration and resource delegation on modern era only; no business mutation adapter changes.
-4. Tests/CI: real SDK HTTP/stdio/proxy clients, invalid sources/URIs/races, profile isolation, unchanged legacy catalog and P0 benchmark.
+The repository task governor has string metadata and seven reference modules. Its `elysia.tasks` JSON profile remains an external canonical dependency. `test-skills-repo.mjs` validates the actual eight-file directory through the production registry. The historical task-profile test now checks string metadata while preserving profile/governance assertions.
 
-## Resume / gates
-Implement and checkpoint one coherent unit at a time: snapshot + tests; registry + tests; protocol serving + tests; CI/docs/canary and review fixes. Start Draft PR immediately. Propagate any late parent fix explicitly.
+`scripts/smoke-mcp-skills-local.mjs` is the reusable readonly exact-SHA canary. `test-skills-smoke.mjs` exercises it hermetically over real HTTP/stdio/proxy; that test must report Desktop NOT_EXERCISED. Instructions and mutation/host gates are in `docs/mcp-skills-local.md`.
 
-Current status: QUALIFICATION_RECORDED, implementation NOT_DONE.
-Local ELYSIA roots / Desktop / Secure / Pilot2: NOT_RUN (Optimike is unavailable in this resumed surface).
-No merge, release or production deployment.
+## Normative and security contract
+
+`io.modelcontextprotocol/skills`, stable upstream SHA `0e85d4db8860a305c857f26fdede64f416675b92`, base MCP `2026-07-28`; Agent Skills specification re-read 2026-09-22. Full contract: `docs/mcp-skills.md`.
+
+Explicit existing-root publications, full-profile default, no arbitrary scanning, no Skills tools/new profiles, no DirectoryRead, no script execution, no caller metadata as authorization. Complete snapshots reject excluded/linked/unreadable/over-limit members. Results use private zero-TTL point-in-time manifests. Hosts verify approved raw bytes and reapprove changes; no old digest is attached to changed content.
+
+## Proof and readiness
+
+Parent exact-head CI and rereview were re-read as green. The Skills predecessor `8baf49fb` passed all observed CI. The actual repo-skill test passed the dedicated Windows/Linux gate at `08521dbf`; historical profile tests then exposed numeric/boolean metadata expectations, corrected at `1a0977b9`. These historical results do not certify a later head.
+
+Before marking CANDIDATE_READY_REPO, read the latest exact-head Skills, MCP 2026, P0, Runtime, P6, M4/M5, profile/privacy/package gates and independent review. P0 remains 50/50 in both eras. No guarantee or assertion may be dropped to close a failing gate. Record final results in the PR body/comment anchored to the actual candidate SHA; do not create a self-referential SHA claim in this file.
+
+## Local gates
+
+LOCAL_GATE: NOT_RUN — real ELYSIA roots, Desktop/Pilot2 and Secure were not accessible in this resumed ChatGPT surface. Do not reuse historical P0 Desktop 12/12. Original local skills remain unchanged. Only full development checkouts can run the canary's genuine v1 client.
+
+## Recovery and rollback
+
+Temporary import/qualification recipes and sealed patch transport are removed. Work lives in commits referenced by these two branches. After interruption: verify connectors, read main/refs/PRs/checkpoints/CI/reviews, compare ancestry, then continue at the first incomplete gate. Commit and read back each small coherent unit. Never regenerate an existing remote result from memory.
+
+Unset Skills configuration and restart to disable Skills; legacy protocol mode also disables modern serving. Neither rollback deletes receipts or rewinds sources. Consult status before uncertain operations. No automatic merge, release or production deployment is authorized.
