@@ -168,3 +168,45 @@ for (const mode of ["live", "cache"]) {
     assert.equal((await search({ page: 4 })).hasMore, false);
   });
 }
+
+for (const options of [
+  { useRegex: true, query: "V[N]ext" },
+  { caseSensitive: true, query: "VNext" },
+]) {
+  test(
+    "stalled live enumeration falls back within the search deadline: " +
+      JSON.stringify(options),
+    { timeout: 6000 },
+    async () => {
+      const pending = [];
+      let calls = 0;
+      const stalled = {
+        ...live,
+        listFiles() {
+          calls++;
+          return new Promise((resolve) => pending.push(resolve));
+        },
+        async getFileContent() {
+          assert.fail("expired live enumeration must not read files");
+        },
+      };
+      const started = performance.now();
+      const result = await processObsidianGlobalSearch(
+        schema.parse({ ...options, searchInPath: "Parent" }),
+        context,
+        stalled,
+        cache,
+      );
+      assert.equal(result.totalFilesFound, 1);
+      assert.ok(performance.now() - started < 5000);
+      assert.equal(calls, 2);
+      for (const resolve of pending) resolve(["LateDirectory/"]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(
+        calls,
+        2,
+        "expired attempts must not continue traversing late replies",
+      );
+    },
+  );
+}

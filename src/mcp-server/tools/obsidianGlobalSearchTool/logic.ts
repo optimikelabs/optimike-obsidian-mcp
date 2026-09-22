@@ -277,36 +277,47 @@ export const processObsidianGlobalSearch = async (
 
     const apiResults: SimpleSearchResult[] = await retryWithDelay(
       async () => {
-        logger.info("Calling obsidianService.searchSimple.", apiSearchContext);
-
-        // The simple-search endpoint does not implement JavaScript regex/case
-        // semantics. Enumerate live Markdown candidates for those modes instead.
-        if (params.useRegex || params.caseSensitive) {
-          const candidates: SimpleSearchResult[] = [];
-          const visit = async (directory: string): Promise<void> => {
-            for (const name of await obsidianService.listFiles(directory, apiSearchContext)) {
-              const filename = path.join(directory === "/" ? "" : directory, name);
-              if (name.endsWith("/")) await visit(filename);
-              else if (name.toLowerCase().endsWith(".md")) candidates.push({ filename, matches: [], score: 0 });
-            }
-          };
-          await visit(searchPathPrefix || "/");
-          return candidates;
-        }
+        logger.info("Searching live content candidates.", apiSearchContext);
+        let expired = false;
+        const searchAttempt = async (): Promise<SimpleSearchResult[]> => {
+          // The simple-search endpoint does not implement JavaScript regex/case
+          // semantics. Enumerate live Markdown candidates for those modes instead.
+          if (params.useRegex || params.caseSensitive) {
+            const candidates: SimpleSearchResult[] = [];
+            const visit = async (directory: string): Promise<void> => {
+              if (expired) return;
+              const names = await obsidianService.listFiles(directory, apiSearchContext);
+              for (const name of names) {
+                // A delayed read may finish after the timeout/cache fallback.
+                // Do not let an expired attempt dispatch more directory reads.
+                if (expired) return;
+                const filename = path.join(directory === "/" ? "" : directory, name);
+                if (name.endsWith("/")) await visit(filename);
+                else if (name.toLowerCase().endsWith(".md")) candidates.push({ filename, matches: [], score: 0 });
+              }
+            };
+            await visit(searchPathPrefix || "/");
+            return candidates;
+          }
+          return obsidianService.searchSimple(params.query, params.contextLength, apiSearchContext);
+        };
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           return await Promise.race([
-            obsidianService.searchSimple(params.query, params.contextLength, apiSearchContext),
+            searchAttempt(),
             new Promise<never>((_, reject) => {
               timer = setTimeout(() => reject(new Error("API search timed out")), API_SEARCH_TIMEOUT_MS);
             }),
           ]);
-        } finally { if (timer) clearTimeout(timer); }
+        } finally {
+          expired = true;
+          if (timer) clearTimeout(timer);
+        }
       },
       {
         operationName: "obsidianService.searchSimple",
         context: apiSearchContext,
-        maxRetries: 2, // Total of 3 attempts
+        maxRetries: 2, // The shared retry helper counts total attempts.
         delayMs: 500,
         shouldRetry: (err: unknown) => {
           // Retry on any error during the API call phase
