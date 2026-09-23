@@ -100,7 +100,8 @@
     "docs/operon-cli-audit.md",
     "docs/operon-cli-audit.fr.md",
     "docs/tree.md",
-    "docs/mcp-2026-dual-stack.md"
+    "docs/mcp-2026-dual-stack.md",
+    "docs/mcp-skills.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
