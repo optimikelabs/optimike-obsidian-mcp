@@ -163,7 +163,7 @@ for (const requiredTool of [
 }
 for (const invariant of [
   'process.env.OPERON_36_BEHAVIOR_CANARY_EXPECTED_OPERON_VERSION ?? "3.9.3"',
-  'process.env.OPERON_36_BEHAVIOR_CANARY_EXPECTED_MCP_VERSION ?? "3.9.1"',
+  'process.env.OPERON_36_BEHAVIOR_CANARY_EXPECTED_MCP_VERSION ?? "3.10.0"',
   'process.env.OPERON_36_BEHAVIOR_CANARY_EXPECTED_BRIDGE_VERSION ?? "0.9.3"',
   "I_CONFIRM_PILOT_2_OPERON_36_BEHAVIOR_MUTATIONS",
   "public_delete_surface_unavailable",

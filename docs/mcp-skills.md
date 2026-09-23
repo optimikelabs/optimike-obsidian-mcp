@@ -1,6 +1,6 @@
 # Skills over MCP — publication contract
 
-This is an opt-in read-only extension of the MCP 2026 dual-stack candidate, not a release or deployment. Parent PR #103 is separate from Skills PR #104.
+This opt-in read-only extension is included in Optimike MCP 3.10.0. Dual-stack and Skills were developed separately in PR #103 and PR #104. A deployed server does not prove that a connected host supports native Skills; observe the host's negotiated protocol and extension calls.
 
 ## Authority
 
@@ -13,7 +13,7 @@ The format defines the skill. This server only publishes its files. It does not 
 
 ## Explicit activation
 
-Keep `MCP_PROTOCOL_MODE=legacy` for existing behavior. To serve Skills, set all three values in a candidate process:
+Keep `MCP_PROTOCOL_MODE=legacy` for existing behavior. To serve Skills, set all three values in the selected process:
 
 ```text
 MCP_PROTOCOL_MODE=dual
@@ -94,7 +94,7 @@ Actual ELYSIA sources and Desktop/Pilot2/Secure remain separate local gates. See
 
 ## Rollback
 
-Unset `MCP_SKILLS_CONFIG_FILE` and restart the candidate to disable Skills without changing source files. Set `MCP_PROTOCOL_MODE=legacy` to also disable modern protocol serving. Full package rollback uses the P0 package/lockfile/build, not a vault rewind. Drain active work and consult status before any uncertain mutation. Do not delete journals or replay apply as part of rollback. No automatic merge or production deployment is authorized.
+Unset `MCP_SKILLS_CONFIG_FILE` and restart the selected process to disable Skills without changing source files. Set `MCP_PROTOCOL_MODE=legacy` to also disable modern protocol serving. A full package rollback restores a previously qualified release, not a vault rewind. Drain active work and consult status before any uncertain mutation. Do not delete journals or replay apply as part of rollback.
 
 ## Rich skills and narrow root authorization
 

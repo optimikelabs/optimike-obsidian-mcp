@@ -1,7 +1,7 @@
 # MCP 2026 dual-stack qualification
 
 Base: `4e59b8ec28d01b8ccde8c04e1b8f53ea1dd13c78` (VNext Reliability P0, PR #102).
-This change is a protocol/SDK migration, not a release or a production deployment.
+This protocol/SDK migration is included in Optimike MCP 3.10.0. Deployment and actual host negotiation remain separate observations.
 
 ## Activation and rollback
 
@@ -12,7 +12,7 @@ stdio proxy retry policy. `MCP_PROTOCOL_MODE=dual` explicitly adds protocol
 values fail startup without reflecting the supplied value.
 
 To disable modern serving, restore `MCP_PROTOCOL_MODE=legacy` and restart the
-candidate. This keeps SDK v2. A full binary rollback restores the pre-upgrade
+server. This keeps SDK v2. A full binary rollback restores the pre-upgrade
 package and lockfile/build, with the same application journal locations. Neither
 rollback deletes receipts, replays mutations, or rewinds the vault. Stop/drain
 in-flight work and inspect status before resuming an uncertain operation.

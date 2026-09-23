@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "3.9.1",
+  "version": "3.10.0",
   "description": "Unified Obsidian MCP server with shared local cache, Operon and Tasks tools, Bases support, semantic search, runtime observability, and degraded read mode for durable agent workflows.",
   "main": "dist/index.js",
   "files": [
@@ -100,7 +100,8 @@
     "docs/operon-cli-audit.md",
     "docs/operon-cli-audit.fr.md",
     "docs/tree.md",
-    "docs/mcp-2026-dual-stack.md"
+    "docs/mcp-2026-dual-stack.md",
+    "docs/mcp-skills.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",

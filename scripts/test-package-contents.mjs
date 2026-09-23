@@ -43,6 +43,8 @@ const requiredFiles = [
   "docs/tool-surface-profiles.fr.md",
   "docs/bridge-packaging.md",
   "docs/bridge-packaging.fr.md",
+  "docs/mcp-2026-dual-stack.md",
+  "docs/mcp-skills.md",
   "docs/governed-note-replacement.md",
   "docs/governed-note-replacement.fr.md",
   "docs/governed-frontmatter-p1.md",
