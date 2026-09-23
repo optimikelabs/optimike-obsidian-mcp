@@ -212,7 +212,7 @@ assert.match(
 );
 assert.match(
   operonLocalValidation,
-  /OPERON_35_CANARY_EXPECTED_MCP_VERSION = "3\.9\.1"/u,
+  /OPERON_35_CANARY_EXPECTED_MCP_VERSION = "3\.10\.0"/u,
   "the copied Pilot 2 recipe must pin its expected MCP runtime",
 );
 assert.match(

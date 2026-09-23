@@ -7,7 +7,7 @@ This recipe is the Desktop proof. Run destructive fixtures only in a disposable 
 - Node.js `>=22.12.0`
 - Obsidian Desktop
 - Local REST API enabled
-- Optimike MCP `3.9.1`, certifying Operon `3.9.3`, Operon CLI `1.2.0` and Local REST API `5.1.0` behind the exact-SHA release gate below; `3.2.1` remains historical certified evidence, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Optimike MCP `3.10.0`, certifying Operon `3.9.3`, Operon CLI `1.2.0` and Local REST API `5.1.0` behind the exact-SHA release gate below; `3.2.1` remains historical certified evidence, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
 - Optimike Operon Bridge `0.9.3`
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch
@@ -282,7 +282,7 @@ $env:OBSIDIAN_API_KEY = "<Pilot 2 Local REST API key>"
 $env:OPERON_MUTATIONS_ENABLED = "true"
 $env:OPERON_35_CANARY_EXPECTED_OPERON_VERSION = "3.9.3"
 $env:OPERON_35_CANARY_EXPECTED_BRIDGE_VERSION = "0.9.3"
-$env:OPERON_35_CANARY_EXPECTED_MCP_VERSION = "3.9.1"
+$env:OPERON_35_CANARY_EXPECTED_MCP_VERSION = "3.10.0"
 $env:OPERON_35_CANARY_RELEASE_CANDIDATE = "true"
 $env:OPERON_35_CANARY_CONFIRM = "I_CONFIRM_PILOT_2_DISPOSABLE_LIVE_MUTATIONS"
 $env:OPERON_35_CANARY_OPEN_VAULT = "true"
