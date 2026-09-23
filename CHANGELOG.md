@@ -7,10 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-09-23
+
 ### Added
 
 - Document the direct ChatGPT path through the official OpenAI Secure MCP Tunnel, including the required app refresh and new-conversation check after a tool-surface upgrade.
 - Add a Windows installer for the official `openai/tunnel-client` release that verifies `SHA256SUMS.txt` and the binary-reported version, removing any need to copy the tunnel executable from another desktop application.
+- Add opt-in dual-era MCP serving for legacy clients and `2026-07-28` clients through the SDK v2 stdio, HTTP and stdio-proxy transports. Legacy profiles, tool names and mutation boundaries remain available.
+- Publish explicitly configured Agent Skills as complete, read-only manifests and resources through `io.modelcontextprotocol/skills` on the modern protocol. Files remain subject to ExternalRoots confinement and policy; scripts are never executed by the server.
+
+### Fixed
+
+- Correct recursive note listing and content-search case, regex, counts and pagination across live and cached backends. Distinguish configured semantic embedding from a recently successful query, with redacted stage diagnostics.
+- Keep unexplained note-creation outcomes uncertain and prevent blind mutation replay after a lost response; retain the VNext Reliability P0 end-to-end benchmark and privacy gates across both MCP eras.
+- Keep the Operon REST bridge responsive while the Obsidian window is hidden by holding a bounded background-execution lease for its mounted routes.
+
+### Limits
+
+- Native Skills over MCP requires a host that negotiates `2026-07-28` and implements the extension. The observed ChatGPT Secure host negotiated `2025-11-25`; ordinary external file reads are not native Skills activation.
+- Semantic cache refresh can make a first query slow after source changes. The current release does not change its loading strategy.
+
 
 ## [3.9.1] - 2026-09-21
 

@@ -8,6 +8,7 @@ French version: [README.fr.md](README.fr.md) · [Documentation hub](docs/README.
 
 Optimike Obsidian MCP gives MCP clients a governed operational surface over an Obsidian vault: live Desktop operations, resilient headless modes, Tasks and Operon, Bases and Canvas, semantic search, runtime observability, and bounded access to configured external documents.
 Version 3.9 adds bounded note-link observation, governed native note move, durable absent-only creation and a single-row Base property patch. Each mutation uses a distinct `plan → apply → status` lifecycle and fails closed when its sealed proof cannot be reconciled. See the [qualification protocol](docs/cycle-20260920/CODEX-FINALISATION.md) and [bounded roadmap](docs/cycle-20260920/ROADMAP.md).
+Version 3.10 improves retrieval and semantic diagnostics, serves legacy and MCP `2026-07-28` clients side by side, and can publish explicitly configured Agent Skills as read-only resources. Host support for native Skills must be verified separately. The Operon Bridge also remains responsive with the Obsidian window hidden. See the [dual-stack contract](docs/mcp-2026-dual-stack.md) and [Skills publication contract](docs/mcp-skills.md).
 
 ## Capability map
 
