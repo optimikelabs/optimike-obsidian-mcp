@@ -41,7 +41,7 @@ type SmartEnvSourceState = {
   fileCount: number;
 };
 
-const SUBDIRS = ["", "multi", "vectors", "cache"];
+const SUBDIRS = ["", "multi", "vectors", "cache", "smart_sources", "embedding_models"];
 const EXTS = [".ajson", ".json", ".jsonl", ".ndjson"];
 
 const SCHEMA_SQL = `
@@ -111,7 +111,10 @@ async function scanSmartEnvSourceState(baseDir: string): Promise<SmartEnvSourceS
     }
 
     for (const file of files) {
-      if (!EXTS.some((extension) => file.toLowerCase().endsWith(extension))) {
+      if (
+        !EXTS.some((extension) => file.toLowerCase().endsWith(extension)) &&
+        !(subdir === "smart_sources" && /^mf_[a-z0-9]+$/i.test(file))
+      ) {
         continue;
       }
       const fullPath = path.join(directory, file);
