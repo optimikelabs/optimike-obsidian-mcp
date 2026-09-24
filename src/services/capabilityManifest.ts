@@ -17,6 +17,7 @@ import type {
 } from "./obsidianRestAPI/types.js";
 import { OperonService } from "./operon/service.js";
 import { getSemanticCacheService } from "./semanticCache.js";
+import { detectSmartEnvQueryProvider } from "./smartEnvV3.js";
 
 export const CAPABILITY_MANIFEST_CONTRACT_VERSION = 1 as const;
 export const CAPABILITY_PROBE_TIMEOUT_MS = 2_500;
@@ -1114,6 +1115,7 @@ export async function collectCapabilityManifest(options: {
               modelHint: config.queryEmbedderModelHint,
               model: config.queryEmbedderModel,
               vaultModel: readiness.dominantModel,
+              vaultProvider: config.smartEnvDir ? await detectSmartEnvQueryProvider(config.smartEnvDir, readiness.dominantModel) : undefined,
               dimension: readiness.dominantDimension,
               ollamaBaseUrl: config.ollamaBaseUrl?.trim() || (config.smartEnvDir ? await detectOllamaBaseUrlFromSmartEnv(config.smartEnvDir, readiness.dominantModel) : undefined),
               openaiApiKey: config.openaiApiKey,

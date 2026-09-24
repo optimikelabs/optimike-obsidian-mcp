@@ -99,6 +99,15 @@ async function activeModel(baseDir: string): Promise<ModelRecord | null> {
   return null;
 }
 
+export async function detectSmartEnvQueryProvider(
+  baseDir: string,
+  expectedModel?: string,
+): Promise<string | undefined> {
+  const model = await activeModel(baseDir);
+  if (!model || (expectedModel && model.model_key !== expectedModel)) return undefined;
+  return model.provider_key;
+}
+
 export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null> {
   const directory = path.join(baseDir, "smart_sources");
   let files: string[];

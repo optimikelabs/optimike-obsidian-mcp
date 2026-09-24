@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "src/services/capabilityManifest.ts"
+      - "src/services/smartEnvV3.ts"
+      - "src/adapters/embed/index.ts"
+      - "src/mcp-server/tools/semanticSearchTool/registration.ts"
       - "src/services/obsidianRestAPI/service.ts"
       - "src/services/obsidianRestAPI/methods/atomicWriteMethods.ts"
       - "src/services/obsidianRestAPI/methods/baseAtomicWriteMethods.ts"
@@ -11,6 +14,7 @@ on:
       - "src/mcp-server/tools/runtimeTools/registration.ts"
       - "src/mcp-server/server.ts"
       - "scripts/test-capability-*.mjs"
+      - "scripts/test-smart-env-v3.mjs"
       - "scripts/smoke-capability-doctor-live.mjs"
       - "scripts/test-http-tool-profiles.mjs"
       - "scripts/smoke-headless-status.mjs"

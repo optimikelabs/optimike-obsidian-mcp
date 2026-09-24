@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { loadSmartEnv } from "../dist/services/smartEnv.js";
+import { detectSmartEnvQueryProvider } from "../dist/services/smartEnvV3.js";
+import { getQueryEmbedder } from "../dist/adapters/embed/index.js";
 
 const root = await mkdtemp(path.join(os.tmpdir(), "smart-env-v3-"));
 try {
@@ -56,6 +58,52 @@ try {
   assert.equal(vectors[0].vec.length, 1024);
   assert.equal(vectors[0].vec[0], 0.25);
   assert.equal(vectors[0].model, "qwen3-embedding:0.6b");
+  assert.equal(await detectSmartEnvQueryProvider(root, vectors[0].model), "ollama");
+  await writeFile(
+    path.join(root, "embedding_models", "embedding_models.ajson"),
+    [
+      '"embedding_models:ollama#bge": ' + JSON.stringify({
+        provider_key: "ollama", model_key: "TaylorAI/bge-micro-v2", dims: 384,
+      }),
+      '"embedding_models:transformers#bge": ' + JSON.stringify({
+        provider_key: "transformers", model_key: "TaylorAI/bge-micro-v2", dims: 384,
+      }),
+    ].join(",\n"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(root, "smart_env.json"),
+    JSON.stringify({ embedding_models: { default_model_key: "ollama#bge" } }),
+    "utf8",
+  );
+  const bgeModel = "TaylorAI/bge-micro-v2";
+  const bgeProvider = await detectSmartEnvQueryProvider(root, bgeModel);
+  assert.equal(bgeProvider, "ollama", "selected registry entry wins over the model name");
+  const bgeSelection = await getQueryEmbedder({
+    provider: "auto", vaultProvider: bgeProvider, vaultModel: bgeModel,
+  });
+  assert.equal(bgeSelection.provider, "ollama");
+  assert.equal(bgeSelection.model, bgeModel);
+  await writeFile(
+    path.join(root, "smart_env.json"),
+    JSON.stringify({ embedding_models: { default_model_key: "transformers#bge" } }),
+    "utf8",
+  );
+  assert.equal(await detectSmartEnvQueryProvider(root, bgeModel), "transformers");
+  await assert.rejects(
+    getQueryEmbedder({
+      provider: "auto", vaultProvider: "transformers", vaultModel: bgeModel,
+    }),
+    /xenova is disabled/u,
+    "a Transformers index must not be queried with a different provider",
+  );
+  await assert.rejects(
+    getQueryEmbedder({
+      provider: "auto", vaultProvider: "unsupported-provider", vaultModel: bgeModel,
+    }),
+    /Unsupported Smart Connections query provider/u,
+    "an unknown provider must not silently fall back to Ollama",
+  );
   await rm(path.join(root, "smart_sources", fingerprint));
   await assert.rejects(
     loadSmartEnv(root),
