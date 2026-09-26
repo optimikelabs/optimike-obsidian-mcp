@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject undeclared `operon_create_task.task` arguments such as `taskFolder` instead of silently dropping them before routing a creation. Declared `fields` and `properties` maps remain available.
+
+### Changed
+
+- Clarify legacy-only `targetFolder`, configured official file-task destinations, and recovery refusals under a path allowlist without changing mutation permissions.
+- Align the public task-governor skill with existing cold capability negotiation and document the native Operon long-path journal defect tracked upstream.
+
 ## [3.10.0] - 2026-09-23
 
 ### Added
