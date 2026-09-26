@@ -22,7 +22,7 @@ Pour un audit de conformité ÉLYSIA, ouvrir `profiles/elysia-tasks/v1/profile.j
 - `fs_elysia_periodic_leakage`
 - `fs_elysia_folder_open` avec un `scopePath` explicite
 
-Si `filterQuery: true` et qu’un `filterSetId` exact vient de l’UI/configuration d’Operon ou d’un workflow opérateur, appeler `operon_query_saved_filter`. Un catalogue vide dans `operon_get_configuration` ne prouve pas l’indisponibilité. Si l’ID manque, lire les critères dans `profile.json` et les traduire dans `operon_query_tasks` ou `operon_find_tasks` pour cette exécution seulement. Ne jamais inventer l’ID depuis le nom ni figer une seconde copie de la logique dans la skill.
+Si un `filterSetId` exact vient de l’UI/configuration d’Operon ou d’un workflow opérateur, appeler `operon_query_saved_filter` ; cette lecture peut négocier le grant même si `filterQuery: false` est encore froid. Un catalogue vide dans `operon_get_configuration` ne prouve pas l’indisponibilité. Un refus effectif arrête cette route. Si l’ID manque ou si le grant est refusé, lire les critères dans `profile.json` et les traduire dans `operon_query_tasks` ou `operon_find_tasks` pour cette exécution seulement. Ne jamais inventer l’ID depuis le nom ni figer une seconde copie de la logique dans la skill.
 
 ## Méthode
 

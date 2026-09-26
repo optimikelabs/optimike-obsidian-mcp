@@ -28,7 +28,9 @@ sortie_finale_autorisee: oui | non
 
 `sortie_finale_autorisee: oui` signifie que les preuves suffisent pour la conclusion. Cela ne vaut jamais autorisation d’appliquer une mutation.
 
-Une référence critique manquante, un runtime stale/non-live ou une capacité absente impose `sortie_finale_autorisee: non` pour toute mutation.
+Une référence critique manquante, un runtime stale/non-live ou une capacité effectivement refusée impose `sortie_finale_autorisee: non` pour toute mutation.
+
+Un indicateur optionnel `false` avant négociation reste à qualifier selon [runtime-et-mutations.md](runtime-et-mutations.md). Rapporter le dry-run et le refus éventuel ; ne pas conclure à un apply validé depuis le seul statut.
 
 Après application, ajouter :
 

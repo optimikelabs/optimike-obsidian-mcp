@@ -1171,7 +1171,7 @@ export class OperonService {
     if (config.operonMutationAllowedPathPrefixes.length === 0) return;
     throw new McpError(
       BaseErrorCode.FORBIDDEN,
-      "Operon recovery is blocked while OPERON_MUTATION_ALLOWED_PATH_PREFIXES is configured because pending recovery records do not expose canonical route evidence. Recovery therefore fails closed before listing, replay, or Bridge apply.",
+      "Operon recovery is blocked while OPERON_MUTATION_ALLOWED_PATH_PREFIXES is configured because pending recovery records do not expose canonical route evidence. Recovery therefore fails closed before listing, replay, or Bridge apply. Preserve any known recoveryRef and inspect the affected task with authorized reads; do not replay the original mutation or relax the allowlist to bypass this gate.",
       this.requestContext(operation, {
         allowedPathPrefixes: config.operonMutationAllowedPathPrefixes,
         routeEvidence: "unavailable",
@@ -1260,7 +1260,7 @@ export class OperonService {
       {
         throw new McpError(
           BaseErrorCode.FORBIDDEN,
-          "Scoped Operon mutations require an explicit targetFolder for file tasks or targetPath for inline tasks.",
+          "Scoped Operon mutations require an allowed configured file-task folder (or an explicit targetFolder on a legacy engine), or an allowed targetPath for inline tasks. Official Developer API V1 does not accept targetFolder.",
           this.requestContext("assertOperonMutationPathScope", { action }),
         );
       }

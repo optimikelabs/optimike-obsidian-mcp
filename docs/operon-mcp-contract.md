@@ -246,3 +246,11 @@ locale-independent UTF-16 code-unit comparison; Pilot 2 exercises this through a
 relationship apply spanning two source notes. These behaviors must be tested in
 the enabled vault configuration;
 they never authorize accepting unrelated postflight drift.
+
+## Creation arguments and native long-path limitation
+
+`operon_create_task.task` rejects undeclared keys, including `taskFolder`, before dispatch rather than silently stripping them. Extensible values still belong in the declared `fields` and `properties` maps and retain their existing validation. `targetFolder` remains a legacy-engine argument: official Developer API V1 rejects it and resolves file-task destinations from engine configuration or a genuine `fields.parentTask` relationship. Do not invent a parent to select a folder.
+
+Pending recovery listing is also blocked when `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` is nonempty. A policy refusal is not an empty list. Preserve any known `recoveryRef`, inspect the affected task using authorized reads, and escalate to the operator without replaying the original mutation or relaxing the allowlist as a workaround.
+
+Native Operon task creation can fail before writing when path-derived journal identifiers exceed the native 128-character limit (`task-source:` plus a path longer than 116 characters). This is tracked in [Operon issue #241](https://github.com/hasanyilmaz/operon/issues/241). The report isolates the native gateway/receipt validation and compares the relevant sources in 3.9.3 and 3.10.0; it does not certify a full CLI-to-Desktop apply on 3.10.0. This MCP change neither patches Operon nor changes the certified compatibility baseline. Report native engine defects upstream; change this repository only for a demonstrated MCP or Bridge responsibility.

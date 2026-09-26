@@ -394,3 +394,11 @@ avec une comparaison des unités de code UTF-16 indépendante de la locale ; Pil
 le vérifie par une relation appliquée sur deux notes sources. Ces comportements
 doivent être testés dans la configuration active
 du coffre ; ils n’autorisent jamais l’acceptation d’une dérive postflight non liée.
+
+## Arguments de création et limite native des chemins longs
+
+`operon_create_task.task` rejette les clés non déclarées, dont `taskFolder`, avant dispatch au lieu de les ignorer silencieusement. Les valeurs extensibles restent dans les maps déclarées `fields` et `properties`, avec leurs validations existantes. `targetFolder` reste un argument du moteur legacy : Developer API V1 le refuse et résout la destination des File Tasks depuis la configuration moteur ou une vraie relation `fields.parentTask`. Ne pas inventer un parent pour sélectionner un dossier.
+
+La liste des recoveries est également bloquée lorsque `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` est non vide. Un refus de politique ne signifie pas une liste vide. Conserver le `recoveryRef` connu, relire la tâche concernée via des lectures autorisées et transmettre le diagnostic à l’opérateur sans rejouer la mutation initiale ni retirer l’allowlist comme contournement.
+
+La création native Operon peut échouer avant écriture lorsque les identifiants de journal dérivés du chemin dépassent la limite native de 128 caractères (`task-source:` plus un chemin de plus de 116 caractères). Le défaut est suivi dans [l’issue Operon #241](https://github.com/hasanyilmaz/operon/issues/241). Le rapport isole la validation native gateway/receipt et compare les sources concernées en 3.9.3 et 3.10.0 ; il ne certifie pas un apply complet CLI vers Desktop en 3.10.0. Ce changement MCP ne corrige pas Operon et ne modifie pas la baseline de compatibilité certifiée. Les défauts natifs sont signalés en amont ; ce dépôt ne change que pour une responsabilité MCP ou Bridge démontrée.
