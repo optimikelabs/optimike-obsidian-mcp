@@ -1,3 +1,5 @@
+import type { LocalRestApiPublicApi } from "obsidian-local-rest-api";
+import { describeRestRoutes } from "../../shared/restOpenApi";
 import { createHash, randomUUID } from "node:crypto";
 import {
   Plugin,
@@ -1705,7 +1707,10 @@ export default class BasesBridgePlugin extends Plugin {
           : undefined;
 
       if (typeof getPublicApi === "function") {
-        const api = getPublicApi(this.manifest);
+        const nativeApi: LocalRestApiPublicApi | undefined = getPublicApi(this.manifest);
+      if (!nativeApi || typeof nativeApi.addRoute !== "function") return null;
+      const documentation = describeRestRoutes(nativeApi, this.manifest.id);
+      const api = documentation.api;
         if (!api || typeof api.addRoute !== "function") return null;
 
         try {
@@ -2445,7 +2450,8 @@ export default class BasesBridgePlugin extends Plugin {
           .addRoute(`/bases/:id(*)/upsert`)
           .post(withPublicLegacyBaseBoundary(upsertBase));
 
-        return () => api.unregister?.();
+        console.info("[" + this.manifest.id + "] optional OpenAPI: " + documentation.publish());
+      return () => api.unregister?.();
         } catch {
           const rollback = () => api.unregister?.();
           try {

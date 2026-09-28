@@ -75,7 +75,7 @@ export function describeRestRoutes<T extends PublicRouteApi>(native: T, id: stri
           });
           if (/[():*?]/.test(path) || new Set(params.map(p => p.name)).size !== params.length)
             throw new Error("unsupported_route_pattern");
-          if (Object.hasOwn(paths, path)) throw new Error("ambiguous_route_pattern");
+          if (Object.prototype.hasOwnProperty.call(paths, path)) throw new Error("ambiguous_route_pattern");
           const item: Record<string, unknown> = { "x-optimike-express-pattern": pattern };
           for (const method of methods) item[method] = {
             tags: [id],
