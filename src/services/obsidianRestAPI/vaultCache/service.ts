@@ -168,6 +168,7 @@ export class VaultCacheService {
   private closed = false;
   private incrementalFailures = 0;
   private uncertaintyGeneration = 0;
+  private eventWorkPending = false;
   private lastRefreshFailedFiles = 0;
   private eventSupervisor: CacheEventSupervisor | null = null;
   private eventStop: Promise<void> = Promise.resolve();
@@ -220,6 +221,8 @@ export class VaultCacheService {
           return this.lastRefreshError === null && this.isCacheReady;
         },
         uncertain: () => this.markFreshnessUncertain(),
+        pending: () => this.markEventWorkPending(),
+        settled: () => this.settleEventWork(),
       });
       this.eventSupervisor.start();
     }
@@ -313,6 +316,7 @@ export class VaultCacheService {
       pendingCacheWrites: this.queuedCacheWrites,
       freshness:
         this.lastRefreshError ||
+        this.eventWorkPending ||
         this.refreshRequested ||
         this.isBuilding ||
         (this.eventSupervisor &&
@@ -438,6 +442,23 @@ export class VaultCacheService {
     this.uncertaintyGeneration++;
     this.lastRefreshError = "cache_freshness_uncertain";
     if (!this.closed) this.upsertMetadataValue("refresh_state", "uncertain");
+  }
+
+  public markEventWorkPending(): void {
+    // Repeated hints share a durable pending epoch; no full scan per event.
+    if (this.closed || this.closing) return;
+    if (!this.eventWorkPending) {
+      this.upsertMetadataValue("refresh_state", "pending-events");
+      this.eventWorkPending = true;
+    }
+  }
+
+  public settleEventWork(): void {
+    this.eventWorkPending = false;
+    if (!this.closed && !this.closing && !this.isBuilding &&
+        this.isCacheReady && this.lastRefreshError === null) {
+      this.upsertMetadataValue("refresh_state", "complete");
+    }
   }
 
   public async updateFileVerified(
@@ -828,7 +849,8 @@ export class VaultCacheService {
       this.db.exec("BEGIN IMMEDIATE");
       try {
         this.upsertMetadataValue("last_refresh_failed_files", String(this.lastRefreshFailedFiles));
-        this.upsertMetadataValue("refresh_state", this.isCacheReady ? "complete" : "incomplete");
+        this.upsertMetadataValue("refresh_state", this.isCacheReady
+          ? (this.eventWorkPending ? "pending-events" : "complete") : "incomplete");
         if (this.isCacheReady) {
           this.upsertMetadataValue("last_refresh_at", String(Date.now()));
           this.upsertMetadataValue("last_refresh_source", refreshSource);

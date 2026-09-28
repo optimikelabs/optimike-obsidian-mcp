@@ -14,6 +14,10 @@ export interface EventCacheTarget {
   update(path: string): Promise<{ ok: boolean }>;
   reconcile(): Promise<boolean>;
   uncertain(): void;
+  /** Synchronous durable mark before any debounce/await. */
+  pending(): void;
+  /** Only called after all known work and coverage have been verified. */
+  settled(): void;
 }
 export interface EventSupervisorOptions {
   maxPending?: number;
@@ -160,6 +164,7 @@ export class CacheEventSupervisor {
     }
     for (const candidate of [notice.oldPath, notice.path]) {
       if (!candidate || !this.target.accepts(candidate, false)) continue;
+      this.target.pending();
       if (
         !this.pending.has(candidate) &&
         this.pending.size >= this.options.maxPending
@@ -235,6 +240,10 @@ export class CacheEventSupervisor {
         this.latencies.push(Math.round(performance.now() - receivedAt));
         if (this.latencies.length > 128) this.latencies.shift();
       }
+    }
+    if (this.running && this.connected.size === VAULT_CACHE_EVENTS.length &&
+        this.revision === this.reconciledRevision && this.pending.size === 0) {
+      this.target.settled();
     }
   }
 
