@@ -225,7 +225,7 @@
     "test:mcp-2026": "npm run build && node scripts/run-mcp-2026-tests.mjs modern",
     "test:mcp-2026:all": "npm run build && node scripts/run-mcp-2026-tests.mjs all",
     "benchmark:vnext:modern": "node scripts/run-mcp-2026-tests.mjs benchmark-modern",
-    "test:cache-events": "npm run build && node --test scripts/test-cache-freshness.mjs scripts/test-cache-event-http.mjs scripts/test-cache-event-supervisor.mjs scripts/test-cache-event-integration.mjs"
+    "test:cache-events": "npm run build && node --test scripts/test-cache-freshness.mjs scripts/test-cache-event-http.mjs scripts/test-cache-event-supervisor.mjs scripts/test-cache-event-integration.mjs scripts/test-cache-consumers.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",

@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      - 'tsconfig.json'
+      - 'scripts/make-executable.mjs'
       - 'scripts/test-cache-*.mjs'
       - 'docs/cache-events*'
       - '.github/workflows/cache-events.yml'
@@ -12,6 +14,8 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'tsconfig.json'
+      - 'scripts/make-executable.mjs'
       - 'scripts/test-cache-*.mjs'
       - 'docs/cache-events*'
       - '.github/workflows/cache-events.yml'

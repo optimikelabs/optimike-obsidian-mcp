@@ -20,7 +20,7 @@ type TasksPluginConfig = {
   presets: Record<string, string>;
   taskFormat: string;
 };
-type CacheEntry = { mtimeMs: number; size: number; tasks: Task[] };
+type CacheEntry = { mtimeMs: number; size: number; hash: string; tasks: Task[] };
 type SharedCacheRow = {
   path: string;
   ctime: number;
@@ -200,7 +200,16 @@ function openSharedCacheDb(readOnly: boolean): DatabaseSync {
     db.exec("PRAGMA synchronous = NORMAL;");
     db.exec(SHARED_TASK_CACHE_SCHEMA_SQL);
   }
-  return db;
+  try {
+    const metadata = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shared_cache_metadata'").get();
+    if (metadata) {
+      const row = db.prepare("SELECT value FROM shared_cache_metadata WHERE key='refresh_state'").get() as {value?:string}|undefined;
+      if (row?.value && row.value !== "complete") {
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared vault cache reconciliation is incomplete.");
+      }
+    }
+    return db;
+  } catch (error) { db.close(); throw error; }
 }
 
 async function ensureSharedCacheReady(
@@ -218,7 +227,8 @@ async function ensureSharedCacheReady(
     await vaultCacheService.buildVaultCache();
     await vaultCacheService.waitUntilReady();
   }
-  if (!existsSync(config.obsidianSharedCacheDbPath)) {
+  if ((vaultCacheService && !vaultCacheService.isReady()) ||
+      !existsSync(config.obsidianSharedCacheDbPath)) {
     throw new McpError(
       BaseErrorCode.SERVICE_UNAVAILABLE,
       "Shared vault cache is unavailable. Start the main cache first before using tasks tools.",
@@ -355,7 +365,6 @@ function syncTaskFileCache(
     parserSignature: string;
   }>;
   const existingByPath = new Map(existingRows.map((row) => [row.path, row]));
-  const sourcePaths = new Set(sharedIndexRows.map((row) => row.path));
   const stalePaths: string[] = [];
 
   for (const row of sharedIndexRows) {
@@ -433,9 +442,8 @@ function syncTaskFileCache(
       );
     }
 
-    if (existingRows.length > sourcePaths.size) {
-      deleteMissingStmt.run();
-    }
+    // A removed source and an added source can leave the count unchanged.
+    deleteMissingStmt.run();
 
     db.exec("COMMIT");
   } catch (error) {
@@ -680,7 +688,7 @@ function hydrateTasksFromTaskFileRow(
 
   if (useCache) {
     const cached = tasksCache.get(cacheKey);
-    if (cached && cached.mtimeMs === row.mtime && cached.size === row.size) {
+    if (cached && cached.mtimeMs === row.mtime && cached.size === row.size && cached.hash === row.hash) {
       return cached.tasks;
     }
   }
@@ -724,6 +732,7 @@ function hydrateTasksFromTaskFileRow(
     tasksCache.set(cacheKey, {
       mtimeMs: row.mtime,
       size: row.size,
+      hash: row.hash,
       tasks,
     });
   }
