@@ -3,7 +3,7 @@ import { operationDigest } from "../operations/contract.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "../operations/obsidianNoteReplaceJournal.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { assetHash, assetFilename, assetSegment, ASSET_MAX_BYTES } from "./windowsAssetFiles.js";
-import { runAssetJob, AssetWorkerError } from "./workerClient.js";
+import { runAssetJob, AssetWorkerError, AssetWorkerNotStartedError } from "./workerClient.js";
 import { ASSET_IMPORT_KIND as KIND, ASSET_IMPORT_REF as REF, ASSET_IMPORT_KEY as KEY,
   AssetImportInputSchema, AssetProofSchema, AssetMetadataSchema, AssetInspectionSchema,
   type AssetImportInput, type AssetProof, type AssetImportPolicy, type AssetSourceProvider,
@@ -145,10 +145,12 @@ export class AssetImportOperationAdapter {
       return this.receipt(row,true);
     } catch(error) {
       const reason=error instanceof AssetWorkerError?error.reason:undefined;
-      const outcome=!dispatched?"rejected":reason==="asset_exists"?"conflict":
+      // Only parent-generated pre-spawn evidence may restore the frozen plan.
+      // A worker reason string alone can never authorize another dispatch.
+      const outcome=error instanceof AssetWorkerNotStartedError?"planned":!dispatched?"rejected":reason==="asset_exists"?"conflict":
         reason==="asset_binding_conflict"?"rejected":"outcome_unknown";
       try {row=this.journal.transition(row.operationId,["applying"],outcome,
-        outcome==="outcome_unknown"?"asset_effect_unverified":"asset_request_rejected",attempt);}
+        outcome==="planned"?"asset_worker_not_started":outcome==="outcome_unknown"?"asset_effect_unverified":"asset_request_rejected",attempt);}
       catch(error){if(!(error instanceof ObsidianNoteReplaceConcurrencyError))throw error;row=this.required(ref);}
       return this.receipt(row);
     }

@@ -424,7 +424,7 @@ export class ObsidianNoteReplaceJournal {
 
     if (
       input.admittedProjectionKinds.length < 1 ||
-      input.admittedProjectionKinds.length > 5 ||
+      input.admittedProjectionKinds.length > 6 ||
       new Set(input.admittedProjectionKinds).size !==
         input.admittedProjectionKinds.length
     ) {

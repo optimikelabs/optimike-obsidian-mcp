@@ -8,6 +8,8 @@ export type AssetJob = { kind: "convert"; bytes: Buffer; policy: ImagePolicy } |
 export class AssetWorkerError extends Error {
   constructor(readonly reason: string) { super("Asset processing did not complete."); }
 }
+/** Parent-only evidence: no child was started, so no asset effect is possible. */
+export class AssetWorkerNotStartedError extends AssetWorkerError {}
 let active = 0;
 export const activeAssetWorkers = () => active;
 const REASONS = new Set(["image_invalid", "image_limit", "image_policy_invalid", "svg_unsupported", "image_dependency_unavailable", "unsupported_platform", "native_backend_unavailable", "asset_path_invalid", "asset_parent_unsupported", "asset_parent_unavailable", "asset_binding_conflict", "asset_exists", "asset_absent", "asset_invalid_file", "asset_io_failed", "asset_read_limit", "asset_effect_unverified", "asset_job_invalid"]);
@@ -17,7 +19,7 @@ export async function runAssetJob<T = ProcessedImage>(job: AssetJob, timeoutMs =
   if (!job || !["convert", "inspect", "create"].includes(job.kind) ||
       !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new AssetWorkerError("asset_job_invalid");
   if ("bytes" in job && (!Buffer.isBuffer(job.bytes) || job.bytes.length > ASSET_SOURCE_MAX_BYTES)) throw new AssetWorkerError("image_limit");
-  if (active >= 2) throw new AssetWorkerError("asset_worker_busy");
+  if (active >= 2) throw new AssetWorkerNotStartedError("asset_worker_busy");
   active++;
   return new Promise<T>((resolve, reject) => {
     const env: Record<string, string> = {};
@@ -32,7 +34,7 @@ export async function runAssetJob<T = ProcessedImage>(job: AssetJob, timeoutMs =
       });
     } catch {
       active--;
-      reject(new AssetWorkerError("asset_worker_unavailable"));
+      reject(new AssetWorkerNotStartedError("asset_worker_unavailable"));
       return;
     }
     let response: any, fault = false, expired = false;
