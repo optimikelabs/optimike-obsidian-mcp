@@ -94,3 +94,13 @@ test('tag-to-commit association rejects altered raw objects', () => {
   const wrong=structuredClone(association);wrong.objects.commit.base64=Buffer.from('tree '+'0'.repeat(40)+'\n').toString('base64');
   assert.throws(()=>verifyAssociation(wrong,raw));
 });
+
+
+test('both compatibility triggers cover compiler and build dependencies', () => {
+  const workflow = yaml.load(readFileSync(new URL('../.github/workflows/local-rest-compat.yml', import.meta.url), 'utf8'));
+  for (const event of ['pull_request', 'push']) {
+    for (const input of ['src/**', 'tsconfig.json', 'scripts/make-executable.mjs', 'package.json', 'package-lock.json', '.gitattributes']) {
+      assert.ok(workflow.on[event].paths.includes(input), event + ' misses ' + input);
+    }
+  }
+});

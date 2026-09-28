@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      - 'tsconfig.json'
+      - 'scripts/make-executable.mjs'
       - 'scripts/test-local-rest-*.mjs'
       - 'docs/obsidian-api/**'
       - 'docs/cycle-20260928/**'
@@ -14,6 +16,8 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'tsconfig.json'
+      - 'scripts/make-executable.mjs'
       - 'scripts/test-local-rest-*.mjs'
       - 'docs/obsidian-api/**'
       - '.github/workflows/local-rest-compat.yml'
