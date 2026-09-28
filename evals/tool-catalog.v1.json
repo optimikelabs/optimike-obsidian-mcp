@@ -2,17 +2,24 @@
   "schemaVersion": "tool-catalog.v1",
   "version": 1,
   "source": "src/mcp-server/toolSurfaceRegistry.ts",
-  "toolCount": 91,
+  "assumedStaticRequirements": [
+    "vault-cache",
+    "asset-policy"
+  ],
+  "toolCount": 94,
   "classificationCounts": {
     "canonical-unique": 47,
     "alias-redundant": 0,
     "compatibility-historical": 1,
-    "governed-operation": 29,
+    "governed-operation": 32,
     "diagnostic": 10,
     "administration": 4
   },
   "modes": {
     "live": [
+      "asset_import_apply",
+      "asset_import_plan",
+      "asset_import_status",
       "bases_create",
       "bases_formula_patch_apply",
       "bases_formula_patch_plan",
@@ -102,6 +109,9 @@
       "smart_semantic_search"
     ],
     "hybrid-live": [
+      "asset_import_apply",
+      "asset_import_plan",
+      "asset_import_status",
       "bases_create",
       "bases_formula_patch_apply",
       "bases_formula_patch_plan",
@@ -811,6 +821,9 @@
       "description": "Explicit complete surface: every tool registered by the active runtime, including unavailable fail-closed compatibility tools, admin, maintenance and external-root capabilities.",
       "modes": {
         "live": [
+          "asset_import_apply",
+          "asset_import_plan",
+          "asset_import_status",
           "bases_create",
           "bases_formula_patch_apply",
           "bases_formula_patch_plan",
@@ -900,6 +913,9 @@
           "smart_semantic_search"
         ],
         "hybrid-live": [
+          "asset_import_apply",
+          "asset_import_plan",
+          "asset_import_status",
           "bases_create",
           "bases_formula_patch_apply",
           "bases_formula_patch_plan",
@@ -1204,6 +1220,108 @@
     }
   },
   "tools": [
+    {
+      "name": "asset_import_apply",
+      "canonicalName": "asset_import_apply",
+      "classification": "governed-operation",
+      "group": "assets.governed",
+      "family": "asset-import",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "full"
+      ],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "apply",
+      "availabilityRules": [
+        {
+          "modes": [
+            "live",
+            "hybrid-live"
+          ],
+          "requires": [
+            "asset-policy"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "asset_import_plan",
+      "canonicalName": "asset_import_plan",
+      "classification": "governed-operation",
+      "group": "assets.governed",
+      "family": "asset-import",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "full"
+      ],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "plan",
+      "availabilityRules": [
+        {
+          "modes": [
+            "live",
+            "hybrid-live"
+          ],
+          "requires": [
+            "asset-policy"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "asset_import_status",
+      "canonicalName": "asset_import_status",
+      "classification": "governed-operation",
+      "group": "assets.governed",
+      "family": "asset-import",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "full"
+      ],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "status",
+      "availabilityRules": [
+        {
+          "modes": [
+            "live",
+            "hybrid-live"
+          ],
+          "requires": [
+            "asset-policy"
+          ]
+        }
+      ]
+    },
     {
       "name": "bases_create",
       "canonicalName": "bases_create",
