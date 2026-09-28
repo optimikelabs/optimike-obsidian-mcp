@@ -77,7 +77,8 @@ export class CacheEventSupervisor {
     if (this.running || this.stopping) return;
     this.running = true;
     this.controller = new AbortController();
-    this.requestReconciliation(false);
+    // The existing periodic cache is not invalidated until a stream connects.
+    // A never-supported event endpoint must not force a redundant startup scan.
     const signal = this.controller.signal;
     this.workers = VAULT_CACHE_EVENTS.map((event) =>
       this.streamLoop(event, signal),

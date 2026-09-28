@@ -69,3 +69,18 @@ for (const partial of [false,true]) test((partial?'partial':'unsupported')+' eve
    assert.equal(supervisor.snapshot().state,partial?'degraded':'unsupported');assert.equal(f.cache.getStats().freshness,'observed');}
  finally {await supervisor.stop();}
 }));
+
+
+test('unsupported events never rescan or downgrade a healthy periodic cache at startup',()=>fixture(async f=>{
+ const {CacheEventSupervisor}=await import('../dist/services/obsidianRestAPI/vaultCache/eventSupervisor.js');
+ const {LocalRestEventError}=await import('../dist/services/obsidianRestAPI/eventStreams.js');
+ f.fail(); let reconciliations=0;
+ const supervisor=new CacheEventSupervisor({consumeVaultEvents:async()=>{throw new LocalRestEventError('unsupported');}}, {
+  accepts:()=>true,update:async()=>({ok:true}),
+  reconcile:async()=>{reconciliations++;await f.cache.refreshCache(true);return f.cache.isReady();},
+  uncertain:()=>f.cache.markFreshnessUncertain(),pending:()=>f.cache.markEventWorkPending(),settled:()=>f.cache.settleEventWork(),
+ },{retryMinMs:10,retryMaxMs:20,debounceMs:2,reconcileIntervalMs:10});
+ try {supervisor.start();await new Promise(resolve=>setTimeout(resolve,60));
+  assert.equal(reconciliations,0); assert.equal(f.cache.getStats().freshness,'observed'); await warmSharedTaskCache(f.cache);}
+ finally {await supervisor.stop();}
+}));
