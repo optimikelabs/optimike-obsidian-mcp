@@ -103,3 +103,7 @@ Formules Base gouvernées source-preserving : [contrat P2](governed-base-formula
 
 Ne pas recopier limites, variables d’environnement ou registres d’outils dans
 plusieurs pages lorsqu’un lien vers l’autorité suffit.
+
+## Cache assiste par evenements
+
+Option de fraicheur du cache : [contrat et validation](cache-events.fr.md).

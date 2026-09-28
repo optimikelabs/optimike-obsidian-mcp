@@ -1,0 +1,46 @@
+name: Event-assisted cache
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tsconfig.json'
+      - 'scripts/make-executable.mjs'
+      - 'scripts/test-cache-*.mjs'
+      - 'docs/cache-events*'
+      - '.github/workflows/cache-events.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tsconfig.json'
+      - 'scripts/make-executable.mjs'
+      - 'scripts/test-cache-*.mjs'
+      - 'docs/cache-events*'
+      - '.github/workflows/cache-events.yml'
+      - 'package.json'
+      - 'package-lock.json'
+permissions:
+  contents: read
+concurrency:
+  group: cache-events-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  cache:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:cache-events
+      - run: npm run test:log-privacy
