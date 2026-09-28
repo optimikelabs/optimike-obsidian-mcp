@@ -111,3 +111,7 @@ Option de fraicheur du cache : [contrat et validation](cache-events.fr.md).
 ## Bridge OpenAPI
 
 - [Bridge OpenAPI route inventory](bridge-openapi.fr.md) ? optional documentation; not authorization or complete payload schemas.
+
+## Images
+
+- [Import volontaire d?images (candidat facultatif, sources serveur)](asset-import.fr.md)

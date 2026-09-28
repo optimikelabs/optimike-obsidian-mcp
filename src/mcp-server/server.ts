@@ -1,3 +1,4 @@
+import { registerAssetImportTools } from "./tools/assetImportTools/registration.js";
 import { configuredSkillRegistry, installSkillsExtension } from "./resources/skillsExtension.js";
 import { resolveToolProfile } from "./toolProfileRuntime.js";
 import { installLegacyToolCatalog } from "./legacyToolCatalog.js";
@@ -1886,6 +1887,7 @@ async function createMcpServerInstance(
       externalRootsService,
       config.mcpTransportType === "stdio",
     );
+    await registerAssetImportTools(server, governedNoteReplaceRuntime?.assetImport, externalRootsService, config.mcpTransportType === "stdio");
     registerFormatValidationTool(server);
 
     if (isHeadlessGuarded || isHeadlessFilesystem) {

@@ -111,3 +111,7 @@ Optional cache freshness: [contract and validation](cache-events.md).
 ## Bridge OpenAPI
 
 - [Bridge OpenAPI route inventory](bridge-openapi.md) ? optional documentation; not authorization or complete payload schemas.
+
+## Images
+
+- [Voluntary image import (optional candidate, server-local inputs)](asset-import.md)

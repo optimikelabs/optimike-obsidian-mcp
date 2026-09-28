@@ -1,3 +1,6 @@
+import { AssetImportOperationAdapter } from "../../../services/assets/assetImportOperation.js";
+import { runAssetJob } from "../../../services/assets/workerClient.js";
+import type { AssetInspection } from "../../../services/assets/assetImportContract.js";
 import { NoteCreateOperationAdapter, type NoteCreateBackend } from "../../../services/operations/noteCreateOperationAdapter.js";
 import { RestNoteCreateBackend } from "../../../services/operations/restNoteCreateBackend.js";
 import { NativeNoteMoveOperationAdapter, type NativeNoteMoveBackend } from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
@@ -383,6 +386,7 @@ export type GovernedNoteReplacePlanView = {
 
 export class GovernedNoteReplaceRuntime {
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
+  readonly assetImport: AssetImportOperationAdapter | undefined;
   readonly nativeMove: NativeNoteMoveOperationAdapter | undefined;
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
@@ -399,6 +403,13 @@ export class GovernedNoteReplaceRuntime {
   ) {
     this.noteCreate = noteCreateBackend ? new NoteCreateOperationAdapter(noteCreateBackend, journal) : undefined;
     this.nativeMove = nativeMoveBackend ? new NativeNoteMoveOperationAdapter(nativeMoveBackend, journal) : undefined;
+    if (config.assetFolder && config.obsidianVaultPath) {
+      const policy = {vaultRoot: config.obsidianVaultPath, assetFolder: config.assetFolder, quality: config.assetWebpQuality};
+      this.assetImport = new AssetImportOperationAdapter({
+        inspect: (filename, binding) => runAssetJob<AssetInspection>({kind:"inspect", ...policy, filename, binding}),
+        create: (filename, bytes, binding) => runAssetJob({kind:"create", ...policy, filename, bytes, binding}),
+      }, journal, policy);
+    }
     this.leaseHeartbeat = setInterval(() => {
       try {
         this.journal.renewExecutionLease();
@@ -438,6 +449,7 @@ export class GovernedNoteReplaceRuntime {
         "obsidian.note.move",
         "obsidian.note.create",
         "obsidian.base.rows.patch",
+        "obsidian.asset.import",
       ],
       allowUnprojectedFallback: true,
     });

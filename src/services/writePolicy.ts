@@ -3,6 +3,8 @@ import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
 
 export type WriteOperation =
+  | "asset_import_plan"
+  | "asset_import_apply"
   | "obsidian_delete_note"
   | "obsidian_move_note"
   | "obsidian_note_move_plan"

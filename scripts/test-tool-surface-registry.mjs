@@ -16,7 +16,7 @@ const repoRoot = path.resolve(
   "..",
 );
 
-const EXPECTED_UNION_COUNT = 91;
+const EXPECTED_UNION_COUNT = 94;
 const EXPECTED_COUNTS_BY_MODE = {
   live: 87,
   "hybrid-live": 87,
@@ -119,14 +119,14 @@ for (const entry of TOOL_SURFACE_REGISTRY) {
 }
 assert.equal(
   governedFamilies.size,
-  8,
-  "exactly eight governed lifecycle families are expected",
+  9,
+  "exactly nine governed lifecycle families are expected",
 );
 
 for (const [family, entries] of governedFamilies) {
   assert.deepEqual(
     entries.map((entry) => entry.lifecycleRole).sort(),
-    ["note-move", "note-create", "base-rows"].includes(family)
+    ["note-move", "note-create", "base-rows", "asset-import"].includes(family)
       ? ["apply", "plan", "status"]
       : expectedLifecycleRoles,
     `${family} must expose its complete declared lifecycle`,
