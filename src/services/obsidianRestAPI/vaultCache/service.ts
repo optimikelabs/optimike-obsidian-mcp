@@ -270,15 +270,15 @@ export class VaultCacheService {
   public async waitUntilReady(timeoutMs = 60000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (this.isCacheReady) {
+      if (this.isCacheReady && !this.isBuilding && !this.refreshRequested && !this.eventWorkPending && !this.lastRefreshError) {
         return true;
       }
-      if (!this.isBuilding && this.lastRefreshError) {
+      if (!this.isBuilding && !this.refreshRequested && !this.eventWorkPending && this.lastRefreshError) {
         return false;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    return this.isCacheReady;
+    return this.isCacheReady && !this.isBuilding && !this.refreshRequested && !this.eventWorkPending && !this.lastRefreshError;
   }
 
   public getCachedFileCount(): number {

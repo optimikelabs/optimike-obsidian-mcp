@@ -77,7 +77,7 @@ export class CacheEventSupervisor {
     if (this.running || this.stopping) return;
     this.running = true;
     this.controller = new AbortController();
-    this.requestReconciliation();
+    this.requestReconciliation(false);
     const signal = this.controller.signal;
     this.workers = VAULT_CACHE_EVENTS.map((event) =>
       this.streamLoop(event, signal),
@@ -139,9 +139,9 @@ export class CacheEventSupervisor {
     };
   }
 
-  private requestReconciliation(): void {
+  private requestReconciliation(markUncertain = true): void {
     this.revision++;
-    this.target.uncertain();
+    if (markUncertain) this.target.uncertain();
     this.schedule();
   }
 
@@ -184,7 +184,7 @@ export class CacheEventSupervisor {
     const dirty = this.revision !== this.reconciledRevision;
     if (
       !this.pending.size &&
-      !(dirty && this.connected.size === VAULT_CACHE_EVENTS.length)
+      !dirty
     )
       return;
     const delay = this.pending.size
@@ -211,7 +211,6 @@ export class CacheEventSupervisor {
     if (!this.running) return;
     if (
       this.revision !== this.reconciledRevision &&
-      this.connected.size === VAULT_CACHE_EVENTS.length &&
       performance.now() >= this.nextReconcileAt
     ) {
       const revision = this.revision;
@@ -241,8 +240,9 @@ export class CacheEventSupervisor {
         if (this.latencies.length > 128) this.latencies.shift();
       }
     }
-    if (this.running && this.connected.size === VAULT_CACHE_EVENTS.length &&
-        this.revision === this.reconciledRevision && this.pending.size === 0) {
+    // Verified periodic reconciliation remains usable even without SSE coverage.
+    // Coverage is reported independently; absent endpoints must not poison it.
+    if (this.running && this.revision === this.reconciledRevision && this.pending.size === 0) {
       this.target.settled();
     }
   }
@@ -278,8 +278,8 @@ export class CacheEventSupervisor {
           this.lastReason =
             error instanceof LocalRestEventError ? error.reason : "unavailable";
       } finally {
-        this.connected.delete(event);
-        if (this.running && !signal.aborted) this.requestReconciliation();
+        const lostConnectedStream = this.connected.delete(event);
+        if (lostConnectedStream && this.running && !signal.aborted) this.requestReconciliation();
       }
       if (signal.aborted || !this.running) break;
       if (performance.now() - started >= 30000) delay = this.options.retryMinMs;

@@ -40,3 +40,32 @@ test('task memory cache keys include content hash when timestamps and size are u
  const second=JSON.parse(await processListAllTasks({responseFormat:'json'},context,f.cache));
  assert.equal(second[0].description,'task-two');
 }));
+
+
+test('task queries wait for an active periodic scan instead of failing on the building marker',()=>fixture(async f=>{
+ let release;const barrier=new Promise(resolve=>{release=resolve;});
+ const original=f.cache.listAllMarkdownFiles.bind(f.cache);
+ f.cache.listAllMarkdownFiles=async(...args)=>{await barrier;return original(...args);};
+ const scan=f.cache.refreshCache();await new Promise(resolve=>setTimeout(resolve,10));
+ let settled=false;const query=warmSharedTaskCache(f.cache).finally(()=>{settled=true;});query.catch(()=>undefined);
+ try { await new Promise(resolve=>setTimeout(resolve,30));assert.equal(settled,false); }
+ finally {release();}
+ await scan;await query;
+}));
+
+for (const partial of [false,true]) test((partial?'partial':'unsupported')+' event endpoints leave periodic cache and direct task queries usable',()=>fixture(async f=>{
+ const {CacheEventSupervisor}=await import('../dist/services/obsidianRestAPI/vaultCache/eventSupervisor.js');
+ const {LocalRestEventError}=await import('../dist/services/obsidianRestAPI/eventStreams.js');
+ const source={consumeVaultEvents:async(event,signal,connected)=>{
+  if (!partial || event === 'rename') throw new LocalRestEventError('unsupported');
+  connected(); await new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));
+ }};
+ const supervisor=new CacheEventSupervisor(source,{
+  accepts:()=>true,update:async()=>({ok:true}),
+  reconcile:async()=>{await f.cache.refreshCache(true);return f.cache.isReady();},
+  uncertain:()=>f.cache.markFreshnessUncertain(),pending:()=>f.cache.markEventWorkPending(),settled:()=>f.cache.settleEventWork(),
+ },{retryMinMs:10,retryMaxMs:20,debounceMs:2,reconcileIntervalMs:10});
+ try {supervisor.start();await new Promise(resolve=>setTimeout(resolve,100));await warmSharedTaskCache(f.cache);
+   assert.equal(supervisor.snapshot().state,partial?'degraded':'unsupported');assert.equal(f.cache.getStats().freshness,'observed');}
+ finally {await supervisor.stop();}
+}));

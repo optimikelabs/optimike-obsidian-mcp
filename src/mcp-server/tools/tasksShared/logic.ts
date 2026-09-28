@@ -227,6 +227,9 @@ async function ensureSharedCacheReady(
     await vaultCacheService.buildVaultCache();
     await vaultCacheService.waitUntilReady();
   }
+  if (vaultCacheService && !(await vaultCacheService.waitUntilReady())) {
+    throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared vault cache reconciliation is incomplete.");
+  }
   if ((vaultCacheService && !vaultCacheService.isReady()) ||
       !existsSync(config.obsidianSharedCacheDbPath)) {
     throw new McpError(
