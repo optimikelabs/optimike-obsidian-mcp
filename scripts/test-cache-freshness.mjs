@@ -213,3 +213,103 @@ test("a backend response for another note cannot populate the requested identity
     rest.getFileContent = original;
   }
 });
+
+// Review regressions: exercise durable rows and a new service instance, not
+// merely the in-memory projection of the writer that noticed the failure.
+test("startup removes excluded persisted rows from direct SQL consumers", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const previous = config.obsidianSharedCacheDbPath;
+  const dbPath = path.join(root, "excluded-restart.sqlite");
+  config.obsidianSharedCacheDbPath = dbPath;
+  let instance = new VaultCacheService(rest);
+  try {
+    instance.db.prepare("INSERT INTO file_cache VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("/Private/secret.md", 1, 2, 6, "fixture", "- [ ] private sentinel", 1);
+    await instance.close();
+    instance = new VaultCacheService(rest);
+    const observer = new DatabaseSync(dbPath);
+    try {
+      assert.equal(observer.prepare("SELECT count(*) AS n FROM file_cache WHERE path = ?")
+        .get("/Private/secret.md").n, 0);
+    } finally { observer.close(); }
+  } finally { await instance.close(); config.obsidianSharedCacheDbPath = previous; }
+});
+
+test("legacy post-write update retries transient REST absence before removing a row", async () => {
+  const { McpError, BaseErrorCode } = await import("../dist/types-global/errors.js");
+  const original = rest.getFileContent;
+  let attempts = 0;
+  rest.getFileContent = async p => {
+    attempts++;
+    if (attempts < 3) throw new McpError(BaseErrorCode.NOT_FOUND, "not indexed yet");
+    return original(p);
+  };
+  try {
+    await cache.updateCacheForFile("Note.md", context);
+    assert.equal(attempts, 3);
+    assert.equal((await cache.getEntry("/Note.md")).content, content);
+  } finally { rest.getFileContent = original; }
+});
+
+test("transient REST unavailability retries but arbitrary failures do not", async () => {
+  const { McpError, BaseErrorCode } = await import("../dist/types-global/errors.js");
+  const original = rest.getFileContent;
+  let attempts = 0;
+  rest.getFileContent = async p => {
+    if (++attempts === 1) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "warming");
+    return original(p);
+  };
+  try {
+    assert.equal((await cache.updateFileVerified("Note.md", context)).ok, true);
+    assert.equal(attempts, 2);
+    attempts = 0;
+    rest.getFileContent = async () => { attempts++; throw new Error("permanent"); };
+    assert.equal((await cache.updateFileVerified("Note.md", context)).ok, false);
+    assert.equal(attempts, 1);
+  } finally { rest.getFileContent = original; }
+});
+
+test("incomplete refresh survives restart and cannot advance successful-refresh evidence", async () => {
+  const previous = config.obsidianSharedCacheDbPath;
+  config.obsidianSharedCacheDbPath = path.join(root, "incomplete-restart.sqlite");
+  let instance = new VaultCacheService(rest);
+  try {
+    await instance.refreshCache(true);
+    const successfulAt = instance.getStats().lastRefreshAt;
+    fail = true;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await instance.refreshCache(true);
+    assert.equal(instance.getStats().lastRefreshAt, successfulAt);
+    await instance.close();
+    instance = new VaultCacheService(rest);
+    assert.equal(instance.isReady(), false);
+    assert.equal(instance.getStats().freshness, "uncertain");
+    assert.equal(instance.getStats().lastRefreshFailedFiles, 1);
+    fail = false;
+    await instance.refreshCache(true);
+    await instance.close();
+    instance = new VaultCacheService(rest);
+    assert.equal(instance.isReady(), true);
+    assert.equal(instance.getStats().lastRefreshFailedFiles, 0);
+  } finally { fail = false; await instance.close(); config.obsidianSharedCacheDbPath = previous; }
+});
+
+test("interrupted refresh and explicit uncertainty remain uncertain after restart", async () => {
+  const previous = config.obsidianSharedCacheDbPath;
+  config.obsidianSharedCacheDbPath = path.join(root, "uncertain-restart.sqlite");
+  let instance = new VaultCacheService(rest);
+  try {
+    await instance.refreshCache(true);
+    instance.markFreshnessUncertain();
+    await instance.close();
+    instance = new VaultCacheService(rest);
+    assert.equal(instance.getStats().freshness, "uncertain");
+    await instance.refreshCache(true);
+    instance.db.prepare("INSERT OR REPLACE INTO shared_cache_metadata VALUES (?, ?, ?)")
+      .run("refresh_state", "building", Date.now());
+    await instance.close();
+    instance = new VaultCacheService(rest);
+    assert.equal(instance.isReady(), false);
+    assert.equal(instance.getStats().freshness, "uncertain");
+  } finally { await instance.close(); config.obsidianSharedCacheDbPath = previous; }
+});
