@@ -79,3 +79,27 @@ test('opened-handle locality rejects remote/removable devices and unverified que
  b.writeUInt32LE(0,4);assert.throws(()=>assertLocalAssetDevice(-1,8,b));assert.throws(()=>assertLocalAssetDevice(0,0,b));
  b.writeUInt32LE(0,0);assert.throws(()=>assertLocalAssetDevice(0,8,b));
 });
+
+
+test('operator vault paths allow legal Windows components without relaxing asset names',()=>{
+ for(const root of ['C:\\Users\\me\\Notes #2','C:\\[Archive]\\Vault','C:\\.vault','C:\\Notes ^ local','C:\\'+('a'.repeat(180))])
+  assert.doesNotThrow(()=>new WindowsAssetFiles(root,'Images'));
+ for(const root of ['C:\\..\\Vault','C:\\Vault:stream','C:\\nul\\Vault','C:\\Vault.','C:\\Vault ','C:\\'+('a'.repeat(256)),'\\\\server\\share\\Vault'])
+  assert.throws(()=>new WindowsAssetFiles(root,'Images'));
+ for(const folder of ['[Images]','Images#2','.images','Images/../Outside'])
+  assert.throws(()=>new WindowsAssetFiles('C:\\[Archive]\\Vault',folder));
+});
+
+test('native creation and collision refusal work under legal non-emitted vault root names',{skip:!supported},()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'optimike-root-names-'));
+ try {
+  for(const name of ['Notes #2','[Archive]','.vault']) {
+   const vault=path.join(root,name);fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,'Images'));
+   const backend=new WindowsAssetFiles(vault,'Images'),before=backend.inspect('safe.webp');
+   const created=backend.create('safe.webp',bytes,before.binding);
+   assert.equal(created.sha256,assetHash(bytes));
+   assert.deepEqual(fs.readFileSync(path.join(vault,'Images','safe.webp')),bytes);
+   assert.throws(()=>backend.create('safe.webp',bytes,before.binding),e=>e.reason==='asset_exists');
+  }
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

@@ -19,6 +19,18 @@ export function assetSegment(value: string): string {
       /^(?:con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3]|conin\$|conout\$)(?:\.|$)/iu.test(value)) fail("asset_path_invalid");
   return value;
 }
+/** Operator-configured root components are not emitted in an Obsidian embed.
+ * Preserve legal Windows spelling; retain traversal/device/ADS restrictions.
+ * See Microsoft Learn: Naming Files, Paths, and Namespaces.
+ */
+function vaultRootSegment(value: string): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 255 ||
+      Buffer.from(value,"utf8").toString("utf8") !== value ||
+      /[\x00-\x1f<>:"/\\|?*]/u.test(value) || value === "." || value === ".." ||
+      /[. ]$/u.test(value) ||
+      /^(?:con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3]|conin\$|conout\$)(?:\.|$)/iu.test(value)) fail("asset_path_invalid");
+  return value;
+}
 export function assetFilename(value: string): string {
   assetSegment(value);
   if (!/\.(?:webp|png|jpg|jpeg|gif|svg|avif)$/u.test(value)) fail("asset_path_invalid");
@@ -97,7 +109,10 @@ export class WindowsAssetFiles {
         vaultRoot !== path.win32.normalize(vaultRoot) || vaultRoot.endsWith("\\") ||
         typeof assetFolder !== "string" || !assetFolder || assetFolder.includes("\\")) fail("asset_path_invalid");
     this.driveRoot = path.win32.parse(vaultRoot).root;
-    this.parents = [...vaultRoot.slice(this.driveRoot.length).split("\\"), ...assetFolder.split("/")].map(assetSegment);
+    this.parents = [
+      ...vaultRoot.slice(this.driveRoot.length).split("\\").map(vaultRootSegment),
+      ...assetFolder.split("/").map(assetSegment),
+    ];
   }
   private withParent<T>(action:(api:NativeApi, parent:Handle, binding:string)=>T):T {
     const api=native();
