@@ -101,7 +101,10 @@
     "docs/operon-cli-audit.fr.md",
     "docs/tree.md",
     "docs/mcp-2026-dual-stack.md",
-    "docs/mcp-skills.md"
+    "docs/mcp-skills.md",
+    "docs/cache-events.md",
+    "docs/cache-events.fr.md",
+    "docs/cycle-20260928"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
@@ -221,7 +224,8 @@
     "benchmark:vnext": "node scripts/benchmark-vnext-e2e.mjs",
     "test:mcp-2026": "npm run build && node scripts/run-mcp-2026-tests.mjs modern",
     "test:mcp-2026:all": "npm run build && node scripts/run-mcp-2026-tests.mjs all",
-    "benchmark:vnext:modern": "node scripts/run-mcp-2026-tests.mjs benchmark-modern"
+    "benchmark:vnext:modern": "node scripts/run-mcp-2026-tests.mjs benchmark-modern",
+    "test:cache-events": "npm run build && node --test scripts/test-cache-freshness.mjs scripts/test-cache-event-http.mjs scripts/test-cache-event-supervisor.mjs scripts/test-cache-event-integration.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",

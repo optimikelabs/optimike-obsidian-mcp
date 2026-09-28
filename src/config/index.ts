@@ -104,7 +104,10 @@ const EnvSchema = z
       .string()
       .transform((val) => val.toLowerCase() === "true")
       .default("false"),
-    OBSIDIAN_CACHE_EVENTS_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
+    OBSIDIAN_CACHE_EVENTS_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
     OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN: z.coerce
       .number()
       .int()
@@ -454,7 +457,7 @@ export const config = {
     env.MCP_EXTERNAL_MOVE_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       "external-moves.sqlite",
@@ -463,7 +466,7 @@ export const config = {
     env.MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       `obsidian-note-replace-${noteReplaceProfileId}.sqlite`,
@@ -474,7 +477,7 @@ export const config = {
     env.MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       `obsidian-base-formula-${noteReplaceProfileId}.sqlite`,

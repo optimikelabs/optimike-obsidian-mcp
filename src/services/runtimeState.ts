@@ -360,15 +360,43 @@ function projectPublicFileFingerprint(value: unknown): PublicFileFingerprint {
   };
 }
 
-function projectPublicEventCache(value: unknown): Record<string, string | number | boolean | undefined> {
+function projectPublicEventCache(
+  value: unknown,
+): Record<string, string | number | boolean | undefined> {
   const item = asRecord(value);
   const result: Record<string, string | number | boolean | undefined> = {
-    state: allowedValue(item.state, ["disabled", "not_applicable", "stopped", "connecting", "degraded", "ready", "unsupported"]),
-    lastReason: allowedValue(item.lastReason, ["unsupported", "forbidden", "unavailable", "invalid_stream", "aborted"]),
+    state: allowedValue(item.state, [
+      "disabled",
+      "not_applicable",
+      "stopped",
+      "connecting",
+      "degraded",
+      "ready",
+      "unsupported",
+    ]),
+    lastReason: allowedValue(item.lastReason, [
+      "unsupported",
+      "forbidden",
+      "unavailable",
+      "invalid_stream",
+      "aborted",
+    ]),
     reconciledAndConnected: booleanOr(item.reconciledAndConnected),
   };
-  for (const key of ["connectedStreams", "pendingPaths", "lastEventAt", "lastReconciledAt", "connectionAttempts",
-    "reconnects", "overflows", "updateFailures", "reconciliations", "latencySampleCount", "eventToCacheP50Ms", "eventToCacheP95Ms"]) {
+  for (const key of [
+    "connectedStreams",
+    "pendingPaths",
+    "lastEventAt",
+    "lastReconciledAt",
+    "connectionAttempts",
+    "reconnects",
+    "overflows",
+    "updateFailures",
+    "reconciliations",
+    "latencySampleCount",
+    "eventToCacheP50Ms",
+    "eventToCacheP95Ms",
+  ]) {
     result[key] = optionalNumber(item[key]);
   }
   return result;
@@ -413,7 +441,11 @@ function projectPublicSharedCacheStatus(
     lastRefreshFailedFiles: optionalNumber(sharedCache.lastRefreshFailedFiles),
     incrementalFailures: optionalNumber(sharedCache.incrementalFailures),
     pendingCacheWrites: optionalNumber(sharedCache.pendingCacheWrites),
-    freshness: allowedValue(sharedCache.freshness, ["uncertain", "observed", "unknown"]),
+    freshness: allowedValue(sharedCache.freshness, [
+      "uncertain",
+      "observed",
+      "unknown",
+    ]),
     eventCache: projectPublicEventCache(sharedCache.eventCache),
     integrity: {
       checked: integrityPresent,

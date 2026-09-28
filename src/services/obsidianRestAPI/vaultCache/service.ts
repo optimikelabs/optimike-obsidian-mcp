@@ -47,16 +47,29 @@ type CacheRefreshSource = "rest" | "filesystem";
 type CacheReadinessStatus = "empty" | "building" | "ready" | "error";
 export type CacheUpdateResult =
   | { ok: true; disposition: "updated" | "absent" | "excluded" }
-  | { ok: false; reason: "invalid_path" | "read_failed" | "queue_full" | "closed" };
+  | {
+      ok: false;
+      reason: "invalid_path" | "read_failed" | "queue_full" | "closed";
+    };
 
 /** Decoded vault paths only; never normalize a traversal into an allowed path. */
 export function normalizedCacheFilePath(input: string): string | null {
-  if (typeof input !== "string" || input.length > 4096 || /[\u0000-\u001f]/u.test(input)) return null;
+  if (
+    typeof input !== "string" ||
+    input.length > 4096 ||
+    /[\u0000-\u001f]/u.test(input)
+  )
+    return null;
   const value = input.replace(/\\/gu, "/").replace(/^\//u, "");
   const parts = value.split("/");
-  if (!value || value.startsWith("/") || /^[a-z]:/iu.test(value) ||
-      parts.some(part => !part || part === "." || part === "..") ||
-      !value.toLowerCase().endsWith(".md")) return null;
+  if (
+    !value ||
+    value.startsWith("/") ||
+    /^[a-z]:/iu.test(value) ||
+    parts.some((part) => !part || part === "." || part === "..") ||
+    !value.toLowerCase().endsWith(".md")
+  )
+    return null;
   return "/" + value;
 }
 
@@ -98,7 +111,10 @@ function getVaultRoot(): string | undefined {
     : undefined;
 }
 
-function vaultRelativePathFromAbsolute(filePath: string, vaultRoot: string): string {
+function vaultRelativePathFromAbsolute(
+  filePath: string,
+  vaultRoot: string,
+): string {
   return `/${path.relative(vaultRoot, filePath).replace(/\\/g, "/")}`;
 }
 
@@ -182,12 +198,22 @@ export class VaultCacheService {
       );
       return;
     }
-    if (config.obsidianCacheEventsEnabled && this.obsidianService &&
-        (config.obsidianRuntimeMode === "live" || config.obsidianRuntimeMode === "hybrid")) {
+    if (
+      config.obsidianCacheEventsEnabled &&
+      this.obsidianService &&
+      (config.obsidianRuntimeMode === "live" ||
+        config.obsidianRuntimeMode === "hybrid")
+    ) {
       this.eventSupervisor ??= new CacheEventSupervisor(this.obsidianService, {
-        accepts: (candidate, folder) => this.acceptsEventPath(candidate, folder),
-        update: candidate => this.updateFileVerified(candidate,
-          requestContextService.createRequestContext({operation: "eventCacheRefresh"})),
+        accepts: (candidate, folder) =>
+          this.acceptsEventPath(candidate, folder),
+        update: (candidate) =>
+          this.updateFileVerified(
+            candidate,
+            requestContextService.createRequestContext({
+              operation: "eventCacheRefresh",
+            }),
+          ),
         reconcile: async () => {
           await this.refreshCache(true);
           return this.lastRefreshError === null && this.isCacheReady;
@@ -284,9 +310,16 @@ export class VaultCacheService {
       lastRefreshFailedFiles: this.lastRefreshFailedFiles,
       incrementalFailures: this.incrementalFailures,
       pendingCacheWrites: this.queuedCacheWrites,
-      freshness: this.lastRefreshError || this.refreshRequested || this.isBuilding ||
-        this.eventSupervisor && !this.eventSupervisor.snapshot().reconciledAndConnected
-        ? "uncertain" : this.isCacheReady ? "observed" : "unknown",
+      freshness:
+        this.lastRefreshError ||
+        this.refreshRequested ||
+        this.isBuilding ||
+        (this.eventSupervisor &&
+          !this.eventSupervisor.snapshot().reconciledAndConnected)
+          ? "uncertain"
+          : this.isCacheReady
+            ? "observed"
+            : "unknown",
     };
   }
 
@@ -298,7 +331,11 @@ export class VaultCacheService {
     return { ok: result === "ok", result };
   }
 
-  public runMaintenance(): { vacuum: boolean; analyze: boolean; checkpoint: string } {
+  public runMaintenance(): {
+    vacuum: boolean;
+    analyze: boolean;
+    checkpoint: string;
+  } {
     this.db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
     this.db.exec("VACUUM;");
     this.db.exec("ANALYZE;");
@@ -341,7 +378,11 @@ export class VaultCacheService {
   }
 
   public async getEntry(filePath: string): Promise<CacheEntry | undefined> {
-    if (!normalizedCacheFilePath(filePath) || isVaultPathExcluded(filePath, this.vaultExclusionMatcher)) return undefined;
+    if (
+      !normalizedCacheFilePath(filePath) ||
+      isVaultPathExcluded(filePath, this.vaultExclusionMatcher)
+    )
+      return undefined;
     const cached = this.contentHotCache.get(filePath);
     if (cached) {
       this.touchHotCache(filePath, cached);
@@ -368,7 +409,10 @@ export class VaultCacheService {
   }
 
   /** Legacy post-write callers do not reinterpret a cache failure as a failed mutation. */
-  public async updateCacheForFile(filePath: string, context: RequestContext): Promise<void> {
+  public async updateCacheForFile(
+    filePath: string,
+    context: RequestContext,
+  ): Promise<void> {
     await this.updateFileVerified(filePath, context);
   }
 
@@ -377,9 +421,15 @@ export class VaultCacheService {
     if (this.queuedCacheWrites >= 1024) throw new Error("cache_queue_full");
     this.queuedCacheWrites++;
     const run = this.cacheWriteTail.then(work);
-    this.cacheWriteTail = run.then(() => undefined, () => undefined);
-    try { return await run; }
-    finally { this.queuedCacheWrites--; }
+    this.cacheWriteTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      return await run;
+    } finally {
+      this.queuedCacheWrites--;
+    }
   }
 
   /** Only finite reason codes are retained; no source path or upstream payload. */
@@ -387,7 +437,10 @@ export class VaultCacheService {
     this.lastRefreshError = "cache_freshness_uncertain";
   }
 
-  public async updateFileVerified(filePath: string, context: RequestContext): Promise<CacheUpdateResult> {
+  public async updateFileVerified(
+    filePath: string,
+    context: RequestContext,
+  ): Promise<CacheUpdateResult> {
     const normalizedPath = normalizedCacheFilePath(filePath);
     if (!normalizedPath) return { ok: false, reason: "invalid_path" };
     if (this.closing || this.closed) return { ok: false, reason: "closed" };
@@ -396,43 +449,65 @@ export class VaultCacheService {
       return { ok: false, reason: "queue_full" };
     }
     try {
-      return await this.serializeCacheWrite(async (): Promise<CacheUpdateResult> => {
-        if (isVaultPathExcluded(normalizedPath, this.vaultExclusionMatcher)) {
-          this.deleteRow(normalizedPath);
-          return { ok: true, disposition: "excluded" };
-        }
-        try {
-          const source = await this.pickRefreshSource();
-          const row = await this.readCacheRow(normalizedPath, source, context);
-          this.upsertRow(row);
-          return { ok: true, disposition: "updated" };
-        } catch (error) {
-          const missing = error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND ||
-            (error as NodeJS.ErrnoException)?.code === "ENOENT";
-          if (missing) {
+      return await this.serializeCacheWrite(
+        async (): Promise<CacheUpdateResult> => {
+          if (isVaultPathExcluded(normalizedPath, this.vaultExclusionMatcher)) {
             this.deleteRow(normalizedPath);
-            return { ok: true, disposition: "absent" };
+            return { ok: true, disposition: "excluded" };
           }
-          this.incrementalFailures++;
-          this.markFreshnessUncertain();
-          return { ok: false, reason: "read_failed" };
-        }
-      });
+          try {
+            const source = await this.pickRefreshSource();
+            const row = await this.readCacheRow(
+              normalizedPath,
+              source,
+              context,
+            );
+            this.upsertRow(row);
+            return { ok: true, disposition: "updated" };
+          } catch (error) {
+            const missing =
+              (error instanceof McpError &&
+                error.code === BaseErrorCode.NOT_FOUND) ||
+              (error as NodeJS.ErrnoException)?.code === "ENOENT";
+            if (missing) {
+              this.deleteRow(normalizedPath);
+              return { ok: true, disposition: "absent" };
+            }
+            this.incrementalFailures++;
+            this.markFreshnessUncertain();
+            return { ok: false, reason: "read_failed" };
+          }
+        },
+      );
     } catch {
       this.incrementalFailures++;
       this.markFreshnessUncertain();
-      return { ok: false, reason: this.closing || this.closed ? "closed" : "queue_full" };
+      return {
+        ok: false,
+        reason: this.closing || this.closed ? "closed" : "queue_full",
+      };
     }
   }
 
-  private async readCacheRow(filePath: string, source: CacheRefreshSource, context: RequestContext): Promise<CacheRow> {
+  private async readCacheRow(
+    filePath: string,
+    source: CacheRefreshSource,
+    context: RequestContext,
+  ): Promise<CacheRow> {
     if (source === "filesystem") {
       const root = getVaultRoot();
       if (!root) throw new Error("filesystem_unavailable");
       const absolutePath = path.join(root, filePath.slice(1));
-      const [realRoot, realFile] = await Promise.all([fs.realpath(root), fs.realpath(absolutePath)]);
+      const [realRoot, realFile] = await Promise.all([
+        fs.realpath(root),
+        fs.realpath(absolutePath),
+      ]);
       const relative = path.relative(realRoot, realFile);
-      if (relative.startsWith(".." + path.sep) || relative === ".." || path.isAbsolute(relative)) {
+      if (
+        relative.startsWith(".." + path.sep) ||
+        relative === ".." ||
+        path.isAbsolute(relative)
+      ) {
         throw new Error("filesystem_outside_vault");
       }
       // Reject static symlinks/junctions in the read path. This is not a native
@@ -440,38 +515,82 @@ export class VaultCacheService {
       let component = root;
       for (const segment of filePath.slice(1).split("/")) {
         component = path.join(component, segment);
-        if ((await fs.lstat(component)).isSymbolicLink()) throw new Error("filesystem_link_refused");
+        if ((await fs.lstat(component)).isSymbolicLink())
+          throw new Error("filesystem_link_refused");
       }
       const handle = await fs.open(absolutePath, "r");
       try {
         const before = await handle.stat();
         if (!before.isFile()) throw new Error("not_a_file");
         const content = await handle.readFile("utf8");
-        const [after, current] = await Promise.all([handle.stat(), fs.stat(absolutePath)]);
-        if (before.ino !== current.ino || before.dev !== current.dev ||
-            before.mtimeMs !== after.mtimeMs || before.size !== after.size ||
-            after.mtimeMs !== current.mtimeMs || after.size !== current.size) {
+        const [after, current] = await Promise.all([
+          handle.stat(),
+          fs.stat(absolutePath),
+        ]);
+        if (
+          before.ino !== current.ino ||
+          before.dev !== current.dev ||
+          before.mtimeMs !== after.mtimeMs ||
+          before.size !== after.size ||
+          after.mtimeMs !== current.mtimeMs ||
+          after.size !== current.size
+        ) {
           throw new Error("read_changed");
         }
-        return { path: filePath, ctime: Math.round(after.ctimeMs), mtime: Math.round(after.mtimeMs),
-          size: after.size, hash: computeContentHash(content), content };
-      } finally { await handle.close(); }
+        return {
+          path: filePath,
+          ctime: Math.round(after.ctimeMs),
+          mtime: Math.round(after.mtimeMs),
+          size: after.size,
+          hash: computeContentHash(content),
+          content,
+        };
+      } finally {
+        await handle.close();
+      }
     }
     if (!this.obsidianService) throw new Error("rest_unavailable");
-    const note = await this.obsidianService.getFileContent(filePath, "json", context) as NoteJson;
-    if (!note || typeof note.content !== "string" || !note.stat ||
-        ![note.stat.ctime, note.stat.mtime, note.stat.size].every(value => Number.isFinite(value) && value >= 0)) {
+    const note = (await this.obsidianService.getFileContent(
+      filePath,
+      "json",
+      context,
+    )) as NoteJson;
+    if (
+      !note ||
+      typeof note.content !== "string" ||
+      !note.stat ||
+      ![note.stat.ctime, note.stat.mtime, note.stat.size].every(
+        (value) => Number.isFinite(value) && value >= 0,
+      )
+    ) {
       throw new Error("invalid_note_response");
     }
-    if (typeof (note as {path?: unknown}).path === "string" &&
-        normalizedCacheFilePath((note as {path: string}).path) !== filePath) throw new Error("note_identity_mismatch");
-    return { path: filePath, content: note.content, hash: computeContentHash(note.content),
-      ctime: note.stat.ctime, mtime: note.stat.mtime, size: note.stat.size };
+    if (
+      typeof (note as { path?: unknown }).path === "string" &&
+      normalizedCacheFilePath((note as { path: string }).path) !== filePath
+    )
+      throw new Error("note_identity_mismatch");
+    return {
+      path: filePath,
+      content: note.content,
+      hash: computeContentHash(note.content),
+      ctime: note.stat.ctime,
+      mtime: note.stat.mtime,
+      size: note.stat.size,
+    };
   }
 
   private acceptsEventPath(candidate: string, folder: boolean): boolean {
-    const probe = normalizedCacheFilePath(folder ? candidate + "/__cache_probe__.md" : candidate);
-    return !!probe && !isVaultPathExcluded(folder ? candidate + "/" : candidate, this.vaultExclusionMatcher);
+    const probe = normalizedCacheFilePath(
+      folder ? candidate + "/__cache_probe__.md" : candidate,
+    );
+    return (
+      !!probe &&
+      !isVaultPathExcluded(
+        folder ? candidate + "/" : candidate,
+        this.vaultExclusionMatcher,
+      )
+    );
   }
 
   public async close(): Promise<void> {
@@ -481,7 +600,10 @@ export class VaultCacheService {
     await this.eventStop;
     await this.refreshRun?.catch(() => undefined);
     await this.cacheWriteTail;
-    if (!this.closed) { this.db.close(); this.closed = true; }
+    if (!this.closed) {
+      this.db.close();
+      this.closed = true;
+    }
   }
 
   public async buildVaultCache(): Promise<void> {
@@ -512,14 +634,18 @@ export class VaultCacheService {
           const force = this.forceRefreshRequested;
           this.refreshRequested = false;
           this.forceRefreshRequested = false;
-          try { await this.serializeCacheWrite(() => this.performRefresh(force)); }
-          catch { this.markFreshnessUncertain(); }
+          try {
+            await this.serializeCacheWrite(() => this.performRefresh(force));
+          } catch {
+            this.markFreshnessUncertain();
+          }
         }
       })().finally(() => {
         this.refreshRun = null;
         // A request may arrive between loop completion and this microtask.
         // Chain it into the same returned promise rather than dropping it.
-        if (this.refreshRequested && !this.closing) return this.refreshCache(this.forceRefreshRequested);
+        if (this.refreshRequested && !this.closing)
+          return this.refreshCache(this.forceRefreshRequested);
       });
     }
     return this.refreshRun;
@@ -569,7 +695,9 @@ export class VaultCacheService {
         }
       }
 
-      const processFile = async (filePath: string): Promise<"added" | "updated" | "skipped" | "failed"> => {
+      const processFile = async (
+        filePath: string,
+      ): Promise<"added" | "updated" | "skipped" | "failed"> => {
         try {
           const cachedEntry = this.metadataCache.get(filePath);
           if (refreshSource === "filesystem") {
@@ -577,12 +705,16 @@ export class VaultCacheService {
             if (!vaultRoot) {
               return "failed";
             }
-            const absolutePath = path.join(vaultRoot, filePath.replace(/^\/+/u, ""));
+            const absolutePath = path.join(
+              vaultRoot,
+              filePath.replace(/^\/+/u, ""),
+            );
             const stats = await fs.stat(absolutePath);
             const remoteMtime = Math.round(stats.mtimeMs);
             const remoteSize = stats.size;
             const needsRefresh =
-              isInitialBuild || !cachedEntry ||
+              isInitialBuild ||
+              !cachedEntry ||
               cachedEntry.mtime !== remoteMtime ||
               cachedEntry.size !== remoteSize;
 
@@ -590,7 +722,9 @@ export class VaultCacheService {
               return "skipped";
             }
 
-            this.upsertRow(await this.readCacheRow(filePath, refreshSource, context));
+            this.upsertRow(
+              await this.readCacheRow(filePath, refreshSource, context),
+            );
             return cachedEntry ? "updated" : "added";
           }
 
@@ -618,7 +752,8 @@ export class VaultCacheService {
           const remoteMtime = fileMetadata.mtime;
           const remoteSize = fileMetadata.size;
           const needsRefresh =
-            isInitialBuild || !cachedEntry ||
+            isInitialBuild ||
+            !cachedEntry ||
             cachedEntry.mtime !== remoteMtime ||
             cachedEntry.size !== remoteSize;
 
@@ -626,7 +761,9 @@ export class VaultCacheService {
             return "skipped";
           }
 
-          this.upsertRow(await this.readCacheRow(filePath, refreshSource, context));
+          this.upsertRow(
+            await this.readCacheRow(filePath, refreshSource, context),
+          );
 
           return cachedEntry ? "updated" : "added";
         } catch (error) {
@@ -655,11 +792,17 @@ export class VaultCacheService {
       }
 
       filesAdded += outcomes.filter((outcome) => outcome === "added").length;
-      filesUpdated += outcomes.filter((outcome) => outcome === "updated").length;
+      filesUpdated += outcomes.filter(
+        (outcome) => outcome === "updated",
+      ).length;
 
       const duration = (Date.now() - startTime) / 1000;
-      this.lastRefreshFailedFiles = outcomes.filter(outcome => outcome === "failed").length;
-      this.lastRefreshError = this.lastRefreshFailedFiles ? "cache_refresh_incomplete" : null;
+      this.lastRefreshFailedFiles = outcomes.filter(
+        (outcome) => outcome === "failed",
+      ).length;
+      this.lastRefreshError = this.lastRefreshFailedFiles
+        ? "cache_refresh_incomplete"
+        : null;
       this.isCacheReady = this.lastRefreshFailedFiles === 0;
       this.lastRefreshCompletedAt = Date.now();
       this.lastRefreshDurationMs = Math.round(duration * 1000);
@@ -711,7 +854,11 @@ export class VaultCacheService {
     const rows = stmt.all() as unknown as CacheIndexEntry[];
     this.metadataCache.clear();
     for (const row of rows) {
-      if (!normalizedCacheFilePath(row.path) || isVaultPathExcluded(row.path, this.vaultExclusionMatcher)) continue;
+      if (
+        !normalizedCacheFilePath(row.path) ||
+        isVaultPathExcluded(row.path, this.vaultExclusionMatcher)
+      )
+        continue;
       this.metadataCache.set(row.path, row);
     }
     this.isCacheReady = this.metadataCache.size > 0;
@@ -830,8 +977,14 @@ export class VaultCacheService {
         opContext,
       );
       for (const entry of entries) {
-        if (typeof entry !== "string" || entry.startsWith("/") ||
-            entry.replace(/\\/gu, "/").split("/").some(part => part === ".." || part === ".")) {
+        if (
+          typeof entry !== "string" ||
+          entry.startsWith("/") ||
+          entry
+            .replace(/\\/gu, "/")
+            .split("/")
+            .some((part) => part === ".." || part === ".")
+        ) {
           throw new Error("invalid_inventory_entry");
         }
         const fullPath = path.posix.join(normalizedPath, entry);
@@ -844,7 +997,8 @@ export class VaultCacheService {
           );
           markdownFiles = markdownFiles.concat(subDirFiles);
         } else if (entry.toLowerCase().endsWith(".md")) {
-          if (!normalizedCacheFilePath(fullPath)) throw new Error("invalid_inventory_entry");
+          if (!normalizedCacheFilePath(fullPath))
+            throw new Error("invalid_inventory_entry");
           markdownFiles.push(fullPath);
         }
       }
@@ -875,7 +1029,9 @@ export class VaultCacheService {
       return "rest";
     }
     if (config.obsidianCacheSource === "filesystem") {
-      return getVaultRoot() && existsSync(getVaultRoot()!) ? "filesystem" : "rest";
+      return getVaultRoot() && existsSync(getVaultRoot()!)
+        ? "filesystem"
+        : "rest";
     }
     const vaultRoot = getVaultRoot();
     if (vaultRoot && existsSync(vaultRoot)) {
@@ -929,7 +1085,9 @@ export class VaultCacheService {
         if (entry.isDirectory()) {
           await walk(fullPath);
         } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-          markdownFiles.push(vaultRelativePathFromAbsolute(fullPath, vaultRoot));
+          markdownFiles.push(
+            vaultRelativePathFromAbsolute(fullPath, vaultRoot),
+          );
         }
       }
     };

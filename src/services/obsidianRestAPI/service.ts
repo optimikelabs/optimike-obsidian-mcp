@@ -5,7 +5,11 @@
  * It encapsulates the logic for making authenticated requests to the API endpoints.
  */
 
-import { consumeVaultEventStream, type VaultCacheEvent, type VaultEventNotice } from "./eventStreams.js";
+import {
+  consumeVaultEventStream,
+  type VaultCacheEvent,
+  type VaultEventNotice,
+} from "./eventStreams.js";
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 import https from "node:https"; // Import the https module for Agent configuration
 import { config } from "../../config/index.js";
@@ -294,10 +298,20 @@ export class ObsidianRestApiService {
    * @param context - The request context for logging and correlation.
    * @returns {Promise<ApiStatusResponse>} - The status object from the API.
    */
-  consumeVaultEvents(event: VaultCacheEvent, signal: AbortSignal,
-    onReady: () => void, onEvent: (event: VaultEventNotice) => void): Promise<void> {
-    return consumeVaultEventStream(this.axiosInstance, config.obsidianBaseUrl,
-      event, signal, onReady, onEvent);
+  consumeVaultEvents(
+    event: VaultCacheEvent,
+    signal: AbortSignal,
+    onReady: () => void,
+    onEvent: (event: VaultEventNotice) => void,
+  ): Promise<void> {
+    return consumeVaultEventStream(
+      this.axiosInstance,
+      config.obsidianBaseUrl,
+      event,
+      signal,
+      onReady,
+      onEvent,
+    );
   }
 
   async checkStatus(
@@ -340,32 +354,100 @@ export class ObsidianRestApiService {
     );
   }
 
-  noteCreatePreflight(payload: { contractVersion: 1; path: string }, context: RequestContext): Promise<unknown> {
-    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/note-create/preflight", data: payload }, context, "noteCreatePreflight");
+  noteCreatePreflight(
+    payload: { contractVersion: 1; path: string },
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/note-create/preflight",
+        data: payload,
+      },
+      context,
+      "noteCreatePreflight",
+    );
   }
-  noteCreateApply(payload: NoteCreateApply, context: RequestContext): Promise<unknown> {
-    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/note-create/apply", data: payload }, context, "noteCreateApply");
+  noteCreateApply(
+    payload: NoteCreateApply,
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/note-create/apply",
+        data: payload,
+      },
+      context,
+      "noteCreateApply",
+    );
   }
-  noteCreateInspect(payload: { contractVersion: 1; path: string }, context: RequestContext): Promise<unknown> {
-    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/note-create/inspect", data: payload }, context, "noteCreateInspect");
+  noteCreateInspect(
+    payload: { contractVersion: 1; path: string },
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/note-create/inspect",
+        data: payload,
+      },
+      context,
+      "noteCreateInspect",
+    );
   }
 
   nativeNoteMovePreflight(
-    payload: { contractVersion: 1; sourcePath: string; destinationPath: string },
+    payload: {
+      contractVersion: 1;
+      sourcePath: string;
+      destinationPath: string;
+    },
     context: RequestContext,
   ): Promise<unknown> {
-    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/native-note-move/preflight", data: payload }, context, "nativeNoteMovePreflight");
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/native-note-move/preflight",
+        data: payload,
+      },
+      context,
+      "nativeNoteMovePreflight",
+    );
   }
 
-  nativeNoteMoveApply(payload: NativeMoveApply, context: RequestContext): Promise<unknown> {
-    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/native-note-move/apply", data: payload }, context, "nativeNoteMoveApply");
+  nativeNoteMoveApply(
+    payload: NativeMoveApply,
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/native-note-move/apply",
+        data: payload,
+      },
+      context,
+      "nativeNoteMoveApply",
+    );
   }
 
   nativeNoteMoveStatus(
-    payload: { contractVersion: 1; operationId: string; preconditionDigest: string },
+    payload: {
+      contractVersion: 1;
+      operationId: string;
+      preconditionDigest: string;
+    },
     context: RequestContext,
   ): Promise<unknown> {
-    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/native-note-move/status", data: payload }, context, "nativeNoteMoveStatus");
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/native-note-move/status",
+        data: payload,
+      },
+      context,
+      "nativeNoteMoveStatus",
+    );
   }
 
   async readNoteLinks(
