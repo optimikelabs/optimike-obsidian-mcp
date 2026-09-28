@@ -316,6 +316,7 @@ export class ObsidianNoteReplaceJournal {
       ObsidianNoteReplacePlan,
       "operationId" | "status" | "createdAt" | "updatedAt"
     >,
+    maximumActiveProjectionRows?: number,
   ): ObsidianNoteReplacePlan {
     this.maybePurgeTerminalPlans();
     const existing = this.getByIdempotencyKey(input.idempotencyKey);
@@ -325,6 +326,11 @@ export class ObsidianNoteReplaceJournal {
       }
       return existing;
     }
+    if (maximumActiveProjectionRows !== undefined &&
+        (!Number.isInteger(maximumActiveProjectionRows) || maximumActiveProjectionRows < 1 ||
+         maximumActiveProjectionRows > 100 || !input.projection?.kind)) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Invalid operation capacity policy.");
+    }
     const now = new Date(this.now()).toISOString();
     const plan: ObsidianNoteReplacePlan = {
       ...input,
@@ -333,11 +339,14 @@ export class ObsidianNoteReplaceJournal {
       createdAt: now,
       updatedAt: now,
     };
+    const insertValues = maximumActiveProjectionRows === undefined
+      ? "VALUES (?, ?, ?, ?, ?, ?)"
+      : "SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM obsidian_note_replace_plans WHERE status IN ('planned','applying','outcome_unknown') AND json_extract(payload_json, '$.projection.kind') = ?) < ?";
     const inserted = this.db
       .prepare(
         `INSERT INTO obsidian_note_replace_plans
          (operation_id, idempotency_key, status, payload_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+         ${insertValues}
          ON CONFLICT(idempotency_key) DO NOTHING`,
       )
       .run(
@@ -347,6 +356,7 @@ export class ObsidianNoteReplaceJournal {
         JSON.stringify(plan),
         plan.createdAt,
         plan.updatedAt,
+        ...(maximumActiveProjectionRows === undefined ? [] : [input.projection!.kind, maximumActiveProjectionRows]),
       );
     if (inserted.changes === 1) return plan;
 
@@ -354,7 +364,12 @@ export class ObsidianNoteReplaceJournal {
     // SQLite serializes the conflicting insert; reload its durable winner
     // instead of surfacing a UNIQUE constraint as an MCP INTERNAL_ERROR.
     const winner = this.getByIdempotencyKey(input.idempotencyKey);
-    if (!winner) throw new ObsidianNoteReplaceConcurrencyError();
+    if (!winner) {
+      if (maximumActiveProjectionRows !== undefined) {
+        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Private operation capacity reached.", {reason:"operation_capacity_reached"});
+      }
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
     if (!sameRequestInput(winner, input)) {
       throw noteReplaceIdempotencyConflict();
     }

@@ -81,7 +81,7 @@ export class AssetImportOperationAdapter {
   }
   async plan(input:unknown,source:AssetSourceProvider,authorize:()=>void|Promise<void>) {
     const parsed=AssetImportInputSchema.parse(input);
-    await authorize();await source.authorize(parsed.source);
+    await authorize();const sourcePolicyDigest=await source.authorize({...parsed.source});
     const existing=this.journal.getByIdempotencyKey(KEY+parsed.idempotencyKey);
     if(existing) {
       this.proof(existing);
@@ -91,20 +91,23 @@ export class AssetImportOperationAdapter {
     if(plansInFlight>=2)deny("asset_plan_busy",BaseErrorCode.SERVICE_UNAVAILABLE);
     plansInFlight++;
     try {
-      const bytes=await source.read(parsed.source);
+      const bytes=await source.read({...parsed.source});
       if(assetHash(bytes)!==parsed.source.sha256)deny("asset_source_changed",BaseErrorCode.CONFLICT);
       const processed=await this.convert(bytes,{quality:parsed.quality??this.policy.quality,
         preserveOriginal:parsed.preserveOriginal,exceptionReason:parsed.exceptionReason});
-      const {bytes:output,...rest}=processed;
+      const {bytes:converted,...rest}=processed;
+      if(!Buffer.isBuffer(converted))deny("asset_conversion_unverified");
+      const output=Buffer.from(converted);
       const metadata=AssetMetadataSchema.parse(rest);
       if(!Buffer.isBuffer(output)||output.length!==metadata.size||assetHash(output)!==metadata.sha256||
          metadata.sourceSha256!==parsed.source.sha256)deny("asset_conversion_unverified");
       const filename=assetFilename(parsed.name+"."+metadata.format);
       const before=AssetInspectionSchema.parse(await this.backend.inspect(filename));
       if(before.exists)deny("asset_destination_exists",BaseErrorCode.CONFLICT);
-      await source.authorize(parsed.source);await authorize();
+      if(await source.authorize({...parsed.source})!==sourcePolicyDigest)deny("asset_source_policy_changed");
+      await authorize();
       const proof=AssetProofSchema.parse({input:parsed,filename,folder:this.policy.assetFolder,
-        policyDigest:this.policyDigest,binding:before.binding,metadata});
+        policyDigest:this.policyDigest,sourcePolicyDigest,binding:before.binding,metadata});
       const target=proof.folder+"/"+filename;
       const row=this.journal.create({
         idempotencyKey:KEY+parsed.idempotencyKey,idempotencyIdentity:this.intent(parsed),
@@ -121,13 +124,15 @@ export class AssetImportOperationAdapter {
     let row=this.required(ref);const proof=this.proof(row);
     if(key!==proof.input.idempotencyKey)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
     if(row.status!=="planned")return this.status(ref);
-    await source.authorize(proof.input.source);await authorize();
+    if(await source.authorize({...proof.input.source})!==proof.sourcePolicyDigest)deny("asset_source_policy_changed");
+    await authorize();
     try {row=this.journal.transition(row.operationId,["planned"],"applying");}
     catch(error){if(error instanceof ObsidianNoteReplaceConcurrencyError)return this.status(ref);throw error;}
     const attempt=row.executionOwner?.attemptId;
     let dispatched=false;
     try {
-      await source.authorize(proof.input.source);await authorize();
+      if(await source.authorize({...proof.input.source})!==proof.sourcePolicyDigest)deny("asset_source_policy_changed");
+    await authorize();
       const bytes=Buffer.from(row.nextContent,"base64");
       // No await can precede journaling the apply reservation. Once dispatched,
       // any uncertain worker result is reconciled; never perform a second write.
@@ -135,16 +140,15 @@ export class AssetImportOperationAdapter {
       const result=await this.backend.create(proof.filename,bytes,proof.binding);
       if(result.sha256!==row.afterSha256||result.size!==proof.metadata.size||
          typeof result.fileIdentity!=="string"||!result.fileIdentity)throw new AssetWorkerError("asset_effect_unverified");
-      row=this.journal.transition(row.operationId,["applying"],"committed",{
-        effectProof:{kind:"exclusive_binary_create",digest:row.afterSha256,details:{nativeAcknowledged:true}},
-      },attempt);
+      row=this.journal.commitAfterVerifiedProof(row.operationId,["applying","outcome_unknown"],
+        {kind:"exclusive_binary_create",digest:row.afterSha256,details:{nativeAcknowledged:true}});
       return this.receipt(row,true);
     } catch(error) {
       const reason=error instanceof AssetWorkerError?error.reason:undefined;
       const outcome=!dispatched?"rejected":reason==="asset_exists"?"conflict":
         reason==="asset_binding_conflict"?"rejected":"outcome_unknown";
       try {row=this.journal.transition(row.operationId,["applying"],outcome,
-        {failure:outcome==="outcome_unknown"?"asset_effect_unverified":"asset_request_rejected"},attempt);}
+        outcome==="outcome_unknown"?"asset_effect_unverified":"asset_request_rejected",attempt);}
       catch(error){if(!(error instanceof ObsidianNoteReplaceConcurrencyError))throw error;row=this.required(ref);}
       return this.receipt(row);
     }
@@ -156,7 +160,7 @@ export class AssetImportOperationAdapter {
     catch {return this.receipt(row,false);}
     const matches=observed.binding===proof.binding&&observed.exists&&observed.sha256===row.afterSha256&&observed.size===proof.metadata.size;
     if(matches&&(row.status==="applying"||row.status==="outcome_unknown")) {
-      try {row=this.journal.commitAfterVerifiedProof(row.operationId,{kind:"observed_binary_state",digest:row.afterSha256,details:{authorshipProven:false}});}
+      try {row=this.journal.commitAfterVerifiedProof(row.operationId,["applying","outcome_unknown"],{kind:"observed_binary_state",digest:row.afterSha256,details:{authorshipProven:false}});}
       catch(error){if(!(error instanceof ObsidianNoteReplaceConcurrencyError))throw error;row=this.required(ref);}
     }
     return this.receipt(row,Boolean(matches)&&row.status==="committed");

@@ -43,13 +43,13 @@ export type AssetMetadata = z.infer<typeof AssetMetadataSchema>;
 export const AssetProofSchema = z.object({
   input:AssetImportInputSchema,
   filename:z.string().refine(value=>{try{assetFilename(value);return true;}catch{return false;}}),
-  folder:z.string().min(1).max(800), policyDigest:Sha256, binding:Sha256,
+  folder:z.string().min(1).max(800), policyDigest:Sha256, sourcePolicyDigest:Sha256, binding:Sha256,
   metadata:AssetMetadataSchema,
 }).strict();
 export type AssetProof = z.infer<typeof AssetProofSchema>;
 export type AssetImportPolicy = {vaultRoot:string;assetFolder:string;quality:number};
 export interface AssetSourceProvider {
-  authorize(source:AssetSource):void|Promise<void>;
+  authorize(source:AssetSource):string|Promise<string>;
   read(source:AssetSource):Promise<Buffer>;
 }
 export const AssetInspectionSchema = z.discriminatedUnion("exists",[
