@@ -52,7 +52,10 @@ const server = createServer(async (req, res) => {
   } else send();
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-Object.assign(process.env, {
+const changedEnvKeys = ['OBSIDIAN_RUNTIME_MODE','OBSIDIAN_VAULT','OBSIDIAN_API_KEY','OBSIDIAN_BASE_URL',
+  'LOGS_DIR','MCP_WRITE_MODE','OBSIDIAN_ENABLE_CACHE','SEMANTIC_SEARCH_PREWARM','NO_PROXY','no_proxy'];
+const originalEnv = Object.fromEntries(changedEnvKeys.map(key => [key,process.env[key]]));
+Object.assign(process.env, { NO_PROXY:'*', no_proxy:'*',
   OBSIDIAN_RUNTIME_MODE:'headless-readonly', OBSIDIAN_VAULT:temporary,
   OBSIDIAN_API_KEY:secret, OBSIDIAN_BASE_URL:'http://127.0.0.1:' + server.address().port,
   LOGS_DIR:logs, MCP_WRITE_MODE:'readonly',
@@ -69,6 +72,7 @@ after(async () => {
   await new Promise(resolve => server.close(resolve));
   rmSync(temporary, {recursive:true,force:true});
   rmSync(logs, {recursive:true,force:true});
+  for (const [key,value] of Object.entries(originalEnv)) { if(value===undefined)delete process.env[key];else process.env[key]=value; }
 });
 
 for (const current of ['5.1.0','5.3.1']) test('status preserves observed version ' + current, async () => {

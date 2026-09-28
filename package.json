@@ -224,7 +224,7 @@
     "test:mcp-2026": "npm run build && node scripts/run-mcp-2026-tests.mjs modern",
     "test:mcp-2026:all": "npm run build && node scripts/run-mcp-2026-tests.mjs all",
     "benchmark:vnext:modern": "node scripts/run-mcp-2026-tests.mjs benchmark-modern",
-    "test:local-rest-531": "node --test scripts/test-local-rest-531-spec.mjs scripts/test-local-rest-http-contract.mjs && node scripts/test-local-rest-api-compat.mjs"
+    "test:local-rest-531": "node --test scripts/test-local-rest-531-spec.mjs scripts/test-local-rest-http-contract.mjs scripts/test-local-rest-http-proxy.mjs && node scripts/test-local-rest-api-compat.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
