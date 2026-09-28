@@ -1,3 +1,8 @@
+> Current contract (2026-09-28): this historical cheatsheet is not a transport or
+> runtime specification. Use README.md, docs/mcp-2026-dual-stack.md,
+> docs/runtime-capability-matrix.md and docs/cycle-20260928/README.md for the
+> current profiles, persistent cache, optional APIs and qualification boundaries.
+
 # Obsidian MCP Server Developer Cheatsheet
 
 This cheatsheet provides quick references for common patterns, utilities, server configuration, and the Obsidian REST API service within the `obsidian-mcp-server` codebase, based on the `mcp-ts-template` and updated for MCP Spec 2025-03-26.

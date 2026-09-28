@@ -1,0 +1,41 @@
+name: Local REST compatibility
+on:
+  pull_request:
+    paths:
+      - 'src/services/obsidianRestAPI/**'
+      - 'scripts/test-local-rest-*.mjs'
+      - 'docs/obsidian-api/**'
+      - 'docs/cycle-20260928/**'
+      - '.github/workflows/local-rest-compat.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    branches: [main]
+    paths:
+      - 'src/services/obsidianRestAPI/**'
+      - 'scripts/test-local-rest-*.mjs'
+      - 'docs/obsidian-api/**'
+      - '.github/workflows/local-rest-compat.yml'
+permissions:
+  contents: read
+concurrency:
+  group: local-rest-compat-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:local-rest-531
