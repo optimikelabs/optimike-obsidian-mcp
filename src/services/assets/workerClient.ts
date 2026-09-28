@@ -37,15 +37,23 @@ export async function runAssetJob<T = ProcessedImage>(job: AssetJob, timeoutMs =
       reject(new AssetWorkerNotStartedError("asset_worker_unavailable"));
       return;
     }
-    let response: any, fault = false, expired = false;
+    let response: any, fault = false, expired = false, spawned = false, spawnFailed = false;
     const timer = setTimeout(() => { expired = true; child.kill(); }, timeoutMs);
+    child.once("spawn", () => { spawned = true; });
     child.once("message", value => { response = value; });
-    child.once("error", () => { fault = true; child.kill(); });
+    child.once("error", () => {
+      fault = true;
+      // OS-level spawn refusal is asynchronous. A PID or successful spawn
+      // means this error cannot prove that no effect was possible.
+      spawnFailed = !spawned && child.pid === undefined;
+      child.kill();
+    });
     // close also follows a failed spawn, unlike exit. Keep the reservation until
     // the child is actually gone; a returned result is not lifecycle completion.
     child.once("close", code => {
       clearTimeout(timer);
       active--;
+      if (spawnFailed) { reject(new AssetWorkerNotStartedError("asset_worker_unavailable")); return; }
       if (expired) { reject(new AssetWorkerError("asset_worker_timeout")); return; }
       if (fault || code !== 0 || !response || typeof response.ok !== "boolean") {
         reject(new AssetWorkerError("asset_worker_unavailable")); return;

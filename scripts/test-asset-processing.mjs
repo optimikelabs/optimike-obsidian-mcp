@@ -98,3 +98,32 @@ test('unqualified animated PNG and AVIF sequences are refused, never silently fl
  const avis=Buffer.alloc(20);avis.writeUInt32BE(20,0);avis.write('ftypavis',4,'ascii');
  await assert.rejects(convert(avis),e=>e.reason==='image_invalid');
 });
+
+
+test('actual asynchronous OS spawn failure carries parent-only not-started evidence',async()=>{
+ const {createRequire,syncBuiltinESMExports}=await import('node:module');
+ const {mock}=await import('node:test');
+ const fs=await import('node:fs'),os=await import('node:os'),path=await import('node:path');
+ const cp=createRequire(import.meta.url)('node:child_process'),original=cp.fork;
+ const {AssetWorkerNotStartedError}=await import('../dist/services/assets/workerClient.js');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'optimike-no-worker-'));
+ const method=mock.method(cp,'fork',(module,args,options)=>original(module,args,{...options,execPath:path.join(root,'missing-executable')}));
+ syncBuiltinESMExports();
+ try {await assert.rejects(convert(png),e=>e instanceof AssetWorkerNotStartedError&&e.reason==='asset_worker_unavailable');assert.equal(activeAssetWorkers(),0);}
+ finally {method.mock.restore();syncBuiltinESMExports();fs.rmSync(root,{recursive:true,force:true});}
+ assert.equal((await convert(png)).format,'webp');
+});
+
+test('an error after a real spawn never carries not-started evidence',async()=>{
+ const {createRequire,syncBuiltinESMExports}=await import('node:module');
+ const {mock}=await import('node:test');
+ const cp=createRequire(import.meta.url)('node:child_process'),original=cp.fork;
+ const {AssetWorkerNotStartedError}=await import('../dist/services/assets/workerClient.js');
+ const method=mock.method(cp,'fork',(module,args,options)=>{
+  const child=original(module,args,options);
+  child.once('spawn',()=>queueMicrotask(()=>child.emit('error',Object.assign(new Error('fixture after spawn'),{code:'ENOENT'}))));
+  return child;
+ });syncBuiltinESMExports();
+ try {await assert.rejects(convert(png),e=>!(e instanceof AssetWorkerNotStartedError)&&e.reason==='asset_worker_unavailable');assert.equal(activeAssetWorkers(),0);}
+ finally {method.mock.restore();syncBuiltinESMExports();}
+});
