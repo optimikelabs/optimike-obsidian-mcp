@@ -318,9 +318,7 @@ export class VaultCacheService {
         this.lastRefreshError ||
         this.eventWorkPending ||
         this.refreshRequested ||
-        this.isBuilding ||
-        (this.eventSupervisor &&
-          !this.eventSupervisor.snapshot().reconciledAndConnected)
+        this.isBuilding
           ? "uncertain"
           : this.isCacheReady
             ? "observed"
@@ -695,6 +693,12 @@ export class VaultCacheService {
       return;
     }
 
+    // Existing uncertainty cannot be discharged by an mtime/size-only scan.
+    // Promote just that scan to content reproof; healthy periodic scans keep
+    // their metadata optimization and SSE coverage remains a separate signal.
+    const previousState = this.readMetadataValue("refresh_state");
+    isInitialBuild ||= this.lastRefreshError !== null || !this.isCacheReady ||
+      (previousState !== "complete" && previousState !== "pending-events");
     this.isBuilding = true;
     const uncertaintyAtStart = this.uncertaintyGeneration;
     this.lastRefreshStartedAt = Date.now();

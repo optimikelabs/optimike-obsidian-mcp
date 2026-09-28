@@ -84,3 +84,28 @@ test('unsupported events never rescan or downgrade a healthy periodic cache at s
   assert.equal(reconciliations,0); assert.equal(f.cache.getStats().freshness,'observed'); await warmSharedTaskCache(f.cache);}
  finally {await supervisor.stop();}
 }));
+
+
+test('prior uncertainty forces content reproof even during an ordinary metadata scan',()=>fixture(async f=>{
+ f.set({'One.md':'- [ ] task-two'});f.cache.markFreshnessUncertain();
+ await f.cache.refreshCache();assert.equal((await f.cache.getEntry('/One.md')).content,'- [ ] task-two');
+ await f.restart();assert.equal(f.cache.isReady(),true);assert.equal((await f.cache.getEntry('/One.md')).content,'- [ ] task-two');
+}));
+test('failed ordinary reproof cannot clear uncertainty or advance successful evidence',()=>fixture(async f=>{
+ const before=f.cache.getStats().lastRefreshAt;f.cache.markFreshnessUncertain();f.fail();
+ await f.cache.refreshCache();assert.equal(f.cache.isReady(),false);assert.equal(f.cache.getStats().lastRefreshAt,before);
+ await f.restart();assert.equal(f.cache.isReady(),false);
+}));
+test('healthy ordinary scans retain metadata-based skipping',()=>fixture(async f=>{
+ f.fail();await f.cache.refreshCache();assert.equal(f.cache.isReady(),true);assert.equal(f.cache.getStats().freshness,'observed');
+}));
+test('production-owned unsupported supervisor reports periodic freshness separately',()=>fixture(async f=>{
+ const {LocalRestEventError}=await import('../dist/services/obsidianRestAPI/eventStreams.js');
+ const mode=config.obsidianRuntimeMode,enabled=config.obsidianCacheEventsEnabled;
+ config.obsidianRuntimeMode='live';config.obsidianCacheEventsEnabled=true;
+ f.cache.obsidianService.consumeVaultEvents=async()=>{throw new LocalRestEventError('unsupported');};
+ try{f.cache.startPeriodicRefresh();const end=Date.now()+2000;
+  while(f.cache.getStats().eventCache.state!=='unsupported'&&Date.now()<end)await new Promise(r=>setTimeout(r,10));
+  assert.equal(f.cache.getStats().eventCache.state,'unsupported');assert.equal(f.cache.getStats().freshness,'observed');
+ }finally{f.cache.stopPeriodicRefresh();config.obsidianRuntimeMode=mode;config.obsidianCacheEventsEnabled=enabled;}
+}));
