@@ -10,6 +10,7 @@ export const TOOL_REGISTRATION_MODES = [
 export type ToolRegistrationMode = (typeof TOOL_REGISTRATION_MODES)[number];
 
 export const TOOL_GROUP_IDS = [
+  "assets.governed",
   "admin",
   "bases.compat",
   "bases.direct",
@@ -69,7 +70,7 @@ export type ToolAnnotationClass =
   | "governed-mutation";
 
 export type GovernedLifecycleRole = "plan" | "apply" | "status" | "recover";
-export type ToolStaticRequirement = "vault-cache";
+export type ToolStaticRequirement = "vault-cache" | "asset-policy";
 
 export interface ToolAvailabilityRule {
   modes: readonly ToolRegistrationMode[];
@@ -140,6 +141,9 @@ const CANONICAL_UNIQUE_TOOL_NAMES = [
 const COMPATIBILITY_HISTORICAL_TOOL_NAMES = ["bases_upsert_config"] as const;
 
 const GOVERNED_OPERATION_TOOL_NAMES = [
+  "asset_import_plan",
+  "asset_import_apply",
+  "asset_import_status",
   "bases_rows_patch_plan",
   "bases_rows_patch_apply",
   "bases_rows_patch_status",
@@ -299,7 +303,7 @@ function defineTool(
 
 /** Recovery is a domain contract, not a mandatory synthetic fourth tool. */
 export function governedLifecycleRoles(family: string): readonly GovernedLifecycleRole[] {
-  return ["note-move", "note-create", "base-rows"].includes(family)
+  return ["note-move", "note-create", "base-rows", "asset-import"].includes(family)
     ? ["plan", "apply", "status"]
     : ["plan", "apply", "status", "recover"];
 }
@@ -349,6 +353,7 @@ const OPERON_MUTATION_TOOLS = [
 ] as const;
 
 export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
+  ...governedFamily("asset_import", "assets.governed", "asset-import").map(entry => ({...entry, availabilityRules: [{modes: LIVE_MODES, requires: ["asset-policy" as const]}]})),
   defineTool("obsidian_read_note", "notes.read", "notes-core", ALL_MODES),
   defineTool("obsidian_note_links", "notes.read", "note-links", LIVE_MODES),
   defineTool("obsidian_list_notes", "notes.read", "notes-core", ALL_MODES),
@@ -636,7 +641,8 @@ function staticRequirementsSatisfied(
   registrationMode: ToolRegistrationMode,
   availableStaticRequirements: readonly ToolStaticRequirement[] | undefined,
 ): boolean {
-  if (!availableStaticRequirements) return true;
+  // Optional asset publication is not assumed configured by legacy callers.
+  if (!availableStaticRequirements) return entry.family !== "asset-import";
   const available = new Set<ToolStaticRequirement>(availableStaticRequirements);
   return (entry.availabilityRules ?? [])
     .filter((rule) => rule.modes.includes(registrationMode))

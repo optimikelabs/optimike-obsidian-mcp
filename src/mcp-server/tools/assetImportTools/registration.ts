@@ -35,7 +35,7 @@ export async function registerAssetImportTools(
     if (!config.assetImportEnabled || config.mcpWriteMode !== "full") {
       throw new McpError(BaseErrorCode.FORBIDDEN, "Asset import is disabled by the explicit write policy.", {reason:"asset_import_disabled"});
     }
-    assertWriteAllowed({ runtimeMode:config.obsidianRuntimeMode, writeMode:config.mcpWriteMode, operation:"note-write" });
+    assertWriteAllowed({ operation:"asset_import_apply", action:"import", destructive:true });
   };
   async function run(toolName:string, operation:()=>Promise<unknown>) {
     try {
@@ -45,7 +45,7 @@ export async function registerAssetImportTools(
         (receipt.outcome==="committed"&&receipt.postflight?.status!=="verified");
       return {content:[{type:"text" as const,text:JSON.stringify(result)}],isError:failed};
     } catch(error) {
-      return {content:[{type:"text" as const,text:JSON.stringify(publicMcpToolErrorPayload(error,{operation:toolName,toolName}))}],isError:true};
+      return {content:[{type:"text" as const,text:JSON.stringify(publicMcpToolErrorPayload(error,{operation:toolName,toolName,params:{}}))}],isError:true};
     }
   }
   server.registerTool("asset_import_plan", {

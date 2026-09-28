@@ -143,6 +143,9 @@ const EnvSchema = z
       // unavailable/degraded state until Local REST becomes reachable.
       .default("false"),
     MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
+    MCP_ASSET_FOLDER: z.string().min(1).max(800).optional(),
+    MCP_ASSET_IMPORT_ENABLED: z.enum(["true", "false"]).default("false").transform(v => v === "true"),
+    MCP_ASSET_WEBP_QUALITY: z.coerce.number().int().min(1).max(100).default(75),
     MCP_EXTERNAL_MOVE_ENABLED: z
       .string()
       .transform((val) => val.toLowerCase() === "true")
@@ -446,6 +449,9 @@ export const config = {
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
   externalRootsFile: env.MCP_EXTERNAL_ROOTS_FILE,
+  assetFolder: env.MCP_ASSET_FOLDER,
+  assetImportEnabled: env.MCP_ASSET_IMPORT_ENABLED,
+  assetWebpQuality: env.MCP_ASSET_WEBP_QUALITY,
   externalMoveEnabled: env.MCP_EXTERNAL_MOVE_ENABLED,
   externalMoveProfileId: env.MCP_EXTERNAL_MOVE_PROFILE_ID,
   externalMoveJournalPath:
