@@ -167,6 +167,7 @@ export class VaultCacheService {
   private closing = false;
   private closed = false;
   private incrementalFailures = 0;
+  private uncertaintyGeneration = 0;
   private lastRefreshFailedFiles = 0;
   private eventSupervisor: CacheEventSupervisor | null = null;
   private eventStop: Promise<void> = Promise.resolve();
@@ -434,7 +435,9 @@ export class VaultCacheService {
 
   /** Only finite reason codes are retained; no source path or upstream payload. */
   public markFreshnessUncertain(): void {
+    this.uncertaintyGeneration++;
     this.lastRefreshError = "cache_freshness_uncertain";
+    if (!this.closed) this.upsertMetadataValue("refresh_state", "uncertain");
   }
 
   public async updateFileVerified(
@@ -457,11 +460,20 @@ export class VaultCacheService {
           }
           try {
             const source = await this.pickRefreshSource();
-            const row = await this.readCacheRow(
-              normalizedPath,
-              source,
-              context,
-            );
+            // Local REST can briefly miss a just-written file before indexing.
+            // Preserve the legacy bounded retries; never retry arbitrary failures.
+            const read = () => this.readCacheRow(normalizedPath, source, context);
+            const row = source === "rest"
+              ? await retryWithDelay(read, {
+                  operationName: "proactiveCacheUpdate",
+                  context,
+                  maxRetries: 3,
+                  delayMs: 300,
+                  shouldRetry: (error: unknown) => error instanceof McpError &&
+                    (error.code === BaseErrorCode.NOT_FOUND ||
+                     error.code === BaseErrorCode.SERVICE_UNAVAILABLE),
+                })
+              : await read();
             this.upsertRow(row);
             return { ok: true, disposition: "updated" };
           } catch (error) {
@@ -663,6 +675,7 @@ export class VaultCacheService {
     }
 
     this.isBuilding = true;
+    const uncertaintyAtStart = this.uncertaintyGeneration;
     this.lastRefreshStartedAt = Date.now();
     this.lastRefreshCompletedAt = null;
     this.lastRefreshDurationMs = null;
@@ -675,6 +688,7 @@ export class VaultCacheService {
     logger.info("Starting persistent vault cache refresh process...", context);
 
     try {
+      this.upsertMetadataValue("refresh_state", "building");
       const startTime = Date.now();
       const refreshSource = await this.pickRefreshSource();
       const remoteFiles =
@@ -802,13 +816,28 @@ export class VaultCacheService {
       ).length;
       this.lastRefreshError = this.lastRefreshFailedFiles
         ? "cache_refresh_incomplete"
-        : null;
-      this.isCacheReady = this.lastRefreshFailedFiles === 0;
+        : this.uncertaintyGeneration !== uncertaintyAtStart
+          ? "cache_freshness_uncertain"
+          : null;
+      this.isCacheReady = this.lastRefreshError === null;
       this.lastRefreshCompletedAt = Date.now();
       this.lastRefreshDurationMs = Math.round(duration * 1000);
       this.lastRefreshFileCount = this.metadataCache.size;
-      this.upsertMetadataValue("last_refresh_at", String(Date.now()));
-      this.upsertMetadataValue("last_refresh_source", refreshSource);
+      // Commit completeness with its evidence. An interrupted scan retains
+      // 'building'; partial work never advances the last successful checkpoint.
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.upsertMetadataValue("last_refresh_failed_files", String(this.lastRefreshFailedFiles));
+        this.upsertMetadataValue("refresh_state", this.isCacheReady ? "complete" : "incomplete");
+        if (this.isCacheReady) {
+          this.upsertMetadataValue("last_refresh_at", String(Date.now()));
+          this.upsertMetadataValue("last_refresh_source", refreshSource);
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
       logger.info(
         `${
           isInitialBuild ? "Initial vault cache build" : "Vault cache refresh"
@@ -817,6 +846,8 @@ export class VaultCacheService {
       );
     } catch (error) {
       this.lastRefreshError = "cache_refresh_failed";
+      this.isCacheReady = false;
+      this.upsertMetadataValue("refresh_state", "incomplete");
       logger.error(
         `Critical error during vault cache refresh. Cache may be incomplete. Error: ${error instanceof Error ? error.message : String(error)}`,
         context,
@@ -857,11 +888,22 @@ export class VaultCacheService {
       if (
         !normalizedCacheFilePath(row.path) ||
         isVaultPathExcluded(row.path, this.vaultExclusionMatcher)
-      )
+      ) {
+        // Direct SQLite readers must not see content hidden only in memory.
+        this.deleteRow(row.path);
         continue;
+      }
       this.metadataCache.set(row.path, row);
     }
-    this.isCacheReady = this.metadataCache.size > 0;
+    const state = this.readMetadataValue("refresh_state");
+    this.lastRefreshFailedFiles = Math.max(0, this.readMetadataNumber("last_refresh_failed_files") ?? 0);
+    this.lastRefreshError = state && state !== "complete"
+      ? "cache_refresh_unverified"
+      : null;
+    // Existing stores without a marker remain usable; once this version has
+    // observed uncertainty, a new process cannot silently erase that evidence.
+    this.isCacheReady = !this.lastRefreshError &&
+      (this.metadataCache.size > 0 || state === "complete");
   }
 
   private touchHotCache(filePath: string, entry: CacheEntry): void {
