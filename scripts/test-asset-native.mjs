@@ -69,3 +69,13 @@ test('separate processes racing on one destination produce exactly one file crea
   assert.deepEqual(fs.readFileSync(path.join(root,'Images/race.png')),Buffer.from([0,255,1]));
  } finally { for(const p of children)if(p.exitCode===null)p.kill(); fs.rmSync(root,{recursive:true,force:true}); }
 });
+
+
+test('opened-handle locality rejects remote/removable devices and unverified query results',async()=>{
+ const {assertLocalAssetDevice}=await import('../dist/services/assets/windowsAssetFiles.js');
+ const b=Buffer.alloc(8);b.writeUInt32LE(7,0);
+ assert.doesNotThrow(()=>assertLocalAssetDevice(0,8n,b));
+ for(const characteristics of [1,16,17]){b.writeUInt32LE(characteristics,4);assert.throws(()=>assertLocalAssetDevice(0,8,b));}
+ b.writeUInt32LE(0,4);assert.throws(()=>assertLocalAssetDevice(-1,8,b));assert.throws(()=>assertLocalAssetDevice(0,0,b));
+ b.writeUInt32LE(0,0);assert.throws(()=>assertLocalAssetDevice(0,8,b));
+});

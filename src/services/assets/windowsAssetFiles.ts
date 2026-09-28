@@ -31,7 +31,7 @@ type NativeInfo = { attributes: number; volume: number; indexHigh: number; index
 type NativeApi = { koffi: any; open: (...args: any[]) => number; info: (...args: any[]) => number;
   close: (handle: Handle) => number; write: (...args: any[]) => number; read: (...args: any[]) => number;
   seek: (...args: any[]) => number; flush: (handle: Handle) => number;
-  drive: (root: string) => number; volume: (...args: any[]) => number; attributesSize: number };
+  drive: (root: string) => number; queryVolume: (...args:any[]) => number; volume: (...args: any[]) => number; attributesSize: number };
 let nativeApi: NativeApi | undefined;
 function native(): NativeApi {
   if (process.platform !== "win32" || process.arch !== "x64") fail("unsupported_platform");
@@ -55,6 +55,7 @@ function native(): NativeApi {
       read:kernel.func("int __stdcall ReadFile(void *file, _Out_ void *data, uint32_t length, _Out_ uint32_t *read, void *overlapped)"),
       seek:kernel.func("int __stdcall SetFilePointerEx(void *file, int64_t offset, void *position, uint32_t method)"),
       flush:kernel.func("int __stdcall FlushFileBuffers(void *file)"),
+      queryVolume:nt.func("int32_t __stdcall NtQueryVolumeInformationFile(void *file, _Out_ OptimikeAssetIoStatus *status, _Out_ void *information, uint32_t length, uint32_t informationClass)"),
       drive:kernel.func("uint32_t __stdcall GetDriveTypeW(const char16_t *root)"),
       volume:kernel.func("int __stdcall GetVolumeInformationByHandleW(void *file, void *name, uint32_t nameLength, void *serial, void *maximumComponent, void *flags, _Out_ void *filesystem, uint32_t filesystemLength)"),
     };
@@ -104,6 +105,11 @@ export class WindowsAssetFiles {
     const held:Handle[]=[], identities:string[]=[];
     try {
       let parent=open(api,"\\??\\"+this.driveRoot,null,true); held.push(parent);
+      const device=Buffer.alloc(8), deviceStatus:{information?:number|bigint}={};
+      const result=api.queryVolume(parent,deviceStatus,device,device.length,4);
+      // FileFsDeviceInformation is queried on the opened handle. A drive-letter
+      // check before open cannot establish locality against namespace replacement.
+      assertLocalAssetDevice(result,deviceStatus.information,device);
       const fsname=Buffer.alloc(128);
       if(!api.volume(parent,null,0,null,null,null,fsname,64) || fsname.toString("utf16le").replace(/\0.*$/su,"")!=="NTFS")
         fail("asset_parent_unsupported");
@@ -160,4 +166,11 @@ export class WindowsAssetFiles {
       } finally {api.close(handle);}
     });
   }
+}
+
+
+/** FILE_DEVICE_DISK; refuse REMOTE_DEVICE and REMOVABLE_MEDIA. */
+export function assertLocalAssetDevice(status:number, length:number|bigint|undefined, bytes:Buffer):void {
+  if(status!==0 || Number(length)!==8 || bytes.length!==8 || bytes.readUInt32LE(0)!==7 ||
+     (bytes.readUInt32LE(4)&0x11)!==0) fail("asset_parent_unsupported");
 }
