@@ -45,3 +45,35 @@ test('failed per-file refresh never reports a fully fresh inventory',async()=>{
  fail=true;try{await cache.refreshCache(true);assert.notEqual(cache.getStats().lastRefreshError,null);}
  finally{fail=false;}
 });
+
+test('a slower inventory read cannot overwrite a later incremental refresh',async()=>{
+ const original=rest.getFileContent;let entered;const reading=new Promise(resolve=>{entered=resolve;});
+ let release;const gate=new Promise(resolve=>{release=resolve;});let first=true;
+ content='old value from scan';
+ rest.getFileContent=async p=>{const result=await original(p);if(first){first=false;entered();await gate;}return result;};
+ try {
+  const scan=cache.refreshCache(true);await reading;content='newer value from incremental';
+  const update=cache.updateCacheForFile('Note.md',context);
+  await new Promise(resolve=>setTimeout(resolve,10));release();await Promise.all([scan,update]);
+  assert.equal((await cache.getEntry('/Note.md')).content,'newer value from incremental');
+ }finally{release();rest.getFileContent=original;}
+});
+test('a refresh requested during a scan is serviced, not dropped',async()=>{
+ const original=rest.listFiles;let entered;const reading=new Promise(resolve=>{entered=resolve;});
+ let release;const gate=new Promise(resolve=>{release=resolve;});let calls=0;
+ rest.listFiles=async()=>{calls++;if(calls===1){entered();await gate;}return original();};
+ try{const first=cache.refreshCache(true);await reading;const second=cache.refreshCache(true);release();await Promise.all([first,second]);assert.equal(calls,2);}
+ finally{release();rest.listFiles=original;}
+});
+test('an incomplete REST inventory cannot purge a previously observed note',async()=>{
+ await cache.refreshCache(true);const original=rest.listFiles;
+ const {McpError,BaseErrorCode}=await import('../dist/types-global/errors.js');
+ rest.listFiles=async()=>{throw new McpError(BaseErrorCode.NOT_FOUND,'missing subtree');};
+ try{await cache.refreshCache(true);assert.ok(await cache.getEntry('/Note.md'));assert.equal(cache.getStats().lastRefreshError,'cache_refresh_failed');}
+ finally{rest.listFiles=original;}
+});
+test('a backend response for another note cannot populate the requested identity',async()=>{
+ const original=rest.getFileContent;rest.getFileContent=async()=>({path:'Other.md',content:'wrong',stat:{mtime:1,ctime:1,size:5}});
+ try{assert.equal((await cache.updateFileVerified('Target.md',context)).ok,false);assert.equal(await cache.getEntry('/Target.md'),undefined);}
+ finally{rest.getFileContent=original;}
+});
