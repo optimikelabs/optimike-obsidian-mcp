@@ -1,0 +1,33 @@
+name: Bridge OpenAPI
+on:
+  pull_request:
+    paths: ['src/**', 'scripts/make-executable.mjs', 'plugins/**', 'scripts/test-bridge-openapi.mjs', 'package*.json', 'tsconfig*.json', '.github/workflows/bridge-openapi.yml', 'docs/bridge-openapi*', 'docs/cycle-20260928/L3.md']
+  push:
+    branches: [main]
+    paths: ['src/**', 'scripts/make-executable.mjs', 'plugins/**', 'scripts/test-bridge-openapi.mjs', 'package*.json', 'tsconfig*.json', '.github/workflows/bridge-openapi.yml', 'docs/bridge-openapi*', 'docs/cycle-20260928/L3.md']
+permissions:
+  contents: read
+concurrency:
+  group: bridge-openapi-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix plugins/obsidian-atomic-write-bridge ci
+      - run: npm --prefix plugins/obsidian-bases-bridge ci
+      - run: npm --prefix plugins/obsidian-operon-bridge ci
+      - run: npm run test:bridge-openapi
+      - run: npm run test:bridge-lifecycle

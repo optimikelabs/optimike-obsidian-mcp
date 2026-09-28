@@ -105,7 +105,10 @@
     "docs/obsidian-api",
     "docs/cache-events.md",
     "docs/cache-events.fr.md",
-    "docs/cycle-20260928"
+    "docs/cycle-20260928",
+    "docs/bridge-openapi.md",
+    "docs/bridge-openapi.fr.md",
+    "docs/cycle-20260928/L3.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
@@ -227,7 +230,8 @@
     "test:mcp-2026:all": "npm run build && node scripts/run-mcp-2026-tests.mjs all",
     "benchmark:vnext:modern": "node scripts/run-mcp-2026-tests.mjs benchmark-modern",
     "test:local-rest-531": "node --test scripts/test-local-rest-531-spec.mjs scripts/test-local-rest-http-contract.mjs scripts/test-local-rest-http-proxy.mjs && node scripts/test-local-rest-api-compat.mjs",
-    "test:cache-events": "npm run build && node --test scripts/test-cache-freshness.mjs scripts/test-cache-event-http.mjs scripts/test-cache-event-supervisor.mjs scripts/test-cache-event-integration.mjs scripts/test-cache-consumers.mjs"
+    "test:cache-events": "npm run build && node --test scripts/test-cache-freshness.mjs scripts/test-cache-event-http.mjs scripts/test-cache-event-supervisor.mjs scripts/test-cache-event-integration.mjs scripts/test-cache-consumers.mjs",
+    "test:bridge-openapi": "npm --prefix plugins/obsidian-atomic-write-bridge run typecheck && npm --prefix plugins/obsidian-operon-bridge run typecheck && node --test scripts/test-bridge-openapi.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
