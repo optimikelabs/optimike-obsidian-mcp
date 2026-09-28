@@ -11,7 +11,8 @@ test('HTTP fixture bypasses hostile ambient proxies', {timeout:30000}, async()=>
   const url='http://127.0.0.1:'+proxy.address().port;
   const env={...process.env,HTTP_PROXY:url,http_proxy:url,HTTPS_PROXY:url,https_proxy:url,
     ALL_PROXY:url,all_proxy:url,NO_PROXY:'',no_proxy:''};
-  const child=spawn(process.execPath,['--test',fileURLToPath(new URL('./test-local-rest-http-contract.mjs',import.meta.url))],
+  delete env.NODE_TEST_CONTEXT;
+  const child=spawn(process.execPath,['--test','--test-reporter=tap',fileURLToPath(new URL('./test-local-rest-http-contract.mjs',import.meta.url))],
     {env,stdio:['ignore','pipe','pipe'],windowsHide:true});
   let output='';child.stdout.on('data',b=>{if(output.length<32768)output+=b;});
   child.stderr.on('data',b=>{if(output.length<32768)output+=b;});
@@ -20,5 +21,7 @@ test('HTTP fixture bypasses hostile ambient proxies', {timeout:30000}, async()=>
     const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
     assert.equal(forwarded,0,'a loopback fixture request reached ambient proxy');
     assert.equal(code,0,output);
+    assert.match(output,/^# tests 23$/m,'child must actually execute the HTTP fixture');
+    assert.match(output,/^# pass 23$/m,'all child cases must pass under hostile proxies');
   } finally {clearTimeout(timer);proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}
 });
