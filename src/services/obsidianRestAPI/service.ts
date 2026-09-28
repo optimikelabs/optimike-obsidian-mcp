@@ -5,6 +5,7 @@
  * It encapsulates the logic for making authenticated requests to the API endpoints.
  */
 
+import { consumeVaultEventStream, type VaultCacheEvent, type VaultEventNotice } from "./eventStreams.js";
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 import https from "node:https"; // Import the https module for Agent configuration
 import { config } from "../../config/index.js";
@@ -293,6 +294,12 @@ export class ObsidianRestApiService {
    * @param context - The request context for logging and correlation.
    * @returns {Promise<ApiStatusResponse>} - The status object from the API.
    */
+  consumeVaultEvents(event: VaultCacheEvent, signal: AbortSignal,
+    onReady: () => void, onEvent: (event: VaultEventNotice) => void): Promise<void> {
+    return consumeVaultEventStream(this.axiosInstance, config.obsidianBaseUrl,
+      event, signal, onReady, onEvent);
+  }
+
   async checkStatus(
     context: RequestContext,
     timeoutMs?: number,
