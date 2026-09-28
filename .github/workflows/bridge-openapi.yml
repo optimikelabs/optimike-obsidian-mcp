@@ -1,10 +1,10 @@
 name: Bridge OpenAPI
 on:
   pull_request:
-    paths: ['plugins/**', 'scripts/test-bridge-openapi.mjs', 'package*.json', 'tsconfig*.json', '.github/workflows/bridge-openapi.yml', 'docs/bridge-openapi*', 'docs/cycle-20260928/L3.md']
+    paths: ['src/**', 'scripts/make-executable.mjs', 'plugins/**', 'scripts/test-bridge-openapi.mjs', 'package*.json', 'tsconfig*.json', '.github/workflows/bridge-openapi.yml', 'docs/bridge-openapi*', 'docs/cycle-20260928/L3.md']
   push:
     branches: [main]
-    paths: ['plugins/**', 'scripts/test-bridge-openapi.mjs', 'package*.json', 'tsconfig*.json', '.github/workflows/bridge-openapi.yml', 'docs/bridge-openapi*', 'docs/cycle-20260928/L3.md']
+    paths: ['src/**', 'scripts/make-executable.mjs', 'plugins/**', 'scripts/test-bridge-openapi.mjs', 'package*.json', 'tsconfig*.json', '.github/workflows/bridge-openapi.yml', 'docs/bridge-openapi*', 'docs/cycle-20260928/L3.md']
 permissions:
   contents: read
 concurrency:

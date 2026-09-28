@@ -119,3 +119,11 @@ for (const id of ['obsidian-atomic-write-bridge','obsidian-bases-bridge','obsidi
     assert.equal(new Set(stableRegistrations).size,1, 'optional docs cannot change route coverage');
   });
 }
+
+
+test('CI watches transitive bridge sources and build inputs in both event filters', async () => {
+ const {default:yaml}=await import('js-yaml');
+ const w=yaml.load(readFileSync(new URL('../.github/workflows/bridge-openapi.yml',import.meta.url),'utf8'));
+ for(const event of ['pull_request','push'])for(const input of ['src/**','plugins/**','package*.json','tsconfig*.json','scripts/make-executable.mjs'])
+   assert.ok(w.on[event].paths.includes(input),event+' misses '+input);
+});
