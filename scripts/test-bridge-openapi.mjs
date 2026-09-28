@@ -73,3 +73,49 @@ test('a route registration error remains an error rather than being hidden as do
   const h=host(); const expected=new Error('route failure'); h.native.addRoute=()=>{throw expected;};
   const d=describeRestRoutes(h.native,'fixture'); assert.throws(()=>d.api.addRoute('/x'),e=>e===expected);
 });
+
+
+for (const id of ['obsidian-atomic-write-bridge','obsidian-bases-bridge','obsidian-operon-bridge']) {
+  test('actual ' + id + ' mount preserves routes on old host, publication and collision', async () => {
+    const { createRequire } = await import('node:module');
+    const { runInNewContext } = await import('node:vm');
+    const { fileURLToPath } = await import('node:url');
+    const localRequire = createRequire(new URL('../plugins/' + id + '/package.json', import.meta.url));
+    const { buildSync } = localRequire('esbuild');
+    const entry = fileURLToPath(new URL('../plugins/' + id + '/src/main.ts', import.meta.url));
+    const code = buildSync({entryPoints:[entry],bundle:true,write:false,platform:'node',format:'cjs',external:['obsidian','electron'],logLevel:'silent'}).outputFiles[0].text;
+    const stableRegistrations=[];
+    for(const mode of ['old','current','collision']) {
+      const h=host(mode==='old'?2:3), messages=[];
+      if(mode==='collision') h.native.addOpenApiDescription=()=>{throw new Error('private collision detail');};
+      class Plugin { constructor(){ this.manifest={id,name:id,version:'0.0.0-test'}; } register(){} }
+      class TFile {} class TFolder {}
+      const obsidian=new Proxy({Plugin,TFile,TFolder,Platform:{isDesktopApp:false}}, {get:(target,key)=>target[key]??class {}});
+      const module={exports:{}};
+      runInNewContext(code,{module,exports:module.exports,require:(name)=>name==='obsidian'?obsidian:localRequire(name),console:{log:()=>{},warn:(s)=>messages.push(s),info:(s)=>messages.push(s),error:(s)=>messages.push(s)},Buffer,process,setTimeout,clearTimeout,setInterval,clearInterval,URL});
+      const plugin=new module.exports.default();
+      const provider={getPublicApi:()=>h.native};
+      plugin.app={workspace:{onLayoutReady:cb=>cb()},plugins:{plugins:{'obsidian-local-rest-api':provider},getPlugin:()=>provider}};
+      plugin.settings={};
+      let cleanup;
+      try {
+        if(id==='obsidian-operon-bridge') cleanup=plugin.mountRestExtension(provider);
+        else { await plugin.registerRestExtension(); cleanup=()=>plugin.restLifecycle.stop(); }
+        assert.ok(h.registrations.length>=6, 'actual mounting registered routes');
+        const expected=h.registrations.map(r=>r.method+' '+r.path).sort();
+        stableRegistrations.push(JSON.stringify(expected));
+        if(mode==='current') {
+          assert.equal(h.contributions.length,1);
+          const actual=[];
+          for(const p of Object.values(h.contributions[0].paths))
+            for(const method of ['get','post','put','patch','delete','head','options'])
+              if(p[method])actual.push(method+' '+p['x-optimike-express-pattern']);
+          assert.equal(JSON.stringify([...new Set(expected)].sort()),JSON.stringify(actual.sort()));
+        } else { assert.equal(h.contributions.length,0); }
+        assert.equal(messages.join(' ').includes('private collision detail'),false);
+      } finally { cleanup?.(); plugin.restLifecycle?.stop(); }
+      assert.equal(h.registrations.length,0); assert.equal(h.contributions.length,0);
+    }
+    assert.equal(new Set(stableRegistrations).size,1, 'optional docs cannot change route coverage');
+  });
+}

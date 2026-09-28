@@ -103,3 +103,5 @@ Formules Base gouvernées source-preserving : [contrat P2](governed-base-formula
 
 Ne pas recopier limites, variables d’environnement ou registres d’outils dans
 plusieurs pages lorsqu’un lien vers l’autorité suffit.
+
+- [Bridge OpenAPI route inventory](bridge-openapi.fr.md) ? optional documentation; not authorization or complete payload schemas.

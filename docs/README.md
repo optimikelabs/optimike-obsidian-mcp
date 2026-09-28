@@ -103,3 +103,5 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 
 Do not copy limits, environment-variable contracts or tool registries into
 multiple pages when a link to the owning page is sufficient.
+
+- [Bridge OpenAPI route inventory](bridge-openapi.md) ? optional documentation; not authorization or complete payload schemas.
