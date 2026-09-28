@@ -15,6 +15,8 @@ function make(options = {}) {
   const updates = [];
   let scans = 0;
   let uncertain = 0;
+  let workPending = false;
+  let settlements = 0;
   let failedUpdate = false;
   let scanHold;
   const source = {
@@ -54,6 +56,8 @@ function make(options = {}) {
     uncertain: () => {
       uncertain++;
     },
+    pending: () => { workPending = true; },
+    settled: () => { workPending = false; settlements++; },
   };
   const supervisor = new CacheEventSupervisor(source, target, {
     maxPending: 4,
@@ -69,6 +73,8 @@ function make(options = {}) {
     channels,
     updates,
     scans: () => scans,
+    workPending: () => workPending,
+    settlements: () => settlements,
     uncertain: () => uncertain,
     failUpdates: (value) => {
       failedUpdate = value;
@@ -195,6 +201,8 @@ test("unsupported host remains explicit without failing the periodic cache", asy
         return true;
       },
       uncertain: () => {},
+      pending: () => {},
+      settled: () => {},
     },
     { retryMinMs: 50, retryMaxMs: 100 },
   );
@@ -206,3 +214,34 @@ test("unsupported host remains explicit without failing the periodic cache", asy
     await supervisor.stop();
   }
 });
+
+
+test("accepted events mark pending synchronously before debounce and settle without an extra scan", async () =>
+  run(async f => {
+    const scans=f.scans();
+    f.emit("modify","Durable.md");
+    assert.equal(f.workPending(),true);
+    assert.equal(f.updates.length,0);
+    await wait(()=>f.supervisor.snapshot().state==="ready");
+    assert.equal(f.workPending(),false);
+    assert.equal(f.scans(),scans);
+  }, {debounceMs:50}));
+
+test("events received during reconciliation remain pending until their updates succeed", async () =>
+  run(async f => {
+    let release;
+    f.hold(new Promise(resolve=>{release=resolve;}));
+    f.emit("rename","Folder",{isFolder:true,oldPath:"Old"});
+    await wait(()=>f.scans()===2);
+    f.emit("modify","Durable.md");
+    try {
+      assert.equal(f.workPending(),true);
+      assert.equal(f.updates.length,0);
+      f.failUpdates(true);
+    } finally { release(); f.hold(null); }
+    await wait(()=>f.supervisor.snapshot().updateFailures===1);
+    assert.equal(f.workPending(),true);
+    f.failUpdates(false);
+    await wait(()=>f.supervisor.snapshot().state==="ready");
+    assert.equal(f.workPending(),false);
+  }));

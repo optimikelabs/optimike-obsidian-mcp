@@ -313,3 +313,30 @@ test("interrupted refresh and explicit uncertainty remain uncertain after restar
     assert.equal(instance.getStats().freshness, "uncertain");
   } finally { await instance.close(); config.obsidianSharedCacheDbPath = previous; }
 });
+
+
+test("accepted pending work is durable before an update and completion cannot clear unrelated uncertainty", async () => {
+  const previous=config.obsidianSharedCacheDbPath;
+  config.obsidianSharedCacheDbPath=path.join(root,"pending-event-restart.sqlite");
+  let instance=new VaultCacheService(rest);
+  try {
+    await instance.refreshCache(true);
+    assert.equal(typeof instance.markEventWorkPending,"function");
+    instance.markEventWorkPending();
+    await instance.close();
+    instance=new VaultCacheService(rest);
+    assert.equal(instance.isReady(),false);
+    assert.equal(instance.getStats().freshness,"uncertain");
+    await instance.refreshCache(true);
+    instance.markEventWorkPending();
+    instance.markFreshnessUncertain();
+    instance.settleEventWork();
+    assert.equal(instance.getStats().freshness,"uncertain");
+    await instance.refreshCache(true);
+    instance.markEventWorkPending();
+    instance.settleEventWork();
+    await instance.close();
+    instance=new VaultCacheService(rest);
+    assert.equal(instance.getStats().freshness,"observed");
+  } finally { await instance.close(); config.obsidianSharedCacheDbPath=previous; }
+});
