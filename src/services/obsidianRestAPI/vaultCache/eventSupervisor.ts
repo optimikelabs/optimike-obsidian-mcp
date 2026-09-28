@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LocalRestEventError, VAULT_CACHE_EVENTS, type VaultCacheEvent,
   type VaultEventNotice, type VaultEventSource, type EventStreamFailure } from "../eventStreams.js";
@@ -20,6 +21,7 @@ export interface EventSupervisorOptions {
 /** One instance per cache/process, not one per MCP request or transport session. */
 export class CacheEventSupervisor {
   private running = false;
+  private stopping: Promise<void> | null = null;
   private controller: AbortController | null = null;
   private workers: Promise<void>[] = [];
   private connected = new Set<VaultCacheEvent>();
@@ -51,7 +53,7 @@ export class CacheEventSupervisor {
   }
 
   start(): void {
-    if (this.running) return;
+    if (this.running || this.stopping) return;
     this.running = true;
     this.controller = new AbortController();
     this.requestReconciliation();
@@ -59,16 +61,20 @@ export class CacheEventSupervisor {
     this.workers = VAULT_CACHE_EVENTS.map(event => this.streamLoop(event, signal));
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopping) return this.stopping;
     this.running = false;
     this.controller?.abort();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    await Promise.allSettled(this.workers);
-    await this.pump?.catch(() => undefined);
-    this.connected.clear();
-    this.pending.clear();
-    this.workers = [];
+    this.stopping = (async () => {
+      await Promise.allSettled(this.workers);
+      await this.pump?.catch(() => undefined);
+      this.connected.clear();
+      this.pending.clear();
+      this.workers = [];
+    })().finally(() => { this.stopping = null; });
+    return this.stopping;
   }
 
   snapshot() {
@@ -116,7 +122,7 @@ export class CacheEventSupervisor {
         this.pending.clear();
         this.requestReconciliation();
       }
-      if (!this.pending.has(candidate)) this.pending.set(candidate, Date.now());
+      if (!this.pending.has(candidate)) this.pending.set(candidate, performance.now());
     }
     this.schedule();
   }
@@ -126,7 +132,7 @@ export class CacheEventSupervisor {
     const dirty = this.revision !== this.reconciledRevision;
     if (!this.pending.size && !(dirty && this.connected.size === VAULT_CACHE_EVENTS.length)) return;
     const delay = this.pending.size ? this.options.debounceMs :
-      Math.max(this.options.debounceMs, this.nextReconcileAt - Date.now());
+      Math.max(this.options.debounceMs, this.nextReconcileAt - performance.now());
     this.timer = setTimeout(() => {
       this.timer = null;
       this.pump = this.flush().catch(() => {
@@ -139,10 +145,10 @@ export class CacheEventSupervisor {
   private async flush(): Promise<void> {
     if (!this.running) return;
     if (this.revision !== this.reconciledRevision && this.connected.size === VAULT_CACHE_EVENTS.length &&
-        Date.now() >= this.nextReconcileAt) {
+        performance.now() >= this.nextReconcileAt) {
       const revision = this.revision;
       this.reconciliations++;
-      this.nextReconcileAt = Date.now() + this.options.reconcileIntervalMs;
+      this.nextReconcileAt = performance.now() + this.options.reconcileIntervalMs;
       const ok = await this.target.reconcile();
       if (ok) { this.reconciledRevision = revision; this.lastReconciledAt = Date.now(); }
       else this.target.uncertain();
@@ -156,7 +162,7 @@ export class CacheEventSupervisor {
       const result = await this.target.update(filePath);
       if (!result.ok) { this.updateFailures++; this.requestReconciliation(); }
       else {
-        this.latencies.push(Date.now() - receivedAt);
+        this.latencies.push(Math.round(performance.now() - receivedAt));
         if (this.latencies.length > 128) this.latencies.shift();
       }
     }
@@ -167,7 +173,7 @@ export class CacheEventSupervisor {
     let hasConnected = false;
     while (this.running && !signal.aborted) {
       this.attempts++;
-      const started = Date.now();
+      const started = performance.now();
       try {
         await this.source.consumeVaultEvents(event, signal, () => {
           if (!this.running || signal.aborted) return;
@@ -185,7 +191,7 @@ export class CacheEventSupervisor {
         if (this.running && !signal.aborted) this.requestReconciliation();
       }
       if (signal.aborted || !this.running) break;
-      if (Date.now() - started >= 30000) delay = this.options.retryMinMs;
+      if (performance.now() - started >= 30000) delay = this.options.retryMinMs;
       await sleep(delay, undefined, {signal}).catch(() => undefined);
       delay = Math.min(this.options.retryMaxMs, delay * 2);
     }

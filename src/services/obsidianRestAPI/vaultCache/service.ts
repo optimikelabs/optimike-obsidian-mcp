@@ -515,7 +515,12 @@ export class VaultCacheService {
           try { await this.serializeCacheWrite(() => this.performRefresh(force)); }
           catch { this.markFreshnessUncertain(); }
         }
-      })().finally(() => { this.refreshRun = null; });
+      })().finally(() => {
+        this.refreshRun = null;
+        // A request may arrive between loop completion and this microtask.
+        // Chain it into the same returned promise rather than dropping it.
+        if (this.refreshRequested && !this.closing) return this.refreshCache(this.forceRefreshRequested);
+      });
     }
     return this.refreshRun;
   }
