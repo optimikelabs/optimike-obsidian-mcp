@@ -104,6 +104,7 @@ const EnvSchema = z
       .string()
       .transform((val) => val.toLowerCase() === "true")
       .default("false"),
+    OBSIDIAN_CACHE_EVENTS_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
     OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN: z.coerce
       .number()
       .int()
@@ -424,6 +425,7 @@ export const config = {
   obsidianBaseUrl: env.OBSIDIAN_BASE_URL,
   obsidianVerifySsl: env.OBSIDIAN_VERIFY_SSL,
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,
+  obsidianCacheEventsEnabled: env.OBSIDIAN_CACHE_EVENTS_ENABLED,
   obsidianEnableCache: env.OBSIDIAN_ENABLE_CACHE,
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
   obsidianCacheSource: env.OBSIDIAN_CACHE_SOURCE,

@@ -24,6 +24,7 @@ import {
   retryWithDelay,
 } from "../../../utils/index.js";
 import { NoteJson, ObsidianRestApiService } from "../index.js";
+import { CacheEventSupervisor } from "./eventSupervisor.js";
 
 export interface CacheEntry {
   content: string;
@@ -151,6 +152,8 @@ export class VaultCacheService {
   private closed = false;
   private incrementalFailures = 0;
   private lastRefreshFailedFiles = 0;
+  private eventSupervisor: CacheEventSupervisor | null = null;
+  private eventStop: Promise<void> = Promise.resolve();
 
   constructor(obsidianService?: ObsidianRestApiService) {
     this.obsidianService = obsidianService;
@@ -167,6 +170,7 @@ export class VaultCacheService {
   }
 
   public startPeriodicRefresh(): void {
+    if (this.closing || this.closed) return;
     const refreshIntervalMs =
       config.obsidianCacheRefreshIntervalMin * 60 * 1000;
     if (this.refreshIntervalId) {
@@ -177,6 +181,20 @@ export class VaultCacheService {
         }),
       );
       return;
+    }
+    if (config.obsidianCacheEventsEnabled && this.obsidianService &&
+        (config.obsidianRuntimeMode === "live" || config.obsidianRuntimeMode === "hybrid")) {
+      this.eventSupervisor ??= new CacheEventSupervisor(this.obsidianService, {
+        accepts: (candidate, folder) => this.acceptsEventPath(candidate, folder),
+        update: candidate => this.updateFileVerified(candidate,
+          requestContextService.createRequestContext({operation: "eventCacheRefresh"})),
+        reconcile: async () => {
+          await this.refreshCache(true);
+          return this.lastRefreshError === null && this.isCacheReady;
+        },
+        uncertain: () => this.markFreshnessUncertain(),
+      });
+      this.eventSupervisor.start();
     }
     this.refreshIntervalId = setInterval(
       () => this.refreshCache().catch(() => undefined),
@@ -191,6 +209,7 @@ export class VaultCacheService {
   }
 
   public stopPeriodicRefresh(): void {
+    this.eventStop = this.eventSupervisor?.stop() ?? Promise.resolve();
     const context = requestContextService.createRequestContext({
       operation: "stopPeriodicRefresh",
     });
@@ -237,7 +256,11 @@ export class VaultCacheService {
   }
 
   public getStats(): Record<string, unknown> {
+    const eventCache = this.eventSupervisor?.snapshot() ?? {
+      state: config.obsidianCacheEventsEnabled ? "not_applicable" : "disabled",
+    };
     return {
+      eventCache,
       dbPath: config.obsidianSharedCacheDbPath,
       refreshSource: this.readMetadataValue("last_refresh_source"),
       configuredRefreshSource: config.obsidianCacheSource,
@@ -261,7 +284,8 @@ export class VaultCacheService {
       lastRefreshFailedFiles: this.lastRefreshFailedFiles,
       incrementalFailures: this.incrementalFailures,
       pendingCacheWrites: this.queuedCacheWrites,
-      freshness: this.lastRefreshError || this.refreshRequested || this.isBuilding
+      freshness: this.lastRefreshError || this.refreshRequested || this.isBuilding ||
+        this.eventSupervisor && !this.eventSupervisor.snapshot().reconciledAndConnected
         ? "uncertain" : this.isCacheReady ? "observed" : "unknown",
     };
   }
@@ -317,6 +341,7 @@ export class VaultCacheService {
   }
 
   public async getEntry(filePath: string): Promise<CacheEntry | undefined> {
+    if (!normalizedCacheFilePath(filePath) || isVaultPathExcluded(filePath, this.vaultExclusionMatcher)) return undefined;
     const cached = this.contentHotCache.get(filePath);
     if (cached) {
       this.touchHotCache(filePath, cached);
@@ -444,10 +469,16 @@ export class VaultCacheService {
       ctime: note.stat.ctime, mtime: note.stat.mtime, size: note.stat.size };
   }
 
+  private acceptsEventPath(candidate: string, folder: boolean): boolean {
+    const probe = normalizedCacheFilePath(folder ? candidate + "/__cache_probe__.md" : candidate);
+    return !!probe && !isVaultPathExcluded(folder ? candidate + "/" : candidate, this.vaultExclusionMatcher);
+  }
+
   public async close(): Promise<void> {
     if (this.closed) return;
     this.stopPeriodicRefresh();
     this.closing = true;
+    await this.eventStop;
     await this.refreshRun?.catch(() => undefined);
     await this.cacheWriteTail;
     if (!this.closed) { this.db.close(); this.closed = true; }
@@ -675,9 +706,10 @@ export class VaultCacheService {
     const rows = stmt.all() as unknown as CacheIndexEntry[];
     this.metadataCache.clear();
     for (const row of rows) {
+      if (!normalizedCacheFilePath(row.path) || isVaultPathExcluded(row.path, this.vaultExclusionMatcher)) continue;
       this.metadataCache.set(row.path, row);
     }
-    this.isCacheReady = rows.length > 0;
+    this.isCacheReady = this.metadataCache.size > 0;
   }
 
   private touchHotCache(filePath: string, entry: CacheEntry): void {

@@ -23,7 +23,7 @@ async function fixture(run, options={}) {
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const base='http://127.0.0.1:'+server.address().port;
-  const client=axios.create({baseURL:base,headers:{Authorization:'Bearer FIXTURE_KEY'}});
+  const client=axios.create({baseURL:base,proxy:false,headers:{Authorization:'Bearer FIXTURE_KEY'}});
   const controller=new AbortController();
   const result=consumeVaultEventStream(client,base,'modify',controller.signal,()=>{ready=true;},e=>notices.push(e),
     {handshakeMs:2000,idleMs:options.idleMs??2000}).catch(error=>error);
