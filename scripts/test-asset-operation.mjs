@@ -139,6 +139,7 @@ test('unrequested URL/download/overwrite/bytes behavior is not admitted by the i
 
 
 test('the owning runtime cockpit accepts all six projections with assets absent or pending',()=>fixture(async f=>{
+ Object.assign(process.env,{NODE_ENV:'test',OBSIDIAN_RUNTIME_MODE:'live',OBSIDIAN_API_KEY:'fixture-not-a-secret',OBSIDIAN_VAULT:path.dirname(f.db),MCP_LOG_DIR:path.join(path.dirname(f.db),'logs'),MCP_WRITE_MODE:'full'});
  const {GovernedNoteReplaceRuntime}=await import('../dist/mcp-server/tools/governedNoteReplaceTools/runtime.js');
  const list=()=>GovernedNoteReplaceRuntime.prototype.listPendingOperationRows.call({journal:f.journal},{limit:100});
  assert.deepEqual(list(),{rows:[],hasMore:false});
