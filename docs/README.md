@@ -103,3 +103,5 @@ Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2
 
 Do not copy limits, environment-variable contracts or tool registries into
 multiple pages when a link to the owning page is sufficient.
+
+- [Voluntary image import (optional candidate, server-local inputs)](asset-import.md)
