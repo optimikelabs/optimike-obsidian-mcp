@@ -136,3 +136,49 @@ test('unrequested URL/download/overwrite/bytes behavior is not admitted by the i
   assert.equal(AssetImportInputSchema.safeParse(makeInput(extra)).success,false);
  assert.equal(AssetImportInputSchema.safeParse(makeInput({source:{url:'https://example.invalid/x'}})).success,false);
 });
+
+
+test('the owning runtime cockpit accepts all six projections with assets absent or pending',()=>fixture(async f=>{
+ const {GovernedNoteReplaceRuntime}=await import('../dist/mcp-server/tools/governedNoteReplaceTools/runtime.js');
+ const list=()=>GovernedNoteReplaceRuntime.prototype.listPendingOperationRows.call({journal:f.journal},{limit:100});
+ assert.deepEqual(list(),{rows:[],hasMore:false});
+ const p=await f.adapter.plan(makeInput(),f.source,f.authorize);
+ const before=f.journal.get(p.planRef.slice(7));
+ const page=list();assert.equal(page.rows.length,1);
+ assert.equal(page.rows[0].operationKind,'obsidian.asset.import');
+ assert.equal(page.rows[0].operationId,p.planRef.slice(7));
+ assert.deepEqual(f.journal.get(p.planRef.slice(7)),before,'listing must not mutate the sealed plan');
+}));
+
+test('real pre-spawn worker saturation keeps the same frozen plan retryable across restart',()=>fixture(async f=>{
+ const {runAssetJob,activeAssetWorkers}=await import('../dist/services/assets/workerClient.js');
+ const p=await f.adapter.plan(makeInput(),f.source,f.authorize);
+ const before=f.journal.get(p.planRef.slice(7));
+ const create=f.backend.create;
+ let jobs=[];
+ f.backend.create=async()=>{
+  jobs=[runAssetJob({kind:'convert',bytes:original,policy:{quality:75}}).catch(()=>{}),
+        runAssetJob({kind:'convert',bytes:original,policy:{quality:75}}).catch(()=>{})];
+  assert.equal(activeAssetWorkers(),2);
+  return runAssetJob({kind:'create',vaultRoot:policy.vaultRoot,assetFolder:policy.assetFolder,filename:'diagram.webp',binding:before.bindingFingerprint,bytes:output});
+ };
+ let result;
+ try {result=await f.adapter.apply(p.planRef,makeInput().idempotencyKey,f.source,f.authorize);}
+ finally {await Promise.all(jobs);f.backend.create=create;}
+ assert.equal(result.phase,'planned');assert.equal(result.applyAllowed,true);assert.equal(result.embed,null);
+ assert.equal(f.writes(),0);assert.equal(f.files.size,0);
+ const after=f.journal.get(p.planRef.slice(7));
+ assert.equal(after.nextContent,before.nextContent);assert.equal(after.requestDigest,before.requestDigest);
+ assert.equal(after.executionOwner,undefined);
+ f.restart();assert.equal((await f.adapter.status(p.planRef)).phase,'planned');
+ assert.equal((await f.adapter.apply(p.planRef,makeInput().idempotencyKey,f.source,f.authorize)).outcome,'committed');
+ assert.equal(f.writes(),1);assert.equal(f.converts(),1);
+}));
+
+test('unverified worker errors cannot claim a safe pre-dispatch retry by reason alone',()=>fixture(async f=>{
+ const p=await f.adapter.plan(makeInput(),f.source,f.authorize);
+ f.backend.create=async()=>{f.files.set('diagram.webp',Buffer.from([1]));throw new AssetWorkerError('asset_worker_busy');};
+ const result=await f.adapter.apply(p.planRef,makeInput().idempotencyKey,f.source,f.authorize);
+ assert.equal(result.outcome,'outcome_unknown');assert.equal(result.applyAllowed,false);
+ assert.equal((await f.adapter.status(p.planRef)).outcome,'outcome_unknown');
+}));
