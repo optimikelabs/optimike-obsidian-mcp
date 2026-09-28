@@ -225,7 +225,7 @@
     "test:mcp-2026": "npm run build && node scripts/run-mcp-2026-tests.mjs modern",
     "test:mcp-2026:all": "npm run build && node scripts/run-mcp-2026-tests.mjs all",
     "benchmark:vnext:modern": "node scripts/run-mcp-2026-tests.mjs benchmark-modern",
-    "test:assets": "npm run build && node --test scripts/test-asset-native.mjs scripts/test-asset-processing.mjs scripts/test-asset-operation.mjs scripts/test-asset-surface.mjs && node scripts/test-asset-doc-contract.mjs"
+    "test:assets": "npm run build && node scripts/test-asset-config.mjs && node --test scripts/test-asset-native.mjs scripts/test-asset-processing.mjs scripts/test-asset-operation.mjs scripts/test-asset-surface.mjs && node scripts/test-asset-doc-contract.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",

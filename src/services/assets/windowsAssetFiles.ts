@@ -106,11 +106,23 @@ export class WindowsAssetFiles {
   private readonly parents: string[];
   constructor(vaultRoot: string, assetFolder: string) {
     if (typeof vaultRoot !== "string" || !/^[A-Za-z]:\\/u.test(vaultRoot) ||
-        vaultRoot !== path.win32.normalize(vaultRoot) || vaultRoot.endsWith("\\") ||
         typeof assetFolder !== "string" || !assetFolder || assetFolder.includes("\\")) fail("asset_path_invalid");
-    this.driveRoot = path.win32.parse(vaultRoot).root;
+    const normalized = path.win32.normalize(vaultRoot);
+    const driveRoot = path.win32.parse(normalized).root;
+    const canonicalRoot = normalized === driveRoot
+      ? driveRoot
+      : normalized.replace(/\\+$/u, "");
+    const suppliedRoot = vaultRoot === path.win32.parse(vaultRoot).root
+      ? vaultRoot
+      : vaultRoot.replace(/\\+$/u, "");
+    if (suppliedRoot !== canonicalRoot) fail("asset_path_invalid");
+    this.driveRoot = driveRoot;
     this.parents = [
-      ...vaultRoot.slice(this.driveRoot.length).split("\\").map(vaultRootSegment),
+      ...canonicalRoot
+        .slice(this.driveRoot.length)
+        .split("\\")
+        .filter(Boolean)
+        .map(vaultRootSegment),
       ...assetFolder.split("/").map(assetSegment),
     ];
   }

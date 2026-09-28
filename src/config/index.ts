@@ -305,6 +305,22 @@ const EnvSchema = z
           "OBSIDIAN_VAULT is required in hybrid mode when OBSIDIAN_API_KEY is not configured",
       });
     }
+
+    if (env.MCP_ASSET_IMPORT_ENABLED && !env.MCP_ASSET_FOLDER) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_ASSET_FOLDER"],
+        message: "MCP_ASSET_FOLDER is required when asset import is enabled",
+      });
+    }
+
+    if (env.MCP_ASSET_IMPORT_ENABLED && !env.OBSIDIAN_VAULT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["OBSIDIAN_VAULT"],
+        message: "OBSIDIAN_VAULT is required when asset import is enabled",
+      });
+    }
   });
 
 const parsedEnv = EnvSchema.safeParse(process.env);
