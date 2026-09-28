@@ -44,6 +44,20 @@ export interface CacheIndexEntry {
 type CacheRow = CacheIndexEntry & { content: string };
 type CacheRefreshSource = "rest" | "filesystem";
 type CacheReadinessStatus = "empty" | "building" | "ready" | "error";
+export type CacheUpdateResult =
+  | { ok: true; disposition: "updated" | "absent" | "excluded" }
+  | { ok: false; reason: "invalid_path" | "read_failed" | "queue_full" | "closed" };
+
+/** Decoded vault paths only; never normalize a traversal into an allowed path. */
+export function normalizedCacheFilePath(input: string): string | null {
+  if (typeof input !== "string" || input.length > 4096 || /[\u0000-\u001f]/u.test(input)) return null;
+  const value = input.replace(/\\/gu, "/").replace(/^\//u, "");
+  const parts = value.split("/");
+  if (!value || value.startsWith("/") || /^[a-z]:/iu.test(value) ||
+      parts.some(part => !part || part === "." || part === "..") ||
+      !value.toLowerCase().endsWith(".md")) return null;
+  return "/" + value;
+}
 
 const CREATE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS file_cache (
@@ -128,6 +142,15 @@ export class VaultCacheService {
   private lastRefreshError: string | null = null;
   private lastRefreshFileCount = 0;
   private refreshIntervalId: NodeJS.Timeout | null = null;
+  private cacheWriteTail: Promise<void> = Promise.resolve();
+  private queuedCacheWrites = 0;
+  private refreshRequested = false;
+  private forceRefreshRequested = false;
+  private refreshRun: Promise<void> | null = null;
+  private closing = false;
+  private closed = false;
+  private incrementalFailures = 0;
+  private lastRefreshFailedFiles = 0;
 
   constructor(obsidianService?: ObsidianRestApiService) {
     this.obsidianService = obsidianService;
@@ -190,8 +213,8 @@ export class VaultCacheService {
 
   public getReadinessStatus(): CacheReadinessStatus {
     if (this.isBuilding) return "building";
-    if (this.isCacheReady) return "ready";
     if (this.lastRefreshError) return "error";
+    if (this.isCacheReady) return "ready";
     return "empty";
   }
 
@@ -235,6 +258,11 @@ export class VaultCacheService {
       lastRefreshDurationMs: this.lastRefreshDurationMs,
       lastRefreshError: this.lastRefreshError,
       lastRefreshFileCount: this.lastRefreshFileCount,
+      lastRefreshFailedFiles: this.lastRefreshFailedFiles,
+      incrementalFailures: this.incrementalFailures,
+      pendingCacheWrites: this.queuedCacheWrites,
+      freshness: this.lastRefreshError || this.refreshRequested || this.isBuilding
+        ? "uncertain" : this.isCacheReady ? "observed" : "unknown",
     };
   }
 
@@ -314,125 +342,115 @@ export class VaultCacheService {
     return entry;
   }
 
-  public async updateCacheForFile(
-    filePath: string,
-    context: RequestContext,
-  ): Promise<void> {
-    const normalizedPath = normalizeDirPath(filePath);
-    const opContext = {
-      ...context,
-      operation: "updateCacheForFile",
-      filePath: normalizedPath,
-    };
-    logger.debug(`Proactively updating cache for file: ${normalizedPath}`, opContext);
+  /** Legacy post-write callers do not reinterpret a cache failure as a failed mutation. */
+  public async updateCacheForFile(filePath: string, context: RequestContext): Promise<void> {
+    await this.updateFileVerified(filePath, context);
+  }
+
+  private async serializeCacheWrite<T>(work: () => Promise<T>): Promise<T> {
+    if (this.closing || this.closed) throw new Error("cache_closed");
+    if (this.queuedCacheWrites >= 1024) throw new Error("cache_queue_full");
+    this.queuedCacheWrites++;
+    const run = this.cacheWriteTail.then(work);
+    this.cacheWriteTail = run.then(() => undefined, () => undefined);
+    try { return await run; }
+    finally { this.queuedCacheWrites--; }
+  }
+
+  /** Only finite reason codes are retained; no source path or upstream payload. */
+  public markFreshnessUncertain(): void {
+    this.lastRefreshError = "cache_freshness_uncertain";
+  }
+
+  public async updateFileVerified(filePath: string, context: RequestContext): Promise<CacheUpdateResult> {
+    const normalizedPath = normalizedCacheFilePath(filePath);
+    if (!normalizedPath) return { ok: false, reason: "invalid_path" };
+    if (this.closing || this.closed) return { ok: false, reason: "closed" };
+    if (this.queuedCacheWrites >= 1024) {
+      this.markFreshnessUncertain();
+      return { ok: false, reason: "queue_full" };
+    }
     try {
-      const vaultRoot = getVaultRoot();
-      if (
-        vaultRoot &&
-        (config.obsidianCacheSource === "filesystem" || !this.obsidianService)
-      ) {
+      return await this.serializeCacheWrite(async (): Promise<CacheUpdateResult> => {
         if (isVaultPathExcluded(normalizedPath, this.vaultExclusionMatcher)) {
           this.deleteRow(normalizedPath);
-          logger.info(
-            `Proactively removed excluded file from cache: ${normalizedPath}`,
-            opContext,
-          );
-          return;
+          return { ok: true, disposition: "excluded" };
         }
-
         try {
-          const absolutePath = path.join(
-            vaultRoot,
-            normalizedPath.replace(/^\/+/u, ""),
-          );
-          const [content, stats] = await Promise.all([
-            fs.readFile(absolutePath, "utf-8"),
-            fs.stat(absolutePath),
-          ]);
-          this.upsertRow({
-            path: normalizedPath,
-            ctime: Math.round(stats.ctimeMs),
-            mtime: Math.round(stats.mtimeMs),
-            size: stats.size,
-            hash: computeContentHash(content),
-            content,
-          });
-          logger.info(
-            `Proactively updated filesystem cache for: ${normalizedPath}`,
-            opContext,
-          );
-          return;
+          const source = await this.pickRefreshSource();
+          const row = await this.readCacheRow(normalizedPath, source, context);
+          this.upsertRow(row);
+          return { ok: true, disposition: "updated" };
         } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code === "ENOENT") {
+          const missing = error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND ||
+            (error as NodeJS.ErrnoException)?.code === "ENOENT";
+          if (missing) {
             this.deleteRow(normalizedPath);
-            logger.info(
-              `Proactively removed missing file from cache: ${normalizedPath}`,
-              opContext,
-            );
-            return;
+            return { ok: true, disposition: "absent" };
           }
-          throw error;
+          this.incrementalFailures++;
+          this.markFreshnessUncertain();
+          return { ok: false, reason: "read_failed" };
         }
-      }
-
-      if (!this.obsidianService) {
-        throw new McpError(
-          BaseErrorCode.SERVICE_UNAVAILABLE,
-          "Obsidian REST API service is unavailable for proactive cache update.",
-          opContext,
-        );
-      }
-      const noteJson = await retryWithDelay(
-        () =>
-          this.obsidianService!.getFileContent(
-            filePath,
-            "json",
-            opContext,
-          ) as Promise<NoteJson>,
-        {
-          operationName: "proactiveCacheUpdate",
-          context: opContext,
-          maxRetries: 3,
-          delayMs: 300,
-          shouldRetry: (err: unknown) =>
-            err instanceof McpError &&
-            (err.code === BaseErrorCode.NOT_FOUND ||
-              err.code === BaseErrorCode.SERVICE_UNAVAILABLE),
-        },
-      );
-
-      if (!noteJson || typeof noteJson.content !== "string" || !noteJson.stat) {
-        logger.warning(
-          `Proactive cache update for ${filePath} received invalid data, skipping update.`,
-          opContext,
-        );
-        return;
-      }
-
-      this.upsertRow({
-        path: normalizedPath,
-        ctime: noteJson.stat.ctime,
-        mtime: noteJson.stat.mtime,
-        size: noteJson.stat.size,
-        hash: computeContentHash(noteJson.content),
-        content: noteJson.content,
       });
-      logger.info(`Proactively updated cache for: ${filePath}`, opContext);
-    } catch (error) {
-      if (error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND) {
-        this.deleteRow(normalizedPath);
-        logger.info(
-          `Proactively removed deleted file from cache: ${normalizedPath}`,
-          opContext,
-        );
-        return;
-      }
-      logger.error(
-        `Failed to proactively update cache for ${normalizedPath}. Error: ${error instanceof Error ? error.message : String(error)}`,
-        opContext,
-      );
+    } catch {
+      this.incrementalFailures++;
+      this.markFreshnessUncertain();
+      return { ok: false, reason: this.closing || this.closed ? "closed" : "queue_full" };
     }
+  }
+
+  private async readCacheRow(filePath: string, source: CacheRefreshSource, context: RequestContext): Promise<CacheRow> {
+    if (source === "filesystem") {
+      const root = getVaultRoot();
+      if (!root) throw new Error("filesystem_unavailable");
+      const absolutePath = path.join(root, filePath.slice(1));
+      const [realRoot, realFile] = await Promise.all([fs.realpath(root), fs.realpath(absolutePath)]);
+      const relative = path.relative(realRoot, realFile);
+      if (relative.startsWith(".." + path.sep) || relative === ".." || path.isAbsolute(relative)) {
+        throw new Error("filesystem_outside_vault");
+      }
+      // Reject static symlinks/junctions in the read path. This is not a native
+      // handle-relative mutation primitive and confers no write authorization.
+      let component = root;
+      for (const segment of filePath.slice(1).split("/")) {
+        component = path.join(component, segment);
+        if ((await fs.lstat(component)).isSymbolicLink()) throw new Error("filesystem_link_refused");
+      }
+      const handle = await fs.open(absolutePath, "r");
+      try {
+        const before = await handle.stat();
+        if (!before.isFile()) throw new Error("not_a_file");
+        const content = await handle.readFile("utf8");
+        const [after, current] = await Promise.all([handle.stat(), fs.stat(absolutePath)]);
+        if (before.ino !== current.ino || before.dev !== current.dev ||
+            before.mtimeMs !== after.mtimeMs || before.size !== after.size ||
+            after.mtimeMs !== current.mtimeMs || after.size !== current.size) {
+          throw new Error("read_changed");
+        }
+        return { path: filePath, ctime: Math.round(after.ctimeMs), mtime: Math.round(after.mtimeMs),
+          size: after.size, hash: computeContentHash(content), content };
+      } finally { await handle.close(); }
+    }
+    if (!this.obsidianService) throw new Error("rest_unavailable");
+    const note = await this.obsidianService.getFileContent(filePath, "json", context) as NoteJson;
+    if (!note || typeof note.content !== "string" || !note.stat ||
+        ![note.stat.ctime, note.stat.mtime, note.stat.size].every(value => Number.isFinite(value) && value >= 0)) {
+      throw new Error("invalid_note_response");
+    }
+    if (typeof (note as {path?: unknown}).path === "string" &&
+        normalizedCacheFilePath((note as {path: string}).path) !== filePath) throw new Error("note_identity_mismatch");
+    return { path: filePath, content: note.content, hash: computeContentHash(note.content),
+      ctime: note.stat.ctime, mtime: note.stat.mtime, size: note.stat.size };
+  }
+
+  public async close(): Promise<void> {
+    if (this.closed) return;
+    this.stopPeriodicRefresh();
+    this.closing = true;
+    await this.refreshRun?.catch(() => undefined);
+    await this.cacheWriteTail;
+    if (!this.closed) { this.db.close(); this.closed = true; }
   }
 
   public async buildVaultCache(): Promise<void> {
@@ -453,7 +471,25 @@ export class VaultCacheService {
     await this.refreshCache(true);
   }
 
-  public async refreshCache(isInitialBuild = false): Promise<void> {
+  public refreshCache(forceContentRead = false): Promise<void> {
+    if (this.closing || this.closed) return Promise.resolve();
+    this.refreshRequested = true;
+    this.forceRefreshRequested ||= forceContentRead;
+    if (!this.refreshRun) {
+      this.refreshRun = (async () => {
+        while (this.refreshRequested && !this.closing) {
+          const force = this.forceRefreshRequested;
+          this.refreshRequested = false;
+          this.forceRefreshRequested = false;
+          try { await this.serializeCacheWrite(() => this.performRefresh(force)); }
+          catch { this.markFreshnessUncertain(); }
+        }
+      })().finally(() => { this.refreshRun = null; });
+    }
+    return this.refreshRun;
+  }
+
+  private async performRefresh(isInitialBuild = false): Promise<void> {
     const context = requestContextService.createRequestContext({
       operation: "refreshCache",
       isInitialBuild,
@@ -469,6 +505,7 @@ export class VaultCacheService {
     this.lastRefreshCompletedAt = null;
     this.lastRefreshDurationMs = null;
     this.lastRefreshError = null;
+    this.lastRefreshFailedFiles = 0;
     if (isInitialBuild) {
       this.isCacheReady = false;
     }
@@ -509,23 +546,15 @@ export class VaultCacheService {
             const remoteMtime = Math.round(stats.mtimeMs);
             const remoteSize = stats.size;
             const needsRefresh =
-              !cachedEntry ||
-              cachedEntry.mtime < remoteMtime ||
+              isInitialBuild || !cachedEntry ||
+              cachedEntry.mtime !== remoteMtime ||
               cachedEntry.size !== remoteSize;
 
             if (!needsRefresh) {
               return "skipped";
             }
 
-            const content = await fs.readFile(absolutePath, "utf-8");
-            this.upsertRow({
-              path: filePath,
-              ctime: Math.round(stats.ctimeMs),
-              mtime: remoteMtime,
-              size: remoteSize,
-              hash: computeContentHash(content),
-              content,
-            });
+            this.upsertRow(await this.readCacheRow(filePath, refreshSource, context));
             return cachedEntry ? "updated" : "added";
           }
 
@@ -553,28 +582,15 @@ export class VaultCacheService {
           const remoteMtime = fileMetadata.mtime;
           const remoteSize = fileMetadata.size;
           const needsRefresh =
-            !cachedEntry ||
-            cachedEntry.mtime < remoteMtime ||
+            isInitialBuild || !cachedEntry ||
+            cachedEntry.mtime !== remoteMtime ||
             cachedEntry.size !== remoteSize;
 
           if (!needsRefresh) {
             return "skipped";
           }
 
-          const noteJson = (await this.obsidianService.getFileContent(
-            filePath,
-            "json",
-            context,
-          )) as NoteJson;
-          const hash = computeContentHash(noteJson.content);
-          this.upsertRow({
-            path: filePath,
-            ctime: noteJson.stat.ctime,
-            mtime: noteJson.stat.mtime,
-            size: noteJson.stat.size,
-            hash,
-            content: noteJson.content,
-          });
+          this.upsertRow(await this.readCacheRow(filePath, refreshSource, context));
 
           return cachedEntry ? "updated" : "added";
         } catch (error) {
@@ -606,7 +622,9 @@ export class VaultCacheService {
       filesUpdated += outcomes.filter((outcome) => outcome === "updated").length;
 
       const duration = (Date.now() - startTime) / 1000;
-      this.isCacheReady = true;
+      this.lastRefreshFailedFiles = outcomes.filter(outcome => outcome === "failed").length;
+      this.lastRefreshError = this.lastRefreshFailedFiles ? "cache_refresh_incomplete" : null;
+      this.isCacheReady = this.lastRefreshFailedFiles === 0;
       this.lastRefreshCompletedAt = Date.now();
       this.lastRefreshDurationMs = Math.round(duration * 1000);
       this.lastRefreshFileCount = this.metadataCache.size;
@@ -619,8 +637,7 @@ export class VaultCacheService {
         context,
       );
     } catch (error) {
-      this.lastRefreshError =
-        error instanceof Error ? error.message : String(error);
+      this.lastRefreshError = "cache_refresh_failed";
       logger.error(
         `Critical error during vault cache refresh. Cache may be incomplete. Error: ${error instanceof Error ? error.message : String(error)}`,
         context,
@@ -776,7 +793,12 @@ export class VaultCacheService {
         opContext,
       );
       for (const entry of entries) {
+        if (typeof entry !== "string" || entry.startsWith("/") ||
+            entry.replace(/\\/gu, "/").split("/").some(part => part === ".." || part === ".")) {
+          throw new Error("invalid_inventory_entry");
+        }
         const fullPath = path.posix.join(normalizedPath, entry);
+        if (isVaultPathExcluded(fullPath, this.vaultExclusionMatcher)) continue;
         if (entry.endsWith("/")) {
           const subDirFiles = await this.listAllMarkdownFiles(
             fullPath,
@@ -785,6 +807,7 @@ export class VaultCacheService {
           );
           markdownFiles = markdownFiles.concat(subDirFiles);
         } else if (entry.toLowerCase().endsWith(".md")) {
+          if (!normalizedCacheFilePath(fullPath)) throw new Error("invalid_inventory_entry");
           markdownFiles.push(fullPath);
         }
       }
@@ -793,8 +816,7 @@ export class VaultCacheService {
       const errMsg = `Failed to list directory during cache build scan: ${normalizedPath}`;
       const err = error as McpError | Error;
       if (err instanceof McpError && err.code === BaseErrorCode.NOT_FOUND) {
-        logger.warning(`${errMsg} - Directory not found, skipping.`, opContext);
-        return [];
+        throw new Error("inventory_incomplete");
       }
       if (err instanceof Error) {
         logger.error(errMsg, err, opContext);
@@ -856,7 +878,7 @@ export class VaultCacheService {
             error: error instanceof Error ? error.message : String(error),
           },
         );
-        return;
+        throw new Error("inventory_incomplete");
       }
 
       for (const entry of entries) {
