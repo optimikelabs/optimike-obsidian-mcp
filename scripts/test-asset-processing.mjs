@@ -89,3 +89,12 @@ test('worker admission is bounded rather than an unbounded promise queue', async
   await assert.rejects(convert(png),e=>e.reason==='asset_worker_busy');
   await Promise.all([a,b]);assert.equal(activeAssetWorkers(),0);
 });
+
+
+test('unqualified animated PNG and AVIF sequences are refused, never silently flattened', async () => {
+ const header=Buffer.from([137,80,78,71,13,10,26,10]);
+ const chunk=Buffer.alloc(20);chunk.writeUInt32BE(8,0);chunk.write('acTL',4,'ascii');
+ await assert.rejects(convert(Buffer.concat([header,chunk])),e=>e.reason==='image_invalid');
+ const avis=Buffer.alloc(20);avis.writeUInt32BE(20,0);avis.write('ftypavis',4,'ascii');
+ await assert.rejects(convert(avis),e=>e.reason==='image_invalid');
+});

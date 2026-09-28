@@ -28,7 +28,7 @@ export async function runAssetJob<T = ProcessedImage>(job: AssetJob, timeoutMs =
     try {
       child = fork(fileURLToPath(new URL("./assetWorker.js", import.meta.url)), [], {
         serialization: "advanced", stdio: ["ignore", "ignore", "ignore", "ipc"],
-        env, execArgv: ["--max-old-space-size=128"], windowsHide: true,
+        env, execArgv: ["--max-old-space-size=128"],
       });
     } catch {
       active--;

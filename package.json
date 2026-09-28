@@ -289,6 +289,7 @@
   },
   "optionalDependencies": {
     "koffi": "3.3.2",
+    "saxes": "6.0.0",
     "sharp": "0.35.5"
   }
 }

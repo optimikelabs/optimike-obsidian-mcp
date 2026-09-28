@@ -32,9 +32,10 @@ function verifySvg(bytes: Buffer): void {
     parser.on("opentag", (tag: { name: string; attributes: Record<string, string> }) => {
       if (++nodes > 10000 || ++depth > 64 || !VECTOR_TAGS.has(tag.name) || (nodes === 1 && tag.name !== "svg")) reject("svg_unsupported");
       for (const [name, value] of Object.entries(tag.attributes)) {
-        const key = name.toLowerCase();
-        if (key.startsWith("on") || key === "style" || key === "xml:base") reject("svg_unsupported");
-        if (key === "href" || key === "xlink:href") {
+        const key = name.toLowerCase().split(":").at(-1)!;
+        if (value.includes("\\") || /[\x00-\x1f\x7f]/u.test(value)) reject("svg_unsupported");
+        if (key.startsWith("on") || key === "style" || key === "base") reject("svg_unsupported");
+        if (key === "href") {
           if (!/^#[A-Za-z_][A-Za-z0-9_.:-]{0,199}$/u.test(value)) reject("svg_unsupported");
         }
         if (/url\s*\(/iu.test(value) && !/^url\(#[A-Za-z_][A-Za-z0-9_.:-]{0,199}\)$/u.test(value)) reject("svg_unsupported");
@@ -61,7 +62,26 @@ export async function processImage(bytes: Buffer, policy: ImagePolicy): Promise<
   if (!Buffer.isBuffer(bytes) || bytes.length < 1 || bytes.length > ASSET_SOURCE_MAX_BYTES) reject("image_limit");
   if (!policy || !Number.isInteger(policy.quality) || policy.quality < 1 || policy.quality > 100 ||
       (policy.preserveOriginal !== undefined && typeof policy.preserveOriginal !== "boolean") ||
-      (policy.preserveOriginal && (!policy.exceptionReason?.trim() || policy.exceptionReason.length > 200))) reject("image_policy_invalid");
+      (policy.preserveOriginal && (typeof policy.exceptionReason !== "string" || !policy.exceptionReason.trim() || policy.exceptionReason.length > 200))) reject("image_policy_invalid");
+  // APNG and AVIF image sequences must not be silently flattened by a decoder
+  // that exposes them as one frame. They are not in this V1's proven contract.
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    let at = 8;
+    while (at + 12 <= bytes.length) {
+      const length = bytes.readUInt32BE(at), type = bytes.subarray(at + 4, at + 8).toString("ascii");
+      if (length > bytes.length - at - 12) reject("image_invalid");
+      if (type === "acTL") reject("image_invalid");
+      at += length + 12;
+      if (type === "IEND") break;
+    }
+  }
+  if (bytes.subarray(4, 8).toString("ascii") === "ftyp") {
+    const length = bytes.readUInt32BE(0);
+    if (length < 16 || length > bytes.length) reject("image_invalid");
+    for (let at = 8; at + 4 <= length; at += 4) {
+      if (bytes.subarray(at, at + 4).toString("ascii") === "avis") reject("image_invalid");
+    }
+  }
   const kind = sourceKind(bytes);
   if (kind === "svg") verifySvg(bytes);
   let sharp: any;
