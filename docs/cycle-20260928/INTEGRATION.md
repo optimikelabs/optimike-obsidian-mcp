@@ -107,3 +107,16 @@ must be revalidated against the eventual merge base; neither automatically
 includes unrelated #107/#108 work. No release version bump or production toggle
 change belongs to this assembly. Final states remain CANDIDATE_READY_REPO,
 QUALIFIED_LOCAL and PROMOTED, never an undifferentiated DONE.
+
+## Final assembly proof contract
+
+PR #113 is the assembled candidate. All pull-request checkout steps now explicitly
+select the PR head, including the older packaging/runtime gates; no synthetic
+merge commit is silently reported as the tested candidate. The M6 workflow runs
+`test-assembly-contract.mjs` to check every PR checkout, combined root dependency
+lockfile coherence and French cache/asset documentation. Existing dedicated
+qualification workflows remain unchanged. Exact CI/review verdict belongs in
+the current PR body and checkpoint comment, not in a self-referential source SHA.
+
+Desktop 5.3.1, TLS and remote binary ingress remain separate NOT_RUN gates; no
+release/deployment or production configuration was authorized or performed.
