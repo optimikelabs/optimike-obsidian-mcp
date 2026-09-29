@@ -91,7 +91,7 @@ metadata-only and exposes no pre-apply task-source path
 (`public_task_source_projection_unavailable`). The tools remain available; this
 is a destructive-canary containment/certification boundary, not full periodic
 certification. Upstream public path projection is a nonblocking follow-up. The
-release still requires the same gate on the clean final SHA. `3.9.3` is certified for Developer API V1 by explicit evidence metadata, while full periodic destructive certification remains excluded,
+release follows [proportionate qualification](../bridge-packaging.md#proportionate-release-qualification): the same gate on the clean final SHA is required for changed or unqualified paths; unchanged paths may reuse applicable successful evidence. `3.9.3` is certified for Developer API V1 by explicit evidence metadata, while full periodic destructive certification remains excluded,
 not because mutations are allowed by product-version allowlist.
 
 Operon `3.6.0` also changes observable product behavior outside the API

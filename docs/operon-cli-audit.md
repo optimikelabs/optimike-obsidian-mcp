@@ -3,7 +3,7 @@
 French version: [operon-cli-audit.fr.md](operon-cli-audit.fr.md)
 
 Updated: 2026-09-21
-Current target: Optimike MCP `3.9.1` uses Bridge `0.9.3` with certified official Operon `3.9.3`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1 and the additive task-workflow API. Pilot 2 admission remains bound to the clean final SHA. The public `src/agent-runtime` contract sources did not drift between `3.6.2` and `3.9.3`; later releases change UI, recurrence, Canvas and settings persistence around the stable V1 boundary. Future non-denied versions remain `compatible-provisional` until separately evidenced. Mutation admission still requires negotiated exact capabilities rather than relying on the product-version label alone.
+Current target: Optimike MCP `3.9.1` uses Bridge `0.9.3` with certified official Operon `3.9.3`, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1 and the additive task-workflow API. Pilot 2 admission follows [proportionate qualification](bridge-packaging.md#proportionate-release-qualification): changed or unqualified paths require the clean final SHA; unchanged paths may reuse applicable successful evidence. The public `src/agent-runtime` contract sources did not drift between `3.6.2` and `3.9.3`; later releases change UI, recurrence, Canvas and settings persistence around the stable V1 boundary. Future non-denied versions remain `compatible-provisional` until separately evidenced. Mutation admission still requires negotiated exact capabilities rather than relying on the product-version label alone.
 
 Operon CLI `1.2.0` adds operator access to Daily/Weekly routing and the typed
 Task Type, Task Image and ordered Task Gallery fields. The MCP does not relay

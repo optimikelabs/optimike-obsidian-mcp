@@ -1,7 +1,7 @@
 # Operon integration decision report
 
 Current authority: Optimike MCP `3.9.1` certifies Operon `3.9.3`, Bridge `0.9.3`
-and Operon CLI `1.2.0`, subject to the exact-SHA release gate. The material below
+and Operon CLI `1.2.0`, subject to [proportionate qualification](bridge-packaging.md#proportionate-release-qualification), with a fresh exact-SHA gate for changed or unqualified paths and scoped reuse of successful evidence for unchanged paths. The material below
 records earlier admissions and remains historical evidence rather than the
 current release decision.
 
@@ -173,7 +173,7 @@ claim.
 The 2026-08-01 Operon `3.0.1` cutover and CLI `1.0.0` Windows observations also
 remain historical. The `3.5.3` / Bridge `0.8.2` evidence is historical;
 Optimike MCP `3.9.1` targets certified Operon `3.9.3`, Bridge `0.9.3` and CLI `1.2.0`,
-subject to its exact-SHA release gate.
+subject to the proportionate qualification policy above.
 
 ## Deliberately excluded or unavailable
 
