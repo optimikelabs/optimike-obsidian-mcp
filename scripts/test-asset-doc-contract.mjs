@@ -8,7 +8,7 @@ const read=p=>fs.readFileSync(path.join(root,p),"utf8");
 const pkg=JSON.parse(read("package.json"));
 for(const doc of ["docs/asset-import.md","docs/asset-import.fr.md"]) {
  const text=read(doc);assert.ok(pkg.files.includes(doc));
- for(const term of ["MCP_ASSET_FOLDER","OBSIDIAN_VAULT","MCP_ASSET_IMPORT_ENABLED","MCP_WRITE_MODE","external:read","NOT_RUN","asset_import_plan","asset_import_apply","asset_import_status"])
+ for(const term of ["MCP_ASSET_FOLDER","OBSIDIAN_VAULT","MCP_EXTERNAL_ROOTS_FILE","MCP_ASSET_IMPORT_ENABLED","MCP_WRITE_MODE","external:read","NOT_RUN","asset_import_plan","asset_import_apply","asset_import_status"])
   assert.ok(text.includes(term),doc+" must declare "+term);
  assert.ok(!text.includes("http://127.0.0.1:27123"),"do not publish production-specific setup");
  assert.ok(!text.includes("?"),doc+" must not contain lossy replacement punctuation");

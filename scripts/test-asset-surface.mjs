@@ -97,6 +97,8 @@ test('real stdio processes import authorized server-local bytes and resume the s
  fs.mkdirSync(vault);fs.mkdirSync(sourceRoot);fs.mkdirSync(path.join(vault,'Images'));
  const png=await sharp({create:{width:6,height:4,channels:4,background:{r:40,g:50,b:60,alpha:0.5}}}).png().toBuffer();
  fs.writeFileSync(path.join(sourceRoot,'input.png'),png);
+ const rootsFile=path.join(root,'stdio-external-roots.json');
+ fs.writeFileSync(rootsFile,JSON.stringify({version:1,roots:[{id:'fixture.stdio',path:sourceRoot,capabilities:['visible','readable','handoff'],include:['**/*.png']}]}));
  const childCode=`
   import {McpServer} from '@modelcontextprotocol/server';
   import {StdioServerTransport} from '@modelcontextprotocol/server/stdio';
@@ -116,7 +118,7 @@ test('real stdio processes import authorized server-local bytes and resume the s
   await server.connect(new StdioServerTransport());
  `;
  const env={};for(const key of ['SystemRoot','WINDIR','TEMP','TMP','TMPDIR','PATH','HOME'])if(process.env[key])env[key]=process.env[key];
- Object.assign(env,{NODE_ENV:'test',MCP_TRANSPORT_TYPE:'stdio',OBSIDIAN_RUNTIME_MODE:'live',OBSIDIAN_API_KEY:'fixture-only',OBSIDIAN_BASE_URL:'http://127.0.0.1:9',OBSIDIAN_VAULT:vault,MCP_WRITE_MODE:'full',MCP_ASSET_IMPORT_ENABLED:'true',MCP_ASSET_FOLDER:'Images',MCP_LOG_DIR:path.join(root,'stdio-logs')});
+ Object.assign(env,{NODE_ENV:'test',MCP_TRANSPORT_TYPE:'stdio',OBSIDIAN_RUNTIME_MODE:'live',OBSIDIAN_API_KEY:'fixture-only',OBSIDIAN_BASE_URL:'http://127.0.0.1:9',OBSIDIAN_VAULT:vault,MCP_WRITE_MODE:'full',MCP_ASSET_IMPORT_ENABLED:'true',MCP_ASSET_FOLDER:'Images',MCP_EXTERNAL_ROOTS_FILE:rootsFile,MCP_LOG_DIR:path.join(root,'stdio-logs')});
  const session=async(body)=>{
   const client=new Client({name:'real-stdio-asset-client',version:'1'});
   const transport=new StdioClientTransport({command:process.execPath,args:['--input-type=module','-e',childCode,new URL('../dist/',import.meta.url).href,vault,sourceRoot,path.join(root,'stdio-plans.sqlite')],cwd:fileURLToPath(new URL('..',import.meta.url)),env,stderr:'pipe'});

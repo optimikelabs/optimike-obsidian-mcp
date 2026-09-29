@@ -1,6 +1,11 @@
 import { AssetImportOperationAdapter } from "../../../services/assets/assetImportOperation.js";
 import { runAssetJob } from "../../../services/assets/workerClient.js";
 import type { AssetInspection } from "../../../services/assets/assetImportContract.js";
+import {
+  AssetFileError,
+  WindowsAssetFiles,
+  type AssetFileReason,
+} from "../../../services/assets/windowsAssetFiles.js";
 import { NoteCreateOperationAdapter, type NoteCreateBackend } from "../../../services/operations/noteCreateOperationAdapter.js";
 import { RestNoteCreateBackend } from "../../../services/operations/restNoteCreateBackend.js";
 import { NativeNoteMoveOperationAdapter, type NativeNoteMoveBackend } from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
@@ -387,6 +392,7 @@ export type GovernedNoteReplacePlanView = {
 export class GovernedNoteReplaceRuntime {
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
   readonly assetImport: AssetImportOperationAdapter | undefined;
+  readonly assetImportBackendReason?: AssetFileReason;
   readonly nativeMove: NativeNoteMoveOperationAdapter | undefined;
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
@@ -403,12 +409,45 @@ export class GovernedNoteReplaceRuntime {
   ) {
     this.noteCreate = noteCreateBackend ? new NoteCreateOperationAdapter(noteCreateBackend, journal) : undefined;
     this.nativeMove = nativeMoveBackend ? new NativeNoteMoveOperationAdapter(nativeMoveBackend, journal) : undefined;
-    if (config.assetFolder && config.obsidianVaultPath) {
-      const policy = {vaultRoot: config.obsidianVaultPath, assetFolder: config.assetFolder, quality: config.assetWebpQuality};
-      this.assetImport = new AssetImportOperationAdapter({
-        inspect: (filename, binding) => runAssetJob<AssetInspection>({kind:"inspect", ...policy, filename, binding}),
-        create: (filename, bytes, binding) => runAssetJob({kind:"create", ...policy, filename, bytes, binding}),
-      }, journal, policy);
+    if (
+      config.assetImportEnabled &&
+      config.assetFolder &&
+      config.obsidianVaultPath
+    ) {
+      const policy = {
+        vaultRoot: config.obsidianVaultPath,
+        assetFolder: config.assetFolder,
+        quality: config.assetWebpQuality,
+      };
+      try {
+        new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
+        this.assetImport = new AssetImportOperationAdapter(
+          {
+            inspect: (filename, binding) =>
+              runAssetJob<AssetInspection>({
+                kind: "inspect",
+                ...policy,
+                filename,
+                binding,
+              }),
+            create: (filename, bytes, binding) =>
+              runAssetJob({
+                kind: "create",
+                ...policy,
+                filename,
+                bytes,
+                binding,
+              }),
+          },
+          journal,
+          policy,
+        );
+      } catch (error) {
+        this.assetImportBackendReason =
+          error instanceof AssetFileError
+            ? error.reason
+            : "native_backend_unavailable";
+      }
     }
     this.leaseHeartbeat = setInterval(() => {
       try {

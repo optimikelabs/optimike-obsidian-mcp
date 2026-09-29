@@ -75,6 +75,7 @@ export type CapabilityReasonCode =
   | "mcp_operon_mutations_disabled"
   | "write_policy_blocked"
   | "asset_import_disabled"
+  | "asset_backend_unavailable"
   | "operation_policy_blocked"
   | "operon_capability_not_advertised"
   | "operon_partial_capabilities"
@@ -106,6 +107,7 @@ export type CapabilityNextAction =
   | "enable_mcp_operon_mutations"
   | "enable_write_policy"
   | "enable_asset_import"
+  | "verify_asset_backend"
   | "review_operation_policy"
   | "negotiate_exact_operon_capability";
 
@@ -678,28 +680,52 @@ function baseCapability(
 function assetCapability(
   input: CapabilityManifestProjectionInput,
 ): CapabilityManifestEntry {
+  const id: CapabilityId = "governed-asset-import";
   const available = input.assetRuntimeAvailable === true;
   const enabled = input.assetImportEnabled === true;
   const writePolicyAllows = input.writeMode === "full";
+  const profileAllows = visible(new Set(input.profileToolNames), id);
+  const modeAllows = visible(new Set(input.modeToolNames), id);
+
+  if (!profileAllows || !modeAllows) {
+    return entry(
+      input,
+      id,
+      available,
+      false,
+      !profileAllows ? "profile_hidden" : "runtime_mode_unavailable",
+      !profileAllows ? "switch_tool_profile" : "use_live_runtime",
+    );
+  }
+
+  if (enabled && !available) {
+    return {
+      id,
+      discoverable: false,
+      available: false,
+      authorized: false,
+      state: "unavailable",
+      reasonCode: "asset_backend_unavailable",
+      nextAction: "verify_asset_backend",
+      preferredTools: TOOL_FAMILIES[id],
+    };
+  }
+
   return entry(
     input,
-    "governed-asset-import",
+    id,
     available,
     available && enabled && writePolicyAllows,
-    !available
-      ? "runtime_not_initialized"
-      : !enabled
-        ? "asset_import_disabled"
-        : !writePolicyAllows
-          ? "write_policy_blocked"
-          : "ready",
-    !available
-      ? "restart_mcp_runtime"
-      : !enabled
-        ? "enable_asset_import"
-        : !writePolicyAllows
-          ? "enable_write_policy"
-          : "none",
+    !enabled
+      ? "asset_import_disabled"
+      : !writePolicyAllows
+        ? "write_policy_blocked"
+        : "ready",
+    !enabled
+      ? "enable_asset_import"
+      : !writePolicyAllows
+        ? "enable_write_policy"
+        : "none",
   );
 }
 
@@ -1100,7 +1126,7 @@ export async function collectCapabilityManifest(options: {
   const operonService = new OperonService();
   const staticRequirements: ToolStaticRequirement[] = [];
   if (options.vaultCacheAvailable) staticRequirements.push("vault-cache");
-  if (options.governedRuntimes.asset) staticRequirements.push("asset-policy");
+  if (config.assetImportEnabled) staticRequirements.push("asset-policy");
   const profileToolNames = compileToolProfileNames({
     profile: options.profile,
     registrationMode: "live",
