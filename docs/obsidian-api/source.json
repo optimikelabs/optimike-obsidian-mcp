@@ -1,0 +1,9 @@
+{
+  "repository": "coddingtonbear/obsidian-local-rest-api",
+  "tag": "5.3.1",
+  "commit": "17a9cfd9ff5dd0156b694bf9b13ab36c786b29da",
+  "path": "docs/openapi.yaml",
+  "blob": "f8976e8add8a4cafab839a33a3cf6ff6c2af53ee",
+  "sha256": "d837704e3e1cb10457f059f3521c0389a95b0179ce222b7080ac4b95d65f50e1",
+  "projection": "JSON parsed from the unchanged upstream YAML; not live certification"
+}

@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { createHash } from "node:crypto";
+import net from "node:net";
 import os from "node:os";
 import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -104,6 +105,10 @@ const EnvSchema = z
       .string()
       .transform((val) => val.toLowerCase() === "true")
       .default("false"),
+    OBSIDIAN_CACHE_EVENTS_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
     OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN: z.coerce
       .number()
       .int()
@@ -143,6 +148,14 @@ const EnvSchema = z
       // unavailable/degraded state until Local REST becomes reachable.
       .default("false"),
     MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
+    MCP_ASSET_FOLDER: z.string().min(1).max(800).optional(),
+    MCP_ASSET_IMPORT_ENABLED: z.enum(["true", "false"]).default("false").transform(v => v === "true"),
+    MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    MCP_ASSET_CHATGPT_FILE_HOSTS: z.string().optional(),
+    MCP_ASSET_WEBP_QUALITY: z.coerce.number().int().min(1).max(100).default(75),
     MCP_EXTERNAL_MOVE_ENABLED: z
       .string()
       .transform((val) => val.toLowerCase() === "true")
@@ -302,6 +315,68 @@ const EnvSchema = z
           "OBSIDIAN_VAULT is required in hybrid mode when OBSIDIAN_API_KEY is not configured",
       });
     }
+
+    if (env.MCP_ASSET_IMPORT_ENABLED && !env.MCP_ASSET_FOLDER) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_ASSET_FOLDER"],
+        message: "MCP_ASSET_FOLDER is required when asset import is enabled",
+      });
+    }
+
+    if (env.MCP_ASSET_IMPORT_ENABLED && !env.OBSIDIAN_VAULT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["OBSIDIAN_VAULT"],
+        message: "OBSIDIAN_VAULT is required when asset import is enabled",
+      });
+    }
+
+    if (
+      env.MCP_ASSET_IMPORT_ENABLED &&
+      !env.MCP_EXTERNAL_ROOTS_FILE &&
+      !env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_EXTERNAL_ROOTS_FILE"],
+        message:
+          "Asset import requires MCP_EXTERNAL_ROOTS_FILE or MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED=true",
+      });
+    }
+    const assetFileHosts = (env.MCP_ASSET_CHATGPT_FILE_HOSTS ?? "")
+      .split(/[\r\n,]+/u)
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+    if (env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED && assetFileHosts.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_ASSET_CHATGPT_FILE_HOSTS"],
+        message:
+          "MCP_ASSET_CHATGPT_FILE_HOSTS is required when ChatGPT file ingress is enabled",
+      });
+    }
+    for (const host of assetFileHosts) {
+      let canonicalHost = "";
+      try {
+        canonicalHost = new URL(`https://${host}/`).hostname.toLowerCase();
+      } catch {
+        canonicalHost = "";
+      }
+      if (
+        net.isIP(host) !== 0 ||
+        canonicalHost !== host ||
+        net.isIP(canonicalHost) !== 0 ||
+        !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(host)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["MCP_ASSET_CHATGPT_FILE_HOSTS"],
+          message:
+            "MCP_ASSET_CHATGPT_FILE_HOSTS must contain exact DNS hostnames only; IP literals are not allowed",
+        });
+      }
+    }
   });
 
 const parsedEnv = EnvSchema.safeParse(process.env);
@@ -424,6 +499,7 @@ export const config = {
   obsidianBaseUrl: env.OBSIDIAN_BASE_URL,
   obsidianVerifySsl: env.OBSIDIAN_VERIFY_SSL,
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,
+  obsidianCacheEventsEnabled: env.OBSIDIAN_CACHE_EVENTS_ENABLED,
   obsidianEnableCache: env.OBSIDIAN_ENABLE_CACHE,
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
   obsidianCacheSource: env.OBSIDIAN_CACHE_SOURCE,
@@ -446,13 +522,21 @@ export const config = {
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
   externalRootsFile: env.MCP_EXTERNAL_ROOTS_FILE,
+  assetFolder: env.MCP_ASSET_FOLDER,
+  assetImportEnabled: env.MCP_ASSET_IMPORT_ENABLED,
+  assetChatgptFileIngressEnabled: env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED,
+  assetChatgptFileHosts: (env.MCP_ASSET_CHATGPT_FILE_HOSTS ?? "")
+    .split(/[\r\n,]+/u)
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean),
+  assetWebpQuality: env.MCP_ASSET_WEBP_QUALITY,
   externalMoveEnabled: env.MCP_EXTERNAL_MOVE_ENABLED,
   externalMoveProfileId: env.MCP_EXTERNAL_MOVE_PROFILE_ID,
   externalMoveJournalPath:
     env.MCP_EXTERNAL_MOVE_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       "external-moves.sqlite",
@@ -461,7 +545,7 @@ export const config = {
     env.MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       `obsidian-note-replace-${noteReplaceProfileId}.sqlite`,
@@ -472,7 +556,7 @@ export const config = {
     env.MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       `obsidian-base-formula-${noteReplaceProfileId}.sqlite`,

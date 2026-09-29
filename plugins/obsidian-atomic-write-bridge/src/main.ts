@@ -1,3 +1,5 @@
+import type { LocalRestApiPublicApi } from "obsidian-local-rest-api";
+import { describeRestRoutes } from "../../shared/restOpenApi";
 import { createHash, randomUUID } from "node:crypto";
 import {
   parseLinktext,
@@ -341,7 +343,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
           ? restPlugin.getPublicApi.bind(restPlugin)
           : undefined;
       if (!getPublicApi) return null;
-      const api = getPublicApi(this.manifest);
+      const nativeApi: LocalRestApiPublicApi | undefined = getPublicApi(this.manifest);
+      if (!nativeApi || typeof nativeApi.addRoute !== "function") return null;
+      const documentation = describeRestRoutes(nativeApi, this.manifest.id);
+      const api = documentation.api;
       if (!api || typeof api.addRoute !== "function") return null;
 
       try {
@@ -704,6 +709,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
 
       this.nativeMove?.mount(api);
       this.noteCreate?.mount(api);
+      console.info("[" + this.manifest.id + "] optional OpenAPI: " + documentation.publish());
       return () => api.unregister?.();
       } catch {
         const rollback = () => api.unregister?.();

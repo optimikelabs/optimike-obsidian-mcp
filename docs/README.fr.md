@@ -103,3 +103,15 @@ Formules Base gouvernées source-preserving : [contrat P2](governed-base-formula
 
 Ne pas recopier limites, variables d’environnement ou registres d’outils dans
 plusieurs pages lorsqu’un lien vers l’autorité suffit.
+
+## Cache assiste par evenements
+
+Option de fraicheur du cache : [contrat et validation](cache-events.fr.md).
+
+## Bridge OpenAPI
+
+- [Bridge OpenAPI route inventory](bridge-openapi.fr.md) ? optional documentation; not authorization or complete payload schemas.
+
+## Images
+
+- [Import volontaire d’images (candidat facultatif, sources serveur + fichiers hôte ChatGPT)](asset-import.fr.md)

@@ -12,6 +12,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { type SmartVec } from "../../../services/smartEnv.js";
 import { getSemanticCacheService } from "../../../services/semanticCache.js";
+import { detectSmartEnvQueryProvider } from "../../../services/smartEnvV3.js";
 import { getQueryEmbedder } from "../../../adapters/embed/index.js";
 import {
   detectOllamaBaseUrlFromSmartEnv,
@@ -308,12 +309,13 @@ async function performSearch(input: InType): Promise<OutType> {
   const embedderSetupStartedAt = nowMs();
   const selection = await semanticStage(
     "semantic_embedder_configuration_invalid",
-    () =>
+    async () =>
       getQueryEmbedder({
         provider: QUERY_EMBEDDER,
         modelHint: QUERY_EMBEDDER_MODEL_HINT,
         model: QUERY_EMBEDDER_MODEL,
         vaultModel: model,
+        vaultProvider: await detectSmartEnvQueryProvider(SMART_ENV_DIR, model),
         dimension,
         ollamaBaseUrl: inferredOllamaBaseUrl,
         openaiApiKey: OPENAI_API_KEY,
@@ -495,6 +497,7 @@ export async function prewarmSemanticSearch(): Promise<SemanticSearchPrewarmResu
     modelHint: QUERY_EMBEDDER_MODEL_HINT,
     model: QUERY_EMBEDDER_MODEL,
     vaultModel: model,
+    vaultProvider: await detectSmartEnvQueryProvider(SMART_ENV_DIR, model),
     dimension,
     ollamaBaseUrl: inferredOllamaBaseUrl,
     openaiApiKey: OPENAI_API_KEY,

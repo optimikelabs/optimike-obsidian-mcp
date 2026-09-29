@@ -276,7 +276,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_update_periodic_scheduling",
     {
       description:
-        "Set or clear dateScheduled for one exact Operon task through the sealed periodic-update workflow. Use this tool, not operon_update_task, for every dateScheduled change: Operon decides retain, detach or realign without moving the source Markdown. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
+        "Set or clear dateScheduled for one exact Operon task. The Bridge first uses Operon's ordinary typed update path and escalates to the sealed periodic-update workflow only when Operon proves Daily/Weekly parent realignment is required. Use this tool, not operon_update_task, for every dateScheduled change. expectedRevision and idempotencyKey are mandatory; dryRun defaults to true.",
       inputSchema: mcpSchema(OperonUpdatePeriodicSchedulingSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },

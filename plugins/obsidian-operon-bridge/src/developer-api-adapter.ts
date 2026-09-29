@@ -31,8 +31,9 @@ export type GenericMutationSnapshotResult =
  * or native adapter gate. Only JSON data survives: every value comes from one
  * own data descriptor, and no caller object is reread after this returns.
  */
-export function genericMutationSnapshot(
+function mutationSnapshot(
   value: unknown,
+  allowDateScheduled: boolean,
 ): GenericMutationSnapshotResult {
   const seen = new Set<object>();
   let entries = 0;
@@ -79,7 +80,10 @@ export function genericMutationSnapshot(
         return { ok: false, message: unsafe };
       }
       if (array) {
-        if (ownKeys.some((key) => key === "dateScheduled")) {
+        if (
+          !allowDateScheduled &&
+          ownKeys.some((key) => key === "dateScheduled")
+        ) {
           return { ok: false, message: restricted };
         }
         const lengthDescriptor = Object.getOwnPropertyDescriptor(
@@ -126,7 +130,8 @@ export function genericMutationSnapshot(
       const output: Record<string, unknown> = Object.create(null);
       for (const key of ownKeys) {
         if (typeof key !== "string") return { ok: false, message: unsafe };
-        if (key === "dateScheduled") return { ok: false, message: restricted };
+        if (!allowDateScheduled && key === "dateScheduled")
+          return { ok: false, message: restricted };
         if (++entries > GENERIC_MUTATION_INSPECTION_MAX_NODES)
           return { ok: false, message: unsafe };
         const descriptor = Object.getOwnPropertyDescriptor(object, key);
@@ -150,6 +155,18 @@ export function genericMutationSnapshot(
 
   const result = clone(value, 0);
   return result.ok ? { ok: true, snapshot: result.value } : result;
+}
+
+export function genericMutationSnapshot(
+  value: unknown,
+): GenericMutationSnapshotResult {
+  return mutationSnapshot(value, false);
+}
+
+function schedulingMutationSnapshot(
+  value: unknown,
+): GenericMutationSnapshotResult {
+  return mutationSnapshot(value, true);
 }
 
 export function genericDateScheduledBoundaryError(
@@ -2193,13 +2210,17 @@ export class OperonDeveloperApiRuntimeAdapter {
     operonId: string | null,
     requested: Record<string, unknown>,
     dryRun: boolean,
+    allowDateScheduled = false,
+    beforeApply?: () => Promise<TaskWorkflowBeforeApplyGateResult>,
   ): Promise<DeveloperApiMutationResult> {
     if (
       capability === "create" ||
       capability === "update" ||
       capability === "recurrence"
     ) {
-      const snapshot = genericMutationSnapshot(requested);
+      const snapshot = allowDateScheduled
+        ? schedulingMutationSnapshot(requested)
+        : genericMutationSnapshot(requested);
       if (!snapshot.ok || !isRecord(snapshot.snapshot)) {
         return this.mutationFailure(
           "invalid-input",
@@ -2302,6 +2323,10 @@ export class OperonDeveloperApiRuntimeAdapter {
         developerErrorMessage(preview.error),
         operonId,
         false,
+        {
+          nativeStatus: String(preview.error?.code ?? "").toLocaleLowerCase(),
+          mutationMayHaveApplied: false,
+        },
       );
     }
     if (dryRun) {
@@ -2314,6 +2339,41 @@ export class OperonDeveloperApiRuntimeAdapter {
         planDigest: preview.plan.planDigest,
         retryable: false,
       };
+    }
+
+    if (beforeApply) {
+      let gate: TaskWorkflowBeforeApplyGateResult;
+      try {
+        gate = await beforeApply();
+      } catch (error) {
+        return this.mutationFailure(
+          "failed",
+          `The pre-apply revision gate could not be verified: ${error instanceof Error ? error.message : String(error)}`,
+          operonId,
+          true,
+          {
+            nativeStatus: "planned-not-applied",
+            planDigest: preview.plan.planDigest,
+            recoveryRef: preview.plan.recoveryRef,
+            mutationMayHaveApplied: false,
+          },
+        );
+      }
+      if (!gate.ok) {
+        return this.mutationFailure(
+          "conflict",
+          gate.message ??
+            "The task revision changed after preview; the sealed plan was not applied.",
+          operonId,
+          true,
+          {
+            nativeStatus: "planned-not-applied",
+            planDigest: preview.plan.planDigest,
+            recoveryRef: preview.plan.recoveryRef,
+            mutationMayHaveApplied: false,
+          },
+        );
+      }
     }
 
     let execution: DeveloperApiMutationExecutionResult;
@@ -2434,6 +2494,122 @@ export class OperonDeveloperApiRuntimeAdapter {
       mutationMayHaveApplied: execution.mutationMayHaveApplied ?? true,
       nativeProof: proof,
     };
+  }
+
+  async executeSchedulingUpdate(
+    operonId: string,
+    requested: Record<string, unknown>,
+    dryRun: boolean,
+    beforePeriodicApply?: () => Promise<TaskWorkflowBeforeApplyGateResult>,
+  ): Promise<DeveloperApiMutationResult> {
+    const snapshot = schedulingMutationSnapshot(requested);
+    if (!snapshot.ok || !isRecord(snapshot.snapshot)) {
+      return this.mutationFailure(
+        "invalid-input",
+        snapshot.ok
+          ? "Scheduling update input must be a JSON object."
+          : snapshot.message,
+        operonId,
+        false,
+        { mutationMayHaveApplied: false },
+      );
+    }
+    requested = snapshot.snapshot;
+    const requestKeys = Object.keys(requested);
+    if (
+      requestKeys.some((key) => key !== "operonId" && key !== "fields") ||
+      String(requested.operonId ?? "").trim() !== operonId
+    ) {
+      return this.mutationFailure(
+        "invalid-input",
+        "Scheduling update accepts only the matching operonId and fields.dateScheduled.",
+        operonId,
+        false,
+        { mutationMayHaveApplied: false },
+      );
+    }
+    const fields = requested.fields;
+    if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+      return this.mutationFailure(
+        "invalid-input",
+        "Scheduling update requires fields.dateScheduled.",
+        operonId,
+        false,
+        { mutationMayHaveApplied: false },
+      );
+    }
+    const fieldEntries = Object.entries(fields as Record<string, unknown>);
+    if (fieldEntries.length !== 1 || fieldEntries[0]?.[0] !== "dateScheduled") {
+      return this.mutationFailure(
+        "invalid-input",
+        "Scheduling update accepts exactly fields.dateScheduled.",
+        operonId,
+        false,
+        { mutationMayHaveApplied: false },
+      );
+    }
+    const dateScheduled = fieldEntries[0][1];
+    if (
+      dateScheduled !== null &&
+      (typeof dateScheduled !== "string" || !dateScheduled.trim())
+    ) {
+      return this.mutationFailure(
+        "invalid-input",
+        "fields.dateScheduled must be a non-empty date string or null.",
+        operonId,
+        false,
+        { mutationMayHaveApplied: false },
+      );
+    }
+
+    const ordinary = await this.executeMutation(
+      "update",
+      operonId,
+      requested,
+      dryRun,
+      true,
+      beforePeriodicApply,
+    );
+    if (!this.requiresPeriodicUpdateWorkflow(ordinary)) return ordinary;
+
+    if (
+      !this.hasTaskWorkflowCapability("periodic-update") ||
+      !this.hasTaskWorkflowRecoverySupport("periodic-update")
+    ) {
+      await this.refreshTaskWorkflow("periodic-update");
+    }
+    if (
+      !this.hasTaskWorkflowCapability("periodic-update") ||
+      !this.hasTaskWorkflowRecoverySupport("periodic-update")
+    ) {
+      return this.mutationFailure(
+        "not-ready",
+        "Operon requires the additive periodic-update workflow for this task, but its exact Developer API grant or recovery surface is unavailable.",
+        operonId,
+        true,
+        { mutationMayHaveApplied: false },
+      );
+    }
+
+    return this.executeTaskWorkflow(
+      "periodic-update",
+      requested,
+      dryRun,
+      beforePeriodicApply,
+    );
+  }
+
+  private requiresPeriodicUpdateWorkflow(
+    result: DeveloperApiMutationResult,
+  ): boolean {
+    return (
+      result.ok === false &&
+      result.code === "not-ready" &&
+      result.nativeStatus === "capability-unavailable" &&
+      result.mutationMayHaveApplied === false &&
+      result.message ===
+        "Automatic periodic parent realignment requires tasks.update.periodic-note.preview/apply."
+    );
   }
 
   async executeTaskWorkflow(

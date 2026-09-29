@@ -1,0 +1,5 @@
+# Preserve the exact upstream YAML, including its significant vendor provenance.
+# Its existing trailing blanks are intentional; all authored files keep normal checks.
+docs/obsidian-api/obsidian_rest_api_spec.yaml text eol=lf whitespace=-blank-at-eol
+docs/obsidian-api/obsidian_rest_api_spec.json text eol=lf
+docs/obsidian-api/source.json text eol=lf

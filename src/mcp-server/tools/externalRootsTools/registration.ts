@@ -88,7 +88,7 @@ function secureHttpIdentity(
   );
 }
 
-function assertExternalReadAccess(
+export function assertExternalReadAccess(
   localHandoffAllowed: boolean,
   authInfo: AuthInfo | undefined,
 ): void {

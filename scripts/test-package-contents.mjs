@@ -20,6 +20,12 @@ const files = new Set(
   report.flatMap((entry) => entry.files.map((file) => file.path)),
 );
 const requiredFiles = [
+  "docs/asset-import.md",
+  "docs/asset-import.fr.md",
+  "dist/services/assets/assetWorker.js",
+  "dist/services/assets/windowsAssetFiles.js",
+  "dist/mcp-server/tools/assetImportTools/registration.js",
+  "scripts/test-asset-surface.mjs",
   "docs/native-note-move-m3.md",
   "docs/durable-note-create-m4.md",
   "docs/base-row-patch-m5.md",

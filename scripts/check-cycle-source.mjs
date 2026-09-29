@@ -70,7 +70,22 @@ assert.deepEqual(
   "Final gate manifest must retain every mandatory gate and no unknown substitute",
 );
 for (const key of requiredFinalGateKeys) assert.equal(cycle.finalGate[key], "NOT_RUN");
-assert.equal(cycle.expectedSurface.crossRuntime, TOOL_SURFACE_REGISTRY.length);
+const registrationModes = ["live", "hybrid-degraded", "headless-readonly", "headless-guarded", "headless-filesystem"];
+const defaultCrossRuntimeNames = new Set(registrationModes.flatMap(registrationMode =>
+  compileToolNames({ registrationMode }),
+));
+const configuredCrossRuntimeNames = new Set(registrationModes.flatMap(registrationMode =>
+  compileToolNames({ registrationMode, availableStaticRequirements: ["vault-cache", "asset-policy"] }),
+));
+assert.equal(cycle.expectedSurface.crossRuntime, defaultCrossRuntimeNames.size,
+  "Cycle surface records the default-off cross-runtime contract");
+assert.equal(TOOL_SURFACE_REGISTRY.length, configuredCrossRuntimeNames.size,
+  "Conditional registry union must remain exhaustively reachable when optional requirements are present");
+assert.deepEqual(
+  [...configuredCrossRuntimeNames].filter(name => !defaultCrossRuntimeNames.has(name)).sort(),
+  ["asset_import_apply", "asset_import_plan", "asset_import_status"],
+  "Only the optional asset family may extend the default-off cycle surface",
+);
 const requiredLiveProfiles = ["standard", "authoring", "tasks", "full"];
 assert.deepEqual(Object.keys(cycle.expectedSurface.liveProfiles).sort(), [...requiredLiveProfiles].sort());
 for (const [profile, count] of Object.entries(cycle.expectedSurface.liveProfiles)) {
@@ -132,7 +147,7 @@ assert.match(read("docs/cycle-20260920/CODEX-FINALISATION.md"), /M1/u);
 assert.match(read("docs/cycle-20260920/CODEX-FINALISATION.md"), /NOT_RUN/u);
 console.log(JSON.stringify({
   result: "SOURCE_CHECKS_PASS", packageVersion: pkg.version,
-  toolCount: TOOL_SURFACE_REGISTRY.length, profiles: cycle.expectedSurface.liveProfiles,
+  toolCount: defaultCrossRuntimeNames.size, conditionalToolCount: configuredCrossRuntimeNames.size, profiles: cycle.expectedSurface.liveProfiles,
   localDesktopTestsExecuted: false, releaseAuthorized: false,
   nextGate: "ordered_local_Codex_Pilot2_qualification",
 }, null, 2));

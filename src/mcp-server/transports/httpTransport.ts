@@ -593,9 +593,9 @@ function startHttpServerWithRetry(
       }
 
       try {
-        const fetch: typeof app.fetch = (request, env, executionCtx) => {
+        const fetch: typeof app.fetch = async (request, env, executionCtx) => {
           const routed = rewriteProfiledMcpRequest(request);
-          return routed instanceof Response
+          const response = await (routed instanceof Response
             ? earlyJsonRpcErrorResponse(
                 request,
                 new McpError(
@@ -604,7 +604,25 @@ function startHttpServerWithRetry(
                 ),
                 { operation: "rewriteProfiledMcpRequest", status: 404 },
               )
-            : app.fetch(routed, env, executionCtx);
+            : app.fetch(routed, env, executionCtx));
+          const pathname = new URL(request.url).pathname;
+          if (
+            response.body &&
+            (pathname === MCP_ENDPOINT_PATH ||
+              pathname.startsWith(`${MCP_ENDPOINT_PATH}/`))
+          ) {
+            // Hono's Node adapter can buffer a short MCP response, then send its
+            // unframed body with a chunked header. Keep MCP on the streaming path.
+            const headers = new Headers(response.headers);
+            headers.delete("content-length");
+            headers.set("transfer-encoding", "chunked");
+            return new Response(response.body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers,
+            });
+          }
+          return response;
         };
         const serverInstance = serve(
           { fetch, port: currentPort, hostname: host },

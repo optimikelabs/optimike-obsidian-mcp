@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add opt-in event-assisted vault cache refresh with bounded authenticated Local REST streams, reconnect reconciliation and redacted diagnostics. The ten-minute inventory interval and mutation authorities remain unchanged.
+- Add portable image-import policy discovery and optional ChatGPT host-file ingress on the existing governed asset lifecycle. The destination remains explicitly configured and no clipping, arbitrary URL download, directory creation or note insertion is implied.
+
 ### Fixed
 
 - Reject undeclared `operon_create_task.task` arguments such as `taskFolder` instead of silently dropping them before routing a creation. Declared `fields` and `properties` maps remain available.
+
+- Apply cache exclusions consistently, report incomplete refreshes, serialize scans and incremental writes, and force content rereads for explicit reconciliation.
+- Read only the selected Smart Connections Smart Environment v3 model vectors, preserving other model indexes and the legacy source fallback.
+- Route automatic query embedding from the selected model's provider metadata, including Ollama models whose names contain `/`; report Transformers/Xenova as unavailable without querying a different provider.
+- Send correctly framed streaming MCP responses so fresh stdio-proxy and HTTP clients can negotiate a session.
+- Route existing-task `dateScheduled` changes through Operon's ordinary typed update first and escalate to the additive periodic workflow only when Operon explicitly requires Daily/Weekly parent realignment, avoiding false `Operon unavailable` failures for ordinary scheduling.
 
 ### Changed
 

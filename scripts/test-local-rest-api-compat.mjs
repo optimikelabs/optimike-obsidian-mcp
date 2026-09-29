@@ -335,7 +335,7 @@ assert.equal(
     apiPath.startsWith("/periodic/"),
   ),
   false,
-  "Vendored Local REST API 5.0.2 spec must not expose core periodic routes",
+  "Vendored Local REST API spec must not expose core periodic routes",
 );
 assert.equal(
   vendoredSpec.paths["/vault/{filename}"].patch.requestBody.content[

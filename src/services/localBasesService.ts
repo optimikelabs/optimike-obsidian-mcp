@@ -41,6 +41,9 @@ async function ensureCacheReady(
     await vaultCacheService.buildVaultCache();
     await vaultCacheService.waitUntilReady();
   }
+  if (!(await vaultCacheService.waitUntilReady()) || !vaultCacheService.isReady()) {
+    throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Shared vault cache reconciliation is incomplete.");
+  }
 }
 
 function normalizeBaseId(baseId: string): string {

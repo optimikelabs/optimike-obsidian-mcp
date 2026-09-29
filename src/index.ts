@@ -133,6 +133,7 @@ const shutdown = async (signal: string) => {
       governedCanvasRuntime = undefined;
     }
 
+    await vaultCacheService?.close();
     logger.info("Graceful shutdown completed successfully", shutdownContext);
     process.exit(0);
   } catch (error) {
