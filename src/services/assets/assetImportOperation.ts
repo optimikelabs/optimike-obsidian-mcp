@@ -7,7 +7,7 @@ import { runAssetJob, AssetWorkerError, AssetWorkerNotStartedError } from "./wor
 import { ASSET_IMPORT_KIND as KIND, ASSET_IMPORT_REF as REF, ASSET_IMPORT_KEY as KEY,
   AssetImportInputSchema, AssetProofSchema, AssetMetadataSchema, AssetInspectionSchema,
   CHATGPT_FILE_ROOT_ID,
-  type AssetImportInput, type AssetProof, type AssetImportPolicy, type AssetSourceProvider,
+  type AssetSource, type AssetImportInput, type AssetProof, type AssetImportPolicy, type AssetSourceProvider,
   type AssetImportBackend, type AssetInspection } from "./assetImportContract.js";
 import type { ProcessedImage } from "./imageProcessing.js";
 
@@ -98,7 +98,7 @@ export class AssetImportOperationAdapter {
     preserveOriginal?:boolean;
     exceptionReason?:string;
     idempotencyKey:string;
-  }) {
+  }, authorizeSource: (source: AssetSource) => string) {
     const existing=this.journal.getByIdempotencyKey(KEY+input.idempotencyKey);
     if(!existing)return null;
     const proof=this.proof(existing);
@@ -110,6 +110,7 @@ export class AssetImportOperationAdapter {
       proof.input.preserveOriginal===input.preserveOriginal &&
       proof.input.exceptionReason===input.exceptionReason;
     if(!matches)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
+    if(authorizeSource({...proof.input.source})!==proof.sourcePolicyDigest)deny("asset_source_policy_changed");
     return this.receipt(existing);
   }
   async coalescePlanClaim<T>(

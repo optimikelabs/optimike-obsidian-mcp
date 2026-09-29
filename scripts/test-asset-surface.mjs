@@ -241,6 +241,13 @@ test("host file parameter uses the same governed plan apply status lifecycle",{s
   const status=value(await client.callTool({name:"asset_import_status",arguments:{planRef:plan.planRef}}));
   assert.equal(status.postflight.status,"verified");assert.equal(downloads,1);
   assert.equal(assetHash(fs.readFileSync(path.join(vault,"Images","chat-file.webp"))),applied.asset.sha256);
+  const replayIntent={fileId:input.file.file_id,name:input.name,idempotencyKey:input.idempotencyKey};
+  const disabledIngress=new AssetFileIngress(false,["files.example.test"],async()=>{throw new Error("no network on replay");});
+  assert.throws(()=>runtime.replayHostFilePlan(replayIntent,s=>disabledIngress.authorizeReference(s)));
+  const changedIngress=new AssetFileIngress(true,["other-files.example.test"],async()=>{throw new Error("no network on replay");});
+  assert.throws(()=>runtime.replayHostFilePlan(replayIntent,s=>changedIngress.authorizeReference(s)));
+  assert.equal(runtime.replayHostFilePlan(replayIntent,s=>ingress.authorizeReference(s)).planRef,plan.planRef);
+  assert.equal(downloads,1);
  } finally {
   await client.close();await server.close();journal.close();
   config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;

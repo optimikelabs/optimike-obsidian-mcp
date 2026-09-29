@@ -118,7 +118,7 @@ export async function registerAssetImportTools(
           preserveOriginal: params.preserveOriginal,
           exceptionReason: params.exceptionReason,
           idempotencyKey: params.idempotencyKey,
-        });
+        }, (source) => fileIngress.authorizeReference(source));
         if (replay) return replay;
 
         return runtime.coalescePlanClaim(
