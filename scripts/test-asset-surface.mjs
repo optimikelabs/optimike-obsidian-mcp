@@ -301,3 +301,52 @@ test("concurrent ChatGPT file plans coalesce one download and conflict before ne
   config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
  }
 });
+
+test("host-file plan capacity is reserved before download across MCP sessions",async()=>{
+ const vault=path.join(root,"host-capacity-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
+ const png=await sharp({create:{width:3,height:2,channels:4,background:{r:11,g:12,b:13,alpha:1}}}).png().toBuffer();
+ let downloads=0,releaseDownloads;
+ const gate=new Promise(resolve=>{releaseDownloads=resolve;});
+ const downloader=async()=>{
+  downloads++;
+  await gate;
+  return {bytes:png,contentType:"image/png"};
+ };
+ const journal=new ObsidianNoteReplaceJournal(path.join(root,"host-capacity-plans.sqlite"));
+ const binding="c".repeat(64);
+ const runtime=new AssetImportOperationAdapter({
+  inspect:async()=>({binding,exists:false}),
+  create:async()=>{throw new Error("plan-only test");},
+ },journal,{vaultRoot:vault,assetFolder:"Images",quality:75});
+ const handlersA=new Map(),handlersB=new Map();
+ const ingressA=new AssetFileIngress(true,["files.example.test"],downloader);
+ const ingressB=new AssetFileIngress(true,["files.example.test"],downloader);
+ const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
+ config.assetImportEnabled=true;config.mcpWriteMode="full";
+ const makeInput=(n)=>({
+  file:{download_url:`https://files.example.test/input-${n}.png?token=temporary`,file_id:`file_capacity${n}`,mime_type:"image/png",file_name:`input-${n}.png`},
+  name:`capacity-${n}`,idempotencyKey:`chatgpt-capacity-key-${n}`,
+ });
+ try {
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersA.set(name,handler)},runtime,undefined,true,ingressA);
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersB.set(name,handler)},runtime,undefined,true,ingressB);
+  const planA=handlersA.get("asset_import_plan"),planB=handlersB.get("asset_import_plan");
+  const first=planA(makeInput(1),{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,1);
+  const second=planB(makeInput(2),{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,2);
+  const third=await planA(makeInput(3),{});
+  assert.equal(third.isError,true);
+  assert.equal(downloads,2,"third distinct plan must fail before starting another download");
+  releaseDownloads();
+  const results=await Promise.all([first,second]);
+  assert.equal(results[0].isError,false);
+  assert.equal(results[1].isError,false);
+ } finally {
+  releaseDownloads?.();
+  journal.close();
+  config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
+ }
+});

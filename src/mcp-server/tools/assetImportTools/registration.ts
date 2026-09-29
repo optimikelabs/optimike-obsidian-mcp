@@ -140,7 +140,12 @@ export async function registerAssetImportTools(
               exceptionReason: params.exceptionReason,
               idempotencyKey: params.idempotencyKey,
             };
-            return runtime.plan(durable, materialized.provider, writeGuard);
+            return runtime.plan(
+              durable,
+              materialized.provider,
+              writeGuard,
+              true,
+            );
           },
         );
       }

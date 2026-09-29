@@ -21,6 +21,13 @@ function operationId(ref:string):string {
 const uncertain = (row:ObsidianNoteReplacePlan) => ["planned","applying","outcome_unknown"].includes(row.status);
 let plansInFlight=0;
 
+async function withPlanCapacity<T>(operation:()=>Promise<T>):Promise<T> {
+  if(plansInFlight>=2)deny("asset_plan_busy",BaseErrorCode.SERVICE_UNAVAILABLE);
+  plansInFlight++;
+  try {return await operation();}
+  finally {plansInFlight--;}
+}
+
 /** A binary projection of the existing journal, not another transaction engine. */
 export class AssetImportOperationAdapter {
   readonly operationKind=KIND;
@@ -130,7 +137,7 @@ export class AssetImportOperationAdapter {
       if(active.intent!==intent)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
       return active.promise as Promise<T>;
     }
-    const promise=operation();
+    const promise=withPlanCapacity(operation);
     this.hostFilePlansInFlight.set(input.idempotencyKey,{intent,promise});
     try {
       return await promise;
@@ -139,7 +146,12 @@ export class AssetImportOperationAdapter {
       if(current?.promise===promise)this.hostFilePlansInFlight.delete(input.idempotencyKey);
     }
   }
-  async plan(input:unknown,source:AssetSourceProvider,authorize:()=>void|Promise<void>) {
+  async plan(
+    input:unknown,
+    source:AssetSourceProvider,
+    authorize:()=>void|Promise<void>,
+    capacityReserved=false,
+  ) {
     const parsed=AssetImportInputSchema.parse(input);
     await authorize();const sourcePolicyDigest=await source.authorize({...parsed.source});
     const existing=this.journal.getByIdempotencyKey(KEY+parsed.idempotencyKey);
@@ -148,9 +160,7 @@ export class AssetImportOperationAdapter {
       if(existing.idempotencyIdentity!==this.intent(parsed))deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
       return this.receipt(existing);
     }
-    if(plansInFlight>=2)deny("asset_plan_busy",BaseErrorCode.SERVICE_UNAVAILABLE);
-    plansInFlight++;
-    try {
+    const construct=async()=>{
       const bytes=await source.read({...parsed.source});
       if(assetHash(bytes)!==parsed.source.sha256)deny("asset_source_changed",BaseErrorCode.CONFLICT);
       const processed=await this.convert(bytes,{quality:parsed.quality??this.policy.quality,
@@ -178,7 +188,8 @@ export class AssetImportOperationAdapter {
           intentDigest:this.intent(parsed),proof},
       },32);
       return this.receipt(row);
-    } finally {plansInFlight--;}
+    };
+    return capacityReserved?construct():withPlanCapacity(construct);
   }
   async apply(ref:string,key:string,source:AssetSourceProvider,authorize:()=>void|Promise<void>) {
     let row=this.required(ref);const proof=this.proof(row);
