@@ -2821,3 +2821,25 @@ test("a rejected Operon 3.5 workflow grant does not revoke another workflow or c
   );
   assert.equal(adapter.hasTaskWorkflowRecoverySupport("periodic-create"), true);
 });
+
+
+test("ordinary scheduling rechecks the caller revision after preview before native apply", async () => {
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, {});
+  let applyCalls = 0;
+  let gateCalls = 0;
+  (adapter as any).mutationApis.set("update", { mutations: {
+    preview: async () => ({ ok: true, plan: { planDigest: "a".repeat(64), recoveryRef: "dvr1_" + "a".repeat(48) } }),
+    apply: async () => { applyCalls++; throw new Error("stale revision must never apply"); },
+  } });
+  (adapter as any).hasMutationCapability = () => true;
+  (adapter as any).getExactTask = async () => ({ identity: { operonId: "abc1234" } });
+  (adapter as any).mapMutationInput = async () => ({ capability: "tasks.update", mutationKind: "update", target: {}, spec: {} });
+  const result = await adapter.executeSchedulingUpdate("abc1234", { operonId: "abc1234", fields: { dateScheduled: "2026-09-29" } }, false, async () => {
+    gateCalls++; return { ok: false, message: "expectedRevision changed" };
+  });
+  assert.equal(result.code, "conflict");
+  assert.equal(result.mutationMayHaveApplied, false);
+  assert.equal(result.nativeStatus, "planned-not-applied");
+  assert.equal(gateCalls, 1);
+  assert.equal(applyCalls, 0);
+});

@@ -3822,6 +3822,9 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       failureScope,
       prepare: async () => {
         const runtime = await this.requireMutationRuntime("update");
+        if (!runtime.developerApi) {
+          throw new OperonMutationCapabilityUnavailableError("update");
+        }
         const before = (await this.oneTask(operonId, true)).task;
         return before
           ? { kind: "ready", value: { runtime, before } }

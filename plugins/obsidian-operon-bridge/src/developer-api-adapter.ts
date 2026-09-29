@@ -2211,6 +2211,7 @@ export class OperonDeveloperApiRuntimeAdapter {
     requested: Record<string, unknown>,
     dryRun: boolean,
     allowDateScheduled = false,
+    beforeApply?: () => Promise<TaskWorkflowBeforeApplyGateResult>,
   ): Promise<DeveloperApiMutationResult> {
     if (
       capability === "create" ||
@@ -2338,6 +2339,41 @@ export class OperonDeveloperApiRuntimeAdapter {
         planDigest: preview.plan.planDigest,
         retryable: false,
       };
+    }
+
+    if (beforeApply) {
+      let gate: TaskWorkflowBeforeApplyGateResult;
+      try {
+        gate = await beforeApply();
+      } catch (error) {
+        return this.mutationFailure(
+          "failed",
+          `The pre-apply revision gate could not be verified: ${error instanceof Error ? error.message : String(error)}`,
+          operonId,
+          true,
+          {
+            nativeStatus: "planned-not-applied",
+            planDigest: preview.plan.planDigest,
+            recoveryRef: preview.plan.recoveryRef,
+            mutationMayHaveApplied: false,
+          },
+        );
+      }
+      if (!gate.ok) {
+        return this.mutationFailure(
+          "conflict",
+          gate.message ??
+            "The task revision changed after preview; the sealed plan was not applied.",
+          operonId,
+          true,
+          {
+            nativeStatus: "planned-not-applied",
+            planDigest: preview.plan.planDigest,
+            recoveryRef: preview.plan.recoveryRef,
+            mutationMayHaveApplied: false,
+          },
+        );
+      }
     }
 
     let execution: DeveloperApiMutationExecutionResult;
@@ -2532,6 +2568,7 @@ export class OperonDeveloperApiRuntimeAdapter {
       requested,
       dryRun,
       true,
+      beforePeriodicApply,
     );
     if (!this.requiresPeriodicUpdateWorkflow(ordinary)) return ordinary;
 
