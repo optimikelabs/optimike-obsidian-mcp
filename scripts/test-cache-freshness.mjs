@@ -339,6 +339,59 @@ test("public readiness drops immediately for pending events and explicit uncerta
   }
 });
 
+test("queued refresh keeps public readiness false until serialized execution settles", async () => {
+  const previous=config.obsidianSharedCacheDbPath;
+  config.obsidianSharedCacheDbPath=path.join(root,"queued-refresh-readiness.sqlite");
+  const instance=new VaultCacheService(rest);
+  const original=rest.getFileContent;
+  let entered;
+  const blocked=new Promise(resolve=>{entered=resolve;});
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  let blockOnce=false;
+  rest.getFileContent=async file=>{
+    if(blockOnce){
+      blockOnce=false;
+      entered();
+      await gate;
+    }
+    return original(file);
+  };
+  try {
+    await instance.refreshCache(true);
+    assert.equal(instance.isReady(),true);
+
+    blockOnce=true;
+    const update=instance.updateFileVerified("Note.md",context);
+    await blocked;
+
+    const refresh=instance.refreshCache(true);
+    await new Promise(resolve=>setTimeout(resolve,10));
+    assert.equal(instance.isReady(),false);
+    assert.equal(instance.getReadinessStatus(),"building");
+    assert.equal(instance.getStats().ready,false);
+    assert.equal(instance.getStats().freshness,"uncertain");
+
+    let settled=false;
+    const wait=instance.waitUntilReady(2000).finally(()=>{settled=true;});
+    wait.catch(()=>undefined);
+    await new Promise(resolve=>setTimeout(resolve,40));
+    assert.equal(settled,false);
+
+    release();
+    await update;
+    await refresh;
+    assert.equal(await wait,true);
+    assert.equal(instance.isReady(),true);
+    assert.equal(instance.getStats().freshness,"observed");
+  } finally {
+    rest.getFileContent=original;
+    release?.();
+    await instance.close();
+    config.obsidianSharedCacheDbPath=previous;
+  }
+});
+
 test("accepted pending work is durable before an update and completion cannot clear unrelated uncertainty", async () => {
   const previous=config.obsidianSharedCacheDbPath;
   config.obsidianSharedCacheDbPath=path.join(root,"pending-event-restart.sqlite");
