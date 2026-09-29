@@ -1,0 +1,49 @@
+name: Voluntary asset import
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "docs/asset-import*"
+      - "docs/cycle-20260928/**"
+      - "evals/tool-catalog.v1.json"
+      - "package*.json"
+      - "tsconfig*.json"
+      - ".gitattributes"
+      - ".github/workflows/asset-import.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "docs/asset-import*"
+      - "docs/cycle-20260928/**"
+      - "evals/tool-catalog.v1.json"
+      - "package*.json"
+      - "tsconfig*.json"
+      - ".gitattributes"
+      - ".github/workflows/asset-import.yml"
+permissions:
+  contents: read
+jobs:
+  assets:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: git rev-parse HEAD
+      - run: npm run test:assets
+      - run: npm run test:profiles
+      - run: node scripts/test-tool-catalog.mjs
+      - run: node scripts/test-doc-contract.mjs

@@ -335,6 +335,16 @@ export class ExternalRootsService {
     return result.sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  async hasBinaryProcessingRoot(): Promise<boolean> {
+    const roots = await this.listRoots();
+    return roots.some(
+      (root) =>
+        root.available &&
+        root.capabilities.includes("handoff") &&
+        root.capabilities.includes("readable"),
+    );
+  }
+
   async list(
     rootId: string,
     requestedPath = "",
@@ -522,6 +532,28 @@ export class ExternalRootsService {
       truncated: text.length < fullText.length,
       sha256: sha256(buffer),
     };
+  }
+
+  /** Internal processing only. The same readable/handoff policy remains required. */
+  binaryProcessingPolicy(rootId: string, requestedPath: string): string {
+    const runtime = this.requireCapability(rootId, "handoff");
+    this.assertCapability(runtime, "readable");
+    const relativePath = normalizeRelativePath(requestedPath);
+    if (!relativePath) throw new ExternalRootError("path_invalid", "A source file is required.");
+    this.assertAllowed(runtime, relativePath);
+    return sha256(Buffer.from(JSON.stringify({ root: runtime.config, path: relativePath })));
+  }
+
+  async readBinaryForProcessing(rootId: string, requestedPath: string, maxBytes: number): Promise<Buffer> {
+    this.binaryProcessingPolicy(rootId, requestedPath);
+    if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 8 * 1024 * 1024)
+      throw new ExternalRootError("too_large", "Invalid processing byte budget.");
+    const runtime = this.requireCapability(rootId, "handoff");
+    const relativePath = normalizeRelativePath(requestedPath);
+    return this.withHandoffLock(async () => {
+      this.binaryProcessingPolicy(rootId, relativePath);
+      return (await this.readVerifiedBuffer(runtime, relativePath, maxBytes)).buffer;
+    });
   }
 
   async handoff(

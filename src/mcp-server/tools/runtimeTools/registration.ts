@@ -95,6 +95,7 @@ export async function registerRuntimeTools(
           note: Boolean(governedNoteReplaceRuntime),
           base: Boolean(governedBaseFormulaRuntime),
           canvas: Boolean(governedCanvasRuntime),
+          asset: Boolean(governedNoteReplaceRuntime?.assetImport),
         },
       });
       return {

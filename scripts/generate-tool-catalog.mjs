@@ -11,7 +11,8 @@ const outputPath = path.join(repoRoot, "evals", "tool-catalog.v1.json");
 const registry = await import("../dist/mcp-server/toolSurfaceRegistry.js");
 const profiles = await import("../dist/mcp-server/toolProfiles.js");
 
-const STATIC_REQUIREMENTS = ["vault-cache"];
+// Catalogue lists potential configured surfaces, not default tool exposure.
+const STATIC_REQUIREMENTS = ["vault-cache", "asset-policy"];
 
 // These are compatibility routes, not aliases: the old names remain distinct
 // public tools and are retained only so callers can migrate safely.
@@ -134,6 +135,7 @@ function buildCatalog() {
     schemaVersion: "tool-catalog.v1",
     version: 1,
     source: "src/mcp-server/toolSurfaceRegistry.ts",
+    assumedStaticRequirements: STATIC_REQUIREMENTS,
     toolCount: tools.length,
     classificationCounts,
     modes,

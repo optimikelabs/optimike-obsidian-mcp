@@ -104,6 +104,10 @@ const EnvSchema = z
       .string()
       .transform((val) => val.toLowerCase() === "true")
       .default("false"),
+    OBSIDIAN_CACHE_EVENTS_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
     OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN: z.coerce
       .number()
       .int()
@@ -143,6 +147,9 @@ const EnvSchema = z
       // unavailable/degraded state until Local REST becomes reachable.
       .default("false"),
     MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
+    MCP_ASSET_FOLDER: z.string().min(1).max(800).optional(),
+    MCP_ASSET_IMPORT_ENABLED: z.enum(["true", "false"]).default("false").transform(v => v === "true"),
+    MCP_ASSET_WEBP_QUALITY: z.coerce.number().int().min(1).max(100).default(75),
     MCP_EXTERNAL_MOVE_ENABLED: z
       .string()
       .transform((val) => val.toLowerCase() === "true")
@@ -302,6 +309,31 @@ const EnvSchema = z
           "OBSIDIAN_VAULT is required in hybrid mode when OBSIDIAN_API_KEY is not configured",
       });
     }
+
+    if (env.MCP_ASSET_IMPORT_ENABLED && !env.MCP_ASSET_FOLDER) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_ASSET_FOLDER"],
+        message: "MCP_ASSET_FOLDER is required when asset import is enabled",
+      });
+    }
+
+    if (env.MCP_ASSET_IMPORT_ENABLED && !env.OBSIDIAN_VAULT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["OBSIDIAN_VAULT"],
+        message: "OBSIDIAN_VAULT is required when asset import is enabled",
+      });
+    }
+
+    if (env.MCP_ASSET_IMPORT_ENABLED && !env.MCP_EXTERNAL_ROOTS_FILE) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_EXTERNAL_ROOTS_FILE"],
+        message:
+          "MCP_EXTERNAL_ROOTS_FILE is required when asset import is enabled",
+      });
+    }
   });
 
 const parsedEnv = EnvSchema.safeParse(process.env);
@@ -424,6 +456,7 @@ export const config = {
   obsidianBaseUrl: env.OBSIDIAN_BASE_URL,
   obsidianVerifySsl: env.OBSIDIAN_VERIFY_SSL,
   obsidianCacheRefreshIntervalMin: env.OBSIDIAN_CACHE_REFRESH_INTERVAL_MIN,
+  obsidianCacheEventsEnabled: env.OBSIDIAN_CACHE_EVENTS_ENABLED,
   obsidianEnableCache: env.OBSIDIAN_ENABLE_CACHE,
   obsidianApiSearchTimeoutMs: env.OBSIDIAN_API_SEARCH_TIMEOUT_MS,
   obsidianCacheSource: env.OBSIDIAN_CACHE_SOURCE,
@@ -446,13 +479,16 @@ export const config = {
   obsidianStartupRetryDelayMs: env.OBSIDIAN_STARTUP_RETRY_DELAY_MS,
   obsidianStartupBlocking: env.OBSIDIAN_STARTUP_BLOCKING,
   externalRootsFile: env.MCP_EXTERNAL_ROOTS_FILE,
+  assetFolder: env.MCP_ASSET_FOLDER,
+  assetImportEnabled: env.MCP_ASSET_IMPORT_ENABLED,
+  assetWebpQuality: env.MCP_ASSET_WEBP_QUALITY,
   externalMoveEnabled: env.MCP_EXTERNAL_MOVE_ENABLED,
   externalMoveProfileId: env.MCP_EXTERNAL_MOVE_PROFILE_ID,
   externalMoveJournalPath:
     env.MCP_EXTERNAL_MOVE_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       "external-moves.sqlite",
@@ -461,7 +497,7 @@ export const config = {
     env.MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       `obsidian-note-replace-${noteReplaceProfileId}.sqlite`,
@@ -472,7 +508,7 @@ export const config = {
     env.MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH ||
     path.join(
       process.env.LOCALAPPDATA ||
-      process.env.XDG_STATE_HOME ||
+        process.env.XDG_STATE_HOME ||
         path.join(os.homedir(), ".local", "state"),
       "optimike-obsidian-mcp",
       `obsidian-base-formula-${noteReplaceProfileId}.sqlite`,
