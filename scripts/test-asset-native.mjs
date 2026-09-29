@@ -90,6 +90,21 @@ test('operator vault paths allow legal Windows components without relaxing asset
   assert.throws(()=>new WindowsAssetFiles('C:\\[Archive]\\Vault',folder));
 });
 
+
+test('vault roots accept harmless trailing separators and drive-root vaults',()=>{
+ assert.doesNotThrow(()=>new WindowsAssetFiles('C:\\Notes\\','Images'));
+ assert.doesNotThrow(()=>new WindowsAssetFiles('C:\\','Images'));
+ assert.throws(()=>new WindowsAssetFiles('C:\\Notes\\.\\','Images'));
+});
+
+test('native creation works when the configured vault root has a trailing separator',{skip:!supported},()=>fixture(({root})=>{
+ const backend=new WindowsAssetFiles(root+'\\','Images');
+ const before=backend.inspect('trailing.webp');
+ const created=backend.create('trailing.webp',bytes,before.binding);
+ assert.equal(created.sha256,assetHash(bytes));
+ assert.deepEqual(fs.readFileSync(path.join(root,'Images','trailing.webp')),bytes);
+}));
+
 test('native creation and collision refusal work under legal non-emitted vault root names',{skip:!supported},()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'optimike-root-names-'));
  try {

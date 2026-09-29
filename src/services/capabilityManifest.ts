@@ -6,7 +6,10 @@ import {
   type ToolProfileId,
 } from "../mcp-server/toolProfiles.js";
 import { getToolSurfaceEntry } from "../mcp-server/toolSurfaceRegistry.js";
-import type { ToolRegistrationMode } from "../mcp-server/toolSurfaceRegistry.js";
+import type {
+  ToolRegistrationMode,
+  ToolStaticRequirement,
+} from "../mcp-server/toolSurfaceRegistry.js";
 import { httpAdmissionController } from "../mcp-server/transports/httpBackpressure.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { requestContextService } from "../utils/index.js";
@@ -32,6 +35,7 @@ export type CapabilityId =
   | "governed-frontmatter-write"
   | "governed-canvas-write"
   | "governed-base-write"
+  | "governed-asset-import"
   | "operon-read"
   | "operon-write";
 
@@ -70,6 +74,7 @@ export type CapabilityReasonCode =
   | "operon_mutations_disabled"
   | "mcp_operon_mutations_disabled"
   | "write_policy_blocked"
+  | "asset_import_disabled"
   | "operation_policy_blocked"
   | "operon_capability_not_advertised"
   | "operon_partial_capabilities"
@@ -100,6 +105,7 @@ export type CapabilityNextAction =
   | "enable_operon_mutations"
   | "enable_mcp_operon_mutations"
   | "enable_write_policy"
+  | "enable_asset_import"
   | "review_operation_policy"
   | "negotiate_exact_operon_capability";
 
@@ -174,6 +180,8 @@ export interface CapabilityManifestProjectionInput {
   operonMutationsEnabled: boolean;
   writeMode: "readonly" | "guarded" | "full";
   operonAllowedPathPrefixesConfigured: boolean;
+  assetImportEnabled?: boolean;
+  assetRuntimeAvailable?: boolean;
   localRest: NormalizedProbe<{ authenticated: boolean }>;
   atomicWrite: NormalizedProbe<AtomicWriteStatusResponse>;
   baseAtomicWrite: NormalizedProbe<BaseAtomicStatusResponse>;
@@ -204,6 +212,7 @@ export interface GovernedRuntimeAvailability {
   note: boolean;
   canvas: boolean;
   base: boolean;
+  asset: boolean;
 }
 
 const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
@@ -244,6 +253,11 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "bases_formula_patch_apply",
     "bases_formula_patch_status",
     "bases_formula_patch_recover",
+  ],
+  "governed-asset-import": [
+    "asset_import_plan",
+    "asset_import_apply",
+    "asset_import_status",
   ],
   "operon-read": ["operon_status", "operon_get_task", "operon_query_tasks"],
   "operon-write": [
@@ -661,6 +675,34 @@ function baseCapability(
   );
 }
 
+function assetCapability(
+  input: CapabilityManifestProjectionInput,
+): CapabilityManifestEntry {
+  const available = input.assetRuntimeAvailable === true;
+  const enabled = input.assetImportEnabled === true;
+  const writePolicyAllows = input.writeMode === "full";
+  return entry(
+    input,
+    "governed-asset-import",
+    available,
+    available && enabled && writePolicyAllows,
+    !available
+      ? "runtime_not_initialized"
+      : !enabled
+        ? "asset_import_disabled"
+        : !writePolicyAllows
+          ? "write_policy_blocked"
+          : "ready",
+    !available
+      ? "restart_mcp_runtime"
+      : !enabled
+        ? "enable_asset_import"
+        : !writePolicyAllows
+          ? "enable_write_policy"
+          : "none",
+  );
+}
+
 function unavailableOperonWrite(
   input: CapabilityManifestProjectionInput,
   reasonCode: CapabilityReasonCode,
@@ -945,6 +987,9 @@ export function projectCapabilityManifest(
     atomicCapability(input, "governed-frontmatter-write"),
     atomicCapability(input, "governed-canvas-write"),
     baseCapability(input),
+    ...((input.assetRuntimeAvailable === true || input.assetImportEnabled === true)
+      ? [assetCapability(input)]
+      : []),
     operon.read,
     operon.write,
   ];
@@ -1053,9 +1098,9 @@ export async function collectCapabilityManifest(options: {
     operation: "collectCapabilityManifest",
   });
   const operonService = new OperonService();
-  const staticRequirements = options.vaultCacheAvailable
-    ? (["vault-cache"] as const)
-    : [];
+  const staticRequirements: ToolStaticRequirement[] = [];
+  if (options.vaultCacheAvailable) staticRequirements.push("vault-cache");
+  if (options.governedRuntimes.asset) staticRequirements.push("asset-policy");
   const profileToolNames = compileToolProfileNames({
     profile: options.profile,
     registrationMode: "live",
@@ -1158,6 +1203,9 @@ export async function collectCapabilityManifest(options: {
     ...(!options.governedRuntimes.base
       ? TOOL_FAMILIES["governed-base-write"]
       : []),
+    ...(!options.governedRuntimes.asset
+      ? TOOL_FAMILIES["governed-asset-import"]
+      : []),
   ]);
   const visibleToolNames = modeToolNames.filter(
     (name) => !unavailableGovernedNames.has(name),
@@ -1178,6 +1226,8 @@ export async function collectCapabilityManifest(options: {
     writeMode: config.mcpWriteMode,
     operonAllowedPathPrefixesConfigured:
       config.operonMutationAllowedPathPrefixes.length > 0,
+    assetImportEnabled: config.assetImportEnabled,
+    assetRuntimeAvailable: options.governedRuntimes.asset,
     localRest,
     atomicWrite,
     baseAtomicWrite,

@@ -88,3 +88,63 @@ test("actual MCP to authorized source, conversion, NTFS exclusive creation and d
   assert.deepEqual(fs.readdirSync(vault),["Images"]);assert.equal(assetHash(fs.readFileSync(path.join(sourceRoot,"input.png"))),assetHash(png));
  }finally {await client.close();await server.close();journal.close();config.assetImportEnabled=false;}
 });
+
+
+test('real stdio processes import authorized server-local bytes and resume the same receipt',{skip:process.platform!=='win32'||process.arch!=='x64',timeout:90000},async()=>{
+ const {StdioClientTransport}=await import('@modelcontextprotocol/client/stdio');
+ const {fileURLToPath}=await import('node:url');
+ const vault=path.join(root,'stdio-vault'),sourceRoot=path.join(root,'stdio-source');
+ fs.mkdirSync(vault);fs.mkdirSync(sourceRoot);fs.mkdirSync(path.join(vault,'Images'));
+ const png=await sharp({create:{width:6,height:4,channels:4,background:{r:40,g:50,b:60,alpha:0.5}}}).png().toBuffer();
+ fs.writeFileSync(path.join(sourceRoot,'input.png'),png);
+ const childCode=`
+  import {McpServer} from '@modelcontextprotocol/server';
+  import {StdioServerTransport} from '@modelcontextprotocol/server/stdio';
+  const [base,vault,source,journalFile]=process.argv.slice(1);
+  const load=p=>import(new URL(p,base));
+  const {registerAssetImportTools}=await load('mcp-server/tools/assetImportTools/registration.js');
+  const {AssetImportOperationAdapter}=await load('services/assets/assetImportOperation.js');
+  const {ObsidianNoteReplaceJournal}=await load('services/operations/obsidianNoteReplaceJournal.js');
+  const {ExternalRootsService}=await load('services/externalRootsService.js');
+  const {runAssetJob}=await load('services/assets/workerClient.js');
+  const roots=ExternalRootsService.fromConfig({version:1,roots:[{id:'fixture.stdio',path:source,capabilities:['visible','readable','handoff'],include:['**/*.png']}]});
+  const journal=new ObsidianNoteReplaceJournal(journalFile),policy={vaultRoot:vault,assetFolder:'Images',quality:75};
+  const runtime=new AssetImportOperationAdapter({inspect:(filename,binding)=>runAssetJob({kind:'inspect',...policy,filename,binding}),create:(filename,bytes,binding)=>runAssetJob({kind:'create',...policy,filename,bytes,binding})},journal,policy);
+  const server=new McpServer({name:'asset-stdio-fixture',version:'1'});
+  await registerAssetImportTools(server,runtime,roots,true);
+  process.stdin.once('end',()=>journal.close());
+  await server.connect(new StdioServerTransport());
+ `;
+ const env={};for(const key of ['SystemRoot','WINDIR','TEMP','TMP','TMPDIR','PATH','HOME'])if(process.env[key])env[key]=process.env[key];
+ Object.assign(env,{NODE_ENV:'test',MCP_TRANSPORT_TYPE:'stdio',OBSIDIAN_RUNTIME_MODE:'live',OBSIDIAN_API_KEY:'fixture-only',OBSIDIAN_BASE_URL:'http://127.0.0.1:9',OBSIDIAN_VAULT:vault,MCP_WRITE_MODE:'full',MCP_ASSET_IMPORT_ENABLED:'true',MCP_ASSET_FOLDER:'Images',MCP_LOG_DIR:path.join(root,'stdio-logs')});
+ const session=async(body)=>{
+  const client=new Client({name:'real-stdio-asset-client',version:'1'});
+  const transport=new StdioClientTransport({command:process.execPath,args:['--input-type=module','-e',childCode,new URL('../dist/',import.meta.url).href,vault,sourceRoot,path.join(root,'stdio-plans.sqlite')],cwd:fileURLToPath(new URL('..',import.meta.url)),env,stderr:'pipe'});
+  transport.stderr?.on('data',()=>{});
+  try {await client.connect(transport);return await body(client);}
+  finally {await client.close();await transport.close();}
+ };
+ const input={source:{rootId:'fixture.stdio',relativePath:'input.png',sha256:assetHash(png)},name:'stdio-image',idempotencyKey:'stdio-import-fixture'};
+ const planned=await session(async client=>{
+  assert.deepEqual((await client.listTools()).tools.map(t=>t.name).sort(),names);
+  const response=await client.callTool({name:'asset_import_plan',arguments:input});assert.equal(response.isError,false);
+  const p=value(response);assert.equal(p.phase,'planned');assert.equal(p.embed,null);
+  assert.deepEqual(fs.readdirSync(path.join(vault,'Images')),[]);return p;
+ });
+ const args={planRef:planned.planRef,idempotencyKey:input.idempotencyKey};
+ const applied=await session(async client=>{
+  assert.equal(value(await client.callTool({name:'asset_import_status',arguments:{planRef:planned.planRef}})).phase,'planned');
+  const response=await client.callTool({name:'asset_import_apply',arguments:args});assert.equal(response.isError,false);return value(response);
+ });
+ assert.equal(applied.outcome,'committed');assert.equal(applied.postflight.status,'verified');
+ const file=path.join(vault,'Images','stdio-image.webp'),before=fs.statSync(file);
+ assert.equal(assetHash(fs.readFileSync(file)),applied.asset.sha256);
+ await session(async client=>{
+  const status=value(await client.callTool({name:'asset_import_status',arguments:{planRef:planned.planRef}}));
+  assert.equal(status.postflight.status,'verified');
+  assert.equal(value(await client.callTool({name:'asset_import_apply',arguments:args})).outcome,'committed');
+ });
+ const after=fs.statSync(file);assert.equal(after.ino,before.ino);assert.equal(after.mtimeMs,before.mtimeMs);
+ assert.deepEqual(fs.readdirSync(path.join(vault,'Images')),['stdio-image.webp']);
+ assert.equal(assetHash(fs.readFileSync(path.join(sourceRoot,'input.png'))),assetHash(png));
+});
