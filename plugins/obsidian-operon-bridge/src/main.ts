@@ -3821,8 +3821,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       requested,
       failureScope,
       prepare: async () => {
-        const runtime =
-          await this.requireTaskWorkflowRuntime("periodic-update");
+        const runtime = await this.requireMutationRuntime("update");
         const before = (await this.oneTask(operonId, true)).task;
         return before
           ? { kind: "ready", value: { runtime, before } }
@@ -3861,8 +3860,8 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       this.cacheMutation(idempotencyKey, signature, payload);
       return { httpStatus: 409, payload };
     }
-    const native = await runtime.developerApi!.executeTaskWorkflow(
-      "periodic-update",
+    const native = await runtime.developerApi!.executeSchedulingUpdate(
+      operonId,
       requested,
       body.dryRun !== false,
       async () => {

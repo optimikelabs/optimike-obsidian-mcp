@@ -868,7 +868,7 @@ test("every replayable native mutation route coordinates before asynchronous rea
     [
       "executePeriodicUpdateMutation",
       "private async taskWorkflowMutationPayload(",
-      "requireTaskWorkflowRuntime(",
+      'requireMutationRuntime("update")',
     ],
     [
       "executeExistingMutation",
@@ -1135,7 +1135,7 @@ test("periodic update validates lookup and revision before durable reservation",
       mutationOperationId: () => "periodic-operation",
       requireRuntime: () => ({}),
       indexState: async () => undefined,
-      requireTaskWorkflowRuntime: () => ({}),
+      requireMutationRuntime: () => ({}),
       oneTask: async () => {
         taskReads += 1;
         return { task };
