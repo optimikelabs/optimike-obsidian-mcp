@@ -7,7 +7,15 @@ import { assertWriteAllowed } from "../../../services/writePolicy.js";
 import type { ExternalRootsService } from "../../../services/externalRootsService.js";
 import type { AssetImportOperationAdapter } from "../../../services/assets/assetImportOperation.js";
 import { ASSET_SOURCE_MAX_BYTES } from "../../../services/assets/imageProcessing.js";
-import { AssetImportInputSchema, AssetApplyInputSchema, AssetStatusInputSchema, type AssetSourceProvider } from "../../../services/assets/assetImportContract.js";
+import {
+  AssetImportPlanInputSchema,
+  AssetApplyInputSchema,
+  AssetStatusInputSchema,
+  type AssetImportInput,
+  type AssetImportPlanInput,
+  type AssetSourceProvider,
+} from "../../../services/assets/assetImportContract.js";
+import { AssetFileIngress } from "../../../services/assets/fileIngress.js";
 import { assertExternalReadAccess } from "../externalRootsTools/registration.js";
 import { GOVERNED_PLAN_TOOL_ANNOTATIONS, GOVERNED_MUTATION_TOOL_ANNOTATIONS, READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { mcpSchema } from "../../mcpSchema.js";
@@ -17,28 +25,57 @@ export async function registerAssetImportTools(
   runtime: AssetImportOperationAdapter | undefined,
   sourceRoots: ExternalRootsService | undefined,
   localTransport: boolean,
+  fileIngress = new AssetFileIngress(config.assetChatgptFileIngressEnabled),
 ): Promise<void> {
   if (!runtime) return;
+  const externalRootReady = Boolean(
+    sourceRoots && (await sourceRoots.hasBinaryProcessingRoot()),
+  );
   if (
     config.assetImportEnabled &&
-    (!sourceRoots || !(await sourceRoots.hasBinaryProcessingRoot()))
+    !externalRootReady &&
+    !fileIngress.isEnabled()
   ) {
     throw new McpError(
       BaseErrorCode.CONFIGURATION_ERROR,
-      "Asset import requires at least one available external root with readable + handoff capabilities.",
+      "Asset import requires an available readable + handoff ExternalRoot or enabled ChatGPT file ingress.",
       { reason: "asset_source_unavailable" },
     );
   }
   const source = (authInfo: Parameters<typeof assertExternalReadAccess>[1]): AssetSourceProvider => ({
     authorize: input => {
       assertExternalReadAccess(localTransport, authInfo);
-      if (!sourceRoots) throw new McpError(BaseErrorCode.FORBIDDEN, "Asset source roots are not configured.");
+      if (fileIngress.isReference(input)) {
+        return fileIngress.authorizeReference(input);
+      }
+      if (!sourceRoots) {
+        throw new McpError(
+          BaseErrorCode.FORBIDDEN,
+          "Asset source roots are not configured.",
+        );
+      }
       return sourceRoots.binaryProcessingPolicy(input.rootId, input.relativePath);
     },
     read: async input => {
       assertExternalReadAccess(localTransport, authInfo);
-      if (!sourceRoots) throw new McpError(BaseErrorCode.FORBIDDEN, "Asset source roots are not configured.");
-      return sourceRoots.readBinaryForProcessing(input.rootId, input.relativePath, ASSET_SOURCE_MAX_BYTES);
+      if (fileIngress.isReference(input)) {
+        throw new McpError(
+          BaseErrorCode.VALIDATION_ERROR,
+          "Host file ingress must be supplied through the file parameter.",
+          { reason: "asset_file_parameter_required" },
+        );
+      }
+      if (!sourceRoots) {
+        throw new McpError(
+          BaseErrorCode.FORBIDDEN,
+          "Asset source roots are not configured.",
+        );
+      }
+      return sourceRoots.readBinaryForProcessing(
+        input.rootId,
+        input.relativePath,
+        ASSET_SOURCE_MAX_BYTES,
+      );
     },
   });
   const writeGuard = () => {
@@ -61,9 +98,51 @@ export async function registerAssetImportTools(
     }
   }
   server.registerTool("asset_import_plan", {
-    description:"Plan one explicitly requested image import from a server-local ExternalRoot authorized for readable + handoff. Reads and decodes the expected original, applies the configured image policy and freezes bytes in the existing private journal; no vault asset or note is written. Does not accept URLs, model-carried base64, client-local paths, automatic downloads or overwrite. Keep remote references remote unless import was requested. Reuse an existing local asset instead of importing it again. Source and image limits apply; Windows x64 local NTFS creation only.",
-    inputSchema:mcpSchema(AssetImportInputSchema),annotations:GOVERNED_PLAN_TOOL_ANNOTATIONS,
-  }, async (params:z.infer<typeof AssetImportInputSchema>, context) => run("asset_import_plan",context.http?.authInfo,()=>runtime.plan(params,source(context.http?.authInfo),writeGuard)));
+    description:"Plan one explicitly requested image import. Use source for a server-local readable + handoff ExternalRoot, or file for a host-provided ChatGPT file parameter when that ingress is enabled. ChatGPT file parameters are fetched directly by the server through a bounded HTTPS path; no base64 passes through the model and no staging file is created. The configured vault-relative destination is discoverable in obsidian_runtime_status and is returned by the plan. Planning decodes the original, applies the configured policy and freezes exact output bytes in the existing private journal; no vault asset or note is written. Arbitrary URL strings, client-local paths, overwrite and implicit clipping downloads remain unsupported.",
+    inputSchema:mcpSchema(AssetImportPlanInputSchema),
+    annotations:{...GOVERNED_PLAN_TOOL_ANNOTATIONS,openWorldHint:true},
+    _meta:{"openai/fileParams":["file"]},
+  }, async (params:z.infer<typeof AssetImportPlanInputSchema>, context) => run(
+    "asset_import_plan",
+    context.http?.authInfo,
+    async () => {
+      if (params.file) {
+        await writeGuard();
+        const replay = runtime.replayHostFilePlan({
+          fileId: params.file.file_id,
+          name: params.name,
+          quality: params.quality,
+          preserveOriginal: params.preserveOriginal,
+          exceptionReason: params.exceptionReason,
+          idempotencyKey: params.idempotencyKey,
+        });
+        if (replay) return replay;
+        const materialized = await fileIngress.materialize(params.file);
+        const durable: AssetImportInput = {
+          source: materialized.source,
+          name: params.name,
+          quality: params.quality,
+          preserveOriginal: params.preserveOriginal,
+          exceptionReason: params.exceptionReason,
+          idempotencyKey: params.idempotencyKey,
+        };
+        return runtime.plan(durable, materialized.provider, writeGuard);
+      }
+      const durable: AssetImportInput = {
+        source: params.source!,
+        name: params.name,
+        quality: params.quality,
+        preserveOriginal: params.preserveOriginal,
+        exceptionReason: params.exceptionReason,
+        idempotencyKey: params.idempotencyKey,
+      };
+      return runtime.plan(
+        durable,
+        source(context.http?.authInfo),
+        writeGuard,
+      );
+    },
+  ));
   server.registerTool("asset_import_apply", {
     description:"Apply the exact sealed asset import once with its matching idempotency key. Requires the independent asset-import opt-in and full write policy; creates one binary without overwriting. Never creates directories or modifies a note. On timeout/lost response/partial effect, use status; never issue another import to retry. An uncertain asset is preserved, not automatically deleted. Insert the returned embed through a separate governed note operation only after postflight is verified.",
     inputSchema:mcpSchema(AssetApplyInputSchema),annotations:GOVERNED_MUTATION_TOOL_ANNOTATIONS,

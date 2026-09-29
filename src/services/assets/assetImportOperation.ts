@@ -79,6 +79,27 @@ export class AssetImportOperationAdapter {
       admittedAt:row.createdAt,updatedAt:row.updatedAt,
     };
   }
+  replayHostFilePlan(input:{
+    fileId:string;
+    name:string;
+    quality?:number;
+    preserveOriginal?:boolean;
+    exceptionReason?:string;
+    idempotencyKey:string;
+  }) {
+    const existing=this.journal.getByIdempotencyKey(KEY+input.idempotencyKey);
+    if(!existing)return null;
+    const proof=this.proof(existing);
+    const matches=
+      proof.input.source.rootId==="chatgpt.file" &&
+      proof.input.source.relativePath===input.fileId &&
+      proof.input.name===input.name &&
+      proof.input.quality===input.quality &&
+      proof.input.preserveOriginal===input.preserveOriginal &&
+      proof.input.exceptionReason===input.exceptionReason;
+    if(!matches)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
+    return this.receipt(existing);
+  }
   async plan(input:unknown,source:AssetSourceProvider,authorize:()=>void|Promise<void>) {
     const parsed=AssetImportInputSchema.parse(input);
     await authorize();const sourcePolicyDigest=await source.authorize({...parsed.source});

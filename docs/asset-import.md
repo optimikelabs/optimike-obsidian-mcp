@@ -1,6 +1,6 @@
-# Voluntary image import — V1 candidate contract
+# Voluntary image import — V2 candidate contract
 
-This optional family creates one verified local image from one explicitly selected server-local source. It is not a general download, publication, image-display or note-editing pipeline.
+This optional family creates one verified local image from one explicitly selected source. The source can be an already-present server-local ExternalRoot file, or — when explicitly enabled — a host-provided ChatGPT file parameter delivered through the MCP tool contract. It is not a general download, publication, image-display or note-editing pipeline.
 
 ## Intention and exposure
 
@@ -10,15 +10,17 @@ Referencing or displaying a remote image does not authorize downloading or impor
 
 ## Explicit server configuration
 
-The operator chooses `MCP_ASSET_FOLDER`, an existing vault-relative directory, configures `OBSIDIAN_VAULT` and `MCP_EXTERNAL_ROOTS_FILE`, and enables mutation with `MCP_ASSET_IMPORT_ENABLED=true` plus `MCP_WRITE_MODE=full`. Enabling asset import without the vault root, asset folder or external-roots configuration is a configuration error. There is no implicit destination and no directory creation. `MCP_ASSET_WEBP_QUALITY` defaults to 75 and accepts 1–100. An example application policy is `X/Images`, but the generic server does not hard-code it. Existing plugin settings are never changed by these tools.
+The operator chooses `MCP_ASSET_FOLDER`, an existing vault-relative directory, configures `OBSIDIAN_VAULT`, and enables mutation with `MCP_ASSET_IMPORT_ENABLED=true` plus `MCP_WRITE_MODE=full`. At least one source path must also be configured: `MCP_EXTERNAL_ROOTS_FILE` for server-local handoff, or `MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED=true` for host-provided ChatGPT file parameters. There is no implicit destination and no directory creation. `MCP_ASSET_WEBP_QUALITY` defaults to 75 and accepts 1–100. An example application policy is `X/Images`, but the generic server does not hard-code it. Existing plugin settings are never changed by these tools.
 
-Sources must already be present on the MCP server inside a configured ExternalRoot with both `readable` and `handoff` capabilities. The root's include/exclude/size and verified-read rules still apply. Direct HTTP access additionally requires a non-development identity carrying `external:read`, including status and terminal apply replay. Local stdio retains its explicit local-root boundary. Do not copy API keys, source bytes or private physical paths into prompts.
+`obsidian_runtime_status` exposes a redacted `assetPolicy` projection before planning: configured vault-relative folder, whether it currently exists, conversion defaults, enabled ingress modes, and the observed relationship to Obsidian's standard `.obsidian/app.json` `attachmentFolderPath`. A fixed Obsidian attachment folder may be returned as a suggestion, but it never changes `MCP_ASSET_FOLDER` or creates the directory. Vault-root and note-relative attachment policies are reported as such. A custom Obsidian config directory is not guessed; its attachment setting is reported unavailable unless separately supported.
+
+ExternalRoot sources must already be present on the MCP server in a root with both `readable` and `handoff` capabilities; include/exclude/size and verified-read rules still apply. Direct HTTP access additionally requires a non-development identity carrying `external:read`, including status and terminal apply replay. Local stdio retains its explicit local-root boundary. Do not copy API keys, source bytes or private physical paths into prompts.
 
 ## Input and lifecycle
 
-A plan takes `source: {rootId, relativePath, sha256}`, an explicit filename stem `name`, and an `idempotencyKey`. The source SHA-256 must come from the authorized original. Optional `quality` selects the conversion quality; `preserveOriginal: true` requires `exceptionReason`. Unknown keys, raw base64, URLs, arbitrary absolute paths and client-local paths are rejected.
+A plan takes exactly one source choice plus an explicit filename stem `name` and an `idempotencyKey`. The existing route is `source: {rootId, relativePath, sha256}`; its SHA-256 must come from the authorized original. The host-file route is `file: {download_url, file_id, mime_type (optional), file_name (optional)}` and is advertised to ChatGPT with `_meta["openai/fileParams"] = ["file"]`. That object is host-provided: callers cannot substitute an arbitrary URL argument for it. Optional `quality` selects the conversion quality; `preserveOriginal: true` requires `exceptionReason`. Raw model-carried base64, arbitrary absolute paths and client-local paths remain rejected.
 
-Planning verifies the original digest, decodes it in a bounded child process, applies the image policy and freezes the exact output with its dimensions, format, size and hash in the existing private operation journal. The destination is observed absent and its native parent identity is sealed. No vault asset or note is created during planning.
+For a host file, the server fetches the temporary HTTPS URL directly with redirects disabled, a finite timeout, the normal 8 MiB source limit and private/loopback/link-local DNS/IP rejection. No temporary staging file is created. The temporary URL is not written to the durable journal: after download, the operation stores only a synthetic source identity (`file_id` plus content hash) and the same frozen converted bytes/proof used by the ExternalRoot path. Planning then decodes in the bounded worker, observes the destination absent and seals its native parent identity. No vault asset or note is created during planning.
 
 Apply takes only the returned `planRef` and matching key. Write and source policy are rechecked; the existing journal reserves the attempt before the exclusive native write. The destination cannot be overwritten. Acknowledged and verified bytes yield a usable local embed. The optional insertion in a note is a separate existing governed note/text operation, never a two-resource transaction.
 
@@ -38,6 +40,6 @@ An error or process interruption after file creation may leave a partial/unverif
 
 ## Evidence boundaries
 
-Repository tests cover native concurrent creation, parent replacement, conversion, source/write permissions, sealed corruption, idempotency, response loss, restart and actual SDK in-memory MCP calls through the native writer. These tests are isolated and do not touch installed vault assets. They do not certify transport from a ChatGPT upload to this server, a remote upload endpoint, TLS reachability or Desktop indexing. End-to-end HTTP/server qualification remains `NOT_RUN`; a loopback address or signed URL alone does not solve client ingress.
+Repository tests cover native concurrent creation, parent replacement, conversion, source/write permissions, sealed corruption, idempotency, response loss, restart, policy discovery, file-parameter schema metadata and actual SDK MCP calls through the native writer. A host-file fixture proves one download during plan followed by the unchanged plan/apply/status receipt lifecycle with no re-download. These tests are isolated and do not touch installed vault assets. They do not yet certify a real ChatGPT attachment against the deployed connector, temporary OpenAI download hosts, TLS reachability or Desktop indexing; that live host qualification remains `NOT_RUN`. The file-parameter path is explicit ingress, not permission for arbitrary URL downloading.
 
 Use `npm run test:assets` for the bounded repository suite. Exact-SHA CI and distinct review must pass before candidate readiness. Deployment, installing/configuring plugins and upgrading the real vault require a separate authorization and local gate.

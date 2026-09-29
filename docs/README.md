@@ -114,4 +114,4 @@ Optional cache freshness: [contract and validation](cache-events.md).
 
 ## Images
 
-- [Voluntary image import (optional candidate, server-local inputs)](asset-import.md)
+- [Voluntary image import (optional candidate, server-local + ChatGPT host-file inputs)](asset-import.md)

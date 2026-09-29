@@ -10,6 +10,7 @@ import { RequestContext, requestContextService } from "../utils/index.js";
 import { getSemanticCacheService } from "./semanticCache.js";
 import { getWritePolicyStatus } from "./writePolicy.js";
 import { attestVaultFilesystemTarget } from "./externalReferences/backendVaultAdapter.js";
+import { inspectAssetPolicy } from "./assets/assetPolicyDiscovery.js";
 import type { VaultCacheService } from "./obsidianRestAPI/vaultCache/index.js";
 
 const PROCESS_STARTED_AT_MS = Math.round(Date.now() - process.uptime() * 1000);
@@ -234,6 +235,7 @@ type PublicRuntimeStatus = {
     guardedMaxBatchOperations: number;
     protectedFrontmatterKeyCount: number;
   };
+  assetPolicy: ReturnType<typeof inspectAssetPolicy>;
 };
 
 type PublicFileFingerprint = {
@@ -555,6 +557,14 @@ export function projectPublicRuntimeStatus(
         ? writePolicy.protectedFrontmatterKeys.length
         : 0,
     },
+    assetPolicy: inspectAssetPolicy({
+      vaultRoot: config.obsidianVaultPath,
+      configuredFolder: config.assetFolder,
+      quality: config.assetWebpQuality,
+      enabled: config.assetImportEnabled,
+      externalRootsConfigured: Boolean(config.externalRootsFile),
+      chatgptFileIngressEnabled: config.assetChatgptFileIngressEnabled,
+    }),
   };
 }
 

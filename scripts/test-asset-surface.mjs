@@ -15,6 +15,7 @@ const {ObsidianNoteReplaceJournal}=await import("../dist/services/operations/obs
 const {ExternalRootsService}=await import("../dist/services/externalRootsService.js");
 const {runAssetJob}=await import("../dist/services/assets/workerClient.js");
 const {assetHash}=await import("../dist/services/assets/windowsAssetFiles.js");
+const {AssetFileIngress}=await import("../dist/services/assets/fileIngress.js");
 const {installToolProfileRegistrationGate}=await import("../dist/mcp-server/toolProfileRuntime.js");
 const {compileToolNames}=await import("../dist/mcp-server/toolSurfaceRegistry.js");
 const names=["asset_import_apply","asset_import_plan","asset_import_status"];
@@ -176,4 +177,72 @@ test('real stdio processes import authorized server-local bytes and resume the s
  const after=fs.statSync(file);assert.equal(after.ino,before.ino);assert.equal(after.mtimeMs,before.mtimeMs);
  assert.deepEqual(fs.readdirSync(path.join(vault,'Images')),['stdio-image.webp']);
  assert.equal(assetHash(fs.readFileSync(path.join(sourceRoot,'input.png'))),assetHash(png));
+});
+
+test("asset plan advertises ChatGPT file parameters without model-carried bytes",async()=>{
+ const server=new McpServer({name:"asset-file-meta",version:"1"}),client=new Client({name:"asset-file-meta",version:"1"});
+ const [ct,st]=InMemoryTransport.createLinkedPair();
+ const runtime={status:async()=>({outcome:null})};
+ const ingress=new AssetFileIngress(true,async()=>({bytes:Buffer.from("unused"),contentType:"image/png"}));
+ try {
+  await registerAssetImportTools(server,runtime,undefined,true,ingress);
+  await server.connect(st);await client.connect(ct);
+  const plan=(await client.listTools()).tools.find(t=>t.name==="asset_import_plan");
+  assert.ok(plan);
+  assert.equal(plan.annotations.openWorldHint,true);
+  assert.deepEqual(plan._meta?.["openai/fileParams"],["file"]);
+  assert.ok(plan.inputSchema.properties.file);
+  assert.equal(plan.inputSchema.properties.file.properties.download_url.type,"string");
+  assert.deepEqual(plan.inputSchema.properties.file.required.sort(),["download_url","file_id"]);
+  assert.equal("mime_type" in plan.inputSchema.properties.file.properties,true);
+  assert.equal("file_name" in plan.inputSchema.properties.file.properties,true);
+ } finally {await client.close();await server.close();}
+});
+
+test("host file parameter uses the same governed plan apply status lifecycle",{skip:process.platform!=="win32"||process.arch!=="x64"},async()=>{
+ const vault=path.join(root,"host-file-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
+ const png=await sharp({create:{width:5,height:4,channels:4,background:{r:80,g:90,b:100,alpha:0.6}}}).png().toBuffer();
+ let downloads=0;
+ const ingress=new AssetFileIngress(true,async url=>{
+  downloads++;assert.equal(url.hostname,"files.example.test");
+  return {bytes:png,contentType:"image/png"};
+ });
+ const journal=new ObsidianNoteReplaceJournal(path.join(root,"host-file-plans.sqlite"));
+ const policy={vaultRoot:vault,assetFolder:"Images",quality:75};
+ const runtime=new AssetImportOperationAdapter({
+  inspect:(filename,binding)=>runAssetJob({kind:"inspect",...policy,filename,binding}),
+  create:(filename,bytes,binding)=>runAssetJob({kind:"create",...policy,filename,bytes,binding}),
+ },journal,policy);
+ const server=new McpServer({name:"asset-host-file",version:"1"}),client=new Client({name:"asset-host-file",version:"1"});
+ const [ct,st]=InMemoryTransport.createLinkedPair();
+ const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
+ config.assetImportEnabled=false;config.mcpWriteMode="full";
+ try {
+  await registerAssetImportTools(server,runtime,undefined,true,ingress);
+  await server.connect(st);await client.connect(ct);
+  const input={
+   file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file_hostfixture",mime_type:"image/png",file_name:"input.png"},
+   name:"chat-file",idempotencyKey:"chatgpt-file-fixture",
+  };
+  const disabled=await client.callTool({name:"asset_import_plan",arguments:input});
+  assert.equal(disabled.isError,true);assert.equal(downloads,0);
+  config.assetImportEnabled=true;
+  const plan=value(await client.callTool({name:"asset_import_plan",arguments:input}));
+  assert.equal(plan.phase,"planned");assert.equal(plan.path,"Images/chat-file.webp");assert.equal(downloads,1);
+  const replay=value(await client.callTool({name:"asset_import_plan",arguments:input}));
+  assert.equal(replay.planRef,plan.planRef);assert.equal(downloads,1);
+  const conflict=await client.callTool({name:"asset_import_plan",arguments:{
+   ...input,file:{...input.file,file_id:"file_otherfixture"},
+  }});
+  assert.equal(conflict.isError,true);assert.equal(downloads,1);
+  const applied=value(await client.callTool({name:"asset_import_apply",arguments:{planRef:plan.planRef,idempotencyKey:"chatgpt-file-fixture"}}));
+  assert.equal(applied.outcome,"committed");assert.equal(applied.postflight.status,"verified");assert.equal(downloads,1);
+  assert.equal(applied.embed,"![[Images/chat-file.webp]]");
+  const status=value(await client.callTool({name:"asset_import_status",arguments:{planRef:plan.planRef}}));
+  assert.equal(status.postflight.status,"verified");assert.equal(downloads,1);
+  assert.equal(assetHash(fs.readFileSync(path.join(vault,"Images","chat-file.webp"))),applied.asset.sha256);
+ } finally {
+  await client.close();await server.close();journal.close();
+  config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
+ }
 });

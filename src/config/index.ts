@@ -149,6 +149,10 @@ const EnvSchema = z
     MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
     MCP_ASSET_FOLDER: z.string().min(1).max(800).optional(),
     MCP_ASSET_IMPORT_ENABLED: z.enum(["true", "false"]).default("false").transform(v => v === "true"),
+    MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
     MCP_ASSET_WEBP_QUALITY: z.coerce.number().int().min(1).max(100).default(75),
     MCP_EXTERNAL_MOVE_ENABLED: z
       .string()
@@ -326,12 +330,16 @@ const EnvSchema = z
       });
     }
 
-    if (env.MCP_ASSET_IMPORT_ENABLED && !env.MCP_EXTERNAL_ROOTS_FILE) {
+    if (
+      env.MCP_ASSET_IMPORT_ENABLED &&
+      !env.MCP_EXTERNAL_ROOTS_FILE &&
+      !env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["MCP_EXTERNAL_ROOTS_FILE"],
         message:
-          "MCP_EXTERNAL_ROOTS_FILE is required when asset import is enabled",
+          "Asset import requires MCP_EXTERNAL_ROOTS_FILE or MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED=true",
       });
     }
   });
@@ -481,6 +489,7 @@ export const config = {
   externalRootsFile: env.MCP_EXTERNAL_ROOTS_FILE,
   assetFolder: env.MCP_ASSET_FOLDER,
   assetImportEnabled: env.MCP_ASSET_IMPORT_ENABLED,
+  assetChatgptFileIngressEnabled: env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED,
   assetWebpQuality: env.MCP_ASSET_WEBP_QUALITY,
   externalMoveEnabled: env.MCP_EXTERNAL_MOVE_ENABLED,
   externalMoveProfileId: env.MCP_EXTERNAL_MOVE_PROFILE_ID,
