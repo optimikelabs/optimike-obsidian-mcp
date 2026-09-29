@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import { execFile } from "node:child_process";
 import path from "path";
 import { promisify } from "node:util";
+import { loadSmartEnvV3 } from "./smartEnvV3.js";
 
 // ---- Types ----
 export type SmartVec = {
@@ -341,6 +342,11 @@ async function listEmbeddingFiles(directory: string): Promise<string[]> {
 }
 
 export async function loadSmartEnv(baseDir: string): Promise<SmartVec[]> {
+  const currentModelSources = await loadSmartEnvV3(baseDir);
+  if (currentModelSources) {
+    if (!currentModelSources.length) throw new Error("No current Smart Environment v3 embeddings found");
+    return currentModelSources;
+  }
   const collected: SmartVec[] = [];
 
   for (const subdir of SUBDIRS) {

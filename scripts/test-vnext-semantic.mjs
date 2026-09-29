@@ -12,12 +12,13 @@ const dist = pathToFileURL(
 ).href;
 const root = await mkdtemp(path.join(os.tmpdir(), "vnext-semantic-"));
 const source = path.join(root, ".smart-env");
+const modelName = "TaylorAI/bge-micro-v2";
 await mkdir(source);
 await writeFile(
   path.join(source, "vectors.json"),
   JSON.stringify([
-    { path: "Notes/Fixture.md", embedding: [1, 0], model: "fixture-model" },
-    { path: "Other/Fixture.md", embedding: [0, 1], model: "fixture-model" },
+    { path: "Notes/Fixture.md", embedding: [1, 0], model: modelName },
+    { path: "Other/Fixture.md", embedding: [0, 1], model: modelName },
   ]),
   "utf8",
 );
@@ -57,22 +58,23 @@ Object.assign(process.env, {
   SEMANTIC_SEARCH_PREWARM: "false",
   ENABLE_QUERY_EMBEDDING: "true",
   MCP_LOG_LEVEL: "error",
-  QUERY_EMBEDDER: "ollama",
-  QUERY_EMBEDDER_MODEL: "fixture-model",
+  QUERY_EMBEDDER: "auto",
 });
+delete process.env.QUERY_EMBEDDER_MODEL;
 // Exercise the same inferred provider URL in the tool and doctor.
 delete process.env.OLLAMA_BASE_URL;
 await mkdir(path.join(source, "embedding_models"));
 await writeFile(
   path.join(source, "smart_env.json"),
-  JSON.stringify({ embedding_models: { default_model_key: "fixture" } }),
+  JSON.stringify({ embedding_models: { default_model_key: "ollama#bge" } }),
   "utf8",
 );
 await writeFile(
   path.join(source, "embedding_models", "embedding_models.ajson"),
-  '"embedding_models:fixture":' +
+  '"embedding_models:ollama#bge":' +
     JSON.stringify({
-      model_key: "fixture-model",
+      provider_key: "ollama",
+      model_key: modelName,
       host: `http://127.0.0.1:${http.address().port}`,
     }),
   "utf8",
@@ -126,6 +128,8 @@ try {
   );
   const good = await call();
   assert.equal(good.response.isError, false);
+  assert.equal(good.value.query_provider, "ollama");
+  assert.equal(good.value.query_model, modelName);
   assert.equal(good.value.results[0].path, "Notes/Fixture.md");
   assert.equal(good.value.results[0].score, 1);
   assert.equal((await doctor()).reasonCode, "ready");
@@ -154,8 +158,21 @@ try {
   recordSemanticSearch(embed, 2, true, 100);
   assert.equal(semanticSearchHealth(embed, 2, 60101), "unverified");
   assert.equal(semanticSearchHealth(embed, 3, 101), "unverified");
+  await writeFile(
+    path.join(source, "embedding_models", "embedding_models.ajson"),
+    '"embedding_models:ollama#bge":' +
+      JSON.stringify({ provider_key: "transformers", model_key: modelName }),
+    "utf8",
+  );
+  assert.equal((await doctor()).reasonCode, "semantic_embedder_unavailable");
+  const builtIn = await call();
+  assert.equal(builtIn.response.isError, true);
+  assert.equal(
+    builtIn.value.error.details.reasonCode,
+    "semantic_embedder_configuration_invalid",
+  );
   console.log(
-    "PASS: semantic MCP query/ranking/folder scope, inferred provider parity, unavailable/wrong-dimension/zero-vector diagnostics, doctor recovery and freshness; no provider call from doctor",
+    "PASS: semantic MCP BGE via Ollama, built-in provider refusal, ranking, diagnostics and recovery; no provider call from doctor",
   );
 } finally {
   await client.close();

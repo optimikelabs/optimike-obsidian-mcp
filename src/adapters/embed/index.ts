@@ -18,6 +18,7 @@ export type QueryEmbedderOptions = {
   model?: string;
   // What Smart Connections stored in .smart-env (often a HuggingFace id when using Transformers).
   vaultModel?: string;
+  vaultProvider?: string;
   dimension?: number;
   ollamaBaseUrl?: string;
   openaiApiKey?: string;
@@ -50,6 +51,15 @@ export const getQueryEmbedder = async (
   opts: QueryEmbedderOptions,
 ): Promise<QueryEmbedderSelection> => {
   const provider = normaliseProvider(opts.provider);
+  const vaultProvider = normaliseProvider(opts.vaultProvider);
+  if (
+    provider === "auto" &&
+    opts.vaultProvider?.trim() &&
+    vaultProvider === "auto" &&
+    opts.vaultProvider.trim().toLowerCase() !== "auto"
+  ) {
+    throw new Error("Unsupported Smart Connections query provider");
+  }
 
   // Strongest precedence: explicit model override
   const modelCandidate =
@@ -57,9 +67,13 @@ export const getQueryEmbedder = async (
 
   const resolvedProvider: Exclude<QueryEmbedderProvider, "auto"> =
     provider === "auto"
-      ? modelCandidate
+      ? opts.model?.trim() && opts.model.trim() !== opts.vaultModel?.trim()
         ? inferProviderFromModel(modelCandidate)
-        : "ollama"
+        : vaultProvider !== "auto"
+          ? vaultProvider
+          : modelCandidate
+            ? inferProviderFromModel(modelCandidate)
+            : "ollama"
       : provider;
 
   if (resolvedProvider === "xenova") {
