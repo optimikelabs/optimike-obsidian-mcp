@@ -350,3 +350,74 @@ test("host-file plan capacity is reserved before download across MCP sessions",a
   config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
  }
 });
+
+test("mixed ChatGPT and ExternalRoot plans share one idempotency claim before any source read",async()=>{
+ const vault=path.join(root,"mixed-source-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
+ const png=await sharp({create:{width:4,height:3,channels:4,background:{r:21,g:22,b:23,alpha:1}}}).png().toBuffer();
+ const digest="d".repeat(64),binding="e".repeat(64);
+ let externalReads=0,downloads=0,releaseExternal,releaseHost;
+ let externalGate=new Promise(resolve=>{releaseExternal=resolve;});
+ let hostGate=new Promise(resolve=>{releaseHost=resolve;});
+ const sourceRoots={
+  hasBinaryProcessingRoot:async()=>true,
+  binaryProcessingPolicy:()=>digest,
+  readBinaryForProcessing:async()=>{
+   externalReads++;
+   await externalGate;
+   return png;
+  },
+ };
+ const ingress=new AssetFileIngress(true,["files.example.test"],async()=>{
+  downloads++;
+  await hostGate;
+  return {bytes:png,contentType:"image/png"};
+ });
+ const journal=new ObsidianNoteReplaceJournal(path.join(root,"mixed-source-plans.sqlite"));
+ const runtime=new AssetImportOperationAdapter({
+  inspect:async()=>({binding,exists:false}),
+  create:async()=>{throw new Error("plan-only test");},
+ },journal,{vaultRoot:vault,assetFolder:"Images",quality:75});
+ const handlersA=new Map(),handlersB=new Map();
+ const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
+ config.assetImportEnabled=true;config.mcpWriteMode="full";
+ const externalInput=(key,name)=>({
+  source:{rootId:"fixture.mixed",relativePath:"input.png",sha256:assetHash(png)},
+  name,idempotencyKey:key,
+ });
+ const hostInput=(key,name)=>({
+  file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file_mixedsource",mime_type:"image/png",file_name:"input.png"},
+  name,idempotencyKey:key,
+ });
+ try {
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersA.set(name,handler)},runtime,sourceRoots,true,ingress);
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersB.set(name,handler)},runtime,sourceRoots,true,ingress);
+  const planA=handlersA.get("asset_import_plan"),planB=handlersB.get("asset_import_plan");
+
+  const externalFirst=planA(externalInput("mixed-key-external-first","mixed-external"),{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(externalReads,1);
+  assert.equal(downloads,0);
+  const hostConflict=await planB(hostInput("mixed-key-external-first","mixed-external"),{});
+  assert.equal(hostConflict.isError,true);
+  assert.equal(downloads,0,"host conflict must be rejected before GET while ExternalRoot claim is active");
+  releaseExternal();
+  assert.equal((await externalFirst).isError,false);
+
+  externalGate=new Promise(resolve=>{releaseExternal=resolve;});
+  hostGate=new Promise(resolve=>{releaseHost=resolve;});
+  const readsBeforeHost=externalReads;
+  const hostFirst=planA(hostInput("mixed-key-host-first","mixed-host"),{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,1);
+  const externalConflict=await planB(externalInput("mixed-key-host-first","mixed-host"),{});
+  assert.equal(externalConflict.isError,true);
+  assert.equal(externalReads,readsBeforeHost,"ExternalRoot conflict must be rejected before source read while host claim is active");
+  releaseHost();
+  assert.equal((await hostFirst).isError,false);
+ } finally {
+  releaseExternal?.();
+  releaseHost?.();
+  journal.close();
+  config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
+ }
+});

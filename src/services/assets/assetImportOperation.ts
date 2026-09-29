@@ -33,7 +33,7 @@ export class AssetImportOperationAdapter {
   readonly operationKind=KIND;
   private readonly policy:AssetImportPolicy;
   private readonly policyDigest:string;
-  private readonly hostFilePlansInFlight = new Map<
+  private readonly planClaimsInFlight = new Map<
     string,
     { intent: string; promise: Promise<unknown> }
   >();
@@ -112,9 +112,10 @@ export class AssetImportOperationAdapter {
     if(!matches)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
     return this.receipt(existing);
   }
-  async coalesceHostFilePlan<T>(
+  async coalescePlanClaim<T>(
     input:{
-      fileId:string;
+      sourceKind:"chatgpt_file"|"external_root";
+      sourceIdentity:unknown;
       name:string;
       quality?:number;
       preserveOriginal?:boolean;
@@ -122,28 +123,30 @@ export class AssetImportOperationAdapter {
       idempotencyKey:string;
     },
     operation:()=>Promise<T>,
+    reserveCapacity=false,
   ):Promise<T> {
     const intent=operationDigest({
       version:1,
-      kind:"chatgpt_file_plan_claim",
-      fileId:input.fileId,
+      kind:"asset_plan_claim",
+      sourceKind:input.sourceKind,
+      sourceIdentity:input.sourceIdentity,
       name:input.name,
       quality:input.quality,
       preserveOriginal:input.preserveOriginal,
       exceptionReason:input.exceptionReason,
     });
-    const active=this.hostFilePlansInFlight.get(input.idempotencyKey);
+    const active=this.planClaimsInFlight.get(input.idempotencyKey);
     if(active) {
       if(active.intent!==intent)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
       return active.promise as Promise<T>;
     }
-    const promise=withPlanCapacity(operation);
-    this.hostFilePlansInFlight.set(input.idempotencyKey,{intent,promise});
+    const promise=reserveCapacity?withPlanCapacity(operation):operation();
+    this.planClaimsInFlight.set(input.idempotencyKey,{intent,promise});
     try {
       return await promise;
     } finally {
-      const current=this.hostFilePlansInFlight.get(input.idempotencyKey);
-      if(current?.promise===promise)this.hostFilePlansInFlight.delete(input.idempotencyKey);
+      const current=this.planClaimsInFlight.get(input.idempotencyKey);
+      if(current?.promise===promise)this.planClaimsInFlight.delete(input.idempotencyKey);
     }
   }
   async plan(

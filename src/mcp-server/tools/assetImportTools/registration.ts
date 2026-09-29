@@ -121,9 +121,10 @@ export async function registerAssetImportTools(
         });
         if (replay) return replay;
 
-        return runtime.coalesceHostFilePlan(
+        return runtime.coalescePlanClaim(
           {
-            fileId: params.file.file_id,
+            sourceKind: "chatgpt_file",
+            sourceIdentity: { fileId: params.file.file_id },
             name: params.name,
             quality: params.quality,
             preserveOriginal: params.preserveOriginal,
@@ -147,6 +148,7 @@ export async function registerAssetImportTools(
               true,
             );
           },
+          true,
         );
       }
       const durable: AssetImportInput = {
@@ -157,10 +159,23 @@ export async function registerAssetImportTools(
         exceptionReason: params.exceptionReason,
         idempotencyKey: params.idempotencyKey,
       };
-      return runtime.plan(
-        durable,
-        source(context.http?.authInfo),
-        writeGuard,
+      writeGuard();
+      return runtime.coalescePlanClaim(
+        {
+          sourceKind: "external_root",
+          sourceIdentity: durable.source,
+          name: durable.name,
+          quality: durable.quality,
+          preserveOriginal: durable.preserveOriginal,
+          exceptionReason: durable.exceptionReason,
+          idempotencyKey: durable.idempotencyKey,
+        },
+        () =>
+          runtime.plan(
+            durable,
+            source(context.http?.authInfo),
+            writeGuard,
+          ),
       );
     },
   ));
