@@ -72,6 +72,18 @@ function verifySvg(bytes: Buffer): void {
     reject("svg_unsupported");
   }
 }
+function contractImageFormat(bytes: Buffer, reported: unknown): string {
+  const format = String(reported);
+  if (
+    format === "heif" &&
+    bytes.subarray(4, 8).toString("ascii") === "ftyp" &&
+    /^(?:avif|avis)$/u.test(bytes.subarray(8, 12).toString("ascii"))
+  ) {
+    return "avif";
+  }
+  return format;
+}
+
 function sourceKind(bytes: Buffer): "raster" | "svg" {
   if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
       bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255])) ||
@@ -115,7 +127,7 @@ export async function processImage(bytes: Buffer, policy: ImagePolicy): Promise<
   const options = { failOn: "warning", limitInputPixels: ASSET_MAX_PIXELS, unlimited: false, animated: true };
   try {
     const metadata = await sharp(bytes, options).metadata();
-    const format = String(metadata.format), pages = metadata.pages ?? 1;
+    const format = contractImageFormat(bytes, metadata.format), pages = metadata.pages ?? 1;
     const width = Number(metadata.width), height = Number(metadata.pageHeight ?? metadata.height);
     if (!["jpeg", "png", "webp", "gif", "avif", "svg"].includes(format) ||
         !Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 ||
@@ -129,11 +141,12 @@ export async function processImage(bytes: Buffer, policy: ImagePolicy): Promise<
       .rotate().webp({ quality: policy.quality, alphaQuality: 100 }).timeout({ seconds: 3 }).toBuffer();
     if (output.length > ASSET_MAX_BYTES) reject("image_limit");
     const final = await sharp(output, options).metadata();
+    const finalFormat = contractImageFormat(output, final.format);
     const expectedWidth = !preserve && [5, 6, 7, 8].includes(metadata.orientation) ? height : width;
     const expectedHeight = !preserve && [5, 6, 7, 8].includes(metadata.orientation) ? width : height;
     if (final.width !== expectedWidth || (final.pageHeight ?? final.height) !== expectedHeight || (final.pages ?? 1) !== pages) reject("image_invalid");
     return {
-      bytes: output, format: String(final.format), width: expectedWidth, height: expectedHeight, pages,
+      bytes: output, format: finalFormat, width: expectedWidth, height: expectedHeight, pages,
       hasAlpha: Boolean(final.hasAlpha), sourceSha256: assetHash(bytes), sha256: assetHash(output), size: output.length,
       encoderVersion: String(sharp.versions.sharp) + ":" + String(sharp.versions.vips),
       exception: kind === "svg" ? "vector_preserved" : pages > 1 ? "animation_preserved" : policy.preserveOriginal ? "original_requested" : "none",

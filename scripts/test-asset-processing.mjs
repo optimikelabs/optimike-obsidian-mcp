@@ -51,6 +51,19 @@ test('EXIF orientation changes geometry correctly, not arbitrarily resizing', as
   assert.equal(result.width,2);assert.equal(result.height,4);
 });
 
+test('static AVIF normalizes Sharp heif metadata to the avif contract', async () => {
+  const avif=await sharp({create:{width:3,height:2,channels:3,background:{r:12,g:34,b:56}}}).avif().toBuffer();
+  const native=await sharp(avif).metadata();
+  assert.equal(native.format,'heif');
+  const converted=await convert(avif);
+  assert.equal(converted.format,'webp');
+  assert.equal(converted.width,3);assert.equal(converted.height,2);
+  const preserved=await convert(avif,{quality:75,preserveOriginal:true,exceptionReason:'Keep original AVIF'});
+  assert.equal(preserved.format,'avif');
+  assert.deepEqual(preserved.bytes,avif);
+  assert.equal(preserved.exception,'original_requested');
+});
+
 test('original preservation is explicit and byte exact', async () => {
   await assert.rejects(convert(png,{quality:75,preserveOriginal:true}),e=>e.reason==='image_policy_invalid');
   const result=await convert(png,{quality:75,preserveOriginal:true,exceptionReason:'Required lossless source'});
