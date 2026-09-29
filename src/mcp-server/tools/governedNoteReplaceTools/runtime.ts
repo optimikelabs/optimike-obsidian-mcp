@@ -2,6 +2,10 @@ import { AssetImportOperationAdapter } from "../../../services/assets/assetImpor
 import { runAssetJob } from "../../../services/assets/workerClient.js";
 import type { AssetInspection } from "../../../services/assets/assetImportContract.js";
 import {
+  ImageProcessingError,
+  probeImageProcessingDependencies,
+} from "../../../services/assets/imageProcessing.js";
+import {
   AssetFileError,
   WindowsAssetFiles,
   type AssetFileReason,
@@ -392,7 +396,7 @@ export type GovernedNoteReplacePlanView = {
 export class GovernedNoteReplaceRuntime {
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
   readonly assetImport: AssetImportOperationAdapter | undefined;
-  readonly assetImportBackendReason?: AssetFileReason;
+  readonly assetImportBackendReason?: AssetFileReason | ImageProcessingError["reason"];
   readonly nativeMove: NativeNoteMoveOperationAdapter | undefined;
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
@@ -420,7 +424,8 @@ export class GovernedNoteReplaceRuntime {
         quality: config.assetWebpQuality,
       };
       try {
-        new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
+new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
+        probeImageProcessingDependencies();
         this.assetImport = new AssetImportOperationAdapter(
           {
             inspect: (filename, binding) =>
@@ -446,7 +451,9 @@ export class GovernedNoteReplaceRuntime {
         this.assetImportBackendReason =
           error instanceof AssetFileError
             ? error.reason
-            : "native_backend_unavailable";
+            : error instanceof ImageProcessingError
+              ? error.reason
+              : "native_backend_unavailable";
       }
     }
     this.leaseHeartbeat = setInterval(() => {
