@@ -42,6 +42,34 @@ test('task memory cache keys include content hash when timestamps and size are u
 }));
 
 
+test('in-process task readers wait while accepted event work is pending',()=>fixture(async f=>{
+ f.cache.markEventWorkPending();
+ assert.equal(f.cache.isReady(),false);
+ assert.equal(f.cache.getStats().ready,false);
+ let settled=false;
+ const query=warmSharedTaskCache(f.cache).finally(()=>{settled=true;});
+ query.catch(()=>undefined);
+ try {
+  await new Promise(resolve=>setTimeout(resolve,40));
+  assert.equal(settled,false);
+ } finally {
+  f.cache.settleEventWork();
+ }
+ await query;
+ assert.equal(f.cache.isReady(),true);
+}));
+
+test('in-process task readers fail closed after explicit event uncertainty',()=>fixture(async f=>{
+ f.cache.markEventWorkPending();
+ f.cache.markFreshnessUncertain();
+ f.cache.settleEventWork();
+ assert.equal(f.cache.isReady(),false);
+ await assert.rejects(
+  warmSharedTaskCache(f.cache),
+  error=>error.code==='SERVICE_UNAVAILABLE',
+ );
+}));
+
 test('task queries wait for an active periodic scan instead of failing on the building marker',()=>fixture(async f=>{
  let release;const barrier=new Promise(resolve=>{release=resolve;});
  const original=f.cache.listAllMarkdownFiles.bind(f.cache);

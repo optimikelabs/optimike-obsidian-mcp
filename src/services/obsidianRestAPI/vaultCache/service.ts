@@ -252,8 +252,16 @@ export class VaultCacheService {
     logger.info("Periodic cache refresh was not running.", context);
   }
 
+  private isPubliclyReady(): boolean {
+    return this.isCacheReady &&
+      !this.isBuilding &&
+      !this.refreshRequested &&
+      !this.eventWorkPending &&
+      !this.lastRefreshError;
+  }
+
   public isReady(): boolean {
-    return this.isCacheReady;
+    return this.isPubliclyReady();
   }
 
   public getIsBuilding(): boolean {
@@ -261,16 +269,16 @@ export class VaultCacheService {
   }
 
   public getReadinessStatus(): CacheReadinessStatus {
-    if (this.isBuilding) return "building";
     if (this.lastRefreshError) return "error";
-    if (this.isCacheReady) return "ready";
+    if (this.isBuilding || this.refreshRequested || this.eventWorkPending) return "building";
+    if (this.isPubliclyReady()) return "ready";
     return "empty";
   }
 
   public async waitUntilReady(timeoutMs = 60000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (this.isCacheReady && !this.isBuilding && !this.refreshRequested && !this.eventWorkPending && !this.lastRefreshError) {
+      if (this.isPubliclyReady()) {
         return true;
       }
       if (!this.isBuilding && !this.refreshRequested && !this.eventWorkPending && this.lastRefreshError) {
@@ -278,7 +286,7 @@ export class VaultCacheService {
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    return this.isCacheReady && !this.isBuilding && !this.refreshRequested && !this.eventWorkPending && !this.lastRefreshError;
+    return this.isPubliclyReady();
   }
 
   public getCachedFileCount(): number {
@@ -299,7 +307,7 @@ export class VaultCacheService {
       schemaVersion:
         this.readMetadataValue("schema_version") ?? SHARED_CACHE_SCHEMA_VERSION,
       status: this.getReadinessStatus(),
-      ready: this.isCacheReady,
+      ready: this.isPubliclyReady(),
       building: this.isBuilding,
       inMemoryFileCount: this.metadataCache.size,
       cachedFileCount: this.metadataCache.size,

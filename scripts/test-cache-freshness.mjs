@@ -315,6 +315,30 @@ test("interrupted refresh and explicit uncertainty remain uncertain after restar
 });
 
 
+test("public readiness drops immediately for pending events and explicit uncertainty", async () => {
+  const previous=config.obsidianSharedCacheDbPath;
+  config.obsidianSharedCacheDbPath=path.join(root,"public-readiness.sqlite");
+  const instance=new VaultCacheService(rest);
+  try {
+    await instance.refreshCache(true);
+    assert.equal(instance.isReady(),true);
+    assert.equal(instance.getStats().ready,true);
+    instance.markEventWorkPending();
+    assert.equal(instance.isReady(),false);
+    assert.equal(instance.getReadinessStatus(),"building");
+    assert.equal(instance.getStats().ready,false);
+    instance.settleEventWork();
+    assert.equal(instance.isReady(),true);
+    instance.markFreshnessUncertain();
+    assert.equal(instance.isReady(),false);
+    assert.equal(instance.getReadinessStatus(),"error");
+    assert.equal(instance.getStats().ready,false);
+  } finally {
+    await instance.close();
+    config.obsidianSharedCacheDbPath=previous;
+  }
+});
+
 test("accepted pending work is durable before an update and completion cannot clear unrelated uncertainty", async () => {
   const previous=config.obsidianSharedCacheDbPath;
   config.obsidianSharedCacheDbPath=path.join(root,"pending-event-restart.sqlite");
