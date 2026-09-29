@@ -221,7 +221,7 @@ test("host file parameter uses the same governed plan apply status lifecycle",{s
   await registerAssetImportTools(server,runtime,undefined,true,ingress);
   await server.connect(st);await client.connect(ct);
   const input={
-   file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file_hostfixture",mime_type:"image/png",file_name:"input.png"},
+   file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file-abc123",mime_type:"image/png",file_name:"input.png"},
    name:"chat-file",idempotencyKey:"chatgpt-file-fixture",
   };
   const disabled=await client.callTool({name:"asset_import_plan",arguments:input});

@@ -8,13 +8,13 @@ import { ASSET_SOURCE_MAX_BYTES } from "./imageProcessing.js";
 import { assetHash } from "./windowsAssetFiles.js";
 import {
   CHATGPT_FILE_ROOT_ID,
+  AssetFileIdSchema,
   type AssetFileParam,
   type AssetSource,
   type AssetSourceProvider,
 } from "./assetImportContract.js";
 
 export { CHATGPT_FILE_ROOT_ID } from "./assetImportContract.js";
-const FILE_ID = /^file_[A-Za-z0-9_-]{6,240}$/u;
 
 function deny(reason: string, code = BaseErrorCode.FORBIDDEN): never {
   throw new McpError(
@@ -236,7 +236,7 @@ export class AssetFileIngress {
     if (!this.isEnabled()) deny("asset_file_ingress_disabled");
     if (
       source.rootId !== CHATGPT_FILE_ROOT_ID ||
-      !FILE_ID.test(source.relativePath)
+      !AssetFileIdSchema.safeParse(source.relativePath).success
     ) {
       deny("asset_file_reference_invalid", BaseErrorCode.VALIDATION_ERROR);
     }
@@ -249,7 +249,7 @@ export class AssetFileIngress {
     contentType?: string;
   }> {
     if (!this.isEnabled()) deny("asset_file_ingress_disabled");
-    if (!FILE_ID.test(file.file_id)) {
+    if (!AssetFileIdSchema.safeParse(file.file_id).success) {
       deny("asset_file_id_invalid", BaseErrorCode.VALIDATION_ERROR);
     }
     if (file.mime_type && !file.mime_type.toLowerCase().startsWith("image/")) {

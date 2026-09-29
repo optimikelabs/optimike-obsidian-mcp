@@ -210,3 +210,21 @@ test("host download has a wall-clock deadline even while the response remains ac
   assert.equal(signal.aborted, true);
   await rejected;
 });
+
+
+test("host file IDs are bounded opaque identities across materialize and replay", async () => {
+  const { AssetFileParamSchema } = await import("../dist/services/assets/assetImportContract.js");
+  const ingress = new AssetFileIngress(true, allowedHosts, async () => ({ bytes: png }));
+  for (const file_id of ["file-abc123", "file_12345678", "opaque:id/123", "x"]) {
+    const file = { download_url: "https://files.example.test/input.png", file_id };
+    assert.equal(AssetFileParamSchema.safeParse(file).success, true);
+    const result = await ingress.materialize(file);
+    assert.equal(result.source.relativePath, file_id);
+    assert.match(await ingress.authorizeReference(result.source), /^[a-f0-9]{64}$/u);
+  }
+  for (const file_id of ["", "x".repeat(246), "file\nabc", "file\u0000abc"]) {
+    const file = { download_url: "https://files.example.test/input.png", file_id };
+    assert.equal(AssetFileParamSchema.safeParse(file).success, false);
+    await assert.rejects(ingress.materialize(file));
+  }
+});

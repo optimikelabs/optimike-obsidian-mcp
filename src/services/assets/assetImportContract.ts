@@ -11,9 +11,10 @@ export const AssetSourceSchema = z.object({
   relativePath: z.string().min(1).max(2048),
   sha256: Sha256.describe("Expected original SHA-256 from the authorized source. A changed source is rejected."),
 }).strict();
+export const AssetFileIdSchema = z.string().min(1).max(245).regex(/^[^\u0000-\u001f\u007f]+$/u);
 export const AssetFileParamSchema = z.object({
   download_url: z.string().url(),
-  file_id: z.string().regex(/^file_[A-Za-z0-9_-]{6,240}$/u),
+  file_id: AssetFileIdSchema,
   mime_type: z.string().min(1).max(200).optional(),
   file_name: z.string().min(1).max(255).optional(),
 }).strict();

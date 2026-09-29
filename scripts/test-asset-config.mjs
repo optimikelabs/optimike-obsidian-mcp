@@ -25,7 +25,7 @@ function run(extra={}){
 assert.notEqual(run({OBSIDIAN_VAULT:null}).status,0,"enabled asset import must require OBSIDIAN_VAULT");
 assert.notEqual(run({OBSIDIAN_VAULT:path.join(root,"fixture-vault"),MCP_ASSET_FOLDER:null}).status,0,"enabled asset import must require MCP_ASSET_FOLDER");
 assert.notEqual(
- run({OBSIDIAN_VAULT:path.join(root,"fixture-vault"),MCP_EXTERNAL_ROOTS_FILE:null}),
+ run({OBSIDIAN_VAULT:path.join(root,"fixture-vault"),MCP_EXTERNAL_ROOTS_FILE:null}).status,
  0,
  "enabled asset import without file ingress must require MCP_EXTERNAL_ROOTS_FILE",
 );
