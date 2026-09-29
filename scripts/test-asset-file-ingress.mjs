@@ -6,11 +6,13 @@ import {
   validateAssetFileDownloadUrl,
 } from "../dist/services/assets/fileIngress.js";
 import { assetHash } from "../dist/services/assets/windowsAssetFiles.js";
+import { ExternalRootSchema } from "../dist/services/externalRootsService.js";
 
 const png = Buffer.from([
   0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,
   0x00,0x00,0x00,0x0d,0x49,0x48,0x44,0x52,
 ]);
+const allowedHosts = ["files.example.test"];
 
 test("file ingress rejects non-HTTPS and private literal URLs before download", async () => {
   for (const url of [
@@ -20,16 +22,25 @@ test("file ingress rejects non-HTTPS and private literal URLs before download", 
     "https://localhost/input.png",
     "https://[::1]/input.png",
   ]) {
-    assert.throws(() => validateAssetFileDownloadUrl(url));
+    assert.throws(() => validateAssetFileDownloadUrl(url, allowedHosts));
   }
+  assert.throws(() =>
+    validateAssetFileDownloadUrl(
+      "https://attacker.example/input.png",
+      allowedHosts,
+    ),
+  );
   assert.equal(
-    validateAssetFileDownloadUrl("https://files.example.test/input.png").hostname,
+    validateAssetFileDownloadUrl(
+      "https://files.example.test/input.png",
+      allowedHosts,
+    ).hostname,
     "files.example.test",
   );
 });
 test("disabled file ingress fails before downloader invocation", async () => {
   let downloads = 0;
-  const ingress = new AssetFileIngress(false, async () => {
+  const ingress = new AssetFileIngress(false, allowedHosts, async () => {
     downloads++;
     return { bytes: png, contentType: "image/png" };
   });
@@ -46,7 +57,7 @@ test("disabled file ingress fails before downloader invocation", async () => {
 
 test("file ingress rejects a non-image host mime hint", async () => {
   let downloads = 0;
-  const ingress = new AssetFileIngress(true, async () => {
+  const ingress = new AssetFileIngress(true, allowedHosts, async () => {
     downloads++;
     return { bytes: png, contentType: "image/png" };
   });
@@ -62,7 +73,7 @@ test("file ingress rejects a non-image host mime hint", async () => {
 });
 test("file ingress materializes one bounded host file as a durable synthetic source", async () => {
   let downloads = 0;
-  const ingress = new AssetFileIngress(true, async (url) => {
+  const ingress = new AssetFileIngress(true, allowedHosts, async (url) => {
     downloads++;
     assert.equal(url.origin, "https://files.example.test");
     return { bytes: png, contentType: "image/png" };
@@ -91,7 +102,7 @@ test("file ingress materializes one bounded host file as a durable synthetic sou
   );
 });
 test("stored ChatGPT file references remain authorizable for apply without re-downloading", async () => {
-  const ingress = new AssetFileIngress(true, async () => ({
+  const ingress = new AssetFileIngress(true, allowedHosts, async () => ({
     bytes: png,
     contentType: "image/png",
   }));
@@ -101,10 +112,36 @@ test("stored ChatGPT file references remain authorizable for apply without re-do
     mime_type: "image/png",
   });
   assert.equal(ingress.isReference(result.source), true);
-  assert.match(ingress.authorizeReference(result.source), /^[a-f0-9]{64}$/u);
+  const originalPolicy=ingress.authorizeReference(result.source);
+  assert.match(originalPolicy, /^[a-f0-9]{64}$/u);
+  const reconfigured = new AssetFileIngress(
+    true,
+    ["other-files.example.test"],
+    async () => ({ bytes: png }),
+  );
+  assert.notEqual(
+    reconfigured.authorizeReference(result.source),
+    originalPolicy,
+    "changing the approved host policy must invalidate the sealed source policy digest",
+  );
 
-  const disabled = new AssetFileIngress(false, async () => ({
+  const disabled = new AssetFileIngress(false, allowedHosts, async () => ({
     bytes: png,
   }));
   assert.throws(() => disabled.authorizeReference(result.source));
+});
+
+test("synthetic ChatGPT identity cannot collide with configured ExternalRoot ids", () => {
+  const legacyLike = ExternalRootSchema.safeParse({
+    id: "chatgpt.file",
+    path: process.cwd(),
+    capabilities: ["visible", "readable"],
+  });
+  assert.equal(legacyLike.success, true);
+  const reserved = ExternalRootSchema.safeParse({
+    id: CHATGPT_FILE_ROOT_ID,
+    path: process.cwd(),
+    capabilities: ["visible", "readable"],
+  });
+  assert.equal(reserved.success, false);
 });

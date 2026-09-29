@@ -61,6 +61,7 @@ export function inspectAssetPolicy(input: {
   enabled: boolean;
   externalRootsConfigured: boolean;
   chatgptFileIngressEnabled: boolean;
+  chatgptFileHostCount: number;
 }) {
   const attachment = inspectObsidianAttachmentFolder(input.vaultRoot);
   const configuredFolder = input.configuredFolder
@@ -109,6 +110,7 @@ export function inspectAssetPolicy(input: {
     ingress: {
       externalRoot: input.externalRootsConfigured,
       chatgptFileParam: input.chatgptFileIngressEnabled,
+      chatgptFileHostCount: input.chatgptFileHostCount,
       chatgptFileParamField: "file" as const,
       modelBase64Accepted: false,
       arbitraryUrlAccepted: false,

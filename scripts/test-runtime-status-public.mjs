@@ -123,6 +123,7 @@ assert.equal(status.writePolicy.protectedFrontmatterKeyCount, 1);
 assert.equal(status.assetPolicy.contractVersion, 1);
 assert.equal(status.assetPolicy.destination.mode, "explicit");
 assert.equal(status.assetPolicy.destination.createsDirectory, false);
+assert.equal(status.assetPolicy.ingress.chatgptFileHostCount, 0);
 assert.equal(status.assetPolicy.ingress.modelBase64Accepted, false);
 assert.equal(status.assetPolicy.ingress.arbitraryUrlAccepted, false);
 assert.equal(status.assetPolicy.noteInsertion, "separate_governed_operation");

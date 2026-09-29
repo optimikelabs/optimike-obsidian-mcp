@@ -6,6 +6,7 @@ import { assetHash, assetFilename, assetSegment, ASSET_MAX_BYTES } from "./windo
 import { runAssetJob, AssetWorkerError, AssetWorkerNotStartedError } from "./workerClient.js";
 import { ASSET_IMPORT_KIND as KIND, ASSET_IMPORT_REF as REF, ASSET_IMPORT_KEY as KEY,
   AssetImportInputSchema, AssetProofSchema, AssetMetadataSchema, AssetInspectionSchema,
+  CHATGPT_FILE_ROOT_ID,
   type AssetImportInput, type AssetProof, type AssetImportPolicy, type AssetSourceProvider,
   type AssetImportBackend, type AssetInspection } from "./assetImportContract.js";
 import type { ProcessedImage } from "./imageProcessing.js";
@@ -91,7 +92,7 @@ export class AssetImportOperationAdapter {
     if(!existing)return null;
     const proof=this.proof(existing);
     const matches=
-      proof.input.source.rootId==="chatgpt.file" &&
+      proof.input.source.rootId===CHATGPT_FILE_ROOT_ID &&
       proof.input.source.relativePath===input.fileId &&
       proof.input.name===input.name &&
       proof.input.quality===input.quality &&

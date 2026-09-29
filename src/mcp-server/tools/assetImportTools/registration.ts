@@ -25,9 +25,16 @@ export async function registerAssetImportTools(
   runtime: AssetImportOperationAdapter | undefined,
   sourceRoots: ExternalRootsService | undefined,
   localTransport: boolean,
-  fileIngress = new AssetFileIngress(config.assetChatgptFileIngressEnabled),
+  fileIngress = new AssetFileIngress(
+    config.assetChatgptFileIngressEnabled,
+    config.assetChatgptFileHosts,
+  ),
 ): Promise<void> {
   if (!runtime) return;
+  const hostPlansInFlight = new Map<
+    string,
+    { intent: string; promise: Promise<unknown> }
+  >();
   const externalRootReady = Boolean(
     sourceRoots && (await sourceRoots.hasBinaryProcessingRoot()),
   );
@@ -107,7 +114,7 @@ export async function registerAssetImportTools(
     context.http?.authInfo,
     async () => {
       if (params.file) {
-        await writeGuard();
+        writeGuard();
         const replay = runtime.replayHostFilePlan({
           fileId: params.file.file_id,
           name: params.name,
@@ -117,16 +124,50 @@ export async function registerAssetImportTools(
           idempotencyKey: params.idempotencyKey,
         });
         if (replay) return replay;
-        const materialized = await fileIngress.materialize(params.file);
-        const durable: AssetImportInput = {
-          source: materialized.source,
+
+        const hostIntent = JSON.stringify({
+          fileId: params.file.file_id,
           name: params.name,
           quality: params.quality,
           preserveOriginal: params.preserveOriginal,
           exceptionReason: params.exceptionReason,
-          idempotencyKey: params.idempotencyKey,
-        };
-        return runtime.plan(durable, materialized.provider, writeGuard);
+        });
+        const active = hostPlansInFlight.get(params.idempotencyKey);
+        if (active) {
+          if (active.intent !== hostIntent) {
+            throw new McpError(
+              BaseErrorCode.CONFLICT,
+              "The asset operation could not be authorized or verified.",
+              { reason: "asset_idempotency_conflict" },
+            );
+          }
+          return active.promise;
+        }
+
+        const task = (async () => {
+          const materialized = await fileIngress.materialize(params.file!);
+          const durable: AssetImportInput = {
+            source: materialized.source,
+            name: params.name,
+            quality: params.quality,
+            preserveOriginal: params.preserveOriginal,
+            exceptionReason: params.exceptionReason,
+            idempotencyKey: params.idempotencyKey,
+          };
+          return runtime.plan(durable, materialized.provider, writeGuard);
+        })();
+        hostPlansInFlight.set(params.idempotencyKey, {
+          intent: hostIntent,
+          promise: task,
+        });
+        try {
+          return await task;
+        } finally {
+          const current = hostPlansInFlight.get(params.idempotencyKey);
+          if (current?.promise === task) {
+            hostPlansInFlight.delete(params.idempotencyKey);
+          }
+        }
       }
       const durable: AssetImportInput = {
         source: params.source!,

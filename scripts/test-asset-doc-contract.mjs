@@ -14,6 +14,7 @@ for(const doc of ["docs/asset-import.md","docs/asset-import.fr.md"]) {
   "MCP_EXTERNAL_ROOTS_FILE",
   "MCP_ASSET_IMPORT_ENABLED",
   "MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED",
+  "MCP_ASSET_CHATGPT_FILE_HOSTS",
   "MCP_WRITE_MODE",
   "external:read",
   "NOT_RUN",

@@ -24,6 +24,7 @@ try {
     enabled: true,
     externalRootsConfigured: true,
     chatgptFileIngressEnabled: false,
+    chatgptFileHostCount: 0,
   });
   assert.equal(matching.destination.folder, "X/Images");
   assert.equal(matching.destination.exists, true);
@@ -52,11 +53,13 @@ try {
     enabled: true,
     externalRootsConfigured: false,
     chatgptFileIngressEnabled: true,
+    chatgptFileHostCount: 2,
   });
   assert.equal(different.destination.matchesObsidian, false);
   assert.equal(different.destination.suggestedFolder, "Media");
   assert.equal(different.ingress.externalRoot, false);
   assert.equal(different.ingress.chatgptFileParam, true);
+  assert.equal(different.ingress.chatgptFileHostCount, 2);
   assert.equal(different.ingress.modelBase64Accepted, false);
   assert.equal(different.ingress.arbitraryUrlAccepted, false);
 
@@ -87,6 +90,7 @@ try {
     enabled: false,
     externalRootsConfigured: false,
     chatgptFileIngressEnabled: false,
+    chatgptFileHostCount: 0,
   });
   assert.equal(absent.destination.folder, null);
   assert.equal(absent.destination.exists, false);

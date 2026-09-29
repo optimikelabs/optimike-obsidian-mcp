@@ -6,13 +6,14 @@ import { operationDigest } from "../operations/contract.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { ASSET_SOURCE_MAX_BYTES } from "./imageProcessing.js";
 import { assetHash } from "./windowsAssetFiles.js";
-import type {
-  AssetFileParam,
-  AssetSource,
-  AssetSourceProvider,
+import {
+  CHATGPT_FILE_ROOT_ID,
+  type AssetFileParam,
+  type AssetSource,
+  type AssetSourceProvider,
 } from "./assetImportContract.js";
 
-export const CHATGPT_FILE_ROOT_ID = "chatgpt.file" as const;
+export { CHATGPT_FILE_ROOT_ID } from "./assetImportContract.js";
 const FILE_ID = /^file_[A-Za-z0-9_-]{6,240}$/u;
 
 function deny(reason: string, code = BaseErrorCode.FORBIDDEN): never {
@@ -57,7 +58,10 @@ function blockedIp(address: string): boolean {
     value.startsWith("2001:db8")
   );
 }
-export function validateAssetFileDownloadUrl(raw: string): URL {
+export function validateAssetFileDownloadUrl(
+  raw: string,
+  allowedHosts: readonly string[],
+): URL {
   let url: URL;
   try {
     url = new URL(raw);
@@ -68,16 +72,23 @@ export function validateAssetFileDownloadUrl(raw: string): URL {
     url.hostname.startsWith("[") && url.hostname.endsWith("]")
       ? url.hostname.slice(1, -1)
       : url.hostname;
+  const normalizedHost = hostname.toLowerCase();
+  const allowed = new Set(allowedHosts.map((value) => value.toLowerCase()));
   if (
     url.protocol !== "https:" ||
     url.username ||
     url.password ||
     url.hash ||
     (url.port && url.port !== "443") ||
-    hostname.toLowerCase() === "localhost" ||
-    (net.isIP(hostname) && blockedIp(hostname))
+    normalizedHost === "localhost" ||
+    net.isIP(hostname) !== 0 ||
+    !allowed.has(normalizedHost)
   ) {
-    deny("asset_file_url_forbidden");
+    deny(
+      allowed.has(normalizedHost)
+        ? "asset_file_url_forbidden"
+        : "asset_file_host_not_allowed",
+    );
   }
   return url;
 }
@@ -138,21 +149,29 @@ async function downloadHttpsFile(url: URL): Promise<DownloadedFile> {
   }
 }
 export class AssetFileIngress {
-  private readonly policyDigest = operationDigest({
-    version: 1,
-    kind: "chatgpt_file_param",
-    httpsOnly: true,
-    redirects: 0,
-    maxBytes: ASSET_SOURCE_MAX_BYTES,
-  });
+  private readonly allowedHosts: readonly string[];
+  private readonly policyDigest: string;
 
   constructor(
     private readonly enabled: boolean,
+    allowedHosts: readonly string[],
     private readonly downloader: AssetFileDownloader = downloadHttpsFile,
-  ) {}
+  ) {
+    this.allowedHosts = Object.freeze(
+      [...new Set(allowedHosts.map((host) => host.trim().toLowerCase()).filter(Boolean))].sort(),
+    );
+    this.policyDigest = operationDigest({
+      version: 1,
+      kind: "chatgpt_file_param",
+      httpsOnly: true,
+      redirects: 0,
+      maxBytes: ASSET_SOURCE_MAX_BYTES,
+      allowedHosts: this.allowedHosts,
+    });
+  }
 
   isEnabled(): boolean {
-    return this.enabled;
+    return this.enabled && this.allowedHosts.length > 0;
   }
 
   isReference(source: AssetSource): boolean {
@@ -160,7 +179,7 @@ export class AssetFileIngress {
   }
 
   authorizeReference(source: AssetSource): string {
-    if (!this.enabled) deny("asset_file_ingress_disabled");
+    if (!this.isEnabled()) deny("asset_file_ingress_disabled");
     if (
       source.rootId !== CHATGPT_FILE_ROOT_ID ||
       !FILE_ID.test(source.relativePath)
@@ -175,14 +194,17 @@ export class AssetFileIngress {
     provider: AssetSourceProvider;
     contentType?: string;
   }> {
-    if (!this.enabled) deny("asset_file_ingress_disabled");
+    if (!this.isEnabled()) deny("asset_file_ingress_disabled");
     if (!FILE_ID.test(file.file_id)) {
       deny("asset_file_id_invalid", BaseErrorCode.VALIDATION_ERROR);
     }
     if (file.mime_type && !file.mime_type.toLowerCase().startsWith("image/")) {
       deny("asset_file_mime_invalid", BaseErrorCode.VALIDATION_ERROR);
     }
-    const url = validateAssetFileDownloadUrl(file.download_url);
+    const url = validateAssetFileDownloadUrl(
+      file.download_url,
+      this.allowedHosts,
+    );
     const downloaded = await this.downloader(url);
     const bytes = Buffer.from(downloaded.bytes);
     const source: AssetSource = {

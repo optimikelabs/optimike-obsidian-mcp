@@ -4,6 +4,7 @@ import { assetSegment, assetFilename, ASSET_MAX_BYTES } from "./windowsAssetFile
 export const ASSET_IMPORT_KIND = "obsidian.asset.import" as const;
 export const ASSET_IMPORT_REF = "oasset:";
 export const ASSET_IMPORT_KEY = "obsidian.asset.import:";
+export const CHATGPT_FILE_ROOT_ID = "@chatgpt.file" as const;
 export const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 export const AssetSourceSchema = z.object({
   rootId: z.string().min(1).max(128),

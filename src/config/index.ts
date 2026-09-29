@@ -153,6 +153,7 @@ const EnvSchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((value) => value === "true"),
+    MCP_ASSET_CHATGPT_FILE_HOSTS: z.string().optional(),
     MCP_ASSET_WEBP_QUALITY: z.coerce.number().int().min(1).max(100).default(75),
     MCP_EXTERNAL_MOVE_ENABLED: z
       .string()
@@ -342,6 +343,30 @@ const EnvSchema = z
           "Asset import requires MCP_EXTERNAL_ROOTS_FILE or MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED=true",
       });
     }
+    const assetFileHosts = (env.MCP_ASSET_CHATGPT_FILE_HOSTS ?? "")
+      .split(/[\r\n,]+/u)
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+    if (env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED && assetFileHosts.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_ASSET_CHATGPT_FILE_HOSTS"],
+        message:
+          "MCP_ASSET_CHATGPT_FILE_HOSTS is required when ChatGPT file ingress is enabled",
+      });
+    }
+    for (const host of assetFileHosts) {
+      if (
+        !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(host)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["MCP_ASSET_CHATGPT_FILE_HOSTS"],
+          message:
+            "MCP_ASSET_CHATGPT_FILE_HOSTS must contain exact DNS hostnames only",
+        });
+      }
+    }
   });
 
 const parsedEnv = EnvSchema.safeParse(process.env);
@@ -490,6 +515,10 @@ export const config = {
   assetFolder: env.MCP_ASSET_FOLDER,
   assetImportEnabled: env.MCP_ASSET_IMPORT_ENABLED,
   assetChatgptFileIngressEnabled: env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED,
+  assetChatgptFileHosts: (env.MCP_ASSET_CHATGPT_FILE_HOSTS ?? "")
+    .split(/[\r\n,]+/u)
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean),
   assetWebpQuality: env.MCP_ASSET_WEBP_QUALITY,
   externalMoveEnabled: env.MCP_EXTERNAL_MOVE_ENABLED,
   externalMoveProfileId: env.MCP_EXTERNAL_MOVE_PROFILE_ID,

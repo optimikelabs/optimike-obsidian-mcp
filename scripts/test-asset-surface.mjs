@@ -183,7 +183,7 @@ test("asset plan advertises ChatGPT file parameters without model-carried bytes"
  const server=new McpServer({name:"asset-file-meta",version:"1"}),client=new Client({name:"asset-file-meta",version:"1"});
  const [ct,st]=InMemoryTransport.createLinkedPair();
  const runtime={status:async()=>({outcome:null})};
- const ingress=new AssetFileIngress(true,async()=>({bytes:Buffer.from("unused"),contentType:"image/png"}));
+ const ingress=new AssetFileIngress(true,["files.example.test"],async()=>({bytes:Buffer.from("unused"),contentType:"image/png"}));
  try {
   await registerAssetImportTools(server,runtime,undefined,true,ingress);
   await server.connect(st);await client.connect(ct);
@@ -203,7 +203,7 @@ test("host file parameter uses the same governed plan apply status lifecycle",{s
  const vault=path.join(root,"host-file-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
  const png=await sharp({create:{width:5,height:4,channels:4,background:{r:80,g:90,b:100,alpha:0.6}}}).png().toBuffer();
  let downloads=0;
- const ingress=new AssetFileIngress(true,async url=>{
+ const ingress=new AssetFileIngress(true,["files.example.test"],async url=>{
   downloads++;assert.equal(url.hostname,"files.example.test");
   return {bytes:png,contentType:"image/png"};
  });
@@ -243,6 +243,58 @@ test("host file parameter uses the same governed plan apply status lifecycle",{s
   assert.equal(assetHash(fs.readFileSync(path.join(vault,"Images","chat-file.webp"))),applied.asset.sha256);
  } finally {
   await client.close();await server.close();journal.close();
+  config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
+ }
+});
+
+test("concurrent ChatGPT file plans coalesce one download and conflict before network",async()=>{
+ const vault=path.join(root,"host-concurrency-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
+ const png=await sharp({create:{width:3,height:2,channels:4,background:{r:7,g:8,b:9,alpha:1}}}).png().toBuffer();
+ let downloads=0,releaseDownload;
+ const downloadGate=new Promise(resolve=>{releaseDownload=resolve;});
+ const ingress=new AssetFileIngress(true,["files.example.test"],async()=>{
+  downloads++;
+  await downloadGate;
+  return {bytes:png,contentType:"image/png"};
+ });
+ const journal=new ObsidianNoteReplaceJournal(path.join(root,"host-concurrency-plans.sqlite"));
+ const binding="b".repeat(64);
+ const runtime=new AssetImportOperationAdapter({
+  inspect:async()=>({binding,exists:false}),
+  create:async()=>{throw new Error("plan-only test");},
+ },journal,{vaultRoot:vault,assetFolder:"Images",quality:75});
+ const handlers=new Map();
+ const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
+ config.assetImportEnabled=true;config.mcpWriteMode="full";
+ try {
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlers.set(name,handler)},runtime,undefined,true,ingress);
+  const planHandler=handlers.get("asset_import_plan");
+  assert.ok(planHandler);
+  const baseInput={
+   file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file_concurrent",mime_type:"image/png",file_name:"input.png"},
+   name:"concurrent-file",idempotencyKey:"chatgpt-concurrent-key",
+  };
+  const first=planHandler(baseInput,{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,1);
+
+  const same=planHandler({...baseInput,file:{...baseInput.file,download_url:"https://files.example.test/input.png?token=other"}},{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,1,"same in-flight intent must share the first download");
+
+  const conflict=await planHandler({...baseInput,file:{...baseInput.file,file_id:"file_otherconcurrent"}},{});
+  assert.equal(conflict.isError,true);
+  assert.equal(downloads,1,"different in-flight identity must conflict before network");
+
+  releaseDownload();
+  const [firstResult,sameResult]=await Promise.all([first,same]);
+  assert.equal(firstResult.isError,false);
+  assert.equal(sameResult.isError,false);
+  assert.equal(value(firstResult).planRef,value(sameResult).planRef);
+  assert.equal(downloads,1);
+ } finally {
+  releaseDownload?.();
+  journal.close();
   config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
  }
 });

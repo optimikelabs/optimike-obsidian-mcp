@@ -564,6 +564,7 @@ export function projectPublicRuntimeStatus(
       enabled: config.assetImportEnabled,
       externalRootsConfigured: Boolean(config.externalRootsFile),
       chatgptFileIngressEnabled: config.assetChatgptFileIngressEnabled,
+      chatgptFileHostCount: config.assetChatgptFileHosts.length,
     }),
   };
 }
