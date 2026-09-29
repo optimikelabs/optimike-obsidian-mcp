@@ -174,15 +174,17 @@ test("custom HTTPS lookup honors Node all=true shape and validates every address
   ));
   assert.deepEqual(one,{address:"93.184.216.34",family:4});
 
-  const blocked=createAssetFileLookup((_hostname,_options,callback)=>callback(null,[
+  for(const blockedAddress of ["127.0.0.1","10.0.0.1","100.64.0.1","169.254.1.1","192.168.1.1","192.0.2.1","198.18.0.1","198.51.100.1","203.0.113.1","224.0.0.1","::1","fc00::1","fe80::1","fec0::1","::ffff:127.0.0.1","::ffff:7f00:1","2001:db8::1"]) {
+   const blocked=createAssetFileLookup((_hostname,_options,callback)=>callback(null,[
     {address:"93.184.216.34",family:4},
-    {address:"127.0.0.1",family:4},
-  ]));
-  await assert.rejects(new Promise((resolve,reject)=>blocked(
+    {address:blockedAddress,family:blockedAddress.includes(":")?6:4},
+   ]));
+   await assert.rejects(new Promise((resolve,reject)=>blocked(
     "files.example.test",
     {all:true},
     (error,address)=>{
       if(error)reject(error);else resolve(address);
     },
-  )));
+   )));
+  }
 });

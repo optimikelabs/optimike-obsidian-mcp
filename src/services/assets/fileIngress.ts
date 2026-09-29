@@ -24,20 +24,38 @@ function deny(reason: string, code = BaseErrorCode.FORBIDDEN): never {
   );
 }
 function blockedIpv4(address: string): boolean {
-  const p = address.split(".").map(Number);
-  if (p.length !== 4 || p.some((v) => !Number.isInteger(v) || v < 0 || v > 255))
+  const octets = address.split(".").map(Number);
+  if (
+    octets.length !== 4 ||
+    octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)
+  ) {
     return true;
-  const [a, b] = p;
+  }
+  const value =
+    (((octets[0] << 24) >>> 0) |
+      (octets[1] << 16) |
+      (octets[2] << 8) |
+      octets[3]) >>> 0;
+  const inRange = (network: number, prefix: number): boolean => {
+    const mask =
+      prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+    return (value & mask) === (network & mask);
+  };
   return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    a >= 224
+    inRange(0x00000000, 8) ||
+    inRange(0x0a000000, 8) ||
+    inRange(0x64400000, 10) ||
+    inRange(0x7f000000, 8) ||
+    inRange(0xa9fe0000, 16) ||
+    inRange(0xac100000, 12) ||
+    inRange(0xc0000000, 24) ||
+    inRange(0xc0000200, 24) ||
+    inRange(0xc0a80000, 16) ||
+    inRange(0xc6120000, 15) ||
+    inRange(0xc6336400, 24) ||
+    inRange(0xcb007100, 24) ||
+    inRange(0xe0000000, 4) ||
+    inRange(0xf0000000, 4)
   );
 }
 
@@ -46,17 +64,14 @@ function blockedIp(address: string): boolean {
   if (!net.isIPv6(address)) return true;
   const value = address.toLowerCase();
   if (value.startsWith("::ffff:")) {
-    return blockedIpv4(value.slice("::ffff:".length));
+    return true;
   }
-  return (
-    value === "::" ||
-    value === "::1" ||
-    value.startsWith("fc") ||
-    value.startsWith("fd") ||
-    /^fe[89ab]/u.test(value) ||
-    value.startsWith("ff") ||
-    value.startsWith("2001:db8")
-  );
+  const firstHextet = Number.parseInt(value.split(":")[0] || "0", 16);
+  const globalUnicast =
+    Number.isInteger(firstHextet) &&
+    firstHextet >= 0x2000 &&
+    firstHextet <= 0x3fff;
+  return !globalUnicast || value.startsWith("2001:db8");
 }
 export function validateAssetFileDownloadUrl(
   raw: string,

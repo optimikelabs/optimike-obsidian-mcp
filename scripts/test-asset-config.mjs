@@ -58,7 +58,7 @@ assert.notEqual(
  0,
  "ChatGPT file host policy accepts hostnames, not URL-shaped values",
 );
-for(const literal of ["127.0.0.1","::1"]) {
+for(const literal of ["127.0.0.1","::1","127.1","0177.0.0.1","0x7f.1","2130706433"]) {
  assert.notEqual(
   run({
    OBSIDIAN_VAULT:path.join(root,"fixture-vault"),

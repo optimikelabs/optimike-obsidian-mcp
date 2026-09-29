@@ -357,8 +357,16 @@ const EnvSchema = z
       });
     }
     for (const host of assetFileHosts) {
+      let canonicalHost = "";
+      try {
+        canonicalHost = new URL(`https://${host}/`).hostname.toLowerCase();
+      } catch {
+        canonicalHost = "";
+      }
       if (
         net.isIP(host) !== 0 ||
+        canonicalHost !== host ||
+        net.isIP(canonicalHost) !== 0 ||
         !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(host)
       ) {
         ctx.addIssue({
