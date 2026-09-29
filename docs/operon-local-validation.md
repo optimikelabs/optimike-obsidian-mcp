@@ -2,12 +2,31 @@
 
 This recipe is the Desktop proof. Run destructive fixtures only in a disposable or copied vault. In production ÉLYSIA, use the backed-up, reversible smoke scope defined by the migration plan and never touch unrelated tasks.
 
+## Qualification scope before running recipes
+
+Apply [proportionate release qualification](bridge-packaging.md#proportionate-release-qualification)
+before selecting the commands below. Documentation or version metadata alone
+requires version/document/package checks and current-commit asset attestation;
+it does not automatically require live Operon mutations. Reuse a successful
+applicable proof only after recording its original SHA, current SHA and the
+reviewed equivalence of relevant code, dependencies, build inputs, runtime
+versions, schemas, grants, settings and artifact bytes. Metadata affecting
+consumer identity, grant binding or migrations is a functional change.
+
+Run a fresh targeted live recipe for changed or unqualified Operon behavior,
+missing evidence or an unresolved relevant failure. A new merge SHA alone is
+not an invalidation when the relevant functional inputs are identical. Retain
+the original proof identity: reused evidence is not a newly executed exact-SHA
+canary. Deferred or untested paths remain unqualified. The recipes below retain
+their disposable-vault fences, explicit confirmations and restoration checks;
+CI and branch-protection requirements remain unchanged.
+
 ## Preconditions
 
 - Node.js `>=22.12.0`
 - Obsidian Desktop
 - Local REST API enabled
-- Optimike MCP `3.11.0`, retaining the certified compatibility baseline for Operon `3.9.3`, Operon CLI `1.2.0` and Local REST API `5.1.0` behind the exact-SHA release gate below; `3.2.1` remains historical certified evidence, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
+- Optimike MCP `3.11.0`, retaining the certified compatibility baseline for Operon `3.9.3`, Operon CLI `1.2.0` and Local REST API `5.1.0` under the qualification scope above and the exact-SHA recipe below when required; `3.2.1` remains historical certified evidence, `3.3.2` / CLI `1.1.2` remains completed historical evidence, and `2.4.0` / `2.5.0` remain legacy-read fixtures
 - Optimike Operon Bridge `0.9.3`
 - Optimike Operon Bridge built from this branch
 - Optimike Obsidian MCP built from this branch

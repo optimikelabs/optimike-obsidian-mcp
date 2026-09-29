@@ -92,7 +92,9 @@ tierce.
 `npm run package:bridge-bundle` construit les trois Bridges, crée le manifeste
 du commit exact et émet les assets sous `out/bridge-release`. La commande refuse
 toute modification suivie ou non suivie et non ignorée. La CI exécute les tests transactionnels sous Windows et
-Linux. L’admission de release exige aussi un cycle exact-SHA dans Pilot 2 :
+Linux. Choisir le périmètre de qualification ci-dessous avant les recettes live.
+Un parcours d’installation ou de rollback modifié ou encore non qualifié exige
+un cycle exact-SHA dans Pilot 2 :
 
 ```text
 attester Pilot 2 fermé → upgrade → redémarrer
@@ -107,3 +109,37 @@ sur les hashes initiaux des fichiers gérés et sur l’invariance de chaque
 `data.json` présent au démarrage. En cas d’échec, il restaure ces octets et
 laisse Pilot 2 fermé : la politique de grants de l’API développeur Operon
 n’observe donc jamais une version de Bridge volontairement rétrogradée.
+
+## Qualification proportionnée des releases
+
+| Changement | Qualification requise |
+| --- | --- |
+| Métadonnées de version, changelog ou documentation uniquement | Vérifier la cohérence des versions, les contrats documentaires et le contenu du package. Pour publier, reconstruire les assets depuis le commit publié propre et vérifier le manifeste et SHA256SUMS. Réutiliser les preuves live applicables ; aucun redémarrage du coffre ni recette de mutation automatique. |
+| Changement fonctionnel MCP ou Operon | Exécuter les tests de contrat/service concernés et le parcours live pertinent si son comportement observable change. Conserver les preuves valides des parcours indépendants. |
+| Changement de code Bridge, grants, installation, rollback ou recovery | Exécuter les contrats de sécurité concernés et le cycle réel Pilot 2 pour ces parcours modifiés, avec restauration. |
+
+Avant qualification, consigner les chemins modifiés, le comportement observable
+concerné, les contrôles retenus et la raison de chaque recette live. Le passage
+d’un candidat à un commit de fusion ne déclenche pas à lui seul une nouvelle
+recette : comparer les entrées fonctionnelles et réutiliser les preuves si elles
+sont identiques.
+
+La réutilisation exige une preuve réussie et bornée avec son commit d’origine,
+les versions runtime, la configuration et les hashes des artefacts. Consigner
+le commit courant et le diff relu démontrant que le code concerné, la résolution
+des dépendances, les entrées de build, grants, schémas et réglages sont inchangés.
+Exclure seulement les différences documentaires et de métadonnées de version
+explicitement relues ; une version qui change l’identité du consommateur, le
+binding d’un grant ou une migration constitue un changement fonctionnel. Les
+octets des Bridges doivent correspondre aux octets qualifiés. Un nouveau
+manifeste lie toujours les assets au commit réellement publié. Il s’agit d’une
+réutilisation de preuve, pas d’un nouveau canary exact-SHA exécuté.
+
+La réutilisation devient invalide si une entrée pertinente ou les octets d’un
+artefact changent, si la preuve manque ou est incomplète, ou si un échec pertinent
+reste non résolu. Exécuter alors la recette concernée. Un impact inconnu demande
+d’abord une inspection et ne justifie pas de rejouer aveuglément toutes les
+suites. Un parcours différé ou non testé reste explicitement non qualifié. Ces
+règles ne désactivent pas la CI, ne changent pas la protection de branche et ne
+réduisent ni l’autorisation runtime, ni les confirmations, la restauration ou
+les fences de rollback.
