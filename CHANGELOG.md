@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add opt-in event-assisted vault cache refresh with bounded authenticated Local REST streams, reconnect reconciliation and redacted diagnostics. The ten-minute inventory interval and mutation authorities remain unchanged.
+- Add portable image-import policy discovery and optional ChatGPT host-file ingress on the existing governed asset lifecycle. The destination remains explicitly configured and no clipping, arbitrary URL download, directory creation or note insertion is implied.
 
 ### Fixed
 

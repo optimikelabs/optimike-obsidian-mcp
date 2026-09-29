@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { createHash } from "node:crypto";
+import net from "node:net";
 import os from "node:os";
 import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -149,6 +150,11 @@ const EnvSchema = z
     MCP_EXTERNAL_ROOTS_FILE: z.string().optional(),
     MCP_ASSET_FOLDER: z.string().min(1).max(800).optional(),
     MCP_ASSET_IMPORT_ENABLED: z.enum(["true", "false"]).default("false").transform(v => v === "true"),
+    MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    MCP_ASSET_CHATGPT_FILE_HOSTS: z.string().optional(),
     MCP_ASSET_WEBP_QUALITY: z.coerce.number().int().min(1).max(100).default(75),
     MCP_EXTERNAL_MOVE_ENABLED: z
       .string()
@@ -326,13 +332,50 @@ const EnvSchema = z
       });
     }
 
-    if (env.MCP_ASSET_IMPORT_ENABLED && !env.MCP_EXTERNAL_ROOTS_FILE) {
+    if (
+      env.MCP_ASSET_IMPORT_ENABLED &&
+      !env.MCP_EXTERNAL_ROOTS_FILE &&
+      !env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["MCP_EXTERNAL_ROOTS_FILE"],
         message:
-          "MCP_EXTERNAL_ROOTS_FILE is required when asset import is enabled",
+          "Asset import requires MCP_EXTERNAL_ROOTS_FILE or MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED=true",
       });
+    }
+    const assetFileHosts = (env.MCP_ASSET_CHATGPT_FILE_HOSTS ?? "")
+      .split(/[\r\n,]+/u)
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+    if (env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED && assetFileHosts.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_ASSET_CHATGPT_FILE_HOSTS"],
+        message:
+          "MCP_ASSET_CHATGPT_FILE_HOSTS is required when ChatGPT file ingress is enabled",
+      });
+    }
+    for (const host of assetFileHosts) {
+      let canonicalHost = "";
+      try {
+        canonicalHost = new URL(`https://${host}/`).hostname.toLowerCase();
+      } catch {
+        canonicalHost = "";
+      }
+      if (
+        net.isIP(host) !== 0 ||
+        canonicalHost !== host ||
+        net.isIP(canonicalHost) !== 0 ||
+        !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(host)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["MCP_ASSET_CHATGPT_FILE_HOSTS"],
+          message:
+            "MCP_ASSET_CHATGPT_FILE_HOSTS must contain exact DNS hostnames only; IP literals are not allowed",
+        });
+      }
     }
   });
 
@@ -481,6 +524,11 @@ export const config = {
   externalRootsFile: env.MCP_EXTERNAL_ROOTS_FILE,
   assetFolder: env.MCP_ASSET_FOLDER,
   assetImportEnabled: env.MCP_ASSET_IMPORT_ENABLED,
+  assetChatgptFileIngressEnabled: env.MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED,
+  assetChatgptFileHosts: (env.MCP_ASSET_CHATGPT_FILE_HOSTS ?? "")
+    .split(/[\r\n,]+/u)
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean),
   assetWebpQuality: env.MCP_ASSET_WEBP_QUALITY,
   externalMoveEnabled: env.MCP_EXTERNAL_MOVE_ENABLED,
   externalMoveProfileId: env.MCP_EXTERNAL_MOVE_PROFILE_ID,

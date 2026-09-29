@@ -6,7 +6,8 @@ import { assetHash, assetFilename, assetSegment, ASSET_MAX_BYTES } from "./windo
 import { runAssetJob, AssetWorkerError, AssetWorkerNotStartedError } from "./workerClient.js";
 import { ASSET_IMPORT_KIND as KIND, ASSET_IMPORT_REF as REF, ASSET_IMPORT_KEY as KEY,
   AssetImportInputSchema, AssetProofSchema, AssetMetadataSchema, AssetInspectionSchema,
-  type AssetImportInput, type AssetProof, type AssetImportPolicy, type AssetSourceProvider,
+  CHATGPT_FILE_ROOT_ID,
+  type AssetSource, type AssetImportInput, type AssetProof, type AssetImportPolicy, type AssetSourceProvider,
   type AssetImportBackend, type AssetInspection } from "./assetImportContract.js";
 import type { ProcessedImage } from "./imageProcessing.js";
 
@@ -20,11 +21,22 @@ function operationId(ref:string):string {
 const uncertain = (row:ObsidianNoteReplacePlan) => ["planned","applying","outcome_unknown"].includes(row.status);
 let plansInFlight=0;
 
+async function withPlanCapacity<T>(operation:()=>Promise<T>):Promise<T> {
+  if(plansInFlight>=2)deny("asset_plan_busy",BaseErrorCode.SERVICE_UNAVAILABLE);
+  plansInFlight++;
+  try {return await operation();}
+  finally {plansInFlight--;}
+}
+
 /** A binary projection of the existing journal, not another transaction engine. */
 export class AssetImportOperationAdapter {
   readonly operationKind=KIND;
   private readonly policy:AssetImportPolicy;
   private readonly policyDigest:string;
+  private readonly planClaimsInFlight = new Map<
+    string,
+    { intent: string; promise: Promise<unknown> }
+  >();
   constructor(private readonly backend:AssetImportBackend,
     private readonly journal:ObsidianNoteReplaceJournal,
     policy:AssetImportPolicy,
@@ -79,7 +91,71 @@ export class AssetImportOperationAdapter {
       admittedAt:row.createdAt,updatedAt:row.updatedAt,
     };
   }
-  async plan(input:unknown,source:AssetSourceProvider,authorize:()=>void|Promise<void>) {
+  replayHostFilePlan(input:{
+    fileId:string;
+    name:string;
+    quality?:number;
+    preserveOriginal?:boolean;
+    exceptionReason?:string;
+    idempotencyKey:string;
+  }, authorizeSource: (source: AssetSource) => string) {
+    const existing=this.journal.getByIdempotencyKey(KEY+input.idempotencyKey);
+    if(!existing)return null;
+    const proof=this.proof(existing);
+    const matches=
+      proof.input.source.rootId===CHATGPT_FILE_ROOT_ID &&
+      proof.input.source.relativePath===input.fileId &&
+      proof.input.name===input.name &&
+      proof.input.quality===input.quality &&
+      proof.input.preserveOriginal===input.preserveOriginal &&
+      proof.input.exceptionReason===input.exceptionReason;
+    if(!matches)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
+    if(authorizeSource({...proof.input.source})!==proof.sourcePolicyDigest)deny("asset_source_policy_changed");
+    return this.receipt(existing);
+  }
+  async coalescePlanClaim<T>(
+    input:{
+      sourceKind:"chatgpt_file"|"external_root";
+      sourceIdentity:unknown;
+      name:string;
+      quality?:number;
+      preserveOriginal?:boolean;
+      exceptionReason?:string;
+      idempotencyKey:string;
+    },
+    operation:()=>Promise<T>,
+    reserveCapacity=false,
+  ):Promise<T> {
+    const intent=operationDigest({
+      version:1,
+      kind:"asset_plan_claim",
+      sourceKind:input.sourceKind,
+      sourceIdentity:input.sourceIdentity,
+      name:input.name,
+      quality:input.quality,
+      preserveOriginal:input.preserveOriginal,
+      exceptionReason:input.exceptionReason,
+    });
+    const active=this.planClaimsInFlight.get(input.idempotencyKey);
+    if(active) {
+      if(active.intent!==intent)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
+      return active.promise as Promise<T>;
+    }
+    const promise=reserveCapacity?withPlanCapacity(operation):operation();
+    this.planClaimsInFlight.set(input.idempotencyKey,{intent,promise});
+    try {
+      return await promise;
+    } finally {
+      const current=this.planClaimsInFlight.get(input.idempotencyKey);
+      if(current?.promise===promise)this.planClaimsInFlight.delete(input.idempotencyKey);
+    }
+  }
+  async plan(
+    input:unknown,
+    source:AssetSourceProvider,
+    authorize:()=>void|Promise<void>,
+    capacityReserved=false,
+  ) {
     const parsed=AssetImportInputSchema.parse(input);
     await authorize();const sourcePolicyDigest=await source.authorize({...parsed.source});
     const existing=this.journal.getByIdempotencyKey(KEY+parsed.idempotencyKey);
@@ -88,9 +164,7 @@ export class AssetImportOperationAdapter {
       if(existing.idempotencyIdentity!==this.intent(parsed))deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
       return this.receipt(existing);
     }
-    if(plansInFlight>=2)deny("asset_plan_busy",BaseErrorCode.SERVICE_UNAVAILABLE);
-    plansInFlight++;
-    try {
+    const construct=async()=>{
       const bytes=await source.read({...parsed.source});
       if(assetHash(bytes)!==parsed.source.sha256)deny("asset_source_changed",BaseErrorCode.CONFLICT);
       const processed=await this.convert(bytes,{quality:parsed.quality??this.policy.quality,
@@ -118,7 +192,8 @@ export class AssetImportOperationAdapter {
           intentDigest:this.intent(parsed),proof},
       },32);
       return this.receipt(row);
-    } finally {plansInFlight--;}
+    };
+    return capacityReserved?construct():withPlanCapacity(construct);
   }
   async apply(ref:string,key:string,source:AssetSourceProvider,authorize:()=>void|Promise<void>) {
     let row=this.required(ref);const proof=this.proof(row);

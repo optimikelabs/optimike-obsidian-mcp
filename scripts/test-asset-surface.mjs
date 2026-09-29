@@ -15,6 +15,7 @@ const {ObsidianNoteReplaceJournal}=await import("../dist/services/operations/obs
 const {ExternalRootsService}=await import("../dist/services/externalRootsService.js");
 const {runAssetJob}=await import("../dist/services/assets/workerClient.js");
 const {assetHash}=await import("../dist/services/assets/windowsAssetFiles.js");
+const {AssetFileIngress}=await import("../dist/services/assets/fileIngress.js");
 const {installToolProfileRegistrationGate}=await import("../dist/mcp-server/toolProfileRuntime.js");
 const {compileToolNames}=await import("../dist/mcp-server/toolSurfaceRegistry.js");
 const names=["asset_import_apply","asset_import_plan","asset_import_status"];
@@ -176,4 +177,254 @@ test('real stdio processes import authorized server-local bytes and resume the s
  const after=fs.statSync(file);assert.equal(after.ino,before.ino);assert.equal(after.mtimeMs,before.mtimeMs);
  assert.deepEqual(fs.readdirSync(path.join(vault,'Images')),['stdio-image.webp']);
  assert.equal(assetHash(fs.readFileSync(path.join(sourceRoot,'input.png'))),assetHash(png));
+});
+
+test("asset plan advertises ChatGPT file parameters without model-carried bytes",async()=>{
+ const server=new McpServer({name:"asset-file-meta",version:"1"}),client=new Client({name:"asset-file-meta",version:"1"});
+ const [ct,st]=InMemoryTransport.createLinkedPair();
+ const runtime={status:async()=>({outcome:null})};
+ const ingress=new AssetFileIngress(true,["files.example.test"],async()=>({bytes:Buffer.from("unused"),contentType:"image/png"}));
+ try {
+  await registerAssetImportTools(server,runtime,undefined,true,ingress);
+  await server.connect(st);await client.connect(ct);
+  const plan=(await client.listTools()).tools.find(t=>t.name==="asset_import_plan");
+  assert.ok(plan);
+  assert.equal(plan.annotations.openWorldHint,true);
+  assert.deepEqual(plan._meta?.["openai/fileParams"],["file"]);
+  assert.ok(plan.inputSchema.properties.file);
+  assert.equal(plan.inputSchema.properties.file.properties.download_url.type,"string");
+  assert.deepEqual(plan.inputSchema.properties.file.required.sort(),["download_url","file_id"]);
+  assert.equal("mime_type" in plan.inputSchema.properties.file.properties,true);
+  assert.equal("file_name" in plan.inputSchema.properties.file.properties,true);
+ } finally {await client.close();await server.close();}
+});
+
+test("host file parameter uses the same governed plan apply status lifecycle",{skip:process.platform!=="win32"||process.arch!=="x64"},async()=>{
+ const vault=path.join(root,"host-file-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
+ const png=await sharp({create:{width:5,height:4,channels:4,background:{r:80,g:90,b:100,alpha:0.6}}}).png().toBuffer();
+ let downloads=0;
+ const ingress=new AssetFileIngress(true,["files.example.test"],async url=>{
+  downloads++;assert.equal(url.hostname,"files.example.test");
+  return {bytes:png,contentType:"image/png"};
+ });
+ const journal=new ObsidianNoteReplaceJournal(path.join(root,"host-file-plans.sqlite"));
+ const policy={vaultRoot:vault,assetFolder:"Images",quality:75};
+ const runtime=new AssetImportOperationAdapter({
+  inspect:(filename,binding)=>runAssetJob({kind:"inspect",...policy,filename,binding}),
+  create:(filename,bytes,binding)=>runAssetJob({kind:"create",...policy,filename,bytes,binding}),
+ },journal,policy);
+ const server=new McpServer({name:"asset-host-file",version:"1"}),client=new Client({name:"asset-host-file",version:"1"});
+ const [ct,st]=InMemoryTransport.createLinkedPair();
+ const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
+ config.assetImportEnabled=false;config.mcpWriteMode="full";
+ try {
+  await registerAssetImportTools(server,runtime,undefined,true,ingress);
+  await server.connect(st);await client.connect(ct);
+  const input={
+   file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file-abc123",mime_type:"image/png",file_name:"input.png"},
+   name:"chat-file",idempotencyKey:"chatgpt-file-fixture",
+  };
+  const disabled=await client.callTool({name:"asset_import_plan",arguments:input});
+  assert.equal(disabled.isError,true);assert.equal(downloads,0);
+  config.assetImportEnabled=true;
+  const plan=value(await client.callTool({name:"asset_import_plan",arguments:input}));
+  assert.equal(plan.phase,"planned");assert.equal(plan.path,"Images/chat-file.webp");assert.equal(downloads,1);
+  const replay=value(await client.callTool({name:"asset_import_plan",arguments:input}));
+  assert.equal(replay.planRef,plan.planRef);assert.equal(downloads,1);
+  const conflict=await client.callTool({name:"asset_import_plan",arguments:{
+   ...input,file:{...input.file,file_id:"file_otherfixture"},
+  }});
+  assert.equal(conflict.isError,true);assert.equal(downloads,1);
+  const applied=value(await client.callTool({name:"asset_import_apply",arguments:{planRef:plan.planRef,idempotencyKey:"chatgpt-file-fixture"}}));
+  assert.equal(applied.outcome,"committed");assert.equal(applied.postflight.status,"verified");assert.equal(downloads,1);
+  assert.equal(applied.embed,"![[Images/chat-file.webp]]");
+  const status=value(await client.callTool({name:"asset_import_status",arguments:{planRef:plan.planRef}}));
+  assert.equal(status.postflight.status,"verified");assert.equal(downloads,1);
+  assert.equal(assetHash(fs.readFileSync(path.join(vault,"Images","chat-file.webp"))),applied.asset.sha256);
+  const replayIntent={fileId:input.file.file_id,name:input.name,idempotencyKey:input.idempotencyKey};
+  const disabledIngress=new AssetFileIngress(false,["files.example.test"],async()=>{throw new Error("no network on replay");});
+  assert.throws(()=>runtime.replayHostFilePlan(replayIntent,s=>disabledIngress.authorizeReference(s)));
+  const changedIngress=new AssetFileIngress(true,["other-files.example.test"],async()=>{throw new Error("no network on replay");});
+  assert.throws(()=>runtime.replayHostFilePlan(replayIntent,s=>changedIngress.authorizeReference(s)));
+  assert.equal(runtime.replayHostFilePlan(replayIntent,s=>ingress.authorizeReference(s)).planRef,plan.planRef);
+  assert.equal(downloads,1);
+ } finally {
+  await client.close();await server.close();journal.close();
+  config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
+ }
+});
+
+test("concurrent ChatGPT file plans coalesce one download and conflict before network",async()=>{
+ const vault=path.join(root,"host-concurrency-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
+ const png=await sharp({create:{width:3,height:2,channels:4,background:{r:7,g:8,b:9,alpha:1}}}).png().toBuffer();
+ let downloads=0,releaseDownload;
+ const downloadGate=new Promise(resolve=>{releaseDownload=resolve;});
+ const downloader=async()=>{
+  downloads++;
+  await downloadGate;
+  return {bytes:png,contentType:"image/png"};
+ };
+ const ingressA=new AssetFileIngress(true,["files.example.test"],downloader);
+ const ingressB=new AssetFileIngress(true,["files.example.test"],downloader);
+ const journal=new ObsidianNoteReplaceJournal(path.join(root,"host-concurrency-plans.sqlite"));
+ const binding="b".repeat(64);
+ const runtime=new AssetImportOperationAdapter({
+  inspect:async()=>({binding,exists:false}),
+  create:async()=>{throw new Error("plan-only test");},
+ },journal,{vaultRoot:vault,assetFolder:"Images",quality:75});
+ const handlersA=new Map(),handlersB=new Map();
+ const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
+ config.assetImportEnabled=true;config.mcpWriteMode="full";
+ try {
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersA.set(name,handler)},runtime,undefined,true,ingressA);
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersB.set(name,handler)},runtime,undefined,true,ingressB);
+  const planHandlerA=handlersA.get("asset_import_plan"),planHandlerB=handlersB.get("asset_import_plan");
+  assert.ok(planHandlerA);assert.ok(planHandlerB);
+  const baseInput={
+   file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file_concurrent",mime_type:"image/png",file_name:"input.png"},
+   name:"concurrent-file",idempotencyKey:"chatgpt-concurrent-key",
+  };
+  const first=planHandlerA(baseInput,{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,1);
+
+  const same=planHandlerB({...baseInput,file:{...baseInput.file,download_url:"https://files.example.test/input.png?token=other"}},{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,1,"same in-flight intent across two MCP server instances must share the first download");
+
+  const conflict=await planHandlerB({...baseInput,file:{...baseInput.file,file_id:"file_otherconcurrent"}},{});
+  assert.equal(conflict.isError,true);
+  assert.equal(downloads,1,"different in-flight identity must conflict before network");
+
+  releaseDownload();
+  const [firstResult,sameResult]=await Promise.all([first,same]);
+  assert.equal(firstResult.isError,false);
+  assert.equal(sameResult.isError,false);
+  assert.equal(value(firstResult).planRef,value(sameResult).planRef);
+  assert.equal(downloads,1);
+ } finally {
+  releaseDownload?.();
+  journal.close();
+  config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
+ }
+});
+
+test("host-file plan capacity is reserved before download across MCP sessions",async()=>{
+ const vault=path.join(root,"host-capacity-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
+ const png=await sharp({create:{width:3,height:2,channels:4,background:{r:11,g:12,b:13,alpha:1}}}).png().toBuffer();
+ let downloads=0,releaseDownloads;
+ const gate=new Promise(resolve=>{releaseDownloads=resolve;});
+ const downloader=async()=>{
+  downloads++;
+  await gate;
+  return {bytes:png,contentType:"image/png"};
+ };
+ const journal=new ObsidianNoteReplaceJournal(path.join(root,"host-capacity-plans.sqlite"));
+ const binding="c".repeat(64);
+ const runtime=new AssetImportOperationAdapter({
+  inspect:async()=>({binding,exists:false}),
+  create:async()=>{throw new Error("plan-only test");},
+ },journal,{vaultRoot:vault,assetFolder:"Images",quality:75});
+ const handlersA=new Map(),handlersB=new Map();
+ const ingressA=new AssetFileIngress(true,["files.example.test"],downloader);
+ const ingressB=new AssetFileIngress(true,["files.example.test"],downloader);
+ const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
+ config.assetImportEnabled=true;config.mcpWriteMode="full";
+ const makeInput=(n)=>({
+  file:{download_url:`https://files.example.test/input-${n}.png?token=temporary`,file_id:`file_capacity${n}`,mime_type:"image/png",file_name:`input-${n}.png`},
+  name:`capacity-${n}`,idempotencyKey:`chatgpt-capacity-key-${n}`,
+ });
+ try {
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersA.set(name,handler)},runtime,undefined,true,ingressA);
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersB.set(name,handler)},runtime,undefined,true,ingressB);
+  const planA=handlersA.get("asset_import_plan"),planB=handlersB.get("asset_import_plan");
+  const first=planA(makeInput(1),{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,1);
+  const second=planB(makeInput(2),{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,2);
+  const third=await planA(makeInput(3),{});
+  assert.equal(third.isError,true);
+  assert.equal(downloads,2,"third distinct plan must fail before starting another download");
+  releaseDownloads();
+  const results=await Promise.all([first,second]);
+  assert.equal(results[0].isError,false);
+  assert.equal(results[1].isError,false);
+ } finally {
+  releaseDownloads?.();
+  journal.close();
+  config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
+ }
+});
+
+test("mixed ChatGPT and ExternalRoot plans share one idempotency claim before any source read",async()=>{
+ const vault=path.join(root,"mixed-source-vault");fs.mkdirSync(vault);fs.mkdirSync(path.join(vault,"Images"));
+ const png=await sharp({create:{width:4,height:3,channels:4,background:{r:21,g:22,b:23,alpha:1}}}).png().toBuffer();
+ const digest="d".repeat(64),binding="e".repeat(64);
+ let externalReads=0,downloads=0,releaseExternal,releaseHost;
+ let externalGate=new Promise(resolve=>{releaseExternal=resolve;});
+ let hostGate=new Promise(resolve=>{releaseHost=resolve;});
+ const sourceRoots={
+  hasBinaryProcessingRoot:async()=>true,
+  binaryProcessingPolicy:()=>digest,
+  readBinaryForProcessing:async()=>{
+   externalReads++;
+   await externalGate;
+   return png;
+  },
+ };
+ const ingress=new AssetFileIngress(true,["files.example.test"],async()=>{
+  downloads++;
+  await hostGate;
+  return {bytes:png,contentType:"image/png"};
+ });
+ const journal=new ObsidianNoteReplaceJournal(path.join(root,"mixed-source-plans.sqlite"));
+ const runtime=new AssetImportOperationAdapter({
+  inspect:async()=>({binding,exists:false}),
+  create:async()=>{throw new Error("plan-only test");},
+ },journal,{vaultRoot:vault,assetFolder:"Images",quality:75});
+ const handlersA=new Map(),handlersB=new Map();
+ const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
+ config.assetImportEnabled=true;config.mcpWriteMode="full";
+ const externalInput=(key,name)=>({
+  source:{rootId:"fixture.mixed",relativePath:"input.png",sha256:assetHash(png)},
+  name,idempotencyKey:key,
+ });
+ const hostInput=(key,name)=>({
+  file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file_mixedsource",mime_type:"image/png",file_name:"input.png"},
+  name,idempotencyKey:key,
+ });
+ try {
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersA.set(name,handler)},runtime,sourceRoots,true,ingress);
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersB.set(name,handler)},runtime,sourceRoots,true,ingress);
+  const planA=handlersA.get("asset_import_plan"),planB=handlersB.get("asset_import_plan");
+
+  const externalFirst=planA(externalInput("mixed-key-external-first","mixed-external"),{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(externalReads,1);
+  assert.equal(downloads,0);
+  const hostConflict=await planB(hostInput("mixed-key-external-first","mixed-external"),{});
+  assert.equal(hostConflict.isError,true);
+  assert.equal(downloads,0,"host conflict must be rejected before GET while ExternalRoot claim is active");
+  releaseExternal();
+  assert.equal((await externalFirst).isError,false);
+
+  externalGate=new Promise(resolve=>{releaseExternal=resolve;});
+  hostGate=new Promise(resolve=>{releaseHost=resolve;});
+  const readsBeforeHost=externalReads;
+  const hostFirst=planA(hostInput("mixed-key-host-first","mixed-host"),{});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(downloads,1);
+  const externalConflict=await planB(externalInput("mixed-key-host-first","mixed-host"),{});
+  assert.equal(externalConflict.isError,true);
+  assert.equal(externalReads,readsBeforeHost,"ExternalRoot conflict must be rejected before source read while host claim is active");
+  releaseHost();
+  assert.equal((await hostFirst).isError,false);
+ } finally {
+  releaseExternal?.();
+  releaseHost?.();
+  journal.close();
+  config.assetImportEnabled=previousEnabled;config.mcpWriteMode=previousMode;
+ }
 });

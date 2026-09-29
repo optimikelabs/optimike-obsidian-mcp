@@ -78,7 +78,7 @@ export async function registerRuntimeTools(
     "obsidian_runtime_status",
     {
       description:
-        "Returns redacted runtime diagnostics plus the versioned capability manifest. The manifest distinguishes tool discoverability, backend availability, and authorization, with stable reason codes and safe next actions. Physical paths, URLs, secrets, note content, and raw configuration are never returned.",
+        "Returns redacted runtime diagnostics plus the versioned capability manifest and safe image-import policy discovery. Asset policy reports only vault-relative destination/conversion/ingress facts and the observed Obsidian attachment-folder relationship; physical paths, URLs, secrets, note content, and raw configuration are never returned.",
       inputSchema: mcpSchema(RuntimeStatusInputSchema.shape),
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },

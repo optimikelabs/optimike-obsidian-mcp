@@ -235,7 +235,7 @@
     "test:local-rest-531": "node --test scripts/test-local-rest-531-spec.mjs scripts/test-local-rest-http-contract.mjs scripts/test-local-rest-http-proxy.mjs && node scripts/test-local-rest-api-compat.mjs",
     "test:cache-events": "npm run build && node --test scripts/test-cache-freshness.mjs scripts/test-cache-event-http.mjs scripts/test-cache-event-supervisor.mjs scripts/test-cache-event-integration.mjs scripts/test-cache-consumers.mjs",
     "test:bridge-openapi": "npm --prefix plugins/obsidian-atomic-write-bridge run typecheck && npm --prefix plugins/obsidian-operon-bridge run typecheck && node --test scripts/test-bridge-openapi.mjs",
-    "test:assets": "npm run build && node scripts/test-asset-config.mjs && node scripts/test-asset-capability.mjs && node --test scripts/test-asset-native.mjs scripts/test-asset-processing.mjs scripts/test-asset-operation.mjs scripts/test-asset-surface.mjs && node scripts/test-asset-doc-contract.mjs"
+    "test:assets": "npm run build && node scripts/test-asset-config.mjs && node scripts/test-asset-capability.mjs && node scripts/test-asset-policy.mjs && node --test scripts/test-asset-file-ingress.mjs scripts/test-asset-native.mjs scripts/test-asset-processing.mjs scripts/test-asset-operation.mjs scripts/test-asset-surface.mjs && node scripts/test-asset-doc-contract.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
