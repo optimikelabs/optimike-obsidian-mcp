@@ -21,6 +21,33 @@ const names=["asset_import_apply","asset_import_plan","asset_import_status"];
 after(()=>fs.rmSync(root,{recursive:true,force:true}));
 const value=r=>JSON.parse(r.content[0].text);
 
+test("asset source readiness requires one available readable + handoff root",async()=>{
+ const available=path.join(root,"source-readiness");fs.mkdirSync(available);
+ const missing=path.join(root,"source-missing");
+ const empty=ExternalRootsService.fromConfig({version:1,roots:[]});
+ const readable=ExternalRootsService.fromConfig({version:1,roots:[{id:"readable.only",path:available,capabilities:["visible","readable"]}]});
+ const unavailable=ExternalRootsService.fromConfig({version:1,roots:[{id:"handoff.missing",path:missing,capabilities:["visible","readable","handoff"]}]});
+ const eligible=ExternalRootsService.fromConfig({version:1,roots:[{id:"handoff.ready",path:available,capabilities:["visible","readable","handoff"]}]});
+ assert.equal(await empty.hasBinaryProcessingRoot(),false);
+ assert.equal(await readable.hasBinaryProcessingRoot(),false);
+ assert.equal(await unavailable.hasBinaryProcessingRoot(),false);
+ assert.equal(await eligible.hasBinaryProcessingRoot(),true);
+});
+
+test("enabled asset registration fails closed without an eligible source provider",async()=>{
+ const previous=config.assetImportEnabled;
+ config.assetImportEnabled=true;
+ try {
+  const roots=ExternalRootsService.fromConfig({version:1,roots:[]});
+  await assert.rejects(
+    registerAssetImportTools({registerTool(){throw new Error("must not register");}},{},roots,true),
+    error=>error?.code==="CONFIGURATION_ERROR"&&error?.details?.reason==="asset_source_unavailable",
+  );
+ } finally {
+  config.assetImportEnabled=previous;
+ }
+});
+
 for (const name of ["asset_import_status","asset_import_apply"]) {
  test(name+" rejects unauthenticated and development HTTP identities before receipt inspection",async()=>{
   const handlers=new Map();let called=0;

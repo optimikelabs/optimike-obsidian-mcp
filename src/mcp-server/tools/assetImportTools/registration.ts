@@ -19,6 +19,16 @@ export async function registerAssetImportTools(
   localTransport: boolean,
 ): Promise<void> {
   if (!runtime) return;
+  if (
+    config.assetImportEnabled &&
+    (!sourceRoots || !(await sourceRoots.hasBinaryProcessingRoot()))
+  ) {
+    throw new McpError(
+      BaseErrorCode.CONFIGURATION_ERROR,
+      "Asset import requires at least one available external root with readable + handoff capabilities.",
+      { reason: "asset_source_unavailable" },
+    );
+  }
   const source = (authInfo: Parameters<typeof assertExternalReadAccess>[1]): AssetSourceProvider => ({
     authorize: input => {
       assertExternalReadAccess(localTransport, authInfo);

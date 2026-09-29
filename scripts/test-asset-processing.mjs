@@ -3,10 +3,36 @@ import { test } from 'node:test';
 import sharp from 'sharp';
 import { runAssetJob, activeAssetWorkers } from '../dist/services/assets/workerClient.js';
 import { assetHash } from '../dist/services/assets/windowsAssetFiles.js';
+import { probeImageProcessingDependencies } from '../dist/services/assets/imageProcessing.js';
 
 const rgba = Buffer.from([255,0,0,0, 0,255,0,128, 0,0,255,255, 200,100,50,255, 20,40,60,64, 150,50,20,255]);
 const png = await sharp(rgba, {raw:{width:2,height:3,channels:4}}).png().toBuffer();
 const convert = (bytes, policy={quality:75}, timeout) => runAssetJob({kind:'convert',bytes,policy},timeout);
+
+test('image dependency readiness requires both Sharp native bindings and Saxes', () => {
+  const fakeSharp=()=>{};
+  fakeSharp.versions={sharp:'fixture-sharp',vips:'fixture-vips'};
+  const ready=name => name==='sharp'
+    ? fakeSharp
+    : name==='saxes'
+      ? {SaxesParser:class SaxesParser{}}
+      : (()=>{throw new Error('unexpected dependency')})();
+  assert.doesNotThrow(()=>probeImageProcessingDependencies(ready));
+  for(const missing of ['sharp','saxes']) {
+    assert.throws(
+      ()=>probeImageProcessingDependencies(name=>{
+        if(name===missing) throw new Error('missing');
+        return name==='sharp' ? fakeSharp : {SaxesParser:class SaxesParser{}};
+      }),
+      error=>error?.reason==='image_dependency_unavailable',
+      missing,
+    );
+  }
+  assert.throws(
+    ()=>probeImageProcessingDependencies(name=>name==='sharp' ? Object.assign(()=>{}, {versions:{}}) : {SaxesParser:class SaxesParser{}}),
+    error=>error?.reason==='image_dependency_unavailable',
+  );
+});
 
 test('PNG becomes WebP without resizing and preserves transparent alpha', async () => {
   const result=await convert(png);

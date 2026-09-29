@@ -14,6 +14,29 @@ export class ImageProcessingError extends Error {
   constructor(readonly reason: "image_invalid" | "image_limit" | "image_policy_invalid" | "svg_unsupported" | "image_dependency_unavailable") { super(reason); }
 }
 function reject(reason: ImageProcessingError["reason"]): never { throw new ImageProcessingError(reason); }
+
+export function probeImageProcessingDependencies(
+  load: NodeRequire = createRequire(import.meta.url),
+): void {
+  try {
+    const sharp = load("sharp") as {
+      (...args: unknown[]): unknown;
+      versions?: { sharp?: unknown; vips?: unknown };
+    };
+    const saxes = load("saxes") as { SaxesParser?: unknown };
+    if (
+      typeof sharp !== "function" ||
+      typeof sharp.versions?.sharp !== "string" ||
+      typeof sharp.versions?.vips !== "string" ||
+      typeof saxes?.SaxesParser !== "function"
+    ) {
+      reject("image_dependency_unavailable");
+    }
+  } catch (error) {
+    if (error instanceof ImageProcessingError) throw error;
+    reject("image_dependency_unavailable");
+  }
+}
 const VECTOR_TAGS = new Set(["svg", "g", "defs", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "title", "desc", "use", "symbol", "linearGradient", "radialGradient", "stop", "clipPath", "mask", "pattern"]);
 
 /** A deliberately restricted inert SVG subset; unsupported inputs are not rewritten. */

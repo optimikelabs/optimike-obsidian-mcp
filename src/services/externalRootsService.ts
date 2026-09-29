@@ -335,6 +335,16 @@ export class ExternalRootsService {
     return result.sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  async hasBinaryProcessingRoot(): Promise<boolean> {
+    const roots = await this.listRoots();
+    return roots.some(
+      (root) =>
+        root.available &&
+        root.capabilities.includes("handoff") &&
+        root.capabilities.includes("readable"),
+    );
+  }
+
   async list(
     rootId: string,
     requestedPath = "",
