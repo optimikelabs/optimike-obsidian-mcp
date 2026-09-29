@@ -114,4 +114,4 @@ Option de fraicheur du cache : [contrat et validation](cache-events.fr.md).
 
 ## Images
 
-- [Import volontaire d?images (candidat facultatif, sources serveur)](asset-import.fr.md)
+- [Import volontaire d’images (candidat facultatif, sources serveur)](asset-import.fr.md)

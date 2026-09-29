@@ -150,6 +150,10 @@ export class WindowsAssetFiles {
       return action(api,parent,binding);
     } finally { for(const handle of held.reverse()) api.close(handle); }
   }
+  probe(): { binding: string } {
+    return this.withParent((_api, _parent, binding) => ({ binding }));
+  }
+
   private readHandle(api:NativeApi, handle:Handle):{ bytes:Buffer; identity:string } {
     const before=info(api,handle), size=before.sizeHigh*4294967296+before.sizeLow;
     if((before.attributes&0x410)!==0 || before.links!==1) fail("asset_invalid_file");

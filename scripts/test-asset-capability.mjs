@@ -26,49 +26,50 @@ const base = {
   obsidianService: undefined,
   vaultCacheAvailable: true,
   probes,
-  governedRuntimes: { note: false, base: false, canvas: false, asset: true },
+  governedRuntimes: { note: false, base: false, canvas: false, asset: false },
 };
 
 try {
   config.assetImportEnabled = false;
   config.mcpWriteMode = "full";
   const disabled = await collectCapabilityManifest(base);
-  const blocked = disabled.capabilities.find((x) => x.id === "governed-asset-import");
-  assert.ok(blocked, "configured asset runtime must appear in capability diagnostics");
-  assert.equal(blocked.discoverable, true);
-  assert.equal(blocked.available, true);
-  assert.equal(blocked.authorized, false);
-  assert.equal(blocked.state, "blocked");
-  assert.equal(blocked.reasonCode, "asset_import_disabled");
-  assert.equal(blocked.nextAction, "enable_asset_import");
-  assert.deepEqual(blocked.preferredTools, [
-    "asset_import_plan",
-    "asset_import_apply",
-    "asset_import_status",
-  ]);
+  assert.equal(
+    disabled.capabilities.some((x) => x.id === "governed-asset-import"),
+    false,
+    "default-off asset family must not change capability output",
+  );
 
   config.assetImportEnabled = true;
-  const ready = await collectCapabilityManifest(base);
+  const unavailableManifest = await collectCapabilityManifest(base);
+  const unavailable = unavailableManifest.capabilities.find(
+    (x) => x.id === "governed-asset-import",
+  );
+  assert.ok(unavailable, "configured asset policy must remain diagnosable");
+  assert.equal(unavailable.discoverable, false);
+  assert.equal(unavailable.available, false);
+  assert.equal(unavailable.authorized, false);
+  assert.equal(unavailable.state, "unavailable");
+  assert.equal(unavailable.reasonCode, "asset_backend_unavailable");
+  assert.equal(unavailable.nextAction, "verify_asset_backend");
+
+  const ready = await collectCapabilityManifest({
+    ...base,
+    governedRuntimes: { ...base.governedRuntimes, asset: true },
+  });
   const asset = ready.capabilities.find((x) => x.id === "governed-asset-import");
   assert.equal(asset.state, "ready");
   assert.equal(asset.authorized, true);
 
   config.mcpWriteMode = "guarded";
-  const guarded = await collectCapabilityManifest(base);
+  const guarded = await collectCapabilityManifest({
+    ...base,
+    governedRuntimes: { ...base.governedRuntimes, asset: true },
+  });
   const denied = guarded.capabilities.find((x) => x.id === "governed-asset-import");
   assert.equal(denied.state, "blocked");
   assert.equal(denied.reasonCode, "write_policy_blocked");
 
   config.mcpWriteMode = "full";
-  const absent = await collectCapabilityManifest({
-    ...base,
-    governedRuntimes: { ...base.governedRuntimes, asset: false },
-  });
-  const unavailable = absent.capabilities.find(
-    (x) => x.id === "governed-asset-import",
-  );
-  assert.equal(unavailable.state, "hidden");
-  assert.equal(unavailable.discoverable, false);
 } finally {
   config.assetImportEnabled = oldEnabled;
   config.mcpWriteMode = oldWrite;

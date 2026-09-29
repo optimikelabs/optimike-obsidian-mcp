@@ -10,7 +10,7 @@ Referencing or displaying a remote image does not authorize downloading or impor
 
 ## Explicit server configuration
 
-The operator chooses `MCP_ASSET_FOLDER`, an existing vault-relative directory, configures `OBSIDIAN_VAULT`, and enables mutation with `MCP_ASSET_IMPORT_ENABLED=true` plus `MCP_WRITE_MODE=full`. Enabling asset import without either the vault root or asset folder is a configuration error. There is no implicit destination and no directory creation. `MCP_ASSET_WEBP_QUALITY` defaults to 75 and accepts 1–100. An example application policy is `X/Images`, but the generic server does not hard-code it. Existing plugin settings are never changed by these tools.
+The operator chooses `MCP_ASSET_FOLDER`, an existing vault-relative directory, configures `OBSIDIAN_VAULT` and `MCP_EXTERNAL_ROOTS_FILE`, and enables mutation with `MCP_ASSET_IMPORT_ENABLED=true` plus `MCP_WRITE_MODE=full`. Enabling asset import without the vault root, asset folder or external-roots configuration is a configuration error. There is no implicit destination and no directory creation. `MCP_ASSET_WEBP_QUALITY` defaults to 75 and accepts 1–100. An example application policy is `X/Images`, but the generic server does not hard-code it. Existing plugin settings are never changed by these tools.
 
 Sources must already be present on the MCP server inside a configured ExternalRoot with both `readable` and `handoff` capabilities. The root's include/exclude/size and verified-read rules still apply. Direct HTTP access additionally requires a non-development identity carrying `external:read`, including status and terminal apply replay. Local stdio retains its explicit local-root boundary. Do not copy API keys, source bytes or private physical paths into prompts.
 

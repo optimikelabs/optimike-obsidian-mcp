@@ -18,10 +18,12 @@ test('asset names reject traversal device names ADS and embed syntax',()=>{
 });
 test('unsupported platform cannot fall back to absolute-path creation', {skip:supported},()=>{
  const b=new WindowsAssetFiles('C:\\Fixture','Images');
+ assert.throws(()=>b.probe(),e=>e instanceof AssetFileError&&e.reason==='unsupported_platform');
  assert.throws(()=>b.inspect('a.png'),e=>e instanceof AssetFileError&&e.reason==='unsupported_platform');
 });
 test('native absent-only creation verifies exact binary bytes and refuses existing target', {skip:!supported},()=>fixture(({root,backend})=>{
  const before=backend.inspect('a.png'); assert.equal(before.exists,false);
+ assert.equal(backend.probe().binding,before.binding);
  const result=backend.create('a.png',bytes,before.binding); assert.equal(result.sha256,assetHash(bytes));
  assert.deepEqual(fs.readFileSync(path.join(root,'Images/a.png')),bytes);
  assert.throws(()=>backend.create('a.png',Buffer.from('other'),before.binding),e=>e.reason==='asset_exists');

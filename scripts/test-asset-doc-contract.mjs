@@ -8,11 +8,14 @@ const read=p=>fs.readFileSync(path.join(root,p),"utf8");
 const pkg=JSON.parse(read("package.json"));
 for(const doc of ["docs/asset-import.md","docs/asset-import.fr.md"]) {
  const text=read(doc);assert.ok(pkg.files.includes(doc));
- for(const term of ["MCP_ASSET_FOLDER","OBSIDIAN_VAULT","MCP_ASSET_IMPORT_ENABLED","MCP_WRITE_MODE","external:read","NOT_RUN","asset_import_plan","asset_import_apply","asset_import_status"])
+ for(const term of ["MCP_ASSET_FOLDER","OBSIDIAN_VAULT","MCP_EXTERNAL_ROOTS_FILE","MCP_ASSET_IMPORT_ENABLED","MCP_WRITE_MODE","external:read","NOT_RUN","asset_import_plan","asset_import_apply","asset_import_status"])
   assert.ok(text.includes(term),doc+" must declare "+term);
  assert.ok(!text.includes("http://127.0.0.1:27123"),"do not publish production-specific setup");
  assert.ok(!text.includes("?"),doc+" must not contain lossy replacement punctuation");
 }
+const frIndex=read("docs/README.fr.md");
+assert.match(frIndex, /Import volontaire d\u2019images/u);
+assert.ok(!frIndex.includes("d?images"), "French documentation index must not contain lossy asset-link punctuation");
 const flow=yaml.load(read(".github/workflows/asset-import.yml"));
 for(const event of ["pull_request","push"])for(const pattern of ["src/**","scripts/**","package*.json","tsconfig*.json",".gitattributes"])
  assert.ok(flow.on[event].paths.includes(pattern),event+" must cover "+pattern);

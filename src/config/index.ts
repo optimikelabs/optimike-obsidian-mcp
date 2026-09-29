@@ -325,6 +325,15 @@ const EnvSchema = z
         message: "OBSIDIAN_VAULT is required when asset import is enabled",
       });
     }
+
+    if (env.MCP_ASSET_IMPORT_ENABLED && !env.MCP_EXTERNAL_ROOTS_FILE) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_EXTERNAL_ROOTS_FILE"],
+        message:
+          "MCP_EXTERNAL_ROOTS_FILE is required when asset import is enabled",
+      });
+    }
   });
 
 const parsedEnv = EnvSchema.safeParse(process.env);

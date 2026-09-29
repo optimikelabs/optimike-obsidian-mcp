@@ -8,7 +8,7 @@ Référencer, afficher ou lire une image distante ne vaut pas autorisation de l�
 
 ## Configuration et accès
 
-L’opérateur choisit un dossier existant avec `MCP_ASSET_FOLDER`, configure `OBSIDIAN_VAULT`, puis autorise les écritures avec `MCP_ASSET_IMPORT_ENABLED=true` et `MCP_WRITE_MODE=full`. Activer l’import sans racine de coffre ou sans dossier d’assets est une erreur de configuration. Le dossier peut être `X/Images`, sans que cette convention soit imposée par le serveur générique. Aucun dossier n’est créé implicitement. `MCP_ASSET_WEBP_QUALITY` vaut 75 par défaut, entre 1 et 100. Aucun réglage du plugin Image Converter n’est modifié.
+L’opérateur choisit un dossier existant avec `MCP_ASSET_FOLDER`, configure `OBSIDIAN_VAULT` et `MCP_EXTERNAL_ROOTS_FILE`, puis autorise les écritures avec `MCP_ASSET_IMPORT_ENABLED=true` et `MCP_WRITE_MODE=full`. Activer l’import sans racine de coffre, dossier d’assets ou configuration ExternalRoots est une erreur de configuration. Le dossier peut être `X/Images`, sans que cette convention soit imposée par le serveur générique. Aucun dossier n’est créé implicitement. `MCP_ASSET_WEBP_QUALITY` vaut 75 par défaut, entre 1 et 100. Aucun réglage du plugin Image Converter n’est modifié.
 
 La source est un fichier serveur dans une ExternalRoot autorisant `readable` et `handoff`, sous ses filtres et limites existants. En HTTP, les trois opérations, y compris la consultation d’un reçu, exigent une identité non-développement avec le scope `external:read`. Le chemin d’un fichier attaché à ChatGPT n’est pas un chemin serveur.
 
