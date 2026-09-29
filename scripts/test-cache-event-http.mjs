@@ -212,3 +212,79 @@ test("explicit shutdown closes the stream without leaking a reader", async () =>
     f.controller.abort();
     assert.equal((await f.result).reason, "aborted");
   }));
+
+
+// Stateful upstream fixture: subscriptions survive socket loss, not expiry/reload.
+async function reconnectFixture(run, options = {}) {
+  const grants = new Map(), requests = [], responses = new Set();
+  let posts = 0, nextStatus = 0, hold = false;
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://fixture');
+    const event = url.pathname.split('/')[3];
+    requests.push({method:req.method,url:req.url,auth:req.headers.authorization});
+    if(req.method === 'POST') {
+      for await(const _ of req) {}
+      const id = 'reconnect-grant-' + ++posts;
+      const expiresAt = options.badExpiry ?? new Date(Date.now()+(options.ttlMs ?? 300000)).toISOString();
+      grants.set(id, {event,expiresAt});
+      if(options.losePost) {req.socket.destroy();return;}
+      res.writeHead(201,{'content-type':'application/json'}).end(JSON.stringify({
+        id,event,emitter:'vault',signed:true,expiresAt,
+        url:'http://127.0.0.1:'+server.address().port+'/events/vault/'+event+'/'+id+'/?sig=PRIVATE',
+      }));
+      return;
+    }
+    if(nextStatus) {const status=nextStatus;nextStatus=0;res.writeHead(status).end('{}');return;}
+    const grant=grants.get(url.pathname.split('/')[4]);
+    if(!grant || grant.event!==event || Date.parse(grant.expiresAt)<Date.now()) {res.writeHead(404).end('{}');return;}
+    responses.add(res);res.on('close',()=>responses.delete(res));
+    res.writeHead(200,{'content-type':'text/event-stream'});res.write(': connected\n\n');
+    if(!hold) setImmediate(()=>res.end());
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  const client=axios.create({baseURL:base,proxy:false,headers:{Authorization:'Bearer FIXTURE_KEY'}});
+  const cycle=(event='modify',args={})=>consumeVaultEventStream(args.client??client,base,event,
+    args.signal??new AbortController().signal,args.ready??(()=>{}),()=>{},
+    {handshakeMs:1000,idleMs:1000}).catch(error=>error);
+  try {await run({cycle,requests,client,base,posts:()=>posts,invalidate:()=>grants.clear(),
+    fail:status=>{nextStatus=status;},hold:value=>{hold=value;}});}
+  finally {for(const res of responses)res.destroy();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+}
+
+test('repeated four-stream reconnects reuse four grants instead of exhausting 256 subscriptions',()=>reconnectFixture(async f=>{
+  for(let round=0;round<70;round++) for(const event of ['create','modify','delete','rename']) {
+    assert.equal((await f.cycle(event)).reason,'unavailable');
+  }
+  assert.equal(f.posts(),4);
+  assert.equal(f.requests.filter(r=>r.method==='GET').length,280);
+  assert.ok(f.requests.filter(r=>r.method==='GET').every(r=>!r.url.includes('?')));
+}));
+test('expired grants are replaced once before reopening',()=>reconnectFixture(async f=>{
+  await f.cycle();await pause(1150);await f.cycle();await f.cycle();assert.equal(f.posts(),2);
+},{ttlMs:1000}));
+test('host reload invalidates a missing GET grant without declaring events unsupported',()=>reconnectFixture(async f=>{
+  await f.cycle();f.invalidate();assert.equal((await f.cycle()).reason,'unavailable');
+  await f.cycle();await f.cycle();assert.equal(f.posts(),2);
+}));
+for(const [status,reason] of [[503,'unavailable'],[403,'forbidden']]) test('GET '+status+' preserves the reusable subscription',()=>reconnectFixture(async f=>{
+  await f.cycle();f.fail(status);assert.equal((await f.cycle()).reason,reason);await f.cycle();assert.equal(f.posts(),1);
+}));
+test('simultaneous same-client event calls neither allocate nor release another stream slot',()=>reconnectFixture(async f=>{
+  f.hold(true);let connected;const ready=new Promise(resolve=>{connected=resolve;});
+  const control=new AbortController();const first=f.cycle('modify',{signal:control.signal,ready:connected});
+  try {await ready;assert.equal((await f.cycle()).reason,'unavailable');assert.equal(f.posts(),1);}
+  finally {control.abort();await first;}
+  f.hold(false);await f.cycle();assert.equal(f.posts(),1);
+}));
+test('grants are scoped to the owning authenticated HTTP client',()=>reconnectFixture(async f=>{
+  const other=axios.create({baseURL:f.base,proxy:false,headers:{Authorization:'Bearer OTHER_KEY'}});
+  await f.cycle();await f.cycle('modify',{client:other});await f.cycle();assert.equal(f.posts(),2);
+}));
+for(const badExpiry of ['invalid',new Date(0).toISOString()]) test('invalid or expired grant lifetime is refused: '+badExpiry,()=>reconnectFixture(async f=>{
+  assert.equal((await f.cycle()).reason,'invalid_stream');assert.equal(f.requests.filter(r=>r.method==='GET').length,0);
+},{badExpiry}));
+test('lost POST acknowledgements request bounded orphan lifetime instead of host maximum TTL',()=>reconnectFixture(async f=>{
+  await f.cycle();assert.equal(f.posts(),1);
+  assert.equal(new URL(f.requests[0].url,f.base).searchParams.get('ttl'),'30');
+},{losePost:true}));

@@ -658,7 +658,7 @@ export class VaultCacheService {
       );
       return;
     }
-    if (this.isCacheReady) {
+    if (this.isCacheReady && this.lastRefreshError === null) {
       logger.info("Cache already built. Skipping.", initialBuildContext);
       return;
     }

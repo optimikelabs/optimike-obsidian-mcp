@@ -315,6 +315,27 @@ test("interrupted refresh and explicit uncertainty remain uncertain after restar
 });
 
 
+test("buildVaultCache reproofs an uncertain ready inventory instead of short-circuiting", async () => {
+  const previous=config.obsidianSharedCacheDbPath;
+  config.obsidianSharedCacheDbPath=path.join(root,"uncertain-build-reproof.sqlite");
+  const instance=new VaultCacheService(rest);
+  try {
+    content="old";
+    await instance.refreshCache(true);
+    const before=fetches;
+    content="new";
+    instance.markFreshnessUncertain();
+    assert.equal(instance.isReady(),false);
+    await instance.buildVaultCache();
+    assert.ok(fetches>before);
+    assert.equal((await instance.getEntry("/Note.md")).content,"new");
+    assert.equal(instance.isReady(),true);
+  } finally {
+    await instance.close();
+    config.obsidianSharedCacheDbPath=previous;
+  }
+});
+
 test("public readiness drops immediately for pending events and explicit uncertainty", async () => {
   const previous=config.obsidianSharedCacheDbPath;
   config.obsidianSharedCacheDbPath=path.join(root,"public-readiness.sqlite");

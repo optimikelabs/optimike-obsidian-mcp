@@ -59,15 +59,26 @@ test('in-process task readers wait while accepted event work is pending',()=>fix
  assert.equal(f.cache.isReady(),true);
 }));
 
-test('in-process task readers fail closed after explicit event uncertainty',()=>fixture(async f=>{
+test('in-process task readers reprove explicit uncertainty before serving',()=>fixture(async f=>{
+ f.set({'One.md':'- [ ] task-two'});
  f.cache.markEventWorkPending();
  f.cache.markFreshnessUncertain();
  f.cache.settleEventWork();
  assert.equal(f.cache.isReady(),false);
+ await warmSharedTaskCache(f.cache);
+ assert.equal(f.cache.isReady(),true);
+ const result=JSON.parse(await processListAllTasks({responseFormat:'json'},context,f.cache));
+ assert.equal(result[0].description,'task-two');
+}));
+
+test('in-process task readers remain unavailable when uncertainty cannot be reverified',()=>fixture(async f=>{
+ f.cache.markFreshnessUncertain();
+ f.fail();
  await assert.rejects(
   warmSharedTaskCache(f.cache),
   error=>error.code==='SERVICE_UNAVAILABLE',
  );
+ assert.equal(f.cache.isReady(),false);
 }));
 
 test('task queries wait for an active periodic scan instead of failing on the building marker',()=>fixture(async f=>{
