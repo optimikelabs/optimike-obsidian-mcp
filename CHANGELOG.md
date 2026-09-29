@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-09-30
+
 ### Added
 
 - Add opt-in event-assisted vault cache refresh with bounded authenticated Local REST streams, reconnect reconciliation and redacted diagnostics. The ten-minute inventory interval and mutation authorities remain unchanged.
