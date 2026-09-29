@@ -255,6 +255,7 @@ export class VaultCacheService {
   private isPubliclyReady(): boolean {
     return this.isCacheReady &&
       !this.isBuilding &&
+      !this.refreshRun &&
       !this.refreshRequested &&
       !this.eventWorkPending &&
       !this.lastRefreshError;
@@ -270,7 +271,7 @@ export class VaultCacheService {
 
   public getReadinessStatus(): CacheReadinessStatus {
     if (this.lastRefreshError) return "error";
-    if (this.isBuilding || this.refreshRequested || this.eventWorkPending) return "building";
+    if (this.isBuilding || this.refreshRun || this.refreshRequested || this.eventWorkPending) return "building";
     if (this.isPubliclyReady()) return "ready";
     return "empty";
   }
@@ -281,7 +282,7 @@ export class VaultCacheService {
       if (this.isPubliclyReady()) {
         return true;
       }
-      if (!this.isBuilding && !this.refreshRequested && !this.eventWorkPending && this.lastRefreshError) {
+      if (!this.isBuilding && !this.refreshRun && !this.refreshRequested && !this.eventWorkPending && this.lastRefreshError) {
         return false;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -325,6 +326,7 @@ export class VaultCacheService {
       freshness:
         this.lastRefreshError ||
         this.eventWorkPending ||
+        this.refreshRun ||
         this.refreshRequested ||
         this.isBuilding
           ? "uncertain"
@@ -461,7 +463,7 @@ export class VaultCacheService {
 
   public settleEventWork(): void {
     this.eventWorkPending = false;
-    if (!this.closed && !this.closing && !this.isBuilding &&
+    if (!this.closed && !this.closing && !this.isBuilding && !this.refreshRun &&
         this.isCacheReady && this.lastRefreshError === null) {
       this.upsertMetadataValue("refresh_state", "complete");
     }
