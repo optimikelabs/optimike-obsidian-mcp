@@ -12,17 +12,19 @@
 
 Utiliser `operon_create_task` pour une action qui n’existe pas encore. Résoudre la description, la destination autorisée, le pipeline, le statut initial, la priorité et les dates réellement justifiées.
 
+Avec Developer API V1, une File Task utilise la destination configurée du moteur ou une vraie relation `fields.parentTask`. Ne pas créer un faux parent pour router un dossier. `targetFolder` est réservé au moteur legacy et est refusé par l’API officielle ; `taskFolder` n’est pas un argument accepté. Une tâche inline utilise `targetPath`. Les clés non déclarées de `task` sont rejetées ; les propriétés extensibles restent dans les maps déclarées `fields` et `properties`, sous leurs validations propres.
+
 ### Adopter
 
-Le verdict `ADOPT` ne garantit pas l’apply. Utiliser `operon_adopt_task` seulement si le runtime annonce `adopt: true`, puis verrouiller le chemin, le numéro de ligne et le contenu attendu. Operon doit produire et appliquer son plan opaque scellé ; sinon retourner une indisponibilité structurée sans modifier le Markdown.
+Le verdict `ADOPT` ne garantit pas l’apply. Verrouiller le chemin, le numéro de ligne et le contenu attendu, puis utiliser le dry-run `operon_adopt_task` pour confirmer `adopt`, y compris à froid dans les conditions de [runtime-et-mutations.md](runtime-et-mutations.md). Operon doit produire et appliquer son plan opaque scellé ; sinon retourner une indisponibilité structurée sans modifier le Markdown.
 
 ### Créer dans une Daily ou Weekly Note
 
-Utiliser `operon_create_periodic_task` seulement si `periodicCreate: true`. Fournir le kind Daily/Weekly et, au besoin, une date de routage ; ne jamais imposer `targetPath` ou `parentTask`. Relire la tâche créée et sa note périodique après apply.
+Confirmer `periodicCreate` avec le dry-run `operon_create_periodic_task`, y compris à froid dans les conditions de [runtime-et-mutations.md](runtime-et-mutations.md). Fournir le kind Daily/Weekly et, au besoin, une date de routage ; ne jamais imposer `targetPath` ou `parentTask`. Relire la tâche créée et sa note périodique après apply.
 
 ### Réaligner le scheduling périodique
 
-Utiliser `operon_update_periodic_scheduling` pour tout changement de `dateScheduled`, seulement si `periodicUpdate: true`, avec `expectedRevision`. Ne jamais envoyer ce champ à `operon_update_task` : Operon peut avoir besoin du workflow périodique pour décider retain, detach ou realign. Aucun déplacement du Markdown source n’est implicite ; un changement de note exige une autre opération explicite.
+Utiliser `operon_update_periodic_scheduling` pour tout changement de `dateScheduled`, avec `expectedRevision` ; confirmer `periodicUpdate` au dry-run, y compris à froid selon [runtime-et-mutations.md](runtime-et-mutations.md). Ne jamais envoyer ce champ à `operon_update_task` : Operon peut avoir besoin du workflow périodique pour décider retain, detach ou realign. Aucun déplacement du Markdown source n’est implicite ; un changement de note exige une autre opération explicite.
 
 ### Modifier
 
@@ -50,7 +52,7 @@ Utiliser exclusivement `operon_relocate_task`. Vérifier la politique locale du 
 
 ### Récupérer
 
-Lister les plans incertains avec `operon_list_pending_recoveries`, puis appeler `operon_recover_mutation` uniquement avec le `recoveryRef` du même plan, une nouvelle clé d’idempotence et le mode `full`. Ne jamais reconstruire ou rejouer la mutation originale.
+Appliquer d’abord la règle de récupération sous allowlist de [runtime-et-mutations.md](runtime-et-mutations.md). Lorsque la politique le permet, lister les plans incertains avec `operon_list_pending_recoveries`, puis appeler `operon_recover_mutation` uniquement avec le `recoveryRef` du même plan, une nouvelle clé d’idempotence et le mode `full`. Ne jamais reconstruire ou rejouer la mutation originale.
 
 ### Rester côté opérateur
 

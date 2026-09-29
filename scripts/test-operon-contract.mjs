@@ -247,6 +247,15 @@ schemaServer.registerTool(
   { inputSchema: mcpSchema(OperonRecoverMutationInputSchema.shape) },
   async () => ({ content: [{ type: "text", text: "ok" }] }),
 );
+let createDispatches = 0;
+schemaServer.registerTool(
+  "operon_create_task",
+  { inputSchema: mcpSchema(OperonCreateTaskSchema.shape) },
+  async () => {
+    createDispatches += 1;
+    return { content: [{ type: "text", text: "ok" }] };
+  },
+);
 const [schemaClientTransport, schemaServerTransport] =
   InMemoryTransport.createLinkedPair();
 const schemaClient = new Client({
@@ -284,6 +293,53 @@ assert.equal(
   Object.hasOwn(publishedDeveloperApiBranch?.properties ?? {}, "planDigest"),
   false,
   "tools/list must not publish planDigest in the developer-api branch",
+);
+const publishedCreateTool = (await schemaClient.listTools()).tools.find(
+  (tool) => tool.name === "operon_create_task",
+);
+assert.equal(
+  publishedCreateTool.inputSchema.properties.task.additionalProperties,
+  false,
+);
+assert.match(
+  publishedCreateTool.inputSchema.properties.task.properties.targetFolder
+    .description,
+  /Legacy engine routing only/,
+);
+const rejectedCreate = await schemaClient.callTool({
+  name: "operon_create_task",
+  arguments: {
+    idempotencyKey: "schema-create-invalid",
+    task: {
+      source: "file",
+      description: "Do not silently misroute",
+      taskFolder: "Projects",
+    },
+  },
+});
+assert.equal(rejectedCreate.isError, true);
+assert.match(JSON.stringify(rejectedCreate.content), /taskFolder/);
+assert.equal(
+  createDispatches,
+  0,
+  "unknown task fields must fail before tool dispatch",
+);
+const acceptedCreate = await schemaClient.callTool({
+  name: "operon_create_task",
+  arguments: {
+    idempotencyKey: "schema-create-valid",
+    task: {
+      source: "file",
+      description: "Valid creation",
+      properties: { custom_flag: true },
+    },
+  },
+});
+assert.notEqual(acceptedCreate.isError, true);
+assert.equal(
+  createDispatches,
+  1,
+  "declared extension properties must remain accepted",
 );
 await schemaClient.close();
 await schemaServer.close();
@@ -659,6 +715,27 @@ const create = OperonCreateTaskSchema.parse({
   },
 });
 assert.equal(create.dryRun, true);
+assert.deepEqual(create.task.properties, { north_star: true, rang: 2 });
+for (const field of ["taskFolder", "targetFolde", "unexpectedField"]) {
+  assert.equal(
+    OperonCreateTaskSchema.safeParse({
+      ...create,
+      task: { ...create.task, [field]: "Projects" },
+    }).success,
+    false,
+    `undeclared task field ${field} must be rejected instead of stripped`,
+  );
+}
+const legacyCreate = OperonCreateTaskSchema.parse({
+  ...create,
+  task: {
+    ...create.task,
+    targetFolder: "Projects",
+    fields: { parentTask: "parent1" },
+  },
+});
+assert.equal(legacyCreate.task.targetFolder, "Projects");
+assert.equal(legacyCreate.task.fields.parentTask, "parent1");
 assert.equal(
   OperonCreateTaskSchema.safeParse({
     idempotencyKey: "contract-create-scheduled-date",

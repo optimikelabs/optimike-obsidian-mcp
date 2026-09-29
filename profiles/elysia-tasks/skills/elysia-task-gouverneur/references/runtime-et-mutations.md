@@ -16,10 +16,20 @@ Autoriser une mutation seulement si :
 - `source = operon-live` ;
 - `stale = false` ;
 - le moteur et le Bridge sont compatibles ;
-- la capacité demandée est annoncée ;
+- la capacité exacte est confirmée avant apply ; un dry-run peut négocier une capacité optionnelle à froid selon les conditions ci-dessous ;
 - la tâche et sa révision courante ont été relues lorsqu’elles existent déjà.
 
 Un snapshot stale peut servir à un diagnostic explicitement limité, jamais à une mutation.
+
+## Capacités optionnelles à froid
+
+`filterQuery`, `adopt`, `periodicCreate` et `periodicUpdate` peuvent être `false` avant leur première négociation. Le statut seul ne distingue pas cet état d’un refus effectif. Pour un filtre dont l’ID exact est connu, une lecture `operon_query_saved_filter` peut négocier son grant. Pour une adoption ou un workflow périodique autorisé, un dry-run exact peut négocier son grant si le runtime est live/non-stale et si le Bridge annonce explicitement `mutationsEnabled: true`. Un ancien Bridge sans ce champ garde la gate par capacité annoncée.
+
+Une réponse de grant absent, en attente ou refusé, une incompatibilité ou un refus de politique arrête l’opération. Ne pas enchaîner les tentatives ni passer en apply pour tester la capacité. Après négociation, relire l’état ; un dry-run réussi ne prouve pas un apply.
+
+## Récupération sous allowlist
+
+Si `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` est non vide, la liste des recoveries et leur apply sont refusés : les enregistrements ne prouvent pas leur route canonique. Ce refus ne signifie pas qu’aucune récupération n’est en attente. Conserver le `recoveryRef` connu, relire la tâche concernée dans le périmètre autorisé et transmettre le diagnostic à l’opérateur. Ne pas retirer l’allowlist ni utiliser la CLI comme contournement. Une récupération éventuelle requiert un contexte opérateur explicitement autorisé et les contrôles natifs ; ne jamais rejouer la mutation initiale.
 
 ## Surface MCP
 
@@ -75,12 +85,12 @@ Pour une tâche existante :
 6. Relire la tâche et sa révision ; arrêter ou recalculer si elle a changé.
 7. Construire une clé d’application distincte : `<intention>-apply-<nonce>`.
 8. Appliquer avec `dryRun: false` et la révision actuelle.
-9. Relire la tâche, vérifier la surface attendue et appeler `operon_validate`. Utiliser un saved filter seulement si `filterQuery` est disponible et si son ID exact vient de l’UI/configuration d’Operon ou d’un workflow opérateur ; sinon traduire les critères du profil dans une requête bornée pour cette exécution.
+9. Relire la tâche, vérifier la surface attendue et appeler `operon_validate`. Utiliser un saved filter si son ID exact vient de l’UI/configuration d’Operon ou d’un workflow opérateur, avec la négociation à froid décrite ci-dessus ; en cas d’ID absent ou de refus effectif, traduire les critères du profil dans une requête bornée pour cette exécution.
 10. Si la tâche apparaît dans `fs_elysia_now`, prouver sa présence dans `fs_elysia_week` et rapporter `invisible: false`.
 
 Ne jamais réutiliser la clé du dry-run pour l’apply : `dryRun` fait partie de la requête canonique.
 
-Pour une création, aucune révision antérieure n’existe : destination, pipeline, statut initial et clé d’idempotence doivent être explicites. Pour une création Daily/Weekly, laisser Operon résoudre la note, le template et le conteneur ; ne fournir ni chemin arbitraire ni parent. Pour une adoption, exiger d’abord `adopt: true`, puis verrouiller le chemin, la ligne et le contenu attendu. Après une mutation de relations, relire la source et les relations inverses. Après une mutation de récurrence, vérifier règle et portée. Après `outcome-unknown`, récupérer uniquement le même `recoveryRef` ; ne jamais rejouer la mutation initiale.
+Pour une création, aucune révision antérieure n’existe : destination, pipeline, statut initial et clé d’idempotence doivent être explicites. Pour une création Daily/Weekly, laisser Operon résoudre la note, le template et le conteneur ; ne fournir ni chemin arbitraire ni parent. Pour une adoption, verrouiller le chemin, la ligne et le contenu attendu, puis confirmer `adopt` via le préflight et, si nécessaire, le dry-run de négociation à froid. Après une mutation de relations, relire la source et les relations inverses. Après une mutation de récurrence, vérifier règle et portée. Après `outcome-unknown`, appliquer d’abord la règle de récupération sous allowlist ci-dessus ; lorsque la politique le permet, récupérer uniquement le même `recoveryRef`. Ne jamais rejouer la mutation initiale.
 
 ## Interdits
 

@@ -951,9 +951,12 @@ export const OperonCreateTaskSchema = MutationControlSchema.extend({
       properties: z.record(OperonRawPropertyValueSchema).optional(),
       fileTemplateId: z.string().optional(),
       targetDateKey: z.string().optional(),
-      targetFolder: OperonVaultRelativePathSchema.optional(),
+      targetFolder: OperonVaultRelativePathSchema.optional().describe(
+        "Legacy engine routing only. Official Developer API V1 rejects targetFolder and uses its configured file-task destination or a genuine parentTask relationship.",
+      ),
       targetPath: OperonVaultMarkdownPathSchema.optional(),
     })
+    .strict()
     .superRefine((value, context) => {
       validateKnownMutationFieldTypes(value.fields, context);
       validateTaskGallery(value.fields, 256, context);
@@ -1063,7 +1066,9 @@ export const OperonConvertTaskInputSchema = MutationControlSchema.extend({
   target: OperonTaskSourceSchema,
   fileTemplateId: z.string().optional(),
   targetPath: OperonVaultMarkdownPathSchema.optional(),
-  targetFolder: OperonVaultRelativePathSchema.optional(),
+  targetFolder: OperonVaultRelativePathSchema.optional().describe(
+    "Legacy engine routing only. Official Developer API V1 conversion rejects targetFolder; use the configured destination or an exact targetPath where supported.",
+  ),
 });
 
 export const OperonConvertTaskSchema = OperonConvertTaskInputSchema.superRefine(

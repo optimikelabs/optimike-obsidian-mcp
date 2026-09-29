@@ -4,10 +4,10 @@
 
 1. Relever `source`, `stale`, âge du snapshot, versions moteur/Bridge, compatibilité et capacités.
 2. Appeler `operon_get_diagnostics`, puis `operon_validate`, et distinguer lifecycle, grant, transport, erreurs, avertissements et doublons.
-3. Distinguer outil non chargé, capacité absente, grant absent, mode d’écriture insuffisant, Bridge, moteur, index, cache, version ou donnée malformée.
+3. Distinguer outil non chargé, capacité optionnelle non encore négociée, refus effectif, grant absent, mode d’écriture insuffisant, Bridge, moteur, index, cache, version ou donnée malformée. Suivre la négociation à froid de [runtime-et-mutations.md](runtime-et-mutations.md).
 4. Reproduire sur une lecture bornée avant d’accuser le volume global.
 5. Mesurer toute affirmation de performance sur la même requête, le même périmètre et le même état de cache.
-6. Pour une mutation incertaine, appeler `operon_list_pending_recoveries` avant toute nouvelle écriture et ne récupérer que le même plan en mode `full` après validation humaine.
+6. Pour une mutation incertaine, appliquer la règle de récupération sous allowlist de [runtime-et-mutations.md](runtime-et-mutations.md). Si la politique autorise la liste, appeler `operon_list_pending_recoveries` avant toute nouvelle écriture et ne récupérer que le même plan en mode `full` après validation humaine. Si elle refuse, conserver le `recoveryRef` connu et arrêter toute tentative de replay ; ce refus ne prouve pas une liste vide.
 
 ## Documentation publique utile
 

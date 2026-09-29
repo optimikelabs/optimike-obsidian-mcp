@@ -289,7 +289,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_create_task",
     {
       description:
-        "Create an Operon inline or file task through the loaded engine's supported official API. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
+        "Create an Operon inline or file task through the loaded engine's supported official API. targetFolder is legacy-only and rejected by official Developer API V1; file tasks use the configured destination or a genuine fields.parentTask relationship. taskFolder is not a supported argument. dateScheduled is reserved for operon_update_periodic_scheduling. dryRun defaults to true. Apply requires the live Bridge and an idempotencyKey; no raw Markdown fallback exists.",
       inputSchema: mcpSchema(OperonCreateTaskSchema.shape),
       annotations: MUTATION_ANNOTATIONS,
     },
@@ -374,7 +374,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_list_pending_recoveries",
     {
       description:
-        "List durable official Operon Developer API mutation recoveries. Read-only: it does not retry or apply anything; use the returned recoveryRef only with operon_recover_mutation after inspecting the uncertain outcome.",
+        "List durable official Operon Developer API mutation recoveries. Read-only: it does not retry or apply anything. Blocked when OPERON_MUTATION_ALLOWED_PATH_PREFIXES is nonempty because recovery records lack canonical route evidence; a refusal is not an empty recovery list. Preserve any known recoveryRef, inspect the affected task with authorized reads, and do not replay the original mutation or relax the allowlist to bypass this gate. When permitted, use the returned recoveryRef only with operon_recover_mutation after inspecting the uncertain outcome.",
       inputSchema: mcpSchema(OperonPendingRecoveriesInputSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },

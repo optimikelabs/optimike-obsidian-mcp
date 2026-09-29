@@ -1,8 +1,8 @@
 ---
-name: elysia-task-gouverneur
+name: "elysia-task-gouverneur"
 description: "Orchestre les tâches d’un coffre compatible avec le profil public ÉLYSIA Tasks via les 25 outils operon_* gouvernés : opérations ponctuelles, Daily/Weekly, relations, récurrence, récupération, audits, triage, cycle de vie et santé du runtime, avec capacités live, IDs stables, dry-run et validation humaine."
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
   skill_structure: "graph"
   portability_class: "profile-bound-portable"
   profile_id: "elysia.tasks"
@@ -17,7 +17,7 @@ Utilise le profil public `elysia.tasks` et la configuration live du moteur pour 
 
 ## Quand l’utiliser
 
-- Créer, modifier, terminer, convertir ou déplacer une tâche ; adopter seulement si le runtime annonce la capacité.
+- Créer, modifier, terminer, convertir ou déplacer une tâche ; adopter après négociation de la capacité exacte.
 - Lire ou modifier des relations et récurrences, ou récupérer exactement une mutation incertaine.
 - Auditer ou trier un backlog compatible avec le profil ÉLYSIA Tasks.
 - Contrôler les filtres canoniques et le respect du propriétaire unique.
@@ -30,7 +30,7 @@ Utilise le profil public `elysia.tasks` et la configuration live du moteur pour 
 - Utiliser les IDs stables ; les libellés français ou anglais ne sont pas des identités.
 - Ne jamais muter une tâche par regex, patch Markdown, édition YAML brute ou déplacement de fichier.
 - Toute mutation d’une tâche existante passe par `expectedRevision`, `idempotencyKey`, dry-run, validation humaine, apply, relecture et `operon_validate`.
-- Runtime stale/non-live, capacité absente ou référence critique inaccessible : lecture seulement.
+- Runtime stale/non-live, capacité effectivement refusée ou référence critique inaccessible : lecture seulement. Un indicateur optionnel `false` avant négociation impose le contrôle à froid décrit dans [runtime-et-mutations.md](references/runtime-et-mutations.md), pas un apply.
 - L’enregistrement d’un outil ne prouve ni sa capacité, ni son grant, ni un mode d’écriture suffisant.
 - Suppression, rappels, pin, contrôle de timer et passthrough CLI générique restent opérateur-only.
 - Une tâche appartient à un seul moteur. Ne jamais écrire en miroir dans Operon, Tasks et TaskNotes.
