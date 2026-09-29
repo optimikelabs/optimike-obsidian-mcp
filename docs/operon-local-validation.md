@@ -453,9 +453,12 @@ mutation/replay/stale-conflict/recovery, adoption, Frontmatter Date Manager
 settlement, validation and exact restoration. Periodic runs were historical/
 diagnostic only; the exact-SHA canary negotiates and previews periodic workflow
 but skips periodic apply under `public_task_source_projection_unavailable`.
-The non-periodic gate results remain diagnostic until this recipe passes after a
-clean rebuild on the final candidate SHA; the historical periodic apply remains
-diagnostic even after that gate. The Operon Developer API V1 public contract
+These historical working-tree runs are incomplete diagnostic evidence and are
+not eligible for evidence reuse. To qualify an affected non-periodic path with
+no applicable successful proof, run this recipe after a clean rebuild on the
+final candidate SHA. Subsequent metadata/documentation changes may reuse that
+successful proof under the qualification scope above. The historical periodic
+apply remains diagnostic even after that gate. The Operon Developer API V1 public contract
 did not drift from `3.5.3`.
 The
 synthetic `3.5.240438` identity remains historical and
@@ -488,12 +491,17 @@ Parent-date expansion is explicitly `SKIP` because Pilot 2's public
 configuration does not announce the opt-in automation as active. Operators who
 enable those features must exercise the two skipped checks before relying on
 them. None of these checks permits unrelated relationship or parent-date drift
-during MCP postflight. Its applicable non-periodic checks must be repeated from a
-clean rebuild pinned to the exact release SHA before they can be cited as
-accepted release evidence. The exact-SHA canary does not repeat Scheduled Date
+during MCP postflight. This historical diagnostic run is not eligible for
+evidence reuse. When an affected non-periodic path needs fresh qualification,
+execute its applicable checks from a clean rebuild pinned to the exact release SHA
+before citing them as accepted release evidence. Once qualified, unchanged paths
+may reuse a successful scoped proof under the policy above. The exact-SHA canary does not repeat Scheduled Date
 apply; it skips periodic apply under `public_task_source_projection_unavailable`.
 
 ## 9. Restart and reindex
+
+Run these steps when restart/indexing behavior changes or lacks an applicable
+successful proof; metadata/documentation alone does not require replaying them.
 
 1. Record the status generation and task revisions.
 2. Restart Obsidian.
