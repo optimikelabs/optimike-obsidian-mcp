@@ -148,6 +148,127 @@ test("adapter blocks generic scheduled dates before its native API and preserves
   assert.match(JSON.stringify(previewInputs), /dateScheduled/u);
 });
 
+test("scheduling update uses ordinary update unless Operon explicitly requires periodic realignment", async () => {
+  const requested = {
+    operonId: "abc1234",
+    fields: { dateScheduled: "2026-09-29" },
+  };
+  const ordinaryAdapter = Object.create(
+    OperonDeveloperApiRuntimeAdapter.prototype,
+  ) as OperonDeveloperApiRuntimeAdapter;
+  const ordinaryCalls: Array<Record<string, unknown>> = [];
+  (ordinaryAdapter as any).executeMutation = async (
+    capability: string,
+    operonId: string,
+    input: Record<string, unknown>,
+    dryRun: boolean,
+    allowDateScheduled: boolean,
+  ) => {
+    ordinaryCalls.push({
+      route: "ordinary",
+      capability,
+      operonId,
+      input,
+      dryRun,
+      allowDateScheduled,
+    });
+    return {
+      ok: true,
+      operonId,
+      code: "planned",
+      nativeStatus: "planned",
+      retryable: false,
+    };
+  };
+  (ordinaryAdapter as any).executeTaskWorkflow = async () => {
+    throw new Error("ordinary scheduling must not enter periodic workflow");
+  };
+  const ordinary = await ordinaryAdapter.executeSchedulingUpdate(
+    "abc1234",
+    requested,
+    true,
+  );
+  assert.equal(ordinary.code, "planned");
+  assert.equal(ordinaryCalls.length, 1);
+  assert.equal(ordinaryCalls[0]?.capability, "update");
+  assert.equal(ordinaryCalls[0]?.allowDateScheduled, true);
+
+  const periodicAdapter = Object.create(
+    OperonDeveloperApiRuntimeAdapter.prototype,
+  ) as OperonDeveloperApiRuntimeAdapter;
+  const periodicCalls: string[] = [];
+  (periodicAdapter as any).executeMutation = async () => ({
+    ok: false,
+    operonId: "abc1234",
+    code: "not-ready",
+    nativeStatus: "capability-unavailable",
+    message:
+      "Automatic periodic parent realignment requires tasks.update.periodic-note.preview/apply.",
+    retryable: false,
+    mutationMayHaveApplied: false,
+  });
+  (periodicAdapter as any).hasTaskWorkflowCapability = () => true;
+  (periodicAdapter as any).hasTaskWorkflowRecoverySupport = () => true;
+  (periodicAdapter as any).executeTaskWorkflow = async (kind: string) => {
+    periodicCalls.push(kind);
+    return {
+      ok: true,
+      operonId: "abc1234",
+      code: "planned",
+      nativeStatus: "planned",
+      retryable: false,
+    };
+  };
+  const periodic = await periodicAdapter.executeSchedulingUpdate(
+    "abc1234",
+    requested,
+    true,
+  );
+  assert.equal(periodic.code, "planned");
+  assert.deepEqual(periodicCalls, ["periodic-update"]);
+
+  const unrelatedAdapter = Object.create(
+    OperonDeveloperApiRuntimeAdapter.prototype,
+  ) as OperonDeveloperApiRuntimeAdapter;
+  let unrelatedFallback = false;
+  (unrelatedAdapter as any).executeMutation = async () => ({
+    ok: false,
+    operonId: "abc1234",
+    code: "not-ready",
+    nativeStatus: "capability-unavailable",
+    message: "A different capability is unavailable.",
+    retryable: true,
+    mutationMayHaveApplied: false,
+  });
+  (unrelatedAdapter as any).executeTaskWorkflow = async () => {
+    unrelatedFallback = true;
+    return {
+      ok: true,
+      operonId: "abc1234",
+      code: "planned",
+      retryable: false,
+    };
+  };
+  const unrelated = await unrelatedAdapter.executeSchedulingUpdate(
+    "abc1234",
+    requested,
+    true,
+  );
+  assert.equal(unrelated.code, "not-ready");
+  assert.equal(unrelatedFallback, false);
+
+  const invalid = await ordinaryAdapter.executeSchedulingUpdate(
+    "abc1234",
+    {
+      ...requested,
+      description: "must not be smuggled through scheduling",
+    },
+    true,
+  );
+  assert.equal(invalid.code, "invalid-input");
+  assert.equal(invalid.mutationMayHaveApplied, false);
+});
+
 test("generic mutation snapshots are bounded JSON values and never inherit caller state", () => {
   const depth = (count: number): Record<string, unknown> => {
     const root: Record<string, unknown> = {};
@@ -2699,4 +2820,26 @@ test("a rejected Operon 3.5 workflow grant does not revoke another workflow or c
     "a failed concurrent recovery negotiation must preserve the established mutation session",
   );
   assert.equal(adapter.hasTaskWorkflowRecoverySupport("periodic-create"), true);
+});
+
+
+test("ordinary scheduling rechecks the caller revision after preview before native apply", async () => {
+  const adapter = new OperonDeveloperApiRuntimeAdapter(consumer, {});
+  let applyCalls = 0;
+  let gateCalls = 0;
+  (adapter as any).mutationApis.set("update", { mutations: {
+    preview: async () => ({ ok: true, plan: { planDigest: "a".repeat(64), recoveryRef: "dvr1_" + "a".repeat(48) } }),
+    apply: async () => { applyCalls++; throw new Error("stale revision must never apply"); },
+  } });
+  (adapter as any).hasMutationCapability = () => true;
+  (adapter as any).getExactTask = async () => ({ identity: { operonId: "abc1234" } });
+  (adapter as any).mapMutationInput = async () => ({ capability: "tasks.update", mutationKind: "update", target: {}, spec: {} });
+  const result = await adapter.executeSchedulingUpdate("abc1234", { operonId: "abc1234", fields: { dateScheduled: "2026-09-29" } }, false, async () => {
+    gateCalls++; return { ok: false, message: "expectedRevision changed" };
+  });
+  assert.equal(result.code, "conflict");
+  assert.equal(result.mutationMayHaveApplied, false);
+  assert.equal(result.nativeStatus, "planned-not-applied");
+  assert.equal(gateCalls, 1);
+  assert.equal(applyCalls, 0);
 });
