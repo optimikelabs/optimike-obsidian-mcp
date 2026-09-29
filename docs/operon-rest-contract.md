@@ -222,7 +222,7 @@ Creates exactly one task through Operon's Daily/Weekly Note workflow. `routeDate
 
 ### `POST /tasks/:operonId/periodic-update`
 
-Sets or clears the exact task's scheduled date through Operon's periodic-update workflow. Operon owns retain/detach/realign semantics. The Bridge verifies the final scheduling projection and never treats the route as an implicit Markdown move.
+Sets or clears the exact task's scheduled date through a native scheduling route. The Bridge first uses Operon's ordinary typed update path and escalates to the periodic-update workflow only when Operon explicitly reports that additive Daily/Weekly parent realignment is required. Operon owns retain/detach/realign semantics. The Bridge verifies the final scheduling projection and never treats the route as an implicit Markdown move.
 
 ### `POST /tasks/:operonId/update`
 

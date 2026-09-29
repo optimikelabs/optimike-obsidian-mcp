@@ -247,9 +247,11 @@ postflight vérifie `priorityId` contre la priorité stable projetée. Si l’ap
 pu réussir sans qu’une identité créée unique puisse être prouvée, le résultat
 reste `outcome-unknown` et le MCP ne rejoue jamais cette création ambiguë.
 `operon_update_periodic_scheduling` fixe ou efface `dateScheduled` sur une tâche
-exacte déjà créée. C’est le seul outil MCP pour modifier ensuite ce champ :
-Operon peut avoir besoin de son workflow périodique additif pour conserver,
-détacher ou réaligner la tâche, sans déplacer le Markdown source.
+exacte déjà créée. C’est le seul outil MCP pour modifier ensuite ce champ. Le
+Bridge tente d’abord la mise à jour typée ordinaire d’Operon et n’escalade vers
+le workflow périodique additif que si Operon signale explicitement qu’un
+réalignement de parent Daily/Weekly est requis. Operon conserve la responsabilité
+des sémantiques conserver/détacher/réaligner, sans déplacer le Markdown source.
 
 Avec Operon officiel `3.6.0`, le plan public Task Workflow périodique est
 uniquement composé de métadonnées : il n’expose aucun chemin de source des

@@ -868,7 +868,7 @@ test("every replayable native mutation route coordinates before asynchronous rea
     [
       "executePeriodicUpdateMutation",
       "private async taskWorkflowMutationPayload(",
-      "requireTaskWorkflowRuntime(",
+      'requireMutationRuntime("update")',
     ],
     [
       "executeExistingMutation",
@@ -1135,7 +1135,7 @@ test("periodic update validates lookup and revision before durable reservation",
       mutationOperationId: () => "periodic-operation",
       requireRuntime: () => ({}),
       indexState: async () => undefined,
-      requireTaskWorkflowRuntime: () => ({}),
+      requireMutationRuntime: () => ({ developerApi: {} }),
       oneTask: async () => {
         taskReads += 1;
         return { task };
@@ -3390,4 +3390,20 @@ test("settings signature changes when the workflow contract changes", () => {
     },
   });
   assert.notEqual(before, after);
+});
+
+
+test("scheduling refuses legacy-only runtime before task lookup and durable reservation", async () => {
+  const BridgePlugin = await loadBridgePluginClassForTest();
+  const fake = {
+    mutationResults: { get: () => undefined },
+    activeMutationReservationResponse: async () => null,
+    mutationPreflight: async () => { throw new Error("must not reserve"); },
+    requireMutationRuntime: async () => ({ api: { capabilities: () => ({ ready: true, update: true }) } }),
+    oneTask: async () => { throw new Error("must not read task"); },
+  };
+  await attachPassThroughCoordination(fake);
+  await assert.rejects(BridgePlugin.prototype.executePeriodicUpdateMutation.call(fake, "task-1", {
+    idempotencyKey: "legacy-scheduling-gate", expectedRevision: "revision-1", patch: { fields: { dateScheduled: null } },
+  }), (error: Error) => error.name === "OperonMutationCapabilityUnavailableError");
 });

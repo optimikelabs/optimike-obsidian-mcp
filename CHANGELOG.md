@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read only the selected Smart Connections Smart Environment v3 model vectors, preserving other model indexes and the legacy source fallback.
 - Route automatic query embedding from the selected model's provider metadata, including Ollama models whose names contain `/`; report Transformers/Xenova as unavailable without querying a different provider.
 - Send correctly framed streaming MCP responses so fresh stdio-proxy and HTTP clients can negotiate a session.
+- Route existing-task `dateScheduled` changes through Operon's ordinary typed update first and escalate to the additive periodic workflow only when Operon explicitly requires Daily/Weekly parent realignment, avoiding false `Operon unavailable` failures for ordinary scheduling.
 
 ## [3.10.0] - 2026-09-23
 
