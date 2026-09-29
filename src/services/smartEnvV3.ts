@@ -85,18 +85,19 @@ async function activeModel(baseDir: string): Promise<ModelRecord | null> {
   } catch {
     return null;
   }
+  let active: ModelRecord | null = null;
   for (const line of registry.split(/\r?\n/)) {
     const trimmed = line.trim().replace(/,$/, "");
     if (!trimmed) continue;
     try {
       const records = JSON.parse(`{${trimmed}}`) as Record<string, ModelRecord>;
       const model = records[`embedding_models:${selected}`];
-      if (model) return model;
+      if (model) active = model;
     } catch {
-      // Ignore a malformed registry entry without losing the others.
+      // Ignore a malformed registry entry without losing later append-only values.
     }
   }
-  return null;
+  return active;
 }
 
 export async function detectSmartEnvQueryProvider(

@@ -59,6 +59,40 @@ try {
   assert.equal(vectors[0].vec[0], 0.25);
   assert.equal(vectors[0].model, "qwen3-embedding:0.6b");
   assert.equal(await detectSmartEnvQueryProvider(root, vectors[0].model), "ollama");
+
+  // Smart Connections registry is append-only: the latest matching key is authoritative
+  // for both provider routing and the model fingerprint used to locate current vectors.
+  await writeFile(
+    path.join(root, "embedding_models", "embedding_models.ajson"),
+    [
+      '"embedding_models:ollama#qwen": ' + JSON.stringify({
+        provider_key: "transformers",
+        model_key: "qwen3-embedding:0.6b",
+        dims: 384,
+        max_tokens: 1024,
+      }),
+      '"embedding_models:ollama#qwen": ' + JSON.stringify({
+        provider_key: "ollama",
+        model_key: "qwen3-embedding:0.6b",
+        dims: 1024,
+        max_tokens: 32768,
+      }),
+    ].join(",\n"),
+    "utf8",
+  );
+  assert.equal(
+    await detectSmartEnvQueryProvider(root, vectors[0].model),
+    "ollama",
+    "latest append-only registry provider must win for the selected key",
+  );
+  const duplicateVectors = await loadSmartEnv(root);
+  assert.equal(
+    duplicateVectors.length,
+    1,
+    "latest append-only registry dimensions must drive the current vector fingerprint",
+  );
+  assert.equal(duplicateVectors[0].vec.length, 1024);
+
   await writeFile(
     path.join(root, "embedding_models", "embedding_models.ajson"),
     [
