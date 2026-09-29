@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { createHash } from "node:crypto";
+import net from "node:net";
 import os from "node:os";
 import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -357,13 +358,14 @@ const EnvSchema = z
     }
     for (const host of assetFileHosts) {
       if (
+        net.isIP(host) !== 0 ||
         !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(host)
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["MCP_ASSET_CHATGPT_FILE_HOSTS"],
           message:
-            "MCP_ASSET_CHATGPT_FILE_HOSTS must contain exact DNS hostnames only",
+            "MCP_ASSET_CHATGPT_FILE_HOSTS must contain exact DNS hostnames only; IP literals are not allowed",
         });
       }
     }

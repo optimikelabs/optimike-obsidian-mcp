@@ -58,5 +58,16 @@ assert.notEqual(
  0,
  "ChatGPT file host policy accepts hostnames, not URL-shaped values",
 );
+for(const literal of ["127.0.0.1","::1"]) {
+ assert.notEqual(
+  run({
+   OBSIDIAN_VAULT:path.join(root,"fixture-vault"),
+   MCP_ASSET_CHATGPT_FILE_INGRESS_ENABLED:"true",
+   MCP_ASSET_CHATGPT_FILE_HOSTS:literal,
+  }).status,
+  0,
+  "ChatGPT file host policy must reject IP literals: "+literal,
+ );
+}
 assert.equal(run({OBSIDIAN_VAULT:path.join(root,"fixture-vault")}).status,0,"complete asset configuration should parse");
 console.log("PASS test-asset-config.mjs");
