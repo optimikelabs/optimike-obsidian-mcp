@@ -12,7 +12,7 @@ export type ObsidianAttachmentFolderObservation =
   | { kind: "unavailable" };
 
 function normalizeVaultRelativeFolder(value: string): string | null {
-  const normalized = value.trim().replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
+  const normalized = value.trim().replace(/\\/gu, "/").replace(/\/+$/gu, "");
   if (
     !normalized ||
     normalized.split("/").some((segment) => !segment || segment === "." || segment === "..") ||

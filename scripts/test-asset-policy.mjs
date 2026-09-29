@@ -96,6 +96,14 @@ try {
   assert.equal(absent.destination.exists, false);
   assert.equal(absent.destination.createsDirectory, false);
 
+  for (const configuredFolder of ["/X/Images", "//server/share", "\\X\\Images", "\\\\server\\share", "C:/X/Images"]) {
+    const invalid = inspectAssetPolicy({ vaultRoot: root, configuredFolder, quality: 75, enabled: true, externalRootsConfigured: true, chatgptFileIngressEnabled: false, chatgptFileHostCount: 0 });
+    assert.equal(invalid.destination.folder, null, configuredFolder);
+    assert.equal(invalid.destination.exists, false, configuredFolder);
+    fs.writeFileSync(path.join(root, ".obsidian", "app.json"), JSON.stringify({ attachmentFolderPath: configuredFolder }));
+    assert.deepEqual(inspectObsidianAttachmentFolder(root), { kind: "unavailable" }, configuredFolder);
+  }
+
   console.log(
     "PASS: asset policy exposes configured destination, Obsidian attachment relationship, conversion and ingress without mutation",
   );
