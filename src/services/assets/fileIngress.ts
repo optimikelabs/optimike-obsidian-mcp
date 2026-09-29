@@ -1,7 +1,7 @@
 import axios from "axios";
 import dns from "node:dns";
 import https from "node:https";
-import net from "node:net";
+import net, { type LookupFunction } from "node:net";
 import { operationDigest } from "../operations/contract.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { ASSET_SOURCE_MAX_BYTES } from "./imageProcessing.js";
@@ -93,21 +93,55 @@ export function validateAssetFileDownloadUrl(
   return url;
 }
 
-const publicHttpsAgent = new https.Agent({
-  lookup: (hostname, _options, callback) => {
-    dns.lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
+type AssetHostResolver = (
+  hostname: string,
+  options: dns.LookupOptions,
+  callback: (
+    error: NodeJS.ErrnoException | null,
+    addresses: dns.LookupAddress[],
+  ) => void,
+) => void;
+
+const defaultHostResolver: AssetHostResolver = (hostname, options, callback) => {
+  dns.lookup(
+    hostname,
+    {
+      all: true,
+      verbatim: true,
+      family: options.family,
+      hints: options.hints,
+    },
+    callback,
+  );
+};
+
+export function createAssetFileLookup(
+  resolveAll: AssetHostResolver = defaultHostResolver,
+): LookupFunction {
+  return (hostname, options, callback) => {
+    resolveAll(hostname, options, (error, addresses) => {
+      const wantsAll = options.all === true;
       if (error) {
-        callback(error, "", 4);
+        callback(error, wantsAll ? [] : "", wantsAll ? undefined : 4);
         return;
       }
       if (!addresses.length || addresses.some((item) => blockedIp(item.address))) {
-        callback(new Error("asset_file_host_forbidden"), "", 4);
+        const blocked = new Error("asset_file_host_forbidden");
+        callback(blocked, wantsAll ? [] : "", wantsAll ? undefined : 4);
+        return;
+      }
+      if (wantsAll) {
+        callback(null, addresses);
         return;
       }
       const selected = addresses[0];
       callback(null, selected.address, selected.family);
     });
-  },
+  };
+}
+
+const publicHttpsAgent = new https.Agent({
+  lookup: createAssetFileLookup(),
 });
 type DownloadedFile = { bytes: Buffer; contentType?: string };
 export type AssetFileDownloader = (url: URL) => Promise<DownloadedFile>;

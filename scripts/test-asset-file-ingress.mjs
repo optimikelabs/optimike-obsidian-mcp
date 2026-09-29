@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   AssetFileIngress,
   CHATGPT_FILE_ROOT_ID,
+  createAssetFileLookup,
   validateAssetFileDownloadUrl,
 } from "../dist/services/assets/fileIngress.js";
 import { assetHash } from "../dist/services/assets/windowsAssetFiles.js";
@@ -144,4 +145,44 @@ test("synthetic ChatGPT identity cannot collide with configured ExternalRoot ids
     capabilities: ["visible", "readable"],
   });
   assert.equal(reserved.success, false);
+});
+
+test("custom HTTPS lookup honors Node all=true shape and validates every address", async () => {
+  const lookup=createAssetFileLookup((_hostname,_options,callback)=>callback(null,[
+    {address:"93.184.216.34",family:4},
+    {address:"2606:4700:4700::1111",family:6},
+  ]));
+  const all=await new Promise((resolve,reject)=>lookup(
+    "files.example.test",
+    {all:true},
+    (error,address)=>{
+      if(error)reject(error);else resolve(address);
+    },
+  ));
+  assert.ok(Array.isArray(all));
+  assert.deepEqual(all,[
+    {address:"93.184.216.34",family:4},
+    {address:"2606:4700:4700::1111",family:6},
+  ]);
+
+  const one=await new Promise((resolve,reject)=>lookup(
+    "files.example.test",
+    {all:false},
+    (error,address,family)=>{
+      if(error)reject(error);else resolve({address,family});
+    },
+  ));
+  assert.deepEqual(one,{address:"93.184.216.34",family:4});
+
+  const blocked=createAssetFileLookup((_hostname,_options,callback)=>callback(null,[
+    {address:"93.184.216.34",family:4},
+    {address:"127.0.0.1",family:4},
+  ]));
+  await assert.rejects(new Promise((resolve,reject)=>blocked(
+    "files.example.test",
+    {all:true},
+    (error,address)=>{
+      if(error)reject(error);else resolve(address);
+    },
+  )));
 });

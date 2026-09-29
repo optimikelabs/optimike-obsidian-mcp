@@ -26,6 +26,10 @@ export class AssetImportOperationAdapter {
   readonly operationKind=KIND;
   private readonly policy:AssetImportPolicy;
   private readonly policyDigest:string;
+  private readonly hostFilePlansInFlight = new Map<
+    string,
+    { intent: string; promise: Promise<unknown> }
+  >();
   constructor(private readonly backend:AssetImportBackend,
     private readonly journal:ObsidianNoteReplaceJournal,
     policy:AssetImportPolicy,
@@ -100,6 +104,40 @@ export class AssetImportOperationAdapter {
       proof.input.exceptionReason===input.exceptionReason;
     if(!matches)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
     return this.receipt(existing);
+  }
+  async coalesceHostFilePlan<T>(
+    input:{
+      fileId:string;
+      name:string;
+      quality?:number;
+      preserveOriginal?:boolean;
+      exceptionReason?:string;
+      idempotencyKey:string;
+    },
+    operation:()=>Promise<T>,
+  ):Promise<T> {
+    const intent=operationDigest({
+      version:1,
+      kind:"chatgpt_file_plan_claim",
+      fileId:input.fileId,
+      name:input.name,
+      quality:input.quality,
+      preserveOriginal:input.preserveOriginal,
+      exceptionReason:input.exceptionReason,
+    });
+    const active=this.hostFilePlansInFlight.get(input.idempotencyKey);
+    if(active) {
+      if(active.intent!==intent)deny("asset_idempotency_conflict",BaseErrorCode.CONFLICT);
+      return active.promise as Promise<T>;
+    }
+    const promise=operation();
+    this.hostFilePlansInFlight.set(input.idempotencyKey,{intent,promise});
+    try {
+      return await promise;
+    } finally {
+      const current=this.hostFilePlansInFlight.get(input.idempotencyKey);
+      if(current?.promise===promise)this.hostFilePlansInFlight.delete(input.idempotencyKey);
+    }
   }
   async plan(input:unknown,source:AssetSourceProvider,authorize:()=>void|Promise<void>) {
     const parsed=AssetImportInputSchema.parse(input);

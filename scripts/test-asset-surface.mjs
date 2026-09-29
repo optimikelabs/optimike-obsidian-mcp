@@ -252,37 +252,40 @@ test("concurrent ChatGPT file plans coalesce one download and conflict before ne
  const png=await sharp({create:{width:3,height:2,channels:4,background:{r:7,g:8,b:9,alpha:1}}}).png().toBuffer();
  let downloads=0,releaseDownload;
  const downloadGate=new Promise(resolve=>{releaseDownload=resolve;});
- const ingress=new AssetFileIngress(true,["files.example.test"],async()=>{
+ const downloader=async()=>{
   downloads++;
   await downloadGate;
   return {bytes:png,contentType:"image/png"};
- });
+ };
+ const ingressA=new AssetFileIngress(true,["files.example.test"],downloader);
+ const ingressB=new AssetFileIngress(true,["files.example.test"],downloader);
  const journal=new ObsidianNoteReplaceJournal(path.join(root,"host-concurrency-plans.sqlite"));
  const binding="b".repeat(64);
  const runtime=new AssetImportOperationAdapter({
   inspect:async()=>({binding,exists:false}),
   create:async()=>{throw new Error("plan-only test");},
  },journal,{vaultRoot:vault,assetFolder:"Images",quality:75});
- const handlers=new Map();
+ const handlersA=new Map(),handlersB=new Map();
  const previousEnabled=config.assetImportEnabled,previousMode=config.mcpWriteMode;
  config.assetImportEnabled=true;config.mcpWriteMode="full";
  try {
-  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlers.set(name,handler)},runtime,undefined,true,ingress);
-  const planHandler=handlers.get("asset_import_plan");
-  assert.ok(planHandler);
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersA.set(name,handler)},runtime,undefined,true,ingressA);
+  await registerAssetImportTools({registerTool:(name,_definition,handler)=>handlersB.set(name,handler)},runtime,undefined,true,ingressB);
+  const planHandlerA=handlersA.get("asset_import_plan"),planHandlerB=handlersB.get("asset_import_plan");
+  assert.ok(planHandlerA);assert.ok(planHandlerB);
   const baseInput={
    file:{download_url:"https://files.example.test/input.png?token=temporary",file_id:"file_concurrent",mime_type:"image/png",file_name:"input.png"},
    name:"concurrent-file",idempotencyKey:"chatgpt-concurrent-key",
   };
-  const first=planHandler(baseInput,{});
+  const first=planHandlerA(baseInput,{});
   await new Promise(resolve=>setTimeout(resolve,20));
   assert.equal(downloads,1);
 
-  const same=planHandler({...baseInput,file:{...baseInput.file,download_url:"https://files.example.test/input.png?token=other"}},{});
+  const same=planHandlerB({...baseInput,file:{...baseInput.file,download_url:"https://files.example.test/input.png?token=other"}},{});
   await new Promise(resolve=>setTimeout(resolve,20));
-  assert.equal(downloads,1,"same in-flight intent must share the first download");
+  assert.equal(downloads,1,"same in-flight intent across two MCP server instances must share the first download");
 
-  const conflict=await planHandler({...baseInput,file:{...baseInput.file,file_id:"file_otherconcurrent"}},{});
+  const conflict=await planHandlerB({...baseInput,file:{...baseInput.file,file_id:"file_otherconcurrent"}},{});
   assert.equal(conflict.isError,true);
   assert.equal(downloads,1,"different in-flight identity must conflict before network");
 
