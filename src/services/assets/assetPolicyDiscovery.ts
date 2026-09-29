@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { assetSegment } from "./windowsAssetFiles.js";
 
 export const OBSIDIAN_ASSET_FOLDER_SENTINEL = "@obsidian" as const;
 
@@ -12,15 +13,13 @@ export type ObsidianAttachmentFolderObservation =
   | { kind: "unavailable" };
 
 function normalizeVaultRelativeFolder(value: string): string | null {
-  const normalized = value.trim().replace(/\\/gu, "/").replace(/\/+$/gu, "");
-  if (
-    !normalized ||
-    normalized.split("/").some((segment) => !segment || segment === "." || segment === "..") ||
-    /^(?:[a-z]:|\/)/iu.test(normalized)
-  ) {
+  if (!value || value.length > 800 || value.includes("\\")) return null;
+  try {
+    value.split("/").forEach(assetSegment);
+    return value;
+  } catch {
     return null;
   }
-  return normalized;
 }
 
 export function inspectObsidianAttachmentFolder(
@@ -108,7 +107,7 @@ export function inspectAssetPolicy(input: {
       preserveOriginalRequiresReason: true,
     },
     ingress: {
-      externalRoot: input.externalRootsConfigured,
+      externalRootConfigured: input.externalRootsConfigured,
       chatgptFileParam: input.chatgptFileIngressEnabled,
       chatgptFileHostCount: input.chatgptFileHostCount,
       chatgptFileParamField: "file" as const,

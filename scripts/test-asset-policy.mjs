@@ -37,7 +37,7 @@ try {
   });
   assert.equal(matching.conversion.quality, 75);
   assert.equal(matching.conversion.resize, false);
-  assert.equal(matching.ingress.externalRoot, true);
+  assert.equal(matching.ingress.externalRootConfigured, true);
   assert.equal(matching.ingress.chatgptFileParam, false);
   assert.equal(matching.noteInsertion, "separate_governed_operation");
 
@@ -57,7 +57,7 @@ try {
   });
   assert.equal(different.destination.matchesObsidian, false);
   assert.equal(different.destination.suggestedFolder, "Media");
-  assert.equal(different.ingress.externalRoot, false);
+  assert.equal(different.ingress.externalRootConfigured, false);
   assert.equal(different.ingress.chatgptFileParam, true);
   assert.equal(different.ingress.chatgptFileHostCount, 2);
   assert.equal(different.ingress.modelBase64Accepted, false);
@@ -96,13 +96,17 @@ try {
   assert.equal(absent.destination.exists, false);
   assert.equal(absent.destination.createsDirectory, false);
 
-  for (const configuredFolder of ["/X/Images", "//server/share", "\\X\\Images", "\\\\server\\share", "C:/X/Images"]) {
+  for (const configuredFolder of ["X/Images/", "X\\Images", "X//Images", "X/CON", "X/Images.", "/X/Images", "//server/share", "\\X\\Images", "\\\\server\\share", "C:/X/Images"]) {
     const invalid = inspectAssetPolicy({ vaultRoot: root, configuredFolder, quality: 75, enabled: true, externalRootsConfigured: true, chatgptFileIngressEnabled: false, chatgptFileHostCount: 0 });
     assert.equal(invalid.destination.folder, null, configuredFolder);
     assert.equal(invalid.destination.exists, false, configuredFolder);
     fs.writeFileSync(path.join(root, ".obsidian", "app.json"), JSON.stringify({ attachmentFolderPath: configuredFolder }));
-    assert.deepEqual(inspectObsidianAttachmentFolder(root), { kind: "unavailable" }, configuredFolder);
+    if (!configuredFolder.includes("\\") || configuredFolder.startsWith("\\")) {
+      assert.deepEqual(inspectObsidianAttachmentFolder(root), { kind: "unavailable" }, configuredFolder);
+    }
   }
+
+  assert.equal("externalRoot" in matching.ingress, false, "configuration presence must not advertise root readiness");
 
   console.log(
     "PASS: asset policy exposes configured destination, Obsidian attachment relationship, conversion and ingress without mutation",
