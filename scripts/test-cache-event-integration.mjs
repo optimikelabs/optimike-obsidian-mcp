@@ -32,6 +32,7 @@ const server = createServer(async (req, res) => {
           event,
           emitter: "vault",
           signed: false,
+          expiresAt: new Date(Date.now() + 30000).toISOString(),
           url:
             "http://127.0.0.1:" +
             server.address().port +
@@ -194,7 +195,7 @@ test("production adapter and cache observe create/modify/rename/delete and recon
   );
   await wait(() => cache.getStats().eventCache.state === "ready");
   const evidence = cache.getStats().eventCache;
-  assert.equal(subscriptions, 5);
+  assert.equal(subscriptions, 4, "a reconnect reuses its still-valid grant");
   assert.equal(evidence.reconnects, 1);
   assert.ok(evidence.reconciliations >= 2);
   assert.ok(evidence.eventToCacheP95Ms >= 0);

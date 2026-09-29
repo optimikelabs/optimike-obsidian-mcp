@@ -18,7 +18,10 @@ client opens the verified route. Redirects are refused.
   or proof of a mutation. The adapter discards note bodies, frontmatter, links,
   raw IDs and other metadata before queuing paths.
 - The numeric counter is global and assigned before filters: gaps are normal.
-  No gap-based scan and no Last-Event-ID replay are implemented.
+  In pinned Local REST 5.3.1 `EventStreams.dispatch()` increments the shared
+  counter before `matches(subscription, payload)`, so a per-subscription gap is
+  not sufficient evidence of loss. No gap-based scan and no Last-Event-ID replay
+  are implemented.
 - Initial connection, reconnect, epoch change, folder changes, overflow and failed
   processing request coalesced reconciliation. A reconciliation rereads all
   selected Markdown files, even if their mtime and size did not change.
@@ -81,3 +84,18 @@ No production installation or switch is changed by these tests.
 Disable the option and restart the candidate to return to periodic-only behavior.
 No note migration, index deletion, API grant or mutation receipt rewrite is
 needed. Preserve the package/Bridge rollback procedure for any later deployment.
+
+## Subscription lifecycle
+
+Each REST client retains at most one grant per vault event (four slots), not one
+per connection. A reconnect reopens the authenticated route until expiry; a
+missing GET subscription (404/410) clears only that grant and retries registration
+on the next supervised attempt. It does not mean events are unsupported.
+Transient failures retain the grant. Concurrent same-client/event opens are refused.
+Grant origin/path and expiry are validated; signed query values are never retained.
+A requested 30-second TTL bounds abandoned registrations after lost POST replies
+(independent of the host default, which allows up to 24 hours). This lifetime
+and the production reconnect backoff bound pressure from a continuously running
+owner; they do not guarantee the shared quota against other clients or repeated
+process restarts.
+Already-open streams outlive the grant TTL; no timer closes a healthy stream.

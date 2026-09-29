@@ -17,8 +17,10 @@ les paramètres signés sont retirés et les redirections refusées.
 Les événements sont des indications de relecture, pas du contenu de référence ni
 une preuve de mutation. Corps, frontmatter, liens et identifiants bruts sont
 éliminés avant la file de chemins. Le compteur amont est global et attribué avant
-filtrage : ses sauts ne déclenchent pas de scan, et aucun replay Last-Event-ID
-n’est supposé.
+filtrage : dans Local REST 5.3.1, `EventStreams.dispatch()` incrémente ce compteur
+partagé avant `matches(subscription, payload)`. Un saut vu par un abonnement ne
+suffit donc pas à prouver une perte ; il ne déclenche pas de scan, et aucun replay
+Last-Event-ID n’est supposé.
 
 Connexion initiale, reconnexion, nouvel epoch, changement de dossier, saturation
 ou traitement échoué demandent une réconciliation regroupée. Celle-ci relit les
@@ -75,3 +77,19 @@ Les essais Desktop 5.3.1, fenêtre masquée, coffre représentatif, identité de
 sources et transports clients réels restent des gates distincts. Pour revenir
 au comportement périodique, désactiver l’option puis redémarrer le candidat :
 aucune migration de notes, suppression d’index ou modification de grants/reçus.
+
+## Cycle de vie des abonnements
+
+Le client REST conserve au plus un abonnement par événement, soit quatre entrées.
+Une reconnexion réutilise son chemin authentifié tant que sa durée de vie le permet.
+Un GET 404/410 invalide uniquement cet abonnement ; la tentative supervisée suivante
+le recrée, sans déclarer toute la fonction événementielle indisponible. Les échecs
+transitoires conservent l’abonnement. Deux ouvertures simultanées du même événement
+pour le même client sont refusées. Origine, chemin et expiration sont vérifiés ;
+les paramètres signés ne sont pas conservés.
+Une durée de vie de 30 secondes est demandée pour limiter les abonnements abandonnés
+si la réponse au POST est perdue. Elle reste dans les limites amont de 10 secondes
+à 24 heures. Cette durée et le délai minimal de reconnexion de production limitent
+la pression d’une instance continue, sans garantir le quota partagé des autres
+clients ni couvrir des redémarrages répétés. Un stream déjà ouvert reste actif
+après expiration : aucun arrêt périodique n’est ajouté.

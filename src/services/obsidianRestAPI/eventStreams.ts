@@ -65,6 +65,10 @@ export function projectVaultEvent(
   ) {
     throw new LocalRestEventError("invalid_stream");
   }
+  // Keep only the epoch. In Local REST 5.3.1 the EventStreams-wide
+  // counter is incremented before each subscription's filter is evaluated, so a
+  // healthy filtered stream can legitimately observe numeric gaps. Stream loss,
+  // parser failure, reconnect and epoch changes remain reconciliation signals.
   const epoch =
     id && /^[a-f0-9]{8}-[0-9]+$/u.test(id) ? id.slice(0, 8) : undefined;
   return {
@@ -75,6 +79,16 @@ export function projectVaultEvent(
     ...(epoch ? { epoch } : {}),
   };
 }
+
+// Four slots per REST client; no signed URLs or credentials are retained.
+// Thirty-second grant lifetime also bounds orphan registrations after a lost POST
+// acknowledgement; an already-open upstream stream outlives this lifetime.
+const SUBSCRIPTION_TTL_SECONDS = 30;
+type SubscriptionSlot = {
+  active: boolean;
+  grant?: { base: string; id: string; expiresAt: number };
+};
+const subscriptionSlots = new WeakMap<AxiosInstance, Map<VaultCacheEvent, SubscriptionSlot>>();
 
 /** One authenticated subscription and bounded stream; the caller owns reconnect. */
 export async function consumeVaultEventStream(
@@ -92,6 +106,8 @@ export async function consumeVaultEventStream(
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal]);
   let stream: Readable | undefined;
+  let ownedSlot: SubscriptionSlot | undefined;
+  let openingGrant = false;
   let deadline: NodeJS.Timeout | undefined;
   const resetDeadline = (ms: number) => {
     clearTimeout(deadline);
@@ -101,51 +117,57 @@ export async function consumeVaultEventStream(
     const base = new URL(baseUrl);
     if (
       base.username ||
-      base.password ||
+      base.password || base.search || base.hash ||
       !["http:", "https:"].includes(base.protocol)
     )
       throw new LocalRestEventError("invalid_stream");
-    const response = await client.request({
-      method: "POST",
-      url: route,
-      data: {},
-      headers: { "Content-Type": "application/json" },
-      maxRedirects: 0,
-      timeout: limits.handshakeMs,
-      maxContentLength: 65536,
-      maxBodyLength: 1024,
-      signal: combined,
-    });
-    const grant: unknown = response.data;
-    if (response.status !== 201 || !grant || typeof grant !== "object")
-      throw new LocalRestEventError("invalid_stream");
-    const record = grant as Record<string, unknown>;
-    if (
-      record.emitter !== "vault" ||
-      record.event !== event ||
-      typeof record.id !== "string" ||
-      !/^[A-Za-z0-9_-]{8,128}$/u.test(record.id) ||
-      typeof record.url !== "string"
-    ) {
-      throw new LocalRestEventError("invalid_stream");
+    const baseKey = base.href.replace(/\/$/u, "");
+    let slots = subscriptionSlots.get(client);
+    if (!slots) { slots = new Map(); subscriptionSlots.set(client, slots); }
+    const slot = slots.get(event) ?? { active: false };
+    // A second caller must not mint a grant or release the first caller's slot.
+    if (slot.active) throw new LocalRestEventError("unavailable");
+    slot.active = true;
+    slots.set(event, slot);
+    ownedSlot = slot;
+    if (slot.grant && (slot.grant.base !== baseKey || slot.grant.expiresAt <= Date.now())) {
+      slot.grant = undefined;
     }
-    const given = new URL(record.url);
-    const expected = new URL(
-      baseUrl.replace(/\/$/u, "") + route + record.id + "/",
-    );
-    if (
-      given.origin !== expected.origin ||
-      given.pathname !== expected.pathname ||
-      given.username ||
-      given.password ||
-      given.hash
-    )
-      throw new LocalRestEventError("invalid_stream");
+    if (!slot.grant) {
+      const response = await client.request({
+        method: "POST", url: route, params: { ttl: SUBSCRIPTION_TTL_SECONDS }, data: {},
+        headers: { "Content-Type": "application/json" }, maxRedirects: 0,
+        timeout: limits.handshakeMs, maxContentLength: 65536, maxBodyLength: 1024,
+        signal: combined,
+      });
+      const grant: unknown = response.data;
+      if (response.status !== 201 || !grant || typeof grant !== "object")
+        throw new LocalRestEventError("invalid_stream");
+      const record = grant as Record<string, unknown>;
+      if (record.emitter !== "vault" || record.event !== event ||
+          typeof record.id !== "string" || !/^[A-Za-z0-9_-]{8,128}$/u.test(record.id) ||
+          typeof record.url !== "string" || typeof record.expiresAt !== "string") {
+        throw new LocalRestEventError("invalid_stream");
+      }
+      const given = new URL(record.url);
+      const expected = new URL(baseKey + route + record.id + "/");
+      const expiresAt = Date.parse(record.expiresAt);
+      // HTTP Date avoids assuming that the host clock equals this process clock.
+      const serverTime = Date.parse(String(response.headers.date));
+      const remaining = expiresAt - (Number.isFinite(serverTime) ? serverTime : Date.now());
+      if (given.origin !== expected.origin || given.pathname !== expected.pathname ||
+          given.username || given.password || given.hash || !Number.isFinite(remaining) || remaining <= 0) {
+        throw new LocalRestEventError("invalid_stream");
+      }
+      slot.grant = { base: baseKey, id: record.id,
+        expiresAt: Date.now() + Math.min(remaining, SUBSCRIPTION_TTL_SECONDS * 1000) };
+    }
+    openingGrant = true;
     // Signed query parameters are unnecessary for the authenticated internal client.
     resetDeadline(limits.handshakeMs);
     const opened = await client.request<Readable>({
       method: "GET",
-      url: route + record.id + "/",
+      url: route + slot.grant.id + "/",
       headers: { Accept: "text/event-stream" },
       responseType: "stream",
       maxRedirects: 0,
@@ -188,6 +210,13 @@ export async function consumeVaultEventStream(
     if (error instanceof LocalRestEventError) throw error;
     if (axios.isAxiosError(error)) {
       const status = error.response?.status;
+      const failedStream = error.response?.data;
+      if (failedStream && typeof failedStream.destroy === "function") failedStream.destroy();
+      if (openingGrant && (status === 404 || status === 410)) {
+        // The feature may still exist: only this subscription expired/reloaded.
+        if (ownedSlot) ownedSlot.grant = undefined;
+        throw new LocalRestEventError("unavailable");
+      }
       if (status === 404) throw new LocalRestEventError("unsupported");
       if (status === 401 || status === 403)
         throw new LocalRestEventError("forbidden");
@@ -198,5 +227,6 @@ export async function consumeVaultEventStream(
     clearTimeout(deadline);
     controller.abort();
     stream?.destroy();
+    if (ownedSlot) ownedSlot.active = false;
   }
 }
