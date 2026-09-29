@@ -161,7 +161,9 @@ const publicHttpsAgent = new https.Agent({
 type DownloadedFile = { bytes: Buffer; contentType?: string };
 export type AssetFileDownloader = (url: URL) => Promise<DownloadedFile>;
 
-async function downloadHttpsFile(url: URL): Promise<DownloadedFile> {
+export async function downloadHttpsFile(url: URL): Promise<DownloadedFile> {
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await axios.request<ArrayBuffer>({
       method: "GET",
@@ -169,6 +171,7 @@ async function downloadHttpsFile(url: URL): Promise<DownloadedFile> {
       responseType: "arraybuffer",
       maxRedirects: 0,
       timeout: 15_000,
+      signal: controller.signal,
       maxContentLength: ASSET_SOURCE_MAX_BYTES,
       maxBodyLength: ASSET_SOURCE_MAX_BYTES,
       proxy: false,
@@ -195,6 +198,8 @@ async function downloadHttpsFile(url: URL): Promise<DownloadedFile> {
   } catch (error) {
     if (error instanceof McpError) throw error;
     deny("asset_file_download_failed", BaseErrorCode.SERVICE_UNAVAILABLE);
+  } finally {
+    clearTimeout(deadline);
   }
 }
 export class AssetFileIngress {

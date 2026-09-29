@@ -4,6 +4,7 @@ import {
   AssetFileIngress,
   CHATGPT_FILE_ROOT_ID,
   createAssetFileLookup,
+  downloadHttpsFile,
   validateAssetFileDownloadUrl,
 } from "../dist/services/assets/fileIngress.js";
 import { assetHash } from "../dist/services/assets/windowsAssetFiles.js";
@@ -187,4 +188,25 @@ test("custom HTTPS lookup honors Node all=true shape and validates every address
     },
    )));
   }
+});
+
+
+test("host download has a wall-clock deadline even while the response remains active", async (t) => {
+  const { default: axios } = await import("axios");
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let signal;
+  t.mock.method(axios, "request", async (options) => {
+    signal = options.signal;
+    return await new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+    });
+  });
+  const pending = downloadHttpsFile(new URL("https://files.example.test/input.png"));
+  const rejected = assert.rejects(pending, (error) => error.details?.reason === "asset_file_download_failed");
+  assert.equal(signal.aborted, false);
+  t.mock.timers.tick(14_999);
+  assert.equal(signal.aborted, false);
+  t.mock.timers.tick(1);
+  assert.equal(signal.aborted, true);
+  await rejected;
 });
