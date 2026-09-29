@@ -104,3 +104,14 @@ test('both compatibility triggers cover compiler and build dependencies', () => 
     }
   }
 });
+
+test('qualification workflow explicitly checks out the pull-request head', async () => {
+  const fs = await import('node:fs');
+  const yaml = (await import('js-yaml')).default;
+  const flow = yaml.load(fs.readFileSync(new URL('../.github/workflows/local-rest-compat.yml', import.meta.url), 'utf8'));
+  for (const job of Object.values(flow.jobs)) {
+    const checkouts = job.steps.filter(step => step.uses?.startsWith('actions/checkout@'));
+    assert.equal(checkouts.length, 1);
+    assert.equal(checkouts[0].with?.ref, '${{ github.event.pull_request.head.sha || github.sha }}');
+  }
+});
