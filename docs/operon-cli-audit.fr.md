@@ -6,8 +6,7 @@ Mise à jour : 2026-09-21
 
 Cible courante : Optimike MCP `3.9.1` utilise le Bridge `0.9.3` avec Operon
 officiel `3.9.3` certifié, Operon CLI `1.2.0`, Local REST API `5.1.0`, Developer API V1
-et API task-workflow additive. L’admission Pilot 2 reste liée au SHA final
-propre. Les sources publiques `src/agent-runtime` n’ont pas dérivé entre `3.6.2`
+et API task-workflow additive. L’admission Pilot 2 suit la [qualification proportionnée](bridge-packaging.fr.md#qualification-proportionnée-des-releases) : les parcours modifiés ou non qualifiés exigent le SHA final propre ; les parcours inchangés peuvent réutiliser une preuve réussie applicable. Les sources publiques `src/agent-runtime` n’ont pas dérivé entre `3.6.2`
 et `3.9.3`. Operon `3.6.1` restaure aussi la réapprobation explicite,
 dans les réglages, d’un grant suspendu cohérent ; une tentative périmée,
 révoquée ou dont le binding a dérivé reste bloquée. Operon `3.6.2` corrige

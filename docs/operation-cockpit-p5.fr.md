@@ -89,7 +89,7 @@ timestamps égaux, les cinq familles, l'exclusion des terminaux stables,
 l'isolation des journaux, un journal fermé, les sentinelles privées,
 l'inspection sans écriture, le stdio et plusieurs sessions MCP HTTP.
 
-La gate de release est un canary live attesté sur le commit exact et une note
+Pour les parcours cockpit modifiés ou non qualifiés, la gate de release est un canary live attesté sur le commit exact et une note
 jetable du coffre Pilot 2 ouvert. Il utilise des journaux privés dans le dossier
 temporaire de l'OS, liste le plan scellé avant apply, vérifie que le plan terminal
 disparaît, puis restaure la note octet pour octet. Le dossier de récupération
@@ -114,3 +114,5 @@ La commande refuse un worktree sale, un commit différent, une intégration de
 date ambiguë, un désaccord coffre nommé/backend ou un binding modifié. Un signal
 ferme la gate aux nouvelles mutations tout en laissant la restauration exacte
 active.
+
+La sélection des recettes suit la [qualification proportionnée](bridge-packaging.fr.md#qualification-proportionnée-des-releases). Un parcours inchangé peut réutiliser une preuve réussie applicable ; un changement documentaire ou de métadonnées seul ne rejoue pas ce canary. Une première admission sans preuve, un changement pertinent ou un échec non résolu exige une qualification. Les gardes runtime et les garanties de restauration restent inchangés.

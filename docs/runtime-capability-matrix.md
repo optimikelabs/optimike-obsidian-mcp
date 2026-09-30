@@ -127,7 +127,7 @@ Operon `3.5.3` is retained as historical evidence for the adoption and
 periodic-workflow rollout; it is not the current candidate target. The
 current Pilot 2 gate targets Optimike MCP `3.9.1` with certified Operon `3.9.3`,
 CLI `1.2.0`, Local REST API `5.1.0` and Bridge `0.9.3`; release admission
-requires the clean final SHA. Recoverably suspended grants may be explicitly
+follows [proportionate qualification](bridge-packaging.md#proportionate-release-qualification), requiring the clean final SHA for changed or unqualified paths and permitting scoped reuse of successful evidence for unchanged paths. Recoverably suspended grants may be explicitly
 reapproved in Operon Settings; stale, revoked or drifted bindings remain blocked.
 Periodic applies in those working-tree runs are historical/diagnostic evidence
 only. The exact-SHA release canary performs periodic preview and exact-grant

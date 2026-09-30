@@ -124,7 +124,7 @@ Operon `3.5.3` reste une preuve historique du déploiement de l’adoption et de
 workflows périodiques ; il n’est pas la cible candidate actuelle. Des runs
 La gate Pilot 2 actuelle cible Optimike MCP `3.9.1` avec Operon `3.9.3` certifié,
 CLI `1.2.0`, Local REST API `5.1.0` et Bridge `0.9.3` ; l’admission de
-la release exige le SHA final propre. Un grant suspendu récupérable peut être
+la release suit la [qualification proportionnée](bridge-packaging.fr.md#qualification-proportionnée-des-releases), avec SHA final propre pour les parcours modifiés ou non qualifiés et réutilisation bornée de preuves réussies pour les parcours inchangés. Un grant suspendu récupérable peut être
 réapprouvé explicitement dans les réglages Operon ; un binding périmé, révoqué
 ou ayant dérivé reste bloqué.
 Les applies périodiques de ces runs sur le worktree sont uniquement des preuves

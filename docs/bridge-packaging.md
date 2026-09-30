@@ -94,7 +94,9 @@ restored resumably. A rollback interrupted in turn resumes from
 `npm run package:bridge-bundle` builds the three Bridges, creates the
 exact-commit manifest and emits the release assets under `out/bridge-release`.
 It refuses any tracked or untracked non-ignored worktree change. CI runs the transaction tests on Windows
-and Linux. Release admission additionally requires an exact-SHA Pilot 2 cycle:
+and Linux. Select the qualification scope below before running live recipes.
+A changed or previously unqualified installation/rollback path requires an
+exact-SHA Pilot 2 cycle:
 
 ```text
 attest closed Pilot 2 → upgrade → restart
@@ -109,3 +111,38 @@ pre-install managed-file hashes plus unchanged hashes for every Bridge
 `data.json` that existed at the start. On failure it restores those bytes and
 leaves Pilot 2 closed, so an intentionally rolled-back Bridge version is never
 observed by Operon's Developer API grant policy.
+
+## Proportionate release qualification
+
+This policy governs release-recipe selection throughout the repository, including
+feature-specific guides. Their live gates apply to initial admission or changed
+or unqualified paths; they do not independently require replay for metadata-only
+changes with applicable successful evidence. First qualification is never waived.
+
+| Change | Required qualification |
+| --- | --- |
+| Version metadata, changelog or documentation only | Check version consistency, documentation contracts and package contents. For a publication, rebuild the assets from the clean published commit and verify the manifest and SHA256SUMS. Reuse applicable live evidence; no automatic vault restart or mutation recipe. |
+| Functional MCP or Operon change | Run the affected contract/service tests and the relevant live path when its observable behavior changes. Preserve unrelated valid evidence. |
+| Bridge code, grants, installation, rollback or recovery change | Run the affected safety contracts and the real Pilot 2 cycle for those changed paths, including restoration. |
+
+Before qualification, record the changed paths, observable behavior affected,
+selected checks and the reason for each live recipe. A candidate followed by a
+merge commit does not itself require repeating a recipe: compare functional
+inputs and reuse evidence when they are identical.
+
+Evidence reuse requires a successful, scoped proof with its original commit,
+runtime versions, configuration and artifact hashes. Record the current commit
+and the reviewed diff establishing unchanged relevant code, dependency
+resolution, build inputs, grants, schemas and settings. Exclude only explicitly
+reviewed documentation and version metadata differences; a version change that
+alters consumer identity, grant binding or migration behavior is functional.
+Bridge artifact bytes must match the qualified bytes. A new manifest still
+binds the assets to the actual published commit. This establishes evidence reuse,
+not a newly executed exact-SHA canary.
+
+Reuse is invalid when relevant inputs or artifact bytes change, the proof is
+missing/incomplete, or a relevant failure remains unresolved. Run the affected
+recipe instead. Unknown impact requires inspection first; it does not justify
+blindly replaying every suite. A deferred or untested path remains explicitly
+unqualified. These rules do not disable CI, change branch protection or weaken
+runtime authorization, confirmations, restoration or rollback fences.

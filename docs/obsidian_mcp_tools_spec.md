@@ -262,7 +262,7 @@ Operon/Bridge versions, capabilities, and limitations.
 
 Mutations require a live Bridge and the loaded engine's official contract.
 Optimike MCP 3.9.1 targets Bridge 0.9.3 with certified Operon 3.9.3, CLI 1.2.0 and Local
-REST API 5.1.0, subject to the repository's exact-SHA Pilot 2 release gate. Valid mutations
+REST API 5.1.0, subject to [proportionate qualification](bridge-packaging.md#proportionate-release-qualification): the exact-SHA Pilot 2 release gate applies to changed or unqualified paths; unchanged paths may reuse applicable successful evidence. Valid mutations
 are admitted by the negotiated contract and exact live gates rather than a
 product-version allowlist. Additive task-workflow operations may reach the
 Bridge when their cached capability is cold so the exact grant can be negotiated
