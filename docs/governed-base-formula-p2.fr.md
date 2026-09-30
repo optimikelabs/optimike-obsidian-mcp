@@ -75,6 +75,8 @@ npm run test:governed-base
 
 La suite prouve la préservation des bytes, les refus fermés, le CAS Base typé,
 plan/apply/status durable, le replay idempotent et une traversée MCP stdio
-complète. La publication exige en plus le canary live dans le coffre pilote
+complète. L’admission initiale de la fonctionnalité et les parcours Base modifiés ou non qualifiés exigent en plus le canary live dans le coffre pilote
 Operon Bridge, sur une copie jetable exacte de `PROJETS.base`, avec backup,
 conflit de plan périmé, restauration et égalité finale du SHA.
+
+La sélection des recettes suit la [qualification proportionnée](bridge-packaging.fr.md#qualification-proportionnée-des-releases). Un parcours inchangé peut réutiliser une preuve réussie applicable ; un changement documentaire ou de métadonnées seul ne rejoue pas ce canary. Une première admission sans preuve, un changement pertinent ou un échec non résolu exige une qualification. Les gardes runtime et les garanties de restauration restent inchangés.

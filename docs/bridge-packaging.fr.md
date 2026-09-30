@@ -112,6 +112,12 @@ n’observe donc jamais une version de Bridge volontairement rétrogradée.
 
 ## Qualification proportionnée des releases
 
+Cette politique gouverne la sélection des recettes de release dans tout le dépôt,
+y compris les guides des fonctionnalités. Leurs gates live concernent une
+admission initiale ou les parcours modifiés ou non qualifiés ; ils ne déclenchent
+pas séparément un rejeu pour des métadonnées seules avec une preuve réussie
+applicable. Une première qualification n’est jamais dispensée.
+
 | Changement | Qualification requise |
 | --- | --- |
 | Métadonnées de version, changelog ou documentation uniquement | Vérifier la cohérence des versions, les contrats documentaires et le contenu du package. Pour publier, reconstruire les assets depuis le commit publié propre et vérifier le manifeste et SHA256SUMS. Réutiliser les preuves live applicables ; aucun redémarrage du coffre ni recette de mutation automatique. |

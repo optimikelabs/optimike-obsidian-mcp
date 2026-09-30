@@ -114,6 +114,11 @@ observed by Operon's Developer API grant policy.
 
 ## Proportionate release qualification
 
+This policy governs release-recipe selection throughout the repository, including
+feature-specific guides. Their live gates apply to initial admission or changed
+or unqualified paths; they do not independently require replay for metadata-only
+changes with applicable successful evidence. First qualification is never waived.
+
 | Change | Required qualification |
 | --- | --- |
 | Version metadata, changelog or documentation only | Check version consistency, documentation contracts and package contents. For a publication, rebuild the assets from the clean published commit and verify the manifest and SHA256SUMS. Reuse applicable live evidence; no automatic vault restart or mutation recipe. |

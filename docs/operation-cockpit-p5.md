@@ -90,7 +90,7 @@ the five families, stable-terminal exclusion, journal isolation, closed
 journals, privacy sentinels, no-write inspection, stdio and multiple HTTP MCP
 sessions.
 
-The release gate is an exact-commit live canary against one disposable note in
+For changed or unqualified cockpit paths, the release gate is an exact-commit live canary against one disposable note in
 the open Pilot 2 vault. It uses private OS-temporary journals, lists the sealed
 plan before apply, verifies that the terminal plan disappears, and restores the
 original note byte-for-byte. The recovery directory is deleted only after the
@@ -113,3 +113,5 @@ npm run smoke:operation-cockpit-live
 The command refuses a dirty worktree, a commit mismatch, an ambiguous date
 integration, a named-vault/backend disagreement, or a changed binding. A signal
 closes the gate for new mutations but leaves exact restoration enabled.
+
+Recipe selection follows [proportionate qualification](bridge-packaging.md#proportionate-release-qualification). An unchanged path may reuse applicable successful evidence; documentation or version metadata alone does not rerun this canary. Initial admission without proof, a relevant change or an unresolved failure requires qualification. Runtime guards and restoration guarantees remain unchanged.

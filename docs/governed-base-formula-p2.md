@@ -70,6 +70,8 @@ npm run test:governed-base
 
 The suite proves byte preservation, fail-closed compilation, typed Base CAS,
 durable plan/apply/status and idempotent replay, plus a complete stdio MCP
-round trip. Publication additionally requires the live canary in the dedicated
+round trip. Initial feature admission and changed or unqualified Base paths additionally require the live canary in the dedicated
 Operon Bridge pilot vault on an exact disposable copy of `PROJETS.base`, with
 backup, stale-plan conflict, restoration, and final SHA equality.
+
+Recipe selection follows [proportionate qualification](bridge-packaging.md#proportionate-release-qualification). An unchanged path may reuse applicable successful evidence; documentation or version metadata alone does not rerun this canary. Initial admission without proof, a relevant change or an unresolved failure requires qualification. Runtime guards and restoration guarantees remain unchanged.

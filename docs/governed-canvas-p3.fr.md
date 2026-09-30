@@ -70,7 +70,9 @@ complet scellé.
 
 ## Frontière du pilote
 
-L'admission en release exige les tests stdio/HTTP et un canary live dans le
+L’admission initiale de la fonctionnalité et les parcours Canvas modifiés ou non qualifiés exigent les tests stdio/HTTP et un canary live dans le
 coffre pilote Operon Bridge. Le canary utilise un Canvas jetable et prouve :
 plan sans écriture, commit, replay, conflit de plan périmé, réconciliation de
 réponse perdue, validation du graphe et restauration exacte du SHA-256 initial.
+
+La sélection des recettes suit la [qualification proportionnée](bridge-packaging.fr.md#qualification-proportionnée-des-releases). Un parcours inchangé peut réutiliser une preuve réussie applicable ; un changement documentaire ou de métadonnées seul ne rejoue pas ce canary. Une première admission sans preuve, un changement pertinent ou un échec non résolu exige une qualification. Les gardes runtime et les garanties de restauration restent inchangés.

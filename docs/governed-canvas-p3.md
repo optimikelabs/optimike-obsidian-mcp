@@ -66,8 +66,10 @@ contract. Logs and public receipts never expose the sealed complete Canvas.
 
 ## Pilot boundary
 
-Release admission requires stdio and HTTP tests plus a live canary in the
+Initial feature admission and changed or unqualified Canvas paths require stdio and HTTP tests plus a live canary in the
 dedicated Operon Bridge pilot vault. The canary must use a disposable Canvas,
 prove plan-without-write, commit, replay, stale-plan conflict, lost-response
 reconciliation, graph validation, and exact restoration of the original
 SHA-256.
+
+Recipe selection follows [proportionate qualification](bridge-packaging.md#proportionate-release-qualification). An unchanged path may reuse applicable successful evidence; documentation or version metadata alone does not rerun this canary. Initial admission without proof, a relevant change or an unresolved failure requires qualification. Runtime guards and restoration guarantees remain unchanged.

@@ -34,4 +34,6 @@ A successful property update may intentionally make a row leave its view. Postfl
 
 Hermetic tests cover selection limits/warnings/homonyms/duplicate paths/Base drift; property set/delete; readonly and protected keys; stale note CAS; restart and response loss; durable replay/concurrency; MCP annotations/domain fences. Multi-target partial-success tests are NOT_APPLICABLE to this one-note V1, not silently passed.
 
-Run `npm run test:base-rows`, profile/catalogue/capability/docs gates and packaging. The dedicated M5 workflow runs Ubuntu and Windows. Pilot2 on a real Base and Obsidian Desktop remains required before promotion, with disposable fixtures and before/after hashes. Do not mark the feature delivered or merge on mocked tests alone.
+Run `npm run test:base-rows`, profile/catalogue/capability/docs gates and packaging. The dedicated M5 workflow runs Ubuntu and Windows. Initial promotion or qualification of changed/unqualified M5 paths requires Pilot2 on a real Base and Obsidian Desktop, with disposable fixtures and before/after hashes. Do not mark the feature delivered or merge on mocked tests alone.
+
+Subsequent recipe selection follows [proportionate qualification](bridge-packaging.md#proportionate-release-qualification); unchanged qualified paths may reuse applicable successful evidence. Metadata-only changes do not newly promote an unqualified feature.
