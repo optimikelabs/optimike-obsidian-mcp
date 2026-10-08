@@ -42,7 +42,7 @@ it creates durable mutation intent and is blocked by `MCP_WRITE_MODE=readonly`.
 
 ### `obsidian_note_replace_apply`
 
-Input: `planRef` and the matching `idempotencyKey` only. A caller cannot replace
+Input: `planRef`, the matching `idempotencyKey`, and optional `completionMode`. A caller cannot replace
 the target, content, binding, or hashes after planning.
 
 Before any possible effect, the server revalidates the current MCP write policy,
@@ -67,7 +67,7 @@ Do not create a new mutation or blindly retry with a new idempotency key.
 
 ### `obsidian_note_replace_recover`
 
-Input: `planRef` and the matching `idempotencyKey` only. Recovery reconciles or,
+Input: `planRef`, the matching `idempotencyKey`, and optional `completionMode`. Recovery reconciles or,
 when proof shows it is safe, resumes the exact same sealed plan. It accepts no
 replacement payload and cannot reactivate a stable terminal plan.
 
@@ -108,8 +108,8 @@ separate user event, not an expected consequence of the write.
 Only a compatible modification property enters the settlement contract. The
 Bridge also reports the bounded observation delay implied by each plugin's
 debounce/rate-limit settings. The MCP starts that durable window only after the
-CAS call returns (or fails after dispatch), then waits before its postflight
-read even when the CAS response succeeds normally. A concurrent `status` or
+CAS call returns (or fails after dispatch), then defers final certification until its postflight
+read is allowed even when the CAS response succeeds normally. A concurrent `status` or
 `recover` observer cannot terminalize either the sealed hash or an early
 timestamp settlement during that wait. Numeric values,
 forced timezones, unsupported formats or delays beyond four minutes are not
@@ -193,7 +193,7 @@ and close that authority cleanly at process shutdown.
 Every applying row also records its runtime instance owner. A durable heartbeat
 lease proves that exact instance is still active without trusting a reusable OS
 PID. Opening the same journal from another MCP process leaves a fresh lease
-untouched; lease expiry or explicit owner shutdown makes exact-plan recovery
+untouched; lease expiry or explicit owner shutdown of an active executor makes exact-plan recovery
 eligible. This prevents an independently launched client from manufacturing an
 interruption while another process is still executing the CAS.
 Every transition leaving `applying` must also present the distinct attempt ID
@@ -224,3 +224,39 @@ restoration retains it at the recovery path printed before the MCP starts. This
 live Desktop gate passed on 2026-08-14 with the final SHA-256 equal to the
 pre-mutation SHA-256. These guarantees are released in Optimike Obsidian MCP
 2.6.0; later capability paliers remain separate repository-authority decisions.
+
+### Completion modes for note, body and frontmatter writes
+
+`obsidian_note_replace_*`, `obsidian_text_patch_*` and
+`obsidian_frontmatter_patch_*` accept optional `completionMode` on `apply` and
+`recover`. The default is `deferred`. Planning still seals the same exact intent
+and each CAS retains all policy, date protection, binding and hash checks.
+
+With an active bounded date integration, successful CAS returns
+`phase: applying`, `outcome: null`, `postflight.status: pending`,
+`postflight.reason: modified_time_settlement` and `postflight.checkAfter` (UTC).
+This is not certified success: no `afterProof` is emitted. Call the matching
+`status` at or after `checkAfter`. Only `committed` with `verified` establishes
+final success. Before that time, status returns durable metadata without a
+backend reread. It never performs another write.
+
+The observation window starts after the CAS attempt, retains the full delay
+advertised by the Bridge, and is not shortened by the response mode. If the CAS
+response is lost, the result remains `outcome_unknown`; status/recovery still
+respect that window. `completionMode: verified` waits for the final observation
+and preserves blocking compatibility, including joining an already deferred
+attempt. It can exceed a client's timeout; call status after a lost response.
+
+Pending postflight is stored in SQLite with its attempt fence. It has no timer
+or background executor: closing or restarting the process does not erase it or
+permit another CAS. A later status verifies exact hash or permitted date-only
+settlement; conflict and real content drift remain distinct. Apply/recover
+replay cannot double-write. Cache refresh occurs after the CAS attempt and
+again after terminal verification. Base-row, Canvas and Base-formula APIs keep
+their existing completion defaults.
+
+A refusal proven by internal checks before any CAS dispatch is immediate: it does not start a date window for a write that was never sent. A network error or caller-provided hint cannot prove non-dispatch.
+
+## Receipts and timings
+
+All four tools accept `responseMode: compact | detailed` (default detailed) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.

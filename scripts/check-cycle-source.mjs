@@ -86,7 +86,7 @@ assert.deepEqual(
   ["asset_import_apply", "asset_import_plan", "asset_import_status"],
   "Only the optional asset family may extend the default-off cycle surface",
 );
-const requiredLiveProfiles = ["standard", "authoring", "tasks", "full"];
+const requiredLiveProfiles = ["standard", "authoring", "tasks", "full", "operational"];
 assert.deepEqual(Object.keys(cycle.expectedSurface.liveProfiles).sort(), [...requiredLiveProfiles].sort());
 for (const [profile, count] of Object.entries(cycle.expectedSurface.liveProfiles)) {
   assert.equal(compileToolProfileNames({ profile, registrationMode: "live", availableStaticRequirements: ["vault-cache"] }).length, count);
@@ -116,7 +116,7 @@ for (const name of requiredDocs) {
   assert.ok(pkg.files.includes(name), `npm package must include ${name}`);
 }
 const qualifiedBridgeVersions = {
-  "obsidian-atomic-write-bridge": "0.8.0",
+  "obsidian-atomic-write-bridge": "0.8.1",
   "obsidian-bases-bridge": "1.2.2",
   "obsidian-operon-bridge": "0.9.3",
 };

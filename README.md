@@ -6,9 +6,9 @@ French version: [README.fr.md](README.fr.md) · [Documentation hub](docs/README.
 
 ![Overview of Optimike Obsidian MCP between agent clients, Obsidian and governed external documents](docs/assets/readme/overview.en.svg)
 
-Optimike Obsidian MCP gives MCP clients a governed operational surface over an Obsidian vault: live Desktop operations, resilient headless modes, Tasks and Operon, Bases and Canvas, semantic search, runtime observability, and bounded access to configured external documents.
-Version 3.9 adds bounded note-link observation, governed native note move, durable absent-only creation and a single-row Base property patch. Each mutation uses a distinct `plan → apply → status` lifecycle and fails closed when its sealed proof cannot be reconciled. See the [qualification protocol](docs/cycle-20260920/CODEX-FINALISATION.md) and [bounded roadmap](docs/cycle-20260920/ROADMAP.md).
-Version 3.10 improves retrieval and semantic diagnostics, serves legacy and MCP `2026-07-28` clients side by side, and can publish explicitly configured Agent Skills as read-only resources. Host support for native Skills must be verified separately. The Operon Bridge also remains responsive with the Obsidian window hidden. See the [dual-stack contract](docs/mcp-2026-dual-stack.md) and [Skills publication contract](docs/mcp-skills.md). Version 3.11 adds opt-in event-assisted cache refresh and governed ChatGPT image import with a portable, explicitly configured image policy. It also corrects Smart Connections v3 model selection, HTTP response framing and Operon scheduling, and clarifies task creation and recovery contracts.
+Optimike Obsidian MCP gives MCP clients a governed operational surface over an Obsidian vault: live Desktop operations, resilient headless modes, Tasks and Operon, Bases and Canvas, semantic search, runtime observability, and bounded access to configured external documents. Version 3.9 adds bounded note-link observation, governed native note move, durable absent-only creation and a single-row Base property patch. Each mutation uses a distinct `plan → apply → status` lifecycle and fails closed when its sealed proof cannot be reconciled. See the [qualification protocol](docs/cycle-20260920/CODEX-FINALISATION.md) and [bounded roadmap](docs/cycle-20260920/ROADMAP.md). Version 3.10 improves retrieval and semantic diagnostics, serves legacy and MCP `2026-07-28` clients side by side, and can publish explicitly configured Agent Skills as read-only resources. Host support for native Skills must be verified separately. The Operon Bridge also remains responsive with the Obsidian window hidden. See the [dual-stack contract](docs/mcp-2026-dual-stack.md) and [Skills publication contract](docs/mcp-skills.md). Version 3.11 adds opt-in event-assisted cache refresh and governed ChatGPT image import with a portable, explicitly configured image policy. It also corrects Smart Connections v3 model selection, HTTP response framing and Operon scheduling, and clarifies task creation and recovery contracts.
+
+Version 3.12 adds the operational profile, read-only frontmatter access and faster governed completion with a qualified optional FDM integration. See the measured gains and conditions in the [changelog](CHANGELOG.md#3120---2026-10-08).
 
 ## Capability map
 
@@ -41,10 +41,13 @@ Runtime answers what the backend can execute. It does not decide how many tools 
 
 | Need                                              | Profile     | Full live/hybrid size |
 | ------------------------------------------------- | ----------- | --------------------: |
-| General vault work                                | `standard`  |                    29 |
-| Notes, tags, Bases and Canvas authoring           | `authoring` |                    43 |
-| Tasks / Operon workflows                          | `tasks`     |                    35 |
-| Explicit complete, admin and specialized surfaces | `full`      |                    87 |
+| General vault work                                | `standard`  |                    30 |
+| Notes, tags, Bases and Canvas authoring           | `authoring` |                    44 |
+| Tasks / Operon workflows                          | `tasks`     |                    36 |
+| Complete daily workflows with governed preference | `operational` | 84 |
+| Explicit complete, admin and specialized surfaces | `full`      |                    88 |
+
+The counts above exclude three optional asset tools: the current local configuration exposes 87 operational and 91 full tools. The local launcher explicitly selects operational; the package-wide unspecified default remains standard.
 
 In 3.0, an unspecified profile defaults to `standard`. `smart_semantic_search` is the only registered semantic-search name; the former `smart_search` and `smart-search` aliases have been removed. `full` remains an explicit opt-in for the complete active-runtime surface. `bases_upsert_config` is a `full`-only whole-Base compatibility path; legacy whole-file config writes are default-off, while normal authoring uses bounded Base creation/row writes plus the governed formula family.
 
@@ -61,6 +64,7 @@ HTTP profile routes:
 /mcp/authoring
 /mcp/tasks
 /mcp/full
+/mcp/operational
 ```
 
 Unqualified `/mcp` now uses `standard`; `/mcp/full` remains the explicit complete route. See [Tool Surface Profiles](docs/tool-surface-profiles.md).
@@ -127,13 +131,9 @@ OPERON_MUTATIONS_ENABLED=true
 
 Stale Operon snapshots remain read-only. No Operon route falls back to raw Markdown or private APIs. Official adoption and Daily/Weekly routing negotiate their exact additive grant on first use, including after a cold MCP start; a pending or refused grant still fails closed. Operon owns every opaque sealed plan and same-plan recovery. Task Type and Task Image stay scalar, Task Gallery stays an ordered array, and `__taskDataType` is read-only. Full compatibility, certified/provisional versions, recovery semantics and current API gaps live in the [Operon MCP contract](docs/operon-mcp-contract.md) and [CLI / Developer API audit](docs/operon-cli-audit.md).
 
-Operon `3.6.0` exposes the public periodic Task Workflow plan as metadata-only,
-without a pre-apply task-source path. The exact-SHA release canary negotiates and
-previews periodic operations but skips periodic applies with reason
+Operon `3.6.0` exposes the public periodic Task Workflow plan as metadata-only, without a pre-apply task-source path. The exact-SHA release canary negotiates and previews periodic operations but skips periodic applies with reason
 `public_task_source_projection_unavailable`. This contains the destructive canary
-without disabling runtime tools; upstream public path projection is a nonblocking
-follow-up, and no full periodic certification is claimed. Core startup, adoption,
-media, Frontmatter Date Manager, idempotence and restoration gates remain mandatory.
+without disabling runtime tools; upstream public path projection is a nonblocking follow-up, and no full periodic certification is claimed. Core startup, adoption, media, Frontmatter Date Manager, idempotence and restoration gates remain mandatory.
 
 ## Governed operations
 
@@ -158,12 +158,9 @@ External roots are disabled by default. They are an authorization broker, not an
 - neither delivery mode authorizes mutation or reveals the physical source path.
 
 `external_references_scan`, `external_move_plan` and `external_move_status` are
-diagnostic only. `external_move_apply`, `external_move_rollback` and any
-automatic mutating recovery are disabled on every platform until an audited
-native handle-relative mutation primitive exists; the runtime reason is
+diagnostic only. `external_move_apply`, `external_move_rollback` and any automatic mutating recovery are disabled on every platform until an audited native handle-relative mutation primitive exists; the runtime reason is
 `native_handle_relative_mutation_unavailable`. The contract still preserves
-redacted receipts, private SQLite snapshots, legacy-binding and stale
-session/binding checks, and exact-CAS evidence for a future implementation.
+redacted receipts, private SQLite snapshots, legacy-binding and stale session/binding checks, and exact-CAS evidence for a future implementation.
 
 The MCP core does not embed PDF, Office or OCR engines. The caller owns binary extraction and verifies size and SHA-256.
 
@@ -192,6 +189,7 @@ Runtime suites use disposable vaults and run in Linux/Windows CI.
 
 ## Documentation
 
+- [Installation choices](docs/installation-options.md) : profile, shared HTTP quota and optional FDM integration.
 - [Documentation hub](docs/README.md)
 - [Tool Surface Profiles](docs/tool-surface-profiles.md)
 - [Tool Surface](docs/obsidian_mcp_tools_spec.md)

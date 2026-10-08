@@ -352,6 +352,13 @@ try {
       `${expectedProfile} capability doctor leaked the vault path`,
     );
   }
+  const operationalToken = await signToken("profile-operational");
+  const operational = await initializeClient(baseUrl,"/mcp/operational",operationalToken,"operational",5);
+  const operationalNames=toolNames(await call(operational,baseUrl,"tools/list"));
+  assert.deepEqual(operationalNames,fullNames,"operational preserves complete readonly functionality on a runtime without governed writes");
+  const operationalStatus=successfulToolPayload(await call(operational,baseUrl,"tools/call",{name:"obsidian_runtime_status",arguments:{}}),"operational doctor");
+  assert.equal(operationalStatus.capabilityManifest.profile,"operational");
+
   const standardDoctor = successfulToolPayload(
     standardStatus,
     "standard capability doctor",

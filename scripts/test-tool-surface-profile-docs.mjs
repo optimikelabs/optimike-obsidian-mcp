@@ -11,7 +11,7 @@ for (const relative of [
   "docs/tool-surface-profiles.fr.md",
 ]) {
   const content = read(relative);
-  for (const profile of ["standard", "authoring", "tasks", "full"]) {
+  for (const profile of ["standard", "authoring", "tasks", "full", "operational"]) {
     assert.ok(
       content.includes(`\`${profile}\``),
       `${relative} omits ${profile}`,

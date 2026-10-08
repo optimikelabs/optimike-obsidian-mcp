@@ -94,6 +94,7 @@ export interface ToolSurfaceEntry {
 
 const CANONICAL_UNIQUE_TOOL_NAMES = [
   "obsidian_read_note",
+  "obsidian_get_frontmatter",
   "obsidian_note_links",
   "obsidian_list_notes",
   "obsidian_global_search",
@@ -353,6 +354,9 @@ const OPERON_MUTATION_TOOLS = [
 ] as const;
 
 export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
+  defineTool("obsidian_get_frontmatter", "notes.read", "frontmatter-read", LIVE_MODES, {
+    annotationClass: "read-only",
+  }),
   ...governedFamily("asset_import", "assets.governed", "asset-import").map(entry => ({...entry, availabilityRules: [{modes: LIVE_MODES, requires: ["asset-policy" as const]}]})),
   defineTool("obsidian_read_note", "notes.read", "notes-core", ALL_MODES),
   defineTool("obsidian_note_links", "notes.read", "note-links", LIVE_MODES),

@@ -49,7 +49,7 @@ export const registerObsidianSearchReplaceTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_search_replace";
   const toolDescription =
-    "Direct Local REST search/replace within one note. Supports string or regex matching and returns the replacement count and optional final content. It overwrites the resulting note without a durable plan/status/recovery receipt; for high-assurance changes, compute the intended complete content and prefer obsidian_note_replace_plan when available.";
+    "Compatibility-only direct Local REST literal/regex search-replace. Prefer governed text_patch for literals, or compute the intended content and seal note_replace for regex edits. No durable receipt; never bypass a governed conflict or uncertain effect. Retained in full or structurally unsupported runtimes.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =

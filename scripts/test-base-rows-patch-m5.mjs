@@ -37,6 +37,8 @@ const { registerBaseRowsPatchTools } = await import(
   "../dist/mcp-server/tools/baseRowsPatchTools/index.js"
 );
 const rest = new ObsidianRestApiService();
+const ownedRuntimes = [];
+function trackedNoteRuntime() { const runtime = createGovernedNoteReplaceRuntime(rest); ownedRuntimes.push(runtime); return runtime; }
 const input = {
   baseId: "Work.base",
   view: "Open",
@@ -92,7 +94,7 @@ function scenario(id) {
       };
     },
   });
-  const notes = createGovernedNoteReplaceRuntime(rest),
+  const notes = trackedNoteRuntime(),
     runtime = new BaseRowsPatchRuntime(notes, selection);
   return {
     notes,
@@ -110,7 +112,7 @@ function scenario(id) {
     },
     reopen: () => {
       notes.close();
-      const fresh = createGovernedNoteReplaceRuntime(rest);
+      const fresh = trackedNoteRuntime();
       return {
         notes: fresh,
         runtime: new BaseRowsPatchRuntime(fresh, selection),
@@ -250,7 +252,7 @@ try {
     const f = scenario("concurrent"),
       p = await f.runtime.plan(input),
       writes = fixture.successfulWrites;
-    const second = createGovernedNoteReplaceRuntime(rest),
+    const second = trackedNoteRuntime(),
       runtime2 = new BaseRowsPatchRuntime(second, f.selection);
     const gate = fixture.blockNextCas();
     const first = f.runtime.apply(p.planRef, input.idempotencyKey);
@@ -268,7 +270,7 @@ try {
     const f = scenario("concurrent-view-exit"),
       p = await f.runtime.plan(input),
       writes = fixture.successfulWrites;
-    const second = createGovernedNoteReplaceRuntime(rest);
+    const second = trackedNoteRuntime();
     let enter, release;
     const entered = new Promise((resolve) => {
       enter = resolve;
@@ -351,6 +353,7 @@ try {
     `PASS: ${cases} M5 durable CAS and real MCP scenarios; Base drift, domain fences, protected keys, restart, loss, replay and single-writer concurrency`,
   );
 } finally {
+  for (const runtime of ownedRuntimes) runtime.close();
   await fixture.close();
   rmSync(root, { recursive: true, force: true });
 }

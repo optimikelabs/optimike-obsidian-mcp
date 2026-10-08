@@ -185,3 +185,28 @@ Live admission passed on 2026-08-14 in the disposable pilot vault under run
 replay, status-credential redaction, stale-plan conflict, and exact restoration;
 the original and final SHA-256 were both
 `5492f80849812193137d8ef66b4349982d8a443503e555f8cd188efe99980912`.
+
+## Fast return and final certification
+
+`apply` and `recover` accept `completionMode: deferred | verified` (default:
+`deferred`). A CAS with automatic dates may return `applying`,
+`postflight.status: pending` and `postflight.checkAfter` without an `afterProof`.
+Call `status` at or after that time; only `committed` with `verified` certifies
+success. `verified` waits for the same full observation window. Pending work
+survives restart and cannot trigger a second CAS.
+See the [shared completion contract](governed-note-replacement.md#completion-modes-for-note-body-and-frontmatter-writes).
+
+## Receipts and timings
+
+All four tools accept `responseMode: compact | detailed` (default detailed) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
+
+## Authorized YAML representation after FDM
+
+FDM may unquote a scalar or expand a YAML collection while updating the date.
+Postflight recognizes this only for keys authorized by the sealed projection:
+key presence and parsed YAML values must match, the compiler must restore their
+sealed spelling, and the original exact resolver must then accept a single valid
+modified-date change with every remaining byte unchanged. Deleted keys cannot
+reappear. Body, creation-date, unknown-key and YAML-type drift remain uncertain.
+No second write occurs. Detailed proof includes settlementAuthorizedFormatKeyCount
+and the original observed hash; authorized keys are retained durably in the journal.

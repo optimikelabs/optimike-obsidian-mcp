@@ -6,8 +6,7 @@ English version: [README.md](README.md) · [Hub documentaire](docs/README.fr.md)
 
 ![Vue d’ensemble d’Optimike Obsidian MCP entre clients agentiques, Obsidian et documents externes gouvernés](docs/assets/readme/overview.fr.svg)
 
-Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouvernée au-dessus d’un coffre Obsidian : opérations Desktop live, modes headless résilients, Tasks et Operon, Bases et Canvas, recherche sémantique, observabilité runtime et accès borné à des documents externes configurés.
-La version 3.9 ajoute l’observation bornée des liens de notes, le déplacement natif gouverné, la création durable d’une note absente et le patch d’une seule row Base. Chaque mutation suit un cycle distinct `plan → apply → status` et échoue de façon sûre si sa preuve scellée ne peut pas être réconciliée. Voir le [protocole de qualification](docs/cycle-20260920/CODEX-FINALISATION.md) et la [roadmap bornée](docs/cycle-20260920/ROADMAP.md). La version 3.10 fiabilise la recherche et les diagnostics sémantiques, sert côte à côte les clients MCP historiques et `2026-07-28`, et peut publier des Agent Skills explicitement configurées comme ressources en lecture seule. La prise en charge native des Skills doit être vérifiée pour chaque client. Le Bridge Operon reste aussi réactif quand la fenêtre Obsidian est masquée. Voir les contrats [dual-stack](docs/mcp-2026-dual-stack.md) et de [publication Skills](docs/mcp-skills.md).
+Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouvernée au-dessus d’un coffre Obsidian : opérations Desktop live, modes headless résilients, Tasks et Operon, Bases et Canvas, recherche sémantique, observabilité runtime et accès borné à des documents externes configurés. La version 3.9 ajoute l’observation bornée des liens de notes, le déplacement natif gouverné, la création durable d’une note absente et le patch d’une seule row Base. Chaque mutation suit un cycle distinct `plan → apply → status` et échoue de façon sûre si sa preuve scellée ne peut pas être réconciliée. Voir le [protocole de qualification](docs/cycle-20260920/CODEX-FINALISATION.md) et la [roadmap bornée](docs/cycle-20260920/ROADMAP.md). La version 3.10 fiabilise la recherche et les diagnostics sémantiques, sert côte à côte les clients MCP historiques et `2026-07-28`, et peut publier des Agent Skills explicitement configurées comme ressources en lecture seule. La prise en charge native des Skills doit être vérifiée pour chaque client. Le Bridge Operon reste aussi réactif quand la fenêtre Obsidian est masquée. Voir les contrats [dual-stack](docs/mcp-2026-dual-stack.md) et de [publication Skills](docs/mcp-skills.md).
  La version 3.11 ajoute le rafraîchissement du cache assisté par événements et l’import gouverné d’images ChatGPT, avec une politique d’images portable et explicitement configurée. Elle corrige aussi la sélection du modèle Smart Connections v3, les réponses HTTP et la planification Operon, et clarifie les contrats de création et de récupération des tâches.
 ## Carte des capacités
 
@@ -22,6 +21,8 @@ La version 3.9 ajoute l’observation bornée des liens de notes, le déplacemen
 | Administration headless | Opérations métadonnées/filesystem bornées                                       | Copie ou coffre dédié                                |
 
 Le registre canonique des outils est documenté dans [Surface des outils](docs/obsidian_mcp_tools_spec.md).
+
+La version 3.12 ajoute le profil operational, la lecture dédiée du frontmatter et une certification gouvernée plus rapide avec une intégration FDM facultative qualifiée. Voir les gains mesurés et leurs conditions dans le [changelog](CHANGELOG.md#3120---2026-10-08).
 
 ## Runtime et transport
 
@@ -40,12 +41,13 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 
 | Besoin                                               | Profil      | Taille live/hybrid complète |
 | ---------------------------------------------------- | ----------- | --------------------------: |
-| Travail général sur le coffre                        | `standard`  |                          29 |
-| Notes, tags, Bases et Canvas                         | `authoring` |                          43 |
-| Workflows Tasks / Operon                             | `tasks`     |                          35 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          87 |
+| Travail général sur le coffre                        | `standard`  |                          30 |
+| Notes, tags, Bases et Canvas                         | `authoring` |                          44 |
+| Workflows Tasks / Operon                             | `tasks`     |                          36 |
+| Usage courant complet, préférence gouvernée | `operational` | 84 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          88 |
 
-En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
+Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 87 outils operational et 91 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
 Sélectionner le profil avant `tools/list` :
 
@@ -60,6 +62,7 @@ Routes HTTP profilées :
 /mcp/authoring
 /mcp/tasks
 /mcp/full
+/mcp/operational
 ```
 
 Le chemin `/mcp` sans qualificatif utilise désormais `standard` ; `/mcp/full` reste la route complète explicite. Voir [Profils de surface d’outils](docs/tool-surface-profiles.fr.md).
@@ -126,15 +129,9 @@ OPERON_MUTATIONS_ENABLED=true
 
 Les snapshots Operon obsolètes restent read-only. Aucune route Operon ne retombe sur du Markdown brut ou des API privées. L’adoption officielle et le routage Daily/Weekly négocient leur grant additif exact au premier usage, y compris après un démarrage MCP à froid ; un grant en attente ou refusé échoue toujours fermé. Operon reste propriétaire de chaque plan opaque scellé et de sa récupération same-plan. Task Type et Task Image restent scalaires, Task Gallery reste un tableau ordonné et `__taskDataType` est read-only. Les versions certifiées/provisoires, la récupération et les gaps d’API sont détaillés dans le [Contrat MCP Operon](docs/operon-mcp-contract.fr.md) et l’[Audit CLI / Developer API](docs/operon-cli-audit.fr.md).
 
-Operon `3.6.0` expose le plan public Task Workflow périodique uniquement sous
-forme de métadonnées, sans chemin de source des tâches avant apply. La canary de
-release sur le SHA exact négocie et prévisualise les opérations périodiques, mais
-saute les applies périodiques avec la raison
+Operon `3.6.0` expose le plan public Task Workflow périodique uniquement sous forme de métadonnées, sans chemin de source des tâches avant apply. La canary de release sur le SHA exact négocie et prévisualise les opérations périodiques, mais saute les applies périodiques avec la raison
 `public_task_source_projection_unavailable`. Cela confine la canary destructive
-sans désactiver les outils runtime ; la projection publique du chemin de source
-reste un suivi amont non bloquant et aucune certification périodique complète
-n’est revendiquée. Les gates startup, adoption, médias, Frontmatter Date Manager,
-idempotence et restauration restent obligatoires.
+sans désactiver les outils runtime ; la projection publique du chemin de source reste un suivi amont non bloquant et aucune certification périodique complète n’est revendiquée. Les gates startup, adoption, médias, Frontmatter Date Manager, idempotence et restauration restent obligatoires.
 
 ## Opérations gouvernées
 
@@ -164,10 +161,7 @@ dans une même racine configurée. `external_move_apply`,
 `external_move_rollback` et toute récupération mutante automatique sont
 désactivés sur toutes les plateformes avec la raison
 `native_handle_relative_mutation_unavailable`; les gates d’écriture historiques
-ne peuvent pas les activer. Les reçus redacted, le journal privé et les preuves
-hash/CAS restent conservés pour une future primitive auditée. Cette surface n’est
-pas exposée en HTTP direct et n’ajoute pas de create, replace, delete, upload ou
-sync générique.
+ne peuvent pas les activer. Les reçus redacted, le journal privé et les preuves hash/CAS restent conservés pour une future primitive auditée. Cette surface n’est pas exposée en HTTP direct et n’ajoute pas de create, replace, delete, upload ou sync générique.
 
 Le cœur MCP n’embarque pas de moteur PDF, Office ou OCR. Le client appelant assure l’extraction binaire et vérifie taille et SHA-256.
 
@@ -196,6 +190,7 @@ Les suites runtime utilisent des coffres jetables et s’exécutent en CI Linux/
 
 ## Documentation
 
+- [Choix d’installation](docs/installation-options.fr.md) : profil, quota HTTP partagé et intégration FDM facultative.
 - [Hub documentaire](docs/README.fr.md)
 - [Profils de surface d’outils](docs/tool-surface-profiles.fr.md)
 - [Surface des outils](docs/obsidian_mcp_tools_spec.md)

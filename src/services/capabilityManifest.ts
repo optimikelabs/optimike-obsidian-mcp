@@ -1,6 +1,9 @@
 import { config } from "../config/index.js";
 import { getQueryEmbedder } from "../adapters/embed/index.js";
-import { detectOllamaBaseUrlFromSmartEnv, semanticSearchHealth } from "./semanticSearchHealth.js";
+import {
+  detectOllamaBaseUrlFromSmartEnv,
+  semanticSearchHealth,
+} from "./semanticSearchHealth.js";
 import {
   compileToolProfileNames,
   type ToolProfileId,
@@ -54,6 +57,7 @@ export type CapabilityReasonCode =
   | "runtime_not_initialized"
   | "local_rest_not_configured"
   | "local_rest_unreachable"
+  | "local_rest_probe_timed_out"
   | "local_rest_unauthorized"
   | "cache_fallback"
   | "vault_backend_unavailable"
@@ -63,6 +67,7 @@ export type CapabilityReasonCode =
   | "semantic_embedder_unavailable"
   | "semantic_query_unverified"
   | "bridge_unavailable"
+  | "bridge_probe_timed_out"
   | "bridge_lifecycle_not_ready"
   | "bridge_contract_incompatible"
   | "bridge_write_disabled"
@@ -95,6 +100,7 @@ export type CapabilityNextAction =
   | "enable_semantic_search"
   | "enable_query_embedding"
   | "refresh_semantic_index"
+  | "retry_capability_probe"
   | "configure_query_embedder"
   | "run_semantic_search"
   | "install_or_enable_bridge"
@@ -163,6 +169,7 @@ type NormalizedProbe<T> =
   | { state: "ready"; value: T }
   | { state: "unauthorized" }
   | { state: "unavailable" }
+  | { state: "timed_out" }
   | { state: "incompatible" };
 
 export interface CapabilityManifestProjectionInput {
@@ -226,9 +233,21 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "obsidian_global_search",
   ],
   "semantic-search": ["smart_semantic_search"],
-  "governed-base-rows": ["bases_rows_patch_plan", "bases_rows_patch_apply", "bases_rows_patch_status"],
-  "governed-note-create": ["obsidian_note_create_plan", "obsidian_note_create_apply", "obsidian_note_create_status"],
-  "governed-native-move": ["obsidian_note_move_plan", "obsidian_note_move_apply", "obsidian_note_move_status"],
+  "governed-base-rows": [
+    "bases_rows_patch_plan",
+    "bases_rows_patch_apply",
+    "bases_rows_patch_status",
+  ],
+  "governed-note-create": [
+    "obsidian_note_create_plan",
+    "obsidian_note_create_apply",
+    "obsidian_note_create_status",
+  ],
+  "governed-native-move": [
+    "obsidian_note_move_plan",
+    "obsidian_note_move_apply",
+    "obsidian_note_move_status",
+  ],
   "governed-note-write": [
     "obsidian_note_replace_plan",
     "obsidian_note_replace_apply",
@@ -391,6 +410,10 @@ function entry(
 function localRestCapability(
   input: CapabilityManifestProjectionInput,
 ): CapabilityManifestEntry {
+  if (input.localRest.state === "timed_out") {
+    return entry(input, "local-rest", false, false,
+      "local_rest_probe_timed_out", "retry_capability_probe");
+  }
   if (input.localRest.state === "ready") {
     const authenticated = boolean(record(input.localRest.value).authenticated);
     return entry(
@@ -513,11 +536,15 @@ function atomicCapability(
   id:
     | "governed-note-write"
     | "governed-native-move"
-  | "governed-note-create"
-  | "governed-base-rows"
+    | "governed-note-create"
+    | "governed-base-rows"
     | "governed-frontmatter-write"
     | "governed-canvas-write",
 ): CapabilityManifestEntry {
+  if (input.atomicWrite.state === "timed_out") {
+    return entry(input, id, false, false,
+      "bridge_probe_timed_out", "retry_capability_probe");
+  }
   if (input.atomicWrite.state !== "ready") {
     const unauthorized = input.atomicWrite.state === "unauthorized";
     return entry(
@@ -552,16 +579,28 @@ function atomicCapability(
   const noteCreate = record(status.noteCreate);
   const nativeMove = record(status.nativeMove);
   const available = create
-    ? contractReady && lifecycleReady && noteCreate.supported === true && noteCreate.exclusiveCreate === true
+    ? contractReady &&
+      lifecycleReady &&
+      noteCreate.supported === true &&
+      noteCreate.exclusiveCreate === true
     : native
-    ? contractReady && lifecycleReady && nativeMove.supported === true && nativeMove.preferenceReadable === true
-    : canvas
-    ? contractReady && lifecycleReady && backend.canvasAtomicCas === true
-    : contractReady && lifecycleReady;
-  const bridgeAuthorized = create ? noteCreate.enabled === true : native ? nativeMove.enabled === true : canvas
-    ? backend.canvasWriteEnabled === true
-    : backend.writeEnabled === true;
-  const writePolicyAllows = native ? input.writeMode === "full" : input.writeMode !== "readonly";
+      ? contractReady &&
+        lifecycleReady &&
+        nativeMove.supported === true &&
+        nativeMove.preferenceReadable === true
+      : canvas
+        ? contractReady && lifecycleReady && backend.canvasAtomicCas === true
+        : contractReady && lifecycleReady;
+  const bridgeAuthorized = create
+    ? noteCreate.enabled === true
+    : native
+      ? nativeMove.enabled === true
+      : canvas
+        ? backend.canvasWriteEnabled === true
+        : backend.writeEnabled === true;
+  const writePolicyAllows = native
+    ? input.writeMode === "full"
+    : input.writeMode !== "readonly";
   const authorized = bridgeAuthorized && writePolicyAllows;
   return entry(
     input,
@@ -599,27 +638,65 @@ function baseRowsSnapshotBridgeReady(status: Record<string, unknown>): boolean {
 }
 
 /** Row patches need note CAS writes and Base reads, not a grant to rewrite the Base. */
-function baseRowsCapability(input: CapabilityManifestProjectionInput): CapabilityManifestEntry {
+function baseRowsCapability(
+  input: CapabilityManifestProjectionInput,
+): CapabilityManifestEntry {
   const note = atomicCapability(input, "governed-base-rows");
   if (!note.available) return note;
   const probe = input.baseAtomicWrite;
-  if (probe.state !== "ready") {
+  if (probe.state === "timed_out") {
     return entry(input, "governed-base-rows", false, false,
-      probe.state === "unauthorized" ? "local_rest_unauthorized" : "bridge_unavailable",
-      probe.state === "unauthorized" ? "verify_local_rest_credentials" : "install_or_enable_bridge");
+      "bridge_probe_timed_out", "retry_capability_probe");
   }
-  const status = record(probe.value), backend = record(status.backend), lifecycle = record(status.lifecycle);
+  if (probe.state !== "ready") {
+    return entry(
+      input,
+      "governed-base-rows",
+      false,
+      false,
+      probe.state === "unauthorized"
+        ? "local_rest_unauthorized"
+        : "bridge_unavailable",
+      probe.state === "unauthorized"
+        ? "verify_local_rest_credentials"
+        : "install_or_enable_bridge",
+    );
+  }
+  const status = record(probe.value),
+    backend = record(status.backend),
+    lifecycle = record(status.lifecycle);
   const live = lifecycle.state === undefined || lifecycle.state === "ready";
-  const available = live && status.ok === true && status.contractVersion === 1 &&
-    backend.atomicCas === true && baseRowsSnapshotBridgeReady(status);
-  return entry(input, "governed-base-rows", available, available && note.authorized,
-    !live ? "bridge_lifecycle_not_ready" : !available ? "bridge_contract_incompatible" : note.reasonCode,
-    !live ? "wait_for_bridge" : !available ? "update_bridge_contract" : note.nextAction);
+  const available =
+    live &&
+    status.ok === true &&
+    status.contractVersion === 1 &&
+    backend.atomicCas === true &&
+    baseRowsSnapshotBridgeReady(status);
+  return entry(
+    input,
+    "governed-base-rows",
+    available,
+    available && note.authorized,
+    !live
+      ? "bridge_lifecycle_not_ready"
+      : !available
+        ? "bridge_contract_incompatible"
+        : note.reasonCode,
+    !live
+      ? "wait_for_bridge"
+      : !available
+        ? "update_bridge_contract"
+        : note.nextAction,
+  );
 }
 
 function baseCapability(
   input: CapabilityManifestProjectionInput,
 ): CapabilityManifestEntry {
+  if (input.baseAtomicWrite.state === "timed_out") {
+    return entry(input, "governed-base-write", false, false,
+      "bridge_probe_timed_out", "retry_capability_probe");
+  }
   if (input.baseAtomicWrite.state !== "ready") {
     const unauthorized = input.baseAtomicWrite.state === "unauthorized";
     return entry(
@@ -774,6 +851,14 @@ function operonCapabilities(input: CapabilityManifestProjectionInput): {
   read: CapabilityManifestEntry;
   write: CapabilityManifestEntry;
 } {
+  if (input.operon.state === "timed_out") {
+    return {
+      read: entry(input, "operon-read", false, false,
+        "bridge_probe_timed_out", "retry_capability_probe"),
+      write: unavailableOperonWrite(input,
+        "bridge_probe_timed_out", "retry_capability_probe"),
+    };
+  }
   if (input.operon.state !== "ready") {
     const reason: CapabilityReasonCode =
       input.operon.state === "incompatible"
@@ -1014,7 +1099,8 @@ export function projectCapabilityManifest(
     atomicCapability(input, "governed-frontmatter-write"),
     atomicCapability(input, "governed-canvas-write"),
     baseCapability(input),
-    ...((input.assetRuntimeAvailable === true || input.assetImportEnabled === true)
+    ...(input.assetRuntimeAvailable === true ||
+    input.assetImportEnabled === true
       ? [assetCapability(input)]
       : []),
     operon.read,
@@ -1078,7 +1164,7 @@ async function probe<T>(
   let timeout: NodeJS.Timeout | undefined;
   const bounded = new Promise<NormalizedProbe<T>>((resolve) => {
     timeout = setTimeout(
-      () => resolve({ state: "unavailable" }),
+      () => resolve({ state: "timed_out" }),
       CAPABILITY_PROBE_TIMEOUT_MS,
     );
     timeout.unref();

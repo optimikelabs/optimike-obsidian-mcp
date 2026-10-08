@@ -1,3 +1,8 @@
+import {
+  GovernedResponseFields,
+  governedResponse,
+} from "../../../services/governedResponse.js";
+import { FrontmatterOperationSchema } from "../governedFrontmatterTools/registration.js";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
@@ -32,6 +37,15 @@ const OperationSchema = z.discriminatedUnion("op", [
 ]);
 
 const PlanSchema = z.object({
+  ...GovernedResponseFields,
+  frontmatterOperations: z
+    .array(FrontmatterOperationSchema)
+    .min(1)
+    .max(64)
+    .optional()
+    .describe(
+      "Optional top-level frontmatter set/delete intentions compiled after the body patch into the SAME sealed plan and single CAS. Both write policies and date protection apply. No new values on apply/recover.",
+    ),
   path: z
     .string()
     .min(1)
@@ -52,6 +66,13 @@ const PlanSchema = z.object({
 });
 
 const ApplySchema = z.object({
+  ...GovernedResponseFields,
+  completionMode: z
+    .enum(["deferred", "verified"])
+    .optional()
+    .describe(
+      "Default deferred: return after the CAS attempt, with postflight.checkAfter when date settlement is pending. Call status at or after that time; only committed/verified certifies success. verified waits within the sealed observation window and can exceed client timeouts; a still-pending completion signal returns applying for later status.",
+    ),
   planRef: z
     .string()
     .min(1)
@@ -64,6 +85,7 @@ const ApplySchema = z.object({
 });
 
 const StatusSchema = z.object({
+  ...GovernedResponseFields,
   planRef: z
     .string()
     .min(1)
@@ -80,7 +102,13 @@ async function runTool(
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(await operation(), null, 2),
+          text: JSON.stringify(
+            await governedResponse(toolName, params, operation),
+            null,
+            (params as { responseMode?: string })?.responseMode === "compact"
+              ? undefined
+              : 2,
+          ),
         },
       ],
       isError: false,
@@ -116,7 +144,7 @@ export async function registerGovernedTextPatchTools(
     "obsidian_text_patch_plan",
     {
       description:
-        "Plan one bounded body-only text patch of an existing Markdown note. The sealed plan preserves the complete note outside its authorized body ranges, binds the current before proof and vault identity, and returns only opaque proof metadata; it never writes the note.",
+        "Plan one bounded body text patch, optionally combined with frontmatterOperations, of an existing Markdown note. The sealed plan preserves the complete note outside its authorized body and optional frontmatter ranges, binds the current before proof and vault identity, and returns only opaque proof metadata; it never writes the note.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },
@@ -133,7 +161,11 @@ export async function registerGovernedTextPatchTools(
     },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_text_patch_apply", params, () =>
-        runtime.apply(params.planRef, params.idempotencyKey),
+        runtime.apply(
+          params.planRef,
+          params.idempotencyKey,
+          params.completionMode,
+        ),
       ),
   );
   server.registerTool(
@@ -159,7 +191,11 @@ export async function registerGovernedTextPatchTools(
     },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_text_patch_recover", params, () =>
-        runtime.recover(params.planRef, params.idempotencyKey),
+        runtime.recover(
+          params.planRef,
+          params.idempotencyKey,
+          params.completionMode,
+        ),
       ),
   );
 }

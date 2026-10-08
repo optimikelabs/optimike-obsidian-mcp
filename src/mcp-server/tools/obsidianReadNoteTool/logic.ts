@@ -145,6 +145,7 @@ export const processObsidianReadNote = async (
     format: requestedFormat,
     includeStat,
   } = params;
+  const needsFormattedStat = requestedFormat === "json" || includeStat;
   let effectiveFilePath = originalFilePath; // Track the actual path used (might change during fallback)
 
   logger.debug(
@@ -179,11 +180,11 @@ export const processObsidianReadNote = async (
 
     effectiveFilePath = matchedPath;
     const noteJson = buildNoteJsonFromCache(matchedPath, cacheEntry);
-    const formattedStat = await createFormattedStatWithTokenCount(
+    const formattedStat = needsFormattedStat ? await createFormattedStatWithTokenCount(
       noteJson.stat,
       noteJson.content ?? "",
       { ...context, operation: "formatSharedCacheResponse", effectiveFilePath: matchedPath },
-    );
+    ) : undefined;
 
     logger.info(`Serving ${matchedPath} from shared cache fallback.`, {
       ...context,
@@ -386,7 +387,7 @@ export const processObsidianReadNote = async (
 
     // Generate formatted statistics using the utility function.
     // Provide the content string for token counting. Handle cases where stat might be missing.
-    const formattedStatResult = noteJson.stat
+    const formattedStatResult = needsFormattedStat && noteJson.stat
       ? await createFormattedStatWithTokenCount(
           noteJson.stat,
           noteJson.content ?? "",

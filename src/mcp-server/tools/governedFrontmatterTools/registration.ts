@@ -1,3 +1,7 @@
+import {
+  GovernedResponseFields,
+  governedResponse,
+} from "../../../services/governedResponse.js";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
@@ -30,7 +34,7 @@ const JsonValueSchema: z.ZodType<FrontmatterJsonValue> = z.lazy(() =>
   ]),
 );
 
-const OperationSchema = z.discriminatedUnion("op", [
+export const FrontmatterOperationSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("set"),
     key: z.string().min(1).max(256),
@@ -43,13 +47,14 @@ const OperationSchema = z.discriminatedUnion("op", [
 ]);
 
 const PlanSchema = z.object({
+  ...GovernedResponseFields,
   path: z
     .string()
     .min(1)
     .max(1024)
     .describe("Vault-relative path of one existing Markdown note."),
   operations: z
-    .array(OperationSchema)
+    .array(FrontmatterOperationSchema)
     .min(1)
     .max(64)
     .describe(
@@ -63,6 +68,13 @@ const PlanSchema = z.object({
 });
 
 const ApplySchema = z.object({
+  ...GovernedResponseFields,
+  completionMode: z
+    .enum(["deferred", "verified"])
+    .optional()
+    .describe(
+      "Default deferred: return after the CAS attempt, with postflight.checkAfter when date settlement is pending. Call status at or after that time; only committed/verified certifies success. verified waits within the sealed observation window and can exceed client timeouts; a still-pending completion signal returns applying for later status.",
+    ),
   planRef: z
     .string()
     .min(1)
@@ -75,6 +87,7 @@ const ApplySchema = z.object({
 });
 
 const StatusSchema = z.object({
+  ...GovernedResponseFields,
   planRef: z
     .string()
     .min(1)
@@ -91,7 +104,13 @@ async function runTool(
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(await operation(), null, 2),
+          text: JSON.stringify(
+            await governedResponse(toolName, params, operation),
+            null,
+            (params as { responseMode?: string })?.responseMode === "compact"
+              ? undefined
+              : 2,
+          ),
         },
       ],
       isError: false,
@@ -146,7 +165,11 @@ export async function registerGovernedFrontmatterTools(
     },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_frontmatter_patch_apply", params, () =>
-        runtime.apply(params.planRef, params.idempotencyKey),
+        runtime.apply(
+          params.planRef,
+          params.idempotencyKey,
+          params.completionMode,
+        ),
       ),
   );
   server.registerTool(
@@ -172,7 +195,11 @@ export async function registerGovernedFrontmatterTools(
     },
     async (params: z.infer<typeof ApplySchema>) =>
       runTool("obsidian_frontmatter_patch_recover", params, () =>
-        runtime.recover(params.planRef, params.idempotencyKey),
+        runtime.recover(
+          params.planRef,
+          params.idempotencyKey,
+          params.completionMode,
+        ),
       ),
   );
 }

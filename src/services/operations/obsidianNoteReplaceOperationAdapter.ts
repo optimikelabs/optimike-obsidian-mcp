@@ -1,3 +1,4 @@
+import { resolveProjectedFrontmatterSettlement } from "./projectedFrontmatterSettlement.js";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import type {
@@ -151,6 +152,9 @@ const ReadSchema = z
     sha256: z.string().regex(SHA256),
     size: z.number().int().nonnegative(),
     bindingFingerprint: z.string().regex(SHA256),
+    completion: z.object({contractVersion: z.literal(1), kind: z.literal('fdm-completion-v1'),
+      token: z.string().uuid(), epoch: z.string().uuid(), generation: z.number().int().nonnegative(), state: z.enum(['complete','pending'])})
+      .refine(value => value.state !== 'complete' || value.generation > 0).optional(),
   })
   .passthrough();
 
@@ -163,8 +167,21 @@ const CasSchema = z
     afterSha256: z.string().regex(SHA256),
     size: z.number().int().nonnegative(),
     bindingFingerprint: z.string().regex(SHA256),
+    completionToken: z.string().uuid().optional(),
   })
   .passthrough();
+
+// An in-process, one-use marker issued only by the trusted policy wrapper.
+// Never trust caller/upstream error properties as evidence of non-dispatch.
+const preDispatchErrors = new WeakSet<Error>();
+export function markAtomicWritePreDispatchError(error: unknown): Error {
+  const failure =
+    error instanceof Error
+      ? error
+      : new Error("Atomic-write pre-dispatch check failed.");
+  preDispatchErrors.add(failure);
+  return failure;
+}
 
 export interface AtomicWriteBackend {
   status(): Promise<AtomicWriteStatusResponse>;
@@ -461,6 +478,8 @@ function planDigest(
   });
 }
 
+export type SettlementCompletionMode = "deferred" | "verified";
+
 function receipt(
   profile: AtomicResourceProfile,
   plan: ObsidianNoteReplacePlan,
@@ -470,6 +489,19 @@ function receipt(
   const recoverable =
     plan.status === "applying" || plan.status === "outcome_unknown";
   const digest = planDigest(profile, plan);
+  const settlementCheckAt =
+    plan.modifiedTimeSettlementPolicy &&
+    plan.settlementObservationStartedAtEpochMs !== undefined &&
+    (plan.status === "applying" || plan.status === "outcome_unknown") &&
+    hasBoundedSettlementObservationDelays(plan.modifiedTimeSettlementPolicy)
+      ? plan.settlementObservationStartedAtEpochMs +
+        Math.max(
+          0,
+          ...plan.modifiedTimeSettlementPolicy.integrations.map(
+            (i) => i.settlementObservationDelayMs,
+          ),
+        )
+      : undefined;
   const committedSha256 =
     plan.modifiedTimeSettlementEvidence?.observedSha256 ?? plan.afterSha256;
   return {
@@ -506,6 +538,12 @@ function receipt(
             }),
             details: {
               sha256: committedSha256,
+              ...(plan.effectProof?.kind === 'fdm-completion-v1' ? {
+                completionKind: plan.effectProof.kind,
+                completionDigest: plan.effectProof.digest,
+                completionEpoch: plan.effectProof.details?.epoch ?? null,
+                completionGeneration: plan.effectProof.details?.generation ?? null,
+              } : {}),
               ...(plan.modifiedTimeSettlementEvidence
                 ? {
                     sealedSha256: plan.afterSha256,
@@ -516,6 +554,14 @@ function receipt(
                       plan.modifiedTimeSettlementEvidence.pluginId,
                     settlementObservedAt:
                       plan.modifiedTimeSettlementEvidence.observedAt,
+                    ...(plan.modifiedTimeSettlementEvidence
+                      .authorizedFrontmatterFormatKeys
+                      ? {
+                          settlementAuthorizedFormatKeyCount:
+                            plan.modifiedTimeSettlementEvidence
+                              .authorizedFrontmatterFormatKeys.length,
+                        }
+                      : {}),
                   }
                 : {}),
             },
@@ -523,6 +569,13 @@ function receipt(
         }
       : {}),
     postflight: {
+      ...(settlementCheckAt !== undefined
+        ? {
+            reason: "modified_time_settlement" as const,
+            checkAfter: new Date(plan.settlementDeferred?.completionToken
+              ? Date.now() + 250 : settlementCheckAt).toISOString(),
+          }
+        : {}),
       status:
         plan.status === "committed"
           ? "verified"
@@ -693,6 +746,22 @@ export class ObsidianNoteReplaceOperationAdapter
       status,
       this.options.modifiedTimeProtectedKeys ?? [],
     );
+    // Bind every configured/dynamic protected date/key at admission. Older
+    // plans without this sealed list keep their original strict settlement.
+    const allowsProjectedFormatting =
+      input.projection?.kind === "obsidian.frontmatter.patch" ||
+      (input.projection?.kind === "obsidian.text.patch" &&
+        Object.hasOwn(input.projection, "frontmatterProof"));
+    const sealedProjection = allowsProjectedFormatting
+      ? {
+          ...input.projection!,
+          normalizationProtectedFrontmatterKeys:
+            effectiveProtectedFrontmatterKeysFromStatus(
+              status,
+              this.options.modifiedTimeProtectedKeys ?? [],
+            ),
+        }
+      : input.projection;
     const requestDigest = operationDigest({
       operationKind: this.operationKind,
       path: input.path,
@@ -702,8 +771,8 @@ export class ObsidianNoteReplaceOperationAdapter
       ...(input.idempotencyIdentity
         ? { idempotencyIdentity: input.idempotencyIdentity }
         : {}),
-      ...(input.projection
-        ? { projectionDigest: operationDigest(input.projection) }
+      ...(sealedProjection
+        ? { projectionDigest: operationDigest(sealedProjection) }
         : {}),
       ...(modifiedTimeSettlementPolicy
         ? {
@@ -719,7 +788,7 @@ export class ObsidianNoteReplaceOperationAdapter
         ...(input.idempotencyIdentity
           ? { idempotencyIdentity: input.idempotencyIdentity }
           : {}),
-        ...(input.projection ? { projection: input.projection } : {}),
+        ...(sealedProjection ? { projection: sealedProjection } : {}),
         path: input.path,
         beforeSha256: read.sha256,
         afterSha256,
@@ -735,6 +804,7 @@ export class ObsidianNoteReplaceOperationAdapter
   async apply(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "verified",
   ): Promise<OperationReceipt> {
     const plan = this.required(reference, idempotencyKey);
     if (plan.status === "committed") return receipt(this.profile, plan);
@@ -742,7 +812,10 @@ export class ObsidianNoteReplaceOperationAdapter
       if (plan.status === "applying") {
         // A second caller may be observing a live executor. Reconcile only
         // terminal proof; never classify an in-flight apply as interrupted.
-        return receipt(this.profile, await this.reconcile(plan));
+        return receipt(
+          this.profile,
+          await this.reconcileForMode(plan, completionMode),
+        );
       }
       return receipt(this.profile, plan);
     }
@@ -759,7 +832,10 @@ export class ObsidianNoteReplaceOperationAdapter
       if (!current) throw error;
       return receipt(this.profile, current);
     }
-    return receipt(this.profile, await this.execute(applying, false));
+    return receipt(
+      this.profile,
+      await this.execute(applying, false, completionMode),
+    );
   }
 
   async status(reference: string): Promise<OperationReceipt> {
@@ -773,6 +849,7 @@ export class ObsidianNoteReplaceOperationAdapter
   async recover(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "verified",
   ): Promise<OperationReceipt> {
     let plan = this.required(reference, idempotencyKey);
     if (plan.status === "committed") return receipt(this.profile, plan);
@@ -788,7 +865,7 @@ export class ObsidianNoteReplaceOperationAdapter
         { reason: "sealed_settlement_delay_missing" },
       );
     }
-    plan = await this.reconcile(plan);
+    plan = await this.reconcileForMode(plan, completionMode);
     if (plan.status === "applying") {
       // A live executor still owns this plan. Only a persisted interruption
       // marker (outcome_unknown) authorizes exact-plan re-execution.
@@ -799,6 +876,12 @@ export class ObsidianNoteReplaceOperationAdapter
     }
     plan = this.beginModifiedTimeSettlementObservationOrReload(plan);
     if (plan.status !== "outcome_unknown") {
+      return receipt(this.profile, plan);
+    }
+    if (
+      completionMode === "deferred" &&
+      this.modifiedTimeSettlementObservationRemainingMs(plan) > 0
+    ) {
       return receipt(this.profile, plan);
     }
     await this.awaitModifiedTimeSettlementObservation(plan);
@@ -851,7 +934,10 @@ export class ObsidianNoteReplaceOperationAdapter
       if (!current) throw error;
       return receipt(this.profile, current);
     }
-    return receipt(this.profile, await this.execute(applying, true));
+    return receipt(
+      this.profile,
+      await this.execute(applying, true, completionMode),
+    );
   }
 
   private required(
@@ -873,6 +959,7 @@ export class ObsidianNoteReplaceOperationAdapter
   private async execute(
     plan: ObsidianNoteReplacePlan,
     recoveredFromUnknown: boolean,
+    completionMode: SettlementCompletionMode,
   ): Promise<ObsidianNoteReplacePlan> {
     const executionAttemptId = this.requiredExecutionAttemptId(plan);
     let casDispatched = false;
@@ -943,6 +1030,21 @@ export class ObsidianNoteReplaceOperationAdapter
         );
       }
       if (plan.modifiedTimeSettlementPolicy) {
+        const completionToken = this.profile.operationKind === "obsidian.note.replace" &&
+          plan.modifiedTimeSettlementPolicy.integrations.length === 1 &&
+          plan.modifiedTimeSettlementPolicy.integrations[0].pluginId === "frontmatter-date-manager"
+            ? result.completionToken : undefined;
+        if (
+          this.modifiedTimeSettlementObservationRemainingMs(plan) > 0 &&
+          (completionMode === "deferred" || completionToken)
+        ) {
+          plan = this.deferSettlementOrReload(
+            plan, executionAttemptId, "postflight", recoveredFromUnknown, completionToken,
+          );
+          return completionMode === "verified"
+            ? this.awaitCompletionWithinOriginalWindow(plan)
+            : plan;
+        }
         await this.awaitModifiedTimeSettlementObservation(plan);
         const reconciled = await this.reconcile(plan, executionAttemptId);
         if (reconciled.status !== "applying") return reconciled;
@@ -960,6 +1062,9 @@ export class ObsidianNoteReplaceOperationAdapter
         executionAttemptId,
       );
     } catch (error) {
+      if (error instanceof Error && preDispatchErrors.delete(error)) {
+        casDispatched = false;
+      }
       if (
         casDispatched &&
         plan.modifiedTimeSettlementPolicy &&
@@ -986,6 +1091,17 @@ export class ObsidianNoteReplaceOperationAdapter
             "conflict",
             error.message,
             executionAttemptId,
+          );
+        }
+        if (
+          completionMode === "deferred" &&
+          this.modifiedTimeSettlementObservationRemainingMs(plan) > 0
+        ) {
+          return this.deferSettlementOrReload(
+            plan,
+            executionAttemptId,
+            "cas_conflict",
+            recoveredFromUnknown,
           );
         }
         let reconciled: ObsidianNoteReplacePlan;
@@ -1024,6 +1140,16 @@ export class ObsidianNoteReplaceOperationAdapter
         );
       }
       if (casDispatched) {
+        if (
+          completionMode === "deferred" &&
+          this.modifiedTimeSettlementObservationRemainingMs(plan) > 0
+        ) {
+          return this.uncertain(
+            plan,
+            error instanceof Error ? error.message : String(error),
+            executionAttemptId,
+          );
+        }
         await this.awaitModifiedTimeSettlementObservation(plan);
         const reconciled = await this.reconcile(plan, executionAttemptId).catch(
           () => plan,
@@ -1037,6 +1163,27 @@ export class ObsidianNoteReplaceOperationAdapter
         error instanceof Error ? error.message : String(error),
         executionAttemptId,
       );
+    }
+  }
+
+  private deferSettlementOrReload(
+    plan: ObsidianNoteReplacePlan,
+    executionAttemptId: string,
+    kind: "postflight" | "cas_conflict",
+    recoveredFromUnknown: boolean,
+    completionToken?: string,
+  ): ObsidianNoteReplacePlan {
+    try {
+      return this.journal.deferSettlement(
+        plan.operationId,
+        executionAttemptId,
+        { kind, recoveredFromUnknown, ...(completionToken ? {completionToken} : {}) },
+      );
+    } catch (error) {
+      if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+      const current = this.journal.get(plan.operationId);
+      if (!current) throw error;
+      return current;
     }
   }
 
@@ -1088,11 +1235,97 @@ export class ObsidianNoteReplaceOperationAdapter
     return plan;
   }
 
+  private async reconcileForMode(
+    plan: ObsidianNoteReplacePlan,
+    completionMode: SettlementCompletionMode,
+  ): Promise<ObsidianNoteReplacePlan> {
+    if (plan.settlementDeferred && completionMode === "verified") {
+      if (plan.status === "applying" && plan.settlementDeferred.completionToken) {
+        return this.awaitCompletionWithinOriginalWindow(plan);
+      }
+      await this.awaitModifiedTimeSettlementObservation(plan);
+    }
+    return this.reconcile(plan);
+  }
+
+  /** A blocking caller gets the same durable completion proof as status. Its
+   * wait budget never exceeds the original sealed observation window. If FDM
+   * is still pending at that deadline, return applying for later status rather
+   * than inventing completion or holding a request for the token's full TTL. */
+  private async awaitCompletionWithinOriginalWindow(
+    plan: ObsidianNoteReplacePlan,
+  ): Promise<ObsidianNoteReplacePlan> {
+    const attemptId = plan.executionOwner?.attemptId;
+    const sleep = this.options.sleep ?? ((ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    while (plan.status === "applying") {
+      const current = this.journal.get(plan.operationId);
+      if (!current || current.status !== "applying" || current.executionOwner?.attemptId !== attemptId) return current ?? plan;
+      plan = await this.reconcile(current);
+      if (plan.status !== "applying") return plan;
+      const remaining = this.modifiedTimeSettlementObservationRemainingMs(plan);
+      if (remaining <= 0) return plan;
+      if (!Number.isFinite(remaining)) throw new Error("Completion observation has no sealed deadline.");
+      await sleep(Math.min(250, remaining));
+    }
+    return plan;
+  }
+
   private async reconcile(
     plan: ObsidianNoteReplacePlan,
     executionAttemptId?: string,
+    completionRead?: z.infer<typeof ReadSchema>,
   ): Promise<ObsidianNoteReplacePlan> {
-    const read = ReadSchema.parse(
+    // The sealed delay cannot yield terminal proof yet. Avoid redundant backend reads.
+    const early = plan.modifiedTimeSettlementPolicy && this.modifiedTimeSettlementObservationRemainingMs(plan) > 0;
+    const token = plan.settlementDeferred?.kind === 'postflight' ? plan.settlementDeferred.completionToken : undefined;
+    if (token && (this.options.now ?? Date.now)() - (plan.settlementObservationStartedAtEpochMs ?? 0) >= 300000)
+      return plan.status === 'applying'
+        ? this.uncertain(plan, 'FDM completion exceeded its bounded observation lifetime.', this.requiredExecutionAttemptId(plan)) : plan;
+    if ((early || token) && !completionRead) {
+      if (!token) return plan;
+      try {
+        const read = ReadSchema.parse(await this.backend.read({contractVersion: 1, path: plan.path, completionToken: token}));
+        if (!sameBackendTarget(plan, read) || read.sha256 !== createHash('sha256').update(read.content, 'utf8').digest('hex')) return plan;
+        if (read.completion?.token === token && read.completion.state === 'pending') {
+          if ((this.options.now ?? Date.now)() - (plan.settlementObservationStartedAtEpochMs ?? 0) >= 300000)
+            return this.uncertain(plan, 'FDM completion remained pending beyond its bounded observation lifetime.', this.requiredExecutionAttemptId(plan));
+          return plan; // A known outstanding effect never becomes safe merely because the old delay elapsed.
+        }
+        if (read.completion?.token === token && read.completion.state === 'complete') completionRead = read;
+        else if (early) return plan;
+      } catch { return plan; } // Probe failure retains the original bounded wait; never retries a write.
+    }
+    if (
+      plan.status === "applying" &&
+      plan.settlementDeferred &&
+      executionAttemptId === undefined
+    ) {
+      const attemptId = this.requiredExecutionAttemptId(plan);
+      const reconciled =
+        plan.settlementDeferred.kind === "cas_conflict"
+          ? await this.reconcileCasConflict(
+              plan,
+              attemptId,
+              plan.settlementDeferred.recoveredFromUnknown,
+            )
+          : await this.reconcile(plan, attemptId, completionRead);
+      if (reconciled.status !== "applying") return reconciled;
+      return plan.settlementDeferred.kind === "cas_conflict"
+        ? this.transitionOrReload(
+            plan,
+            ["applying"],
+            "conflict",
+            "Atomic compare-and-swap conflict.",
+            attemptId,
+          )
+        : this.uncertain(
+            plan,
+            "Deferred postflight did not reach either sealed proof.",
+            attemptId,
+          );
+    }
+    const read = completionRead ?? ReadSchema.parse(
       await this.backend.read({ contractVersion: 1, path: plan.path }),
     );
     const observesLiveExecutor =
@@ -1109,9 +1342,23 @@ export class ObsidianNoteReplaceOperationAdapter
     }
     if (
       plan.modifiedTimeSettlementPolicy &&
-      this.modifiedTimeSettlementObservationRemainingMs(plan) > 0
+      this.modifiedTimeSettlementObservationRemainingMs(plan) > 0 && !completionRead
     ) {
       return plan;
+    }
+    if (completionRead && executionAttemptId) {
+      const settlement = read.sha256 === plan.afterSha256 ? undefined : this.modifiedTimeSettlement(plan, read.content);
+      if (read.sha256 === plan.afterSha256 || settlement) {
+        try {
+          return this.journal.commitWithCompletionProof(plan.operationId, executionAttemptId, {
+            kind: 'fdm-completion-v1', digest: operationDigest({epoch: read.completion!.epoch, generation: read.completion!.generation, sha256: read.sha256}),
+            details: {epoch: read.completion!.epoch, generation: read.completion!.generation, sha256: read.sha256, observedAt: new Date((this.options.now ?? Date.now)()).toISOString()},
+          }, settlement);
+        } catch (error) {
+          if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+          return this.journal.get(plan.operationId) ?? plan;
+        }
+      }
     }
     if (read.sha256 === plan.afterSha256) {
       if (observesLiveExecutor) {
@@ -1161,14 +1408,24 @@ export class ObsidianNoteReplaceOperationAdapter
     ) {
       return undefined;
     }
-    return resolveModifiedTimeSettlement(
-      plan.nextContent,
-      observedContent,
-      plan.modifiedTimeSettlementPolicy,
-      {
-        applyStartedAtEpochMs: plan.executionStartedAtEpochMs,
-        settlementObservedAtEpochMs: (this.options.now ?? Date.now)(),
-      },
+    const window = {
+      applyStartedAtEpochMs: plan.executionStartedAtEpochMs,
+      settlementObservedAtEpochMs: (this.options.now ?? Date.now)(),
+    };
+    return (
+      resolveModifiedTimeSettlement(
+        plan.nextContent,
+        observedContent,
+        plan.modifiedTimeSettlementPolicy,
+        window,
+      ) ??
+      resolveProjectedFrontmatterSettlement(
+        plan.nextContent,
+        observedContent,
+        plan.modifiedTimeSettlementPolicy,
+        window,
+        plan.projection,
+      )
     );
   }
 

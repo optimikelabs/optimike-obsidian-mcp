@@ -56,6 +56,9 @@ try{
  while(next.nextCursor){next=await r.list(next.nextCursor);entries.push(...next.skills);}
  assert.deepEqual(entries.map(x=>x.uri),[uri('one'),uri('team/one'),uri('two')]);checks++;
  const first=(await r.get(uri('one'))).skill;assert.deepEqual(first,page.skills[0]);assert.equal(first.frontmatter.custom.enabled,true);checks++;
+ const operational=new SkillRegistry(roots,cfg,'operational');assert.deepEqual((await operational.get(uri('one'))).skill,first);checks++;
+ await reject(()=>operational.get(uri('private')),'not_found');
+ await reject(()=>operational.list(page.nextCursor),'cursor_invalid');
  for(const entry of first.resources){
   const relative=decodeURIComponent(entry.uri.slice('skill://local.skills/one/'.length));
   const bytes=await readFile(path.join(root,'one',relative));

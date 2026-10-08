@@ -39,6 +39,8 @@ export type OperationReceipt = {
   beforeProof: OperationProof;
   afterProof?: OperationProof;
   postflight: {
+    reason?: "modified_time_settlement";
+    checkAfter?: string;
     status:
       | "not_started"
       | "pending"

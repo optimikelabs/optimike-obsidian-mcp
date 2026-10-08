@@ -13,6 +13,8 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
 ## Canonical priorities
 
 - Read, list and exact text search: use the dedicated read/search tools.
+- Frontmatter key reads: use \`obsidian_get_frontmatter\` in live/hybrid mode.
+  It is read-only and does not accept mutation inputs.
 - Semantic search: use \`smart_semantic_search\`. It is the only registered
   semantic-search tool in 3.0.
 - Operon-managed tasks: use \`operon_list_tasks\` or \`operon_query_tasks\`. Use
@@ -28,8 +30,9 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
   only for an intentional direct compatibility/create path when the governed
   family is unavailable; they have no durable receipt.
 - Top-level frontmatter set/delete in live/hybrid mode: prefer
-  \`obsidian_frontmatter_patch_plan\`. Use \`obsidian_manage_frontmatter\` for
-  direct reads, compatibility, or a runtime where the governed tool is absent.
+  \`obsidian_frontmatter_patch_plan\`. \`obsidian_manage_frontmatter\` remains
+  an explicit full-profile compatibility path or a bounded non-live fallback.
+  A governed conflict or uncertain effect never authorizes a direct write.
 - Named Base formula set/delete: prefer \`bases_formula_patch_plan\`.
   \`bases_upsert_config\` is a whole-config compatibility path and must not bypass
   the governed formula contract.
@@ -42,6 +45,13 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
   is intentional and allowed by the active runtime policy.
 - Headless filesystem mutations are bounded fallback operations for copied or
   dedicated vaults. They do not claim Obsidian Desktop or plugin semantics.
+
+The \`operational\` profile retains complete workflows, Operon, external roots
+and distinct direct capabilities. It hides redundant direct note/frontmatter
+mutations when their governed lifecycles are complete, and reserves historical
+whole-Base replacement for \`full\`. Use a governed frontmatter patch for tags
+in YAML; the retained direct tag helper has a separate composite/inline contract.
+The \`full\` profile remains explicit compatibility, not a recovery bypass.
 
 ## Governed sequence
 

@@ -43,7 +43,7 @@ il crée une intention durable de mutation et est bloqué par
 
 ### `obsidian_note_replace_apply`
 
-Entrée : `planRef` et l’`idempotencyKey` correspondante uniquement. Le caller ne
+Entrée : `planRef`, l’`idempotencyKey` correspondante et `completionMode` optionnel. Le caller ne
 peut plus substituer cible, contenu, binding ou hash après le planning.
 
 Avant chaque effet possible, le serveur revalide la politique d’écriture MCP
@@ -70,7 +70,7 @@ nouvelle clé d’idempotence.
 
 ### `obsidian_note_replace_recover`
 
-Entrée : `planRef` et l’`idempotencyKey` correspondante uniquement. Recover
+Entrée : `planRef`, l’`idempotencyKey` correspondante et `completionMode` optionnel. Recover
 réconcilie ou, si les preuves démontrent que c’est sûr, reprend exactement le
 même plan scellé. Il n’accepte aucun payload de remplacement et ne peut pas
 réactiver un plan terminal stable.
@@ -243,3 +243,37 @@ avant le démarrage du MCP. Cette gate Desktop live a réussi le 2026-08-14,
 avec un SHA-256 final identique au SHA-256 avant mutation. Ces garanties sont
 publiées dans Optimike Obsidian MCP 2.6.0 ; les paliers de capacités suivants
 restent des décisions séparées de l’autorité du dépôt.
+
+### Modes de retour pour note, corps et frontmatter
+
+`obsidian_note_replace_*`, `obsidian_text_patch_*` et
+`obsidian_frontmatter_patch_*` acceptent `completionMode` optionnel sur `apply`
+et `recover`. Le défaut est `deferred`. Le plan reste scellé et chaque CAS
+conserve les contrôles de politique, dates protégées, binding et hash.
+
+Avec une intégration de dates bornée, le CAS réussi rend
+`phase: applying`, `outcome: null`, `postflight.status: pending`,
+`postflight.reason: modified_time_settlement` et `postflight.checkAfter` (UTC).
+Ce reçu ne certifie pas le succès et ne contient pas d’`afterProof`. Appeler le
+`status` correspondant à partir de `checkAfter`. Seul `committed` avec
+`verified` certifie le résultat final. Avant cette échéance, status rend les
+métadonnées durables sans relire le backend et sans écrire.
+
+La fenêtre commence après la tentative de CAS et conserve tout le délai annoncé
+par le Bridge. Une réponse perdue laisse `outcome_unknown` ; status/recovery
+respectent aussi cette fenêtre. `completionMode: verified` attend la vérification
+finale, y compris pour rejoindre une tentative déjà différée. Ce mode peut
+dépasser le timeout client : appeler status après une réponse perdue.
+
+L’attente est enregistrée dans SQLite avec le verrou de tentative. Aucun timer
+ni exécuteur en arrière-plan ne doit rester actif : fermeture et redémarrage
+préservent le suivi sans autoriser un second CAS. Le prochain status vérifie le
+hash exact ou la seule variation de date admissible ; conflit et vraie dérive
+restent distincts. Le cache est rafraîchi après la tentative de CAS puis après
+certification. Les API Base-row, Canvas et Base-formula conservent leurs défauts.
+
+Un refus confirmé par les contrôles internes avant tout envoi CAS reste immédiat : il ne démarre pas une fenêtre de dates pour une écriture non envoyée. Une erreur réseau ou une indication fournie par un client ne prouve pas cette absence d’envoi.
+
+## Reçus et mesures
+
+Les quatre outils acceptent `responseMode: compact | detailed` (défaut detailed) et `diagnostics: true`. Le reçu compact conserve l’état, les permissions et le délai de postflight ; `detailedReceipt` indique la lecture status de la preuve complète. Les durées couvrent uniquement l’appel serveur courant et ne modifient pas le plan scellé.

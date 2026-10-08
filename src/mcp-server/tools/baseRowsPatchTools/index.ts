@@ -88,7 +88,7 @@ export function registerBaseRowsPatchTools(
     "bases_rows_patch_apply",
     {
       description:
-        "Revalidate the sealed Base and selected path, then apply one note-content CAS. Top-level set/delete only. No Base write or multi-file transaction. Unknown or completed attempts are observed, never blindly replayed; no synthetic recovery.",
+        "Revalidate the sealed Base and selected path, then apply one note-content CAS. Top-level set/delete only. No Base write or multi-file transaction. Waits within the sealed note observation window, using a supported completion signal when available; a still-pending signal returns applying for later status. Unknown or completed attempts are observed, never blindly replayed; no synthetic recovery.",
       inputSchema: mcpSchema(Apply.shape),
       annotations: {
         ...GOVERNED_MUTATION_TOOL_ANNOTATIONS,

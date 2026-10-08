@@ -370,6 +370,10 @@ function parse(result) {
 }
 
 async function call(name, args) {
+  // These historical canaries assert a terminal receipt, not deferred latency.
+  if (/^obsidian_(?:note_replace|text_patch|frontmatter_patch)_(?:apply|recover)$/.test(name)) {
+    args = { ...args, completionMode: "verified" };
+  }
   assertMainFlowActive();
   const result = parse(await client.callTool({ name, arguments: args }));
   assertMainFlowActive();

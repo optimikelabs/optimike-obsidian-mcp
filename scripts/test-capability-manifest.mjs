@@ -842,3 +842,14 @@ for (const observed of [
 }
 assert.equal(capability(projectCapabilityManifest(input({ operon: { state: "ready", value: operonReady({ operon: { present: false } }) } })), "operon-read").reasonCode, "operon_not_present");
 console.log("PASS: R1-C unavailable and unknown observations are distinct from explicit Operon absence");
+
+for (const [probeName, ids, reason] of [
+  ['localRest', ['local-rest'], 'local_rest_probe_timed_out'],
+  ['atomicWrite', ['governed-note-write','governed-frontmatter-write','governed-native-move','governed-note-create','governed-canvas-write'], 'bridge_probe_timed_out'],
+  ['baseAtomicWrite', ['governed-base-rows','governed-base-write'], 'bridge_probe_timed_out'],
+  ['operon', ['operon-read','operon-write'], 'bridge_probe_timed_out'],
+]) {
+  const manifest=projectCapabilityManifest(input({[probeName]:{state:'timed_out'}}));
+  for(const id of ids){const c=capability(manifest,id);assert.equal(c.available,false);assert.equal(c.authorized,false);assert.equal(c.reasonCode,reason);assert.equal(c.nextAction,'retry_capability_probe');}
+}
+console.log('PASS REST, Atomic, Base and Operon deadlines are distinguished from missing services, without permission promotion');

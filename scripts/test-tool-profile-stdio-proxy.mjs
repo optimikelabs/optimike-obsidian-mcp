@@ -183,6 +183,10 @@ try {
     await full.close().catch(() => undefined);
   }
 
+  const operational=await openProxy(vault,port,"operational");
+  try {const names=(await operational.listTools()).tools.map(x=>x.name);assert.equal(names.length,48);assert.ok(names.includes("external_read"));const status=await operational.callTool({name:"obsidian_runtime_status",arguments:{}});assert.equal(JSON.parse(status.content[0].text).capabilityManifest.profile,"full");}
+  finally{await operational.close().catch(()=>undefined);}
+
   console.log(
     "PASS: stdio proxy defaults to standard, tasks exposes structured Operon status in non-live mode, explicit profiles remain per-client, and the shared backend remains full",
   );

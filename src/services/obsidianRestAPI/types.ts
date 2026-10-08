@@ -37,6 +37,7 @@ export type BridgeLifecycleStatus = {
 export type AtomicWriteReadRequest = {
   contractVersion: 1;
   path: string;
+  completionToken?: string;
 };
 
 export type AtomicWriteCasRequest = AtomicWriteReadRequest & {
@@ -104,6 +105,8 @@ export type AtomicWriteReadResponse = {
   sha256: string;
   size: number;
   bindingFingerprint: string;
+  completion?: { contractVersion: 1; kind: 'fdm-completion-v1'; token: string;
+    epoch: string; generation: number; state: 'complete' | 'pending' };
 };
 
 export type AtomicWriteCasResponse = {
@@ -114,6 +117,7 @@ export type AtomicWriteCasResponse = {
   afterSha256: string;
   size: number;
   bindingFingerprint: string;
+  completionToken?: string;
 };
 
 export type NoteLinksRequest = {
