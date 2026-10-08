@@ -296,14 +296,14 @@ try {
     report.authority.surfaceHashAuthority,
     "verifier-measure-tools-list/v1",
   );
-  assert.equal(report.authority.candidateSurfaceHashes.length, 4);
+  assert.equal(report.authority.candidateSurfaceHashes.length, 5);
   assert.ok(
     report.authority.candidateSurfaceHashes.every((surface) =>
       /^[0-9a-f]{64}$/u.test(surface.toolsListSha256),
     ),
   );
   assert.equal(report.failures.length, 0);
-  assert.equal(report.summaries.length, 4);
+  assert.equal(report.summaries.length, 5);
   assert.ok(report.summaries.every((summary) => summary.successRate === 1));
   assert.ok(report.summaries.every((summary) => summary.safetyPassRate === 1));
 
