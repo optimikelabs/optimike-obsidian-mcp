@@ -46,13 +46,15 @@ const watchdog = setTimeout(() => {
   rawChild?.kill("SIGKILL");
   console.error("stdio fixture watchdog");
   process.exit(2);
-}, 60000);
+// Seven fresh processes include SDK bounded shutdown grace periods.
+}, 120000);
 try {
   for (const [profile, count] of [
     ["standard", 9],
     ["authoring", 9],
     ["tasks", 14],
     ["full", 48],
+    ["operational", 48],
   ]) {
     const transport = new ModernStdio({
       command: process.execPath,
@@ -191,7 +193,7 @@ try {
     "invalid config must not echo its value",
   );
   console.log(
-    "PASS: modern stdio 4 profiles, genuine v1 default/dual clients, discovery-free request, per-request metadata, unsupported version, JSON-only stdout and fail-closed protocol mode",
+    "PASS: modern stdio 5 profiles, genuine v1 default/dual clients, discovery-free request, per-request metadata, unsupported version, JSON-only stdout and fail-closed protocol mode",
   );
 } finally {
   clearTimeout(watchdog);

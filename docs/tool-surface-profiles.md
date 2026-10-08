@@ -151,3 +151,5 @@ These client features can evolve independently. Select an Optimike profile first
 - `smart_search` and `smart-search` no longer exist; call `smart_semantic_search`.
 
 Clients that genuinely need administration, external roots or specialized compatibility tools must opt in with `MCP_TOOL_PROFILE=full`, `--tool-profile full`, or `/mcp/full`. Profile selection still changes discovery, not authorization.
+
+The routing corpus preserves its original 31 cases and adds four operational cases for governed append, uncertain-status inspection, read-only frontmatter and combined body/YAML planning. Offline fixture validation is not a model-behavior benchmark.
