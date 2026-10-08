@@ -26,12 +26,12 @@ assert.deepEqual(
 );
 assert.equal(artifact.schemaVersion, "tool-catalog.v1");
 assert.equal(artifact.version, 1);
-assert.equal(artifact.toolCount, 94);
+assert.equal(artifact.toolCount, 95);
 assert.equal(artifact.tools.length, TOOL_SURFACE_REGISTRY.length);
 
 const registryNames = TOOL_SURFACE_REGISTRY.map((entry) => entry.name);
 const catalogNames = artifact.tools.map((entry) => entry.name);
-assert.equal(new Set(registryNames).size, 94);
+assert.equal(new Set(registryNames).size, 95);
 assert.deepEqual(
   catalogNames,
   [...registryNames].sort((a, b) => a.localeCompare(b)),
@@ -49,7 +49,7 @@ for (const entry of artifact.tools) {
 }
 
 assert.deepEqual(artifact.classificationCounts, {
-  "canonical-unique": 47,
+  "canonical-unique": 48,
   "alias-redundant": 0,
   "compatibility-historical": 1,
   "governed-operation": 32,
@@ -123,5 +123,5 @@ for (const profileId of TOOL_PROFILE_IDS) {
 }
 
 console.log(
-  "PASS: deterministic 94-tool conditional catalog is exhaustive, alias-free, profile/mode-complete, and classifies all governed/diagnostic/admin surfaces",
+  "PASS: deterministic 95-tool conditional catalog is exhaustive, alias-free, profile/mode-complete, and classifies all governed/diagnostic/admin surfaces",
 );

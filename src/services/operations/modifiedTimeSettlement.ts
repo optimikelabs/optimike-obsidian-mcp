@@ -24,6 +24,7 @@ export type ModifiedTimeSettlementEvidence = {
   propertyName: string;
   observedSha256: string;
   observedAt: string;
+  authorizedFrontmatterFormatKeys?: string[];
 };
 
 const STRICT_LOCAL_DATETIME =

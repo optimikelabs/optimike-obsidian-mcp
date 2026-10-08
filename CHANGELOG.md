@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-10-08
+
+### Local benchmark highlights
+
+- With the qualified optional FDM integration, full combined-edit certification fell from 37.71 s to a 1.52 s median (after n=5); blocking verified apply fell from 37.53 s to 1.54 s, and one existing Base-row apply from 38.00 s to 1.73 s (before n=1, after n=3). Unmodified FDM retains its conservative settlement window.
+- Forced Operon snapshot refresh fell from 6.74 s to 5.03 s (n=3 per campaign). Compact terminal receipts used 1,065 instead of 4,217 JSON bytes (~75% fewer; three combined statuses), retaining status and proof digests.
+- These local successive measurements are not an SLA. See [method, conditions and limits](docs/governed-performance.md#measured-local-improvements).
+
+### Added
+
+- Add an opt-in `operational` catalog with governed write preference and dedicated read-only `obsidian_get_frontmatter`; `full` retains explicit compatibility.
+- Add deferred completion, compact receipts, per-call timing diagnostics, and combined body/frontmatter intentions to the governed write workflow. Final success still requires `committed` and `verified`.
+- Add an optional, exact-build-fenced installer with external backup and guarded rollback for the completion add-on. FDM means Frontmatter Date Manager, the plugin that owns automatic note date updates.
+- Add a fenced FDM completion adapter and optional FDM 1.6.0 add-on for earlier settlement; installations without the qualified acknowledgement retain the original conservative deadline. Atomic Write Bridge is versioned `0.8.1`.
+
+### Fixed
+
+- Update the MCP SDK client/core/server to 2.3.1, Axios to 1.20.0 and the resolved source-map-js to 1.2.2; production dependencies pass the high-severity audit gate.
+- Preserve uncertain post-dispatch outcomes, reject proven pre-dispatch conflicts promptly, and reconcile only authorized YAML representation changes with identical parsed values.
+- Avoid statistics/tokenizer work for plain Markdown reads without requested stats; overlap independent Operon snapshot reads while preserving generation and consistency checks.
+- Distinguish expired REST/Bridge diagnostic probes from missing services without promoting availability or permissions.
+
+### Documentation
+
+- Document exercised Local REST API 5.4.0 paths and optional shared-identity HTTP quota tuning. Plugin selection and installation-specific limits remain the installer's choice.
+
 ## [3.11.0] - 2026-09-30
 
 ### Added

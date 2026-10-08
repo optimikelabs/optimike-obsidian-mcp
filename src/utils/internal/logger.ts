@@ -9,6 +9,7 @@ import path from "path";
 import winston from "winston";
 import TransportStream from "winston-transport";
 import { config } from "../../config/index.js";
+import { TOOL_PROFILE_IDS } from "../../mcp-server/toolProfiles.js";
 import { RequestContext } from "./requestContext.js";
 
 /**
@@ -205,7 +206,7 @@ const SAFE_LOG_ENUM_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
   ]),
   transport: new Set(["stdio", "http", "sse", "streamable-http"]),
   writeMode: new Set(["readonly", "guarded", "full"]),
-  profile: new Set(["minimal", "standard", "authoring", "tasks", "full"]),
+  profile: new Set(["minimal", ...TOOL_PROFILE_IDS]),
   originalErrorType: new Set([
     "mcp",
     "syntax",

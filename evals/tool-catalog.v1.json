@@ -6,9 +6,9 @@
     "vault-cache",
     "asset-policy"
   ],
-  "toolCount": 94,
+  "toolCount": 95,
   "classificationCounts": {
-    "canonical-unique": 47,
+    "canonical-unique": 48,
     "alias-redundant": 0,
     "compatibility-historical": 1,
     "governed-operation": 32,
@@ -54,6 +54,7 @@
       "obsidian_frontmatter_patch_plan",
       "obsidian_frontmatter_patch_recover",
       "obsidian_frontmatter_patch_status",
+      "obsidian_get_frontmatter",
       "obsidian_global_search",
       "obsidian_list_notes",
       "obsidian_list_pending_operations",
@@ -146,6 +147,7 @@
       "obsidian_frontmatter_patch_plan",
       "obsidian_frontmatter_patch_recover",
       "obsidian_frontmatter_patch_status",
+      "obsidian_get_frontmatter",
       "obsidian_global_search",
       "obsidian_list_notes",
       "obsidian_list_pending_operations",
@@ -425,6 +427,7 @@
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
           "obsidian_frontmatter_patch_status",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
@@ -456,6 +459,7 @@
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
           "obsidian_frontmatter_patch_status",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
@@ -552,6 +556,7 @@
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
           "obsidian_frontmatter_patch_status",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
@@ -597,6 +602,7 @@
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
           "obsidian_frontmatter_patch_status",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
@@ -679,6 +685,7 @@
       "modes": {
         "live": [
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
@@ -716,6 +723,7 @@
         ],
         "hybrid-live": [
           "list_all_tasks",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
@@ -858,6 +866,7 @@
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
           "obsidian_frontmatter_patch_status",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
@@ -950,6 +959,7 @@
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
           "obsidian_frontmatter_patch_status",
+          "obsidian_get_frontmatter",
           "obsidian_global_search",
           "obsidian_list_notes",
           "obsidian_list_pending_operations",
@@ -1217,6 +1227,400 @@
           "smart_semantic_search"
         ]
       }
+    },
+    "operational": {
+      "description": "Complete operational surface with governed note/frontmatter preference, read-only frontmatter access, tasks, external documents and distinct direct capabilities. Historical whole-Base replacement is reserved for full compatibility.",
+      "modes": {
+        "live": [
+          "asset_import_apply",
+          "asset_import_plan",
+          "asset_import_status",
+          "bases_create",
+          "bases_formula_patch_apply",
+          "bases_formula_patch_plan",
+          "bases_formula_patch_recover",
+          "bases_formula_patch_status",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_rows_patch_apply",
+          "bases_rows_patch_plan",
+          "bases_rows_patch_status",
+          "bases_upsert_rows",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_canvas_patch_apply",
+          "obsidian_canvas_patch_plan",
+          "obsidian_canvas_patch_recover",
+          "obsidian_canvas_patch_status",
+          "obsidian_delete_note",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
+          "obsidian_get_frontmatter",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_manage_tags",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
+          "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_status",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "hybrid-live": [
+          "asset_import_apply",
+          "asset_import_plan",
+          "asset_import_status",
+          "bases_create",
+          "bases_formula_patch_apply",
+          "bases_formula_patch_plan",
+          "bases_formula_patch_recover",
+          "bases_formula_patch_status",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_rows_patch_apply",
+          "bases_rows_patch_plan",
+          "bases_rows_patch_status",
+          "bases_upsert_rows",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_canvas_patch_apply",
+          "obsidian_canvas_patch_plan",
+          "obsidian_canvas_patch_recover",
+          "obsidian_canvas_patch_status",
+          "obsidian_delete_note",
+          "obsidian_frontmatter_patch_apply",
+          "obsidian_frontmatter_patch_plan",
+          "obsidian_frontmatter_patch_recover",
+          "obsidian_frontmatter_patch_status",
+          "obsidian_get_frontmatter",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_list_pending_operations",
+          "obsidian_manage_tags",
+          "obsidian_note_create_apply",
+          "obsidian_note_create_plan",
+          "obsidian_note_create_status",
+          "obsidian_note_links",
+          "obsidian_note_move_apply",
+          "obsidian_note_move_plan",
+          "obsidian_note_move_status",
+          "obsidian_note_replace_apply",
+          "obsidian_note_replace_plan",
+          "obsidian_note_replace_recover",
+          "obsidian_note_replace_status",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_text_patch_apply",
+          "obsidian_text_patch_plan",
+          "obsidian_text_patch_recover",
+          "obsidian_text_patch_status",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "hybrid-degraded": [
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-readonly": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-guarded": [
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_manage_frontmatter",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ],
+        "headless-filesystem": [
+          "bases_create",
+          "bases_get_schema",
+          "bases_list",
+          "bases_query",
+          "bases_upsert_rows",
+          "external_handoff",
+          "external_list",
+          "external_move_apply",
+          "external_move_plan",
+          "external_move_rollback",
+          "external_move_status",
+          "external_read",
+          "external_references_scan",
+          "external_roots_list",
+          "external_runtime_status",
+          "external_stat",
+          "list_all_tasks",
+          "obsidian_admin_filesystem",
+          "obsidian_batch_frontmatter",
+          "obsidian_delete_note",
+          "obsidian_global_search",
+          "obsidian_list_notes",
+          "obsidian_manage_canvas",
+          "obsidian_manage_frontmatter",
+          "obsidian_manage_tags",
+          "obsidian_move_note",
+          "obsidian_read_note",
+          "obsidian_runtime_maintenance",
+          "obsidian_runtime_status",
+          "obsidian_search_replace",
+          "obsidian_update_note",
+          "obsidian_validate_format",
+          "operon_adopt_task",
+          "operon_build_context",
+          "operon_convert_task",
+          "operon_create_periodic_task",
+          "operon_create_task",
+          "operon_find_tasks",
+          "operon_get_configuration",
+          "operon_get_diagnostics",
+          "operon_get_relationships",
+          "operon_get_task",
+          "operon_get_timer_state",
+          "operon_list_pending_recoveries",
+          "operon_list_tasks",
+          "operon_query_saved_filter",
+          "operon_query_tasks",
+          "operon_recover_mutation",
+          "operon_relocate_task",
+          "operon_resolve_task",
+          "operon_set_relationships",
+          "operon_status",
+          "operon_transition_task",
+          "operon_update_periodic_scheduling",
+          "operon_update_recurrence",
+          "operon_update_task",
+          "operon_validate",
+          "query_tasks",
+          "smart_semantic_search"
+        ]
+      }
     }
   },
   "tools": [
@@ -1233,10 +1637,15 @@
         "hybrid-live"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1267,10 +1676,15 @@
         "hybrid-live"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1301,10 +1715,15 @@
         "hybrid-live"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1337,7 +1756,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1346,6 +1766,11 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "headless-filesystem"
@@ -1366,7 +1791,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1374,6 +1800,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1394,7 +1824,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1402,6 +1833,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1422,7 +1857,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1430,6 +1866,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1450,7 +1890,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1458,6 +1899,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1482,7 +1927,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -1500,6 +1946,13 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "headless-readonly",
@@ -1536,7 +1989,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -1554,6 +2008,13 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "headless-readonly",
@@ -1590,7 +2051,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -1608,6 +2070,13 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "headless-readonly",
@@ -1640,7 +2109,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1648,6 +2118,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1668,7 +2142,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1676,6 +2151,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1696,7 +2175,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1704,6 +2184,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -1754,7 +2238,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -1763,6 +2248,11 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "headless-filesystem"
@@ -1786,10 +2276,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -1816,10 +2315,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -1846,10 +2354,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -1876,10 +2393,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -1906,10 +2432,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -1936,10 +2471,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -1966,10 +2510,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -1996,10 +2549,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -2026,10 +2588,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -2056,10 +2627,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -2086,10 +2666,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -2117,7 +2706,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -2129,6 +2719,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -2155,10 +2753,14 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
           "headless-filesystem"
         ]
       }
@@ -2175,10 +2777,14 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
           "headless-filesystem"
         ]
       }
@@ -2197,7 +2803,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -2205,6 +2812,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2225,7 +2836,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -2233,6 +2845,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2253,7 +2869,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -2261,6 +2878,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2281,7 +2902,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -2289,6 +2911,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2309,10 +2935,16 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "headless-filesystem"
@@ -2334,7 +2966,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2346,6 +2979,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2367,7 +3004,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2379,6 +3017,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2400,7 +3042,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2412,6 +3055,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2433,7 +3080,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2447,9 +3095,55 @@
         "full": [
           "live",
           "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
         ]
       },
       "lifecycleRole": "status"
+    },
+    {
+      "name": "obsidian_get_frontmatter",
+      "canonicalName": "obsidian_get_frontmatter",
+      "classification": "canonical-unique",
+      "group": "notes.read",
+      "family": "frontmatter-read",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "standard",
+        "authoring",
+        "tasks",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "standard": [
+          "live",
+          "hybrid-live"
+        ],
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "tasks": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      }
     },
     {
       "name": "obsidian_global_search",
@@ -2471,7 +3165,8 @@
         "standard",
         "authoring",
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2499,6 +3194,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -2543,7 +3246,8 @@
         "standard",
         "authoring",
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2571,6 +3275,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -2596,7 +3308,8 @@
         "standard",
         "authoring",
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2612,6 +3325,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2630,13 +3347,17 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
           "headless-filesystem"
         ],
         "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
           "headless-filesystem"
         ]
       },
@@ -2675,7 +3396,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2689,6 +3411,10 @@
         "full": [
           "live",
           "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "headless-guarded",
           "headless-filesystem"
         ]
@@ -2727,7 +3453,8 @@
       ],
       "profiles": [
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "authoring": [
@@ -2736,6 +3463,11 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "headless-filesystem"
@@ -2754,10 +3486,14 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "headless-filesystem"
+        ],
+        "operational": [
           "headless-filesystem"
         ]
       }
@@ -2777,7 +3513,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2789,6 +3526,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2810,7 +3551,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2822,6 +3564,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2843,7 +3589,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2855,6 +3602,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2877,7 +3628,8 @@
         "standard",
         "authoring",
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2893,6 +3645,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2913,7 +3669,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2925,6 +3682,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2946,7 +3707,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2958,6 +3720,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -2979,7 +3745,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -2991,6 +3758,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3012,7 +3783,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3024,6 +3796,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3045,7 +3821,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3057,6 +3834,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3078,7 +3859,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3090,6 +3872,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3111,7 +3897,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3123,6 +3910,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3149,7 +3940,8 @@
         "standard",
         "authoring",
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3183,6 +3975,14 @@
           "headless-readonly",
           "headless-guarded",
           "headless-filesystem"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       }
     },
@@ -3203,10 +4003,19 @@
         "headless-filesystem"
       ],
       "profiles": [
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3236,7 +4045,8 @@
         "standard",
         "authoring",
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3270,6 +4080,14 @@
           "headless-readonly",
           "headless-guarded",
           "headless-filesystem"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       }
     },
@@ -3290,7 +4108,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3304,6 +4123,10 @@
         "full": [
           "live",
           "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "headless-guarded",
           "headless-filesystem"
         ]
@@ -3342,7 +4165,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3354,6 +4178,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3375,7 +4203,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3387,6 +4216,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3408,7 +4241,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3420,6 +4254,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3441,7 +4279,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3453,6 +4292,10 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
           "live",
           "hybrid-live"
         ]
@@ -3476,7 +4319,8 @@
       "profiles": [
         "standard",
         "authoring",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3490,6 +4334,10 @@
         "full": [
           "live",
           "hybrid-live",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "headless-guarded",
           "headless-filesystem"
         ]
@@ -3533,7 +4381,8 @@
         "standard",
         "authoring",
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -3567,6 +4416,14 @@
           "headless-readonly",
           "headless-guarded",
           "headless-filesystem"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
         ]
       }
     },
@@ -3588,7 +4445,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3596,6 +4454,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3623,7 +4489,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3631,6 +4498,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3658,7 +4533,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3666,6 +4542,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3693,7 +4577,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3701,6 +4586,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3728,7 +4621,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3736,6 +4630,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3763,7 +4665,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3771,6 +4674,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3798,7 +4709,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3810,6 +4722,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3837,7 +4757,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3845,6 +4766,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3872,7 +4801,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3880,6 +4810,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3907,7 +4845,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3919,6 +4858,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3946,7 +4893,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3954,6 +4902,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -3981,7 +4937,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -3989,6 +4946,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4016,7 +4981,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4028,6 +4994,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4055,7 +5029,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4063,6 +5038,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4090,7 +5073,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4102,6 +5086,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4129,7 +5121,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4137,6 +5130,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4164,7 +5165,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4172,6 +5174,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4199,7 +5209,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4207,6 +5218,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4234,7 +5253,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4242,6 +5262,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4269,7 +5297,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4281,6 +5310,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4308,7 +5345,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4316,6 +5354,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4343,7 +5389,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4351,6 +5398,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4378,7 +5433,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4386,6 +5442,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4413,7 +5477,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4421,6 +5486,14 @@
           "hybrid-live"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4448,7 +5521,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4460,6 +5534,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4487,7 +5569,8 @@
       ],
       "profiles": [
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "tasks": [
@@ -4499,6 +5582,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",
@@ -4533,7 +5624,8 @@
         "standard",
         "authoring",
         "tasks",
-        "full"
+        "full",
+        "operational"
       ],
       "profileModes": {
         "standard": [
@@ -4561,6 +5653,14 @@
           "headless-filesystem"
         ],
         "full": [
+          "live",
+          "hybrid-live",
+          "hybrid-degraded",
+          "headless-readonly",
+          "headless-guarded",
+          "headless-filesystem"
+        ],
+        "operational": [
           "live",
           "hybrid-live",
           "hybrid-degraded",

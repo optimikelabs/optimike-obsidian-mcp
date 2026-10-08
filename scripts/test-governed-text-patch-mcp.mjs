@@ -849,6 +849,41 @@ try {
     "VALIDATION_ERROR",
     "redacted parameters",
   );
+  // Compatible body + YAML changes use the same sealed child, not two writes.
+  fake.reset();
+  const combinedInput = { path: FIXTURE_PATH, operations: [{ op: "replace_literal", search: "needle", replacement: "révisé ✅" }], frontmatterOperations: [{ op: "set", key: "statut", value: "stable" }], idempotencyKey: "combined" };
+  const combined = await call(first, "obsidian_text_patch_plan", { ...combinedInput, diagnostics: true });
+  assert.equal(fake.successfulWrites, 0);
+  assert.equal(combined.payload.projection.sourcePreservation, "byte-identical-outside-authorized-body-and-frontmatter-ranges");
+  assert.equal(combined.payload.projection.frontmatterProof.bodySha256, combined.payload.projection.proof.afterBodySha256);
+  assert.equal(combined.payload.projection.composition.intermediateContentSha256, combined.payload.projection.proof.nextContentSha256);
+  assert.equal(combined.payload.projection.composition.frontmatterInput, "body-patch-output");
+  assert.equal(combined.payload.diagnostics.scope, "current-server-call");
+  const appliedCombined = await call(first, "obsidian_text_patch_apply", { planRef: combined.payload.planRef, idempotencyKey: "combined", responseMode: "compact" });
+  assert.equal(appliedCombined.payload.outcome, "committed");
+  assert.equal(fake.successfulWrites, 1);
+  assert.equal(fake.content, INITIAL.replace("needle", "révisé ✅").replace("statut: actif", 'statut: "stable"'));
+  assert.equal(appliedCombined.payload.projection.proof, undefined);
+  const detailedCombined = await call(first, appliedCombined.payload.detailedReceipt.tool, appliedCombined.payload.detailedReceipt.arguments);
+  assert.equal(detailedCombined.payload.planDigest, appliedCombined.payload.planDigest);
+  assert.ok(detailedCombined.payload.projection.frontmatterProof.authorizedRanges.length > 0);
+  const replayCombined = await call(first, "obsidian_text_patch_plan", { ...combinedInput, responseMode: "compact" });
+  assert.equal(replayCombined.payload.planRef, combined.payload.planRef);
+  await call(first, "obsidian_text_patch_apply", { planRef: combined.payload.planRef, idempotencyKey: "combined" });
+  assert.equal(fake.successfulWrites, 1);
+  await call(first, "obsidian_text_patch_plan", { ...combinedInput, frontmatterOperations: [{ op: "set", key: "statut", value: "other" }] }, true);
+  const compactStatus = await call(first, "obsidian_text_patch_status", { planRef: combined.payload.planRef, responseMode: "compact" });
+  assert.equal(compactStatus.payload.idempotencyKey, undefined);
+  await call(first, "obsidian_text_patch_plan", { ...combinedInput, idempotencyKey: "combined-protected", frontmatterOperations: [{ op: "set", key: "création", value: "changed" }] }, true);
+  assert.equal(fake.successfulWrites, 1);
+  fake.reset();
+  const staleCombined = await call(first, "obsidian_text_patch_plan", { ...combinedInput, idempotencyKey: "combined-stale" });
+  fake.content = INITIAL.replace("omega", "concurrent");
+  const concurrentCombinedContent = fake.content;
+  const staleResult = await call(first, "obsidian_text_patch_apply", { planRef: staleCombined.payload.planRef, idempotencyKey: "combined-stale", responseMode: "compact" });
+  assert.equal(staleResult.payload.outcome, "conflict");
+  assert.equal(fake.content, concurrentCombinedContent);
+  assert.equal(fake.successfulWrites, 0);
   for (const result of observed)
     assert.equal(
       result.includes(SECRET),

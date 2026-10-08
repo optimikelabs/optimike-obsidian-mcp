@@ -9,16 +9,28 @@ Optimike Obsidian MCP separates two independent contracts:
 
 Profiles reduce schema volume and routing ambiguity. They are not an authorization boundary: runtime mode, write policy, bridge grants, scopes, confirmations, CAS, idempotency and recovery rules remain authoritative.
 
+
+## Complete operational profile
+
+`operational` preserves useful `full` workflows: Operon, external documents, diagnostics, assets and distinct direct capabilities. In live mode it hides `obsidian_update_note`, `obsidian_search_replace` and `obsidian_manage_frontmatter` when their governed families are complete. `obsidian_get_frontmatter` provides dedicated read-only key access without mutation inputs. Batch `bases_upsert_rows` and composite/inline tag operations retain their separate contracts; prefer governed Frontmatter for YAML tags. Historical whole-document `bases_upsert_config` remains reserved for `full`.
+
+This profile has 84 live tools with cache versus 88 for `full`, excluding three optional asset tools. Select `/mcp/operational` or `--tool-profile operational`. `full` preserves compatibility and existing direct calls. No write rights or mutation contracts change. A structurally absent family may leave a bounded fallback visible on a dedicated runtime; a conflict, unavailable Bridge or uncertain effect in a governed runtime never authorizes direct-write fallback.
+
+Skills already explicitly published to `full` remain visible to `operational` with the same root/path checks; cursors remain profile-bound. Other profile policies remain unchanged. Stdio selection is fixed for one proxy lifetime; an existing session may require reconnection to discover its new catalogue.
+
 ## Public profiles
 
 | Profile     | Intended use                                                                | Full live/hybrid surface |
 | ----------- | --------------------------------------------------------------------------- | -----------------------: |
-| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 29 tools |
-| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 43 tools |
-| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 35 tools |
-| `full`      | Explicit complete/admin surface for the active runtime                      |                 87 tools |
+| `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 30 tools |
+| `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 44 tools |
+| `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 36 tools |
+| `operational` | Complete daily workflows with governed preference | 84 tools |
+| `full`      | Explicit complete/admin surface for the active runtime                      |                 88 tools |
 
-Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 87 tools. The canonical registry covers 91 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
+The counts above exclude three optional asset tools: the current local configuration exposes 87 operational and 91 full tools. The local launcher explicitly selects operational; the package-wide unspecified default remains standard.
+
+Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 88 tools. The canonical registry covers 95 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
 
 `obsidian_note_links` is live/hybrid-live only because its semantics come from Obsidian Desktop's public `MetadataCache`; degraded and headless profiles omit it rather than simulating graph semantics from filesystem state.
 
@@ -139,3 +151,5 @@ These client features can evolve independently. Select an Optimike profile first
 - `smart_search` and `smart-search` no longer exist; call `smart_semantic_search`.
 
 Clients that genuinely need administration, external roots or specialized compatibility tools must opt in with `MCP_TOOL_PROFILE=full`, `--tool-profile full`, or `/mcp/full`. Profile selection still changes discovery, not authorization.
+
+The routing corpus preserves its original 31 cases and adds four operational cases for governed append, uncertain-status inspection, read-only frontmatter and combined body/YAML planning. Offline fixture validation is not a model-behavior benchmark.

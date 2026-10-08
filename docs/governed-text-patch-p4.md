@@ -93,3 +93,51 @@ cannot be proved, they are retained and their exact paths are printed. The
 redacted JSON evidence is written to the operating-system temporary directory
 and its exact path is printed. A lost-response path is covered by deterministic
 runtime tests because the live stdio canary exposes no response-loss injector.
+
+## Fast return and final certification
+
+`apply` and `recover` accept `completionMode: deferred | verified` (default:
+`deferred`). A CAS with automatic dates may return `applying`,
+`postflight.status: pending` and `postflight.checkAfter` without an `afterProof`.
+Call `status` at or after that time; only `committed` with `verified` certifies
+success. `verified` waits for the same full observation window. Pending work
+survives restart and cannot trigger a second CAS.
+See the [shared completion contract](governed-note-replacement.md#completion-modes-for-note-body-and-frontmatter-writes).
+
+
+## Combined body and frontmatter plan
+
+`obsidian_text_patch_plan` optionally accepts `frontmatterOperations` using
+the structured frontmatter `set` / `delete` compiler. Body compilation runs
+first, followed by YAML compilation on that output. ONE sealed child plan,
+ONE CAS and ONE date-settlement observation cover both intentions. Both
+write policies and dynamic date protections apply. YAML failure or a conflict
+rejects the whole change; there is no partial body/frontmatter commit.
+
+The body proof keeps its operation-input coordinates. Frontmatter proof
+coordinates refer to body-patch output. `composition` binds intermediate and
+final content hashes. Bytes outside authorized ranges remain identical.
+Without this option, frontmatter remains byte-identical.
+
+## Receipt size and diagnostics
+
+All four tools accept `responseMode: compact | detailed` (default detailed for
+compatibility). Compact preserves references/digests, state, permissions,
+postflight and checkAfter, omitting verbose range proofs. `detailedReceipt`
+provides the matching status call to retrieve complete evidence. Pending is
+never certified success, in either representation.
+
+`diagnostics: true` adds isolated per-server-call milliseconds for Bridge
+status, note reads, pre-dispatch reads, atomic CAS and cache refresh. It excludes
+client transport and does not enter the sealed intent or journal.
+
+## Authorized YAML representation after FDM
+
+FDM may unquote a scalar or expand a YAML collection while updating the date.
+Postflight recognizes this only for keys authorized by the sealed projection:
+key presence and parsed YAML values must match, the compiler must restore their
+sealed spelling, and the original exact resolver must then accept a single valid
+modified-date change with every remaining byte unchanged. Deleted keys cannot
+reappear. Body, creation-date, unknown-key and YAML-type drift remain uncertain.
+No second write occurs. Detailed proof includes settlementAuthorizedFormatKeyCount
+and the original observed hash; authorized keys are retained durably in the journal.

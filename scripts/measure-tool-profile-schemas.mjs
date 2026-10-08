@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { TOOL_PROFILE_IDS } from "../dist/mcp-server/toolProfiles.js";
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -10,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const PROFILE_IDS = ["standard", "authoring", "tasks", "full"];
+const PROFILE_IDS = TOOL_PROFILE_IDS;
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);

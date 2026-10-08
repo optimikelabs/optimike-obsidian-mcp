@@ -3,20 +3,20 @@ import { lstat, open } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { ExternalRootsService } from "../externalRootsService.js";
-import type { ToolProfileId } from "../../mcp-server/toolProfiles.js";
+import { TOOL_PROFILE_IDS, type ToolProfileId } from "../../mcp-server/toolProfiles.js";
 import { SkillDirectoryError, type SkillSourceSnapshot } from "./skillSourceSnapshot.js";
 import { SkillValidationError, skillUtf8, validateSkillFrontmatter, validateSkillReferences,
   type SkillFrontmatter } from "./skillValidation.js";
 
 const ROOT_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
-const PROFILE_IDS = ["standard", "authoring", "tasks", "full"] as const;
+const PROFILE_IDS = TOOL_PROFILE_IDS;
 const relativeDirectory = z.string().min(1).max(1024).refine(value =>
   !/[\\:\x00-\x1f]/u.test(value) && value.split("/").every(segment =>
     Boolean(segment) && segment !== "." && segment !== ".." && !segment.startsWith(".") && !/[. ]$/u.test(segment)));
 const PublicationSchema = z.object({
   rootId: z.string().regex(ROOT_ID),
   path: relativeDirectory,
-  profiles: z.array(z.enum(PROFILE_IDS)).min(1).max(4).default(["full"]),
+  profiles: z.array(z.enum(PROFILE_IDS)).min(1).max(PROFILE_IDS.length).default(["full"]),
   listed: z.boolean().default(true),
 }).strict();
 export const SkillsPublicationConfigSchema = z.object({
@@ -105,7 +105,10 @@ export class SkillRegistry {
       if (uris.has(uri)) throw new SkillRegistryError("configuration_invalid");
       uris.add(uri);
     }
-    this.publications = this.config.skills.filter(pub => pub.profiles.includes(profile))
+    // Operational is the curated complete surface. Preserve publications already
+    // authorized for full without broadening any external root or skill path.
+    this.publications = this.config.skills.filter(pub => pub.profiles.includes(profile) ||
+      (profile === "operational" && pub.profiles.includes("full")))
       .sort((a, b) => compare(rootUri(a), rootUri(b)));
     this.cursorBinding = digest(JSON.stringify({ profile, config: this.config })).slice(0, 32);
   }

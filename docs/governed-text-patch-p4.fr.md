@@ -1,6 +1,6 @@
 # Patches texte gouvernés du corps Markdown (P4)
 
-Optimike MCP expose une famille bornée pour modifier uniquement le corps d’une
+Optimike MCP expose une famille bornée pour modifier le corps d’une
 note Markdown existante :
 
 ```text
@@ -22,7 +22,7 @@ hash avant écriture et le contenu privé, puis ne retourne qu’un reçu opaque
 
 Les opérations sont ordonnées et bornées. Regex, cible active, création de
 fichier, ressource non Markdown, frontmatter mal fermé et correspondance
-ambiguë sont refusés avant la création du plan enfant. Le frontmatter reste
+ambiguë sont refusés avant la création du plan enfant. Sans `frontmatterOperations`, le frontmatter reste
 identique octet pour octet. Les vraies lignes de tâches Markdown sont
 protégées ; les exemples placés dans un bloc de code fenced restent du texte.
 
@@ -95,3 +95,54 @@ affichés. La preuve JSON expurgée est écrite dans le dossier temporaire du
 système et son chemin exact est affiché. La perte de réponse est couverte par
 les tests déterministes du runtime, car le canary stdio live n'expose pas
 d'injecteur de perte de réponse.
+
+## Retour rapide et certification
+
+`apply` et `recover` acceptent `completionMode: deferred | verified` (défaut :
+`deferred`). Un CAS avec dates automatiques peut rendre `applying`,
+`postflight.status: pending` et `postflight.checkAfter` sans `afterProof`.
+Appeler `status` à partir de cette échéance ; seul `committed` avec `verified`
+certifie le résultat. Le mode `verified` attend la même fenêtre complète.
+L’attente reste durable après redémarrage et ne provoque pas de second CAS.
+Voir le [contrat commun des modes](governed-note-replacement.fr.md#modes-de-retour-pour-note-corps-et-frontmatter).
+
+
+## Plan combiné corps et frontmatter
+
+`obsidian_text_patch_plan` accepte désormais `frontmatterOperations` en option,
+avec les mêmes `set` / `delete` structurés que la projection frontmatter. Le
+compilateur applique le patch du corps, puis le patch YAML sur ce résultat,
+et scelle UNE note suivante avec UN CAS et UNE observation des dates. Les
+deux politiques d'écriture et la protection des dates s'appliquent. Un échec
+YAML ou un conflit refuse l'ensemble ; aucune moitié du patch n'est appliquée.
+
+La preuve distingue les plages du corps (coordonnées de chaque opération) et
+celles du frontmatter (entrée = sortie du compilateur corps). `composition`
+lie le hash intermédiaire et le hash final. Hors de ces plages autorisées,
+les octets sont préservés. Sans cette option, le frontmatter reste inchangé.
+
+## Taille des reçus et diagnostic
+
+Les quatre outils acceptent `responseMode: compact | detailed`. Le défaut
+`detailed` préserve la compatibilité. `compact` conserve références/digests,
+état, permissions, postflight et `checkAfter`, sans les longues preuves de
+plages. `detailedReceipt` indique l'appel status permettant de relire toute
+la preuve. Un reçu compact pending ne certifie jamais la réussite.
+
+`diagnostics: true` ajoute des durées par appel serveur : statut du Bridge,
+lecture de note, lecture préalable au CAS, CAS atomique et rafraîchissement du
+cache. Les durées excluent le transport client et ne sont pas persistées dans
+l'intention scellée. Les appels concurrents ont des compteurs isolés.
+
+## Représentation des clés autorisées après FDM
+
+FDM peut retirer des guillemets ou développer une collection YAML lors de sa
+mise à jour de date. La postflight reconnaît ce changement uniquement pour
+les clés frontmatter autorisées par la projection scellée : présence et valeurs
+YAML doivent être identiques, le compilateur doit reconstruire leur forme
+scellée, et le vérificateur original doit ensuite accepter une seule date
+modifiée valide avec tous les autres octets exactement identiques. Une clé
+supprimée ne peut réapparaître. Toute dérive du corps, création, d'une clé
+inconnue ou du type YAML reste incertaine. Aucune seconde écriture n'est faite.
+Le reçu détaillé expose settlementAuthorizedFormatKeyCount et le hash réellement
+observé ; le journal conserve les clés concernées, y compris après redémarrage.

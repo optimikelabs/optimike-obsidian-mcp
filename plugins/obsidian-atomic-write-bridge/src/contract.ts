@@ -11,6 +11,7 @@ export const NOTE_LINKS_MAX_LIMIT = 1000;
 export type NoteReadRequest = {
   contractVersion: typeof ATOMIC_WRITE_CONTRACT_VERSION;
   path: string;
+  completionToken?: string;
 };
 
 export type NoteLinksRequest = NoteReadRequest & {
@@ -160,10 +161,13 @@ export function assertBindingFingerprint(
 
 export function parseReadRequest(input: unknown): NoteReadRequest {
   const body = bodyRecord(input);
-  assertExactKeys(body, ["contractVersion", "path"]);
+  assertExactKeys(body, body.completionToken === undefined ? ["contractVersion", "path"] : ["contractVersion", "path", "completionToken"]);
+  if (body.completionToken !== undefined && (typeof body.completionToken !== 'string' || !/^[a-f0-9-]{36}$/u.test(body.completionToken)))
+    throw new Error('Invalid completion token.');
   return {
     contractVersion: contractVersion(body.contractVersion),
     path: validateVaultMarkdownPath(body.path),
+    ...(body.completionToken === undefined ? {} : { completionToken: body.completionToken as string }),
   };
 }
 

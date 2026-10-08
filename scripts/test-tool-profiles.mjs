@@ -12,15 +12,15 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 29, authoring: 43, tasks: 35, full: 87 },
-  "hybrid-live": { standard: 29, authoring: 43, tasks: 35, full: 87 },
-  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45 },
-  "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48 },
-  "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51 },
-  "headless-filesystem": { standard: 12, authoring: 16, tasks: 14, full: 60 },
+  live: { standard: 30, authoring: 44, tasks: 36, full: 88, operational: 84 },
+  "hybrid-live": { standard: 30, authoring: 44, tasks: 36, full: 88, operational: 84 },
+  "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45, operational: 45 },
+  "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48, operational: 48 },
+  "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51, operational: 51 },
+  "headless-filesystem": { standard: 12, authoring: 16, tasks: 14, full: 60, operational: 59 },
 };
 
-assert.deepEqual(TOOL_PROFILE_IDS, ["standard", "authoring", "tasks", "full"]);
+assert.deepEqual(TOOL_PROFILE_IDS, ["standard", "authoring", "tasks", "full", "operational"]);
 for (const profile of TOOL_PROFILE_IDS) {
   assert.equal(TOOL_PROFILES[profile].id, profile);
   assert.ok(TOOL_PROFILES[profile].groups.length > 0);
@@ -330,7 +330,7 @@ const standardWithoutCache = compileToolProfileNames({
   availableStaticRequirements: [],
 });
 assert.ok(!standardWithoutCache.includes("obsidian_global_search"));
-assert.equal(standardWithoutCache.length, 28);
+assert.equal(standardWithoutCache.length, 29);
 
 const readonlyWithoutCache = compileToolProfileNames({
   profile: "standard",

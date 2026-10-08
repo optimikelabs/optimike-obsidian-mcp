@@ -49,7 +49,7 @@ import {
   requestContextService,
 } from "../../utils/index.js";
 import { withToolProfileContext } from "../toolProfileContext.js";
-import type { ToolProfileId } from "../toolProfiles.js";
+import { TOOL_PROFILE_IDS, type ToolProfileId } from "../toolProfiles.js";
 import {
   rewriteProfiledMcpRequest,
   toolProfileFromInternalRequest,
@@ -631,7 +631,7 @@ function startHttpServerWithRetry(
             // server address to console/log transports.
             logger.info("HTTP transport listening.", {
               ...attemptContext,
-              toolProfiles: ["standard", "authoring", "tasks", "full"],
+              toolProfiles: [...TOOL_PROFILE_IDS],
             });
             if (process.stdout.isTTY) {
               console.log("\n🚀 MCP Server running.\n");

@@ -676,13 +676,13 @@ try {
     Object.keys(
       byName.get("obsidian_note_replace_apply")?.inputSchema.properties ?? {},
     ).sort(),
-    ["idempotencyKey", "planRef"],
+    ["completionMode", "diagnostics", "idempotencyKey", "planRef", "responseMode"],
   );
   assert.deepEqual(
     Object.keys(
       byName.get("obsidian_note_replace_recover")?.inputSchema.properties ?? {},
     ).sort(),
-    ["idempotencyKey", "planRef"],
+    ["completionMode", "diagnostics", "idempotencyKey", "planRef", "responseMode"],
   );
 
   fake.reset();
@@ -1095,6 +1095,7 @@ try {
     session,
     "obsidian_note_replace_apply",
     {
+      completionMode: "verified",
       planRef: unsupportedConfigurationChangedPlan.payload.planRef,
       idempotencyKey: "dynamic-unsupported-date-config-before-apply",
     },
@@ -1124,6 +1125,7 @@ try {
     session,
     "obsidian_note_replace_apply",
     {
+      completionMode: "verified",
       planRef: protectionChangedPlan.payload.planRef,
       idempotencyKey: "dynamic-protection-changed-before-apply",
     },
@@ -1288,6 +1290,7 @@ try {
     session,
     "obsidian_note_replace_apply",
     {
+      completionMode: "verified",
       planRef: firstPlan.payload.planRef,
       idempotencyKey: "nominal-secret",
     },
@@ -1358,6 +1361,20 @@ try {
   assertTerminal(stale.payload, "conflict");
   assert.equal(fake.successfulWrites, staleWrites);
   assert.equal(fake.content, nextContent("third-party-edit"));
+
+  // A wrapper preflight refusal has not sent a CAS and must not wait for
+  // an automation window belonging to a write that never happened.
+  fake.reset(INITIAL_CONTENT.replace("statut:", "modification: 2026-08-17T10:00\nstatut:"));
+  fake.dateProtection = [{ pluginId: "frontmatter-date-manager", createdPropertyName: "création", modifiedPropertyName: "modification" }];
+  fake.settlement = { contractVersion: 1, modifiedTimeFrontmatter: { integrations: [{ pluginId: "frontmatter-date-manager", propertyName: "modification", settlementObservationDelayMs: 37250 }], utcOffsetMinutes: 0 } };
+  const noDispatchPlan = await call(session, "obsidian_note_replace_plan", { path: FIXTURE_PATH, nextContent: fake.content.replace("before", "intended"), idempotencyKey: "pre-dispatch-conflict-with-date-window" });
+  fake.content = fake.content.replace("before", "concurrent edit");
+  const noDispatchCas = fake.casRequests;
+  const noDispatchResult = await call(session, "obsidian_note_replace_apply", { planRef: noDispatchPlan.payload.planRef, idempotencyKey: "pre-dispatch-conflict-with-date-window", completionMode: "deferred" });
+  assertTerminal(noDispatchResult.payload, "conflict");
+  assert.equal(noDispatchResult.payload.postflight.checkAfter, undefined);
+  assert.equal(fake.casRequests, noDispatchCas);
+  assert.ok(fake.content.includes("concurrent edit"));
 
   fake.reset();
   const bindingPlan = await call(session, "obsidian_note_replace_plan", {
@@ -1540,6 +1557,7 @@ try {
     session,
     "obsidian_note_replace_apply",
     {
+      completionMode: "verified",
       planRef: policyPlan.payload.planRef,
       idempotencyKey: "policy-revalidated",
     },
@@ -1574,6 +1592,7 @@ try {
     session,
     "obsidian_note_replace_apply",
     {
+      completionMode: "verified",
       planRef: policyPlan.payload.planRef,
       idempotencyKey: "policy-revalidated",
     },

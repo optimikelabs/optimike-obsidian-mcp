@@ -24,6 +24,7 @@ export type ObsidianNoteReplaceProjection = {
   publicIdempotencyKey: string;
   intentDigest: string;
   proof: Record<string, unknown>;
+  normalizationProtectedFrontmatterKeys?: string[];
 };
 
 export type ObsidianNoteReplacePlan = {
@@ -48,6 +49,12 @@ export type ObsidianNoteReplacePlan = {
   modifiedTimeSettlementPolicy?: ModifiedTimeSettlementPolicy;
   executionStartedAtEpochMs?: number;
   settlementObservationStartedAtEpochMs?: number;
+  // Persisted only after the CAS attempt has returned; no live executor remains.
+  settlementDeferred?: {
+    kind: "postflight" | "cas_conflict";
+    recoveredFromUnknown: boolean;
+    completionToken?: string;
+  };
   modifiedTimeSettlementEvidence?: ModifiedTimeSettlementEvidence;
   effectProof?: OperationProof;
 };
@@ -327,10 +334,17 @@ export class ObsidianNoteReplaceJournal {
       }
       return existing;
     }
-    if (maximumActiveProjectionRows !== undefined &&
-        (!Number.isInteger(maximumActiveProjectionRows) || maximumActiveProjectionRows < 1 ||
-         maximumActiveProjectionRows > 100 || !input.projection?.kind)) {
-      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Invalid operation capacity policy.");
+    if (
+      maximumActiveProjectionRows !== undefined &&
+      (!Number.isInteger(maximumActiveProjectionRows) ||
+        maximumActiveProjectionRows < 1 ||
+        maximumActiveProjectionRows > 100 ||
+        !input.projection?.kind)
+    ) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        "Invalid operation capacity policy.",
+      );
     }
     const now = new Date(this.now()).toISOString();
     const plan: ObsidianNoteReplacePlan = {
@@ -367,7 +381,11 @@ export class ObsidianNoteReplaceJournal {
     const winner = this.getByIdempotencyKey(input.idempotencyKey);
     if (!winner) {
       if (maximumActiveProjectionRows !== undefined) {
-        throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Private operation capacity reached.", {reason:"operation_capacity_reached"});
+        throw new McpError(
+          BaseErrorCode.SERVICE_UNAVAILABLE,
+          "Private operation capacity reached.",
+          { reason: "operation_capacity_reached" },
+        );
       }
       throw new ObsidianNoteReplaceConcurrencyError();
     }
@@ -560,6 +578,41 @@ export class ObsidianNoteReplaceJournal {
     return updated;
   }
 
+  deferSettlement(
+    operationId: string,
+    expectedExecutionAttemptId: string,
+    deferred: NonNullable<ObsidianNoteReplacePlan["settlementDeferred"]>,
+  ): ObsidianNoteReplacePlan {
+    const current = this.get(operationId);
+    if (
+      !current ||
+      current.status !== "applying" ||
+      current.executionOwner?.attemptId !== expectedExecutionAttemptId ||
+      current.settlementObservationStartedAtEpochMs === undefined
+    ) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    const updated: ObsidianNoteReplacePlan = {
+      ...current,
+      settlementDeferred: deferred,
+      updatedAt: new Date(this.now()).toISOString(),
+    };
+    const result = this.db
+      .prepare(
+        `UPDATE obsidian_note_replace_plans SET payload_json = ?, updated_at = ?
+       WHERE operation_id = ? AND status = 'applying' AND payload_json = ?`,
+      )
+      .run(
+        JSON.stringify(updated),
+        updated.updatedAt,
+        operationId,
+        JSON.stringify(current),
+      );
+    if (Number(result.changes) !== 1)
+      throw new ObsidianNoteReplaceConcurrencyError();
+    return updated;
+  }
+
   commitWithModifiedTimeSettlement(
     operationId: string,
     expected: Array<"applying" | "outcome_unknown">,
@@ -575,6 +628,16 @@ export class ObsidianNoteReplaceJournal {
       expectedExecutionAttemptId === undefined,
       evidence,
     );
+  }
+
+  commitWithCompletionProof(
+    operationId: string,
+    expectedExecutionAttemptId: string,
+    effectProof: OperationProof,
+    settlementEvidence?: ModifiedTimeSettlementEvidence,
+  ): ObsidianNoteReplacePlan {
+    return this.transitionInternal(operationId, ['applying'], 'committed', undefined,
+      expectedExecutionAttemptId, false, settlementEvidence, effectProof);
   }
 
   commitAfterVerifiedProof(
@@ -629,6 +692,7 @@ export class ObsidianNoteReplaceJournal {
             },
             executionStartedAtEpochMs: this.now(),
             settlementObservationStartedAtEpochMs: undefined,
+            settlementDeferred: undefined,
           }
         : { executionOwner: undefined }),
       ...(settlementEvidence
@@ -705,7 +769,12 @@ export class ObsidianNoteReplaceJournal {
         .all() as Array<{ operation_id: string; payload_json: string }>;
       for (const row of rows) {
         const current = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
-        if (this.executionOwnerHasFreshLease(current.executionOwner)) continue;
+        // A deferred observer needs no lease. Its attempt fence still prevents replay.
+        if (
+          current.settlementDeferred ||
+          this.executionOwnerHasFreshLease(current.executionOwner)
+        )
+          continue;
         const interrupted: ObsidianNoteReplacePlan = {
           ...current,
           status: "outcome_unknown",
@@ -752,6 +821,7 @@ export class ObsidianNoteReplaceJournal {
       const owned = rows.filter((row) => {
         const plan = JSON.parse(row.payload_json) as ObsidianNoteReplacePlan;
         return (
+          !plan.settlementDeferred &&
           plan.executionOwner?.instanceId === this.executionOwner.instanceId
         );
       });

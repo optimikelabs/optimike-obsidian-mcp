@@ -1,3 +1,4 @@
+import type { SettlementCompletionMode } from "./operations/obsidianNoteReplaceOperationAdapter.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -34,7 +35,7 @@ const AuthorizedRangeSchema = z.object({
   afterSha256: z.string().regex(SHA256),
 });
 
-const FrontmatterPatchProofSchema = z.object({
+export const FrontmatterPatchProofSchema = z.object({
   contractVersion: z.literal(1),
   compilerVersion: z.literal(1),
   sourcePreservation: z.literal(
@@ -304,6 +305,7 @@ export class GovernedFrontmatterRuntime {
   async apply(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "deferred",
   ): Promise<FrontmatterProjectionReceipt> {
     const publicKey = normalizedPublicKey(idempotencyKey);
     const childPlanRef = childReference(reference);
@@ -313,6 +315,7 @@ export class GovernedFrontmatterRuntime {
     const child = await this.noteRuntime.apply(
       childPlanRef,
       before.idempotencyKey,
+      completionMode,
     );
     return projectedReceipt(
       child,
@@ -335,6 +338,7 @@ export class GovernedFrontmatterRuntime {
   async recover(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "deferred",
   ): Promise<FrontmatterProjectionReceipt> {
     const publicKey = normalizedPublicKey(idempotencyKey);
     const childPlanRef = childReference(reference);
@@ -344,6 +348,7 @@ export class GovernedFrontmatterRuntime {
     const child = await this.noteRuntime.recover(
       childPlanRef,
       before.idempotencyKey,
+      completionMode,
     );
     return projectedReceipt(
       child,

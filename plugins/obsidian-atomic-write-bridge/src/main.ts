@@ -25,6 +25,7 @@ import {
   sha256,
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
+import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { createNativeNoteMoveRoutes } from "./nativeNoteMoveRoutes.js";
@@ -231,6 +232,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   allowNoteCreates = false;
   private noteCreate: ReturnType<typeof createNoteCreateRoutes>;
   private nativeMove: ReturnType<typeof createNativeNoteMoveRoutes>;
+  private fdmCompletion!: ReturnType<typeof createFdmCompletion>;
 
   async onload(): Promise<void> {
     const stored = (await this.loadData()) as Partial<PluginData> | null;
@@ -283,6 +285,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       });
     } catch { this.noteCreate = undefined; }
     this.addSettingTab(new AtomicWriteSettingsTab(this.app, this));
+    this.fdmCompletion = createFdmCompletion(this.app);
+    this.register(() => this.fdmCompletion.dispose());
     void this.registerRestExtension();
   }
 
@@ -329,6 +333,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   }
 
   private async registerRestExtension(): Promise<void> {
+    this.fdmCompletion ??= createFdmCompletion(this.app);
     await new Promise<void>((resolve) =>
       this.app.workspace.onLayoutReady(() => resolve()),
     );
@@ -375,6 +380,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             limits: { markdownOnly: true },
             settlement: {
               contractVersion: 1,
+              completion: this.fdmCompletion.capability(),
               modifiedTimeFrontmatter: {
                 integrations: dateContract.settlementIntegrations,
                 utcOffsetMinutes: -new Date().getTimezoneOffset(),
@@ -605,7 +611,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             return;
           }
           try {
-            const content = await this.app.vault.read(this.file(request.path));
+            const observed = request.completionToken
+              ? await this.fdmCompletion.read(request.path, request.completionToken, () => this.app.vault.read(this.file(request.path)))
+              : {content: await this.app.vault.read(this.file(request.path))};
+            const { content } = observed;
             sendJson(res, 200, {
               ok: true,
               contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
@@ -614,6 +623,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               sha256: sha256(content),
               size: Buffer.byteLength(content, "utf8"),
               bindingFingerprint: this.bindingFingerprint,
+              ...('completion' in observed ? { completion: observed.completion } : {}),
             });
           } catch (error) {
             const notFound = this.isMissingResource(error, "note");
@@ -656,7 +666,9 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               this.bindingFingerprint,
             );
             let beforeSha256 = "";
-            const written = await this.app.vault.process(
+            const completionToken = this.fdmCompletion.begin(request.path);
+            let written: string;
+            try { written = await this.app.vault.process(
               this.file(request.path),
               (current) => {
                 const result = compareAndReplace(
@@ -668,7 +680,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
                 return result.content;
               },
             );
+            } catch (error) { this.fdmCompletion.cancel(completionToken); throw error; }
+            this.fdmCompletion.activate(completionToken);
             sendJson(res, 200, {
+              ...(completionToken ? { completionToken } : {}),
               ok: true,
               contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
               path: request.path,

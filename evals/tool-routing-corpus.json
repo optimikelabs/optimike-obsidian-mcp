@@ -9,7 +9,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "semantic-search",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["smart_semantic_search"]
+      "acceptableFirstTools": [
+        "smart_semantic_search"
+      ]
     },
     {
       "id": "read-exact-note",
@@ -17,7 +19,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "notes-core",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_read_note"]
+      "acceptableFirstTools": [
+        "obsidian_read_note"
+      ]
     },
     {
       "id": "list-folder",
@@ -25,7 +29,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "notes-core",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_list_notes"]
+      "acceptableFirstTools": [
+        "obsidian_list_notes"
+      ]
     },
     {
       "id": "exact-text-search",
@@ -33,7 +39,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "notes-core",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_global_search"]
+      "acceptableFirstTools": [
+        "obsidian_global_search"
+      ]
     },
     {
       "id": "validate-markdown",
@@ -41,7 +49,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "format-validation",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_validate_format"]
+      "acceptableFirstTools": [
+        "obsidian_validate_format"
+      ]
     },
     {
       "id": "runtime-status",
@@ -49,8 +59,12 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "runtime",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_runtime_status"],
-      "forbiddenTools": ["obsidian_runtime_maintenance"]
+      "acceptableFirstTools": [
+        "obsidian_runtime_status"
+      ],
+      "forbiddenTools": [
+        "obsidian_runtime_maintenance"
+      ]
     },
     {
       "id": "append-note-governed",
@@ -58,9 +72,14 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "text-patch",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_text_patch_plan"],
+      "acceptableFirstTools": [
+        "obsidian_text_patch_plan"
+      ],
       "minimumToolCalls": 2,
-      "forbiddenTools": ["obsidian_update_note", "obsidian_note_replace_plan"]
+      "forbiddenTools": [
+        "obsidian_update_note",
+        "obsidian_note_replace_plan"
+      ]
     },
     {
       "id": "search-replace-governed",
@@ -68,9 +87,13 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "text-patch",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_text_patch_plan"],
+      "acceptableFirstTools": [
+        "obsidian_text_patch_plan"
+      ],
       "minimumToolCalls": 2,
-      "forbiddenTools": ["obsidian_search_replace"]
+      "forbiddenTools": [
+        "obsidian_search_replace"
+      ]
     },
     {
       "id": "replace-complete-note",
@@ -81,7 +104,9 @@
       "expectNoTool": true,
       "acceptableFirstTools": [],
       "minimumToolCalls": 0,
-      "forbiddenTools": ["obsidian_update_note"]
+      "forbiddenTools": [
+        "obsidian_update_note"
+      ]
     },
     {
       "id": "lost-response-note-status",
@@ -89,8 +114,13 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "note-replace",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_note_replace_status"],
-      "forbiddenTools": ["obsidian_note_replace_apply", "obsidian_update_note"]
+      "acceptableFirstTools": [
+        "obsidian_note_replace_status"
+      ],
+      "forbiddenTools": [
+        "obsidian_note_replace_apply",
+        "obsidian_update_note"
+      ]
     },
     {
       "id": "recover-note-plan",
@@ -98,7 +128,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "note-replace",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_note_replace_recover"]
+      "acceptableFirstTools": [
+        "obsidian_note_replace_recover"
+      ]
     },
     {
       "id": "frontmatter-live-governed",
@@ -106,9 +138,13 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "frontmatter-patch",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_frontmatter_patch_plan"],
+      "acceptableFirstTools": [
+        "obsidian_frontmatter_patch_plan"
+      ],
       "minimumToolCalls": 2,
-      "forbiddenTools": ["obsidian_manage_frontmatter"]
+      "forbiddenTools": [
+        "obsidian_manage_frontmatter"
+      ]
     },
     {
       "id": "frontmatter-status",
@@ -116,7 +152,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "frontmatter-patch",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_frontmatter_patch_status"]
+      "acceptableFirstTools": [
+        "obsidian_frontmatter_patch_status"
+      ]
     },
     {
       "id": "bases-list",
@@ -124,7 +162,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "bases",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["bases_list"]
+      "acceptableFirstTools": [
+        "bases_list"
+      ]
     },
     {
       "id": "bases-schema",
@@ -132,7 +172,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "bases",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["bases_get_schema"]
+      "acceptableFirstTools": [
+        "bases_get_schema"
+      ]
     },
     {
       "id": "bases-query",
@@ -140,7 +182,9 @@
       "recommendedProfile": "standard",
       "expectedToolFamily": "bases",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["bases_query"]
+      "acceptableFirstTools": [
+        "bases_query"
+      ]
     },
     {
       "id": "bases-formula-governed",
@@ -148,9 +192,13 @@
       "recommendedProfile": "authoring",
       "expectedToolFamily": "base-formula-patch",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["bases_formula_patch_plan"],
+      "acceptableFirstTools": [
+        "bases_formula_patch_plan"
+      ],
       "minimumToolCalls": 2,
-      "forbiddenTools": ["bases_upsert_config"]
+      "forbiddenTools": [
+        "bases_upsert_config"
+      ]
     },
     {
       "id": "canvas-existing-governed",
@@ -158,9 +206,13 @@
       "recommendedProfile": "authoring",
       "expectedToolFamily": "canvas-patch",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_canvas_patch_plan"],
+      "acceptableFirstTools": [
+        "obsidian_canvas_patch_plan"
+      ],
       "minimumToolCalls": 2,
-      "forbiddenTools": ["obsidian_manage_canvas"]
+      "forbiddenTools": [
+        "obsidian_manage_canvas"
+      ]
     },
     {
       "id": "tags-authoring",
@@ -168,7 +220,9 @@
       "recommendedProfile": "authoring",
       "expectedToolFamily": "tags",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["obsidian_manage_tags"]
+      "acceptableFirstTools": [
+        "obsidian_manage_tags"
+      ]
     },
     {
       "id": "markdown-tasks-query",
@@ -176,8 +230,13 @@
       "recommendedProfile": "tasks",
       "expectedToolFamily": "markdown-tasks",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["query_tasks", "list_all_tasks"],
-      "forbiddenTools": ["operon_query_tasks"]
+      "acceptableFirstTools": [
+        "query_tasks",
+        "list_all_tasks"
+      ],
+      "forbiddenTools": [
+        "operon_query_tasks"
+      ]
     },
     {
       "id": "operon-list",
@@ -185,8 +244,13 @@
       "recommendedProfile": "tasks",
       "expectedToolFamily": "operon",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["operon_list_tasks", "operon_query_tasks"],
-      "forbiddenTools": ["list_all_tasks"]
+      "acceptableFirstTools": [
+        "operon_list_tasks",
+        "operon_query_tasks"
+      ],
+      "forbiddenTools": [
+        "list_all_tasks"
+      ]
     },
     {
       "id": "operon-find-ranked",
@@ -194,7 +258,9 @@
       "recommendedProfile": "tasks",
       "expectedToolFamily": "operon",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["operon_find_tasks"]
+      "acceptableFirstTools": [
+        "operon_find_tasks"
+      ]
     },
     {
       "id": "operon-resolve-before-write",
@@ -202,7 +268,9 @@
       "recommendedProfile": "tasks",
       "expectedToolFamily": "operon",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["operon_resolve_task"]
+      "acceptableFirstTools": [
+        "operon_resolve_task"
+      ]
     },
     {
       "id": "operon-context",
@@ -210,7 +278,9 @@
       "recommendedProfile": "tasks",
       "expectedToolFamily": "operon",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["operon_build_context"]
+      "acceptableFirstTools": [
+        "operon_build_context"
+      ]
     },
     {
       "id": "operon-create",
@@ -228,7 +298,9 @@
       "recommendedProfile": "tasks",
       "expectedToolFamily": "operon",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["operon_transition_task"]
+      "acceptableFirstTools": [
+        "operon_transition_task"
+      ]
     },
     {
       "id": "operon-recovery-status",
@@ -236,8 +308,12 @@
       "recommendedProfile": "tasks",
       "expectedToolFamily": "operon",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["operon_list_pending_recoveries"],
-      "forbiddenTools": ["operon_recover_mutation"]
+      "acceptableFirstTools": [
+        "operon_list_pending_recoveries"
+      ],
+      "forbiddenTools": [
+        "operon_recover_mutation"
+      ]
     },
     {
       "id": "operon-recover",
@@ -245,7 +321,9 @@
       "recommendedProfile": "tasks",
       "expectedToolFamily": "operon",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["operon_recover_mutation"]
+      "acceptableFirstTools": [
+        "operon_recover_mutation"
+      ]
     },
     {
       "id": "external-read-full",
@@ -253,14 +331,20 @@
       "recommendedProfile": "full",
       "expectedToolFamily": "external-roots",
       "clarificationExpectation": "none",
-      "acceptableFirstTools": ["external_read", "external_stat"]
+      "acceptableFirstTools": [
+        "external_read",
+        "external_stat"
+      ]
     },
     {
       "id": "external-move-full",
       "prompt": "Move this configured external file while preserving exact ElySIA references; inventory and plan before applying.",
       "recommendedProfile": "full",
       "expectedToolFamily": "external-move",
-      "acceptableFirstToolFamilies": ["external-roots", "external-move"],
+      "acceptableFirstToolFamilies": [
+        "external-roots",
+        "external-move"
+      ],
       "clarificationExpectation": "none",
       "acceptableFirstTools": [
         "external_references_scan",
@@ -276,6 +360,63 @@
       "clarificationExpectation": "none",
       "acceptableFirstTools": [],
       "expectNoTool": true
+    },
+    {
+      "id": "operational-append-note-governed",
+      "prompt": "Append this one paragraph to an existing note without replacing the rest of the file.",
+      "recommendedProfile": "operational",
+      "expectedToolFamily": "text-patch",
+      "clarificationExpectation": "none",
+      "acceptableFirstTools": [
+        "obsidian_text_patch_plan"
+      ],
+      "minimumToolCalls": 2,
+      "forbiddenTools": [
+        "obsidian_update_note",
+        "obsidian_note_replace_plan"
+      ]
+    },
+    {
+      "id": "operational-lost-response-note-status",
+      "prompt": "The note replacement apply timed out after dispatch. Check what happened without issuing another mutation.",
+      "recommendedProfile": "operational",
+      "expectedToolFamily": "note-replace",
+      "clarificationExpectation": "none",
+      "acceptableFirstTools": [
+        "obsidian_note_replace_status"
+      ],
+      "forbiddenTools": [
+        "obsidian_note_replace_apply",
+        "obsidian_update_note"
+      ]
+    },
+    {
+      "id": "operational-read-frontmatter-key",
+      "prompt": "Read only the status frontmatter key of Atlas/Example.md without changing the note.",
+      "recommendedProfile": "operational",
+      "expectedToolFamily": "frontmatter-read",
+      "clarificationExpectation": "none",
+      "acceptableFirstTools": [
+        "obsidian_get_frontmatter"
+      ],
+      "forbiddenTools": [
+        "obsidian_manage_frontmatter"
+      ]
+    },
+    {
+      "id": "operational-combined-body-yaml",
+      "prompt": "Prepare one governed plan to append a paragraph and set the status key in Atlas/Example.md, preserving all other text and YAML.",
+      "recommendedProfile": "operational",
+      "expectedToolFamily": "text-patch",
+      "clarificationExpectation": "none",
+      "acceptableFirstTools": [
+        "obsidian_text_patch_plan"
+      ],
+      "minimumToolCalls": 2,
+      "forbiddenTools": [
+        "obsidian_update_note",
+        "obsidian_manage_frontmatter"
+      ]
     }
   ]
 }

@@ -206,3 +206,30 @@ delete, replay, l’expurgation de la clé d’exécution dans status, le confli
 plan périmé et la restauration exacte ; les SHA-256 initial et final étaient
 tous deux
 `5492f80849812193137d8ef66b4349982d8a443503e555f8cd188efe99980912`.
+
+## Retour rapide et certification
+
+`apply` et `recover` acceptent `completionMode: deferred | verified` (défaut :
+`deferred`). Un CAS avec dates automatiques peut rendre `applying`,
+`postflight.status: pending` et `postflight.checkAfter` sans `afterProof`.
+Appeler `status` à partir de cette échéance ; seul `committed` avec `verified`
+certifie le résultat. Le mode `verified` attend la même fenêtre complète.
+L’attente reste durable après redémarrage et ne provoque pas de second CAS.
+Voir le [contrat commun des modes](governed-note-replacement.fr.md#modes-de-retour-pour-note-corps-et-frontmatter).
+
+## Reçus et mesures
+
+Les quatre outils acceptent `responseMode: compact | detailed` (défaut detailed) et `diagnostics: true`. Le reçu compact conserve l’état, les permissions et le délai de postflight ; `detailedReceipt` indique la lecture status de la preuve complète. Les durées couvrent uniquement l’appel serveur courant et ne modifient pas le plan scellé.
+
+## Représentation des clés autorisées après FDM
+
+FDM peut retirer des guillemets ou développer une collection YAML lors de sa
+mise à jour de date. La postflight reconnaît ce changement uniquement pour
+les clés frontmatter autorisées par la projection scellée : présence et valeurs
+YAML doivent être identiques, le compilateur doit reconstruire leur forme
+scellée, et le vérificateur original doit ensuite accepter une seule date
+modifiée valide avec tous les autres octets exactement identiques. Une clé
+supprimée ne peut réapparaître. Toute dérive du corps, création, d'une clé
+inconnue ou du type YAML reste incertaine. Aucune seconde écriture n'est faite.
+Le reçu détaillé expose settlementAuthorizedFormatKeyCount et le hash réellement
+observé ; le journal conserve les clés concernées, y compris après redémarrage.

@@ -1835,7 +1835,12 @@ export class OperonService {
     status?: OperonStatus,
   ): Promise<OperonSnapshotEnvelope> {
     const liveStatus = status ?? (await this.fetchLiveStatus());
-    const pageResult = await this.fetchAllLiveTasks(liveStatus);
+    // Configuration is an independent read. Fetch it while task pages are
+    // collected, then fence both observations against the final live status.
+    const [pageResult, configuration] = await Promise.all([
+      this.fetchAllLiveTasks(liveStatus),
+      this.fetchLiveConfiguration(),
+    ]);
     const validation = await this.fetchLiveValidation();
     if (
       validation.generation !== pageResult.settledStatus.index.generation ||
@@ -1868,7 +1873,6 @@ export class OperonService {
       finalStatus,
       "snapshot validation",
     );
-    const configuration = await this.fetchLiveConfiguration();
     if (configuration.settingsSignature !== finalStatus.settingsSignature) {
       throw new McpError(
         BaseErrorCode.CONFLICT,

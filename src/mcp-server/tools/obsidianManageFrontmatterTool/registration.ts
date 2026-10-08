@@ -29,7 +29,7 @@ export const registerObsidianManageFrontmatterTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_manage_frontmatter";
   const toolDescription =
-    "Direct Local REST frontmatter get/set/delete for one note. Prefer obsidian_frontmatter_patch_plan for live mutations when available: it preserves authorized source ranges and provides a durable plan/status/recovery receipt. Keep this tool for reads, compatibility, or runtimes without the governed projection.";
+    "Compatibility-only direct Local REST frontmatter get/set/delete. Use obsidian_get_frontmatter for read-only access and obsidian_frontmatter_patch_plan/apply/status for live edits. This tool creates no durable receipt and must never bypass a governed conflict or uncertain result. Retained in full or structurally unsupported runtimes.";
 
   const registrationContext: RequestContext =
     requestContextService.createRequestContext({

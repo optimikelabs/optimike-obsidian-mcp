@@ -14,7 +14,7 @@ process.env.SEMANTIC_SEARCH_PREWARM = "false";
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 assert.equal(
   packageJson.dependencies["@modelcontextprotocol/server"],
-  "2.0.0",
+  "2.3.1",
   "the public boundary is qualified against the exact SDK release",
 );
 

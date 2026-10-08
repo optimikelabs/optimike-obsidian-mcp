@@ -1,3 +1,11 @@
+import type { SettlementCompletionMode } from "./operations/obsidianNoteReplaceOperationAdapter.js";
+import { FrontmatterPatchProofSchema } from "./frontmatterProjectionRuntime.js";
+import {
+  compileFrontmatterPatch,
+  canonicalizeFrontmatterPatchOperations,
+  type FrontmatterPatchOperation,
+  type FrontmatterPatchProof,
+} from "./frontmatterPatchCompiler.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -64,6 +72,14 @@ const StoredProjectionSchema = z.object({
   publicIdempotencyKey: z.string().min(1).max(256),
   intentDigest: z.string().regex(SHA256),
   proof: TextPatchProofSchema,
+  frontmatterProof: FrontmatterPatchProofSchema.optional(),
+  composition: z
+    .object({
+      frontmatterInput: z.literal("body-patch-output"),
+      intermediateContentSha256: z.string().regex(SHA256),
+      finalContentSha256: z.string().regex(SHA256),
+    })
+    .optional(),
   nextContentLength: z.number().int().nonnegative(),
 });
 
@@ -72,6 +88,7 @@ type StoredProjection = z.infer<typeof StoredProjectionSchema>;
 export type GovernedTextPatchPlanInput = {
   path: string;
   operations: TextPatchOperation[];
+  frontmatterOperations?: FrontmatterPatchOperation[];
   idempotencyKey: string;
 };
 
@@ -82,7 +99,11 @@ export type TextPatchProjectionReceipt = Omit<
   idempotencyKey?: string;
   projection: {
     kind: typeof OPERATION_KIND;
-    sourcePreservation: TextPatchProof["sourcePreservation"];
+    sourcePreservation:
+      | TextPatchProof["sourcePreservation"]
+      | "byte-identical-outside-authorized-body-and-frontmatter-ranges";
+    frontmatterProof?: FrontmatterPatchProof;
+    composition?: StoredProjection["composition"];
     proof: Omit<TextPatchProof, "patchDigest">;
   };
 };
@@ -121,9 +142,7 @@ function markdownPath(value: string): string {
     value.startsWith("/") ||
     value.includes("\\") ||
     !value.toLowerCase().endsWith(".md") ||
-    value
-      .split("/")
-      .some((part) => !part || part === "." || part === "..") ||
+    value.split("/").some((part) => !part || part === "." || part === "..") ||
     value.split("/")[0]?.toLowerCase() === ".obsidian"
   ) {
     throw new McpError(
@@ -187,12 +206,23 @@ function canonicalIntentOperations(
   });
 }
 
-function canonicalIntent(path: string, operations: TextPatchOperation[]): string {
+function canonicalIntent(
+  path: string,
+  operations: TextPatchOperation[],
+  frontmatterOperations?: FrontmatterPatchOperation[],
+): string {
   return operationDigest({
     contractVersion: 1,
     operationKind: OPERATION_KIND,
     path,
     operations: canonicalIntentOperations(operations),
+    ...(frontmatterOperations
+      ? {
+          frontmatterOperations: canonicalizeFrontmatterPatchOperations(
+            frontmatterOperations,
+          ),
+        }
+      : {}),
   });
 }
 
@@ -209,6 +239,23 @@ function storedProjection(
       { reason: "text_patch_projection_missing_or_invalid" },
     );
   }
+  const composed = parsed.data;
+  if (
+    Boolean(composed.frontmatterProof) !== Boolean(composed.composition) ||
+    (composed.frontmatterProof &&
+      composed.composition &&
+      (composed.frontmatterProof.bodySha256 !==
+        composed.proof.afterBodySha256 ||
+        composed.composition.intermediateContentSha256 !==
+          composed.proof.nextContentSha256 ||
+        composed.composition.finalContentSha256 !== view.afterSha256 ||
+        composed.proof.beforeContentSha256 !== view.beforeSha256))
+  )
+    throw new McpError(
+      BaseErrorCode.CONFLICT,
+      "The combined source-preservation proof does not match its sealed child.",
+      { reason: "text_patch_composition_invalid" },
+    );
   if (
     view.idempotencyIdentity !== parsed.data.intentDigest ||
     (expectedPublicKey !== undefined &&
@@ -236,7 +283,10 @@ function policyOperation(action: "plan" | "apply" | "recover"): WriteOperation {
 function assertDomainWritePolicy(
   action: "plan" | "apply" | "recover",
   view: Pick<GovernedNoteReplacePlanView, "path">,
-  projection: Pick<StoredProjection, "proof" | "nextContentLength">,
+  projection: Pick<
+    StoredProjection,
+    "proof" | "frontmatterProof" | "nextContentLength"
+  >,
 ): void {
   assertWriteAllowed({
     operation: policyOperation(action),
@@ -246,6 +296,21 @@ function assertDomainWritePolicy(
     batchCount: projection.proof.operationCount,
     contentLength: projection.nextContentLength,
   });
+  if (projection.frontmatterProof) {
+    assertWriteAllowed({
+      operation:
+        action === "plan"
+          ? "obsidian_frontmatter_patch_plan"
+          : action === "apply"
+            ? "obsidian_frontmatter_patch_apply"
+            : "obsidian_frontmatter_patch_recover",
+      action,
+      target: view.path,
+      targetType: "filePath",
+      batchCount: projection.frontmatterProof.changedKeys.length,
+      frontmatterKeys: projection.frontmatterProof.changedKeys,
+    });
+  }
 }
 
 function projectedReceipt(
@@ -271,9 +336,17 @@ function projectedReceipt(
       childPlanDigest: child.planDigest,
       intentDigest: projection.intentDigest,
       proof: projection.proof,
+      ...(projection.frontmatterProof
+        ? {
+            frontmatterProof: projection.frontmatterProof,
+            composition: projection.composition,
+          }
+        : {}),
     }),
     target: {
-      kind: "vault-markdown-text-body",
+      kind: projection.frontmatterProof
+        ? "vault-markdown-body-and-frontmatter"
+        : "vault-markdown-text-body",
       logicalRef: child.target.logicalRef,
     },
     ...(child.recoveryRef
@@ -281,7 +354,15 @@ function projectedReceipt(
       : { recoveryRef: undefined }),
     projection: {
       kind: OPERATION_KIND,
-      sourcePreservation: projection.proof.sourcePreservation,
+      sourcePreservation: projection.frontmatterProof
+        ? "byte-identical-outside-authorized-body-and-frontmatter-ranges"
+        : projection.proof.sourcePreservation,
+      ...(projection.frontmatterProof
+        ? {
+            frontmatterProof: projection.frontmatterProof,
+            composition: projection.composition,
+          }
+        : {}),
       proof: publicProof,
     },
   };
@@ -315,7 +396,11 @@ export class GovernedTextPatchRuntime {
     const path = markdownPath(input.path);
     const publicKey = normalizedPublicKey(input.idempotencyKey);
     const internalKey = internalIdempotencyKey(publicKey);
-    const requestedIntentDigest = canonicalIntent(path, input.operations);
+    const requestedIntentDigest = canonicalIntent(
+      path,
+      input.operations,
+      input.frontmatterOperations,
+    );
     const replay = await this.replayExisting(
       internalKey,
       publicKey,
@@ -325,8 +410,25 @@ export class GovernedTextPatchRuntime {
 
     const source = await this.noteRuntime.readForProjection(path);
     let compiled;
+    let frontmatter;
     try {
       compiled = compileTextPatch(source.content, input.operations, path);
+      if (input.frontmatterOperations) {
+        assertWriteAllowed({
+          operation: "obsidian_frontmatter_patch_plan",
+          action: "plan",
+          target: path,
+          targetType: "filePath",
+          batchCount: input.frontmatterOperations.length,
+          frontmatterKeys: input.frontmatterOperations.map(
+            (operation) => operation.key,
+          ),
+        });
+        frontmatter = compileFrontmatterPatch(
+          compiled.nextContent,
+          input.frontmatterOperations,
+        );
+      }
     } catch (error) {
       const concurrentWinner = await this.replayExisting(
         internalKey,
@@ -336,19 +438,36 @@ export class GovernedTextPatchRuntime {
       if (concurrentWinner) return concurrentWinner;
       throw error;
     }
-    const intentDigest = canonicalIntent(path, compiled.operations);
+    const intentDigest = canonicalIntent(
+      path,
+      compiled.operations,
+      frontmatter?.operations,
+    );
+    const nextContent = frontmatter?.nextContent ?? compiled.nextContent;
     const projection: StoredProjection = {
       contractVersion: 1,
       kind: OPERATION_KIND,
       publicIdempotencyKey: publicKey,
       intentDigest,
       proof: compiled.proof,
-      nextContentLength: compiled.nextContent.length,
+      ...(frontmatter
+        ? {
+            frontmatterProof: frontmatter.proof,
+            composition: {
+              frontmatterInput: "body-patch-output" as const,
+              intermediateContentSha256: compiled.proof.nextContentSha256,
+              finalContentSha256: createHash("sha256")
+                .update(nextContent, "utf8")
+                .digest("hex"),
+            },
+          }
+        : {}),
+      nextContentLength: nextContent.length,
     };
     assertDomainWritePolicy("plan", { path }, projection);
     const child = await this.noteRuntime.plan({
       path,
-      nextContent: compiled.nextContent,
+      nextContent,
       idempotencyKey: internalKey,
       expectedBeforeSha256: source.sha256,
       expectedBindingFingerprint: source.bindingFingerprint,
@@ -363,33 +482,55 @@ export class GovernedTextPatchRuntime {
   async apply(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "deferred",
   ): Promise<TextPatchProjectionReceipt> {
     const publicKey = normalizedPublicKey(idempotencyKey);
     const childPlanRef = childReference(reference);
     const before = this.noteRuntime.inspect(childPlanRef);
     const projection = storedProjection(before, publicKey);
     assertDomainWritePolicy("apply", before, projection);
-    const child = await this.noteRuntime.apply(childPlanRef, before.idempotencyKey);
-    return projectedReceipt(child, this.noteRuntime.inspect(child.planRef), true);
+    const child = await this.noteRuntime.apply(
+      childPlanRef,
+      before.idempotencyKey,
+      completionMode,
+    );
+    return projectedReceipt(
+      child,
+      this.noteRuntime.inspect(child.planRef),
+      true,
+    );
   }
 
   async status(reference: string): Promise<TextPatchProjectionReceipt> {
     const childPlanRef = childReference(reference);
     storedProjection(this.noteRuntime.inspect(childPlanRef));
     const child = await this.noteRuntime.status(childPlanRef);
-    return projectedReceipt(child, this.noteRuntime.inspect(child.planRef), false);
+    return projectedReceipt(
+      child,
+      this.noteRuntime.inspect(child.planRef),
+      false,
+    );
   }
 
   async recover(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "deferred",
   ): Promise<TextPatchProjectionReceipt> {
     const publicKey = normalizedPublicKey(idempotencyKey);
     const childPlanRef = childReference(reference);
     const before = this.noteRuntime.inspect(childPlanRef);
     const projection = storedProjection(before, publicKey);
     assertDomainWritePolicy("recover", before, projection);
-    const child = await this.noteRuntime.recover(childPlanRef, before.idempotencyKey);
-    return projectedReceipt(child, this.noteRuntime.inspect(child.planRef), true);
+    const child = await this.noteRuntime.recover(
+      childPlanRef,
+      before.idempotencyKey,
+      completionMode,
+    );
+    return projectedReceipt(
+      child,
+      this.noteRuntime.inspect(child.planRef),
+      true,
+    );
   }
 }

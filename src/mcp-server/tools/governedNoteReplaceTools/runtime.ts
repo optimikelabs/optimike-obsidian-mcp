@@ -1,3 +1,4 @@
+import { measureGovernedPhase } from "../../../services/governedResponse.js";
 import { AssetImportOperationAdapter } from "../../../services/assets/assetImportOperation.js";
 import { runAssetJob } from "../../../services/assets/workerClient.js";
 import type { AssetInspection } from "../../../services/assets/assetImportContract.js";
@@ -10,10 +11,17 @@ import {
   WindowsAssetFiles,
   type AssetFileReason,
 } from "../../../services/assets/windowsAssetFiles.js";
-import { NoteCreateOperationAdapter, type NoteCreateBackend } from "../../../services/operations/noteCreateOperationAdapter.js";
+import {
+  NoteCreateOperationAdapter,
+  type NoteCreateBackend,
+} from "../../../services/operations/noteCreateOperationAdapter.js";
 import { RestNoteCreateBackend } from "../../../services/operations/restNoteCreateBackend.js";
-import { NativeNoteMoveOperationAdapter, type NativeNoteMoveBackend } from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
+import {
+  NativeNoteMoveOperationAdapter,
+  type NativeNoteMoveBackend,
+} from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
 import { RestNativeNoteMoveBackend } from "../../../services/operations/restNativeNoteMoveBackend.js";
+import type { SettlementCompletionMode } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
@@ -24,6 +32,7 @@ import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/i
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import {
   type AtomicWriteBackend,
+  markAtomicWritePreDispatchError,
   effectiveAtomicWriteDateProtection,
   effectiveAtomicWriteProtectedFrontmatterKeys,
   ObsidianNoteReplaceOperationAdapter,
@@ -225,7 +234,10 @@ function validateReplacement(
       throw new McpError(
         BaseErrorCode.FORBIDDEN,
         `Atomic note replacement requires active creation-date properties to exist before planning: ${missingCreated.join(", ")}`,
-        { reasonCode: "atomic_write_creation_property_missing", missingCreatedProperties: missingCreated },
+        {
+          reasonCode: "atomic_write_creation_property_missing",
+          missingCreatedProperties: missingCreated,
+        },
       );
     }
     if (dateProtection.unsupportedModifiedPropertyNames.length > 0) {
@@ -280,14 +292,14 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
   }
 
   async status() {
-    const status = await this.delegate.status();
+    const status = await measureGovernedPhase("bridgeStatus", () => this.delegate.status());
     const context = this.callContext.getStore();
     if (context) context.atomicWriteStatus = status;
     return status;
   }
 
   async read(payload: Parameters<AtomicWriteBackend["read"]>[0]) {
-    const result = await this.delegate.read(payload);
+    const result = await measureGovernedPhase("noteRead", () => this.delegate.read(payload));
     const context = this.callContext.getStore();
     if (context?.kind === "plan") {
       if (context.path !== payload.path) {
@@ -319,52 +331,56 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
   }
 
   async replace(payload: Parameters<AtomicWriteBackend["replace"]>[0]) {
-    const context = this.callContext.getStore();
-    if (!context || context.kind === "plan") {
-      throw new McpError(
-        BaseErrorCode.FORBIDDEN,
-        "Atomic note replacement requires an active governed apply or recover context.",
-      );
-    }
+    try {
+      const context = this.callContext.getStore();
+      if (!context || context.kind === "plan") {
+        throw new McpError(
+          BaseErrorCode.FORBIDDEN,
+          "Atomic note replacement requires an active governed apply or recover context.",
+        );
+      }
 
-    assertCurrentWritePolicy(context.kind, payload.path, payload.nextContent);
-    const current = await this.delegate.read({
-      contractVersion: 1,
-      path: payload.path,
-    });
-    if (
-      current.path !== payload.path ||
-      current.bindingFingerprint !== payload.bindingFingerprint
-    ) {
-      throw new McpError(
-        BaseErrorCode.CONFLICT,
-        "The atomic-write backend identity or target changed before the effect.",
+      assertCurrentWritePolicy(context.kind, payload.path, payload.nextContent);
+      const current = await measureGovernedPhase("preDispatchRead", () => this.delegate.read({
+        contractVersion: 1,
+        path: payload.path,
+      }));
+      if (
+        current.path !== payload.path ||
+        current.bindingFingerprint !== payload.bindingFingerprint
+      ) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "The atomic-write backend identity or target changed before the effect.",
+        );
+      }
+      if (current.sha256 !== payload.expectedSha256) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "The note changed after the sealed plan was admitted.",
+        );
+      }
+      if (!context.atomicWriteStatus) {
+        throw new McpError(
+          BaseErrorCode.CONFLICT,
+          "Atomic-write status was not sealed before validating protected frontmatter.",
+          { reason: "atomic_write_status_not_sealed" },
+        );
+      }
+      validateReplacement(
+        current.content,
+        payload.nextContent,
+        "effect",
+        effectiveAtomicWriteProtectedFrontmatterKeys(
+          context.atomicWriteStatus,
+          config.mcpProtectedFrontmatterKeys,
+        ),
+        effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
       );
+    } catch (error) {
+      throw markAtomicWritePreDispatchError(error);
     }
-    if (current.sha256 !== payload.expectedSha256) {
-      throw new McpError(
-        BaseErrorCode.CONFLICT,
-        "The note changed after the sealed plan was admitted.",
-      );
-    }
-    if (!context.atomicWriteStatus) {
-      throw new McpError(
-        BaseErrorCode.CONFLICT,
-        "Atomic-write status was not sealed before validating protected frontmatter.",
-        { reason: "atomic_write_status_not_sealed" },
-      );
-    }
-    validateReplacement(
-      current.content,
-      payload.nextContent,
-      "effect",
-      effectiveAtomicWriteProtectedFrontmatterKeys(
-        context.atomicWriteStatus,
-        config.mcpProtectedFrontmatterKeys,
-      ),
-      effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
-    );
-    return this.delegate.replace(payload);
+    return measureGovernedPhase("atomicCas", () => this.delegate.replace(payload));
   }
 }
 
@@ -396,7 +412,9 @@ export type GovernedNoteReplacePlanView = {
 export class GovernedNoteReplaceRuntime {
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
   readonly assetImport: AssetImportOperationAdapter | undefined;
-  readonly assetImportBackendReason?: AssetFileReason | ImageProcessingError["reason"];
+  readonly assetImportBackendReason?:
+    | AssetFileReason
+    | ImageProcessingError["reason"];
   readonly nativeMove: NativeNoteMoveOperationAdapter | undefined;
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
@@ -523,15 +541,16 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   async apply(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "verified",
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
     if (plan.status === "planned") {
       assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
     }
     const operation = this.backend.withContext({ kind: "apply" }, () =>
-      this.adapter.apply(reference, idempotencyKey),
+      this.adapter.apply(reference, idempotencyKey, completionMode),
     );
-    return this.refreshCacheAfterCommit(plan, operation);
+    return this.refreshCacheAfterCommit(plan, operation, true);
   }
 
   planPublicDirect(
@@ -550,9 +569,10 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   async applyPublicDirectPlan(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "deferred",
   ): Promise<OperationReceipt> {
     this.requiredPublicDirectPlan(reference);
-    return this.apply(reference, idempotencyKey);
+    return this.apply(reference, idempotencyKey, completionMode);
   }
 
   async status(reference: string): Promise<OperationReceipt> {
@@ -568,23 +588,25 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   async recover(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "verified",
   ): Promise<OperationReceipt> {
     const plan = this.required(reference);
     if (plan.status === "outcome_unknown") {
       assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
     }
     const operation = this.backend.withContext({ kind: "recover" }, () =>
-      this.adapter.recover(reference, idempotencyKey),
+      this.adapter.recover(reference, idempotencyKey, completionMode),
     );
-    return this.refreshCacheAfterCommit(plan, operation);
+    return this.refreshCacheAfterCommit(plan, operation, true);
   }
 
   async recoverPublicDirectPlan(
     reference: string,
     idempotencyKey: string,
+    completionMode: SettlementCompletionMode = "deferred",
   ): Promise<OperationReceipt> {
     this.requiredPublicDirectPlan(reference);
-    return this.recover(reference, idempotencyKey);
+    return this.recover(reference, idempotencyKey, completionMode);
   }
 
   close(): void {
@@ -639,9 +661,20 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   private async refreshCacheAfterCommit(
     plan: ObsidianNoteReplacePlan,
     operation: Promise<OperationReceipt>,
+    refreshPendingAttempt = false,
   ): Promise<OperationReceipt> {
     const result = await operation;
-    if (result.outcome !== "committed" || !this.vaultCacheService) {
+    const mayHaveWritten =
+      refreshPendingAttempt &&
+      result.postflight.checkAfter !== undefined &&
+      (plan.status === "planned" ||
+        (plan.status === "outcome_unknown" &&
+          this.required(result.planRef).executionStartedAtEpochMs !==
+            plan.executionStartedAtEpochMs));
+    if (
+      (result.outcome !== "committed" && !mayHaveWritten) ||
+      !this.vaultCacheService
+    ) {
       return result;
     }
 
@@ -651,7 +684,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
       filePath: plan.path,
     });
     try {
-      await this.vaultCacheService.updateCacheForFile(plan.path, context);
+      await measureGovernedPhase("cacheRefresh", () => this.vaultCacheService!.updateCacheForFile(plan.path, context));
     } catch (error) {
       logger.warning(
         `Background cache refresh failed for '${plan.path}': ${error instanceof Error ? error.message : String(error)}`,

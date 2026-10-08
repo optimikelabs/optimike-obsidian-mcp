@@ -14,6 +14,7 @@ export const TOOL_PROFILE_IDS = [
   "authoring",
   "tasks",
   "full",
+  "operational",
 ] as const;
 
 export type ToolProfileId = (typeof TOOL_PROFILE_IDS)[number];
@@ -97,6 +98,13 @@ export const TOOL_PROFILES: Readonly<
       "Explicit complete surface: every tool registered by the active runtime, including unavailable fail-closed compatibility tools, admin, maintenance and external-root capabilities.",
     groups: TOOL_GROUP_IDS,
     preferCanonicalAlternatives: false,
+  },
+  operational: {
+    id: "operational",
+    description:
+      "Complete operational surface with governed note/frontmatter preference, read-only frontmatter access, tasks, external documents and distinct direct capabilities. Historical whole-Base replacement is reserved for full compatibility.",
+    groups: TOOL_GROUP_IDS,
+    preferCanonicalAlternatives: true,
   },
 };
 
@@ -206,7 +214,7 @@ function finalizeProfileEntries(
   options: FinalizeProfileEntriesOptions = {},
 ): readonly ToolSurfaceEntry[] {
   let selected =
-    definition.id === "full"
+    definition.id === "full" || definition.id === "operational"
       ? entries
       : entries.filter((entry) => modernRuntimeAvailable(entry, operonLive));
 
@@ -221,6 +229,9 @@ function finalizeProfileEntries(
 
   if (definition.preferCanonicalAlternatives) {
     selected = suppressPreferredFallbacks(selected);
+  }
+  if (definition.id === "operational") {
+    selected = selected.filter((entry) => entry.name !== "bases_upsert_config");
   }
   assertGovernedFamiliesAtomic(selected);
   return [...selected].sort((left, right) =>

@@ -69,6 +69,7 @@ import { registerObsidianReadNoteTool } from "./tools/obsidianReadNoteTool/index
 import { registerObsidianSearchReplaceTool } from "./tools/obsidianSearchReplaceTool/index.js";
 import { registerObsidianUpdateNoteTool } from "./tools/obsidianUpdateNoteTool/index.js";
 import { registerObsidianManageFrontmatterTool } from "./tools/obsidianManageFrontmatterTool/index.js";
+import { registerObsidianGetFrontmatterTool } from "./tools/obsidianGetFrontmatterTool/registration.js";
 import { registerObsidianManageTagsTool } from "./tools/obsidianManageTagsTool/index.js";
 import { registerSemanticSearchTool } from "./tools/semanticSearchTool/index.js";
 import { registerBasesListTool } from "./tools/basesListTool/index.js";
@@ -1921,6 +1922,7 @@ async function createMcpServerInstance(
         obsidianService,
         vaultCacheService,
       );
+      registerObsidianGetFrontmatterTool(server, obsidianService);
       await registerObsidianManageTagsTool(
         server,
         obsidianService,

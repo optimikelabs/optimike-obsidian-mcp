@@ -439,3 +439,7 @@ exact plugin engine semantics remains outside the current headless surface.
 ## Governed single-row Base property patch M5 / P7
 
 `bases_rows_patch_plan/apply/status` patch one existing Markdown row selected by exact `baseId`, `view` and `path`. Raw top-level frontmatter `set/delete` only; no note insert/delete, generic batch, native-engine completeness or multi-file atomicity. A warning-free complete supported-filter snapshot (at most 500 rows) seals selection; cache freshness stays unknown. Base hash/binding and membership are rechecked before the existing note-content CAS. A patched row may leave the view; status certifies the note effect, not view membership. Unknown attempts are observed, never replayed through a synthetic recovery tool. Available in live/hybrid-live authoring/full profiles. See [M5 contract](base-row-patch-m5.md).
+
+## Dedicated frontmatter reads and operational profile
+
+`obsidian_get_frontmatter`: read-only live/hybrid key access using filePath and key; no set/delete/value inputs. `operational` retains complete workflows while suppressing redundant direct note/frontmatter mutations and reserving whole-Base replacement for `full`. See [Tool Surface Profiles](tool-surface-profiles.md).

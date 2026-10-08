@@ -1,4 +1,4 @@
-import { parseToolProfileId } from "../mcp-server/toolProfiles.js";
+import { parseToolProfileId, TOOL_PROFILE_IDS } from "../mcp-server/toolProfiles.js";
 
 export function applyToolProfileCliOverride(
   argv: readonly string[] = process.argv.slice(2),
@@ -11,7 +11,7 @@ export function applyToolProfileCliOverride(
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) {
         throw new Error(
-          "--tool-profile requires one of: standard, authoring, tasks, full.",
+          `--tool-profile requires one of: ${TOOL_PROFILE_IDS.join(", ")}.`,
         );
       }
       values.push(value);
