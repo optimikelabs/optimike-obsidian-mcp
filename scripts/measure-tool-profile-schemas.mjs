@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const PROFILE_IDS = ["standard", "authoring", "tasks", "full"];
+const PROFILE_IDS = ["standard", "authoring", "tasks", "full", "operational"];
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);

@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Update the MCP SDK client/core/server to 2.3.1, Axios to 1.20.0 and the resolved source-map-js to 1.2.2; production dependencies pass the high-severity audit gate.
 - Preserve uncertain post-dispatch outcomes, reject proven pre-dispatch conflicts promptly, and reconcile only authorized YAML representation changes with identical parsed values.
 - Avoid statistics/tokenizer work for plain Markdown reads without requested stats; overlap independent Operon snapshot reads while preserving generation and consistency checks.
 - Distinguish expired REST/Bridge diagnostic probes from missing services without promoting availability or permissions.

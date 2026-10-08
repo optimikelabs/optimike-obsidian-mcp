@@ -49,7 +49,7 @@ export const registerObsidianUpdateNoteTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_update_note";
   const toolDescription =
-    "Compatibility-only direct Local REST append/prepend/create/overwrite. Prefer governed text_patch, note_create or note_replace lifecycles in live mode. No durable plan/status/recovery receipt; never use this as a bypass after a governed conflict or uncertain effect. Retained in full or structurally unsupported runtimes.";
+    "For whole-note replacement prefer obsidian_note_replace_plan/apply/status. Compatibility-only direct Local REST append/prepend/create/overwrite. Prefer governed text_patch, note_create or note_replace lifecycles in live mode. No durable plan/status/recovery receipt; never use this as a bypass after a governed conflict or uncertain effect. Retained in full or structurally unsupported runtimes.";
 
   // Create a context for the registration process itself for better traceability.
   const registrationContext: RequestContext =

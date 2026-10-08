@@ -49,7 +49,7 @@ export const registerObsidianSearchReplaceTool = async (
 ): Promise<void> => {
   const toolName = "obsidian_search_replace";
   const toolDescription =
-    "Compatibility-only direct Local REST literal/regex search-replace. Prefer governed text_patch for literals, or compute the intended content and seal note_replace for regex edits. No durable receipt; never bypass a governed conflict or uncertain effect. Retained in full or structurally unsupported runtimes.";
+    "Compatibility-only direct Local REST literal/regex search-replace. Prefer obsidian_text_patch_plan/apply/status for literals, or compute the intended content and seal note_replace for regex edits. No durable receipt; never bypass a governed conflict or uncertain effect. Retained in full or structurally unsupported runtimes.";
 
   // Create a context specifically for the registration process.
   const registrationContext: RequestContext =
