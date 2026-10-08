@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add an opt-in `operational` catalog with governed write preference and dedicated read-only `obsidian_get_frontmatter`; `full` retains explicit compatibility.
 - Add deferred completion, compact receipts, per-call timing diagnostics, and combined body/frontmatter intentions to the governed write workflow. Final success still requires `committed` and `verified`.
+- Add an optional, exact-build-fenced installer with external backup and guarded rollback for the completion add-on. FDM means Frontmatter Date Manager, the plugin that owns automatic note date updates.
 - Add a fenced FDM completion adapter and optional FDM 1.6.0 add-on for earlier settlement; installations without the qualified acknowledgement retain the original conservative deadline. Atomic Write Bridge is versioned `0.8.1`.
 
 ### Fixed

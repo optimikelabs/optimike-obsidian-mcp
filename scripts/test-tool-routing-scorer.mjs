@@ -275,8 +275,8 @@ try {
     corpus: sha256(fs.readFileSync(corpusPath)),
   };
   const report = score(canonicalPaths);
-  assert.equal(report.evaluatedRuns, 120);
-  assert.equal(report.strictTraceRuns, 120);
+  assert.equal(report.evaluatedRuns, 136);
+  assert.equal(report.strictTraceRuns, 136);
   assert.equal(report.legacyTraceRuns, 0);
   assert.equal(report.scorerSchemaVersion, "tool-routing-score/v2");
   assert.equal(report.scorerVersion, "2.0.0");

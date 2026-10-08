@@ -242,7 +242,7 @@
     "test:bridge-openapi": "npm --prefix plugins/obsidian-atomic-write-bridge run typecheck && npm --prefix plugins/obsidian-operon-bridge run typecheck && node --test scripts/test-bridge-openapi.mjs",
     "test:assets": "npm run build && node scripts/test-asset-config.mjs && node scripts/test-asset-capability.mjs && node scripts/test-asset-policy.mjs && node --test scripts/test-asset-file-ingress.mjs scripts/test-asset-native.mjs scripts/test-asset-processing.mjs scripts/test-asset-operation.mjs scripts/test-asset-surface.mjs && node scripts/test-asset-doc-contract.mjs",
     "test:governed-deferred-settlement": "npm run build && node scripts/test-governed-deferred-settlement.mjs",
-    "test:governed-performance": "npm run build && node scripts/test-governed-response.mjs && node scripts/test-projected-frontmatter-settlement.mjs && node scripts/test-fdm-completion.mjs && node --test plugins/fdm-settlement/signal.test.mjs && node scripts/test-operational-profile.mjs && node scripts/test-read-note-optional-stats.mjs && node scripts/test-operon-refresh-concurrency.mjs && node scripts/test-capability-probe-deadlines.mjs"
+    "test:governed-performance": "npm run build && node scripts/test-governed-response.mjs && node scripts/test-projected-frontmatter-settlement.mjs && node scripts/test-fdm-completion.mjs && node --test plugins/fdm-settlement/signal.test.mjs scripts/test-fdm-installer.mjs && node scripts/test-operational-profile.mjs && node scripts/test-read-note-optional-stats.mjs && node scripts/test-operon-refresh-concurrency.mjs && node scripts/test-capability-probe-deadlines.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",

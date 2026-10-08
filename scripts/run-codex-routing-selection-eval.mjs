@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { TOOL_PROFILE_IDS } from "../dist/mcp-server/toolProfiles.js";
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -13,7 +14,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-const PROFILE_IDS = ["standard", "authoring", "tasks", "full"];
+const PROFILE_IDS = TOOL_PROFILE_IDS;
 const CODEX_ENV_ALLOWLIST = [
   "APPDATA",
   "CODEX_HOME",

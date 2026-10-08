@@ -54,3 +54,38 @@ Hermetic tests additionally cover activation races, all tracked pending states,
 content-read generation drift, invalid token/path/binding, configuration changes,
 durable MCP proof and observation expiry. Plugin assets are backed up independently
 from the common MCP release pointer. No credentials are persisted in evidence.
+
+## Optional installation and rollback
+
+The add-on is opt-in. No MCP start or upgrade modifies FDM automatically.
+The installer requires the exact audited FDM 1.6.0 asset hash above and refuses
+other builds. It adds the signal to FDM's load and modify paths; it preserves
+`manifest.json`, `data.json`, timestamp settings and native retry guards.
+
+From the installed MCP package directory, first inspect the read-only plan:
+
+```powershell
+node scripts/install-fdm-completion.mjs plan --vault "C:\Obsidian\Vault"
+```
+
+Close Obsidian for the target vault before applying. The closed-vault flag is
+an explicit operator attestation, not automatic detection. Keep backups outside
+the vault. Installation prints the backup receipt path; retain it for recovery.
+
+```powershell
+node scripts/install-fdm-completion.mjs install --vault "C:\Obsidian\Vault" --backup-root "C:\ObsidianBackups" --apply --confirm-obsidian-closed
+```
+
+Reopen Obsidian and inspect completion readiness before measuring fast
+certification. To undo, close the target vault again and use its receipt:
+
+```powershell
+node scripts/install-fdm-completion.mjs rollback --receipt "C:\ObsidianBackups\fdm-completion-ID\receipt.json" --apply --confirm-obsidian-closed
+```
+
+Rollback restores the original `main.js` exactly. It refuses changed settings,
+manifest or concurrently replaced assets. An interrupted installation retains
+an `applying` receipt and the original asset for guarded recovery. If metadata
+has subsequently changed, inspect the receipt and backup before manual recovery;
+do not overwrite a newer plugin build. An upstream FDM update may replace the
+add-on, in which case the conservative certification window remains in force.
