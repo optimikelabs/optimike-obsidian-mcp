@@ -102,6 +102,17 @@ try {
     tools.find((t) => t.name.endsWith("apply")).annotations.destructiveHint,
     false,
   );
+  const applyTool = tools.find(
+    (t) => t.name === "obsidian_note_create_apply",
+  );
+  assert.match(
+    applyTool.description,
+    /same idempotencyKey supplied to obsidian_note_create_plan/,
+  );
+  assert.match(
+    applyTool.inputSchema.properties.idempotencyKey.description,
+    /Reuse the exact idempotencyKey from obsidian_note_create_plan/,
+  );
   assert.equal(
     tools.find((t) => t.name.endsWith("plan")).annotations.readOnlyHint,
     false,
