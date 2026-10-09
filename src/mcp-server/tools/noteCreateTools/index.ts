@@ -31,7 +31,13 @@ const Plan = z
 const Apply = z
   .object({
     planRef: z.string().min(1).max(128),
-    idempotencyKey: z.string().min(1).max(256),
+    idempotencyKey: z
+      .string()
+      .min(1)
+      .max(256)
+      .describe(
+        "Reuse the exact idempotencyKey from obsidian_note_create_plan. Do not generate a new key for apply.",
+      ),
   })
   .strict();
 const Status = z.object({ planRef: z.string().min(1).max(128) }).strict();
@@ -81,7 +87,7 @@ export function registerNoteCreateTools(
     "obsidian_note_create_apply",
     {
       description:
-        "Attempt the exact sealed exclusive creation once; never overwrite or add suffixes. A lost response is reconciled through status, not re-executed. Committed means intended state observed, not attribution to this attempt; Obsidian indexing is not certified.",
+        "Attempt the exact sealed exclusive creation once. Reuse the same idempotencyKey supplied to obsidian_note_create_plan; never generate a new key for apply. Never overwrite or add suffixes. On conflict or lost response, call obsidian_note_create_status on the existing planRef before any further action; never blindly replay. Only terminal/committed with postflight verified certifies completion. Committed means intended state observed, not attribution to this attempt; Obsidian indexing is not certified.",
       inputSchema: mcpSchema(Apply.shape),
       annotations: {
         ...GOVERNED_MUTATION_TOOL_ANNOTATIONS,
