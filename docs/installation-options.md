@@ -11,3 +11,5 @@ updates. The optional add-on signals completed processing to Atomic Write Bridge
 so the MCP can verify final bytes sooner without owning timestamp writes.
 Installation is restricted to the audited FDM 1.6.0 build, with explicit backup
 and rollback in [the procedure](fdm-completion.md#optional-installation-and-rollback).
+
+Semantic search with the Smart Connections built-in model (default BGE Micro) needs the optional `@huggingface/transformers` package next to the MCP: `npm install @huggingface/transformers`. It is not installed by default because it adds about 470 MB; Ollama and OpenAI-compatible setups do not need it. See [embedders](../README_EMBEDDERS.md).

@@ -15,7 +15,7 @@ Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouver
 | Notes                   | Lecture/recherche/éditions directes + opérations gouvernées Note et Frontmatter | Coffre ; Local REST API + Atomic Write Bridge        |
 | Bases et Canvas         | Requêtes, écritures bornées, formules et graphes Canvas gouvernés               | Bases Bridge ; Atomic Write Bridge                   |
 | Tâches                  | Markdown Tasks-compatible + 25 outils Operon gouvernés                          | Operon Developer API V1 via le Bridge                |
-| Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` + embedding Ollama ou compatible OpenAI |
+| Recherche sémantique    | Recherche dans l’index Smart Connections                                        | `.smart-env` + embedding Ollama, compatible OpenAI ou modèle intégré |
 | Runtime                 | Cache SQLite partagé, santé, maintenance et modes dégradés                      | Filesystem local                                     |
 | Documents externes      | Lectures/handoff default-deny + diagnostic de move local                        | Allowlist de racines                                 |
 | Administration headless | Opérations métadonnées/filesystem bornées                                       | Copie ou coffre dédié                                |
@@ -169,7 +169,7 @@ Voir [Configuration External Roots](docs/external-roots-setup.fr.md).
 
 ## Recherche sémantique
 
-`smart_semantic_search` est l’outil canonique. Il interroge l’index Smart Connections local. L’embedding de requête peut rester local via Ollama ou utiliser un fournisseur compatible OpenAI.
+`smart_semantic_search` est l’outil canonique. Il interroge l’index Smart Connections local. L’embedding de requête peut rester local via Ollama, utiliser un fournisseur compatible OpenAI, ou reprendre le modèle intégré de Smart Connections (BGE Micro par défaut) une fois le paquet optionnel `@huggingface/transformers` installé. Voir [embedders](README_EMBEDDERS.md).
 
 Voir [Exploitation](OPERATIONS.fr.md) pour les providers et le cache.
 

@@ -1,9 +1,10 @@
 import { getEmbedder as getOllamaEmbedder } from "./ollama.js";
 import { getEmbedder as getOpenAIEmbedder } from "./openai.js";
+import { getEmbedder as getTransformersEmbedder } from "./transformers.js";
 
 type EmbedFunction = (text: string) => Promise<number[]>;
 
-export type QueryEmbedderProvider = "auto" | "xenova" | "ollama" | "openai";
+export type QueryEmbedderProvider = "auto" | "transformers" | "ollama" | "openai";
 
 export type QueryEmbedderSelection = {
   provider: Exclude<QueryEmbedderProvider, "auto">;
@@ -14,7 +15,7 @@ export type QueryEmbedderSelection = {
 export type QueryEmbedderOptions = {
   provider?: string;
   modelHint?: string;
-  // Explicit override (strongest). HuggingFace ids resolve to the disabled Xenova provider.
+  // Explicit override (strongest). HuggingFace ids resolve to the built-in Transformers provider.
   model?: string;
   // What Smart Connections stored in .smart-env (often a HuggingFace id when using Transformers).
   vaultModel?: string;
@@ -33,7 +34,7 @@ const looksLikeOpenAIEmbeddingModel = (id: string): boolean =>
 
 const normaliseProvider = (provider?: string): QueryEmbedderProvider => {
   const raw = (provider ?? "auto").trim().toLowerCase();
-  if (raw === "xenova" || raw === "transformers") return "xenova";
+  if (raw === "xenova" || raw === "transformers") return "transformers";
   if (raw === "ollama") return "ollama";
   if (raw === "openai") return "openai";
   return "auto";
@@ -43,7 +44,7 @@ const inferProviderFromModel = (
   model: string,
 ): Exclude<QueryEmbedderProvider, "auto"> => {
   if (looksLikeOpenAIEmbeddingModel(model)) return "openai";
-  if (looksLikeHuggingFaceId(model)) return "xenova";
+  if (looksLikeHuggingFaceId(model)) return "transformers";
   return "ollama";
 };
 
@@ -76,13 +77,10 @@ export const getQueryEmbedder = async (
             : "ollama"
       : provider;
 
-  if (resolvedProvider === "xenova") {
-    throw new Error(
-      [
-        "QUERY_EMBEDDER=xenova is disabled because @xenova/transformers pulls vulnerable ONNX/protobuf dependencies.",
-        "Use QUERY_EMBEDDER=ollama with QUERY_EMBEDDER_MODEL, or QUERY_EMBEDDER=openai.",
-      ].join(" "),
-    );
+  if (resolvedProvider === "transformers") {
+    const model = modelCandidate;
+    const embed = await getTransformersEmbedder(model);
+    return { provider: "transformers", model, embed };
   }
 
   if (resolvedProvider === "openai") {

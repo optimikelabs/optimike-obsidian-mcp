@@ -12,3 +12,5 @@ traitement entre ce plugin et Atomic Write Bridge. Le MCP peut alors vérifier
 les octets finaux et certifier plus tôt, sans modifier lui-même les dates.
 L'installation reste facultative, limitée au build FDM 1.6.0 audité, avec
 sauvegarde et rollback décrits dans [la procédure](fdm-completion.md#optional-installation-and-rollback).
+
+La recherche sémantique avec le modèle intégré de Smart Connections (BGE Micro par défaut) demande le paquet optionnel `@huggingface/transformers` à côté du MCP : `npm install @huggingface/transformers`. Il n'est pas installé par défaut car il ajoute environ 470 Mo ; les configurations Ollama ou compatibles OpenAI n'en ont pas besoin. Voir [embedders](../README_EMBEDDERS.md).

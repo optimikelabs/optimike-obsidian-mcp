@@ -17,7 +17,7 @@ Version 3.12 adds the operational profile, read-only frontmatter access and fast
 | Notes                   | Read/search/direct edits plus governed note and Frontmatter operations | Vault; Local REST API + Atomic Write Bridge                |
 | Bases and Canvas        | Queries, bounded writes, governed formulas and Canvas graph plans      | Bases Bridge; Atomic Write Bridge                          |
 | Tasks                   | Tasks-compatible Markdown plus 25 governed Operon tools                | Operon Developer API V1 through the Bridge                 |
-| Semantic search         | Smart Connections index search                                         | `.smart-env` + Ollama or OpenAI-compatible query embedding |
+| Semantic search         | Smart Connections index search                                         | `.smart-env` + Ollama, OpenAI-compatible or built-in model query embedding |
 | Runtime                 | Shared SQLite cache, health, maintenance and degraded modes            | Local filesystem                                           |
 | External documents      | Default-deny reads/handoff plus opt-in local move                      | Explicit root allowlist                                    |
 | Headless administration | Guarded metadata and filesystem operations                             | Copied or dedicated vault                                  |
@@ -168,7 +168,7 @@ See [External Roots Setup](docs/external-roots-setup.md).
 
 ## Semantic search
 
-`smart_semantic_search` is the canonical semantic-search tool. It searches the local Smart Connections index. Query embedding can remain local through Ollama or use an OpenAI-compatible provider.
+`smart_semantic_search` is the canonical semantic-search tool. It searches the local Smart Connections index. Query embedding can remain local through Ollama, use an OpenAI-compatible provider, or reuse the Smart Connections built-in model (BGE Micro by default) once the optional `@huggingface/transformers` package is installed. See [embedders](README_EMBEDDERS.md).
 
 See [Operations](OPERATIONS.md) for providers and cache behavior.
 

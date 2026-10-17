@@ -124,12 +124,35 @@ try {
     "utf8",
   );
   assert.equal(await detectSmartEnvQueryProvider(root, bgeModel), "transformers");
+  // @huggingface/transformers is an optional peer: cover whichever branch this install exercises.
+  const transformersInstalled = (() => {
+    try {
+      import.meta.resolve("@huggingface/transformers");
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const builtInSelection = getQueryEmbedder({
+    provider: "auto", vaultProvider: "transformers", vaultModel: bgeModel,
+  });
+  if (transformersInstalled) {
+    const selected = await builtInSelection;
+    assert.equal(selected.provider, "transformers", "a Transformers index is queried with Transformers");
+    assert.equal(selected.model, bgeModel);
+  } else {
+    await assert.rejects(
+      builtInSelection,
+      /needs the optional package @huggingface\/transformers/u,
+      "a Transformers index without the optional package must name the package, not fall back to another provider",
+    );
+  }
   await assert.rejects(
     getQueryEmbedder({
-      provider: "auto", vaultProvider: "transformers", vaultModel: bgeModel,
+      provider: "auto", vaultProvider: "transformers", vaultModel: "sentence-transformers/all-MiniLM-L6-v2",
     }),
-    /xenova is disabled/u,
-    "a Transformers index must not be queried with a different provider",
+    /Unsupported Smart Connections built-in model/u,
+    "a built-in model without a known query profile must be refused",
   );
   await assert.rejects(
     getQueryEmbedder({

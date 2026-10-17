@@ -301,7 +301,7 @@ fail-closed; no private or Markdown fallback is introduced.
 The former `smart_search` and `smart-search` aliases were physically removed in
 3.0. Existing clients must migrate to `smart_semantic_search`.
 
-Semantic query execution still needs a reachable query embedder provider. The
+Semantic query execution still needs a reachable query embedder provider (Ollama, OpenAI-compatible, or the Smart Connections built-in model through the optional `@huggingface/transformers` package). The
 semantic manifest/vector metadata are cached locally for faster warm refreshes.
 
 ## Bases
