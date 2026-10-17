@@ -56,8 +56,8 @@ try {
         vaultModel: "sentence-transformers/all-MiniLM-L6-v2",
         dimension: 384,
       }),
-    /xenova is disabled/u,
-    "auto selection must expose a deterministically disabled provider",
+    /Unsupported Smart Connections built-in model/u,
+    "auto selection must refuse a built-in model without a known query profile",
   );
 
   const snapshot = await service.getSnapshot();

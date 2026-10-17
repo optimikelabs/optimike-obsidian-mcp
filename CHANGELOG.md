@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Query a Smart Connections built-in model index (`provider_key: transformers`, including the default BGE Micro) through the optional `@huggingface/transformers` package. Query profiles mirror Smart Connections, unknown built-in models are refused, and the model loads on the first query only.
+
+### Security
+
+- Keep `@xenova/transformers` removed; its successor `@huggingface/transformers` 4.3.1 passes npm audit with no known vulnerability.
+
 ## [3.12.0] - 2026-10-08
 
 ### Local benchmark highlights

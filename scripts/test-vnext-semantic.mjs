@@ -164,15 +164,15 @@ try {
       JSON.stringify({ provider_key: "transformers", model_key: modelName }),
     "utf8",
   );
-  assert.equal((await doctor()).reasonCode, "semantic_embedder_unavailable");
-  const builtIn = await call();
-  assert.equal(builtIn.response.isError, true);
+  const requestsBeforeBuiltIn = requests;
+  assert.equal((await doctor()).reasonCode, "semantic_query_unverified");
   assert.equal(
-    builtIn.value.error.details.reasonCode,
-    "semantic_embedder_configuration_invalid",
+    requests,
+    requestsBeforeBuiltIn,
+    "a built-in Transformers index must not be routed to Ollama",
   );
   console.log(
-    "PASS: semantic MCP BGE via Ollama, built-in provider refusal, ranking, diagnostics and recovery; no provider call from doctor",
+    "PASS: semantic MCP BGE via Ollama, built-in provider selection, ranking, diagnostics and recovery; no provider call from doctor",
   );
 } finally {
   await client.close();

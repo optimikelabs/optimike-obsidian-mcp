@@ -299,6 +299,7 @@
     "node": ">=22.12.0"
   },
   "devDependencies": {
+    "@huggingface/transformers": "4.3.1",
     "@modelcontextprotocol/inspector": "^0.21.2",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@types/js-yaml": "^4.0.9",
@@ -313,5 +314,13 @@
     "koffi": "3.3.2",
     "saxes": "6.0.0",
     "sharp": "0.35.5"
+  },
+  "peerDependencies": {
+    "@huggingface/transformers": "^4.3.1"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/transformers": {
+      "optional": true
+    }
   }
 }

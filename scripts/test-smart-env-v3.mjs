@@ -124,12 +124,17 @@ try {
     "utf8",
   );
   assert.equal(await detectSmartEnvQueryProvider(root, bgeModel), "transformers");
+  const builtInSelection = await getQueryEmbedder({
+    provider: "auto", vaultProvider: "transformers", vaultModel: bgeModel,
+  });
+  assert.equal(builtInSelection.provider, "transformers", "a Transformers index is queried with Transformers");
+  assert.equal(builtInSelection.model, bgeModel);
   await assert.rejects(
     getQueryEmbedder({
-      provider: "auto", vaultProvider: "transformers", vaultModel: bgeModel,
+      provider: "auto", vaultProvider: "transformers", vaultModel: "sentence-transformers/all-MiniLM-L6-v2",
     }),
-    /xenova is disabled/u,
-    "a Transformers index must not be queried with a different provider",
+    /Unsupported Smart Connections built-in model/u,
+    "a built-in model without a known query profile must be refused",
   );
   await assert.rejects(
     getQueryEmbedder({
