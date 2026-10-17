@@ -165,7 +165,18 @@ try {
     "utf8",
   );
   const requestsBeforeBuiltIn = requests;
-  assert.equal((await doctor()).reasonCode, "semantic_query_unverified");
+  const transformersInstalled = (() => {
+    try {
+      import.meta.resolve("@huggingface/transformers");
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  assert.equal(
+    (await doctor()).reasonCode,
+    transformersInstalled ? "semantic_query_unverified" : "semantic_embedder_unavailable",
+  );
   assert.equal(
     requests,
     requestsBeforeBuiltIn,
