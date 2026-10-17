@@ -47,7 +47,9 @@ sonde live bornée charge au moins un vecteur valide depuis la source actuelle.
 et `refresh_semantic_index` couvrent un index absent, vide, malformé, périmé ou
 en timeout. `semantic_embedder_unavailable` et `configure_query_embedder`
 signalent séparément un provider de requête impossible à construire depuis la
-configuration non secrète actuelle. Le doctor n’envoie jamais de requête
+configuration non secrète actuelle, y compris un index du modèle intégré de
+Smart Connections quand le paquet optionnel `@huggingface/transformers` n’est
+pas installé. Le doctor n’envoie jamais de requête
 d’embedding de test.
 Les lectures issues du cache Operon sont
 signalées `degraded` avec `operon_snapshot_fallback` ; un snapshot n’est jamais

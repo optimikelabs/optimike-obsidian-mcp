@@ -449,8 +449,9 @@ Exemples :
 
 - si ton vault sémantique repose sur Ollama, Ollama doit toujours être joignable pour exécuter une requête sémantique
 - si Ollama tombe, le MCP renvoie maintenant une erreur propre au lieu de sembler bloqué
+- si ton vault utilise le modèle intégré de Smart Connections, le paquet optionnel `@huggingface/transformers` doit être installé à côté du MCP (`npm install @huggingface/transformers`) ; le modèle (environ 66 Mo pour BGE Micro) est téléchargé une fois depuis Hugging Face, puis tourne en local sur le CPU
 
-Au démarrage, le backend préchauffe la recherche sémantique en chargeant le snapshot et en envoyant une petite requête d’embedding au provider configuré. Désactivation possible avec `SEMANTIC_SEARCH_PREWARM=false` ; texte de warmup surchargeable avec `SEMANTIC_SEARCH_PREWARM_TEXT`.
+Au démarrage, le backend préchauffe la recherche sémantique en chargeant le snapshot et en envoyant une petite requête d’embedding au provider configuré. Avec le modèle intégré, c’est ce préchauffage en arrière-plan qui télécharge et charge le modèle la première fois : la première requête d’un agent ne l’attend pas. Désactivation possible avec `SEMANTIC_SEARCH_PREWARM=false` ; texte de warmup surchargeable avec `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
 ## Mode dégradé
 

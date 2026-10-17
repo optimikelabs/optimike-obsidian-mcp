@@ -45,7 +45,9 @@ disabled `ENABLE_QUERY_EMBEDDING` switch, while `semantic_index_unavailable`
 and `refresh_semantic_index` cover a missing, empty, malformed, stale, or
 timed-out index. `semantic_embedder_unavailable` and
 `configure_query_embedder` separately report a query provider that cannot be
-constructed from the current non-secret configuration. The doctor never sends
+constructed from the current non-secret configuration, including a Smart
+Connections built-in model index when the optional `@huggingface/transformers`
+package is not installed. The doctor never sends
 a test embedding request.
 Operon cached reads are reported as `degraded` with
 `operon_snapshot_fallback`; cached state is never presented as proof that a

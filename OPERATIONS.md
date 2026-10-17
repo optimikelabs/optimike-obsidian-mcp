@@ -434,8 +434,9 @@ Examples:
 
 - if your vault semantic setup relies on Ollama, Ollama still needs to be reachable for semantic queries
 - if Ollama is down, the MCP now returns a clean error instead of silently hanging
+- if your vault uses the Smart Connections built-in model, the optional `@huggingface/transformers` package must be installed next to the MCP (`npm install @huggingface/transformers`); the model (about 66 MB for BGE Micro) is downloaded from Hugging Face once, then runs locally on CPU
 
-At startup, the backend prewarms semantic search by loading the semantic snapshot and sending a small embedding request to the configured provider. Disable it with `SEMANTIC_SEARCH_PREWARM=false`; override the warmup text with `SEMANTIC_SEARCH_PREWARM_TEXT`.
+At startup, the backend prewarms semantic search by loading the semantic snapshot and sending a small embedding request to the configured provider. With the built-in model, this background prewarm is where the model is first downloaded and loaded, so the first agent query does not wait for it. Disable it with `SEMANTIC_SEARCH_PREWARM=false`; override the warmup text with `SEMANTIC_SEARCH_PREWARM_TEXT`.
 
 ## Degraded Mode
 

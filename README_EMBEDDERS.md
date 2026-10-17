@@ -23,7 +23,7 @@ An unrecognized Smart Connections provider fails closed in `auto` mode; configur
 Built-in model settings
 
 - Install the optional package next to the MCP: `npm install @huggingface/transformers`. Without it, a built-in index is reported as unavailable and the error names the package.
-- The model is downloaded from Hugging Face on the first semantic query (BGE Micro: about 70 MB), then cached locally. Diagnostics never load it.
+- The model is downloaded from Hugging Face on first use (BGE Micro: about 66 MB), then cached locally. First use is the background startup prewarm, or the first semantic query when `SEMANTIC_SEARCH_PREWARM=false`. Diagnostics never load it.
 - Queries run in fp32 on CPU. On a vault indexed by Smart Connections 4.7.2 with BGE Micro, this reproduced the plugin's top 3 and scores on 10 of 10 queries; q8 reordered the top 3. `scripts/compare-transformers-query-ranking.mjs` repeats this check on another vault.
 - The package adds about 470 MB of dependencies (ONNX Runtime), which is why it is optional.
 

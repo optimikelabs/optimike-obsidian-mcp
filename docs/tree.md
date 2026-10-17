@@ -171,7 +171,8 @@ optimike-obsidian-mcp
 │   │   └── embed
 │   │       ├── index.ts
 │   │       ├── ollama.ts
-│   │       └── openai.ts
+│   │       ├── openai.ts
+│   │       └── transformers.ts
 │   ├── config
 │   │   └── index.ts
 │   ├── mcp-server
