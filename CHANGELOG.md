@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-10-18
+
 ### Added
 
 - Query a Smart Connections built-in model index (`provider_key: transformers`, including the default BGE Micro) through the optional `@huggingface/transformers` package. Query profiles mirror Smart Connections, unknown built-in models are refused, and the model loads on the first query only.

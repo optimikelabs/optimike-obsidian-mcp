@@ -22,7 +22,7 @@ Optimike Obsidian MCP fournit aux clients MCP une surface opérationnelle gouver
 
 Le registre canonique des outils est documenté dans [Surface des outils](docs/obsidian_mcp_tools_spec.md).
 
-La version 3.12 ajoute le profil operational, la lecture dédiée du frontmatter et une certification gouvernée plus rapide avec une intégration FDM facultative qualifiée. Voir les gains mesurés et leurs conditions dans le [changelog](CHANGELOG.md#3120---2026-10-08).
+La version 3.12 ajoute le profil operational, la lecture dédiée du frontmatter et une certification gouvernée plus rapide avec une intégration FDM facultative qualifiée. Voir les gains mesurés et leurs conditions dans le [changelog](CHANGELOG.md#3120---2026-10-08). La version 3.13 rétablit la recherche sémantique sur les index Smart Connections construits avec le modèle intégré du plugin (BGE Micro par défaut), via le paquet optionnel `@huggingface/transformers` ; voir [embedders](README_EMBEDDERS.md).
 
 ## Runtime et transport
 
