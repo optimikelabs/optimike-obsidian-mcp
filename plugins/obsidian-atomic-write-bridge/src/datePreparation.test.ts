@@ -10,6 +10,7 @@ function fixture() {
   let clock = 0,
     commands = 0,
     opens = 0,
+    detaches = 0,
     enabled = true;
   const file = { path: "Test.md", extension: "md" };
   let content = "---\nstatut: actif\n---\nbody\n";
@@ -26,7 +27,9 @@ function fixture() {
     openFile: async () => {
       opens++;
     },
-    detach() {},
+    detach() {
+      detaches++;
+    },
   };
   const app: any = {
     vault: { getAbstractFileByPath: () => file, read: async () => content },
@@ -84,6 +87,10 @@ function fixture() {
       enabled = false;
     },
     counts: () => ({ commands, opens }),
+    detached: () => detaches,
+    advance: (ms: number) => {
+      clock += ms;
+    },
   };
 }
 
@@ -202,16 +209,13 @@ for (const path of ["X/Modèles/A.md", "Excluded/A.md", "Templates/A.md"]) {
   });
 }
 
-test("native editor close is settled before returning the prepared hash", async () => {
+test("review P2: native editor close cannot normalize body CRLF to LF", async () => {
   const f = fixture();
   f.setContent(f.content().replace(/\n/g, "\r\n"));
   f.app.workspace.getLeaf().detach = () => {
     f.setContent(f.content().replace(/\r\n/g, "\n"));
   };
-  const result = await f.prepare(f.request());
-  assert.equal(result.content, f.content());
-  assert(!result.content.includes("\r"));
-  assert.equal(result.datePreparation?.kind, "date-manager-before-plan");
+  await assert.rejects(f.prepare(f.request()), /changed after/);
 });
 
 test("a non-date edit flushed on native editor close remains a conflict", async () => {
@@ -219,4 +223,107 @@ test("a non-date edit flushed on native editor close remains a conflict", async 
   f.app.workspace.getLeaf().detach = () =>
     f.setContent(f.content() + "human edit");
   await assert.rejects(f.prepare(f.request()), /changed after/);
+});
+
+test("review P1: a queued request expires from arrival and never dispatches FDM", async () => {
+  const f = fixture();
+  const command = f.app.commands.executeCommandById;
+  let dispatches = 0;
+  f.app.commands.executeCommandById = () => {
+    dispatches++;
+    // The first manager command never produces a date and consumes its budget.
+    return dispatches === 1 ? true : command();
+  };
+  const request = f.request();
+  const results = await Promise.allSettled([
+    f.prepare(request),
+    f.prepare(request),
+  ]);
+  assert.deepEqual(
+    results.map((r) => r.status),
+    ["rejected", "rejected"],
+  );
+  assert.equal(dispatches, 1);
+  assert.equal(f.counts().opens, 1);
+});
+
+test("review P1: time spent opening the note cannot extend the command deadline", async () => {
+  const f = fixture();
+  f.app.workspace.getLeaf().openFile = async () => {
+    f.advance(1500);
+  };
+  await assert.rejects(f.prepare(f.request()), {
+    message: MISSING_CREATION_MESSAGE,
+  });
+  assert.equal(f.counts().commands, 0);
+  assert.equal(f.detached(), 1);
+});
+
+test("review P1: do not dispatch without the minimum remaining settlement budget", async () => {
+  const f = fixture();
+  f.app.workspace.getLeaf().openFile = async () => {
+    f.advance(1000);
+  };
+  await assert.rejects(f.prepare(f.request()), {
+    message: MISSING_CREATION_MESSAGE,
+  });
+  assert.equal(f.counts().commands, 0);
+});
+
+test("review P2: FDM body CRLF to LF rewrite is a conflict", async () => {
+  const f = fixture();
+  f.setContent(f.content().replace(/\n/g, "\r\n"));
+  const command = f.app.commands.executeCommandById;
+  f.app.commands.executeCommandById = () => {
+    command();
+    f.setContent(f.content().replace(/\r\n/g, "\n"));
+    return true;
+  };
+  await assert.rejects(f.prepare(f.request()), /changed after/);
+});
+
+test("CRLF body preserved by FDM remains accepted", async () => {
+  const f = fixture();
+  f.setContent(f.content().replace(/\n/g, "\r\n"));
+  const before = f.content().split("---\r\n")[2];
+  const result = await f.prepare(f.request());
+  assert.equal(
+    result.content.slice(result.content.lastIndexOf("---\r\n") + 5),
+    before,
+  );
+});
+
+for (const conflict of [false, true]) {
+  test(`review P2: temporary leaf detaches after focus changed (conflict=${conflict})`, async () => {
+    const f = fixture();
+    const otherLeaf = {};
+    const command = f.app.commands.executeCommandById;
+    f.app.commands.executeCommandById = () => {
+      command();
+      f.app.workspace.activeLeaf = otherLeaf;
+      if (conflict) f.setContent(f.content() + "human edit");
+      return true;
+    };
+    if (conflict) await assert.rejects(f.prepare(f.request()), /changed after/);
+    else await f.prepare(f.request());
+    assert.equal(f.detached(), 1);
+    assert.equal(f.app.workspace.activeLeaf, otherLeaf);
+  });
+}
+
+test("native editor close is settled before returning the prepared content", async () => {
+  const f = fixture();
+  f.app.workspace.getLeaf().detach = () => {
+    f.setContent(
+      f
+        .content()
+        .replace(
+          "modification: 2026-10-23T10:00",
+          "modification: 2026-10-23T10:01",
+        ),
+    );
+  };
+  const result = await f.prepare(f.request());
+  assert.equal(result.content, f.content());
+  assert.match(result.content, /modification: 2026-10-23T10:01/);
 });
