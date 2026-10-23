@@ -129,7 +129,7 @@ export function createDatePreparation(
         if (leafReleased) return;
         leafReleased = true;
         // Restore focus only if still ours; always release our temporary leaf.
-        // Observe any native save before returning, with exact body checks.
+        // Observe any native save before returning, including line-ending normalization.
         if (app.workspace.activeLeaf === leaf && previous)
           app.workspace.setActiveLeaf(previous, { focus: false });
         leaf.detach();
@@ -166,9 +166,10 @@ export function createDatePreparation(
           const content = await app.vault.read(file);
           if (now() >= deadline) return fail();
           const observed = envelope(content);
-          // A body edit while FDM runs is a conflict; never silently fold it into the plan.
+          // Only CRLF/LF conversion is tolerated during native dating; all other body edits conflict.
           if (
-            observed.body !== before.body ||
+            observed.body.replace(/\r\n/g, "\n") !==
+              before.body.replace(/\r\n/g, "\n") ||
             !isDeepStrictEqual(
               nonDates(observed.properties),
               nonDates(before.properties),
@@ -194,7 +195,14 @@ export function createDatePreparation(
               content,
               datePreparation: {
                 kind: "date-manager-before-plan" as const,
-                message: DATE_PREPARATION_MESSAGE,
+                message:
+                  DATE_PREPARATION_MESSAGE +
+                  (observed.body !== before.body
+                    ? " fins de ligne normalisées par Obsidian pendant la datation."
+                    : ""),
+                ...(observed.body !== before.body
+                  ? { lineEndingsNormalized: true as const }
+                  : {}),
               },
             };
           await sleep(POLL_MS);

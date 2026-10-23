@@ -100,6 +100,11 @@ test("undated note is dated only by FDM command, then reread with a receipt", as
   assert.equal(result.content, f.content());
   assert.match(result.content, /création: 2026/);
   assert.equal(result.datePreparation?.kind, "date-manager-before-plan");
+  assert.equal(
+    result.datePreparation?.message,
+    "Note datée par le gestionnaire de dates avant le plan.",
+  );
+  assert.equal("lineEndingsNormalized" in result.datePreparation!, false);
   assert.equal(f.counts().commands, 1);
   await f.prepare(f.request());
   assert.equal(f.counts().commands, 1);
@@ -209,13 +214,18 @@ for (const path of ["X/Modèles/A.md", "Excluded/A.md", "Templates/A.md"]) {
   });
 }
 
-test("review P2: native editor close cannot normalize body CRLF to LF", async () => {
+test("native editor close normalizes CRLF to LF with a receipt", async () => {
   const f = fixture();
   f.setContent(f.content().replace(/\n/g, "\r\n"));
   f.app.workspace.getLeaf().detach = () => {
     f.setContent(f.content().replace(/\r\n/g, "\n"));
   };
-  await assert.rejects(f.prepare(f.request()), /changed after/);
+  const result = await f.prepare(f.request());
+  assert.equal(result.content, f.content());
+  assert.match(
+    result.datePreparation!.message,
+    /fins de ligne normalisées par Obsidian pendant la datation/,
+  );
 });
 
 test("a non-date edit flushed on native editor close remains a conflict", async () => {
@@ -270,17 +280,60 @@ test("review P1: do not dispatch without the minimum remaining settlement budget
   assert.equal(f.counts().commands, 0);
 });
 
-test("review P2: FDM body CRLF to LF rewrite is a conflict", async () => {
-  const f = fixture();
-  f.setContent(f.content().replace(/\n/g, "\r\n"));
-  const command = f.app.commands.executeCommandById;
-  f.app.commands.executeCommandById = () => {
-    command();
-    f.setContent(f.content().replace(/\r\n/g, "\n"));
-    return true;
-  };
-  await assert.rejects(f.prepare(f.request()), /changed after/);
-});
+for (const [name, body, convert] of [
+  ["CRLF to LF", "body\r\nnext\r\n", (s: string) => s.replace(/\r\n/g, "\n")],
+  ["LF to CRLF", "body\nnext\n", (s: string) => s.replace(/\r?\n/g, "\r\n")],
+  [
+    "mixed endings to LF",
+    "body\r\nnext\n",
+    (s: string) => s.replace(/\r\n/g, "\n"),
+  ],
+] as const) {
+  test(`FDM accepts only line-ending normalization: ${name}`, async () => {
+    const f = fixture();
+    f.setContent("---\nstatut: actif\n---\n" + body);
+    const command = f.app.commands.executeCommandById;
+    f.app.commands.executeCommandById = () => {
+      command();
+      f.setContent(convert(f.content()));
+      return true;
+    };
+    const result = await f.prepare(f.request());
+    assert.equal(result.content, f.content());
+    assert.match(
+      result.datePreparation!.message,
+      /fins de ligne normalisées par Obsidian pendant la datation/,
+    );
+    assert.equal(
+      "lineEndingsNormalized" in result.datePreparation! &&
+        result.datePreparation.lineEndingsNormalized,
+      true,
+    );
+  });
+}
+
+for (const replacement of [
+  "word",
+  "bod",
+  "body!",
+  "body ",
+  "body\n",
+  "bo\rdy",
+]) {
+  test(`CRLF normalization does not hide a body edit: ${JSON.stringify(replacement)}`, async () => {
+    const f = fixture();
+    f.setContent(f.content().replace(/\n/g, "\r\n"));
+    const command = f.app.commands.executeCommandById;
+    f.app.commands.executeCommandById = () => {
+      command();
+      f.setContent(
+        f.content().replace(/\r\n/g, "\n").replace("body", replacement),
+      );
+      return true;
+    };
+    await assert.rejects(f.prepare(f.request()), /changed after/);
+  });
+}
 
 test("CRLF body preserved by FDM remains accepted", async () => {
   const f = fixture();
@@ -326,4 +379,21 @@ test("native editor close is settled before returning the prepared content", asy
   const result = await f.prepare(f.request());
   assert.equal(result.content, f.content());
   assert.match(result.content, /modification: 2026-10-23T10:01/);
+});
+
+test("CRLF conversion cannot conceal a non-date property change", async () => {
+  const f = fixture();
+  f.setContent(f.content().replace(/\n/g, "\r\n"));
+  const command = f.app.commands.executeCommandById;
+  f.app.commands.executeCommandById = () => {
+    command();
+    f.setContent(
+      f
+        .content()
+        .replace(/\r\n/g, "\n")
+        .replace("statut: actif", "statut: clos"),
+    );
+    return true;
+  };
+  await assert.rejects(f.prepare(f.request()), /changed after/);
 });

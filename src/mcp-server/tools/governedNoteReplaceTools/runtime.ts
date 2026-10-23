@@ -362,7 +362,9 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       throw new McpError(BaseErrorCode.CONFLICT, "The note changed during date preparation.");
     if (created.some(key => entriesForKey(parseFrontmatter(current.content), normalizeKey(key)).length !== 1)) throw fail();
     return { ...current, ...(prepared.datePreparation?.kind === "date-manager-before-plan" ? { datePreparation: {
-      kind: "date-manager-before-plan" as const, message: "Note datée par le gestionnaire de dates avant le plan."
+      kind: "date-manager-before-plan" as const, message: "Note datée par le gestionnaire de dates avant le plan." + (prepared.datePreparation.lineEndingsNormalized === true
+        ? " fins de ligne normalisées par Obsidian pendant la datation." : ""),
+      ...(prepared.datePreparation.lineEndingsNormalized === true ? { lineEndingsNormalized: true as const } : {})
     }} : {}) };
   }
 

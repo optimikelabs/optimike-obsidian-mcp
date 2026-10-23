@@ -29,7 +29,7 @@ const { ErrorHandler, publicMcpToolErrorPayload } = await import(
   "../dist/utils/internal/errorHandler.js"
 );
 const hash = (value) => createHash("sha256").update(value).digest("hex");
-const initial = "---\nstatut: actif\n---\nneedle\n";
+const initial = "---\r\nstatut: actif\r\n---\r\nneedle\r\n";
 const binding = hash("test-vault");
 let createdKey = "création",
   modifiedKey = "modification",
@@ -101,14 +101,18 @@ const fake = {
     preparations++;
     if (!active || failPreparation) throw Error("no manager or failed command");
     assert.equal(request.expectedSha256, hash(content));
-    content = content.replace(
-      "statut: actif",
-      `statut: actif\n${createdKey}: 2026-10-23T10:00\n${modifiedKey}: 2026-10-23T10:00`,
-    );
+    const lineEndingsNormalized = content.includes("\r\n");
+    content = content
+      .replace(/\r\n/g, "\n")
+      .replace(
+        "statut: actif",
+        `statut: actif\n${createdKey}: 2026-10-23T10:00\n${modifiedKey}: 2026-10-23T10:00`,
+      );
     return {
       ...read(),
       datePreparation: {
         kind: "date-manager-before-plan",
+        ...(lineEndingsNormalized ? { lineEndingsNormalized: true } : {}),
         message: "Note datée par le gestionnaire de dates avant le plan.",
       },
     };
@@ -144,6 +148,12 @@ try {
   assert.equal(writes, 0);
   assert.match(content, /needle/);
   assert.equal(planned.datePreparation.kind, "date-manager-before-plan");
+  assert.equal(planned.datePreparation.lineEndingsNormalized, true);
+  assert.match(
+    planned.datePreparation.message,
+    /fins de ligne normalisées par Obsidian pendant la datation/,
+  );
+  assert(!content.includes("\r"));
   assert.equal(
     runtime.inspect("obsidian-note-replace:v1:" + planned.operationId)
       .beforeSha256,
@@ -158,6 +168,11 @@ try {
   const committed = await text.apply(planned.planRef, "dated", "verified");
   assert.equal(committed.outcome, "committed");
   assert.equal(committed.postflight.status, "verified");
+  assert.deepEqual(committed.datePreparation, planned.datePreparation);
+  assert.deepEqual(
+    (await text.status(planned.planRef)).datePreparation,
+    planned.datePreparation,
+  );
   const after = content;
   await text.apply(planned.planRef, "dated", "verified");
   assert.equal(content, after);
