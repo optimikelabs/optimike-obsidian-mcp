@@ -843,6 +843,12 @@ for (const observed of [
 assert.equal(capability(projectCapabilityManifest(input({ operon: { state: "ready", value: operonReady({ operon: { present: false } }) } })), "operon-read").reasonCode, "operon_not_present");
 console.log("PASS: R1-C unavailable and unknown observations are distinct from explicit Operon absence");
 
+const timeoutSemantic = capability(projectCapabilityManifest(input({ semanticIndex: {state: "timed_out"} })), "semantic-search");
+assert.equal(timeoutSemantic.available, false);
+assert.equal(timeoutSemantic.authorized, false);
+assert.equal(timeoutSemantic.reasonCode, "semantic_probe_timed_out");
+assert.equal(timeoutSemantic.nextAction, "retry_capability_probe");
+
 for (const [probeName, ids, reason] of [
   ['localRest', ['local-rest'], 'local_rest_probe_timed_out'],
   ['atomicWrite', ['governed-note-write','governed-frontmatter-write','governed-native-move','governed-note-create','governed-canvas-write'], 'bridge_probe_timed_out'],

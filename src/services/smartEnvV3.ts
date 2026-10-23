@@ -15,10 +15,18 @@ type ModelRecord = {
 type SourceRecord = {
   path?: string;
   last_import?: { hash?: string };
+  last_read?: { hash?: string };
   embedding?: {
     default?: Record<string, { file?: string; file_i?: number; read_hash?: string }>;
   };
   metadata?: { tags?: string[] };
+};
+
+type SearchSource = {
+  path: string;
+  reference: { file?: string; file_i?: number; read_hash?: string } | undefined;
+  readHash: string | undefined;
+  tags: string[] | undefined;
 };
 
 function hash32(value: string): number {
@@ -127,7 +135,7 @@ export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null
   const dimensions = Number(model?.dims || model?.dimensions || 0);
   if (!model?.model_key || !Number.isInteger(dimensions) || dimensions <= 0) return [];
   const fingerprint = modelFingerprint(model);
-  const latest = new Map<string, SourceRecord>();
+  const latest = new Map<string, SearchSource>();
   for (const file of files) {
     const lines = readline.createInterface({
       input: createReadStream(path.join(directory, file), { encoding: "utf8" }),
@@ -139,7 +147,14 @@ export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null
       try {
         const records = JSON.parse(`{${trimmed}}`) as Record<string, SourceRecord>;
         const source = Object.values(records)[0];
-        if (source?.path) latest.set(source.path, source);
+        // Search needs only the current vector reference and search metadata.
+        // Never retain whole note bodies from the append-only source history.
+        if (source?.path) latest.set(source.path, {
+          path: source.path,
+          reference: source.embedding?.default?.[fingerprint],
+          readHash: source.last_read?.hash ?? source.last_import?.hash,
+          tags: Array.isArray(source.metadata?.tags) ? source.metadata.tags : undefined,
+        });
       } catch {
         // A partial append must not prevent reading the other source records.
       }
@@ -154,14 +169,15 @@ export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null
   }
   const vectors: SmartVec[] = [];
   for (const source of latest.values()) {
-    const reference = source.embedding?.default?.[fingerprint];
+    const reference = source.reference;
     const index = reference?.file_i;
     if (
       reference?.file !== fingerprint ||
       !Number.isInteger(index) ||
       index === undefined ||
       index < 0 ||
-      reference.read_hash !== source.last_import?.hash
+      !reference.read_hash ||
+      reference.read_hash !== source.readHash
     ) continue;
     const offset = index * dimensions * 4;
     if (offset + dimensions * 4 > binary.length) continue;
@@ -172,7 +188,7 @@ export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null
       id: notePath,
       notePath,
       title: path.basename(notePath, path.extname(notePath)),
-      tags: Array.isArray(source.metadata?.tags) ? source.metadata.tags : undefined,
+      tags: source.tags,
       model: model.model_key,
       vec,
     });

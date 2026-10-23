@@ -66,6 +66,7 @@ export type CapabilityReasonCode =
   | "semantic_index_unavailable"
   | "semantic_embedder_unavailable"
   | "semantic_query_unverified"
+  | "semantic_probe_timed_out"
   | "bridge_unavailable"
   | "bridge_probe_timed_out"
   | "bridge_lifecycle_not_ready"
@@ -499,6 +500,16 @@ function semanticCapability(
       false,
       "semantic_query_embedding_disabled",
       "enable_query_embedding",
+    );
+  }
+  if (input.semanticIndex.state === "timed_out") {
+    return entry(
+      input,
+      "semantic-search",
+      false,
+      false,
+      "semantic_probe_timed_out",
+      "retry_capability_probe",
     );
   }
   const validated =
