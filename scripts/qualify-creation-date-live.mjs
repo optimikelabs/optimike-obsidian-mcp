@@ -1,5 +1,6 @@
 // Isolated technical G1 replay. Credentials are inherited privately; never serialized.
 import assert from "node:assert/strict";
+import { load } from "js-yaml";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -25,6 +26,8 @@ const save = (name, value) =>
   );
 const noteFile = path.join(cfg.vault, scenario.note);
 const content = () => fs.readFileSync(noteFile, "utf8");
+const frontmatter = (text) =>
+  load(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1] ?? "") ?? {};
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function cdp(expression, name) {
   const expr = path.join(out, name + ".js");
@@ -114,9 +117,14 @@ try {
   const initial = content();
   assert(!initial.includes("création:"));
   snapshot("B0-sans-date");
-  await cdp(
-    `(()=>{const p=app.plugins.getPlugin('frontmatter-date-manager');const original=app.fileManager.processFrontMatter;globalThis.__creationB=[];app.fileManager.processFrontMatter=function(file,cb,...args){const stack=new Error().stack;return original.call(this,file,fm=>{const before=JSON.parse(JSON.stringify(fm));const value=cb(fm);globalThis.__creationB.push({path:file.path,fromFdm:stack.includes('plugin:frontmatter-date-manager'),before,after:JSON.parse(JSON.stringify(fm)),utc:Date.now()});return value;},...args);};return {vault:app.vault.adapter.basePath,plugins:Object.fromEntries(Object.entries(app.plugins.plugins).map(([id,p])=>[id,p.manifest.version])),fdmSettings:{enableAutoUpdate:p.settings.enableAutoUpdate,headerCreated:p.settings.headerCreated}};})()`,
+  const admission = await cdp(
+    `(()=>{const p=app.plugins.getPlugin('frontmatter-date-manager');const original=app.fileManager.processFrontMatter;globalThis.__creationB=[];app.fileManager.processFrontMatter=function(file,cb,...args){const stack=new Error().stack;return original.call(this,file,fm=>{const before=JSON.parse(JSON.stringify(fm));const value=cb(fm);globalThis.__creationB.push({path:file.path,fromFdm:stack.includes('plugin:frontmatter-date-manager'),before,after:JSON.parse(JSON.stringify(fm)),utc:Date.now()});return value;},...args);};return {bridgeWritesEnabled:!!app.plugins.getPlugin('obsidian-atomic-write-bridge')?.allowWrites,vault:app.vault.adapter.basePath,plugins:Object.fromEntries(Object.entries(app.plugins.plugins).map(([id,p])=>[id,p.manifest.version])),fdmSettings:{enableAutoUpdate:p.settings.enableAutoUpdate,headerCreated:p.settings.headerCreated}};})()`,
     "runtime-admission",
+  );
+  assert.equal(
+    admission.bridgeWritesEnabled,
+    true,
+    "Isolated Bridge writes must be enabled",
   );
   const first = await call("obsidian_text_patch_plan", {
     path: scenario.note,
@@ -133,6 +141,8 @@ try {
   assert.equal(first.phase, "planned");
   assert.equal(first.datePreparation.kind, "date-manager-before-plan");
   assert.match(content(), /création:/);
+  const creationByFdm = frontmatter(content())["création"];
+  assert.equal(typeof creationByFdm, "string");
   assert(content().includes(scenario.old));
   const observations = await cdp(
     "globalThis.__creationB",
@@ -218,12 +228,26 @@ try {
   assert.deepEqual(B4, B3);
   assert.equal(content().split(scenario.accepted_line).length - 1, 1);
   assert(content().includes(scenario.retouche));
+  assert.equal(frontmatter(content())["création"], creationByFdm);
+  const beforeForbidden = content();
+  const forbiddenDate = await call(
+    "obsidian_frontmatter_patch_plan",
+    {
+      path: scenario.note,
+      operations: [{ op: "set", key: "création", value: "2099-01-01T00:00" }],
+      idempotencyKey: "creation-b-protected-date",
+    },
+    true,
+  );
+  assert.equal(forbiddenDate.error.code, "FORBIDDEN");
+  assert.equal(content(), beforeForbidden);
   save("G1-VERIFICATION", {
     passed: true,
     deterministicTechnicalReplay: true,
     noComparisonOfModels: true,
     dateOwnedByFdm: true,
-    protectedFrontmatterKeyCount: 2,
+    creationPreserved: frontmatter(content())["création"] === creationByFdm,
+    clientDateWriteRejected: forbiddenDate.error.code === "FORBIDDEN",
     conflict: refused.outcome,
     B1equalsB2note: true,
     B3equalsB4allFiles: true,
