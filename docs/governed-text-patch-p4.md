@@ -141,3 +141,21 @@ modified-date change with every remaining byte unchanged. Deleted keys cannot
 reappear. Body, creation-date, unknown-key and YAML-type drift remain uncertain.
 No second write occurs. Detailed proof includes settlementAuthorizedFormatKeyCount
 and the original observed hash; authorized keys are retained durably in the journal.
+
+## Creation-date preparation
+
+Before sealing a new plan, the runtime can ask the candidate Atomic Write Bridge to date an undated note. The Bridge requires writes enabled, a loaded and active Frontmatter Date Manager and its `frontmatter-date-manager:update-timestamps-current-file` command. It opens only the target in a temporary tab, checks the source hash and vault binding, then invokes the command. FDM owns all creation/modified values; the MCP never invents or calculates them.
+
+The compiler and CAS use a fresh dated read. The durable and compact receipts include `datePreparation`. Source-preservation claims start at that dated source: the requested patch still waits for `apply`, but vault-owned dating can happen during planning. A whole-note replacement carries forward only observed manager-owned date values, while caller edits to protected keys remain forbidden.
+
+No active manager, absent commands or no observed date within 55 seconds fail closed with `atomic_write_creation_property_missing` and an actionable message asking the user to open and save the note in Obsidian once. An already dispatched FDM command may finish after a timeout; reread before retrying. No patch is sealed on uncertain evidence.
+
+Install the candidate MCP and Bridge together. Active vault settings define date names. Without an active integration, only protected canonical creation keys (`création`, `creation`, `created`) are recognized, not arbitrary names. Other date managers, multiple integrations and disabled FDM are not admitted for automatic preparation. Already-dated notes retain protected-key and CAS behavior.
+
+### Templates and paths outside date management
+
+Do not require or prepare dates under `X/Modèles/**`, Templater's configured `templates_folder`, or paths excluded by FDM `filterRules`. Loaded settings take precedence; otherwise the Bridge reads the plugin configuration inside the vault's `configDir`. Rules use FDM 1.6.0 ordered Picomatch POSIX matching, comments, `!` exceptions and folder boundaries. Ordinary undated notes still require FDM preparation.
+
+The durable receipt carries `datePreparation.kind: outside-date-management` and “Note hors gestion des dates.”. Sealed planning, CAS conflict rejection and reread verification remain mandatory. These paths receive no post-write date-settlement tolerance. Explicitly configured protected keys remain immutable; the exception never authorizes client-supplied dates.
+
+FDM also reacts asynchronously to vault modifications. The Bridge wraps FDM's `shouldFileBeIgnored` in memory to exclude template paths even when missing from FDM's filters, delegating ordinary paths unchanged and restoring the hook on Bridge unload. No plugin configuration or date field is written by this hook. This integration is tested against FDM 1.6.0; other managers are not qualified. Verification proves the reread state, not immunity to later independent changes.

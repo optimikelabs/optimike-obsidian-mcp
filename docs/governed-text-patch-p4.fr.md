@@ -146,3 +146,21 @@ supprimée ne peut réapparaître. Toute dérive du corps, création, d'une clé
 inconnue ou du type YAML reste incertaine. Aucune seconde écriture n'est faite.
 Le reçu détaillé expose settlementAuthorizedFormatKeyCount et le hash réellement
 observé ; le journal conserve les clés concernées, y compris après redémarrage.
+
+## Préparation des notes sans date de création
+
+Avant de sceller un nouveau plan, le runtime peut demander au Bridge de dater une note sans propriété de création. Le Bridge exige les écritures autorisées, FDM chargé et actif et sa commande `frontmatter-date-manager:update-timestamps-current-file`. Il ouvre uniquement la note ciblée dans un onglet temporaire, vérifie le hash et l’identité du coffre, puis appelle cette commande. FDM reste le seul auteur des valeurs de `création` et `modification` ; le MCP ne calcule ni ne choisit ces valeurs.
+
+Après datation, une nouvelle lecture sert de source au compilateur et au CAS. Le reçu durable, y compris en mode compact, contient `datePreparation` et « Note datée par le gestionnaire de dates avant le plan. ». La préservation du frontmatter et du corps annoncée par le patch se mesure à partir de cette source datée. Le patch demandé attend toujours `apply` ; la datation peut donc précéder son autorisation d’application.
+
+Sans gestionnaire actif, avec une commande absente ou une datation non observée dans les 55 secondes, le plan est refusé : « Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez. » Une commande déjà remise à FDM peut terminer après un timeout ; relire avant de réessayer. Aucun patch n’est scellé sur un état incertain.
+
+Cette préparation exige le Bridge candidat et le MCP candidat ensemble. Les noms de dates viennent des réglages actifs du coffre. Sans intégration active, le Bridge candidat reconnaît les clés de création canoniques protégées `création`, `creation` ou `created` ; il ne déduit pas un rôle de date d’un nom arbitraire. Les autres gestionnaires, les configurations multiples ou désactivées restent refusés pour la préparation automatique. Les notes déjà datées gardent leur protection et leur CAS. Un remplacement complet recopie uniquement les valeurs de dates observées après FDM ; il ne permet aucune modification des clés protégées demandée par le client.
+
+### Modèles et dossiers hors gestion des dates
+
+Aucune date n'est exigée ni préparée sous `X/Modèles/**`, dans le dossier `templates_folder` de Templater, ni dans un chemin exclu par `filterRules` de FDM. Les réglages chargés font foi ; si le plugin est déchargé, le Bridge lit son fichier de configuration dans le `configDir` du coffre. Les règles FDM 1.6.0 sont évaluées dans l'ordre avec Picomatch POSIX, commentaires, exclusions, exceptions `!` et limites de dossiers. Une note ordinaire reste soumise à la préparation par FDM.
+
+Le reçu indique `datePreparation.kind: outside-date-management` et « Note hors gestion des dates. ». Le plan, le hash CAS et la relecture restent obligatoires. Aucune tolérance aux changements de dates après écriture n'est accordée à ces fichiers. Les clés protégées explicitement configurées restent immuables : cette exception n'autorise pas un agent à inventer une date.
+
+FDM réagit aussi aux modifications du coffre après le CAS. Pour qu'un modèle Templater ne soit pas daté par cette réaction, même si son dossier manque dans `filterRules`, le Bridge ajoute une exclusion en mémoire autour de `shouldFileBeIgnored` de FDM. Elle ne change ni sa configuration ni ses fichiers, délègue les notes ordinaires à FDM et est retirée au déchargement du Bridge. Ce raccord est testé avec l'API de FDM 1.6.0 ; un autre gestionnaire n'est pas qualifié. Le reçu `verified` n'est émis que pour l'état relu, pas pour une garantie contre une modification ultérieure indépendante.

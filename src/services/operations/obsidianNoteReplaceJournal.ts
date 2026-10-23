@@ -31,6 +31,7 @@ export type ObsidianNoteReplacePlan = {
   operationId: string;
   idempotencyKey: string;
   requestDigest: string;
+  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string };
   idempotencyIdentity?: string;
   projection?: ObsidianNoteReplaceProjection;
   path: string;

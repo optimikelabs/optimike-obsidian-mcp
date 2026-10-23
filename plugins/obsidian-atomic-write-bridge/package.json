@@ -11,9 +11,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/picomatch": "^4.0.3",
     "esbuild": "^0.25.0",
     "obsidian": "1.13.0",
     "obsidian-local-rest-api": "5.3.0",
+    "picomatch": "^4.0.7",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3"
   }

@@ -144,7 +144,7 @@ export async function registerGovernedTextPatchTools(
     "obsidian_text_patch_plan",
     {
       description:
-        "Plan one bounded body text patch, optionally combined with frontmatterOperations, of an existing Markdown note. The sealed plan preserves the complete note outside its authorized body and optional frontmatter ranges, binds the current before proof and vault identity, and returns only opaque proof metadata; it never writes the note.",
+        "Plan one bounded body text patch, optionally combined with frontmatterOperations, of an existing Markdown note. The sealed plan preserves the complete note outside its authorized body and optional frontmatter ranges, binds the current before proof and vault identity, and returns only opaque proof metadata; it does not apply the requested patch. Templates and date-manager-excluded paths are never dated. Otherwise, if a creation date is missing, it first asks the active vault date manager to date the note and seals the reread dated state.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

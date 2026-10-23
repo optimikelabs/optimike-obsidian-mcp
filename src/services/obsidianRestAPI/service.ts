@@ -354,6 +354,13 @@ export class ObsidianRestApiService {
     );
   }
 
+  prepareAtomicWriteDate(
+    payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string },
+    context: RequestContext,
+  ): Promise<AtomicWriteReadResponse> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/notes/prepare-date", data: payload, timeout: 65_000 }, context, "prepareAtomicWriteDate");
+  }
+
   noteCreatePreflight(
     payload: { contractVersion: 1; path: string },
     context: RequestContext,

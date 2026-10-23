@@ -145,6 +145,7 @@ const StatusSchema = z
 
 const ReadSchema = z
   .object({
+    dateManagement: z.object({ managed: z.boolean(), reason: z.string().optional() }).optional(),
     ok: z.literal(true),
     contractVersion: z.literal(1),
     path: z.string().min(1),
@@ -186,6 +187,7 @@ export function markAtomicWritePreDispatchError(error: unknown): Error {
 export interface AtomicWriteBackend {
   status(): Promise<AtomicWriteStatusResponse>;
   read(payload: AtomicWriteReadRequest): Promise<AtomicWriteReadResponse>;
+  prepareDate?(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string }): Promise<AtomicWriteReadResponse>;
   replace(payload: AtomicWriteCasRequest): Promise<AtomicWriteCasResponse>;
 }
 
@@ -193,6 +195,7 @@ export type ObsidianNoteReplacePlanInput = {
   path: string;
   nextContent: string;
   idempotencyKey: string;
+  datePreparation?: OperationReceipt["datePreparation"];
   expectedBeforeSha256?: string;
   expectedBindingFingerprint?: string;
   idempotencyIdentity?: string;
@@ -460,6 +463,7 @@ function planDigest(
   plan: ObsidianNoteReplacePlan,
 ): string {
   return operationDigest({
+    ...(plan.datePreparation ? { datePreparation: plan.datePreparation } : {}),
     contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
     operationKind: profile.operationKind,
     operationId: plan.operationId,
@@ -511,6 +515,7 @@ function receipt(
     operationKind: profile.operationKind,
     planRef: planRef(profile, plan.operationId),
     planDigest: digest,
+    ...(plan.datePreparation ? { datePreparation: plan.datePreparation } : {}),
     phase: current.phase,
     outcome: current.outcome,
     backend: {
@@ -742,7 +747,7 @@ export class ObsidianNoteReplaceOperationAdapter
         "The atomic-write backend changed after the domain projection was compiled.",
       );
     }
-    const modifiedTimeSettlementPolicy = settlementPolicy(
+    const modifiedTimeSettlementPolicy = read.dateManagement?.managed === false ? undefined : settlementPolicy(
       status,
       this.options.modifiedTimeProtectedKeys ?? [],
     );
@@ -785,6 +790,7 @@ export class ObsidianNoteReplaceOperationAdapter
       this.journal.create({
         idempotencyKey: input.idempotencyKey,
         requestDigest,
+        ...(input.datePreparation ? { datePreparation: input.datePreparation } : {}),
         ...(input.idempotencyIdentity
           ? { idempotencyIdentity: input.idempotencyIdentity }
           : {}),

@@ -433,7 +433,9 @@ function safeDiagnosticFields(
   return safe;
 }
 
-function publicErrorMessage(code: BaseErrorCode): string {
+function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (code === BaseErrorCode.FORBIDDEN && reasonCode === "atomic_write_creation_property_missing")
+    return "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.";
   switch (code) {
     case BaseErrorCode.UNAUTHORIZED:
       return "Authentication is required for this request.";
@@ -777,7 +779,7 @@ export class ErrorHandler {
 
     const finalError = new McpError(
       loggedErrorCode,
-      publicErrorMessage(loggedErrorCode),
+      publicErrorMessage(loggedErrorCode, errorDetailsMetadata.reasonCode),
       {
         ...contextMetadata,
         ...errorDetailsMetadata,
@@ -869,7 +871,7 @@ export class ErrorHandler {
       const details = safeMcpErrorDetails(error);
       return {
         code: mcpCode,
-        message: publicErrorMessage(mcpCode),
+        message: publicErrorMessage(mcpCode, details ? readOwnDataProperty(details, "reasonCode") : undefined),
         details: details
           ? safeDiagnosticFields(details, SAFE_ERROR_DETAIL_FIELDS)
           : {},
@@ -976,7 +978,7 @@ export function publicMcpToolErrorPayload(
         : undefined,
     error: {
       code,
-      message: publicErrorMessage(code),
+      message: publicErrorMessage(code, publicDetails.reasonCode),
       details: publicDetails,
     },
   };

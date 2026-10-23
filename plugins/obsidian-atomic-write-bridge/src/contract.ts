@@ -171,6 +171,13 @@ export function parseReadRequest(input: unknown): NoteReadRequest {
   };
 }
 
+export function parseDatePreparationRequest(input: unknown) {
+  const body = bodyRecord(input);
+  assertExactKeys(body, ["contractVersion", "path", "expectedSha256", "bindingFingerprint"]);
+  return { contractVersion: contractVersion(body.contractVersion), path: validateVaultMarkdownPath(body.path),
+    expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"), bindingFingerprint: sha256Digest(body.bindingFingerprint, "bindingFingerprint") };
+}
+
 export function parseNoteLinksRequest(input: unknown): NoteLinksRequest {
   const body = bodyRecord(input);
   assertExactKeys(body, ["contractVersion", "limit", "path"]);

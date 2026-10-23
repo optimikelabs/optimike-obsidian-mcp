@@ -146,7 +146,7 @@ export async function registerGovernedFrontmatterTools(
     "obsidian_frontmatter_patch_plan",
     {
       description:
-        "Plan a source-preserving patch of top-level frontmatter keys in one existing Markdown note. The compiler changes only authorized source ranges, then seals the complete next note through the existing atomic note runtime. It performs no note write and returns an opaque planRef.",
+        "Plan a source-preserving patch of top-level frontmatter keys in one existing Markdown note. The compiler changes only authorized source ranges, then seals the complete next note through the existing atomic note runtime. It returns an opaque planRef without applying the requested patch. Missing creation dates are first prepared by the active vault date manager, then reread before sealing.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

@@ -398,7 +398,9 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
   assert.equal(payload.error.code, code, `${label} error code`);
   assert.equal(
     payload.error.message,
-    PUBLIC_MESSAGES[code],
+    payload.error.details?.reasonCode === "atomic_write_creation_property_missing"
+      ? "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez."
+      : PUBLIC_MESSAGES[code],
     `${label} catalog message`,
   );
   const requestId = payload.requestId ?? payload.error.details?.requestId;

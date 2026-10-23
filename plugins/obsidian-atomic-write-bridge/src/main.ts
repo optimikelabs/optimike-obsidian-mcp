@@ -3,6 +3,7 @@ import { describeRestRoutes } from "../../shared/restOpenApi";
 import { createHash, randomUUID } from "node:crypto";
 import {
   parseLinktext,
+  parseYaml,
   Plugin,
   PluginSettingTab,
   resolveSubpath,
@@ -22,9 +23,12 @@ import {
   parseCanvasReadRequest,
   parseNoteLinksRequest,
   parseReadRequest,
+  parseDatePreparationRequest,
   sha256,
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
+import { dateManagementScope, createTemplateDateGuard } from "./dateManagementScope.js";
+import { createDatePreparation, MISSING_CREATION_MESSAGE } from "./datePreparation.js";
 import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
@@ -232,6 +236,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   allowNoteCreates = false;
   private noteCreate: ReturnType<typeof createNoteCreateRoutes>;
   private nativeMove: ReturnType<typeof createNativeNoteMoveRoutes>;
+  private templateDateGuard!: ReturnType<typeof createTemplateDateGuard>;
+  private datePreparation!: ReturnType<typeof createDatePreparation>;
   private fdmCompletion!: ReturnType<typeof createFdmCompletion>;
 
   async onload(): Promise<void> {
@@ -285,6 +291,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       });
     } catch { this.noteCreate = undefined; }
     this.addSettingTab(new AtomicWriteSettingsTab(this.app, this));
+    this.templateDateGuard = createTemplateDateGuard(this.app);
+    this.register(() => this.templateDateGuard.dispose());
+    this.datePreparation = createDatePreparation(this.app, parseYaml, { enabled: () => this.allowWrites });
+    this.register(() => this.datePreparation.dispose());
     this.fdmCompletion = createFdmCompletion(this.app);
     this.register(() => this.fdmCompletion.dispose());
     void this.registerRestExtension();
@@ -375,6 +385,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               canvasAtomicCas: true,
               canvasWriteEnabled: this.allowCanvasWrites,
             },
+            datePreparation: { contractVersion: 1, supported: true },
             nativeMove: this.nativeMove?.capabilities() ?? { supported: false, enabled: false },
             noteCreate: this.noteCreate?.capabilities() ?? { supported: false, enabled: false },
             limits: { markdownOnly: true },
@@ -615,6 +626,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               ? await this.fdmCompletion.read(request.path, request.completionToken, () => this.app.vault.read(this.file(request.path)))
               : {content: await this.app.vault.read(this.file(request.path))};
             const { content } = observed;
+            this.templateDateGuard?.ensure();
+            const dateManagement = await dateManagementScope(this.app, request.path);
             sendJson(res, 200, {
               ok: true,
               contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
@@ -623,6 +636,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               sha256: sha256(content),
               size: Buffer.byteLength(content, "utf8"),
               bindingFingerprint: this.bindingFingerprint,
+              dateManagement,
               ...('completion' in observed ? { completion: observed.completion } : {}),
             });
           } catch (error) {
@@ -634,6 +648,24 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             );
           }
         });
+
+      api.addRoute(`${ATOMIC_WRITE_REST_PREFIX}/notes/prepare-date`).post(async (req: any, res: any) => {
+        let request: ReturnType<typeof parseDatePreparationRequest>;
+        try { request = parseDatePreparationRequest(req?.body); }
+        catch { sendJson(res, 400, errorPayload("invalid_request")); return; }
+        try {
+          assertBindingFingerprint(request.bindingFingerprint, this.bindingFingerprint);
+          this.templateDateGuard?.ensure();
+          const prepared = await this.datePreparation(request);
+          const content = prepared.content;
+          sendJson(res, 200, { ok: true, contractVersion: 1, path: request.path, content,
+            sha256: sha256(content), size: Buffer.byteLength(content, "utf8"), bindingFingerprint: this.bindingFingerprint,
+            ...(prepared.datePreparation ? { datePreparation: prepared.datePreparation } : {}) });
+        } catch (error) {
+          const conflict = safeInstanceOf(error, HashConflictError) || safeInstanceOf(error, BindingConflictError);
+          sendJson(res, conflict ? 409 : 403, errorPayload(conflict ? "hash_conflict" : "atomic_write_creation_property_missing", MISSING_CREATION_MESSAGE));
+        }
+      });
 
       api
         .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/notes/cas`)
@@ -665,6 +697,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               request.bindingFingerprint,
               this.bindingFingerprint,
             );
+            this.templateDateGuard?.ensure();
             let beforeSha256 = "";
             const completionToken = this.fdmCompletion.begin(request.path);
             let written: string;

@@ -47,6 +47,7 @@ export type AtomicWriteCasRequest = AtomicWriteReadRequest & {
 };
 
 export type AtomicWriteStatusResponse = {
+  datePreparation?: { contractVersion: 1; supported: true };
   ok: true;
   contractVersion: 1;
   plugin: { id: string; version: string };
@@ -98,6 +99,7 @@ export type AtomicWriteStatusResponse = {
 };
 
 export type AtomicWriteReadResponse = {
+  dateManagement?: { managed: boolean; reason?: string };
   ok: true;
   contractVersion: 1;
   path: string;
@@ -105,6 +107,7 @@ export type AtomicWriteReadResponse = {
   sha256: string;
   size: number;
   bindingFingerprint: string;
+  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string };
   completion?: { contractVersion: 1; kind: 'fdm-completion-v1'; token: string;
     epoch: string; generation: number; state: 'complete' | 'pending' };
 };

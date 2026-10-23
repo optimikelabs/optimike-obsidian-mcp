@@ -29,6 +29,10 @@ export class RestAtomicWriteBackend implements AtomicWriteBackend {
     );
   }
 
+  prepareDate(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string }) {
+    return this.rest.prepareAtomicWriteDate(payload, requestContextService.createRequestContext({ operation: "AtomicWriteDatePreparation" }));
+  }
+
   replace(payload: AtomicWriteCasRequest): Promise<AtomicWriteCasResponse> {
     return this.rest.replaceAtomicWriteNote(
       payload,

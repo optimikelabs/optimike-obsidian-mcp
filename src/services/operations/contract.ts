@@ -48,6 +48,7 @@ export type OperationReceipt = {
       | "compensated"
       | "unverified";
   };
+  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string };
   admittedAt: string;
   updatedAt: string;
   terminalAt?: string;
