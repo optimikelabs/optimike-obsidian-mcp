@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-10-23
+
+### Fixed
+
+- Let FDM date a note without a creation property before sealing a protected modification plan; the requested modification still requires `apply`, and the MCP never generates date values.
+- Keep templates and FDM-excluded paths undated, including the configured Templater folder. Refuse preparation clearly when no active date manager is available.
+- Accept CRLF/LF normalization performed by Obsidian during date preparation, including mixed line endings, and report it in the receipt. Other body or non-date property changes remain conflicts; CAS uses the exact freshly read bytes.
+
+### Changed
+
+- Ship Atomic Write Bridge 0.8.2 with MCP 3.14.0; retain Operon Bridge 0.9.3 and Bases Bridge 1.2.2.
+
+### Security
+
+- Update `follow-redirects` to 1.16.1 to fix credential-header exposure risks during redirects (#123).
+
+### Limits
+
+- Date preparation and template protection are qualified with FDM 1.6.0 only; other date managers are not qualified. An already dispatched FDM command may complete after a timeout: reread before retrying.
+- Release preparation only; not published. See the [English](docs/releases/3.14.0.md) and [French](docs/releases/3.14.0.fr.md) release notes.
+
 ## [3.13.0] - 2026-10-18
 
 ### Added

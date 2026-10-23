@@ -10,6 +10,8 @@ Optimike Obsidian MCP gives MCP clients a governed operational surface over an O
 
 Version 3.12 adds the operational profile, read-only frontmatter access and faster governed completion with a qualified optional FDM integration. See the measured gains and conditions in the [changelog](CHANGELOG.md#3120---2026-10-08). Version 3.13 restores semantic search on Smart Connections indexes built with the plugin's built-in model (BGE Micro by default), through the optional `@huggingface/transformers` package; see [embedders](README_EMBEDDERS.md).
 
+Version 3.14 prepares undated notes through FDM before protected edits, preserves undated templates and excluded paths, and accepts Obsidian CRLF/LF normalization during preparation. FDM 1.6.0 is qualified; other date managers are not. See the [3.14.0 release notes](docs/releases/3.14.0.md).
+
 ## Capability map
 
 | Area                    | What the MCP provides                                                  | Main dependency                                            |
