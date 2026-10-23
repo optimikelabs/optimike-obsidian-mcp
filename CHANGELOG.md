@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.1] - 2026-10-23
+
+### Fixed
+
+- Accept a Smart Environment v3 vector when its `read_hash` matches the source's `last_read.hash`, falling back to `last_import.hash`. Re-embedded notes that were not re-imported are no longer dropped from semantic search; missing or stale hashes remain rejected.
+- Report a semantic readiness probe that exceeds its deadline as `semantic_probe_timed_out` with `retry_capability_probe`, distinct from a missing index; the capability stays unavailable and unauthorized.
+
+### Changed
+
+- Store the private semantic vector cache as exact little-endian Float64 base64 rows behind a versioned source signature. Historical number-array rows remain readable; old and new releases rebuild the derived cache from Smart Connections sources once after an upgrade or rollback.
+- Share one source read between a semantic query and a readiness probe already in flight in the same refresh generation, coalesce concurrent probes, keep a successful observation for at most 60 seconds, stat source files in bounded batches of 32 and reuse an unchanged in-memory snapshot. Probes still write nothing.
+- Retain Atomic Write Bridge 0.8.2, Operon Bridge 0.9.3 and Bases Bridge 1.2.2; no Bridge code changes.
+
+### Limits
+
+- Local measurements from a frozen 7,578-vector corpus (8 October 2026): cache persistence 5.45 to 2.50 s, vector payload about 49% smaller, cold query plus diagnostic 11.0 / 8.2 s to 4.9 / 4.8 s. These are not an SLA and no RAM reduction is claimed. See the [English](docs/releases/3.14.1.md) and [French](docs/releases/3.14.1.fr.md) release notes.
+
 ## [3.14.0] - 2026-10-23
 
 ### Fixed
@@ -26,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Limits
 
 - Date preparation and template protection are qualified with FDM 1.6.0 only; other date managers are not qualified. An already dispatched FDM command may complete after a timeout: reread before retrying.
-- Release preparation only; not published. See the [English](docs/releases/3.14.0.md) and [French](docs/releases/3.14.0.fr.md) release notes.
+- See the [English](docs/releases/3.14.0.md) and [French](docs/releases/3.14.0.fr.md) release notes.
 
 ## [3.13.0] - 2026-10-18
 
