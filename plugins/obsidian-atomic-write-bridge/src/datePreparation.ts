@@ -108,6 +108,17 @@ export function createDatePreparation(
         );
       const previous = app.workspace.activeLeaf;
       const leaf = app.workspace.getLeaf("tab");
+      let leafReleased = false;
+      const releaseLeaf = () => {
+        if (leafReleased) return;
+        leafReleased = true;
+        // Closing the native editor may flush an LF-normalized save. Observe it
+        // before returning a hash, while retaining the same non-date checks.
+        if (app.workspace.activeLeaf === leaf) {
+          if (previous) app.workspace.setActiveLeaf(previous, { focus: false });
+          leaf.detach();
+        }
+      };
       try {
         await leaf.openFile(file, { state: { mode: "source" }, active: true });
         app.workspace.setActiveLeaf(leaf, { focus: false });
@@ -148,6 +159,13 @@ export function createDatePreparation(
             )
           )
             throw new HashConflictError(sha256(content));
+          if (hasCreated(observed.properties) && !leafReleased) {
+            releaseLeaf();
+            last = "";
+            stableSince = now();
+            await sleep(100);
+            continue;
+          }
           if (content !== last) {
             last = content;
             stableSince = now();
@@ -165,10 +183,7 @@ export function createDatePreparation(
         return fail();
       } finally {
         // Never steal focus back from a user who moved to another note.
-        if (app.workspace.activeLeaf === leaf) {
-          if (previous) app.workspace.setActiveLeaf(previous, { focus: false });
-          leaf.detach();
-        }
+        releaseLeaf();
       }
     };
     const result = tail.then(run);

@@ -108,6 +108,12 @@ async function call(name, args, error = false) {
     }) + "\n",
     "utf8",
   );
+  if (Boolean(result.isError) !== error) {
+    await cdp(
+      "({observations:globalThis.__creationB,error:globalThis.__creationBError})",
+      "unexpected-error-native-proof",
+    );
+  }
   assert.equal(Boolean(result.isError), error, JSON.stringify(payload));
   return payload;
 }
@@ -118,7 +124,7 @@ try {
   assert(!initial.includes("création:"));
   snapshot("B0-sans-date");
   const admission = await cdp(
-    `(()=>{const p=app.plugins.getPlugin('frontmatter-date-manager');const original=app.fileManager.processFrontMatter;globalThis.__creationB=[];app.fileManager.processFrontMatter=function(file,cb,...args){const stack=new Error().stack;return original.call(this,file,fm=>{const before=JSON.parse(JSON.stringify(fm));const value=cb(fm);globalThis.__creationB.push({path:file.path,fromFdm:stack.includes('plugin:frontmatter-date-manager'),before,after:JSON.parse(JSON.stringify(fm)),utc:Date.now()});return value;},...args);};return {bridgeWritesEnabled:!!app.plugins.getPlugin('obsidian-atomic-write-bridge')?.allowWrites,vault:app.vault.adapter.basePath,plugins:Object.fromEntries(Object.entries(app.plugins.plugins).map(([id,p])=>[id,p.manifest.version])),fdmSettings:{enableAutoUpdate:p.settings.enableAutoUpdate,headerCreated:p.settings.headerCreated}};})()`,
+    `(()=>{const bridge=app.plugins.getPlugin('obsidian-atomic-write-bridge');const prepare=bridge.datePreparation;bridge.datePreparation=Object.assign(async(...args)=>{try{return await prepare(...args)}catch(e){globalThis.__creationBError={message:e.message,stack:e.stack};throw e;}},{dispose:prepare.dispose});const p=app.plugins.getPlugin('frontmatter-date-manager');const original=app.fileManager.processFrontMatter;globalThis.__creationB=[];app.fileManager.processFrontMatter=function(file,cb,...args){const stack=new Error().stack;return original.call(this,file,fm=>{const before=JSON.parse(JSON.stringify(fm));const value=cb(fm);globalThis.__creationB.push({path:file.path,fromFdm:stack.includes('plugin:frontmatter-date-manager'),before,after:JSON.parse(JSON.stringify(fm)),utc:Date.now()});return value;},...args);};return {bridgeWritesEnabled:!!app.plugins.getPlugin('obsidian-atomic-write-bridge')?.allowWrites,vault:app.vault.adapter.basePath,plugins:Object.fromEntries(Object.entries(app.plugins.plugins).map(([id,p])=>[id,p.manifest.version])),fdmSettings:{enableAutoUpdate:p.settings.enableAutoUpdate,headerCreated:p.settings.headerCreated}};})()`,
     "runtime-admission",
   );
   assert.equal(

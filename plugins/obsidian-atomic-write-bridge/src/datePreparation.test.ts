@@ -201,3 +201,22 @@ for (const path of ["X/Modèles/A.md", "Excluded/A.md", "Templates/A.md"]) {
     assert.deepEqual(f.counts(), { commands: 0, opens: 0 });
   });
 }
+
+test("native editor close is settled before returning the prepared hash", async () => {
+  const f = fixture();
+  f.setContent(f.content().replace(/\n/g, "\r\n"));
+  f.app.workspace.getLeaf().detach = () => {
+    f.setContent(f.content().replace(/\r\n/g, "\n"));
+  };
+  const result = await f.prepare(f.request());
+  assert.equal(result.content, f.content());
+  assert(!result.content.includes("\r"));
+  assert.equal(result.datePreparation?.kind, "date-manager-before-plan");
+});
+
+test("a non-date edit flushed on native editor close remains a conflict", async () => {
+  const f = fixture();
+  f.app.workspace.getLeaf().detach = () =>
+    f.setContent(f.content() + "human edit");
+  await assert.rejects(f.prepare(f.request()), /changed after/);
+});
