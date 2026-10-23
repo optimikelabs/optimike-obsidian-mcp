@@ -311,7 +311,7 @@ try {
   );
   const noManagerBefore = fs.readFileSync(path.join(cfg.vault, undated));
   await cdp(
-    "(async()=>{await app.plugins.unloadPlugin('frontmatter-date-manager');return {fdmLoaded:!!app.plugins.getPlugin('frontmatter-date-manager')};})()",
+    "(()=>({fdmLoaded:!!app.plugins.getPlugin('frontmatter-date-manager')}))()",
     "fdm-unloaded",
   );
   const noManager = await call(
