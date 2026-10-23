@@ -107,7 +107,7 @@ export type AtomicWriteReadResponse = {
   sha256: string;
   size: number;
   bindingFingerprint: string;
-  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string };
+  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string; lineEndingsNormalized?: true };
   completion?: { contractVersion: 1; kind: 'fdm-completion-v1'; token: string;
     epoch: string; generation: number; state: 'complete' | 'pending' };
 };
