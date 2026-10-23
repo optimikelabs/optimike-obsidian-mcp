@@ -91,7 +91,8 @@ export class BaseRowsPatchRuntime {
         changedKeys: compiled.proof.changedKeys, sourcePreservation: compiled.proof.sourcePreservation } });
     const child = await this.notes.plan({ path: target.path, nextContent: compiled.nextContent,
       idempotencyKey: internalKey, idempotencyIdentity: intentDigest,
-      expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint, projection });
+      expectedBeforeSha256: source.sha256,
+      datePreparation: source.datePreparation, expectedBindingFingerprint: source.bindingFingerprint, projection });
     const view = this.notes.inspect(child.planRef);
     stored(view, input.idempotencyKey, intentDigest);
     return this.receipt(child, view);

@@ -25,6 +25,8 @@ import type { SettlementCompletionMode } from "../../../services/operations/obsi
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
+import { operationDigest } from "../../../services/operations/contract.js";
+import { compileFrontmatterPatch } from "../../../services/frontmatterPatchCompiler.js";
 import { z } from "zod";
 import { config } from "../../../config/index.js";
 import { validateObsidianMarkdown } from "../../../services/obsidianFormatService.js";
@@ -63,7 +65,7 @@ type CallContext =
       nextContent: string;
       atomicWriteStatus?: unknown;
     }
-  | { kind: "apply" | "recover"; atomicWriteStatus?: unknown };
+  | { kind: "apply" | "recover"; path: string; atomicWriteStatus?: unknown };
 
 type FrontmatterRecord = Record<string, unknown>;
 
@@ -233,7 +235,7 @@ function validateReplacement(
     if (missingCreated.length > 0) {
       throw new McpError(
         BaseErrorCode.FORBIDDEN,
-        `Atomic note replacement requires active creation-date properties to exist before planning: ${missingCreated.join(", ")}`,
+        "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.",
         {
           reasonCode: "atomic_write_creation_property_missing",
           missingCreatedProperties: missingCreated,
@@ -292,8 +294,12 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
   }
 
   async status() {
-    const status = await measureGovernedPhase("bridgeStatus", () => this.delegate.status());
+    let status = await measureGovernedPhase("bridgeStatus", () => this.delegate.status());
     const context = this.callContext.getStore();
+    if (context) {
+      const scope = await this.delegate.read({ contractVersion: 1, path: context.path });
+      if (scope.dateManagement?.managed === false) status = { ...status, protection: undefined, settlement: undefined };
+    }
     if (context) context.atomicWriteStatus = status;
     return status;
   }
@@ -324,10 +330,40 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
           context.atomicWriteStatus,
           config.mcpProtectedFrontmatterKeys,
         ),
-        effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
+        result.dateManagement?.managed === false ? undefined : effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
       );
     }
     return result;
+  }
+
+  async prepareForPlan(path: string, expectedSource?: { sha256: string; bindingFingerprint: string }) {
+    const source = await this.delegate.read({ contractVersion: 1, path });
+    if (expectedSource && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
+      throw new McpError(BaseErrorCode.CONFLICT, "The note changed before date preparation.");
+    if (source.dateManagement?.managed === false) return { ...source, datePreparation: { kind: "outside-date-management" as const, message: "Note hors gestion des dates." } };
+    const status = await this.delegate.status();
+    const protection = effectiveAtomicWriteDateProtection(status);
+    const created = [...new Set([...protection.createdPropertyNames,
+      ...(protection.createdPropertyNames.length || !status.datePreparation?.supported ? [] : config.mcpProtectedFrontmatterKeys.filter(key => /^(création|creation|created)$/iu.test(key)))])];
+    const fm = parseFrontmatter(source.content);
+    if (!created.some(key => entriesForKey(fm, normalizeKey(key)).length === 0)) return source;
+    assertCurrentWritePolicy("plan", path, source.content);
+    const fail = () => new McpError(BaseErrorCode.FORBIDDEN,
+      "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.",
+      { reasonCode: "atomic_write_creation_property_missing" });
+    if (!status.backend.writeEnabled || !this.delegate.prepareDate || protection.unsupportedIntegrations.length) throw fail();
+    let prepared;
+    try {
+      prepared = await this.delegate.prepareDate({ contractVersion: 1, path, expectedSha256: source.sha256, bindingFingerprint: source.bindingFingerprint });
+    } catch (error) { if (error instanceof McpError && error.code === BaseErrorCode.CONFLICT) throw error; throw fail(); }
+    // Seal only a fresh read, never the preparation response or the old projection.
+    const current = await this.delegate.read({ contractVersion: 1, path });
+    if (current.path !== path || current.bindingFingerprint !== source.bindingFingerprint || current.sha256 !== prepared.sha256)
+      throw new McpError(BaseErrorCode.CONFLICT, "The note changed during date preparation.");
+    if (created.some(key => entriesForKey(parseFrontmatter(current.content), normalizeKey(key)).length !== 1)) throw fail();
+    return { ...current, ...(prepared.datePreparation?.kind === "date-manager-before-plan" ? { datePreparation: {
+      kind: "date-manager-before-plan" as const, message: "Note datée par le gestionnaire de dates avant le plan."
+    }} : {}) };
   }
 
   async replace(payload: Parameters<AtomicWriteBackend["replace"]>[0]) {
@@ -375,7 +411,7 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
           context.atomicWriteStatus,
           config.mcpProtectedFrontmatterKeys,
         ),
-        effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
+        current.dateManagement?.managed === false ? undefined : effectiveAtomicWriteDateProtection(context.atomicWriteStatus),
       );
     } catch (error) {
       throw markAtomicWritePreDispatchError(error);
@@ -493,7 +529,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   }
 
   readForProjection(path: string) {
-    return this.backend.read({ contractVersion: 1, path });
+    return this.backend.prepareForPlan ? this.backend.prepareForPlan(path) : this.backend.read({ contractVersion: 1, path });
   }
 
   listPendingOperationRows(
@@ -547,13 +583,13 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     if (plan.status === "planned") {
       assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
     }
-    const operation = this.backend.withContext({ kind: "apply" }, () =>
+    const operation = this.backend.withContext({ kind: "apply", path: plan.path }, () =>
       this.adapter.apply(reference, idempotencyKey, completionMode),
     );
     return this.refreshCacheAfterCommit(plan, operation, true);
   }
 
-  planPublicDirect(
+  async planPublicDirect(
     input: ObsidianNoteReplacePlanInput,
   ): Promise<OperationReceipt> {
     if (input.idempotencyKey.startsWith(PROJECTED_IDEMPOTENCY_KEY_PREFIX)) {
@@ -563,7 +599,29 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
         { reason: "reserved_projection_idempotency_namespace" },
       );
     }
-    return this.plan(input);
+    assertCurrentWritePolicy("plan", input.path, input.nextContent);
+    const identity = operationDigest({ path: input.path, nextContent: input.nextContent });
+    const existing = this.findPlanByIdempotencyKey(input.idempotencyKey);
+    if (existing?.idempotencyIdentity === identity) return this.status(`${PLAN_REF_PREFIX}${existing.operationId}`);
+    if (existing) return this.plan(existing.idempotencyIdentity ? { ...input, idempotencyIdentity: identity } : input);
+    const before = await this.backend.read({ contractVersion: 1, path: input.path });
+    const status = await this.backend.status();
+    const keys = effectiveAtomicWriteProtectedFrontmatterKeys(status, config.mcpProtectedFrontmatterKeys);
+    validateReplacement(before.content, input.nextContent, "plan", keys);
+    const source = await this.backend.prepareForPlan(input.path, before);
+    let nextContent = input.nextContent;
+    if (source.datePreparation?.kind === "date-manager-before-plan") {
+      const fm = parseFrontmatter(source.content);
+      const dateKeys = effectiveAtomicWriteDateProtection(status).createdPropertyNames.concat(
+        (status.protection?.frontmatterDateProperties.integrations ?? []).flatMap(i => i.modifiedPropertyName ? [i.modifiedPropertyName] : []));
+      const operations = dateKeys.flatMap(key => entriesForKey(fm, normalizeKey(key)).map(({key, value}) => {
+        if (typeof value !== "string") throw new McpError(BaseErrorCode.CONFLICT, "The date manager returned an unsupported date value.");
+        return {op: "set" as const, key, value};
+      }));
+      if (operations.length) nextContent = compileFrontmatterPatch(nextContent, operations).nextContent;
+    }
+    return this.plan({ ...input, nextContent, idempotencyIdentity: identity,
+      expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint, datePreparation: source.datePreparation });
   }
 
   async applyPublicDirectPlan(
@@ -594,7 +652,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     if (plan.status === "outcome_unknown") {
       assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
     }
-    const operation = this.backend.withContext({ kind: "recover" }, () =>
+    const operation = this.backend.withContext({ kind: "recover", path: plan.path }, () =>
       this.adapter.recover(reference, idempotencyKey, completionMode),
     );
     return this.refreshCacheAfterCommit(plan, operation, true);

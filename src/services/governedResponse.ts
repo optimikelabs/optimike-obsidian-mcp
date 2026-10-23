@@ -55,6 +55,7 @@ function compactReceipt(value: unknown, toolName: string): unknown {
     "idempotencyKey",
     "target",
     "postflight",
+    "datePreparation",
     "applyAllowed",
     "recoveryAllowed",
     "recoveryRef",

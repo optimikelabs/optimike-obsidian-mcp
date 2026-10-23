@@ -111,7 +111,7 @@ export async function registerGovernedNoteReplaceTools(
     "obsidian_note_replace_plan",
     {
       description:
-        "Plan one complete atomic replacement of an existing Markdown note. This reads the live Atomic Write Bridge, validates the future Markdown and protected frontmatter, seals the before/after proofs and next content in the private journal, and performs no note write. planRef is opaque.",
+        "Plan one complete atomic replacement of an existing Markdown note. This reads the live Atomic Write Bridge, validates the future Markdown and protected frontmatter, seals the before/after proofs and next content in the private journal, without applying the requested replacement. Missing creation dates are first prepared by the active vault date manager, then reread before sealing. planRef is opaque.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

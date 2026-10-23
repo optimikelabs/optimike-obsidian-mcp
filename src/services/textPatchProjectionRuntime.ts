@@ -470,6 +470,7 @@ export class GovernedTextPatchRuntime {
       nextContent,
       idempotencyKey: internalKey,
       expectedBeforeSha256: source.sha256,
+      datePreparation: source.datePreparation,
       expectedBindingFingerprint: source.bindingFingerprint,
       idempotencyIdentity: intentDigest,
       projection,
