@@ -146,6 +146,12 @@ try {
   });
   assert.equal(first.phase, "planned");
   assert.equal(first.datePreparation.kind, "date-manager-before-plan");
+  assert(initial.includes("\r\n"), "G1 fixture must exercise CRLF");
+  assert.equal(first.datePreparation.lineEndingsNormalized, true);
+  assert.match(
+    first.datePreparation.message,
+    /fins de ligne normalisées par Obsidian pendant la datation/,
+  );
   assert.match(content(), /création:/);
   const creationByFdm = frontmatter(content())["création"];
   assert.equal(typeof creationByFdm, "string");
@@ -252,6 +258,8 @@ try {
     deterministicTechnicalReplay: true,
     noComparisonOfModels: true,
     dateOwnedByFdm: true,
+    lineEndingsNormalized: first.datePreparation.lineEndingsNormalized,
+    datePreparationMessage: first.datePreparation.message,
     creationPreserved: frontmatter(content())["création"] === creationByFdm,
     clientDateWriteRejected: forbiddenDate.error.code === "FORBIDDEN",
     conflict: refused.outcome,
