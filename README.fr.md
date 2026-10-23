@@ -24,7 +24,7 @@ Le registre canonique des outils est documenté dans [Surface des outils](docs/o
 
 La version 3.12 ajoute le profil operational, la lecture dédiée du frontmatter et une certification gouvernée plus rapide avec une intégration FDM facultative qualifiée. Voir les gains mesurés et leurs conditions dans le [changelog](CHANGELOG.md#3120---2026-10-08). La version 3.13 rétablit la recherche sémantique sur les index Smart Connections construits avec le modèle intégré du plugin (BGE Micro par défaut), via le paquet optionnel `@huggingface/transformers` ; voir [embedders](README_EMBEDDERS.md).
 
-La version 3.14 fait dater les notes sans création par FDM avant une modification protégée, préserve les modèles et chemins exclus sans dates et accepte la normalisation CRLF/LF par Obsidian pendant la préparation. FDM 1.6.0 est qualifié ; les autres gestionnaires ne le sont pas. Voir les [notes de version 3.14.0](docs/releases/3.14.0.fr.md).
+La version 3.14 fait dater les notes sans création par FDM avant une modification protégée, préserve les modèles et chemins exclus sans dates et accepte la normalisation CRLF/LF par Obsidian pendant la préparation. FDM 1.6.0 est qualifié ; les autres gestionnaires ne le sont pas. Voir les [notes de version 3.14.0](docs/releases/3.14.0.fr.md). La version 3.14.1 garde dans la recherche les notes Smart Connections réindexées et rend le cache sémantique plus rapide et exact ; voir les [notes de version 3.14.1](docs/releases/3.14.1.fr.md).
 
 ## Runtime et transport
 

@@ -71,6 +71,39 @@ CREATE INDEX IF NOT EXISTS idx_semantic_vectors_model ON semantic_vectors (model
 
 let semanticCacheServiceSingleton: SemanticCacheService | null = null;
 
+// The cache is derived data. Version its source signature with the row encoding
+// so an older release rebuilds from the source rather than reading an encoding
+// it cannot interpret. No source or public vector representation is changed.
+const VECTOR_CACHE_ENCODING = "float64le-base64-v1";
+const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+function encodeCachedVector(vec: readonly number[]): string {
+  // Native typed-array conversion avoids formatting millions of decimals.
+  const bytes = LITTLE_ENDIAN
+    ? Buffer.from(new Float64Array(vec).buffer)
+    : Buffer.allocUnsafe(vec.length * 8);
+  if (!LITTLE_ENDIAN)
+    for (let i = 0; i < vec.length; i++) bytes.writeDoubleLE(vec[i]!, i * 8);
+  return JSON.stringify({ encoding: VECTOR_CACHE_ENCODING, length: vec.length, data: bytes.toString("base64") });
+}
+function decodeCachedVector(json: string, dimension: number): number[] {
+  const value: unknown = JSON.parse(json);
+  // Compatibility with an existing cache, including historical numeric arrays.
+  if (Array.isArray(value)) return value as number[];
+  if (!value || typeof value !== "object") throw new Error("Invalid semantic vector cache encoding");
+  const row = value as Record<string, unknown>;
+  if (row.encoding !== VECTOR_CACHE_ENCODING || !Number.isSafeInteger(row.length) ||
+      row.length !== dimension || dimension < 0 || typeof row.data !== "string")
+    throw new Error("Invalid semantic vector cache encoding");
+  const bytes = Buffer.from(row.data, "base64");
+  if (bytes.length !== dimension * 8 || bytes.toString("base64") !== row.data)
+    throw new Error("Invalid semantic vector cache byte length or base64 encoding");
+  if (LITTLE_ENDIAN && bytes.byteOffset % 8 === 0)
+    return Array.from(new Float64Array(bytes.buffer, bytes.byteOffset, dimension));
+  const vec: number[] = [];
+  for (let i = 0; i < dimension; i++) vec.push(bytes.readDoubleLE(i * 8));
+  return vec;
+}
+
 function pickDominantDimension(items: SmartVec[]): number | undefined {
   const counts = new Map<number, number>();
   for (const item of items) {
@@ -94,12 +127,16 @@ function pickDominantModel(items: SmartVec[]): string | undefined {
 
 function makeSourceSignature(entries: Array<{ path: string; mtimeMs: number; size: number }>): string {
   return createHash("sha1")
+    // A reader-contract change must invalidate persisted snapshots even when
+    // the vault files themselves have not changed.
+    .update("smart-env-v3:last-read-v1:float64le-base64-v1\n")
     .update(JSON.stringify(entries))
     .digest("hex");
 }
 
 async function scanSmartEnvSourceState(baseDir: string): Promise<SmartEnvSourceState> {
   const entries: Array<{ path: string; mtimeMs: number; size: number }> = [];
+  const paths: string[] = [];
 
   for (const subdir of SUBDIRS) {
     const directory = subdir ? path.join(baseDir, subdir) : baseDir;
@@ -117,18 +154,26 @@ async function scanSmartEnvSourceState(baseDir: string): Promise<SmartEnvSourceS
       ) {
         continue;
       }
-      const fullPath = path.join(directory, file);
-      try {
-        const stat = await fs.stat(fullPath);
-        entries.push({
-          path: path.relative(baseDir, fullPath).replace(/\\/g, "/"),
-          mtimeMs: stat.mtimeMs,
-          size: stat.size,
-        });
-      } catch {
-        continue;
-      }
+      paths.push(path.join(directory, file));
     }
+  }
+
+  // Bound filesystem concurrency instead of serializing thousands of stat calls.
+  for (let offset = 0; offset < paths.length; offset += 32) {
+    await Promise.all(
+      paths.slice(offset, offset + 32).map(async (fullPath) => {
+        try {
+          const stat = await fs.stat(fullPath);
+          entries.push({
+            path: path.relative(baseDir, fullPath).replace(/\\/g, "/"),
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+          });
+        } catch {
+          // A vanished file is handled just as in the sequential scan.
+        }
+      }),
+    );
   }
 
   entries.sort((a, b) => a.path.localeCompare(b.path));
@@ -143,6 +188,25 @@ export class SemanticCacheService {
   private readonly ttlMs: number;
   private memorySnapshot: SemanticCacheSnapshot | null = null;
   private memorySnapshotLoadedAt = 0;
+  private pendingSnapshot: Promise<SemanticCacheSnapshot> | null = null;
+  private refreshGeneration = 0;
+  private pendingSource: {
+    generation: number;
+    promise: Promise<SmartVec[]>;
+  } | null = null;
+  private readiness: {
+    value: {
+      vectorCount: number;
+      dominantModel?: string;
+      dominantDimension?: number;
+    };
+    observedAt: number;
+  } | null = null;
+  private pendingReadiness: Promise<{
+    vectorCount: number;
+    dominantModel?: string;
+    dominantDimension?: number;
+  }> | null = null;
 
   constructor(
     private readonly smartEnvDir: string,
@@ -162,12 +226,6 @@ export class SemanticCacheService {
       throw new Error("SMART_ENV_DIR is not configured");
     }
 
-    const opContext =
-      context ??
-      requestContextService.createRequestContext({
-        operation: "SemanticCacheService.getSnapshot",
-      });
-
     const now = Date.now();
 
     if (
@@ -177,7 +235,35 @@ export class SemanticCacheService {
       return this.memorySnapshot;
     }
 
+    // All concurrent callers share one refresh, including its failure.
+    if (this.pendingSnapshot) return this.pendingSnapshot;
+    const pending = this.refreshSnapshot(context);
+    this.pendingSnapshot = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.pendingSnapshot === pending) this.pendingSnapshot = null;
+    }
+  }
+
+  private async refreshSnapshot(
+    context?: RequestContext,
+  ): Promise<SemanticCacheSnapshot> {
+    const generation = this.refreshGeneration;
+    const opContext =
+      context ??
+      requestContextService.createRequestContext({
+        operation: "SemanticCacheService.getSnapshot",
+      });
+
     const sourceState = await scanSmartEnvSourceState(this.smartEnvDir);
+    if (generation !== this.refreshGeneration)
+      return this.refreshSnapshot(context);
+
+    if (this.memorySnapshot?.sourceSignature === sourceState.signature) {
+      this.memorySnapshotLoadedAt = Date.now();
+      return this.memorySnapshot;
+    }
 
     const manifest = this.readManifest();
     if (
@@ -187,7 +273,7 @@ export class SemanticCacheService {
     ) {
       const snapshot = this.loadSnapshotFromDb(manifest);
       this.memorySnapshot = snapshot;
-      this.memorySnapshotLoadedAt = now;
+      this.memorySnapshotLoadedAt = Date.now();
       return snapshot;
     }
 
@@ -196,10 +282,13 @@ export class SemanticCacheService {
       smartEnvDir: this.smartEnvDir,
       sourceFileCount: sourceState.fileCount,
     });
-    const items = await loadSmartEnv(this.smartEnvDir);
+    const items = await this.loadSource(generation);
+    // A maintenance invalidation during a read must not publish its old result.
+    if (generation !== this.refreshGeneration)
+      return this.refreshSnapshot(context);
     const snapshot = this.persistSnapshot(items, sourceState);
     this.memorySnapshot = snapshot;
-    this.memorySnapshotLoadedAt = now;
+    this.memorySnapshotLoadedAt = Date.now();
     return snapshot;
   }
 
@@ -228,6 +317,29 @@ export class SemanticCacheService {
       );
     }
 
+    // Observational cache only: no DB writes, no query snapshot publication.
+    // A late successful probe can answer the next bounded health request.
+    if (
+      this.readiness &&
+      now - this.readiness.observedAt < Math.min(this.ttlMs || 60_000, 60_000)
+    )
+      return { ...this.readiness.value };
+    if (this.pendingReadiness) return { ...(await this.pendingReadiness) };
+    const pending = this.validateReadiness();
+    this.pendingReadiness = pending;
+    try {
+      return { ...(await pending) };
+    } finally {
+      if (this.pendingReadiness === pending) this.pendingReadiness = null;
+    }
+  }
+
+  private async validateReadiness(): Promise<{
+    vectorCount: number;
+    dominantModel?: string;
+    dominantDimension?: number;
+  }> {
+    const generation = this.refreshGeneration;
     const sourceState = await scanSmartEnvSourceState(this.smartEnvDir);
     const manifest = this.readManifest();
     const snapshot =
@@ -236,12 +348,30 @@ export class SemanticCacheService {
       manifest.smart_env_dir === this.smartEnvDir
         ? this.loadSnapshotFromDb(manifest)
         : null;
-    const items = snapshot?.items ?? (await loadSmartEnv(this.smartEnvDir));
-    return this.projectReadiness(
+    const items = snapshot?.items ?? (await this.loadSource(generation));
+    if (generation !== this.refreshGeneration) return this.validateReadiness();
+    const value = this.projectReadiness(
       items,
       snapshot?.dominantModel,
       snapshot?.dominantDim,
     );
+    this.readiness = { value, observedAt: Date.now() };
+    return value;
+  }
+
+  // Share only an in-flight read of authoritative sources. A probe never starts
+  // persistence or retains a query snapshot, and invalidated generations cannot
+  // reuse an older read. Both callers keep their existing publication fences.
+  private async loadSource(generation: number): Promise<SmartVec[]> {
+    if (this.pendingSource?.generation === generation)
+      return this.pendingSource.promise;
+    const pending = { generation, promise: loadSmartEnv(this.smartEnvDir) };
+    this.pendingSource = pending;
+    try {
+      return await pending.promise;
+    } finally {
+      if (this.pendingSource === pending) this.pendingSource = null;
+    }
   }
 
   public getStats(): Record<string, unknown> {
@@ -279,6 +409,8 @@ export class SemanticCacheService {
   }
 
   public forceRefresh(): void {
+    this.refreshGeneration += 1;
+    this.readiness = null;
     this.memorySnapshot = null;
     this.memorySnapshotLoadedAt = 0;
   }
@@ -338,7 +470,7 @@ export class SemanticCacheService {
       title: row.title ?? undefined,
       tags: row.tags_json ? (JSON.parse(row.tags_json) as string[]) : undefined,
       model: row.model ?? undefined,
-      vec: JSON.parse(row.vec_json) as number[],
+      vec: decodeCachedVector(row.vec_json, row.dim),
     }));
 
     return {
@@ -377,7 +509,7 @@ export class SemanticCacheService {
           item.tags ? JSON.stringify(item.tags) : null,
           item.model ?? null,
           item.vec.length,
-          JSON.stringify(item.vec),
+          encodeCachedVector(item.vec),
           item.id,
           refreshedAt,
         );

@@ -16,7 +16,7 @@ const bridgeBuilds = [
   read("plugins/obsidian-bases-bridge/esbuild.config.mjs"),
 ];
 
-assert.equal(rootPackage.version, "3.14.0");
+assert.equal(rootPackage.version, "3.14.1");
 assert.match(
   english,
   /Optimike MCP releases ship one verified bundle/,
