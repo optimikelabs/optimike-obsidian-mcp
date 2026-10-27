@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getFrontmatterDateIntegrationContract } from './modifiedTimeIntegrations.js';
+import { dateManagementScope } from './dateManagementScope.js';
 import { sha256 } from './contract.js';
 
 type Observation = { state: string; epoch: string; generation?: number; sha256?: string };
@@ -30,6 +31,12 @@ export function createFdmCompletion(app: any) {
       prune(); const api = signal(); if (!api) return;
       const key = api.begin(path); if (!key) return;
       const token = randomUUID(); receipts.set(token, { path, api, key, started: Date.now(), policy: policy() }); prune(); return token;
+    },
+    async beginForPath(path: string): Promise<string | undefined> {
+      // An excluded path has no FDM modify pass to acknowledge. Emitting a
+      // token there strands older clients waiting for a signal that cannot fire.
+      if (!(await dateManagementScope(app, path)).managed) return undefined;
+      return this.begin(path);
     },
     cancel(token: string | undefined) { if (!token) return; const entry = receipts.get(token);
       if (entry) entry.api.cancel(entry.key); receipts.delete(token); },
