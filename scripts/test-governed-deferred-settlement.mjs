@@ -216,6 +216,18 @@ function fixture() {
 }
 try {
   {
+    // Diagnostic: journal lease expiry cannot fence a request already in the bridge.
+    const f = fixture(), p = await f.plan();
+    f.backend.beforeWrite = async () => {
+      f.advance(120_001);
+      assert.equal(f.journal.get(p.operationId).status, "outcome_unknown");
+    };
+    await f.adapter.apply(p.planRef, "test", "deferred");
+    assert.match(f.backend.content, /après/);
+    assert.equal(f.backend.replaceCalls, 1);
+    console.log("DIAGNOSTIC: an expired lease and unknown journal state do not fence an already dispatched backend write");
+  }
+  {
     const f = fixture(), p = await f.plan();
     await f.adapter.apply(p.planRef, "test", "deferred");
     f.restart(); f.advance(300_001);
