@@ -177,6 +177,7 @@ const state = {
   taskGetSignature: null,
   taskGetOtherId: null,
   failPages: 0,
+  failHeldPages: false,
   validationCalls: 0,
   mutationCalls: 0,
   pendingRecoveryCalls: 0,
@@ -486,7 +487,12 @@ const server = http.createServer((request, response) => {
           tasks: pageTasks,
           limitations: ["read-only"],
         });
-      if (state.holdPage) state.holdPage.then(sendPage);
+      if (state.holdPage)
+        state.holdPage.then(() =>
+          state.failHeldPages
+            ? sendJson(response, 503, { error: "fixture_page_failure" })
+            : sendPage(),
+        );
       else sendPage();
     });
     return;
@@ -3015,6 +3021,41 @@ try {
   assert.equal(afterCancel.probe, "x1");
   await settleBackground();
 
+  // 4e'. R9-2: a read cancelled while its attempt runs does not spend the
+  //      retry window. The next read of the same mutation still retries a
+  //      transient failure and answers live.
+  state.failPages = 1;
+  await raceApply("race-cancel-2", "x2");
+  await settleBackground();
+  releasePages = holdPages();
+  pagesBefore = state.postCalls;
+  const heldCancel = new AbortController();
+  const cancelledDuringAttempt = service.query(
+    { operonIds: ["abc1234"], includeProperties: true },
+    heldCancel.signal,
+  );
+  await waitFor(() => state.postCalls === pagesBefore + 1, "held attempt");
+  heldCancel.abort();
+  assert.equal((await cancelledDuringAttempt).stale, true);
+  state.failHeldPages = true;
+  releasePages();
+  await settleBackground();
+  state.failHeldPages = false;
+  assert.ok(
+    service.liveState.coveredMutations < service.liveState.appliedMutations,
+    "the mutation is still uncovered after the cancelled read",
+  );
+  state.failPages = 1;
+  const afterCancelledAttempt = await readProbe();
+  assert.equal(
+    afterCancelledAttempt.page.source,
+    "operon-live",
+    "a cancellation does not spend the retry window",
+  );
+  assert.equal(afterCancelledAttempt.page.stale, false);
+  assert.equal(afterCancelledAttempt.probe, "x2");
+  await settleBackground();
+
   // 4f. R8-2: the background refresh completes while a read waits for its
   //     status, and that status then fails. The read must not return the
   //     snapshot it loaded before the refresh committed.
@@ -3045,6 +3086,41 @@ try {
     raced.probe,
     "o2",
     "the fallback is the snapshot already committed with the mutation",
+  );
+  await settleBackground();
+
+  // 4f'. R9-1: the same race through get_task. Its fallback must reload the
+  //      snapshot instead of returning the one loaded before its status.
+  releasePages = holdPages();
+  pagesBefore = state.postCalls;
+  await raceApply("race-reload-2", "o3");
+  await waitFor(() => state.postCalls === pagesBefore + 1, "held refresh");
+  let releaseTaskStatus;
+  const taskStatusHold = {
+    entered: false,
+    promise: new Promise((resolve) => {
+      releaseTaskStatus = resolve;
+    }),
+  };
+  state.holdNextStatus = taskStatusHold;
+  const racingTask = service.getTask({
+    operonId: "abc1234",
+    includeProperties: true,
+  });
+  await waitFor(() => taskStatusHold.entered, "get_task status held");
+  releasePages();
+  await waitFor(
+    () =>
+      service.liveState.coveredMutations === service.liveState.appliedMutations,
+    "background refresh committed",
+  );
+  releaseTaskStatus();
+  const racedTask = await racingTask;
+  assert.equal(racedTask.stale, true, "the get_task status failed");
+  assert.equal(
+    racedTask.task.fields.latency_probe,
+    "o3",
+    "get_task falls back to the snapshot committed with the mutation",
   );
   await settleBackground();
 

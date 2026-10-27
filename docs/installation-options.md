@@ -1,5 +1,7 @@
 # Configuration for your installation
 
+Install the MCP and the Bridge bundle of the same release together: MCP 3.15.x requires Atomic Write Bridge 0.8.5. See [Bridge Bundle, Upgrade and Rollback](bridge-packaging.md) and the [release notes](releases/).
+
 The `operational` profile prefers governed writes; `full` retains compatibility tools. Select a profile for your clients and workflows. Permissions remain independent of catalog selection.
 
 Clients sharing an HTTP backend and authenticated identity also share its quota. When receiving `429`, check counters and `Retry-After` before changing limits. `MCP_HTTP_IDENTITY_RATE_LIMIT_MAX` sets a workload-appropriate ceiling; for example, `1000` requests per 15-minute window may suit a busy local installation. This is an optional example, not a mandatory default or per-client isolation. Retain a finite limit and HTTP protections, and choose the ceiling for your exposure and usage. See [HTTP protections](http-multiclient-security.md).

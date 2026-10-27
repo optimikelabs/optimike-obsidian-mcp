@@ -158,6 +158,15 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
   - requis pour les écritures `.base` live et le comportement complet des requêtes via bridge
   - expose les endpoints Bases consommés par ce MCP
 
+- Optimike Atomic Write Bridge (inclus)
+
+  - requis pour les écritures gouvernées de note, la création, le déplacement natif, la suppression, le Frontmatter et le Canvas
+  - le MCP 3.15.x exige la version 0.8.5 ; les déployer et les restaurer ensemble
+
+- Optimike Operon Bridge (inclus)
+
+  - requis pour les outils Operon ; voir le [contrat MCP Operon](docs/operon-mcp-contract.fr.md)
+
 - Fallback local Bases
 
   - disponible en modes headless pour `bases_list`, `bases_get_schema` et `bases_query`
@@ -200,6 +209,12 @@ modifié depuis l’installation.
 
 Les commandes complètes, états d’échec et gates de release vivent dans
 [Bundle des Bridges, mise à niveau et rollback](docs/bridge-packaging.fr.md).
+
+Mettre à niveau ensemble le MCP et le bundle des Bridges de la même release. Le
+MCP 3.15.x livre Atomic Write Bridge 0.8.5, Operon Bridge 0.9.3 et Bases Bridge
+1.2.2. Avant de basculer ou de restaurer la paire, vider les opérations en
+attente et les fences de préparation des dates
+([Clore les opérations incertaines](#clore-les-opérations-incertaines)).
 
 ## Remplacement atomique gouverné d’une note
 
@@ -790,6 +805,7 @@ C’est la forme visée du produit.
 - Sécurité et frontière de déploiement : [SECURITY.fr.md](SECURITY.fr.md)
 - Matrice des capacités par mode : [docs/runtime-capability-matrix.fr.md](docs/runtime-capability-matrix.fr.md)
 - Profil serveur headless dédié : [docs/headless-server-profile.fr.md](docs/headless-server-profile.fr.md)
+- Notes de version : [docs/releases/](docs/releases/)
 - Guide de routage agent : [docs/mcp-routing-guide.fr.md](docs/mcp-routing-guide.fr.md)
 - Racines externes et handoff : [docs/external-roots-setup.fr.md](docs/external-roots-setup.fr.md)
 - Guide d’exploitation anglais : [OPERATIONS.md](OPERATIONS.md)
