@@ -80,7 +80,11 @@ si elle rapporte la même génération d’index et la même signature de régla
 le statut live lu juste avant (`source: operon-live`, `snapshotAgeMs: 0`) ; le
 snapshot complet est alors rafraîchi en arrière-plan. Une tâche absente de
 l’index live, une génération qui a bougé ou une réponse inattendue renvoient au
-chemin snapshot.
+chemin snapshot. Sur ce chemin d’une seule tâche, `operon-live` n’inclut pas la
+validation complète du coffre : une tâche dont le fichier source a disparu alors
+que l’index la liste encore est rendue en live, alors qu’un refresh du snapshot
+refuserait le coffre pour cette violation P0 `source_missing`. Un doublon
+d’`operonId` refuse toujours la lecture, via le statut live.
 
 Un payload invalide, une pagination tronquée, une génération instable, des IDs
 dupliqués, une version incompatible, un index non prêt ou une validation P0
@@ -160,7 +164,13 @@ Contrôles communs :
   attendre son snapshot SQLite, rafraîchi en arrière-plan et de façon
   coalescée. Le reçu n’affirme que ce que le Bridge a prouvé (`after`). Toute
   lecture ultérieure du même processus attend un refresh commencé après le reçu
-  avant de réutiliser le snapshot, même si la génération d’index n’a pas bougé ;
+  avant de réutiliser le snapshot, même si la génération d’index n’a pas bougé.
+  Tant que ce snapshot ne contient pas un reçu confirmé, les échecs live
+  passagers (index qui se stabilise ou bouge, Bridge momentanément injoignable)
+  sont relancés pendant 15 secondes au plus au lieu de se replier ; un repli
+  après ce délai, ou après un échec durable comme un refus P0, reste
+  `operon-cache` / `stale: true` et ajoute une limite indiquant qu’il ne contient
+  pas une mutation confirmée ;
 - aucune mutation ne s’appuie sur un snapshot headless ou obsolète.
 
 Le journal MCP `operon_mutation_journal` réserve la clé avant l’appel au Bridge.
