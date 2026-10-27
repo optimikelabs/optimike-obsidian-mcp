@@ -187,6 +187,7 @@ export function markAtomicWritePreDispatchError(error: unknown): Error {
 export interface AtomicWriteBackend {
   status(): Promise<AtomicWriteStatusResponse>;
   read(payload: AtomicWriteReadRequest): Promise<AtomicWriteReadResponse>;
+  inspectFrontmatterFormat?(yaml: string): Promise<unknown>;
   prepareDate?(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string }): Promise<AtomicWriteReadResponse>;
   replace(payload: AtomicWriteCasRequest): Promise<AtomicWriteCasResponse>;
 }
