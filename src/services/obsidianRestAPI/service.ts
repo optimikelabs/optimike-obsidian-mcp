@@ -184,6 +184,7 @@ export class ObsidianRestApiService {
             const errorDetails = requestLogMetadata(
               requestConfig,
               axiosError.response?.status,
+              axiosError,
             );
 
             if (axiosError.response) {
@@ -266,6 +267,7 @@ export class ObsidianRestApiService {
                   ...operationContext,
                   ...errorDetails,
                   failureCategory: "request_setup",
+                  errorClass: "request_setup",
                 },
               );
               throw new McpError(errorCode, errorMessage, operationContext);

@@ -114,6 +114,18 @@ d’erreur et ne sont journalisées qu’après la fin de son corps. Si le corps
 sur le réseau et indique `result: exception` au lieu d’inventer ensuite un
 HTTP `500`.
 
+## Événements de log runtime
+
+Les logs fichiers écrits par le runtime (`combined.log` et les fichiers par niveau, voir [Exploitation](../OPERATIONS.fr.md#fichiers-de-logs-runtime)) suivent la même frontière de confidentialité que les logs de requêtes ci-dessus. Leur message est la constante `Runtime <niveau> event.` ; un événement se lit par des champs fermés :
+
+- `toolName` : un nom d’outil enregistré, pris dans l’appel MCP en cours quand le site de log ne l’a pas posé. Toute autre valeur est en empreinte.
+- `operation` et `module` : identifiants définis par le code. Une valeur qui n’est pas un identifiant borné est en empreinte. Un test de contrat échoue quand un nouveau gabarit de chaîne alimentant ces champs interpole autre chose qu’une courte liste de valeurs fermées.
+- `routeClass`, `method` et `status` : famille de route Local REST API, méthode et statut de l’appel amont, jamais une fin de route.
+- `errorClass` : une classe fermée dérivée du code système de l’échec ou du statut HTTP amont, jamais de son message.
+- `event` : un libellé fermé (`live_api_probe_unavailable`, `live_api_probe_recovered`, `log_events_suppressed`).
+
+`timestamp` est l’instant d’émission. Un contexte de requête réutilisé par une boucle de longue durée garde son heure de création dans `requestTimestamp`. La sonde de l’API Obsidian live derrière `/readyz` utilise son propre identifiant de corrélation par épisode de disponibilité au lieu du contexte de démarrage du transport, écrit un événement `live_api_probe_unavailable` quand Obsidian devient injoignable et un événement `live_api_probe_recovered` à son retour. Les événements identiques d’une même requête dans `MCP_LOG_DEDUPE_WINDOW_MS` sont réunis en une ligne suivie d’une ligne `log_events_suppressed` portant `suppressedRepeats`.
+
 ## Enveloppe d’erreur HTTP publique
 
 Chaque rejet HTTP, y compris la limite pré-authentification, l’authentification,

@@ -482,6 +482,53 @@ les outils MCP authentifiés pour obtenir :
 - stats sémantiques
 - résultat d’intégrité SQLite si demandé
 
+### Fichiers de logs runtime
+
+Les logs sont des lignes JSON dans `LOGS_DIR` (par défaut `<release>/logs`). Le `message` vaut toujours `Runtime <niveau> event.` : le texte d’un appel de log n’est jamais écrit, la partie lisible d’un événement est donc faite de ses champs structurés.
+
+| Fichier | Contenu |
+| --- | --- |
+| `combined.log` | tous les événements au niveau actif ; à lire en premier |
+| `error.log`, `warn.log`, `info.log` | exactement un niveau chacun, créés au premier événement de ce niveau |
+| `debug.log` | n’existe que si `MCP_LOG_LEVEL=debug`, et ne contient que des événements debug |
+
+Aucun fichier n’est créé vide. Les fichiers tournés sont `nom1.log`, `nom2.log`, etc.
+
+| Variable | Défaut | Plage | Sens |
+| --- | --- | --- | --- |
+| `MCP_LOG_MAX_FILE_SIZE_MB` | `8` | 1–1024 | taille à laquelle un fichier de log tourne |
+| `MCP_LOG_MAX_FILES` | `10` | 1–200 | fichiers conservés par famille (`combined`, `info`, ...) |
+| `MCP_LOG_DEDUPE_WINDOW_MS` | `300000` | 0–3600000 | les événements identiques d’une même requête dans cette fenêtre sont réunis en une ligne ; `0` conserve tout |
+
+La rétention est un budget de taille, pas une durée : les défauts conservent 80 Mio par famille. Le jour le plus chargé mesuré sur un runtime de production a écrit 8,33 Mo dans `combined.log` (3,6 Mo un jour calme) ; les défauts gardent donc au moins 8 jours de contexte en laissant 25 % pour les champs décrits ci-dessous, et environ deux semaines un jour moyen. Chaque famille est plafonnée séparément ; le pire cas est le plafond multiplié par le nombre de familles existantes (`combined` et `info` portent l’essentiel du volume).
+
+Champs qui rendent un événement lisible, tous issus de vocabulaires fermés ou d’identifiants bornés, jamais de contenu :
+
+| Champ | Sens |
+| --- | --- |
+| `toolName` | outil MCP enregistré en cours de traitement ; rempli depuis l’appel en cours quand le site de log ne l’a pas posé |
+| `operation`, `module` | identifiants définis par le code, comme `ObsidianAPI_checkStatus` ; tout ce qui n’est pas un identifiant reste en empreinte |
+| `routeClass`, `method`, `status` | famille de route Local REST API (`status`, `vault`, `search`, `commands`, `active`, `open`, `extension`, `other`), méthode et statut HTTP de l’appel amont |
+| `errorCode` | code d’erreur public (`SERVICE_UNAVAILABLE`, `NOT_FOUND`, ...) |
+| `errorClass` | où l’échec s’est produit : `upstream_unreachable`, `upstream_timeout`, `upstream_reset`, `upstream_tls`, `upstream_http_4xx`, `upstream_http_5xx`, `request_setup`, `disk_full`, `filesystem_permission`, `filesystem_missing`, `resource_exhausted`, `database_busy`, `database_error` ; lu dans le code système de l’échec ou le statut HTTP, jamais dans son message |
+| `event` | libellé fermé pour les événements d’exploitation : `live_api_probe_unavailable`, `live_api_probe_recovered`, `log_events_suppressed` |
+| `timestamp`, `requestTimestamp` | `timestamp` est l’instant d’écriture de la ligne ; `requestTimestamp` est l’heure de création, plus ancienne, du contexte de requête quand elle diffère |
+| `suppressedRepeats`, `repeatWindowMs` | sur une ligne `log_events_suppressed` : nombre d’événements identiques réunis pendant la fenêtre |
+
+Une valeur hors de ces vocabulaires n’est pas perdue en silence : elle devient `<champ>Fingerprint`, un HMAC propre au processus, comparable au sein d’une même exécution mais ni lisible ni réversible. Chemins, noms de notes, contenus, en-têtes, jetons, messages d’exception et champs de contexte arbitraires n’apparaissent jamais.
+
+Lire un échec : relever le `requestId` renvoyé dans l’erreur, puis lire ses lignes dans `combined.log`. Une connexion refusée vers Local REST API ressemble à ceci (exemple synthétique) :
+
+```json
+{"level":"error","message":"Runtime error event.","operation":"ObsidianAPI_checkStatus","toolName":"obsidian_read_note","routeClass":"status","method":"GET","errorClass":"upstream_unreachable","requestId":"<uuid>","timestamp":"<heure d’émission>"}
+```
+
+Événements répétés : une boucle de longue durée qui réutilise un même contexte de requête (une sonde, une relance) écrivait le même événement aussi longtemps qu’elle tournait. Les événements identiques d’une même requête dans `MCP_LOG_DEDUPE_WINDOW_MS` sont maintenant écrits une seule fois, et une ligne `log_events_suppressed` ultérieure porte le compte. Les événements de requêtes différentes ne sont jamais réunis : un identifiant de requête figurant dans une erreur renvoie toujours à sa propre ligne.
+
+### Supervision du backend
+
+Rien ne surveille le backend après son démarrage, et un backend lancé par un client ou un tunnel s’arrête avec lui. [`scripts/supervise-backend.ps1`](scripts/supervise-backend.ps1) maintient le backend HTTP partagé en marche de façon autonome ; voir [Supervision du backend](docs/backend-supervision.fr.md).
+
 ### Tools MCP runtime
 
 - `obsidian_runtime_status`

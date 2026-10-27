@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Make runtime log events readable without leaking content: `toolName` (registered tools only, also filled from the MCP call in progress), `operation` and `module` (bounded developer-defined identifiers), the Local REST API `routeClass`, a closed `errorClass` read from a failure's system code or HTTP status (`upstream_unreachable`, `upstream_timeout`, `upstream_reset`, `upstream_tls`, `upstream_http_4xx`/`5xx`, `request_setup`, `disk_full`, `filesystem_permission`, `filesystem_missing`, `resource_exhausted`, `database_busy`, `database_error`), and closed `event` labels. Values outside these vocabularies stay HMAC-fingerprinted. The message text is still never written.
+- Add `MCP_LOG_MAX_FILE_SIZE_MB` (default 8), `MCP_LOG_MAX_FILES` (default 10) and `MCP_LOG_DEDUPE_WINDOW_MS` (default 300000, `0` disables). The defaults keep 80 MiB per log family: at least 8 days at the busiest day measured on a production runtime (8.33 MB of `combined.log`).
+- Add `scripts/supervise-backend.ps1` and [Backend supervision](docs/backend-supervision.md): restarts the shared HTTP backend after consecutive `/healthz` failures, independently of any client or tunnel, with a restart budget, a refusal to touch a process that owns the port, and no machine-specific path or secret. Nothing is installed or scheduled by the repository.
+
+### Changed
+
+- Write `info.log`, `warn.log`, `error.log` and `debug.log` as exactly one level each instead of cascading upward (`info.log` was byte-identical to `debug.log`); `combined.log` stays the complete timeline. Per-level files are created at their first event, so no empty file is left behind, and `debug.log` exists only when `MCP_LOG_LEVEL=debug`.
+- `timestamp` in a log line is now the emission time. A request context created earlier keeps its time as `requestTimestamp`.
+- The live Obsidian API probe behind `/readyz` uses its own correlation ID per availability episode and logs one event when Obsidian becomes unreachable and one when it returns.
+
+### Fixed
+
+- Stop one event from being rewritten for as long as a loop runs: the live API probe borrowed the transport's startup context, so every failed probe reused its request ID and timestamp (7,928 identical lines, 11.8% of `combined.log`, on a production runtime). Identical events of one request inside `MCP_LOG_DEDUPE_WINDOW_MS` now collapse into one line plus a `suppressedRepeats` counter; events of different requests never collapse.
+
 ## [3.14.0] - 2026-10-23
 
 ### Fixed

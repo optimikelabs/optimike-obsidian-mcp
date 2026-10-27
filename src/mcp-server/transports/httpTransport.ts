@@ -127,38 +127,60 @@ export function liveApiProbeIntervalMs(
   );
 }
 
-function createLiveApiProbe(
-  obsidianService: ObsidianRestApiService | undefined,
-  parentContext: RequestContext,
+/** @internal Exported for the log-observability contract test. */
+export function createLiveApiProbe(
+  obsidianService: Pick<ObsidianRestApiService, "checkStatus"> | undefined,
+  intervalMs = liveApiProbeIntervalMs(),
 ) {
   let observation: LiveApiObservation = {
     available: obsidianService ? null : false,
   };
   let probing = false;
+  // The probe outlives every request, so it must not borrow the transport's
+  // startup context: that replayed one request ID and timestamp for every
+  // failed probe (thousands of identical log lines). Each availability episode
+  // gets its own correlation ID; the logger collapses repeats within it.
+  const newEpisodeContext = () =>
+    requestContextService.createRequestContext({
+      operation: "httpObservabilityLiveApiProbe",
+      component: "HttpLiveApiProbe",
+    });
+  let episodeContext = newEpisodeContext();
 
   const probe = async () => {
     if (!obsidianService || probing) return;
     probing = true;
+    const previouslyAvailable = observation.available;
+    let available = false;
     try {
-      const status = await obsidianService.checkStatus({
-        ...parentContext,
-        operation: "httpObservabilityLiveApiProbe",
-      });
-      observation = {
-        available:
-          status?.service === "Obsidian Local REST API" &&
-          status.authenticated === true,
-        observedAt: Date.now(),
-      };
+      const status = await obsidianService.checkStatus(episodeContext);
+      available =
+        status?.service === "Obsidian Local REST API" &&
+        status.authenticated === true;
     } catch {
-      observation = { available: false, observedAt: Date.now() };
+      available = false;
     } finally {
+      observation = { available, observedAt: Date.now() };
       probing = false;
+    }
+    if (available && previouslyAvailable === false) {
+      logger.notice("Live Obsidian API probe recovered.", {
+        ...episodeContext,
+        event: "live_api_probe_recovered",
+      });
+    } else if (!available && previouslyAvailable !== false) {
+      logger.warning("Live Obsidian API probe became unavailable.", {
+        ...episodeContext,
+        event: "live_api_probe_unavailable",
+      });
+    }
+    if (previouslyAvailable !== null && available !== previouslyAvailable) {
+      episodeContext = newEpisodeContext();
     }
   };
 
   const timer = obsidianService
-    ? setInterval(() => void probe(), liveApiProbeIntervalMs())
+    ? setInterval(() => void probe(), intervalMs)
     : undefined;
   timer?.unref?.();
   if (obsidianService) void probe();
@@ -692,7 +714,7 @@ export async function startHttpTransport(
     ...parentContext,
     component: "HttpTransportSetup",
   });
-  const liveApiProbe = createLiveApiProbe(_obsidianService, transportContext);
+  const liveApiProbe = createLiveApiProbe(_obsidianService);
   const observability = createHttpObservability({
     vaultCacheService: _vaultCacheService,
     getLiveApiObservation: liveApiProbe.getObservation,

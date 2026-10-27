@@ -91,6 +91,12 @@ partagés :
   corrélation sont fingerprintées par HMAC avec un secret généré pour le
   processus courant ; les fingerprints changent au redémarrage et ne sont pas
   réversibles comme un hash dictionnaire simple.
+- Les champs de log destinés à l’exploitation sont des vocabulaires fermés ou
+  des identifiants bornés : `toolName` enregistré, `operation` et `module`
+  définis par le code et de forme identifiant, `routeClass` de Local REST API,
+  et `errorClass` lue dans le code système ou le statut HTTP d’un échec, jamais
+  dans son message. Tout ce qui sort de ces vocabulaires reste fingerprinté par
+  HMAC comme avant.
 - Les diagnostics de recovery sont volontairement étroits : seuls des IDs,
   digests, références et codes fermés de raison/phase/outcome validés par
   schéma peuvent être retournés. Les erreurs d’items batch peuvent conserver
