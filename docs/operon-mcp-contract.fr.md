@@ -73,6 +73,15 @@ versions Operon/Bridge, la version du contrat, les capacités et les limites.
 - `operon-cache` : dernier snapshot SQLite validé, toujours obsolète et jamais
   utilisé comme preuve d’une mutation.
 
+`operon_get_task` ne sert le snapshot enregistré que s’il correspond à la
+génération live et couvre tous les reçus de mutation rendus par ce processus.
+Sinon, il lit cette seule tâche par la route Bridge dédiée et ne l’accepte que
+si elle rapporte la même génération d’index et la même signature de réglages que
+le statut live lu juste avant (`source: operon-live`, `snapshotAgeMs: 0`) ; le
+snapshot complet est alors rafraîchi en arrière-plan. Une tâche absente de
+l’index live, une génération qui a bougé ou une réponse inattendue renvoient au
+chemin snapshot.
+
 Un payload invalide, une pagination tronquée, une génération instable, des IDs
 dupliqués, une version incompatible, un index non prêt ou une validation P0
 n’écrasent jamais le dernier snapshot sain.
@@ -147,8 +156,11 @@ Contrôles communs :
 - les résultats Task Workflow sont validés strictement avant projection ; une
   preuve native malformée ou contradictoire reste `outcome-unknown`, et
   `nativeProof` ne contient que la projection de preuve bornée ;
-- après apply, le Bridge relit l’index live vérifié et le MCP rafraîchit son
-  snapshot SQLite ;
+- après apply, le Bridge relit l’index live vérifié ; le MCP rend le reçu sans
+  attendre son snapshot SQLite, rafraîchi en arrière-plan et de façon
+  coalescée. Le reçu n’affirme que ce que le Bridge a prouvé (`after`). Toute
+  lecture ultérieure du même processus attend un refresh commencé après le reçu
+  avant de réutiliser le snapshot, même si la génération d’index n’a pas bougé ;
 - aucune mutation ne s’appuie sur un snapshot headless ou obsolète.
 
 Le journal MCP `operon_mutation_journal` réserve la clé avant l’appel au Bridge.

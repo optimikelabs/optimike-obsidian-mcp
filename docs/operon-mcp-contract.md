@@ -53,6 +53,8 @@ Every read response declares `source`, `stale`, snapshot time/age, Operon and Br
 - `operon-live`: complete pagination and validation match one stable Operon generation/settings signature.
 - `operon-cache`: last validated SQLite snapshot; always stale and never proof of a mutation.
 
+`operon_get_task` serves the persisted snapshot only while it matches the live generation and covers every mutation receipt this process has returned. Otherwise it reads that one task through the Bridge single-task route and accepts it only when the route reports the same index generation and settings signature as the live status read just before (`source: operon-live`, `snapshotAgeMs: 0`); the full snapshot is then refreshed in the background. A task absent from the live index, a moved generation or an unexpected answer falls back to the snapshot path.
+
 SQLite cache state lives in `operon_task_snapshot` and `operon_snapshot_meta`. Malformed payloads, incomplete pagination, generation drift, duplicate IDs, incompatible versions, unready index, or P0 validation never replace the last known-good snapshot.
 
 ### Vacation-safe compatibility
@@ -111,7 +113,7 @@ Common controls:
 - `outcome-unknown` is surfaced with its recovery reference and never blind-retried;
 - Task Workflow results are strictly validated before projection; malformed or contradictory native evidence remains `outcome-unknown`, while `nativeProof` exposes only the bounded proof projection;
 - after apply, the Bridge rereads the verified live index;
-- the MCP refreshes its SQLite snapshot;
+- the MCP returns the receipt without waiting for its SQLite snapshot; the refresh runs in the background, coalesced. The receipt states only what the Bridge proved (`after`). Any later read in the same process waits for a refresh that started after the receipt before it reuses the snapshot, even if the index generation did not move;
 - no mutation is available from a stale/headless snapshot.
 
 MCP results are stored in `operon_mutation_journal`. A reservation is committed before the Bridge call. Reusing an idempotency key with the same completed request returns the original `operationId` and result without calling the Bridge again. A restart or timeout that leaves the MCP reservation `in_progress` is treated as an uncertain outcome and blocks blind retry. Reusing a key for a different request is rejected as `CONFLICT`. Revision mismatch returns `conflict` without writing.
