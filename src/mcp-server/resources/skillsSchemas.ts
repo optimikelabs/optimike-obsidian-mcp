@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { mcpSchema } from "../mcpSchema.js";
 
 /** Shared wire/client contracts have no runtime configuration side effects.

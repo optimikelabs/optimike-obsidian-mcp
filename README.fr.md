@@ -46,8 +46,8 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 | Travail général sur le coffre                        | `standard`  |                          30 |
 | Notes, tags, Bases et Canvas                         | `authoring` |                          44 |
 | Workflows Tasks / Operon                             | `tasks`     |                          36 |
-| Usage courant complet, préférence gouvernée | `operational` | 84 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          88 |
+| Usage courant complet, préférence gouvernée | `operational` | 85 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          89 |
 
 Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 87 outils operational et 91 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
@@ -145,7 +145,7 @@ plan → apply → status → recover
 
 Après timeout ou perte de transport, appeler `status` avant `recover` ; ne jamais recréer aveuglément une mutation. Les plans durables ne sont pas liés au profil qui les a créés.
 
-Si le client a perdu la référence opaque du plan, appeler `obsidian_list_pending_operations`. Ce cockpit read-only liste uniquement les reçus Obsidian gouvernés en attente ou incertains depuis les journaux déjà ouverts du runtime live, avec le `planRef` métier exact et la prochaine action sûre. Il n'expose ni cible, ni clé d'idempotence, ni contenu, ni hash, ni binding backend, et n'appelle jamais status, apply ou recovery. Voir [Cockpit des opérations en attente](docs/operation-cockpit-p5.fr.md).
+Si le client a perdu la référence opaque du plan, appeler `obsidian_list_pending_operations`. Ce cockpit read-only liste uniquement les reçus Obsidian gouvernés en attente ou incertains depuis les journaux déjà ouverts du runtime live, avec le `planRef` métier exact et la prochaine action sûre. Il n'expose ni cible, ni clé d'idempotence, ni contenu, ni hash, ni binding backend, et n'appelle jamais status, apply ou recovery. Voir [Cockpit des opérations en attente](docs/operation-cockpit-p5.fr.md). Les opérations incertaines que rien ne peut régler se clôturent, après revue du propriétaire, avec `obsidian_operation_close` ([Clôture administrative](docs/administrative-closure.fr.md)).
 
 ## Racines documentaires externes
 

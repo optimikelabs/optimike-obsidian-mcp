@@ -1,14 +1,16 @@
-import { resolveProjectedFrontmatterSettlement } from "./projectedFrontmatterSettlement.js";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { createHash } from "node:crypto";
 import type {
   AtomicWriteCasRequest,
   AtomicWriteCasResponse,
+  EffectFenceResolveRequest,
+  EffectFenceResolveResponse,
   AtomicWriteReadRequest,
   AtomicWriteReadResponse,
   AtomicWriteStatusResponse,
 } from "../obsidianRestAPI/types.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
+import { supportedAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
   operationDigest,
@@ -80,6 +82,14 @@ const StatusSchema = z
       writeEnabled: z.boolean(),
     }),
     limits: z.object({ markdownOnly: z.literal(true) }),
+    effectFence: z
+      .object({
+        contractVersion: z.literal(1),
+        supported: z.literal(true),
+        epoch: z.string().uuid(),
+      })
+      .passthrough()
+      .optional(),
     settlement: z
       .object({
         contractVersion: z.literal(1),
@@ -172,6 +182,19 @@ const CasSchema = z
   })
   .passthrough();
 
+/** The Bridge effect-fence epoch, when the Bridge can check tokens at the effect point. */
+export function effectFenceEpoch(status: unknown): string | undefined {
+  const version = (status as { plugin?: { version?: unknown } } | null)?.plugin?.version;
+  if (!supportedAtomicBridgeVersion(version)) return undefined;
+  const fence = (status as { effectFence?: unknown } | null)?.effectFence;
+  if (!fence || typeof fence !== "object") return undefined;
+  const value = fence as Record<string, unknown>;
+  return value.contractVersion === 1 && value.supported === true &&
+    typeof value.epoch === "string" && z.string().uuid().safeParse(value.epoch).success
+    ? value.epoch
+    : undefined;
+}
+
 // An in-process, one-use marker issued only by the trusted policy wrapper.
 // Never trust caller/upstream error properties as evidence of non-dispatch.
 const preDispatchErrors = new WeakSet<Error>();
@@ -187,7 +210,10 @@ export function markAtomicWritePreDispatchError(error: unknown): Error {
 export interface AtomicWriteBackend {
   status(): Promise<AtomicWriteStatusResponse>;
   read(payload: AtomicWriteReadRequest): Promise<AtomicWriteReadResponse>;
-  prepareDate?(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string }): Promise<AtomicWriteReadResponse>;
+  inspectFrontmatterFormat?(yaml: string): Promise<unknown>;
+  prepareDate?(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string;
+    fence?: { contractVersion: 1; epoch: string; attemptId: string } }): Promise<AtomicWriteReadResponse>;
+  resolveEffectFence?(payload: EffectFenceResolveRequest): Promise<EffectFenceResolveResponse>;
   replace(payload: AtomicWriteCasRequest): Promise<AtomicWriteCasResponse>;
 }
 
@@ -196,6 +222,7 @@ export type ObsidianNoteReplacePlanInput = {
   nextContent: string;
   idempotencyKey: string;
   datePreparation?: OperationReceipt["datePreparation"];
+  frontmatterFormat?: OperationReceipt["frontmatterFormat"];
   expectedBeforeSha256?: string;
   expectedBindingFingerprint?: string;
   idempotencyIdentity?: string;
@@ -464,6 +491,7 @@ function planDigest(
 ): string {
   return operationDigest({
     ...(plan.datePreparation ? { datePreparation: plan.datePreparation } : {}),
+    ...(plan.frontmatterFormat ? { frontmatterFormat: plan.frontmatterFormat } : {}),
     contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
     operationKind: profile.operationKind,
     operationId: plan.operationId,
@@ -516,6 +544,7 @@ function receipt(
     planRef: planRef(profile, plan.operationId),
     planDigest: digest,
     ...(plan.datePreparation ? { datePreparation: plan.datePreparation } : {}),
+    ...(plan.frontmatterFormat ? { frontmatterFormat: plan.frontmatterFormat } : {}),
     phase: current.phase,
     outcome: current.outcome,
     backend: {
@@ -772,6 +801,7 @@ export class ObsidianNoteReplaceOperationAdapter
       path: input.path,
       beforeSha256: read.sha256,
       afterSha256,
+      ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
       bindingFingerprint: read.bindingFingerprint,
       ...(input.idempotencyIdentity
         ? { idempotencyIdentity: input.idempotencyIdentity }
@@ -791,6 +821,7 @@ export class ObsidianNoteReplaceOperationAdapter
         idempotencyKey: input.idempotencyKey,
         requestDigest,
         ...(input.datePreparation ? { datePreparation: input.datePreparation } : {}),
+        ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
         ...(input.idempotencyIdentity
           ? { idempotencyIdentity: input.idempotencyIdentity }
           : {}),
@@ -847,7 +878,16 @@ export class ObsidianNoteReplaceOperationAdapter
   async status(reference: string): Promise<OperationReceipt> {
     const plan = this.required(reference);
     if (plan.status === "applying" || plan.status === "outcome_unknown") {
-      return receipt(this.profile, await this.reconcile(plan));
+      try {
+        return receipt(this.profile, await this.reconcile(plan));
+      } catch (error) {
+        const started = plan.settlementObservationStartedAtEpochMs;
+        if (plan.status === "applying" && plan.settlementDeferred && started !== undefined &&
+            (this.options.now ?? Date.now)() - started >= 300_000) {
+          return receipt(this.profile, this.uncertain(plan, "Deferred postflight observation was unavailable beyond its bounded lifetime.", this.requiredExecutionAttemptId(plan)));
+        }
+        throw error;
+      }
     }
     return receipt(this.profile, plan);
   }
@@ -1006,6 +1046,19 @@ export class ObsidianNoteReplaceOperationAdapter
           executionAttemptId,
         );
       }
+      // The token is durable before the request exists. An executor that no
+      // longer owns the applying plan (interruption sweep, closure) stops here.
+      const fenceEpoch = effectFenceEpoch(status);
+      try {
+        plan = this.journal.recordEffectAttempt(
+          plan.operationId,
+          executionAttemptId,
+          fenceEpoch,
+        );
+      } catch (error) {
+        if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+        return this.journal.get(plan.operationId) ?? plan;
+      }
       casDispatched = true;
       const rawResult = await this.backend.replace({
         contractVersion: 1,
@@ -1013,6 +1066,9 @@ export class ObsidianNoteReplaceOperationAdapter
         bindingFingerprint: plan.bindingFingerprint,
         expectedSha256: plan.beforeSha256,
         nextContent: plan.nextContent,
+        ...(fenceEpoch
+          ? { fence: { contractVersion: 1, epoch: fenceEpoch, attemptId: executionAttemptId } }
+          : {}),
       });
       plan = this.beginModifiedTimeSettlementObservationOrReload(
         plan,
@@ -1418,21 +1474,7 @@ export class ObsidianNoteReplaceOperationAdapter
       applyStartedAtEpochMs: plan.executionStartedAtEpochMs,
       settlementObservedAtEpochMs: (this.options.now ?? Date.now)(),
     };
-    return (
-      resolveModifiedTimeSettlement(
-        plan.nextContent,
-        observedContent,
-        plan.modifiedTimeSettlementPolicy,
-        window,
-      ) ??
-      resolveProjectedFrontmatterSettlement(
-        plan.nextContent,
-        observedContent,
-        plan.modifiedTimeSettlementPolicy,
-        window,
-        plan.projection,
-      )
-    );
+    return resolveModifiedTimeSettlement(plan.nextContent, observedContent, plan.modifiedTimeSettlementPolicy, window);
   }
 
   private async awaitModifiedTimeSettlementObservation(

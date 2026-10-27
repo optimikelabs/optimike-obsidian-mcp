@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { ProtocolError, type McpServer } from "@modelcontextprotocol/server";
 import { ErrorHandler, publicMcpToolErrorPayload } from "../utils/index.js";
+import { withActiveToolName } from "../utils/internal/activeTool.js";
 import { activeHttpRequestId } from "./transports/httpRequestState.js";
 
 // These are request-local provenance flags, never protocol sessions or grants.
@@ -118,7 +119,7 @@ export function installMcpToolPublicErrorBoundary(server: McpServer): void {
     return register(name, configuration, async (...args: any[]) => {
       let result: any;
       try {
-        result = await callback(...args);
+        result = await withActiveToolName(name, () => callback(...args));
       } catch (error) {
         result = {
           content: [

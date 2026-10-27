@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { parse, stringify } from "yaml";
+import { inspectFrontmatterFormat } from "../plugins/obsidian-atomic-write-bridge/src/frontmatterFormat.ts";
+
+// Obsidian 1.15.0's exported stringifyYaml is the same function called by
+// processFrontMatter. Its bundled yaml version is unknown; replay in Obsidian
+// is mandatory. These are the options observed in its asar.
+const obsidianOptions = (value) => stringify(value, null, {
+  nullStr: "", lineWidth: 0, aliasDuplicateObjects: false,
+});
+const types = { getAssignedWidget: (key) => ({ statut: "multitext", nombre: "number", coche: "checkbox" })[key] ?? null };
+
+test("read-only serializer uses the observed Obsidian options and signals types", () => {
+  const source = "statut: 'actif' # comment\r\nvide: null\r\ntexte: >-\r\n  bonjour\r\n  monde\r\ntags: [un, deux]\r\ndate: \"2026-10-21\"\r\nnombre: 3\r\ncoche: true\r\naccent: été\r\n";
+  const result = inspectFrontmatterFormat(source, parse, obsidianOptions, types);
+  assert.equal(result.canonicalYaml, "statut: actif\nvide:\ntexte: bonjour monde\ntags:\n  - un\n  - deux\ndate: 2026-10-21\nnombre: 3\ncoche: true\naccent: été\n");
+  assert.deepEqual(result.warnings.find(w => w.key === "statut"), { key: "statut", reason: "type_mismatch", declaredType: "multitext", actualType: "text" });
+  assert.ok(result.warnings.some(w => w.key === "tags" && w.reason === "untyped"));
+  assert.ok(!result.warnings.some(w => w.key === "nombre" || w.key === "coche"));
+  assert.equal(inspectFrontmatterFormat(result.canonicalYaml, parse, obsidianOptions, types).canonicalYaml, result.canonicalYaml);
+});
+
+test("rejects non-mapping roots and never returns parser diagnostics", () => {
+  for (const input of ["- a\n", "texte\n", "null\n", "secret: first\nsecret: second\n"]) {
+    assert.throws(() => inspectFrontmatterFormat(input, parse, obsidianOptions, types), /invalid_frontmatter/);
+  }
+});
+
+test("empty frontmatter is an empty mapping", () => {
+  for (const yaml of ["", "\r\n", "  \n"]) {
+    assert.equal(inspectFrontmatterFormat(yaml, parse, obsidianOptions, types).canonicalYaml, "{}\n");
+  }
+});
+
+test("types: dates, nested objects, empty values and unknown widgets are only signals", () => {
+  const registry = { getAssignedWidget: key => ({ jour: "date", heure: "datetime", invalide: "date", objet: "text", vide: "number", futur: "custom" })[key] ?? null };
+  const input = "jour: 2026-10-21\nheure: 2026-10-21T14:30\ninvalide: 2026-02-30\nobjet:\n  enfant: valeur\nvide:\nfutur: valeur\n";
+  const { warnings } = inspectFrontmatterFormat(input, parse, obsidianOptions, registry);
+  assert.deepEqual(warnings.map(({ key, reason }) => [key, reason]), [
+    ["invalide", "type_mismatch"], ["objet", "type_mismatch"], ["vide", "empty_value"], ["futur", "unknown_widget"],
+  ]);
+});

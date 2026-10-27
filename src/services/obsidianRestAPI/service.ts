@@ -35,6 +35,9 @@ import { requestLogMetadata } from "./requestLogMetadata.js";
 import {
   ApiStatusResponse, // Import PatchOptions type
   AtomicWriteCasRequest,
+  EffectFenceResolveRequest,
+  EffectFenceResolveResponse,
+  EffectFenceToken,
   AtomicWriteCasResponse,
   AtomicWriteReadRequest,
   AtomicWriteReadResponse,
@@ -184,9 +187,15 @@ export class ObsidianRestApiService {
             const errorDetails = requestLogMetadata(
               requestConfig,
               axiosError.response?.status,
+              axiosError,
             );
 
             if (axiosError.response) {
+              // Only Bridge-defined codes may cross this boundary; never forward messages or paths.
+              const bridgeReasons = new Set(["request_rejected", "invalid_frontmatter", "resource_not_found", "write_not_authorized", "backend_binding_changed", "resource_changed", "read_failed", "write_failed", "atomic_write_creation_property_missing", "date_preparation_failed", "note_create_target_exists", "note_create_disabled", "note_create_request_invalid", "note_create_failed", "effect_fence_refused", "date_preparation_fdm_pending"]);
+              const payload = axiosError.response.data as { error?: { reasonCode?: unknown } } | undefined;
+              const reason = payload && typeof payload === "object" && payload.error && typeof payload.error === "object" ? payload.error.reasonCode : undefined;
+              const publicReason = typeof reason === "string" && bridgeReasons.has(reason) ? { reasonCode: reason } : {};
               // Handle specific HTTP status codes
               switch (axiosError.response.status) {
                 case 400:
@@ -211,7 +220,7 @@ export class ObsidianRestApiService {
                     ...operationContext,
                     ...errorDetails,
                   });
-                  throw new McpError(errorCode, errorMessage, operationContext);
+                  throw new McpError(errorCode, errorMessage, { ...operationContext, ...publicReason });
                 // NOTE: We throw immediately after logging debug for 404, skipping the general error log below.
                 case 405:
                   errorCode = BaseErrorCode.VALIDATION_ERROR; // Method not allowed often implies incorrect usage
@@ -245,7 +254,7 @@ export class ObsidianRestApiService {
                 ...operationContext,
                 ...errorDetails,
               });
-              throw new McpError(errorCode, errorMessage, operationContext);
+              throw new McpError(errorCode, errorMessage, { ...operationContext, ...publicReason });
             } else if (axiosError.request) {
               // Network error (no response received)
               errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;
@@ -266,6 +275,7 @@ export class ObsidianRestApiService {
                   ...operationContext,
                   ...errorDetails,
                   failureCategory: "request_setup",
+                  errorClass: "request_setup",
                 },
               );
               throw new McpError(errorCode, errorMessage, operationContext);
@@ -354,8 +364,20 @@ export class ObsidianRestApiService {
     );
   }
 
+  inspectAtomicFrontmatterFormat(payload: { contractVersion: 1; yaml: string }, context: RequestContext): Promise<unknown> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/frontmatter/format", data: payload }, context, "inspectAtomicFrontmatterFormat");
+  }
+
+  /** Inspect or irreversibly revoke recorded write attempts at the Bridge effect point. */
+  resolveAtomicWriteEffectFence(
+    payload: EffectFenceResolveRequest,
+    context: RequestContext,
+  ): Promise<EffectFenceResolveResponse> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/effect-fence/resolve", data: payload }, context, "resolveAtomicWriteEffectFence");
+  }
+
   prepareAtomicWriteDate(
-    payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string },
+    payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string; fence?: EffectFenceToken },
     context: RequestContext,
   ): Promise<AtomicWriteReadResponse> {
     return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/notes/prepare-date", data: payload, timeout: 65_000 }, context, "prepareAtomicWriteDate");

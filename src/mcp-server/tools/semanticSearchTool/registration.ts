@@ -7,7 +7,7 @@
  * Schéma JSON "Codex-friendly" (pas d'integer ni d'unions).
  */
 import { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { promises as fs } from "fs";
 import path from "path";
 import { type SmartVec } from "../../../services/smartEnv.js";

@@ -1,5 +1,5 @@
 import path from "node:path"; // For file path fallback logic using POSIX separators
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   NoteJson,
   ObsidianRestApiService,

@@ -74,13 +74,13 @@
     }
   ],
   "expectedSurface": {
-    "crossRuntime": 92,
+    "crossRuntime": 93,
     "liveProfiles": {
       "standard": 30,
       "authoring": 44,
       "tasks": 36,
-      "full": 88,
-      "operational": 84
+      "full": 89,
+      "operational": 85
     },
     "threeMemberFamilies": [
       "note-move",

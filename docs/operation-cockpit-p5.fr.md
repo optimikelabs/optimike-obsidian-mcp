@@ -28,7 +28,9 @@ Chaque ligne contient uniquement :
 - `state` ;
 - `admittedAt` et `updatedAt` ;
 - `ageSeconds` borné ;
-- `nextAction` : `apply`, `status` ou `recover`.
+- `nextAction` : `apply`, `status` ou `recover` ;
+- `closeAllowed` : `obsidian_operation_close` peut être tenté après revue du
+  propriétaire (le fence du Bridge décide toujours).
 
 La réponse n'expose jamais de chemin du coffre, nom de cible, clé d'idempotence,
 contenu de Note ou Canvas, valeur de formule/frontmatter, hash, binding backend,
@@ -49,6 +51,14 @@ Appeler l'action retournée uniquement dans cette famille métier. En
 particulier, `applying` impose status ; ne jamais relancer apply à l'aveugle.
 `outcome_unknown` signifie que l'effet du plan exact reste incertain et que le
 recovery de la famille peut être nécessaire. Recovery n'est pas undo.
+
+## Clôture administrative
+
+Les lignes `outcome_unknown` qu'aucun status ni aucune reprise ne peut régler se
+clôturent avec `obsidian_operation_close` en `reviewed_unverified`, après revue
+du propriétaire et seulement si le fence de l'Atomic Write Bridge prouve
+qu'aucune tentative ne peut encore agir. Les lignes closes sortent du cockpit.
+Voir [Clôture administrative](administrative-closure.fr.md).
 
 ## Autorité durable et isolation
 

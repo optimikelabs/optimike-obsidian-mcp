@@ -2,7 +2,7 @@
 
 ## Contract and scope
 
-This candidate moves one existing Markdown note through Obsidian `FileManager.renameFile`, never by rewriting wikilinks or renaming a folder at the filesystem layer. A durable MCP plan seals exact source/destination paths, the backend/vault binding, the source content hash, the native update-links preference and a bounded observed neighborhood. It revalidates before dispatch. The destination parent must already exist; case-only renames are refused.
+This candidate moves one existing Markdown note through Obsidian `FileManager.renameFile`, never by rewriting wikilinks or renaming a folder at the filesystem layer. A durable MCP plan seals exact source/destination paths, the backend/vault binding, the source content hash, the native update-links preference and a bounded observed neighborhood. It revalidates before dispatch. The destination parent must already exist; case-only renames are refused. The destination is a new name and must satisfy the shared [note name rules](note-name-rules.md) (refused with a closed `note_name_*` reason, a fixed hint and a `suggestedPath`; a sibling that differs only by case or Unicode form is refused too). The source and its neighborhood may keep a legacy name, so moving such a note to a valid name is the repair path.
 
 The public family is `obsidian_note_move_plan`, `obsidian_note_move_apply`, `obsidian_note_move_status`. There is deliberately no recover or undo endpoint. Other governed families retain their existing lifecycle. Standard/authoring/full expose the complete three-tool family in live/hybrid-live; tasks and headless/degraded modes do not expose it.
 
@@ -21,6 +21,8 @@ Native completion and `graph_postflight` are different facts. A returned rename 
 The adapter reuses the existing process-owned SQLite journal, execution leases and attempt fencing. It does not call the note-replacement CAS adapter and does not expose the private projection as a direct replacement plan. The legacy journal envelope stores the source hash in both before/after slots; the after slot is not a post-rename content claim. Native and graph proofs live in the typed move projection/observation.
 
 The Bridge serializes its own native moves and keeps at most 128 acknowledgements within an 8 MiB budget. Those acknowledgements are process-local. A lost MCP reply can reconcile through status while the Bridge acknowledgement survives. A Bridge restart without a durable MCP acknowledgement remains outcome_unknown; matching file contents alone are not proof that this attempt moved them. A durable committed outcome survives MCP restart, but current graph verification can become indeterminate. Neither status nor duplicate apply dispatches another rename.
+
+Receipts indicate `nextAction: none` for stable terminal outcomes and `status` for an uncertain outcome that may still be reconciled from a surviving acknowledgement.
 
 There is no OS-wide directory lock, source-content atomic CAS, multi-file transaction or distributed rollback. Physical guards reject observed symlinks/junctions, hardlinked source files and root changes, but do not claim to exclude arbitrary concurrent external filesystem actors. A native error after dispatch can therefore remain uncertain. Do not create a new operation merely to force a retry. Inspect the exact source/destination and journal in the isolated pilot.
 

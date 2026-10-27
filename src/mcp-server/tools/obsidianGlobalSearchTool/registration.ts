@@ -49,7 +49,7 @@ export async function registerObsidianGlobalSearchTool(
       module: "ObsidianGlobalSearchRegistration",
     });
 
-  logger.info(`Attempting to register tool: ${toolName}`, registrationContext);
+  logger.debug(`Attempting to register tool: ${toolName}`, registrationContext);
 
   await ErrorHandler.tryCatch(
     async () => {
@@ -115,7 +115,7 @@ export async function registerObsidianGlobalSearchTool(
         },
       );
 
-      logger.info(
+      logger.debug(
         `Tool registered successfully: ${toolName}`,
         registrationContext,
       );

@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   OperationCockpit,
   OPERATION_COCKPIT_DEFAULT_LIMIT,
   OPERATION_COCKPIT_MAX_LIMIT,
+  OperationKindSchema,
   type PendingOperationSource,
 } from "../../../services/operationCockpit.js";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
@@ -23,6 +24,9 @@ const InputSchema = z
       .regex(/^[A-Za-z0-9_-]{1,2048}$/u)
       .optional()
       .describe("Opaque cursor returned by the previous page."),
+    operationKind: OperationKindSchema.optional().describe("Restrict to one operation kind."),
+    status: z.enum(["planned", "applying", "outcome_unknown"]).optional().describe("Restrict to one pending state."),
+    minAgeSeconds: z.number().int().min(0).max(315360000).optional().describe("Only operations admitted at least this many seconds ago."),
   })
   .strict();
 
@@ -45,7 +49,7 @@ export function registerOperationCockpitTool(
         {
           type: "text",
           text: JSON.stringify(
-            cockpit.list({ limit: params.limit, cursor: params.cursor }),
+            cockpit.list(params),
             null,
             2,
           ),

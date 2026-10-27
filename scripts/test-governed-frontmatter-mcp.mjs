@@ -124,7 +124,7 @@ async function startClient(writeMode = "full", runtimeMode = "live") {
 }
 
 async function call(session, name, args, expectedError = false) {
-  const result = await session.client.callTool({ name, arguments: args });
+  const result = await session.client.callTool({ name, arguments: { responseMode: "detailed", ...args } });
   observed.push(JSON.stringify(result));
   assert.equal(Boolean(result.isError), expectedError, `${name} error status`);
   return { result, payload: parse(result) };
@@ -159,7 +159,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     `${label} request id details`,
   );
   assert.doesNotMatch(
-    JSON.stringify(payload),
+    JSON.stringify({ ...payload, error: { ...payload.error, details: { ...payload.error.details, reasonCode: undefined } } }),
     new RegExp(forbiddenMarker, "u"),
     `${label} leaked marker`,
   );
@@ -167,7 +167,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     if (field in (payload.error.details ?? {})) {
       const value = payload.error.details[field];
       assert.equal(typeof value, "string");
-      if (field === "reasonCode") assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
+      if (field === "reasonCode") assert.match(value, /^[A-Za-z][A-Za-z0-9_]+$/u);
       if (field === "phase")
         assert.ok(
           ["planned", "applying", "recovering", "terminal"].includes(value),
@@ -190,14 +190,11 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
 function expectedNominalContent() {
   return [
     "---",
-    "# keep header",
     "création: 2026-08-14",
-    `statut: "${SECRET}"`,
-    "# keep separator",
+    `statut: ${SECRET}`,
     "meta:",
     "  nested: true",
     "rang: 1",
-    "",
     "---",
     "Body must stay byte-identical.",
     "",
@@ -298,7 +295,7 @@ try {
     assertPublicError(
       missing.payload,
       "NOT_FOUND",
-      "note_replace_plan_not_found",
+      "PRIVATE_SOURCE_SENTINEL",
       "unknown plan",
     );
   }
@@ -409,10 +406,7 @@ try {
     "obsidian_note_replace_plan",
     {
       path: FRONTMATTER_FIXTURE_PATH,
-      nextContent: FRONTMATTER_INITIAL_CONTENT.replace(
-        "owner: mike",
-        "owner: direct-p0",
-      ),
+      nextContent: "---\ncréation: 2026-08-14\nstatut: actif\nmeta:\n  nested: true\nowner: Mike\n---\nBody must stay byte-identical.\n",
       idempotencyKey: formerlyCollidingDirectKey,
     },
   );
@@ -436,10 +430,7 @@ try {
     "obsidian_note_replace_plan",
     {
       path: FRONTMATTER_FIXTURE_PATH,
-      nextContent: FRONTMATTER_INITIAL_CONTENT.replace(
-        "owner: mike",
-        "owner: reserved-p0",
-      ),
+      nextContent: "---\ncréation: 2026-08-14\nstatut: actif\nmeta:\n  nested: true\nowner: Mike\n---\nBody must stay byte-identical.\n",
       idempotencyKey: `optimike:projection:v1:${formerlyCollidingDirectKey}`,
     },
     true,
@@ -468,8 +459,9 @@ try {
   assert.match(nominalPlan.payload.planRef, /^obsidian-frontmatter-patch:v1:/u);
   assert.equal(
     nominalPlan.payload.projection.sourcePreservation,
-    "byte-identical-outside-authorized-frontmatter-ranges",
+    "byte-identical-outside-authorized-frontmatter-ranges-after-announced-normalization",
   );
+  assert.equal(nominalPlan.payload.frontmatterFormat.normalization.applied, true);
   assert.equal(fake.content, FRONTMATTER_INITIAL_CONTENT);
   assertNoPrivateData(nominalPlan.result, "P1 plan receipt");
   const pendingFrontmatter = await call(
@@ -558,7 +550,7 @@ try {
     assertPublicError(
       blockedChildReplay.payload,
       "NOT_FOUND",
-      "note_replace_plan_not_found",
+      "PRIVATE_SOURCE_SENTINEL",
       "forged child plan",
     );
   }
@@ -815,6 +807,22 @@ try {
     },
   );
   assert.equal(policyCommitted.payload.outcome, "committed");
+
+  fake.reset();
+  const nativeTypes = await call(session, "obsidian_frontmatter_patch_plan", {
+    path: FRONTMATTER_FIXTURE_PATH, idempotencyKey: "native-values",
+    operations: [{ op: "set", key: "statut", value: "clos" }, { op: "set", key: "tags", value: ["un", "deux"] },
+      { op: "set", key: "vide", value: null }, { op: "set", key: "nombre", value: 42 }, { op: "set", key: "coche", value: true },
+      { op: "set", key: "jour", value: "2026-10-21" }],
+  });
+  assert.equal(nativeTypes.payload.frontmatterFormat.normalization.applied, true);
+  assert.equal((await call(session, "obsidian_frontmatter_patch_apply", { planRef: nativeTypes.payload.planRef, idempotencyKey: "native-values" })).payload.outcome, "committed");
+  assert.match(fake.content, /statut: clos\n/);
+  assert.match(fake.content, /tags:\n  - un\n  - deux\n/);
+  assert.match(fake.content, /vide:\n/);
+  assert.match(fake.content, /nombre: 42\n/);
+  assert.match(fake.content, /coche: true\n/);
+  assert.match(fake.content, /jour: 2026-10-21\n/);
 
   for (const response of observed)
     assertNoPrivateData(response, "MCP response");

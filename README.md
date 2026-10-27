@@ -46,8 +46,8 @@ Runtime answers what the backend can execute. It does not decide how many tools 
 | General vault work                                | `standard`  |                    30 |
 | Notes, tags, Bases and Canvas authoring           | `authoring` |                    44 |
 | Tasks / Operon workflows                          | `tasks`     |                    36 |
-| Complete daily workflows with governed preference | `operational` | 84 |
-| Explicit complete, admin and specialized surfaces | `full`      |                    88 |
+| Complete daily workflows with governed preference | `operational` | 85 |
+| Explicit complete, admin and specialized surfaces | `full`      |                    89 |
 
 The counts above exclude three optional asset tools: the current local configuration exposes 87 operational and 91 full tools. The local launcher explicitly selects operational; the package-wide unspecified default remains standard.
 
@@ -147,7 +147,7 @@ plan → apply → status → recover
 
 After timeout or transport loss, call `status` before `recover`; never create a blind replacement mutation. Durable plans are not bound to the profile that created them.
 
-If the client lost the opaque plan reference, call `obsidian_list_pending_operations`. The readonly cockpit lists only pending or uncertain governed Obsidian receipts from the live runtime's already-open journals, with the exact domain `planRef` and the next safe action. It never exposes targets, idempotency keys, content, hashes or backend bindings, and it never invokes status, apply or recovery. See [Pending Operation Cockpit](docs/operation-cockpit-p5.md).
+If the client lost the opaque plan reference, call `obsidian_list_pending_operations`. The readonly cockpit lists only pending or uncertain governed Obsidian receipts from the live runtime's already-open journals, with the exact domain `planRef` and the next safe action. It never exposes targets, idempotency keys, content, hashes or backend bindings, and it never invokes status, apply or recovery. See [Pending Operation Cockpit](docs/operation-cockpit-p5.md). Uncertain operations that nothing can settle are closed, after owner review, with `obsidian_operation_close` ([Administrative closure](docs/administrative-closure.md)).
 
 ## External document roots
 

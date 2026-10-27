@@ -16,7 +16,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { readCompleteSkillDirectory, type SkillSourceSnapshot } from "./skills/skillSourceSnapshot.js";
 
 export const ExternalRootCapabilitySchema = z.enum([

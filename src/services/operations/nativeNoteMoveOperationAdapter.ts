@@ -1,6 +1,7 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { assertWriteAllowed } from "../writePolicy.js";
+import { asNoteNameMcpError } from "../noteNameMcp.js";
 import {
   NATIVE_MOVE_PREFIX, nativeDigest, nativeMovePaths, verifyNativeMovePreflight,
   type NativeMoveApply, type NativeMoveObservation, type NativeMovePreflight,
@@ -9,6 +10,7 @@ import {
   ObsidianNoteReplaceConcurrencyError, ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
 } from "./obsidianNoteReplaceJournal.js";
+import { effectFenceEpoch } from "./obsidianNoteReplaceOperationAdapter.js";
 
 const KIND = "obsidian.note.move";
 const KEY_PREFIX = "optimike:projection:v1:native-move:";
@@ -37,6 +39,8 @@ const Observation = z.object({
   observedGraphDigest: Hash.optional(), scope: z.literal("sealed_neighborhood_only"), replayAllowed: z.literal(false),
 }).strict();
 export interface NativeNoteMoveBackend {
+  /** Atomic Write Bridge status; its effect-fence epoch is sealed before dispatch. */
+  bridgeStatus?(): Promise<unknown>;
   preflight(sourcePath: string, destinationPath: string): Promise<unknown>;
   apply(request: NativeMoveApply): Promise<unknown>;
   status(operationId: string, preconditionDigest: string): Promise<unknown>;
@@ -44,7 +48,7 @@ export interface NativeNoteMoveBackend {
 export type NativeMovePlanInput = { sourcePath: string; destinationPath: string; idempotencyKey: string };
 
 function bad(reason: string): never {
-  throw new McpError(BaseErrorCode.CONFLICT, "The native move request or its durable identity is invalid.", { reason });
+  throw new McpError(BaseErrorCode.CONFLICT, "The native move request or its durable identity is invalid.", { reasonCode: reason });
 }
 function key(value: string): string {
   if (!z.string().min(1).max(256).safeParse(value).success) bad("invalid_native_move_key");
@@ -93,7 +97,9 @@ export class NativeNoteMoveOperationAdapter {
     return row;
   }
   async plan(input: NativeMovePlanInput) {
-    const paths = nativeMovePaths(input.sourcePath, input.destinationPath);
+    let paths: ReturnType<typeof nativeMovePaths>;
+    try { paths = nativeMovePaths(input.sourcePath, input.destinationPath); }
+    catch (error) { throw asNoteNameMcpError(error); }
     const internalKey = key(input.idempotencyKey);
     const identity = nativeDigest(paths);
     const existing = this.lookup(internalKey, identity);
@@ -140,6 +146,8 @@ export class NativeNoteMoveOperationAdapter {
     let row = this.require(reference, idempotencyKey);
     if (row.status !== "planned") return this.status(reference);
     this.authorize("apply", row.path);
+    // Refuse an unqualified Bridge before changing the durable operation state.
+    if (this.backend.bridgeStatus) await this.backend.bridgeStatus();
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }
     catch (error) {
       if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(reference);
@@ -150,9 +158,17 @@ export class NativeNoteMoveOperationAdapter {
     try {
       this.authorize("apply", row.path);
       const plan = this.sealed(row);
+      // Durable effect-fence token before the request exists; a stale owner stops here.
+      const fenceEpoch = this.backend.bridgeStatus ? effectFenceEpoch(await this.backend.bridgeStatus()) : undefined;
+      try { row = this.journal.recordEffectAttempt(row.operationId, attemptId, fenceEpoch); }
+      catch (error) {
+        if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(reference);
+        throw error;
+      }
       observed = this.observation(await this.backend.apply({ contractVersion: 1, operationId: row.operationId,
         sourcePath: plan.sourcePath, destinationPath: plan.destinationPath, bindingFingerprint: row.bindingFingerprint,
-        preconditionDigest: row.requestDigest }), row);
+        preconditionDigest: row.requestDigest,
+        ...(fenceEpoch ? { fence: { contractVersion: 1 as const, epoch: fenceEpoch, attemptId } } : {}) }), row);
       row = this.journal.transition(row.operationId, ["applying"], observed.outcome,
         observed.outcome === "committed" ? undefined : "native_move_not_committed", attemptId);
     } catch {
@@ -200,7 +216,7 @@ export class NativeNoteMoveOperationAdapter {
       affectedPaths: sealed.notes.map(note => note.path),
       limitations: ["no_global_graph_transaction", "native_rename_is_not_source_content_CAS", "backend_acknowledgements_are_process_local"],
       applyAllowed: row.status === "planned", recoveryAllowed: false,
-      nextAction: row.status === "planned" ? "apply" : "status",
+      nextAction: row.status === "planned" ? "apply" : ["applying", "outcome_unknown"].includes(row.status) ? "status" : "none",
       admittedAt: row.createdAt, updatedAt: row.updatedAt,
     };
   }

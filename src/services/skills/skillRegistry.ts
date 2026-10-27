@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, open } from "node:fs/promises";
 import path from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { ExternalRootsService } from "../externalRootsService.js";
 import { TOOL_PROFILE_IDS, type ToolProfileId } from "../../mcp-server/toolProfiles.js";
 import { SkillDirectoryError, type SkillSourceSnapshot } from "./skillSourceSnapshot.js";

@@ -127,6 +127,14 @@ try {
     "read projection must not change persisted payload rows",
   );
   assert.equal(all.hasMore, false);
+  const filtered = journal.listPendingOperationRows({
+    fallbackOperationKind, admittedProjectionKinds, allowUnprojectedFallback: true,
+    limit: 1, operationKind: "obsidian.text.patch", status: "applying", createdBefore: p4.createdAt,
+  });
+  assert.deepEqual(filtered.rows.map(row => row.operationId), [p4.operationId]);
+  assert.equal(filtered.hasMore, false);
+  assert.equal(journal.listPendingOperationRows({ fallbackOperationKind, admittedProjectionKinds,
+    allowUnprojectedFallback: true, limit: 1, status: "planned", createdBefore: "2000-01-01T00:00:00.000Z" }).rows.length, 0);
   assert.deepEqual(
     new Set(all.rows.map((row) => row.operationId)),
     new Set([

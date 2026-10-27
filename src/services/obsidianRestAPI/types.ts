@@ -40,14 +40,51 @@ export type AtomicWriteReadRequest = {
   completionToken?: string;
 };
 
+/** Attempt token checked by the Atomic Write Bridge at the effect point. */
+export type EffectFenceToken = {
+  contractVersion: 1;
+  epoch: string;
+  attemptId: string;
+};
+
 export type AtomicWriteCasRequest = AtomicWriteReadRequest & {
   bindingFingerprint: string;
   expectedSha256: string;
   nextContent: string;
+  fence?: EffectFenceToken;
+};
+
+export type EffectFenceVerdict =
+  | "not_reached"
+  | "revoked_before_effect"
+  | "effect_in_progress"
+  | "effect_settled"
+  | "epoch_unknown";
+
+export type EffectFenceResolveRequest = {
+  contractVersion: 1;
+  bindingFingerprint: string;
+  mode: "inspect" | "revoke";
+  attempts: Array<{ epoch: string; attemptId: string }>;
+  includeLegacy: boolean;
+};
+
+export type EffectFenceResolveResponse = {
+  ok: true;
+  contractVersion: 1;
+  bindingFingerprint: string;
+  epoch: string;
+  mode: "inspect" | "revoke";
+  results: Array<{ epoch: string; attemptId: string; verdict: EffectFenceVerdict; settledAgoMs?: number }>;
+  legacy?: { requireFence: boolean; strictForMs: number | null; unfencedInFlight: number; quiescent: boolean };
 };
 
 export type AtomicWriteStatusResponse = {
+  frontmatterFormat?: { contractVersion: 1; supported: boolean };
   datePreparation?: { contractVersion: 1; supported: true };
+  effectFence?: { contractVersion: 1; supported: true; epoch: string; requireFence: boolean; legacyQuiescent: boolean };
+  noteCreate?: { supported: boolean; enabled: boolean; bindingFingerprint?: string };
+  nativeMove?: { supported: boolean; enabled: boolean; bindingFingerprint?: string };
   ok: true;
   contractVersion: 1;
   plugin: { id: string; version: string };

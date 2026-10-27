@@ -1,5 +1,5 @@
 import path from "node:path/posix";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   NoteJson,
   ObsidianRestApiService,
@@ -86,7 +86,7 @@ const ObsidianGlobalSearchInputSchema = z
     responseMode: z
       .enum(["detailed", "compact"])
       .optional()
-      .default("detailed")
+      .default("compact")
       .describe(
         "Response shape. 'detailed' returns match snippets; 'compact' returns file-level hits with counts and metadata only.",
       ),

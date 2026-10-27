@@ -145,6 +145,8 @@ test("Atomic note CAS route emits one safe conflict and backend failure", async 
   const nativeRequire = createRequire(import.meta.url);
   class TFileStub {}
   const obsidianStub = {
+    parseYaml: (input: string) => { if (input === "invalid") throw new Error("SECRET_PARSE_DIAGNOSTIC"); return { statut: input }; },
+    stringifyYaml: (value: { statut: string }) => `statut: ${value.statut}\n`,
     Plugin: class {
       register() {}
     },
@@ -184,11 +186,14 @@ test("Atomic note CAS route emits one safe conflict and backend failure", async 
   const actualSha256 = createHash("sha256")
     .update(current, "utf8")
     .digest("hex");
+  let processCalls = 0;
   const vault: any = {
     getAbstractFileByPath: () => file,
     read: async () => current,
-    process: async (_file: unknown, callback: (value: string) => string) =>
-      callback(current),
+    process: async (_file: unknown, callback: (value: string) => string) => {
+      processCalls++;
+      return callback(current);
+    },
   };
   const plugin = new Bridge();
   plugin.app = {
@@ -199,6 +204,7 @@ test("Atomic note CAS route emits one safe conflict and backend failure", async 
       },
     },
     vault,
+    metadataTypeManager: { getAssignedWidget: () => "multitext" },
   };
   plugin.manifest = { id: "obsidian-atomic-write-bridge", version: "test" };
   plugin.allowWrites = true;
@@ -211,6 +217,7 @@ test("Atomic note CAS route emits one safe conflict and backend failure", async 
   const canvasRoute = routes.get(
     "/extensions/obsidian-atomic-write-bridge/canvas/cas",
   );
+  const formatRoute = routes.get("/extensions/obsidian-atomic-write-bridge/frontmatter/format");
   assert.equal(typeof route?.postHandler, "function");
   assert.equal(typeof canvasRoute?.postHandler, "function");
   plugin.allowCanvasWrites = true;
@@ -233,6 +240,21 @@ test("Atomic note CAS route emits one safe conflict and backend failure", async 
       responseBody = value;
     },
   };
+  await formatRoute.postHandler({ body: { contractVersion: 1, yaml: "actif" } }, response);
+  assert.equal(statusCode, 200);
+  assert.equal(responseBody.canonicalYaml, "statut: actif\n");
+  assert.equal(responseBody.bindingFingerprint, bindingFingerprint);
+  assert.equal(responseBody.warnings[0].reason, "type_mismatch");
+  statusCode = undefined;
+  responseCount = 0;
+  responseBody = undefined;
+  await formatRoute.postHandler({ body: { contractVersion: 1, yaml: "invalid" } }, response);
+  assert.equal(statusCode, 400);
+  assert.doesNotMatch(JSON.stringify(responseBody), /SECRET_PARSE_DIAGNOSTIC/);
+  assert.equal(processCalls, 0);
+  statusCode = undefined;
+  responseCount = 0;
+  responseBody = undefined;
   await route.postHandler({ body: {} }, response);
   assert.equal(statusCode, 400);
   assert.equal(responseCount, 1);
@@ -512,4 +534,13 @@ test("Atomic Write Bridge remounts exactly once after Local REST reload", async 
   assert.equal(bridge.restLifecycle.snapshot().mountGeneration, 2);
   bridge.restLifecycle.stop();
   assert.equal(providers[2].unregisters, 1);
+});
+
+test("date preparation reasons distinguish missing precondition and technical failure", async () => {
+  const payloadFactory = await loadPayloadFactory();
+  const missing = payloadFactory("atomic_write_creation_property_missing", "PRIVATE_PATH") as Record<string, any>;
+  const failure = payloadFactory("date_preparation_failed", "PRIVATE_PATH") as Record<string, any>;
+  assert.equal(missing.error.reasonCode, "atomic_write_creation_property_missing");
+  assert.equal(failure.error.reasonCode, "date_preparation_failed");
+  assert.doesNotMatch(JSON.stringify([missing, failure]), /PRIVATE_PATH/u);
 });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import http from "node:http";
+import { nativeFormatFixture } from "./native-frontmatter-format.mjs";
 
 export const FRONTMATTER_FIXTURE_PATH = "Fixture/Governed Frontmatter.md";
 export const FRONTMATTER_INITIAL_CONTENT = [
@@ -131,7 +132,8 @@ export class GovernedFrontmatterAtomicServer {
       json(response, 200, {
         ok: true,
         contractVersion: 1,
-        plugin: { id: "obsidian-atomic-write-bridge", version: "0.2.0" },
+        plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.4" },
+        frontmatterFormat: { contractVersion: 1, supported: true },
         backend: {
           kind: "obsidian-vault-process",
           bindingFingerprint: this.bindingFingerprint,
@@ -142,6 +144,11 @@ export class GovernedFrontmatterAtomicServer {
         ...(this.settlement ? { settlement: this.settlement } : {}),
         ...(this.protection ? { protection: this.protection } : {}),
       });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/extensions/obsidian-atomic-write-bridge/frontmatter/format") {
+      const { yaml } = await requestBody(request);
+      json(response, 200, await nativeFormatFixture(this.bindingFingerprint).inspectFrontmatterFormat(yaml));
       return;
     }
     if (

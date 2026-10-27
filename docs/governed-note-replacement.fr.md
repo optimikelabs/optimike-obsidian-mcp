@@ -2,6 +2,11 @@
 
 Version anglaise : [governed-note-replacement.md](governed-note-replacement.md)
 
+Les plans non envoyés expirent après `MCP_OBSIDIAN_PLANNED_RETENTION_DAYS` jours
+(30 par défaut ; de 1 à 3650). La valeur `0` désactive leur expiration et
+conserve leur contenu privé jusqu'à modification explicite de ce réglage ; elle
+ne désactive pas la purge des reçus terminaux ni celle des baux expirés.
+
 Optimike Obsidian MCP 2.6.0 expose la première mutation publique non-Operon appuyée sur le
 vocabulaire du runtime commun. Elle remplace le contenu complet d’une note
 Markdown existante sans publier d’API générique `operation_*`.
@@ -29,12 +34,22 @@ artefacts publiés et diagnostics publics.
 
 Entrée : `path`, le `nextContent` complet et une `idempotencyKey` obligatoire.
 
-Le planning n’écrit pas la note. L’Atomic Write Bridge lit la note `.md`
+Le planning n’applique pas le remplacement demandé. Une note non datée peut
+être d’abord datée par FDM, comme décrit dans le contrat de patch de texte.
+L’Atomic Write Bridge lit la note `.md`
 existante ; cette même lecture fournit le SHA-256 initial et le contenu utilisé
 pour comparer structurellement le frontmatter protégé. Le serveur valide le
 futur Markdown Obsidian, scelle cible, binding backend, hashes avant/après,
 digest de requête, clé d’idempotence et contenu privé nécessaire à la
 récupération, puis retourne un reçu avec un `planRef` opaque.
+
+Le frontmatter fourni doit déjà être au format canonique natif d’Obsidian. La
+capacité de contrôle du Bridge est obligatoire et liée à l’identité du coffre.
+Si la forme diffère, le plan est refusé avec `frontmatter_not_obsidian_canonical`
+et `expectedFrontmatter`, construit uniquement depuis le frontmatter de la
+requête. L’appelant peut le renvoyer ; le corps et les diagnostics du parseur
+ne sont pas exposés. Les écarts de type sont signalés sans refus. La capacité
+et la forme scellée sont revérifiées avant le CAS.
 
 La même clé et la même requête canonique retournent le même plan. Réutiliser la
 clé pour un autre remplacement est refusé. Plan n’est pas une simple lecture :
@@ -276,4 +291,8 @@ Un refus confirmé par les contrôles internes avant tout envoi CAS reste imméd
 
 ## Reçus et mesures
 
-Les quatre outils acceptent `responseMode: compact | detailed` (défaut detailed) et `diagnostics: true`. Le reçu compact conserve l’état, les permissions et le délai de postflight ; `detailedReceipt` indique la lecture status de la preuve complète. Les durées couvrent uniquement l’appel serveur courant et ne modifient pas le plan scellé.
+Les quatre outils acceptent `responseMode: compact | detailed` (défaut compact) et `diagnostics: true`. Le reçu compact conserve l’état, les permissions et le délai de postflight ; `detailedReceipt` indique la lecture status de la preuve complète. Les durées couvrent uniquement l’appel serveur courant et ne modifient pas le plan scellé.
+
+## Compatibilité de l’intégration audit
+
+L’inspection native du frontmatter exige Atomic Write Bridge 0.8.4 ou ultérieur. Basculer et restaurer le MCP et le Bridge ensemble, après contrôle des opérations planned, applying ou outcome-unknown et des verrous de préparation ; vérifier les empreintes des artefacts, pas seulement les versions.

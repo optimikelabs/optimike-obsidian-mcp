@@ -21,6 +21,8 @@ Input:
 { "limit": 50, "cursor": "opaque-optional-cursor" }
 ```
 
+Optional filters `operationKind`, `status`, and `minAgeSeconds` are applied in each journal before pagination. Repeat the same filters on subsequent pages; age is evaluated when each page is requested.
+
 Each row contains only:
 
 - `operationKind`;
@@ -28,7 +30,9 @@ Each row contains only:
 - `state`;
 - `admittedAt` and `updatedAt`;
 - bounded `ageSeconds`;
-- `nextAction`: `apply`, `status`, or `recover`.
+- `nextAction`: `apply`, `status`, or `recover`;
+- `closeAllowed`: whether `obsidian_operation_close` may be attempted after
+  owner review (the Bridge effect fence still decides).
 
 The response never exposes a vault path, target name, idempotency key, note or
 Canvas content, formula/frontmatter value, hash, backend binding, execution
@@ -49,6 +53,13 @@ Call the returned action only through that domain family. In particular,
 `applying` means call status; never issue a blind apply. `outcome_unknown`
 means the exact sealed plan remains uncertain and may be passed to that
 family's recovery tool. Recovery is not undo.
+
+## Administrative closure
+
+`outcome_unknown` rows that no status or recovery can settle are closed by
+`obsidian_operation_close` as `reviewed_unverified`, after owner review and only
+when the Atomic Write Bridge effect fence proves that no attempt can still act.
+Closed rows leave the cockpit. See [Administrative closure](administrative-closure.md).
 
 ## Durable authority and isolation
 

@@ -10,7 +10,14 @@ import winston from "winston";
 import TransportStream from "winston-transport";
 import { config } from "../../config/index.js";
 import { TOOL_PROFILE_IDS } from "../../mcp-server/toolProfiles.js";
+import {
+  TOOL_CLASSIFICATION_BY_NAME,
+  TOOL_SURFACE_REGISTRY,
+} from "../../mcp-server/toolSurfaceRegistry.js";
+import { activeToolName } from "./activeTool.js";
+import { ERROR_CLASSES, classifyErrorClass } from "./errorClass.js";
 import { RequestContext } from "./requestContext.js";
+import { NOTE_NAME_REASON_CODES } from "../../services/noteNameRules.js";
 
 /**
  * Defines the supported logging levels based on RFC 5424 Syslog severity levels,
@@ -112,6 +119,7 @@ const SAFE_LOG_CONTEXT_FIELDS = new Set([
   "writeMode",
   "profile",
   "errorCode",
+  "errorClass",
   "originalErrorType",
   "finalErrorType",
   "critical",
@@ -182,8 +190,51 @@ const SAFE_NESTED_LOG_FIELDS = new Set([
   "valueRedacted",
 ]);
 
+/**
+ * Registered tool names are a closed, code-defined set. `mcp_sdk` labels the
+ * SDK's own validation boundary. Any other `toolName` stays fingerprinted.
+ */
+const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "mcp_sdk",
+  ...Object.keys(TOOL_CLASSIFICATION_BY_NAME),
+  ...TOOL_SURFACE_REGISTRY.flatMap((entry) => [
+    entry.name,
+    entry.canonicalName,
+  ]),
+]);
+
+/**
+ * `operation` and `module` are developer-defined identifiers (for example
+ * `ObsidianAPI_checkStatus` or `mcpTool:obsidian_read_note`). Only a bounded
+ * identifier shape is readable: free text, paths and anything with spaces or
+ * separators stay fingerprinted.
+ */
+const CODE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.:]{0,95}$/u;
+
 const SAFE_LOG_ENUM_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
-  reasonCode: new Set([
+  toolName: KNOWN_TOOL_NAMES,
+  errorClass: new Set(ERROR_CLASSES),
+  // Local REST API route families only (see requestLogMetadata); never a tail.
+  routeClass: new Set([
+    "status",
+    "extension",
+    "search",
+    "commands",
+    "active",
+    "vault",
+    "open",
+    "other",
+    "unknown",
+  ]),
+  // Closed operator-facing event labels. The message text itself is never
+  // persisted, so a label is the only readable statement of what happened.
+  event: new Set([
+    "live_api_probe_unavailable",
+    "live_api_probe_recovered",
+    "log_events_suppressed",
+  ]),
+  reasonCode: new Set<string>([
+    ...NOTE_NAME_REASON_CODES,
     "semantic_index_unavailable",
     "semantic_embedder_configuration_invalid",
     "semantic_query_embedding_failed",
@@ -258,6 +309,9 @@ const SAFE_LOG_ENUM_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 
 function safeLogString(field: string, value: string): string | undefined {
+  if (field === "operation" || field === "module") {
+    return CODE_IDENTIFIER.test(value) ? value : undefined;
+  }
   if (field === "timestamp") {
     return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value)
       ? value
@@ -487,6 +541,21 @@ function createWinstonConsoleFormat(): winston.Logform.Format {
   );
 }
 
+interface RepeatEntry {
+  level: McpLogLevel;
+  data: Record<string, unknown>;
+  windowStart: number;
+  suppressed: number;
+}
+
+const MAX_REPEAT_ENTRIES = 256;
+
+/** Keeps a file family to exactly one Winston level (no cascading upward). */
+const onlyWinstonLevel = winston.format(
+  (info: winston.Logform.TransformableInfo, options: unknown) =>
+    info.level === (options as { level?: string }).level ? info : false,
+);
+
 /**
  * Singleton Logger class that wraps Winston for robust logging.
  * Supports file logging, conditional console logging, and MCP notifications.
@@ -499,8 +568,14 @@ export class Logger {
   private currentMcpLevel: McpLogLevel = "info";
   private currentWinstonLevel: "debug" | "info" | "warn" | "error" = "info";
 
-  private readonly LOG_FILE_MAX_SIZE = 5 * 1024 * 1024; // 5MB
-  private readonly LOG_MAX_FILES = 5;
+  // Rotation and collapse limits come from MCP_LOG_MAX_FILE_SIZE_MB,
+  // MCP_LOG_MAX_FILES and MCP_LOG_DEDUPE_WINDOW_MS (see OPERATIONS.md).
+  private readonly LOG_FILE_MAX_SIZE = config.logMaxFileSizeBytes;
+  private readonly LOG_MAX_FILES = config.logMaxFiles;
+  private readonly DEDUPE_WINDOW_MS = config.logDedupeWindowMs;
+  private readonly levelTransports = new Map<string, TransportStream>();
+  private readonly repeats = new Map<string, RepeatEntry>();
+  private repeatTimer?: NodeJS.Timeout;
 
   /** @private */
   private constructor() {}
@@ -531,46 +606,14 @@ export class Logger {
     // If isLogsDirSafe is true, we assume resolvedLogsDir exists and is usable.
     // No redundant directory creation logic here.
 
-    const fileFormat = winston.format.combine(
-      winston.format.timestamp(),
-      winston.format.json(),
-    );
-
     const transports: TransportStream[] = [];
-    const fileTransportOptions = {
-      format: fileFormat,
-      maxsize: this.LOG_FILE_MAX_SIZE,
-      maxFiles: this.LOG_MAX_FILES,
-      tailable: true,
-    };
 
     if (isLogsDirSafe) {
-      transports.push(
-        new winston.transports.File({
-          filename: path.join(resolvedLogsDir, "error.log"),
-          level: "error",
-          ...fileTransportOptions,
-        }),
-        new winston.transports.File({
-          filename: path.join(resolvedLogsDir, "warn.log"),
-          level: "warn",
-          ...fileTransportOptions,
-        }),
-        new winston.transports.File({
-          filename: path.join(resolvedLogsDir, "info.log"),
-          level: "info",
-          ...fileTransportOptions,
-        }),
-        new winston.transports.File({
-          filename: path.join(resolvedLogsDir, "debug.log"),
-          level: "debug",
-          ...fileTransportOptions,
-        }),
-        new winston.transports.File({
-          filename: path.join(resolvedLogsDir, "combined.log"),
-          ...fileTransportOptions,
-        }),
-      );
+      // `combined.log` is the complete timeline at the active level. The
+      // per-level files hold exactly one level each and are created on the
+      // first record of that level, so no empty file is left behind and
+      // `debug.log` only exists when debug logging was actually on.
+      transports.push(this.createFileTransport("combined.log"));
     } else {
       if (process.stdout.isTTY) {
         console.warn(
@@ -674,6 +717,43 @@ export class Logger {
     }
   }
 
+  private createFileTransport(
+    filename: string,
+    onlyLevel?: "error" | "warn" | "info" | "debug",
+  ): TransportStream {
+    const jsonFormat = winston.format.combine(
+      winston.format.timestamp(),
+      winston.format.json(),
+    );
+    return new winston.transports.File({
+      filename: path.join(resolvedLogsDir, filename),
+      format: onlyLevel
+        ? winston.format.combine(
+            onlyWinstonLevel({ level: onlyLevel }),
+            jsonFormat,
+          )
+        : jsonFormat,
+      maxsize: this.LOG_FILE_MAX_SIZE,
+      maxFiles: this.LOG_MAX_FILES,
+      tailable: true,
+    });
+  }
+
+  private ensureLevelTransport(level: "error" | "warn" | "info" | "debug") {
+    if (!isLogsDirSafe || !this.winstonLogger) return;
+    if (this.levelTransports.has(level)) return;
+    // A missing file is better than a lost event: failing to open this file
+    // must not drop the record from the other transports.
+    if (typeof this.winstonLogger.add !== "function") return;
+    try {
+      const transport = this.createFileTransport(`${level}.log`, level);
+      this.levelTransports.set(level, transport);
+      this.winstonLogger.add(transport);
+    } catch {
+      /* observability only */
+    }
+  }
+
   /**
    * Configures the console transport based on the current log level and TTY status.
    * Adds or removes the console transport as needed.
@@ -774,11 +854,142 @@ export class Logger {
     if (error) {
       logData.errorCategory = logErrorCategory(error);
       logData.stackAvailable = hasReadableErrorStack(error);
+      if (logData.errorClass === undefined) {
+        const errorClass = classifyErrorClass(error);
+        if (errorClass) logData.errorClass = errorClass;
+      }
+    }
+    // Attribute the event to the tool being served when the call site did not.
+    if (
+      logData.toolName === undefined &&
+      logData.toolNameFingerprint === undefined
+    ) {
+      const tool = activeToolName();
+      if (tool !== undefined && KNOWN_TOOL_NAMES.has(tool)) {
+        logData.toolName = tool;
+      }
+    }
+
+    if (this.collapseRepeat(level, logData)) return;
+    this.emit(level, logData, context);
+  }
+
+  /**
+   * Collapses identical events of one request into a single line with a
+   * counter. A context reused by a long-lived loop (a probe, a retry) would
+   * otherwise write the same event for as long as the loop runs. Events of
+   * different requests never collapse, so a request ID in a public error still
+   * resolves to its own log line.
+   * @returns true when the event was suppressed (it is counted instead).
+   */
+  private collapseRepeat(
+    level: McpLogLevel,
+    logData: Record<string, unknown>,
+  ): boolean {
+    if (this.DEDUPE_WINDOW_MS <= 0) return false;
+    const now = Date.now();
+    this.flushExpiredRepeats(now);
+    const key = [
+      level,
+      logData.requestId,
+      logData.eventFingerprint,
+      logData.operation ?? logData.operationFingerprint,
+      logData.toolName ?? logData.toolNameFingerprint,
+      logData.routeClass,
+      logData.errorCode,
+      logData.errorClass,
+      logData.httpStatus,
+      logData.status,
+      logData.method,
+      logData.attempt,
+    ].join("|");
+    const existing = this.repeats.get(key);
+    if (existing) {
+      existing.suppressed++;
+      this.armRepeatTimer(now);
+      return true;
+    }
+    if (this.repeats.size >= MAX_REPEAT_ENTRIES) {
+      const oldest = this.repeats.keys().next().value as string;
+      this.flushRepeat(oldest);
+    }
+    this.repeats.set(key, {
+      level,
+      data: { ...logData },
+      windowStart: now,
+      suppressed: 0,
+    });
+    return false;
+  }
+
+  private flushRepeat(key: string): void {
+    const entry = this.repeats.get(key);
+    this.repeats.delete(key);
+    if (!entry || entry.suppressed === 0) return;
+    this.emit(entry.level, {
+      ...entry.data,
+      event: "log_events_suppressed",
+      suppressedRepeats: entry.suppressed,
+      repeatWindowMs: this.DEDUPE_WINDOW_MS,
+    });
+  }
+
+  private flushExpiredRepeats(now: number): void {
+    for (const [key, entry] of [...this.repeats]) {
+      if (now - entry.windowStart >= this.DEDUPE_WINDOW_MS) {
+        this.flushRepeat(key);
+      }
+    }
+  }
+
+  private armRepeatTimer(now: number): void {
+    if (this.repeatTimer) return;
+    let nextExpiry = Infinity;
+    for (const entry of this.repeats.values()) {
+      if (entry.suppressed > 0) {
+        nextExpiry = Math.min(
+          nextExpiry,
+          entry.windowStart + this.DEDUPE_WINDOW_MS,
+        );
+      }
+    }
+    if (nextExpiry === Infinity) return;
+    this.repeatTimer = setTimeout(
+      () => {
+        this.repeatTimer = undefined;
+        this.flushExpiredRepeats(Date.now());
+        this.armRepeatTimer(Date.now());
+      },
+      Math.max(1000, nextExpiry - now),
+    );
+    this.repeatTimer.unref?.();
+  }
+
+  /** Writes the pending "suppressed N repeats" lines (shutdown, tests). */
+  public flushSuppressed(): void {
+    if (this.repeatTimer) clearTimeout(this.repeatTimer);
+    this.repeatTimer = undefined;
+    for (const key of [...this.repeats.keys()]) this.flushRepeat(key);
+  }
+
+  private emit(
+    level: McpLogLevel,
+    logData: Record<string, unknown>,
+    context?: RequestContext,
+  ): void {
+    // `timestamp` is the emission time. A context created earlier (startup, a
+    // long-lived loop) keeps its own creation time as `requestTimestamp`.
+    const now = new Date().toISOString();
+    const contextTimestamp = logData.timestamp;
+    logData = { ...logData, timestamp: now };
+    if (typeof contextTimestamp === "string" && contextTimestamp !== now) {
+      logData.requestTimestamp = contextTimestamp;
     }
     const winstonLevel = mcpToWinstonLevel[level];
     const publicMessage = `Runtime ${level} event.`;
 
     try {
+      this.ensureLevelTransport(winstonLevel);
       this.winstonLogger!.log(winstonLevel, publicMessage, logData);
     } catch {
       // Logging is observability only. A transport failure must never turn a
@@ -807,6 +1018,7 @@ export class Logger {
           failureCategory: logErrorCategory(sendError),
         };
         try {
+          this.ensureLevelTransport("error");
           this.winstonLogger!.error(
             "Runtime logging notification failed.",
             sanitizeLogContext(internalErrorContext),

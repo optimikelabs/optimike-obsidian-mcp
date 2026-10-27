@@ -20,8 +20,9 @@ export interface NativeMoveHost {
   absent(path: string): Promise<boolean>;
   parentExists(path: string): boolean;
   note(path: string): Promise<NativeSemanticNote>;
-  /** Must revalidate the source/destination/preference immediately before renameFile. */
-  rename(plan: NativeMovePreflight): Promise<{ afterSha256: string; barrier: NativeMoveClock }>;
+  /** Must revalidate the source/destination/preference immediately before renameFile,
+   * then admit the effect fence token in the same tick that calls renameFile. */
+  rename(plan: NativeMovePreflight, fence?: NativeMoveApply["fence"]): Promise<{ afterSha256: string; barrier: NativeMoveClock }>;
 }
 
 type Entry = {
@@ -121,7 +122,7 @@ export class NativeNoteMoveService {
       if (this.host.preference() !== plan.updateLinks) throw new NativeMoveBeforeEffectConflict();
       entry.dispatchedAt = this.now();
       mayHaveDispatched = true;
-      const result = await this.host.rename(plan);
+      const result = await this.host.rename(plan, request.fence);
       if (!/^[a-f0-9]{64}$/u.test(result.afterSha256)) throw new Error("invalid_native_move_result");
       entry.barrier = result.barrier;
       entry.observation = {

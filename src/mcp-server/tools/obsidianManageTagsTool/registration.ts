@@ -38,7 +38,7 @@ export const registerObsidianManageTagsTool = async (
       module: "ObsidianManageTagsRegistration",
     });
 
-  logger.info(`Attempting to register tool: ${toolName}`, registrationContext);
+  logger.debug(`Attempting to register tool: ${toolName}`, registrationContext);
 
   await ErrorHandler.tryCatch(
     async () => {
@@ -107,7 +107,7 @@ export const registerObsidianManageTagsTool = async (
         },
       );
 
-      logger.info(
+      logger.debug(
         `Tool registered successfully: ${toolName}`,
         registrationContext,
       );

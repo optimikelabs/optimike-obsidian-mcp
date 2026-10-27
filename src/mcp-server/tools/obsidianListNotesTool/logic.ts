@@ -6,7 +6,7 @@
  */
 
 import path from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
@@ -71,7 +71,7 @@ export const ObsidianListNotesInputSchema = z
     responseMode: z
       .enum(["tree", "compact"])
       .optional()
-      .default("tree")
+      .default("compact")
       .describe(
         "Response shape. 'tree' preserves the legacy tree string; 'compact' returns paginated path entries for agent context efficiency.",
       ),

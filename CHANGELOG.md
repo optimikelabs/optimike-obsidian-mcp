@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Atomic Write Bridge 0.8.4 or later is required for governed writes and native frontmatter inspection. Deploy and roll back the MCP and Bridge as one pair after draining pending operations and preparation fences, and verify artifact hashes. Empty YAML blocks are treated as empty mappings; invalid or duplicate-key YAML receives a validation error. Tool-registration lifecycle messages are debug-level.
+
+### Added
+
+- Opt-in ChatGPT stdio proxy compatibility for root `content` keys in JSON text tool results; disabled by default. See [Secure Tunnel](docs/chatgpt-secure-tunnel.md).
+
+- Filter pending operations by kind, state and minimum age before pagination.
+- Expire unsent plans after a configurable retention window and remove expired runtime leases; uncertain effects are preserved.
+
+- Shared note-name rule (`src/services/noteNameRules.ts`) valid on Windows, macOS, mobile and in Obsidian links, applied to every name the MCP creates: `obsidian_note_create_plan`/`apply` and the Atomic Write Bridge create route, the **destination** of `obsidian_note_move_plan`/`apply` and the Bridge move route, and files written by the headless filesystem tools (`VaultFileService`). It refuses `\ : * ? " < > | # ^ [ ] %%`, control and invisible characters (no-break and zero-width spaces), non-NFC Unicode, leading dots, edge spaces, Windows reserved names, names over 255 UTF-8 bytes and paths over 240 characters, and a new name that differs from an existing sibling only by case or Unicode form. See [note name rules](docs/note-name-rules.md) for the sources.
+- A refusal returns a closed `note_name_*` `reasonCode`, a fixed-vocabulary `hint` (rule or character, optional segment and code point) and a deterministic `suggestedPath`/`suggestedName` the caller may resubmit; nothing is renamed or created automatically and conforming names are never modified. The creation/move tool descriptions now state the rules.
+- Add the Atomic Write Bridge **effect fence**: the MCP journal durably records an attempt token `{ epoch, attemptId }` before governed note writes, create, native move and FDM date preparation; the Bridge admits it synchronously at the effect point and `POST /effect-fence/resolve` (`inspect` | `revoke`) proves whether an attempt was revoked before its effect, is running, settled or belongs to a vanished epoch. Canvas routes enforce a token when required, but the current Canvas MCP adapter does not send one; Canvas writes are refused while that setting is enabled. See [Administrative closure](docs/administrative-closure.md).
+- Add `obsidian_operation_close` (operational/full profiles, `dryRun: true` by default): closes `outcome_unknown` operations as the new terminal outcome `reviewed_unverified` and releases `date_preparation_unverified` locks, only when the fence proves that no attempt can still change the vault. Status reconciliation runs first; the closure keeps content-free evidence (verdicts, Bridge identity, current note hash) and never writes a note, claims success or replays. The cockpit adds `closeAllowed`.
+- Add the Bridge setting **Require a fence token for every write** (off by default) needed to close attempts dispatched without token by MCP 3.14 and older, plus `scripts/close-pending-operations.mjs` (batch closure through the public tools) and `scripts/release-date-preparation-lock.mjs` (offline manual release, refused while Obsidian or the backend answers).
+- `obsidian_validate_format` accepts `kind: "note_name"` with `filePath` to check a proposed name read-only with the same rule and proposal.
+
+- Make runtime log events readable without leaking content: `toolName` (registered tools only, also filled from the MCP call in progress), `operation` and `module` (bounded developer-defined identifiers), the Local REST API `routeClass`, a closed `errorClass` read from a failure's system code or HTTP status (`upstream_unreachable`, `upstream_timeout`, `upstream_reset`, `upstream_tls`, `upstream_http_4xx`/`5xx`, `request_setup`, `disk_full`, `filesystem_permission`, `filesystem_missing`, `resource_exhausted`, `database_busy`, `database_error`), and closed `event` labels. Values outside these vocabularies stay HMAC-fingerprinted. The message text is still never written.
+- Add `MCP_LOG_MAX_FILE_SIZE_MB` (default 8), `MCP_LOG_MAX_FILES` (default 10) and `MCP_LOG_DEDUPE_WINDOW_MS` (default 300000, `0` disables). The defaults keep 80 MiB per log family: at least 8 days at the busiest day measured on a production runtime (8.33 MB of `combined.log`).
+- Add `scripts/supervise-backend.ps1` and [Backend supervision](docs/backend-supervision.md): restarts the shared HTTP backend after consecutive `/healthz` failures, independently of any client or tunnel, with a restart budget, a refusal to touch a process that owns the port, and no machine-specific path or secret. Nothing is installed or scheduled by the repository.
+
+### Changed
+
+- Tools exposing `responseMode` now default to `compact`; callers needing the former detailed, tree or legacy responses must request them explicitly. `completionMode` retains its existing defaults pending qualification of proxy timeouts.
+
+- Require Obsidian's native frontmatter format for governed note creation and whole-note replacement. Noncanonical caller input is refused with the canonical caller-provided frontmatter in `expectedFrontmatter`. Property type issues are warnings only.
+- Body and property patches explicitly announce and seal normalization of existing noncanonical frontmatter. Targeted values use the native Bridge serializer. Postflight accepts no alternate target-key representation: only qualified date-line effects may differ.
+- Detect and announce normalization during FDM's pre-plan date preparation; if its effect cannot be verified, report that the note may have changed and require inspection. FDM remains the date owner; Linter settings are unchanged.
+
+- The error boundary releases `hint`, `suggestedPath` and `suggestedName` for note-name refusals only after validating them against the closed hint vocabulary and the name rule itself; suggestions are never logged. This is an explicit, scoped exception to the no-caller-derived-string rule (see SECURITY.md).
+- Headless `obsidian_move_note` and `obsidian_admin_filesystem` dry runs apply the name rule too, and backslash-separated paths are refused (use `/`).
+- Existing notes are not judged: only new names (creation, move destination, non-existing file) are validated, so a note with a legacy name stays readable, editable and movable.
+
+- Write `info.log`, `warn.log`, `error.log` and `debug.log` as exactly one level each instead of cascading upward (`info.log` was byte-identical to `debug.log`); `combined.log` stays the complete timeline. Per-level files are created at their first event, so no empty file is left behind, and `debug.log` exists only when `MCP_LOG_LEVEL=debug`.
+- `timestamp` in a log line is now the emission time. A request context created earlier keeps its time as `requestTimestamp`.
+- The live Obsidian API probe behind `/readyz` uses its own correlation ID per availability episode and logs one event when Obsidian becomes unreachable and one when it returns.
+
+### Fixed
+
+- Keep the creation preflight wire response compatible with strict MCP 3.12–3.14 clients. The new MCP reads and seals the vault binding from Bridge status after matching the creation binding. Expose actionable, content-free reason codes for deferred or unstarted date preparation and the attempt limit; exhausted pre-effect preparation budgets are retryable deferrals, not missing dates.
+
+- Expose closed, non-sensitive error reasons and distinguish missing creation-date preconditions from technical failures.
+- Ignore code spans and variable-length backtick or tilde fences when validating wikilinks and fences.
+- Bound deferred postflight when observation remains unavailable: a subsequent status records an uncertain result rather than leaving the attempt applying forever.
+- Close the late-effect race of lot C: a write held in the Bridge after its lease expired and the journal recorded `outcome_unknown` is now refused at the effect point once the operation is closed (`scripts/test-effect-fence-closure.mjs`, `scripts/test-operation-close-mcp.mjs`). An executor that lost its plan before recording its token never dispatches.
+- Keep the FDM date preparation lock only when the preparation may have acted: a `revoked_before_effect` verdict from the Bridge fence releases it immediately with a retryable reason (`date_preparation_not_started`, `date_preparation_fdm_pending` or the original missing-creation refusal); a lock left while the Bridge was unreachable is released at the next plan once the Bridge proves the attempt never started.
+- Stop racing FDM's own pending passes: the Bridge waits, before its effect point, until FDM 1.6.0 has nothing pending for the note (new-file window `delayForNewFiles`, debounce, retry, manual or running pass), then re-checks the source; beyond the request budget it refuses with `date_preparation_fdm_pending`.
+- Return `nextAction: none` for stable terminal note-create and note-move receipts. Uncertain outcomes retain `status` because a later observation may still reconcile them without redispatching the effect.
+
+- Stop one event from being rewritten for as long as a loop runs: the live API probe borrowed the transport's startup context, so every failed probe reused its request ID and timestamp (7,928 identical lines, 11.8% of `combined.log`, on a production runtime). Identical events of one request inside `MCP_LOG_DEDUPE_WINDOW_MS` now collapse into one line plus a `suppressedRepeats` counter; events of different requests never collapse.
+
+### Security
+
+- Fix the production `npm audit` gate (`--audit-level=high`), which started failing on 2026-10-27 for reasons independent of the code: Zod `<4.6.6` (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections; no patched 3.x exists). Move `zod` to 4.6.7 and keep the existing business schemas on the unchanged Zod 3 API through the `zod/v3` subpath, so validation behaviour does not change. The nested Zod copies of `@modelcontextprotocol/{client,core,server}` are deduplicated onto 4.6.7.
+- Update `openai` to 6.49.0 (its 4.55.0–5.23.2 range depended on the vulnerable Zod; only the embeddings client and a chat-message type are used), `sanitize-html` to 2.18.1 (GHSA-x3q4-9hxx-gx8m, GHSA-374f-7chj-9948, GHSA-cv27-6wvh-8x7j) and `hono` to 4.13.14 (GHSA-5r4p-p66f-jhc7). The token counter now skips non-function (custom) tool calls introduced by the `openai` 6 types.
+
+- The format route uses Obsidian's own serializer, is capability-negotiated and bound to the vault identity. Its dedicated refusal field deliberately returns only a canonical rendering of caller-supplied frontmatter, never parser diagnostics or the note body. This is an explicit, narrowly scoped exception to content-free public error diagnostics.
+
+### Limits
+
+- Administrative closure supports the Note journal families (replace, frontmatter, text, Base rows, create, move). Canvas, Base Formula and asset import keep their own journals and are refused. A Bridge without the effect fence refuses every closure (fail-closed); attempts sent without token need the fence requirement for 10 continuous minutes and are recorded with `priorEffect: unknown`. Whether a historical attempt wrote is never inferred.
+- Not covered: the legacy Bases Bridge `bases_create`/`bases_upsert_config` routes (independent plugin, disabled by default) and external roots. Asset import keeps its own segment rule, which does not refuse invisible characters.
+
+
 ## [3.14.0] - 2026-10-23
 
 ### Fixed

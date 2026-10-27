@@ -29,7 +29,7 @@ import { mcpProtocolMode } from "./protocolMode.js";
 import { dump, load } from "js-yaml";
 import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 // Import validated configuration and environment details.
 import { config, environment } from "../config/index.js";
 // Import core utilities: ErrorHandler, logger, requestContextService.
@@ -53,6 +53,7 @@ import {
 } from "../services/vaultFileService.js";
 import { assertWriteAllowed } from "../services/writePolicy.js";
 import { ExternalRootsService } from "../services/externalRootsService.js";
+import { NOTE_NAME_RULES_DESCRIPTION, NOTE_NAME_RULES_VERSION, checkNoteName } from "../services/noteNameRules.js";
 import type { GovernedBaseFormulaRuntime } from "../services/baseFormulaProjectionRuntime.js";
 import type { GovernedCanvasRuntime } from "../services/canvasProjectionRuntime.js";
 import {
@@ -227,10 +228,12 @@ function registerFormatValidationTool(server: McpServer): void {
     "obsidian_validate_format",
     {
       description:
-        "Validate Obsidian-facing file formats before writing. Checks Markdown frontmatter/tags/wikilinks/callouts, .base YAML/formula references/views, and JSON Canvas nodes/edges.",
+        "Validate Obsidian-facing file formats before writing. Checks Markdown frontmatter/tags/wikilinks/callouts, .base YAML/formula references/views, and JSON Canvas nodes/edges. kind=note_name checks only a proposed vault-relative filePath against the shared note name rules (read-only; no content, nothing is read or created) and returns reasonCode, hint and suggestedPath.",
       inputSchema: mcpSchema(
         z.object({
-          kind: z.enum(["auto", "markdown", "base", "canvas"]).default("auto"),
+          kind: z
+            .enum(["auto", "markdown", "base", "canvas", "note_name"])
+            .default("auto"),
           filePath: z.string().optional(),
           content: z.string().optional(),
         }),
@@ -243,6 +246,26 @@ function registerFormatValidationTool(server: McpServer): void {
         toolName: "obsidian_validate_format",
         target: params.filePath,
       });
+      if (params.kind === "note_name") {
+        const verdict = checkNoteName(params.filePath, {
+          extensions: [".md", ".base", ".canvas"],
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                verdict.ok
+                  ? { ok: true, kind: "note_name", filePath: verdict.path, rulesVersion: NOTE_NAME_RULES_VERSION }
+                  : { ok: false, kind: "note_name", rulesVersion: NOTE_NAME_RULES_VERSION, ...verdict.violation },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: false,
+        };
+      }
       const { content, source, filePath } = await readFormatValidationContent(
         params.filePath,
         params.content,
@@ -810,7 +833,7 @@ function registerHeadlessGuardedWriteTools(
     "obsidian_move_note",
     {
       description:
-        "Headless-filesystem move/rename for explicit filePath targets. Requires expectedHash or expectedMtime.",
+        `Headless-filesystem move/rename for explicit filePath targets. Requires expectedHash or expectedMtime. ${NOTE_NAME_RULES_DESCRIPTION}`,
       inputSchema: mcpSchema(
         z.object({
           sourcePath: z.string().min(1),
@@ -858,6 +881,11 @@ function registerHeadlessGuardedWriteTools(
             "File changed since the caller-provided expectedMtime.",
           );
         }
+        // Same name rule as the real move, so a dry run does not promise a refused name.
+        await vaultFileService.assertNewFileName(
+          params.targetPath,
+          vaultFileService.resolveVaultPath(params.targetPath, context),
+        );
         return {
           content: [
             {
@@ -1047,7 +1075,7 @@ function registerHeadlessGuardedWriteTools(
     "obsidian_admin_filesystem",
     {
       description:
-        "Headless-filesystem admin batch operations with dry-run by default. Supports sandbox-safe batch move, archive, and delete with preconditions.",
+        `Headless-filesystem admin batch operations with dry-run by default. Supports sandbox-safe batch move, archive, and delete with preconditions. New names follow the note name rules (check with obsidian_validate_format kind=note_name).`,
       inputSchema: mcpSchema(
         z.object({
           operation: z.enum(["batch_move", "archive", "batch_delete"]),
@@ -1100,6 +1128,12 @@ function registerHeadlessGuardedWriteTools(
             );
           }
           if (params.dryRun) {
+            if (params.operation !== "batch_delete") {
+              await vaultFileService.assertNewFileName(
+                targetPath!,
+                vaultFileService.resolveVaultPath(targetPath!, context),
+              );
+            }
             results.push({
               sourcePath: current.path,
               targetPath,
@@ -1782,7 +1816,7 @@ async function createMcpServerInstance(
   const context = requestContextService.createRequestContext({
     operation: "createMcpServerInstance",
   });
-  logger.info("Initializing MCP server instance with shared services", context);
+  logger.debug("Initializing MCP server instance with shared services", context);
 
   requestContextService.configure({
     appName: config.mcpServerName,
@@ -1945,7 +1979,7 @@ async function createMcpServerInstance(
       );
     }
 
-    logger.info("Resources and tools registered successfully", context);
+    logger.debug("Resources and tools registered successfully", context);
 
     if (vaultCacheService && servingContext?.era !== "modern") {
       logger.info(

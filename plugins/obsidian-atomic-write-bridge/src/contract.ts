@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { parseEffectFenceToken, type EffectFenceToken } from "./effectFence.js";
 
 export const ATOMIC_WRITE_CONTRACT_VERSION = 1 as const;
 export const ATOMIC_WRITE_REST_PREFIX =
@@ -22,6 +23,7 @@ export type NoteCasRequest = NoteReadRequest & {
   bindingFingerprint: string;
   expectedSha256: string;
   nextContent: string;
+  fence?: EffectFenceToken;
 };
 
 export type CanvasReadRequest = {
@@ -33,6 +35,7 @@ export type CanvasCasRequest = CanvasReadRequest & {
   bindingFingerprint: string;
   expectedSha256: string;
   nextContent: string;
+  fence?: EffectFenceToken;
 };
 
 export class HashConflictError extends Error {
@@ -131,6 +134,15 @@ function assertExactKeys(
   }
 }
 
+/** The effect fence token is optional for rolling compatibility; when present it is strict. */
+function optionalFence(body: Record<string, unknown>): { fence?: EffectFenceToken } {
+  return body.fence === undefined ? {} : { fence: parseEffectFenceToken(body.fence) };
+}
+
+function withOptionalFence(body: Record<string, unknown>, keys: string[]): string[] {
+  return body.fence === undefined ? keys : [...keys, "fence"];
+}
+
 function bodyRecord(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("Request body must be a JSON object.");
@@ -173,9 +185,10 @@ export function parseReadRequest(input: unknown): NoteReadRequest {
 
 export function parseDatePreparationRequest(input: unknown) {
   const body = bodyRecord(input);
-  assertExactKeys(body, ["contractVersion", "path", "expectedSha256", "bindingFingerprint"]);
+  assertExactKeys(body, withOptionalFence(body, ["contractVersion", "path", "expectedSha256", "bindingFingerprint"]));
   return { contractVersion: contractVersion(body.contractVersion), path: validateVaultMarkdownPath(body.path),
-    expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"), bindingFingerprint: sha256Digest(body.bindingFingerprint, "bindingFingerprint") };
+    expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"), bindingFingerprint: sha256Digest(body.bindingFingerprint, "bindingFingerprint"),
+    ...optionalFence(body) };
 }
 
 export function parseNoteLinksRequest(input: unknown): NoteLinksRequest {
@@ -200,13 +213,13 @@ export function parseNoteLinksRequest(input: unknown): NoteLinksRequest {
 
 export function parseCasRequest(input: unknown): NoteCasRequest {
   const body = bodyRecord(input);
-  assertExactKeys(body, [
+  assertExactKeys(body, withOptionalFence(body, [
     "bindingFingerprint",
     "contractVersion",
     "expectedSha256",
     "nextContent",
     "path",
-  ]);
+  ]));
   if (typeof body.nextContent !== "string") {
     throw new Error("nextContent must be a string.");
   }
@@ -222,6 +235,7 @@ export function parseCasRequest(input: unknown): NoteCasRequest {
     ),
     expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"),
     nextContent: body.nextContent,
+    ...optionalFence(body),
   };
 }
 
@@ -236,13 +250,13 @@ export function parseCanvasReadRequest(input: unknown): CanvasReadRequest {
 
 export function parseCanvasCasRequest(input: unknown): CanvasCasRequest {
   const body = bodyRecord(input);
-  assertExactKeys(body, [
+  assertExactKeys(body, withOptionalFence(body, [
     "bindingFingerprint",
     "contractVersion",
     "expectedSha256",
     "nextContent",
     "path",
-  ]);
+  ]));
   if (typeof body.nextContent !== "string") {
     throw new Error("nextContent must be a string.");
   }
@@ -257,6 +271,7 @@ export function parseCanvasCasRequest(input: unknown): CanvasCasRequest {
     ),
     expectedSha256: sha256Digest(body.expectedSha256, "expectedSha256"),
     nextContent: body.nextContent,
+    ...optionalFence(body),
   };
 }
 

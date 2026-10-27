@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { BaseRowSelectionSchema, baseRowTarget, type BaseRowSelectionReader, type BaseRowTarget } from "./baseRowSelection.js";
 import { canonicalizeFrontmatterPatchOperations, compileFrontmatterPatch, frontmatterCanonicalDigest, type FrontmatterPatchOperation } from "./frontmatterPatchCompiler.js";
@@ -25,7 +25,7 @@ const Stored = z.object({
 }).strict();
 export type BaseRowsPatchInput = BaseRowTarget & { operations: FrontmatterPatchOperation[]; idempotencyKey: string };
 function fail(reason: string): never {
-  throw new McpError(BaseErrorCode.CONFLICT, "The governed Base row plan or its selection is invalid or changed; replan is required.", { reason });
+  throw new McpError(BaseErrorCode.CONFLICT, "The governed Base row plan or its selection is invalid or changed; replan is required.", { reasonCode: reason });
 }
 function privateKey(value: string) {
   if (typeof value !== "string" || !value || value !== value.trim() || value.length > 256 ||

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertNoteName } from "./noteNameRules.js";
 
 export const NATIVE_MOVE_CONTRACT = 1 as const;
 export const NATIVE_MOVE_MAX_NEIGHBORS = 16;
@@ -23,7 +24,9 @@ export function nativeNotePath(value: unknown): string {
 
 export function nativeMovePaths(source: unknown, destination: unknown) {
   const sourcePath = nativeNotePath(source);
-  const destinationPath = nativeNotePath(destination);
+  // The destination is a NEW name: shared cross-platform rule. The source and the
+  // neighbourhood may already exist under a legacy name and stay on the lenient check.
+  const destinationPath = nativeNotePath(assertNoteName(destination));
   if (sourcePath.toLowerCase() === destinationPath.toLowerCase()) {
     throw new Error("same_or_case_only_path");
   }
@@ -61,6 +64,8 @@ export type NativeMoveApply = {
   destinationPath: string;
   bindingFingerprint: string;
   preconditionDigest: string;
+  /** Effect fence token recorded by the MCP journal before dispatch. */
+  fence?: { contractVersion: 1; epoch: string; attemptId: string };
 };
 export type NativeMoveObservation = {
   contractVersion: 1;

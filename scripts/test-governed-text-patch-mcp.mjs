@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 
 // Keep this test focused on the P4 projection. The fake below is the smallest
 // useful Atomic Write/Note Replace seam: the production compiler, projection
@@ -38,6 +39,8 @@ const { registerGovernedTextPatchTools } = await import(
 const { GovernedTextPatchRuntime } = await import(
   "../src/services/textPatchProjectionRuntime.ts"
 ).catch(async () => import("../dist/services/textPatchProjectionRuntime.js"));
+const { inspectNativeFrontmatter, frontmatterEnvelope } = await import("../dist/services/obsidianFrontmatterFormat.js");
+const { nativeFrontmatterPatchKeys } = await import("../dist/services/frontmatterPatchCompiler.js");
 
 const FIXTURE_PATH = "Fixture/Governed Text Patch.md";
 const PROTECTED = "création: 2026-08-13";
@@ -103,6 +106,19 @@ class FakeGovernedNoteReplaceRuntime {
     };
   }
 
+  async inspectFrontmatter(content, binding) {
+    return inspectNativeFrontmatter(nativeFormatFixture(this.bindingFingerprint), content, binding);
+  }
+
+  async renderFrontmatterEntries(content, operations, binding) {
+    const result = {};
+    for (const entry of nativeFrontmatterPatchKeys(content, operations)) {
+      const formatted = await this.inspectFrontmatter(`---\n${JSON.stringify({ [entry.key]: entry.value })}\n---\n`, binding);
+      result[entry.normalized] = frontmatterEnvelope(formatted.content).yaml;
+    }
+    return result;
+  }
+
   findPlanByIdempotencyKey(key) {
     const plan = this.byKey.get(key);
     return plan && this.view(plan);
@@ -127,6 +143,7 @@ class FakeGovernedNoteReplaceRuntime {
         input.expectedBindingFingerprint ?? this.bindingFingerprint,
       nextContent: input.nextContent,
       projection: input.projection,
+      frontmatterFormat: input.frontmatterFormat,
       status: "planned",
     };
     this.plans.set(id, plan);
@@ -236,6 +253,7 @@ class FakeGovernedNoteReplaceRuntime {
       bindingFingerprint: plan.bindingFingerprint,
       status: plan.status,
       projection: structuredClone(plan.projection),
+      frontmatterFormat: plan.frontmatterFormat,
     };
   }
 
@@ -279,6 +297,7 @@ class FakeGovernedNoteReplaceRuntime {
                 ? "unverified"
                 : "not_started",
       },
+      frontmatterFormat: plan.frontmatterFormat,
       admittedAt: "2026-08-31T00:00:00.000Z",
       updatedAt: "2026-08-31T00:00:00.000Z",
       recoveryAllowed: recoverable,
@@ -314,7 +333,7 @@ function parseResult(result) {
 }
 async function call(session, name, args, expectedError = false) {
   try {
-    const result = await session.client.callTool({ name, arguments: args });
+    const result = await session.client.callTool({ name, arguments: { responseMode: "detailed", ...args } });
     observed.push(JSON.stringify(result));
     assert.equal(
       Boolean(result.isError),
@@ -424,6 +443,24 @@ try {
     true,
   );
   assertPublicError(overCharacters.payload, "FORBIDDEN", "character limit");
+
+  fake.reset(`---\n${PROTECTED}\nstatut: 'actif' # ancien\ntags: [un, deux]\n---\nneedle\n`);
+  const legacy = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH,
+    operations: [{ op: "replace_literal", search: "needle", replacement: "nouveau" }], idempotencyKey: "legacy-normalization" });
+  assert.equal(legacy.payload.frontmatterFormat.normalization.applied, true);
+  assert.equal(fake.casRequests, 0);
+  const legacyResult = await call(first, "obsidian_text_patch_apply", { planRef: legacy.payload.planRef, idempotencyKey: "legacy-normalization" });
+  assert.equal(legacyResult.payload.outcome, "committed");
+  assert.equal(fake.content, `---\n${PROTECTED}\nstatut: actif\ntags:\n  - un\n  - deux\n---\nnouveau\n`);
+  assert.equal((await call(first, "obsidian_text_patch_status", { planRef: legacy.payload.planRef, responseMode: "compact" })).payload.frontmatterFormat.normalization.applied, true);
+
+  fake.reset(`---\r\n${PROTECTED}\r\nstatut: 'actif'\r\n---\r\nneedle\r\n`);
+  const crlf = await call(first, "obsidian_text_patch_plan", { path: FIXTURE_PATH,
+    operations: [{ op: "replace_literal", search: "needle", replacement: "été" }],
+    frontmatterOperations: [{ op: "set", key: "tags", value: ["un", "deux"] }], idempotencyKey: "crlf-native" });
+  assert.equal(crlf.payload.frontmatterFormat.normalization.applied, true);
+  assert.equal((await call(first, "obsidian_text_patch_apply", { planRef: crlf.payload.planRef, idempotencyKey: "crlf-native" })).payload.outcome, "committed");
+  assert.equal(fake.content, `---\r\n${PROTECTED}\nstatut: actif\ntags:\n  - un\n  - deux\n---\r\nété\r\n`);
 
   fake.reset();
   const operations = [
@@ -862,7 +899,7 @@ try {
   const appliedCombined = await call(first, "obsidian_text_patch_apply", { planRef: combined.payload.planRef, idempotencyKey: "combined", responseMode: "compact" });
   assert.equal(appliedCombined.payload.outcome, "committed");
   assert.equal(fake.successfulWrites, 1);
-  assert.equal(fake.content, INITIAL.replace("needle", "révisé ✅").replace("statut: actif", 'statut: "stable"'));
+  assert.equal(fake.content, INITIAL.replace("needle", "révisé ✅").replace("statut: actif", "statut: stable"));
   assert.equal(appliedCombined.payload.projection.proof, undefined);
   const detailedCombined = await call(first, appliedCombined.payload.detailedReceipt.tool, appliedCombined.payload.detailedReceipt.arguments);
   assert.equal(detailedCombined.payload.planDigest, appliedCombined.payload.planDigest);

@@ -1,6 +1,6 @@
 import type { SettlementCompletionMode } from "./operations/obsidianNoteReplaceOperationAdapter.js";
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   canonicalizeFrontmatterPatchOperations,
   compileFrontmatterPatch,
@@ -13,6 +13,7 @@ import {
   type OperationReceipt,
 } from "./operations/contract.js";
 import { assertWriteAllowed } from "./writePolicy.js";
+import { DatePreparationPlanFailure, frontmatterAssessment } from "./obsidianFrontmatterFormat.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import {
   PROJECTED_IDEMPOTENCY_KEY_PREFIX,
@@ -75,7 +76,7 @@ export type FrontmatterProjectionReceipt = Omit<
   projection: {
     kind: typeof OPERATION_KIND;
     intentDigest: string;
-    sourcePreservation: FrontmatterPatchProof["sourcePreservation"];
+    sourcePreservation: FrontmatterPatchProof["sourcePreservation"] | "byte-identical-outside-authorized-frontmatter-ranges-after-announced-normalization";
     proof: FrontmatterPatchProof;
   };
 };
@@ -185,6 +186,11 @@ function storedProjection(
       { reason: "frontmatter_idempotency_conflict" },
     );
   }
+  const normalization = view.frontmatterFormat?.normalization;
+  if (normalization?.applied && (normalization.sourceSha256 !== view.beforeSha256 ||
+      normalization.afterFrontmatterSha256 !== parsed.data.proof.beforeFrontmatterSha256)) {
+    throw new McpError(BaseErrorCode.CONFLICT, "The normalized frontmatter proof does not match the sealed source.", { reason: "frontmatter_normalization_proof_mismatch" });
+  }
   return parsed.data;
 }
 
@@ -240,7 +246,9 @@ function projectedReceipt(
     projection: {
       kind: OPERATION_KIND,
       intentDigest: projection.intentDigest,
-      sourcePreservation: projection.proof.sourcePreservation,
+      sourcePreservation: view.frontmatterFormat?.normalization.applied
+        ? "byte-identical-outside-authorized-frontmatter-ranges-after-announced-normalization"
+        : projection.proof.sourcePreservation,
       proof: projection.proof,
     },
   };
@@ -279,8 +287,14 @@ export class GovernedFrontmatterRuntime {
       );
     }
 
-    const source = await this.noteRuntime.readForProjection(input.path);
-    const compiled = compileFrontmatterPatch(source.content, operations);
+    const source = await this.noteRuntime.readForProjection(input.path, true);
+    try {
+    const normalized = await this.noteRuntime.inspectFrontmatter(source.content, source.bindingFingerprint);
+    const nativeEntries = await this.noteRuntime.renderFrontmatterEntries(normalized.content, operations, source.bindingFingerprint);
+    const compiled = compileFrontmatterPatch(normalized.content, operations, nativeEntries);
+    const finalFormat = await this.noteRuntime.inspectFrontmatter(compiled.nextContent, source.bindingFingerprint);
+    if (finalFormat.normalized) throw new McpError(BaseErrorCode.CONFLICT, "The compiled patch is not in the native frontmatter format.", { reason: "frontmatter_native_render_invalid" });
+    const format = frontmatterAssessment(source.content, normalized.content, finalFormat.warnings);
     const projection: StoredProjection = {
       contractVersion: 1,
       kind: OPERATION_KIND,
@@ -294,13 +308,19 @@ export class GovernedFrontmatterRuntime {
       idempotencyKey: internalKey,
       expectedBeforeSha256: source.sha256,
       datePreparation: source.datePreparation,
+      frontmatterFormat: format,
       expectedBindingFingerprint: source.bindingFingerprint,
       idempotencyIdentity: intentDigest,
       projection,
     });
     const view = this.noteRuntime.inspect(child.planRef);
+    if (source.datePreparation?.kind === "date-manager-before-plan" && view.beforeSha256 !== source.sha256) throw new DatePreparationPlanFailure(source.datePreparation);
     storedProjection(view, publicKey, intentDigest);
     return projectedReceipt(child, view, true);
+    } catch (error) {
+      if (source.datePreparation?.kind === "date-manager-before-plan") throw new DatePreparationPlanFailure(source.datePreparation);
+      throw error;
+    } finally { this.noteRuntime.releasePreparation?.(source); }
   }
 
   async apply(

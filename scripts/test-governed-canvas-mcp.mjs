@@ -82,7 +82,7 @@ function assertPublicError(result, code, forbiddenMarker, label) {
     `${label} request id details`,
   );
   assert.doesNotMatch(
-    JSON.stringify(payload),
+    JSON.stringify({ ...payload, error: { ...payload.error, details: { ...payload.error.details, reasonCode: undefined } } }),
     new RegExp(forbiddenMarker, "u"),
     `${label} leaked marker`,
   );

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 process.env.NODE_ENV = "test";
 process.env.OBSIDIAN_RUNTIME_MODE = "live";
 process.env.OBSIDIAN_API_KEY = "hermetic-fixture-key";
@@ -18,6 +19,7 @@ function fixture(name, dateFields = []) {
   const files = new Map(), db = path.join(root, name + ".sqlite"), clock = () => now;
   const journal = new ObsidianNoteReplaceJournal(db, { now: clock });
   const backend = {
+    ...nativeFormatFixture(() => binding),
     async preflight(path) {
       if (files.has(path)) throw new Error("target exists");
       return { contractVersion: 1, path, bindingFingerprint: binding, absent: true, enabled: true, policy, policyDigest: createPolicyDigest(policy) };
@@ -42,6 +44,70 @@ function fixture(name, dateFields = []) {
     policy: value => { policy = value; } };
 }
 try {
+  {
+    const f = fixture("invalid-markdown");
+    await assert.rejects(f.adapter.plan({ ...input, content: "broken [[link" }), error => {
+      assert.equal(error.code, "VALIDATION_ERROR");
+      assert.equal(error.details.reasonCode, "create_markdown_invalid");
+      return true;
+    });
+    f.journal.close();
+  }
+  {
+    const f = fixture("empty-mapping-dates", [{ pluginId: "update-time", role: "modified", propertyName: "updated", delayMs: 2250 }]);
+    await assert.rejects(f.adapter.plan({ ...input, content: "---\n{}\n---\nbody\n" }), error => error.details?.reasonCode === "frontmatter_empty_mapping_date_management");
+    assert.equal(f.calls(), 0); f.journal.close();
+  }
+  {
+    const f = fixture("format-admission");
+    try {
+      const noncanonical = { ...input, content: "---\ntitle: 'Test'\n---\nPrivate prose.\n" };
+      await assert.rejects(f.adapter.plan(noncanonical), error => error.message === "frontmatter_not_obsidian_canonical" && error.expectedFrontmatter === "---\ntitle: Test\n---");
+      assert.equal(f.calls(), 0);
+      const status = f.backend.status;
+      f.backend.status = async () => ({ backend: { bindingFingerprint: "a".repeat(64) } });
+      await assert.rejects(f.adapter.plan(input));
+      assert.equal(f.calls(), 0);
+      f.backend.status = status;
+      const p = await f.adapter.plan(input);
+      assert.deepEqual(p.typeWarnings, []);
+      assert.deepEqual((await f.adapter.status(p.planRef)).typeWarnings, []);
+      f.backend.status = async () => ({ backend: { bindingFingerprint: "a".repeat(64) } });
+      await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey));
+      assert.equal(f.calls(), 0);
+      assert.equal((await f.adapter.status(p.planRef)).phase, "planned");
+    } finally { f.journal.close(); }
+  }
+  {
+    const f = fixture("legacy-wire-identity");
+    try {
+      const preflight = f.backend.preflight;
+      f.backend.preflight = async path => { const { vaultBindingFingerprint, ...wire } = await preflight(path); return wire; };
+      const status = f.backend.status;
+      f.backend.status = async () => ({ ...(await status()), noteCreate: { supported: true, enabled: true, bindingFingerprint: "b".repeat(64) } });
+      await assert.rejects(f.adapter.plan(input), error => error.details?.reasonCode === "create_preflight_identity_mismatch");
+      assert.equal(f.calls(), 0);
+      f.backend.status = async () => ({ ...(await status()), noteCreate: { supported: true, enabled: true, bindingFingerprint: "a".repeat(64) } });
+      const p = await f.adapter.plan(input);
+      assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "committed");
+      assert.equal(f.calls(), 1);
+    } finally { f.journal.close(); }
+  }
+  {
+    const f = fixture("format-vault-identity");
+    try {
+      const preflight = f.backend.preflight;
+      f.backend.preflight = async path => ({ ...(await preflight(path)), bindingFingerprint: "b".repeat(64) });
+      const initialStatus = f.backend.status;
+      f.backend.status = async () => ({ ...(await initialStatus()), noteCreate: { supported: true, enabled: true, bindingFingerprint: "b".repeat(64) } });
+      const p = await f.adapter.plan(input);
+      const status = f.backend.status;
+      f.backend.status = async () => ({ ...(await status()), backend: { bindingFingerprint: "c".repeat(64) } });
+      await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey), error => error.details?.reasonCode === "create_preflight_identity_mismatch");
+      assert.equal(f.calls(), 0);
+      assert.equal((await f.adapter.status(p.planRef)).phase, "planned");
+    } finally { f.journal.close(); }
+  }
   {
     const f = fixture("nominal"); const p = await f.adapter.plan(input);
     assert.equal(f.calls(), 0); assert.equal((await f.adapter.plan(input)).planRef, p.planRef);
@@ -105,7 +171,7 @@ try {
   }
   {
     const f = fixture("rebind"), p = await f.adapter.plan(input); f.rebind();
-    assert.notEqual((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "committed");
+    await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey));
     assert.equal(f.files.size, 0); f.journal.close(); cases++;
   }
   {
@@ -157,6 +223,7 @@ try {
       f.files.set(input.path, input.content);
       const reconciled = await adapter.status(p.planRef);
       assert.equal(reconciled.outcome, "committed"); assert.equal(reconciled.postflight, "verified");
+      assert.equal(reconciled.nextAction, "none");
       assert.equal(reconciled.effectProof.details.match, "exact");
       await adapter.apply(p.planRef, input.idempotencyKey);
       assert.equal(f.calls(), 1);

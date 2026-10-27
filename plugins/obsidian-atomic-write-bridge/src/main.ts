@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   parseLinktext,
   parseYaml,
+  stringifyYaml,
   Plugin,
   PluginSettingTab,
   resolveSubpath,
@@ -28,11 +29,18 @@ import {
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
 import { dateManagementScope, createTemplateDateGuard } from "./dateManagementScope.js";
-import { createDatePreparation, MISSING_CREATION_MESSAGE } from "./datePreparation.js";
+import { createDatePreparation, DatePreparationDeferred, DatePreparationError } from "./datePreparation.js";
 import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { createNativeNoteMoveRoutes } from "./nativeNoteMoveRoutes.js";
+import { inspectFrontmatterFormat, InvalidFrontmatter } from "./frontmatterFormat.js";
+import {
+  EFFECT_FENCE_CONTRACT_VERSION,
+  EFFECT_FENCE_MAX_ATTEMPTS_PER_REQUEST,
+  EffectFence,
+  EffectFenceRefused,
+} from "./effectFence.js";
 import {
   RestExtensionLifecycle,
   RestExtensionPartialMountError,
@@ -44,7 +52,30 @@ type PluginData = {
   allowCanvasWrites: boolean;
   allowNativeMoves: boolean;
   allowNoteCreates: boolean;
+  /** Absent in older data.json files; never written until the owner changes it. */
+  requireEffectFence?: boolean;
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+function parseEffectFenceResolveRequest(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("invalid_request");
+  const body = input as Record<string, unknown>;
+  const keys = Object.keys(body).sort().join("\0");
+  if (keys !== ["attempts", "bindingFingerprint", "contractVersion", "includeLegacy", "mode"].join("\0") ||
+      body.contractVersion !== EFFECT_FENCE_CONTRACT_VERSION || (body.mode !== "inspect" && body.mode !== "revoke") ||
+      typeof body.includeLegacy !== "boolean" || typeof body.bindingFingerprint !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(body.bindingFingerprint) || !Array.isArray(body.attempts) ||
+      body.attempts.length > EFFECT_FENCE_MAX_ATTEMPTS_PER_REQUEST) throw new Error("invalid_request");
+  const attempts = body.attempts.map((item: unknown) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("invalid_request");
+    const attempt = item as Record<string, unknown>;
+    if (Object.keys(attempt).sort().join("\0") !== "attemptId\0epoch" || typeof attempt.epoch !== "string" ||
+        typeof attempt.attemptId !== "string" || !UUID.test(attempt.epoch) || !UUID.test(attempt.attemptId)) throw new Error("invalid_request");
+    return { epoch: attempt.epoch, attemptId: attempt.attemptId };
+  });
+  return { mode: body.mode, includeLegacy: body.includeLegacy, bindingFingerprint: body.bindingFingerprint, attempts };
+}
 
 type AtomicResource = "note" | "canvas";
 
@@ -103,6 +134,13 @@ type AtomicPublicErrorDescriptor = {
 };
 
 const ATOMIC_PUBLIC_ERRORS: Record<string, AtomicPublicErrorDescriptor> = {
+  invalid_frontmatter: {
+    code: "invalid_frontmatter",
+    reasonCode: "invalid_frontmatter",
+    status: "rejected",
+    retryable: false,
+    message: "The frontmatter must be a valid YAML mapping without duplicate keys.",
+  },
   invalid_request: {
     code: "invalid_request",
     reasonCode: "request_rejected",
@@ -153,6 +191,22 @@ const ATOMIC_PUBLIC_ERRORS: Record<string, AtomicPublicErrorDescriptor> = {
     retryable: false,
     message:
       "The resource changed after it was read. Read it again before retrying.",
+  },
+  atomic_write_creation_property_missing: {
+    code: "atomic_write_creation_property_missing", reasonCode: "atomic_write_creation_property_missing",
+    status: "blocked", retryable: false, message: "Date preparation requires vault owner intervention.",
+  },
+  date_preparation_failed: {
+    code: "date_preparation_failed", reasonCode: "date_preparation_failed",
+    status: "rejected", retryable: false, message: "Date preparation failed.",
+  },
+  date_preparation_fdm_pending: {
+    code: "date_preparation_fdm_pending", reasonCode: "date_preparation_fdm_pending", status: "conflict", retryable: false,
+    message: "The date manager still has pending work for this note; nothing was prepared. Plan again shortly.",
+  },
+  effect_fence_refused: {
+    code: "effect_fence_refused", reasonCode: "effect_fence_refused", status: "blocked", retryable: false,
+    message: "The write attempt was revoked, replayed or superseded; it produced no effect.",
   },
   read_error: {
     code: "read_error",
@@ -234,6 +288,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   allowCanvasWrites = false;
   allowNativeMoves = false;
   allowNoteCreates = false;
+  requireEffectFence = false;
+  effectFence!: EffectFence;
   private noteCreate: ReturnType<typeof createNoteCreateRoutes>;
   private nativeMove: ReturnType<typeof createNativeNoteMoveRoutes>;
   private templateDateGuard!: ReturnType<typeof createTemplateDateGuard>;
@@ -250,6 +306,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     this.allowCanvasWrites = stored?.allowCanvasWrites === true;
     this.allowNativeMoves = stored?.allowNativeMoves === true;
     this.allowNoteCreates = stored?.allowNoteCreates === true;
+    this.requireEffectFence = stored?.requireEffectFence === true;
+    // Created before any route: every effect of this instance passes this fence.
+    this.effectFence = new EffectFence({ requireFence: () => this.requireEffectFence });
+    this.register(() => this.effectFence.dispose());
     const deviceStorageKey = "optimike-atomic-write-bridge:device-id";
     let deviceId = window.localStorage.getItem(deviceStorageKey);
     if (!deviceId) {
@@ -280,6 +340,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
         binding: () => this.bindingFingerprint,
         enabled: () => this.allowNativeMoves,
         registerEvent: (event) => this.registerEvent(event),
+        enterEffect: (fence) => this.effectFence.enter(fence),
       });
     } catch {
       // An unsupported native host must not disable the existing atomic CAS routes.
@@ -288,12 +349,16 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     try {
       this.noteCreate = createNoteCreateRoutes(this.app, {
         binding: () => this.bindingFingerprint, enabled: () => this.allowNoteCreates,
+        enterEffect: (fence) => this.effectFence.enter(fence),
       });
     } catch { this.noteCreate = undefined; }
     this.addSettingTab(new AtomicWriteSettingsTab(this.app, this));
     this.templateDateGuard = createTemplateDateGuard(this.app);
     this.register(() => this.templateDateGuard.dispose());
-    this.datePreparation = createDatePreparation(this.app, parseYaml, { enabled: () => this.allowWrites });
+    this.datePreparation = createDatePreparation(this.app, parseYaml, {
+      enabled: () => this.allowWrites,
+      enterEffect: (fence) => this.effectFence.enter(fence),
+    });
     this.register(() => this.datePreparation.dispose());
     this.fdmCompletion = createFdmCompletion(this.app);
     this.register(() => this.fdmCompletion.dispose());
@@ -307,6 +372,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       allowCanvasWrites: this.allowCanvasWrites,
       allowNativeMoves: this.allowNativeMoves,
       allowNoteCreates: this.allowNoteCreates,
+      requireEffectFence: this.requireEffectFence,
     } satisfies PluginData);
   }
 
@@ -344,6 +410,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
 
   private async registerRestExtension(): Promise<void> {
     this.fdmCompletion ??= createFdmCompletion(this.app);
+    this.effectFence ??= new EffectFence({ requireFence: () => this.requireEffectFence });
     await new Promise<void>((resolve) =>
       this.app.workspace.onLayoutReady(() => resolve()),
     );
@@ -386,6 +453,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               canvasWriteEnabled: this.allowCanvasWrites,
             },
             datePreparation: { contractVersion: 1, supported: true },
+            effectFence: this.effectFence.capability(),
+            frontmatterFormat: { contractVersion: 1, supported: typeof (this.app as any).metadataTypeManager?.getAssignedWidget === "function" },
             nativeMove: this.nativeMove?.capabilities() ?? { supported: false, enabled: false },
             noteCreate: this.noteCreate?.capabilities() ?? { supported: false, enabled: false },
             limits: { markdownOnly: true },
@@ -405,6 +474,63 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               },
             },
           });
+        });
+
+      api
+        .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/effect-fence/resolve`)
+        .post((req: any, res: any) => {
+          let request: ReturnType<typeof parseEffectFenceResolveRequest>;
+          try {
+            request = parseEffectFenceResolveRequest(req?.body);
+          } catch {
+            sendJson(res, 400, errorPayload("invalid_request"));
+            return;
+          }
+          try {
+            assertBindingFingerprint(request.bindingFingerprint, this.bindingFingerprint);
+            // Synchronous on purpose: no effect route can interleave between verdicts.
+            const results = request.attempts.map((attempt) => ({
+              ...attempt,
+              ...this.effectFence.resolve(attempt, request.mode as "inspect" | "revoke"),
+            }));
+            sendJson(res, 200, {
+              ok: true,
+              contractVersion: EFFECT_FENCE_CONTRACT_VERSION,
+              bindingFingerprint: this.bindingFingerprint,
+              epoch: this.effectFence.epoch,
+              mode: request.mode,
+              results,
+              ...(request.includeLegacy ? { legacy: this.effectFence.legacy() } : {}),
+            });
+          } catch (error) {
+            sendJson(res, safeInstanceOf(error, BindingConflictError) ? 409 : 500,
+              errorPayload(safeInstanceOf(error, BindingConflictError) ? "binding_conflict" : "read_error"));
+          }
+        });
+
+      api
+        .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/frontmatter/format`)
+        .post((req: any, res: any) => {
+          try {
+            const body = req?.body;
+            if (!body || body.contractVersion !== 1 || typeof body.yaml !== "string" ||
+                Buffer.byteLength(body.yaml, "utf8") > 5 * 1024 * 1024 ||
+                Object.keys(body).some((key) => key !== "contractVersion" && key !== "yaml")) {
+              sendJson(res, 400, errorPayload("invalid_request"));
+              return;
+            }
+            const types = (this.app as any).metadataTypeManager;
+            if (typeof types?.getAssignedWidget !== "function") {
+              sendJson(res, 503, errorPayload("read_error"));
+              return;
+            }
+            const result = inspectFrontmatterFormat(body.yaml, parseYaml, stringifyYaml, types);
+            sendJson(res, 200, { ok: true, contractVersion: 1, bindingFingerprint: this.bindingFingerprint, ...result });
+          } catch (error) {
+            // Parser diagnostics can contain private frontmatter; never return them.
+            const invalid = safeInstanceOf(error, InvalidFrontmatter);
+            sendJson(res, invalid ? 400 : 503, errorPayload(invalid ? "invalid_frontmatter" : "read_error"));
+          }
         });
 
       api
@@ -476,18 +602,26 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               this.bindingFingerprint,
             );
             let beforeSha256 = "";
-            const written = await this.app.vault.process(
-              this.file(request.path, "canvas"),
-              (current) => {
-                const result = compareAndReplace(
-                  current,
-                  request.expectedSha256,
-                  request.nextContent,
-                );
-                beforeSha256 = result.beforeSha256;
-                return result.content;
-              },
-            );
+            let settleEffect: (() => void) | undefined;
+            let written: string;
+            try {
+              written = await this.app.vault.process(
+                this.file(request.path, "canvas"),
+                (current) => {
+                  const result = compareAndReplace(
+                    current,
+                    request.expectedSha256,
+                    request.nextContent,
+                  );
+                  // Effect point: the fence and the CAS decide in the same synchronous callback.
+                  settleEffect = this.effectFence.enter(request.fence);
+                  beforeSha256 = result.beforeSha256;
+                  return result.content;
+                },
+              );
+            } finally {
+              settleEffect?.();
+            }
             sendJson(res, 200, {
               ok: true,
               contractVersion: ATOMIC_WRITE_CONTRACT_VERSION,
@@ -504,6 +638,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
                 409,
                 errorPayload("binding_conflict"),
               );
+              return;
+            }
+            if (safeInstanceOf(error, EffectFenceRefused)) {
+              sendJson(res, 403, errorPayload("effect_fence_refused"));
               return;
             }
             if (safeInstanceOf(error, HashConflictError)) {
@@ -662,8 +800,12 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             sha256: sha256(content), size: Buffer.byteLength(content, "utf8"), bindingFingerprint: this.bindingFingerprint,
             ...(prepared.datePreparation ? { datePreparation: prepared.datePreparation } : {}) });
         } catch (error) {
-          const conflict = safeInstanceOf(error, HashConflictError) || safeInstanceOf(error, BindingConflictError);
-          sendJson(res, conflict ? 409 : 403, errorPayload(conflict ? "hash_conflict" : "atomic_write_creation_property_missing", MISSING_CREATION_MESSAGE));
+          if (safeInstanceOf(error, BindingConflictError)) sendJson(res, 409, errorPayload("binding_conflict"));
+          else if (safeInstanceOf(error, EffectFenceRefused)) sendJson(res, 403, errorPayload("effect_fence_refused"));
+          else if (safeInstanceOf(error, DatePreparationDeferred)) sendJson(res, 409, errorPayload("date_preparation_fdm_pending"));
+          else if (safeInstanceOf(error, HashConflictError)) sendJson(res, 409, errorPayload("hash_conflict", undefined, safeHashConflictDetails(error)));
+          else if (safeInstanceOf(error, DatePreparationError)) sendJson(res, 422, errorPayload("atomic_write_creation_property_missing"));
+          else sendJson(res, 500, errorPayload("date_preparation_failed"));
         }
       });
 
@@ -699,8 +841,9 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             );
             this.templateDateGuard?.ensure();
             let beforeSha256 = "";
-            const completionToken = this.fdmCompletion.begin(request.path);
+            const completionToken = await this.fdmCompletion.beginForPath(request.path);
             let written: string;
+            let settleEffect: (() => void) | undefined;
             try { written = await this.app.vault.process(
               this.file(request.path),
               (current) => {
@@ -709,11 +852,15 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
                   request.expectedSha256,
                   request.nextContent,
                 );
+                // Effect point: a revocation handled before this callback refuses the
+                // write; one handled after it observes effect_in_progress/settled.
+                settleEffect = this.effectFence.enter(request.fence);
                 beforeSha256 = result.beforeSha256;
                 return result.content;
               },
             );
             } catch (error) { this.fdmCompletion.cancel(completionToken); throw error; }
+            finally { settleEffect?.(); }
             this.fdmCompletion.activate(completionToken);
             sendJson(res, 200, {
               ...(completionToken ? { completionToken } : {}),
@@ -732,6 +879,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
                 409,
                 errorPayload("binding_conflict"),
               );
+              return;
+            }
+            if (safeInstanceOf(error, EffectFenceRefused)) {
+              sendJson(res, 403, errorPayload("effect_fence_refused"));
               return;
             }
             if (safeInstanceOf(error, HashConflictError)) {
@@ -816,6 +967,18 @@ class AtomicWriteSettingsTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.bridge.allowWrites).onChange(async (value) => {
           this.bridge.allowWrites = value;
+          await this.bridge.saveSettings();
+        }),
+      );
+    new Setting(containerEl)
+      .setName("Exiger un jeton de fence pour toute écriture")
+      .setDesc(
+        "Désactivé par défaut. Refuse toute écriture qui ne porte pas de jeton de tentative (clients MCP antérieurs). Nécessaire, pendant au moins 10 minutes continues, pour clore les opérations historiques envoyées sans jeton.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.bridge.requireEffectFence).onChange(async (value) => {
+          this.bridge.requireEffectFence = value;
+          this.bridge.effectFence.requireFenceChanged();
           await this.bridge.saveSettings();
         }),
       );

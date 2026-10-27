@@ -4,7 +4,7 @@ import {
 } from "../../../services/governedResponse.js";
 import { FrontmatterOperationSchema } from "../governedFrontmatterTools/registration.js";
 import { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
   GOVERNED_PLAN_TOOL_ANNOTATIONS,
@@ -16,6 +16,7 @@ import {
 } from "../../../services/textPatchProjectionRuntime.js";
 import type { GovernedNoteReplaceRuntime } from "../governedNoteReplaceTools/runtime.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
+import { preparationPlanRejection } from "../../../services/obsidianFrontmatterFormat.js";
 import { mcpSchema } from "../../mcpSchema.js";
 
 const OperationSchema = z.discriminatedUnion("op", [
@@ -105,7 +106,7 @@ async function runTool(
           text: JSON.stringify(
             await governedResponse(toolName, params, operation),
             null,
-            (params as { responseMode?: string })?.responseMode === "compact"
+            (params as { responseMode?: string })?.responseMode !== "detailed"
               ? undefined
               : 2,
           ),
@@ -119,7 +120,7 @@ async function runTool(
         {
           type: "text" as const,
           text: JSON.stringify(
-            publicMcpToolErrorPayload(error, {
+            (toolName === "obsidian_text_patch_plan" ? preparationPlanRejection(error) : undefined) ?? publicMcpToolErrorPayload(error, {
               operation: toolName,
               toolName,
               params,
@@ -144,7 +145,7 @@ export async function registerGovernedTextPatchTools(
     "obsidian_text_patch_plan",
     {
       description:
-        "Plan one bounded body text patch, optionally combined with frontmatterOperations, of an existing Markdown note. The sealed plan preserves the complete note outside its authorized body and optional frontmatter ranges, binds the current before proof and vault identity, and returns only opaque proof metadata; it does not apply the requested patch. Templates and date-manager-excluded paths are never dated. Otherwise, if a creation date is missing, it first asks the active vault date manager to date the note and seals the reread dated state.",
+        "Plan one bounded body text patch, optionally combined with frontmatterOperations, of an existing Markdown note. Noncanonical existing frontmatter is normalized in the sealed plan and announced in frontmatterFormat.normalization; type issues are warnings. After normalization the plan preserves bytes outside authorized body and frontmatter ranges, binds the before proof and vault identity, and does not apply the requested patch. Templates and date-manager-excluded paths are never dated. Otherwise missing creation dates may be prepared by the active vault date manager and any preparation normalization is reported. If preparation is unavailable or fails its preconditions, the plan is refused; ask the vault owner to resolve the missing date.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

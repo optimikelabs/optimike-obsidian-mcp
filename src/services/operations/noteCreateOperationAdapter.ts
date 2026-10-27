@@ -1,12 +1,15 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { load } from "js-yaml";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { validateObsidianMarkdown } from "../obsidianFormatService.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import { nativeNotePath } from "../nativeNoteMoveContract.js";
+import { assertNewNotePath } from "../noteNameMcp.js";
 import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCreateHash, observeCreateContent, validateCreatePolicy, validateNoteCreate,
   type NoteCreateApply, type NoteCreatePreflight } from "../noteCreateContract.js";
 import { operationDigest } from "./contract.js";
+import { frontmatterEnvelope, inspectNativeFrontmatter, rejectNonCanonical } from "../obsidianFrontmatterFormat.js";
+import { effectFenceEpoch, type AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "./obsidianNoteReplaceJournal.js";
 
 /** Newly created user-authored frontmatter is a change from the empty document.
@@ -29,8 +32,11 @@ const Policy = z.object({ version: z.literal(1), utcOffsetMinutes: z.number().in
   fields: z.array(z.object({ pluginId: z.enum(["update-time-on-edit", "frontmatter-date-manager", "update-time"]),
     propertyName: z.string().min(1).max(128), role: z.enum(["created", "modified"]), delayMs: z.number().int().min(0).max(240000),
   }).strict()).max(6) }).strict();
-const Preflight = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
+const Preflight = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH, vaultBindingFingerprint: HASH.optional(),
   absent: z.literal(true), enabled: z.literal(true), policy: Policy, policyDigest: HASH }).strict();
+// Keep the wire response compatible with strict MCP v3.12/v3.14 schemas. The
+// vault binding is sealed locally after it is obtained from the Bridge status.
+const WirePreflight = Preflight.omit({ vaultBindingFingerprint: true }).strict();
 const Inspection = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
   // Optional only for rolling compatibility with the immediately preceding
   // Bridge contract. It is deliberately ignored for reconciliation.
@@ -39,13 +45,13 @@ const Inspection = z.object({ contractVersion: z.literal(1), path: z.string().ma
 const Result = z.object({ contractVersion: z.literal(1), operationId: z.string().uuid(), path: z.string().max(1024),
   bindingFingerprint: HASH, policyDigest: HASH, contentSha256: HASH,
   outcome: z.enum(["created", "conflict", "outcome_unknown"]), reason: z.string().regex(/^[a-z_]{1,96}$/u) }).strict();
-export interface NoteCreateBackend {
+export interface NoteCreateBackend extends Pick<AtomicWriteBackend, "status" | "inspectFrontmatterFormat"> {
   preflight(path: string): Promise<unknown>;
   create(request: NoteCreateApply): Promise<unknown>;
   inspect(path: string): Promise<unknown>;
 }
 export type NoteCreatePlanInput = { path: string; content: string; idempotencyKey: string };
-function bad(reason: string): never { throw new McpError(BaseErrorCode.CONFLICT, "The sealed creation could not be admitted or verified.", { reason }); }
+function bad(reason: string): never { throw new McpError(reason === "create_markdown_invalid" || reason === "invalid_create_key" || reason === "invalid_create_reference" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.CONFLICT, "The sealed creation could not be admitted or verified.", { reasonCode: reason }); }
 function internalKey(value: string): string {
   if (!z.string().min(1).max(256).safeParse(value).success) bad("invalid_create_key");
   return "optimike:projection:v1:note-create:" + noteCreateHash(value);
@@ -74,7 +80,8 @@ export class NoteCreateOperationAdapter {
     if (createPolicyDigest(plan.policy) !== plan.policyDigest || row.path !== plan.path || row.bindingFingerprint !== plan.bindingFingerprint ||
         row.idempotencyIdentity !== intent(row.path, row.afterSha256) || row.projection.intentDigest !== row.idempotencyIdentity ||
         row.beforeSha256 !== absence({ path: row.path, bindingFingerprint: row.bindingFingerprint }) ||
-        row.requestDigest !== operationDigest({ ...plan, contentSha256: row.afterSha256 }) ||
+        row.requestDigest !== operationDigest({ ...plan, contentSha256: row.afterSha256,
+          ...(Object.hasOwn(row.projection.proof, "typeWarnings") ? { typeWarnings: row.projection.proof.typeWarnings } : {}) }) ||
         (["planned", "applying", "outcome_unknown"].includes(row.status) && noteCreateHash(row.nextContent) !== row.afterSha256)) bad("create_seal_mismatch");
     return plan;
   }
@@ -86,8 +93,15 @@ export class NoteCreateOperationAdapter {
     if (key !== undefined && (row.idempotencyKey !== internalKey(key) || row.projection!.publicIdempotencyKey !== key)) bad("create_key_mismatch");
     return row;
   }
+  private async vaultBindingForCreate(expectedCreateBinding: string): Promise<string> {
+    const status = await this.backend.status();
+    const vault = HASH.safeParse(status?.backend?.bindingFingerprint);
+    if (!vault.success || status?.noteCreate?.supported !== true || status.noteCreate.enabled !== true ||
+        status.noteCreate.bindingFingerprint !== expectedCreateBinding) bad("create_preflight_identity_mismatch");
+    return vault.data;
+  }
   async plan(input: NoteCreatePlanInput) {
-    nativeNotePath(input.path);
+    assertNewNotePath(input.path);
     validateNoteCreate(input.path, input.content, { version: 1, utcOffsetMinutes: 0, fields: [] });
     if (!validateObsidianMarkdown(input.content).ok) bad("create_markdown_invalid");
     const key = internalKey(input.idempotencyKey), hash = noteCreateHash(input.content), identity = intent(input.path, hash);
@@ -99,15 +113,20 @@ export class NoteCreateOperationAdapter {
     const old = winner(); if (old) return this.receipt(old);
     this.authorize("plan", input.path, input.content);
     let plan: NoteCreatePreflight;
-    try { plan = Preflight.parse(await this.backend.preflight(input.path)); }
+    try { plan = WirePreflight.parse(await this.backend.preflight(input.path)); }
     catch (error) { const existing = winner(); if (existing) return this.receipt(existing); throw error; }
     if (plan.path !== input.path || createPolicyDigest(plan.policy) !== plan.policyDigest) bad("create_preflight_identity_mismatch");
     validateNoteCreate(input.path, input.content, plan.policy);
+    plan = { ...plan, vaultBindingFingerprint: await this.vaultBindingForCreate(plan.bindingFingerprint) };
+    const format = await inspectNativeFrontmatter(this.backend, input.content, plan.vaultBindingFingerprint);
+    rejectNonCanonical(format);
+    if (plan.policy.fields.length && frontmatterEnvelope(input.content)?.yaml.trim() === "{}")
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "An empty frontmatter mapping cannot be verified with automatic dates.", { reasonCode: "frontmatter_empty_mapping_date_management" });
     this.authorize("plan", input.path, input.content);
     const row = this.journal.create({ idempotencyKey: key, idempotencyIdentity: identity, path: input.path,
       nextContent: input.content, beforeSha256: absence({ path: input.path, bindingFingerprint: plan.bindingFingerprint }), afterSha256: hash,
-      bindingFingerprint: plan.bindingFingerprint, requestDigest: operationDigest({ ...plan, contentSha256: hash }),
-      projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity, proof: { preflight: plan } } });
+      bindingFingerprint: plan.bindingFingerprint, requestDigest: operationDigest({ ...plan, contentSha256: hash, typeWarnings: format.warnings }),
+      projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity, proof: { preflight: plan, typeWarnings: format.warnings } } });
     return this.receipt(row);
   }
   async apply(ref: string, key: string) {
@@ -115,6 +134,10 @@ export class NoteCreateOperationAdapter {
     if (row.status !== "planned") return this.status(ref);
     const admitted = this.sealed(row);
     this.authorize("apply", row.path, row.nextContent);
+    if (!admitted.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
+    if (await this.vaultBindingForCreate(admitted.bindingFingerprint) !== admitted.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
+    const format = await inspectNativeFrontmatter(this.backend, row.nextContent, admitted.vaultBindingFingerprint);
+    if (format.normalized) throw new McpError(BaseErrorCode.CONFLICT, "The sealed note no longer matches the native frontmatter format.", { reasonCode: "frontmatter_format_changed" });
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }
     catch (error) { if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(ref); throw error; }
     const attempt = row.executionOwner!.attemptId;
@@ -122,9 +145,13 @@ export class NoteCreateOperationAdapter {
     try {
       const plan = this.sealed(row);
       this.authorize("apply", row.path, row.nextContent);
+      // Durable effect-fence token before the request exists; a stale owner stops here.
+      const fenceEpoch = effectFenceEpoch(await this.backend.status());
+      row = this.journal.recordEffectAttempt(row.operationId, attempt, fenceEpoch);
       dispatched = true;
       const result = Result.parse(await this.backend.create({ contractVersion: 1, operationId: row.operationId, path: row.path,
-        content: row.nextContent, contentSha256: row.afterSha256, bindingFingerprint: row.bindingFingerprint, policyDigest: plan.policyDigest }));
+        content: row.nextContent, contentSha256: row.afterSha256, bindingFingerprint: row.bindingFingerprint, policyDigest: plan.policyDigest,
+        ...(fenceEpoch ? { fence: { contractVersion: 1 as const, epoch: fenceEpoch, attemptId: attempt } } : {}) }));
       if (result.operationId !== row.operationId || result.path !== row.path || result.bindingFingerprint !== row.bindingFingerprint ||
           result.contentSha256 !== row.afterSha256 || result.policyDigest !== plan.policyDigest) bad("create_result_identity_mismatch");
       if (result.outcome !== "created") {
@@ -185,7 +212,9 @@ export class NoteCreateOperationAdapter {
       beforeProof: { kind: "observed-path-absence", digest: row.beforeSha256 },
       expectedContentSha256: row.afterSha256, effectProof: row.effectProof ?? null, postflight,
       automaticDateFields: plan.policy.fields.map(field => ({ propertyName: field.propertyName, role: field.role })),
-      applyAllowed: row.status === "planned", recoveryAllowed: false, nextAction: row.status === "planned" ? "apply" : "status",
+      typeWarnings: row.projection?.proof.typeWarnings ?? [],
+      applyAllowed: row.status === "planned", recoveryAllowed: false,
+      nextAction: row.status === "planned" ? "apply" : ["applying", "outcome_unknown"].includes(row.status) ? "status" : "none",
       indexing: "not_certified", authorAttribution: "not_proven", admittedAt: row.createdAt, updatedAt: row.updatedAt,
     };
   }

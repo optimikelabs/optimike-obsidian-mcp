@@ -113,6 +113,7 @@ export async function countChatTokens(
             message.tool_calls
           ) {
             for (const tool_call of message.tool_calls) {
+              if (tool_call.type !== "function") continue;
               // Add tokens for the function name and arguments
               if (tool_call.function.name) {
                 num_tokens += encoding.encode(tool_call.function.name).length;

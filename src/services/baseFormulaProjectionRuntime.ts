@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { config } from "../config/index.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { logger, requestContextService } from "../utils/index.js";
@@ -393,7 +393,7 @@ export function createGovernedBaseFormulaRuntime(
   if (!service) return undefined;
   const journal = new ObsidianNoteReplaceJournal(
     config.obsidianBaseFormulaJournalPath,
-    { executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs },
+    { executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs, plannedRetentionMs: config.obsidianPlannedRetentionMs },
   );
   const backend = new RestBaseAtomicWriteBackend(service);
   const adapter = new ObsidianNoteReplaceOperationAdapter(

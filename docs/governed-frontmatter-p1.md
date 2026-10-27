@@ -2,8 +2,9 @@
 
 French version: [governed-frontmatter-p1.fr.md](governed-frontmatter-p1.fr.md)
 
-P1 adds a source-preserving frontmatter mutation domain above the released P0
-atomic-note runtime. It does not add another transaction engine.
+P1 adds a governed frontmatter mutation domain above the released P0
+atomic-note runtime. It does not add another transaction engine. Existing
+noncanonical frontmatter is normalized as an announced part of the sealed plan.
 
 ## Public surface
 
@@ -42,7 +43,7 @@ block. It may contain up to 64 unique top-level operations:
 - `delete`: remove one existing top-level bare key when the source range and
   neighboring-comment ownership are unambiguous.
 
-The compiler fails closed on unsupported source, including duplicate or
+The compiler fails closed on unsupported normalized source, including duplicate or
 case-colliding keys, anchors, aliases, merge keys, explicit YAML tags, complex
 or quoted keys, multi-document syntax, targeted entries containing direct or
 nested block scalars or multiline quoted scalars, ambiguous comment
@@ -50,16 +51,23 @@ ownership, excessive nesting, non-finite numbers, and oversized values.
 
 ## Source-preservation guarantee
 
-P1 never performs `parse YAML -> mutate object -> dump whole YAML`.
+P1 first asks the Atomic Write Bridge for the form produced by Obsidian's own
+`parseYaml` / `stringifyYaml`. If the existing frontmatter differs, the plan
+includes the complete normalization and reports `frontmatterFormat.normalization`
+with its reason and source/normalized digests. Comments, quotes, inline lists,
+line endings in the YAML and folding can therefore change. The body is not
+normalized by this step. The Bridge capability is mandatory and identity-bound;
+an absent or invalid capability fails closed. Type declarations are warnings
+only, including untyped and unknown widgets, empty values and mismatches.
 
-It locates the source ranges owned by the targeted top-level entries and edits
-only those ranges. For every admitted plan:
+Against that announced normalized input, the compiler renders each targeted
+value with Obsidian and edits only the authorized top-level ranges:
 
 ```text
-actualDiff(before, after) is a subset of authorizedChangeSet(intent)
+actualDiff(normalizedBefore, after) is a subset of authorizedChangeSet(intent)
 ```
 
-When not targeted, the following remain byte-identical:
+After the announced normalization, the following remain byte-identical when not targeted:
 
 - the Markdown body;
 - line endings;
@@ -94,7 +102,7 @@ fails closed before CAS rather than disappearing from protection.
 
 Planning has two phases:
 
-1. P1 reads the live note and compiles the source-preserving candidate;
+1. P1 reads the live note, announces any normalization and compiles the candidate;
 2. P0 re-reads the same target and admits the candidate only if both SHA-256 and
    backend binding still equal the compiler snapshot.
 
@@ -198,15 +206,11 @@ See the [shared completion contract](governed-note-replacement.md#completion-mod
 
 ## Receipts and timings
 
-All four tools accept `responseMode: compact | detailed` (default detailed) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
+All four tools accept `responseMode: compact | detailed` (default compact) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
 
-## Authorized YAML representation after FDM
+## Exact representation after FDM
 
-FDM may unquote a scalar or expand a YAML collection while updating the date.
-Postflight recognizes this only for keys authorized by the sealed projection:
-key presence and parsed YAML values must match, the compiler must restore their
-sealed spelling, and the original exact resolver must then accept a single valid
-modified-date change with every remaining byte unchanged. Deleted keys cannot
-reappear. Body, creation-date, unknown-key and YAML-type drift remain uncertain.
-No second write occurs. Detailed proof includes settlementAuthorizedFormatKeyCount
-and the original observed hash; authorized keys are retained durably in the journal.
+Postflight no longer accepts an alternate representation even for a targeted
+key. Only a strictly qualified modified-date line may differ; restoring that
+line must make every other byte equal to the sealed candidate. The FDM signal
+does not replace this comparison or authorize another write.

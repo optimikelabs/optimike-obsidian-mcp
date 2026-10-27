@@ -8,7 +8,7 @@ import { StdioClientTransport as ModernStdio } from "@modelcontextprotocol/clien
 import { Client as LegacyClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport as LegacyStdio } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { mcpSchema } from "../dist/mcp-server/mcpSchema.js";
 
 const revision = "2026-07-28";

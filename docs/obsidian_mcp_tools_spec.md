@@ -124,11 +124,12 @@ automations. No generic public `operation_*` surface is introduced.
 
 Available on the same live/hybrid Atomic Write boundary. P4 compiles ordered
 `append_body`, `prepend_body`, and exact `replace_literal` intentions into a
-complete next note, preserves frontmatter, refuses real Markdown task lines,
+complete next note, announces normalization of noncanonical frontmatter, refuses real Markdown task lines,
 and delegates one sealed child plan to the existing note runtime.
 
-- `obsidian_text_patch_plan`: compile and seal one body-only patch without
-  writing; `occurrence: all` requires `intent: replace_all`.
+- `obsidian_text_patch_plan`: compile and seal one body patch; the requested
+  patch is not applied during planning, although FDM may prepare missing dates.
+  `occurrence: all` requires `intent: replace_all`.
 - `obsidian_text_patch_apply`: apply only the sealed patch with its matching
   public idempotency key.
 - `obsidian_text_patch_status`: reconcile the durable child receipt without
@@ -144,7 +145,13 @@ headless fallback modes retain the direct compatibility tools.
 - `obsidian_list_pending_operations`: list only `planned`, `applying`, and
   `outcome_unknown` receipts from the current live runtime's already-open Note,
   Base Formula, and Canvas journals. Frontmatter and Text Patch retain their
-  public projected family and `planRef`.
+  public projected family and `planRef`. `closeAllowed` marks rows that the
+  owner may close administratively.
+- `obsidian_operation_close` (operational/full): after owner review, close
+  `outcome_unknown` operations as `reviewed_unverified` or release
+  `date_preparation_unverified` locks, only when the Atomic Write Bridge effect
+  fence proves that no attempt can still act. `dryRun` defaults to true. See
+  [Administrative closure](administrative-closure.md).
 
 The paginated projection contains the operation family, exact opaque domain
 reference, durable state, timestamps, bounded age and the next safe action. It
@@ -161,9 +168,10 @@ Atomic Write Bridge. P1 compiles bounded top-level Frontmatter intentions into
 complete Markdown and delegates one sealed child plan to the existing P0
 operation runtime.
 
-- `obsidian_frontmatter_patch_plan`: compile source-preserving `set` and
-  `delete` operations, prove the authorized ranges, revalidate source
-  SHA-256/backend binding, and persist no effect.
+- `obsidian_frontmatter_patch_plan`: announce native normalization when needed,
+  compile `set` and `delete` operations, prove authorized ranges against that
+  normalized input, and revalidate source SHA-256/backend binding. A missing
+  creation date may first be prepared by FDM.
 - `obsidian_frontmatter_patch_apply`: apply only the exact sealed child plan
   with the matching public idempotency key.
 - `obsidian_frontmatter_patch_status`: read/reconcile the projected P0 receipt
@@ -171,9 +179,9 @@ operation runtime.
 - `obsidian_frontmatter_patch_recover`: recover the exact child plan; recovery
   is not undo and accepts no new patch.
 
-Unsupported or ambiguous YAML fails closed. The Markdown body, line endings,
-comments, ordering, quoting, indentation, and all non-target source ranges
-remain byte-identical. See [the P1 contract](governed-frontmatter-p1.md).
+Unsupported or ambiguous YAML fails closed. After any announced normalization,
+the Markdown body and non-target source ranges remain byte-identical. Type
+issues are warnings. See [the P1 contract](governed-frontmatter-p1.md).
 
 ### Governed Base formula P2
 

@@ -37,7 +37,7 @@ export async function registerBasesListTool(
 
   await ErrorHandler.tryCatch(
     async () => {
-      logger.info(`Enregistrement du tool ${TOOL_NAME}`, registrationContext);
+      logger.debug(`Enregistrement du tool ${TOOL_NAME}`, registrationContext);
       server.registerTool(
         TOOL_NAME,
         {
@@ -71,7 +71,7 @@ export async function registerBasesListTool(
         },
       );
 
-      logger.info(
+      logger.debug(
         `Tool ${TOOL_NAME} enregistré avec succès`,
         registrationContext,
       );

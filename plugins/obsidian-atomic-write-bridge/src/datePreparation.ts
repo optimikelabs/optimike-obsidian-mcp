@@ -2,12 +2,28 @@ import { dateManagementScope } from "./dateManagementScope.js";
 import { isDeepStrictEqual } from "node:util";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
 import { sha256, HashConflictError } from "./contract.js";
+import type { EffectFenceToken } from "./effectFence.js";
 
 export const DATE_PREPARATION_MESSAGE =
   "Note datée par le gestionnaire de dates avant le plan.";
 export const MISSING_CREATION_MESSAGE =
   "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.";
+export class DatePreparationError extends Error {}
+/** Refused before the effect point: FDM still owes this note a pass. */
+export class DatePreparationDeferred extends Error {}
 const POLL_MS = 100;
+/** FDM 1.6.0 per-path work queues (new-file window, debounce/retry, manual, running pass). */
+const FDM_PENDING_QUEUES = ["recentlyCreated", "newFileTimers", "newFileModified", "modifyTimers", "manualPending", "processingFiles"];
+
+/** True while FDM itself will still date or rewrite this note. Unknown builds
+ * expose none of these queues and keep the previous behaviour. */
+export function fdmHasPendingWork(plugin: any, path: string): boolean {
+  if (plugin?.bulkRunning === true) return true;
+  return FDM_PENDING_QUEUES.some((name) => {
+    const queue = plugin?.[name];
+    return (queue instanceof Map || queue instanceof Set) && queue.has(path);
+  });
+}
 const STABLE_MS = 1_000;
 const COMMAND_SETTLEMENT_BUDGET_MS = STABLE_MS + 2 * POLL_MS;
 const COMMAND = "frontmatter-date-manager:update-timestamps-current-file";
@@ -18,6 +34,8 @@ export function createDatePreparation(
   parse: (yaml: string) => any,
   options: {
     enabled: () => boolean;
+    /** Effect fence admission; throws when the attempt must produce no effect. */
+    enterEffect?: (fence: EffectFenceToken | undefined) => () => void;
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
     timeoutMs?: number;
@@ -35,7 +53,7 @@ export function createDatePreparation(
     const delimiter = /^---(?:\r?\n|$)/gm;
     delimiter.lastIndex = opening[0].length;
     const closing = delimiter.exec(content);
-    if (!closing) throw Error(MISSING_CREATION_MESSAGE);
+    if (!closing) throw new DatePreparationError(MISSING_CREATION_MESSAGE);
     // Normalize only the YAML input. The body remains byte-for-byte as read.
     const properties = parse(
       content.slice(opening[0].length, closing.index).replace(/\r\n/g, "\n"),
@@ -45,27 +63,28 @@ export function createDatePreparation(
       typeof properties !== "object" ||
       Array.isArray(properties)
     )
-      throw Error(MISSING_CREATION_MESSAGE);
+      throw new DatePreparationError(MISSING_CREATION_MESSAGE);
     return {
       properties,
       body: content.slice(closing.index + closing[0].length),
     };
   }
-  const prepare = (request: { path: string; expectedSha256: string }) => {
+  const prepare = (request: { path: string; expectedSha256: string; fence?: EffectFenceToken }) => {
     // Queueing and native I/O consume this request's budget too.
     const deadline = now() + (options.timeoutMs ?? 55_000);
     const run = async () => {
       const fail = () => {
-        throw Error(MISSING_CREATION_MESSAGE);
+        throw new DatePreparationError(MISSING_CREATION_MESSAGE);
       };
-      if (disposed || !options.enabled() || now() >= deadline) return fail();
+      if (disposed || !options.enabled()) return fail();
+      if (now() >= deadline) throw new DatePreparationDeferred();
       const scope = await dateManagementScope(app, request.path);
-      if (now() >= deadline) return fail();
+      if (now() >= deadline) throw new DatePreparationDeferred();
       if (!scope.managed) {
         const content = await app.vault.read(
           app.vault.getAbstractFileByPath(request.path),
         );
-        if (now() >= deadline) return fail();
+        if (now() >= deadline) throw new DatePreparationDeferred();
         if (sha256(content) !== request.expectedSha256)
           throw new HashConflictError(sha256(content));
         return {
@@ -94,7 +113,7 @@ export function createDatePreparation(
       const file = app.vault.getAbstractFileByPath(request.path);
       if (!file || file.extension !== "md") return fail();
       const original = await app.vault.read(file);
-      if (now() >= deadline) return fail();
+      if (now() >= deadline) throw new DatePreparationDeferred();
       if (sha256(original) !== request.expectedSha256)
         throw new HashConflictError(sha256(original));
       const before = envelope(original);
@@ -121,9 +140,29 @@ export function createDatePreparation(
             ([key]) => !dateKeys.has(key.toLowerCase()),
           ),
         );
-      if (deadline - now() < COMMAND_SETTLEMENT_BUDGET_MS) return fail();
+      // A note still in FDM's new-file window (or with a pending debounce, retry
+      // or running pass) would be dated twice: by this command and by FDM's own
+      // deferred pass, after this preparation has already returned. Wait, before
+      // any effect, until FDM has nothing pending for this path.
+      if (fdmHasPendingWork(plugin, file.path)) {
+        while (fdmHasPendingWork(plugin, file.path)) {
+          if (disposed || !options.enabled() || deadline - now() < COMMAND_SETTLEMENT_BUDGET_MS + POLL_MS)
+            throw new DatePreparationDeferred();
+          await sleep(POLL_MS);
+        }
+        const settled = await app.vault.read(file);
+        if (sha256(settled) !== request.expectedSha256)
+          throw new HashConflictError(sha256(settled));
+      }
+      if (deadline - now() < COMMAND_SETTLEMENT_BUDGET_MS) throw new DatePreparationDeferred();
+      // Effect point: opening the temporary leaf can already let plugins act on
+      // the note. Admission is synchronous with the first workspace change and
+      // settles only after the leaf is released and the observation ended.
+      const settleEffect = options.enterEffect?.(request.fence) ?? (() => undefined);
       const previous = app.workspace.activeLeaf;
-      const leaf = app.workspace.getLeaf("tab");
+      let leaf: any;
+      try { leaf = app.workspace.getLeaf("tab"); }
+      catch (error) { settleEffect(); throw error; }
       let leafReleased = false;
       const releaseLeaf = () => {
         if (leafReleased) return;
@@ -211,6 +250,7 @@ export function createDatePreparation(
       } finally {
         // Never steal focus back from a user who moved to another note.
         releaseLeaf();
+        settleEffect();
       }
     };
     const result = tail.then(run);

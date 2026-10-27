@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { McpServer } from "@modelcontextprotocol/server";
 import {
   freePort,

@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
   GOVERNED_PLAN_TOOL_ANNOTATIONS,

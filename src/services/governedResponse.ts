@@ -1,13 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
-import { z } from "zod";
+import { z } from "zod/v3";
 
 export const GovernedResponseFields = {
   responseMode: z
     .enum(["compact", "detailed"])
     .optional()
     .describe(
-      "Default detailed for compatibility. compact preserves state, postflight/checkAfter, permissions and proof digests; retrieve full evidence with the matching status tool and responseMode=detailed.",
+      "Default compact. compact preserves state, postflight/checkAfter, permissions and proof digests; retrieve full evidence with the matching status tool and responseMode=detailed.",
     ),
   diagnostics: z
     .boolean()
@@ -56,6 +56,7 @@ function compactReceipt(value: unknown, toolName: string): unknown {
     "target",
     "postflight",
     "datePreparation",
+    "frontmatterFormat",
     "applyAllowed",
     "recoveryAllowed",
     "recoveryRef",
@@ -93,7 +94,7 @@ export async function governedResponse(
     ? await timings.run(phases, work)
     : await work();
   const result =
-    options.responseMode === "compact"
+    options.responseMode !== "detailed"
       ? compactReceipt(value, toolName)
       : value;
   if (!options.diagnostics || !result || typeof result !== "object")

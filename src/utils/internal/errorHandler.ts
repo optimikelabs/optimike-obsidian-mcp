@@ -9,6 +9,9 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { generateUUID, sanitizeInputForLogging } from "../index.js"; // Import from main barrel file
 import { logger } from "./logger.js";
 import {
+  NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
+} from "../../services/noteNameRules.js";
+import {
   activeRequestCorrelationId,
   RequestContext,
 } from "./requestContext.js"; // Import RequestContext
@@ -209,6 +212,10 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "planRef",
   "recoveryRef",
   "reasonCode",
+  // Note-name refusal (shared rule): closed hint and a validated suggestion.
+  "hint",
+  "suggestedPath",
+  "suggestedName",
   "retryable",
   "recoveryAllowed",
   "applyAllowed",
@@ -219,12 +226,185 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "outcome",
 ]);
 
-const SAFE_PUBLIC_REASON_CODES = new Set([
+const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"]);
+
+const SAFE_PUBLIC_REASON_CODES = new Set<string>([
+  ...NOTE_NAME_REASON_CODES,
+  "atomic_bridge_version_unsupported",
+  "frontmatter_native_render_invalid",
+  "frontmatter_normalization_proof_mismatch",
+  "text_patch_normalization_proof_mismatch",
+  "note_source_proof_invalid",
+  "frontmatter_envelope_invalid",
+  "invalid_frontmatter",
+  "ambiguous_base_view",
+  "ambiguous_delete_comment",
+  "ambiguous_trailing_comment",
+  "asset_bytes_invalid",
+  "asset_conversion_unverified",
+  "asset_destination_exists",
+  "asset_idempotency_conflict",
+  "asset_plan_busy",
+  "asset_plan_invalid",
+  "asset_plan_not_found",
+  "asset_policy_invalid",
+  "asset_projection_invalid",
+  "asset_proof_invalid",
+  "asset_proof_mismatch",
+  "asset_source_changed",
+  "asset_source_policy_changed",
+  "atomic_write_status_not_sealed",
+  "backend_binding_changed",
+  "base_changed_during_selection",
+  "base_formula_expression_size",
+  "base_formula_layout_unsupported",
+  "base_formula_name_unsupported",
+  "base_formula_not_found",
+  "base_formula_operation_count",
+  "base_formula_plan_not_found",
+  "base_formula_projection_conflict",
+  "base_formulas_mapping_ambiguous",
+  "base_last_formula_delete_unsupported",
+  "base_mixed_line_endings",
+  "base_or_selection_changed",
+  "base_yaml_extension_unsupported",
+  "base_yaml_invalid",
+  "base_yaml_reference_unsupported",
+  "base_yaml_root_not_mapping",
+  "body_drift",
+  "canvas_compiled_content_too_large",
+  "canvas_edge_changed_before_incident_removal",
+  "canvas_edge_exists",
+  "canvas_edge_missing",
+  "canvas_edge_node_missing",
+  "canvas_edge_reuse_after_incident_removal",
+  "canvas_edges_required",
+  "canvas_edges_syntax",
+  "canvas_entity_id",
+  "canvas_entity_projection_mismatch",
+  "canvas_geometry_invalid",
+  "canvas_graph_invalid_after",
+  "canvas_graph_invalid_before",
+  "canvas_json_invalid",
+  "canvas_node_exists",
+  "canvas_node_missing",
+  "canvas_node_not_text",
+  "canvas_object_required",
+  "canvas_operation_id",
+  "canvas_patch_duplicate_target",
+  "canvas_patch_size",
+  "canvas_path_invalid",
+  "canvas_plan_not_found",
+  "canvas_projection_conflict",
+  "canvas_projection_invalid",
+  "canvas_projection_mismatch",
+  "canvas_root_projection_mismatch",
+  "canvas_source_too_large",
+  "compiled_base_formula_postcondition",
+  "compiled_base_formulas_invalid",
+  "create_domain_mismatch",
+  "create_execution_timestamp_missing",
+  "create_idempotency_conflict",
+  "create_key_mismatch",
+  "create_markdown_invalid",
+  "create_observation_invalid",
+  "create_plan_unavailable",
+  "create_preflight_identity_mismatch",
+  "create_result_identity_mismatch",
+  "create_seal_mismatch",
+  "date_preparation_failed",
+  "duplicate_base_formula",
+  "duplicate_base_formula_operation",
+  "duplicate_frontmatter_key",
+  "duplicate_patch_target",
+  "empty_patch",
+  "frontmatter_idempotency_conflict",
+  "frontmatter_key_missing",
+  "frontmatter_missing",
+  "frontmatter_not_mapping",
+  "frontmatter_number_non_finite",
+  "frontmatter_projection_missing_or_invalid",
+  "frontmatter_unclosed",
+  "frontmatter_value_too_deep",
+  "frontmatter_value_too_large",
+  "frontmatter_yaml_invalid",
+  "incomplete_or_unsupported_selection",
+  "invalid_base_path",
+  "invalid_base_snapshot",
+  "invalid_base_yaml",
+  "invalid_create_key",
+  "invalid_create_reference",
+  "invalid_native_move_key",
+  "invalid_row_key",
+  "markdown_validation_failed",
+  "native_move_domain_mismatch",
+  "native_move_key_intent_conflict",
+  "native_move_key_mismatch",
+  "native_move_observation_identity_mismatch",
+  "native_move_observation_invalid",
+  "native_move_preflight_invalid",
+  "native_move_reference_invalid",
+  "native_move_reference_unavailable",
+  "native_move_seal_mismatch",
+  "native_move_target_mismatch",
+  "note_create_disabled",
+  "note_create_failed",
+  "note_create_request_invalid",
+  "note_create_target_exists",
+  "note_replace_plan_not_found",
+  "overlapping_patch_ranges",
+  "query_base_snapshot_mismatch",
+  "read_failed",
+  "request_rejected",
+  "reserved_projection_idempotency_namespace",
+  "resource_changed",
+  "resource_not_found",
+  "row_identity_mismatch",
+  "row_not_uniquely_selected",
+  "row_projection_invalid",
+  "row_reference_domain_mismatch",
+  "row_reference_invalid",
+  "row_virtual_property",
+  "target_block_scalar_unsupported",
+  "target_multiline_quoted_scalar_unsupported",
+  "text_patch_composition_invalid",
+  "text_patch_idempotency_conflict",
+  "text_patch_idempotency_key_invalid",
+  "text_patch_operation_invalid",
+  "text_patch_operation_unsupported",
+  "text_patch_path_invalid",
+  "text_patch_plan_reference_invalid",
+  "text_patch_plan_reference_malformed",
+  "text_patch_projection_missing_or_invalid",
+  "text_patch_total_too_large",
+  "text_patch_value_invalid",
+  "text_patch_value_too_large",
+  "too_many_patch_operations",
+  "unsupported_date_property_configuration",
+  "unsupported_frontmatter_key",
+  "unsupported_frontmatter_value",
+  "unsupported_top_level_yaml",
+  "unsupported_yaml_layout",
+  "write_failed",
+  "write_not_authorized",
+  "yaml_alias_unsupported",
+  "yaml_anchor_unsupported",
+  "yaml_merge_key_unsupported",
+  "yaml_multi_document_unsupported",
+  "yaml_tag_unsupported",
+
   "semantic_index_unavailable",
   "semantic_embedder_configuration_invalid",
   "semantic_query_embedding_failed",
   "semantic_query_vector_invalid",
   "atomic_write_creation_property_missing",
+  "date_preparation_unverified",
+  "date_preparation_fdm_pending",
+  "date_preparation_not_started",
+  "effect_attempt_limit_reached",
+  "frontmatter_format_capability_missing",
+  "frontmatter_format_changed",
+  "frontmatter_empty_mapping_date_management",
   "REVISION_CONFLICT",
   "OPERON_BRIDGE_REQUEST_INVALID",
   "OPERON_BRIDGE_UNAUTHORIZED",
@@ -363,6 +543,9 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   }
   if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
+  if (field === "hint") return isNoteNameHint(value);
+  // A suggestion is only released if it satisfies the shared name rule itself.
+  if (CALLER_DERIVED_PUBLIC_FIELDS.has(field)) return checkNoteName(value, { extensions: null }).ok;
   if (field === "operationId") {
     return UUID.test(value) || OPERON_FALLBACK_OPERATION_ID.test(value);
   }
@@ -414,7 +597,8 @@ function safeDiagnosticFields(
     // into a new source of failure or data disclosure.
     let value: unknown;
     try {
-      const descriptor = Object.getOwnPropertyDescriptor(source, field);
+      const descriptor = Object.getOwnPropertyDescriptor(source, field) ??
+        (field === "reasonCode" ? Object.getOwnPropertyDescriptor(source, "reason") : undefined);
       if (!descriptor || !("value" in descriptor)) continue;
       value = descriptor.value;
     } catch {
@@ -424,6 +608,7 @@ function safeDiagnosticFields(
     if (
       typeof value === "string" &&
       callerStrings &&
+      !CALLER_DERIVED_PUBLIC_FIELDS.has(field) &&
       isCallerDerivedString(value, callerStrings)
     ) {
       continue;
@@ -434,8 +619,22 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
-  if (code === BaseErrorCode.FORBIDDEN && reasonCode === "atomic_write_creation_property_missing")
-    return "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.";
+  if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_frontmatter")
+    return "Le frontmatter doit être une table YAML valide sans clés dupliquées.";
+  if (reasonCode === "date_preparation_unverified")
+    return "La préparation des dates a pu modifier ou normaliser la note. Utilisez obsidian_operation_close avec datePreparationPaths pour une revue administrative avant reprise.";
+  if (reasonCode === "date_preparation_fdm_pending")
+    return "Le gestionnaire de dates ou une autre préparation occupe encore la file ; rien n'a été modifié par cette préparation. Relancez le plan dans une trentaine de secondes.";
+  if (reasonCode === "date_preparation_not_started")
+    return "La préparation des dates n'a pas démarré ; rien n'a été modifié par cette préparation. Relisez la note puis relancez le plan.";
+  if (reasonCode === "effect_attempt_limit_reached")
+    return "La limite de tentatives de cette opération est atteinte. Consultez son statut avant toute nouvelle action ; ne rejouez pas un effet incertain.";
+  if (reasonCode === "atomic_bridge_version_unsupported")
+    return "Les versions du Bridge et du MCP sont incompatibles. Alignez la paire sur le Bridge requis avant de réessayer.";
+  if (reasonCode === "atomic_write_creation_property_missing")
+    return "La date de création est absente ou sa préparation indisponible. Demandez au propriétaire du coffre de la faire ajouter par le gestionnaire de dates, puis relancez le plan.";
+  if (code === BaseErrorCode.VALIDATION_ERROR && isNoteNameReasonCode(reasonCode))
+    return "The note path is not a valid name on every platform and in Obsidian. See hint and suggestedPath.";
   switch (code) {
     case BaseErrorCode.UNAUTHORIZED:
       return "Authentication is required for this request.";
@@ -810,7 +1009,12 @@ export class ErrorHandler {
       ),
     };
 
-    logPayload.errorDetails = finalError.details;
+    // Caller-derived suggestions go to the caller only, never to the log sink.
+    logPayload.errorDetails = Object.fromEntries(
+      Object.entries(finalError.details ?? {}).filter(
+        ([key]) => !CALLER_DERIVED_PUBLIC_FIELDS.has(key),
+      ),
+    );
 
     if (includeStack) logPayload.stackAvailable = true;
 

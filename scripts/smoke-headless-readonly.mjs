@@ -610,6 +610,25 @@ async function main() {
     assertTextIncludes(markdownValidation, '"ok": true', "markdown validation");
     assertTextIncludes(markdownValidation, "wikilinks", "markdown validation");
 
+    const nameValidation = await withTimeout(
+      client.callTool({
+        name: "obsidian_validate_format",
+        arguments: { kind: "note_name", filePath: "Projets/Réunion: suite #2.md" },
+      }),
+      "note name validation",
+    );
+    assertTextIncludes(nameValidation, '"ok": false', "note name validation");
+    assertTextIncludes(nameValidation, "note_name_forbidden_character", "note name validation");
+    assertTextIncludes(nameValidation, "Projets/Réunion — suite 2.md", "note name validation");
+    const goodName = await withTimeout(
+      client.callTool({
+        name: "obsidian_validate_format",
+        arguments: { kind: "note_name", filePath: "Projets/Réunion — suite (2).md" },
+      }),
+      "note name validation (valid)",
+    );
+    assertTextIncludes(goodName, '"ok": true', "note name validation (valid)");
+
     const canvasValidation = await withTimeout(
       client.callTool({
         name: "obsidian_validate_format",

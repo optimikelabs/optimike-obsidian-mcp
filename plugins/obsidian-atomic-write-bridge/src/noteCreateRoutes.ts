@@ -1,9 +1,11 @@
 import { realpathSync } from "node:fs";
 import type { App } from "obsidian";
 import { nativeNotePath } from "../../../src/services/nativeNoteMoveContract.js";
+import { assertNoteName, NoteNameError, noteNameFixedHint } from "../../../src/services/noteNameRules.js";
 import { createPolicyDigest, noteCreateHash, validateNoteCreate, type NoteCreateApply } from "../../../src/services/noteCreateContract.js";
 import { ExclusiveNoteCreateFiles, NoteCreateExists } from "./exclusiveNoteCreate.js";
 import { noteCreateDatePolicy } from "./noteCreatePolicy.js";
+import { EffectFenceRefused, parseEffectFenceToken, type EffectFenceToken } from "./effectFence.js";
 
 const PREFIX = "/extensions/obsidian-atomic-write-bridge/note-create";
 const HASH = /^[a-f0-9]{64}$/u;
@@ -13,15 +15,21 @@ function body(value: unknown, expected: string[]): Record<string, unknown> {
   if (Object.keys(result).sort().join("\0") !== expected.sort().join("\0") || result.contractVersion !== 1) throw new Error("invalid_create_request");
   return result;
 }
-export function createNoteCreateRoutes(app: App, options: { binding: () => string; enabled: () => boolean }) {
+export function createNoteCreateRoutes(app: App, options: {
+  binding: () => string; enabled: () => boolean;
+  /** Effect fence admission; throws when the attempt must produce no effect. */
+  enterEffect?: (fence: EffectFenceToken | undefined) => () => void;
+}) {
   const root = (app.vault.adapter as { getBasePath?: () => string }).getBasePath?.();
   if (!root) return undefined;
   const files = new ExclusiveNoteCreateFiles(root);
   const bindingFingerprint = noteCreateHash(options.binding() + "\0exclusive-note-create\0" + realpathSync(root));
   function preflight(path: string) {
-    nativeNotePath(path);
+    // A creation is a NEW name: shared cross-platform rule (status/inspect stay lenient for legacy names).
+    assertNoteName(path);
     if (!options.enabled()) throw new Error("note_creates_disabled");
     const policy = noteCreateDatePolicy(app), policyDigest = createPolicyDigest(policy);
+    if (files.hasFoldedSibling(path)) throw new NoteNameError({ reasonCode: "note_name_case_collision", hint: noteNameFixedHint("note_name_case_collision") });
     if (app.vault.getAbstractFileByPath(path) || files.inspect(path).exists) throw new NoteCreateExists();
     return { contractVersion: 1 as const, path, bindingFingerprint, absent: true as const, enabled: true as const, policy, policyDigest };
   }
@@ -31,42 +39,61 @@ export function createNoteCreateRoutes(app: App, options: { binding: () => strin
     // settings may change or become unsupported after the sealed apply.
     return { contractVersion: 1, path, bindingFingerprint, ...files.inspect(path) };
   }
-  function apply(request: NoteCreateApply) {
+  function apply(request: NoteCreateApply & { fence?: EffectFenceToken }) {
     const common = { contractVersion: 1, operationId: request.operationId, path: request.path,
       bindingFingerprint: request.bindingFingerprint, policyDigest: request.policyDigest, contentSha256: request.contentSha256 };
     let dispatched = false;
+    let settleEffect: (() => void) | undefined;
     try {
       const current = preflight(request.path);
       validateNoteCreate(request.path, request.content, current.policy);
       if (current.bindingFingerprint !== request.bindingFingerprint || current.policyDigest !== request.policyDigest ||
           noteCreateHash(request.content) !== request.contentSha256) throw new Error("create_precondition_changed");
       // This is the only effect point. O_EXCL, not a read-then-overwriting REST PUT, fences collisions.
+      // The fence decides in the same synchronous block as the exclusive create.
+      settleEffect = options.enterEffect?.(request.fence);
       dispatched = true;
       const result = files.create(request.path, request.content);
       return { ...common, outcome: "created", reason: "exclusive_create_fsynced", contentSha256: result.sha256 };
     } catch (error) {
+      if (!dispatched && error instanceof EffectFenceRefused) return { ...common, outcome: "conflict", reason: "create_fence_refused" };
       return { ...common, outcome: !dispatched || error instanceof NoteCreateExists ? "conflict" : "outcome_unknown",
         reason: !dispatched || error instanceof NoteCreateExists ? "create_precondition_failed" : "create_effect_uncertain" };
+    } finally {
+      settleEffect?.();
     }
   }
   function mount(api: { addRoute: (route: string) => { post: (handler: (req: any, res: any) => void) => unknown } }) {
     const install = (suffix: string, handler: (value: unknown) => unknown) => api.addRoute(PREFIX + suffix).post((req, res) => {
       try { res.status(200).json(handler(req?.body)); }
-      catch { res.status(400).json({ ok: false, contractVersion: 1, retryable: false,
-        error: { code: "note_create_rejected", reasonCode: "request_or_precondition_rejected", message: "The note creation request could not be admitted or observed." } }); }
+      catch (error) {
+        const known = error instanceof Error ? error.message : "";
+        const reasonCode = error instanceof NoteNameError ? error.violation.reasonCode
+          : error instanceof NoteCreateExists ? "note_create_target_exists"
+          : known === "note_creates_disabled" ? "note_create_disabled"
+          : (known === "invalid_create_request" || known === "invalid_note_path") ? "note_create_request_invalid" : "note_create_failed";
+        const status = error instanceof NoteNameError ? 400 : reasonCode === "note_create_target_exists" ? 409 : reasonCode === "note_create_disabled" ? 403 : reasonCode === "note_create_request_invalid" ? 400 : 500;
+        res.status(status).json({ ok: false, contractVersion: 1, retryable: false,
+          error: { code: "note_create_rejected", reasonCode, message: "The note creation request could not be admitted or observed." } });
+      }
     });
     install("/preflight", value => { const r = body(value, ["contractVersion", "path"]); return preflight(nativeNotePath(r.path)); });
     install("/inspect", value => { const r = body(value, ["contractVersion", "path"]); return inspect(nativeNotePath(r.path)); });
     install("/apply", value => {
-      const r = body(value, ["contractVersion", "operationId", "path", "content", "contentSha256", "bindingFingerprint", "policyDigest"]);
+      const keys = ["contractVersion", "operationId", "path", "content", "contentSha256", "bindingFingerprint", "policyDigest"];
+      const fenced = !!value && typeof value === "object" && (value as Record<string, unknown>).fence !== undefined;
+      const r = body(value, fenced ? [...keys, "fence"] : keys);
+      if (fenced) {
+        try { r.fence = parseEffectFenceToken(r.fence); } catch { throw new Error("invalid_create_request"); }
+      }
       if (typeof r.operationId !== "string" || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u.test(r.operationId) ||
           typeof r.content !== "string" || [r.contentSha256, r.bindingFingerprint, r.policyDigest].some(h => typeof h !== "string" || !HASH.test(h))) {
         throw new Error("invalid_create_request");
       }
       nativeNotePath(r.path);
-      return apply(r as unknown as NoteCreateApply);
+      return apply(r as unknown as NoteCreateApply & { fence?: EffectFenceToken });
     });
   }
-  return { mount, capabilities: () => ({ supported: true, enabled: options.enabled(), exclusiveCreate: true,
+  return { mount, capabilities: () => ({ supported: true, enabled: options.enabled(), exclusiveCreate: true, bindingFingerprint,
     indexing: "eventual_vault_watcher", automaticDatePolicy: "qualified_fields_only" }) };
 }

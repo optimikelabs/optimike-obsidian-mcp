@@ -2,11 +2,22 @@
 
 ## Public contract
 
+When automatic dates are active, an empty YAML mapping (`{}`) is refused before
+creation with `frontmatter_empty_mapping_date_management`: the date manager
+would remove the mapping marker, which cannot be justified by date-line-only
+settlement. Supply a nonempty canonical mapping or omit the frontmatter.
+
 `obsidian_note_create_plan`, `obsidian_note_create_apply`, `obsidian_note_create_status` are a live-only three-tool family. The existing process-owned SQLite journal is reused; there is no second durable runtime and no synthetic recover endpoint. Planning stores an exact private content snapshot and an observed-absence proof. Apply requires the sealed target/backend/date-policy identity and independent `allowNoteCreates` Bridge grant (false by default). Guarded/full MCP write policy permits explicit bounded content; readonly rejects new plans/effects.
 
 The Bridge uses a local filesystem exclusive create (`O_CREAT | O_EXCL`) followed by file data fsync. Existing files are never overwritten. The parent directory must exist. Hidden/configuration paths, traversal, device paths, symlinks/junctions and hardlink leaves are refused by pre/post checks. A source file is not published under an automatic suffix. This is not a rename, general file writer, or transaction across notes.
 
+Create planning requires the identity-bound native format capability. If caller-provided YAML is not already in Obsidian's canonical form, planning refuses with `frontmatter_not_obsidian_canonical` and an `expectedFrontmatter` field containing the canonical form of that caller-provided frontmatter. The caller can resend it. It contains no note body or parser diagnostic. Property type discrepancies and undeclared types are warnings only. The capability and canonical form are checked again before apply.
+
 A process/OS failure can leave a partial newly created file. Status never repairs, overwrites or deletes it, and apply never redispatches an already admitted uncertain attempt. Directory fsync/power-loss durability and races with hostile processes replacing ancestor directories are not certified. The local vault and host filesystem remain a trusted boundary; do not expose creation against an adversarial shared mount. Windows/Linux filesystem tests do not establish correctness for network or cloud-mounted vaults.
+
+## Name of the new note
+
+The path is a new name: it must satisfy the shared [note name rules](note-name-rules.md) (valid on Windows, macOS, mobile and in Obsidian links; Unicode NFC; no `# ^ [ ] : * ? " < > | \`, no invisible characters, no Windows reserved names, bounded length). The plan refuses before any Bridge call with `VALIDATION_ERROR`, a closed `note_name_*` `reasonCode`, a fixed `hint` and a `suggestedPath` the caller may resubmit; nothing is renamed or created automatically. A sibling that differs only by letter case or Unicode form is refused too: by the MCP from the directory listing, and again by the Bridge on the real directory at preflight and apply.
 
 ## Receipts and ambiguity
 
@@ -15,6 +26,10 @@ A process/OS failure can leave a partial newly created file. Status never repair
 A content-free effect proof is persisted before terminal payload zeroization. Later status compares current bytes with that proof; drift does not revoke the historical committed receipt but makes the current postflight unverified. The existing journal's retention window applies; indefinite idempotency after journal purging is not promised.
 
 If the file exists but its observed content matches neither the sealed bytes nor qualified automatic date effects after the settlement delay, status transitions an `applying` attempt to `terminal / outcome_unknown` with `postflight: unverified`. Apply and recovery remain disallowed; status may later reconcile a qualified observation without redispatching creation.
+
+Each dispatch records an effect-fence token first. An `outcome_unknown` creation that no observation can settle is closed, after owner review, with `obsidian_operation_close` as `reviewed_unverified` (never a second creation); see [Administrative closure](administrative-closure.md).
+
+Receipts indicate `nextAction: none` for stable terminal outcomes. `outcome_unknown` continues to suggest `status`: a later qualified observation can still change that outcome, without a new creation. An optional status on a committed receipt can refresh the current postflight without changing the historical outcome.
 
 ## Automatic fields
 

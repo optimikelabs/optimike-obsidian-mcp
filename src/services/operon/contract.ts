@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 export const OPERON_CONTRACT_VERSION = "1" as const;
 export const OPERON_SNAPSHOT_SCHEMA_VERSION = 2;

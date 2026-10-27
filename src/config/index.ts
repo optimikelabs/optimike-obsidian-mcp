@@ -5,7 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { parseVaultExcludePatterns } from "../services/vaultExclusions.js";
 
 dotenv.config();
@@ -80,6 +80,22 @@ const EnvSchema = z
     MCP_SERVER_NAME: z.string().optional(),
     MCP_SERVER_VERSION: z.string().optional(),
     MCP_LOG_LEVEL: z.string().default("info"),
+    // Rotation applies to each log family (combined plus one file per level).
+    MCP_LOG_MAX_FILE_SIZE_MB: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1024)
+      .default(8),
+    MCP_LOG_MAX_FILES: z.coerce.number().int().min(1).max(200).default(10),
+    // Identical events of one request inside this window collapse into one
+    // line carrying `suppressedRepeats`; 0 disables the collapse.
+    MCP_LOG_DEDUPE_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(3_600_000)
+      .default(300_000),
     LOGS_DIR: z.string().default(path.join(projectRoot, "logs")),
     NODE_ENV: z.string().default("development"),
     MCP_TRANSPORT_TYPE: z.enum(["stdio", "http"]).default("stdio"),
@@ -194,6 +210,7 @@ const EnvSchema = z
       .min(1_000)
       .max(300_000)
       .default(30_000),
+    MCP_OBSIDIAN_PLANNED_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
     MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID: z
       .string()
       .regex(
@@ -482,6 +499,9 @@ export const config = {
   mcpServerVersion: env.MCP_SERVER_VERSION || pkg.version,
   logLevel: env.MCP_LOG_LEVEL,
   logsPath: validatedLogsPath,
+  logMaxFileSizeBytes: env.MCP_LOG_MAX_FILE_SIZE_MB * 1024 * 1024,
+  logMaxFiles: env.MCP_LOG_MAX_FILES,
+  logDedupeWindowMs: env.MCP_LOG_DEDUPE_WINDOW_MS,
   environment: env.NODE_ENV,
   mcpTransportType: env.MCP_TRANSPORT_TYPE,
   mcpHttpPort: env.MCP_HTTP_PORT,
@@ -552,6 +572,7 @@ export const config = {
     ),
   obsidianNoteReplaceExecutionLeaseMs:
     env.MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS,
+  obsidianPlannedRetentionMs: env.MCP_OBSIDIAN_PLANNED_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   obsidianBaseFormulaJournalPath:
     env.MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH ||
     path.join(

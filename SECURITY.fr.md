@@ -67,6 +67,13 @@ move local est définie dans
 
 ## Contrat P0 de confidentialité des erreurs et des logs
 
+Exception explicite pour les plans de création et de remplacement complet :
+en cas de `frontmatter_not_obsidian_canonical`, `expectedFrontmatter` contient
+la forme canonique du seul frontmatter fourni dans cette même requête. Il ne
+contient ni corps de note, ni contenu lu du coffre, ni diagnostic du parseur,
+ni chemin. Les données de l’appelant restent interdites dans les logs ; les
+autres erreurs gardent l’enveloppe fermée ci-dessous.
+
 La frontière P0 est appliquée aux sinks MCP d’erreur et de journalisation
 partagés :
 
@@ -91,12 +98,27 @@ partagés :
   corrélation sont fingerprintées par HMAC avec un secret généré pour le
   processus courant ; les fingerprints changent au redémarrage et ne sont pas
   réversibles comme un hash dictionnaire simple.
+- Les champs de log destinés à l’exploitation sont des vocabulaires fermés ou
+  des identifiants bornés : `toolName` enregistré, `operation` et `module`
+  définis par le code et de forme identifiant, `routeClass` de Local REST API,
+  et `errorClass` lue dans le code système ou le statut HTTP d’un échec, jamais
+  dans son message. Tout ce qui sort de ces vocabulaires reste fingerprinté par
+  HMAC comme avant.
 - Les diagnostics de recovery sont volontairement étroits : seuls des IDs,
   digests, références et codes fermés de raison/phase/outcome validés par
   schéma peuvent être retournés. Les erreurs d’items batch peuvent conserver
   leur ordinal et l’exact chemin relatif au coffre déjà validé et fourni par le
   caller. Un chemin issu d’un Bridge/backend non fiable, un chemin absolu et le
   texte d’erreur backend ne franchissent jamais cette frontière.
+- Un refus de nom de note (codes `note_name_*`, voir les
+  [règles de nom de note](docs/note-name-rules.fr.md)) renvoie en plus un `hint`
+  limité à un vocabulaire fermé de phrases fixes (avec éventuellement un numéro de
+  segment et un point de code) et, quand une correction sûre existe,
+  `suggestedPath` / `suggestedName`. Une proposition est dérivée du chemin de
+  l’appelant, n’est rendue que si elle respecte la même règle de nom et n’est
+  jamais écrite dans les journaux. C’est une exception explicite et bornée à la
+  règle selon laquelle aucune chaîne dérivée de l’appelant ne traverse
+  l’enveloppe publique.
 - `@modelcontextprotocol/sdk` est épinglé exactement à `1.30.0` : le hook privé
   `createToolError` n’est que le fallback ultime pour la validation SDK et les
   outils inconnus. La CI échoue en cas de dérive de dépendance jusqu’à ce que le
@@ -112,9 +134,9 @@ que les corps de requête et les suffixes de route restent exclus.
 Le cockpit read-only `obsidian_list_pending_operations` est une projection
 publique volontairement fermée pour reprendre un travail gouverné. Chaque ligne
 retournée contient uniquement `operationKind`, le `planRef` métier, `state`,
-`admittedAt`, `updatedAt`, `ageSeconds` borné et `nextAction` fermé (`apply`,
-`status` ou `recover`). Le curseur opaque ne contient que la dernière clé
-publique de tri.
+`admittedAt`, `updatedAt`, `ageSeconds` borné, `nextAction` fermé (`apply`,
+`status` ou `recover`) et le booléen `closeAllowed`. Le curseur opaque ne
+contient que la dernière clé publique de tri.
 
 Le cockpit ne retourne ni ne journalise de chemins du coffre ou des journaux,
 clés d’idempotence ou autres clés secrètes, noms de cibles, contenu de Note ou
@@ -129,6 +151,19 @@ Le contrat est exercé par `npm run test:log-privacy` (fixture des items batch
 incluse) sur Linux et Windows dans la CI. Le job CI `bridge-privacy` exécute
 aussi les contrôles de confidentialité des Bridges Bases, Operon et Atomic
 Write sur les deux plateformes.
+
+## Clôture administrative et fence au point d'effet
+
+`obsidian_operation_close` n'écrit jamais de note et ne transforme jamais une
+issue incertaine en succès. Il ne clôt que si l'Atomic Write Bridge prouve, à
+son point d'effet, qu'aucune tentative ne peut encore agir ; un Bridge sans
+fence, injoignable, une identité différente ou un effet en cours refusent sans
+rien changer. Les preuves conservées contiennent verdicts, époques, identifiants
+de tentative, version et identité du Bridge et l'empreinte actuelle de la note ;
+jamais de contenu de note, de chemin dans une erreur ni de clé d'idempotence.
+Les jetons de fence ne sont pas des secrets d'accès : l'authentification Local
+REST s'applique toujours. Activer **Exiger un jeton de fence pour toute
+écriture** refuse les écritures des clients MCP qui n'envoient pas de jeton.
 
 ## Frontière reverse proxy
 

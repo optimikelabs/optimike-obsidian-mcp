@@ -2,7 +2,7 @@ import {
   fromJsonSchema,
   type StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 /**

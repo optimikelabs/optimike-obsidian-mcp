@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ExternalRootError } from "../externalRootsService.js";
 import type { ExternalMoveCoordinator } from "../externalReferences/externalMoveCoordinator.js";
 import {

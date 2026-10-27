@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { load } from "js-yaml";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { nativeNotePath } from "./nativeNoteMoveContract.js";
 import type { ObsidianRestApiService } from "./obsidianRestAPI/service.js";
 import { requestContextService } from "../utils/index.js";
@@ -38,7 +38,7 @@ export interface BaseRowSelectionTransport {
   query(baseId: string, view: string): Promise<unknown>;
 }
 function refuse(reason: string): never {
-  throw new McpError(BaseErrorCode.CONFLICT, "The Base row selection is unavailable, ambiguous or changed; replan is required.", { reason });
+  throw new McpError(BaseErrorCode.CONFLICT, "The Base row selection is unavailable, ambiguous or changed; replan is required.", { reasonCode: reason });
 }
 export function baseRowTarget(value: unknown): BaseRowTarget {
   const p = BaseRowTargetSchema.parse(value);

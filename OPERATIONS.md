@@ -467,6 +467,53 @@ authenticated MCP runtime tools for:
 - semantic stats
 - optional SQLite integrity result
 
+### Runtime log files
+
+Logs are JSON lines in `LOGS_DIR` (default `<release>/logs`). The `message` is always `Runtime <level> event.`: the text of a log call is never written, so the readable part of an event is its structured fields.
+
+| File | Content |
+| --- | --- |
+| `combined.log` | every event at the active level; read this one first |
+| `error.log`, `warn.log`, `info.log` | exactly one level each, created at the first event of that level |
+| `debug.log` | only exists when `MCP_LOG_LEVEL=debug`, and holds only debug events |
+
+No file is created empty. Rotated files are `name1.log`, `name2.log`, and so on.
+
+| Variable | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `MCP_LOG_MAX_FILE_SIZE_MB` | `8` | 1–1024 | size at which a log file rotates |
+| `MCP_LOG_MAX_FILES` | `10` | 1–200 | files kept per family (`combined`, `info`, ...) |
+| `MCP_LOG_DEDUPE_WINDOW_MS` | `300000` | 0–3600000 | identical events of one request inside this window collapse into one line; `0` keeps every event |
+
+Retention is a size budget, not an age: the defaults keep 80 MiB per family. The busiest day measured on a production runtime wrote 8.33 MB to `combined.log` (3.6 MB on a quiet day), so the defaults keep at least 8 days of context after allowing 25% for the fields described below, and about two weeks on an average day. Each family is capped separately; the worst case is the cap multiplied by the number of families that exist (`combined` and `info` carry most of the volume).
+
+Fields that make an event readable, all closed vocabularies or bounded identifiers, never content:
+
+| Field | Meaning |
+| --- | --- |
+| `toolName` | registered MCP tool being served; filled from the call in progress when the logging site did not set it |
+| `operation`, `module` | developer-defined identifiers such as `ObsidianAPI_checkStatus`; anything that is not an identifier stays fingerprinted |
+| `routeClass`, `method`, `status` | Local REST API route family (`status`, `vault`, `search`, `commands`, `active`, `open`, `extension`, `other`), HTTP method and status of the upstream call |
+| `errorCode` | public error code (`SERVICE_UNAVAILABLE`, `NOT_FOUND`, ...) |
+| `errorClass` | where the failure happened: `upstream_unreachable`, `upstream_timeout`, `upstream_reset`, `upstream_tls`, `upstream_http_4xx`, `upstream_http_5xx`, `request_setup`, `disk_full`, `filesystem_permission`, `filesystem_missing`, `resource_exhausted`, `database_busy`, `database_error`; read from the failure's system code or HTTP status, never from its message |
+| `event` | closed label for operator events: `live_api_probe_unavailable`, `live_api_probe_recovered`, `log_events_suppressed` |
+| `timestamp`, `requestTimestamp` | `timestamp` is when the line was written; `requestTimestamp` is the older creation time of the request context, when different |
+| `suppressedRepeats`, `repeatWindowMs` | on a `log_events_suppressed` line: how many identical events were collapsed during the window |
+
+A value outside these vocabularies is not dropped silently: it is replaced by `<field>Fingerprint`, a per-process HMAC that can be compared inside one process run but not read or reversed. Paths, note names, bodies, headers, tokens, exception messages and arbitrary context fields never appear.
+
+Reading a failure: find the `requestId` returned in the error, then read its lines in `combined.log`. A refused connection to Local REST API looks like this (synthetic example):
+
+```json
+{"level":"error","message":"Runtime error event.","operation":"ObsidianAPI_checkStatus","toolName":"obsidian_read_note","routeClass":"status","method":"GET","errorClass":"upstream_unreachable","requestId":"<uuid>","timestamp":"<emission time>"}
+```
+
+Repeated events: a long-lived loop that reuses one request context (a probe, a retry) used to write the same event for as long as it ran. Identical events of the same request inside `MCP_LOG_DEDUPE_WINDOW_MS` are now written once, and a later `log_events_suppressed` line carries the count. Events of different requests never collapse, so a request ID in an error always resolves to its own line.
+
+### Backend supervision
+
+Nothing watches the backend after it starts, and a backend spawned by a client or a tunnel stops with it. [`scripts/supervise-backend.ps1`](scripts/supervise-backend.ps1) keeps the shared HTTP backend running on its own; see [Backend supervision](docs/backend-supervision.md).
+
 ### MCP runtime tools
 
 - `obsidian_runtime_status`
@@ -486,6 +533,23 @@ Supported maintenance actions:
 - `refresh_semantic_cache`
 - `refresh_tasks_cache`
 - `refresh_all`
+
+### Closing uncertain operations
+
+1. Install the Bridge and MCP of the same release, restart Obsidian, then the
+   backend.
+2. In Obsidian, Atomic Write Bridge settings, enable **Require a fence token for
+   every write** (refuses writes from older MCP clients) and keep it on for at
+   least 10 minutes.
+3. Dry run: `node scripts/close-pending-operations.mjs --launcher <launch.mjs>`;
+   read the JSON report (`would_close`, refusals and reasons).
+4. After owner approval: same command with `--apply`. Refusals are never
+   retried automatically; `closure_effect_settling` and other retryable reasons
+   can be rerun later.
+5. A `date_preparation_unverified` note is released with
+   `obsidian_operation_close` and `datePreparationPaths`; offline fallback:
+   `scripts/release-date-preparation-lock.mjs` with Obsidian and the backend
+   stopped. See [Administrative closure](docs/administrative-closure.md).
 
 ### Automated local verification
 

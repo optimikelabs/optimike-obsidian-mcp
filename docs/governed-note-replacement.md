@@ -2,6 +2,10 @@
 
 French version: [governed-note-replacement.fr.md](governed-note-replacement.fr.md)
 
+Unsent `planned` records expire after `MCP_OBSIDIAN_PLANNED_RETENTION_DAYS` (default 30, range 0–3650), at journal maintenance on startup or subsequent journal access. Setting it to `0` disables expiry of planned records, including their private content, until explicitly changed; this does not disable terminal receipt or expired lease cleanup. Expiry atomically changes only still-planned rows to terminal `expired`, clears their private content, and retains the sealed hash. Apply racing expiry can win only by transitioning the plan first. Expired leases are removed during maintenance. Stable terminal receipts are purged after the existing retention window; after purge the journal no longer guarantees idempotency for that key. `applying` and `outcome_unknown` are never expired or purged as failed attempts.
+
+When a deferred postflight cannot be read and its original observation has exceeded five minutes, a later `status` records `outcome_unknown`; it does not execute a write or assert success. There is no background observer: a caller must request `status`.
+
 Optimike Obsidian MCP 2.6.0 exposes the first public non-Operon mutation backed by the
 common operation-runtime vocabulary. It replaces the complete content of one
 existing Markdown note without exposing a generic `operation_*` API.
@@ -29,12 +33,21 @@ published artifacts, and public diagnostics.
 
 Input: `path`, complete `nextContent`, and mandatory `idempotencyKey`.
 
-Planning performs no note write. The Atomic Write Bridge reads the existing
+The requested replacement is not written during planning. An undated note can
+first be dated by FDM as described in the text-patch contract. The Atomic Write Bridge reads the existing
 `.md` note; that same read supplies the before SHA-256 and the current content
 used for structured protected-frontmatter comparison. The server validates the
 future Obsidian Markdown, seals target, backend binding, before/after hashes,
 request digest, idempotency key, and the private recovery content, then returns
 a receipt with an opaque `planRef`.
+
+The caller's frontmatter must already match Obsidian's native canonical form.
+The Bridge's read-only `frontmatter/format` capability is mandatory and bound
+to its vault identity. A noncanonical input is refused with the closed reason
+`frontmatter_not_obsidian_canonical` and a dedicated `expectedFrontmatter`
+field derived only from the caller's own frontmatter; no body or parser error
+is returned. The caller can resend that form. Type discrepancies are warnings,
+not admission failures. The capability and sealed form are checked again before CAS.
 
 The same key and canonical request return the same plan. Reusing the key for a
 different replacement is rejected. Planning is not classified as read-only:
@@ -259,4 +272,8 @@ A refusal proven by internal checks before any CAS dispatch is immediate: it doe
 
 ## Receipts and timings
 
-All four tools accept `responseMode: compact | detailed` (default detailed) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
+All four tools accept `responseMode: compact | detailed` (default compact) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
+
+## Audit integration compatibility
+
+Native frontmatter inspection requires Atomic Write Bridge 0.8.4 or later. Deploy and roll back the MCP and Bridge as one pair, after checking for planned, applying or outcome-unknown operations and unresolved preparation fences; compare artifact hashes, not just versions.

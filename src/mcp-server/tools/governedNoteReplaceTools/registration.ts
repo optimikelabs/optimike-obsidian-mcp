@@ -3,7 +3,7 @@ import {
   governedResponse,
 } from "../../../services/governedResponse.js";
 import { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   GOVERNED_MUTATION_TOOL_ANNOTATIONS,
   GOVERNED_PLAN_TOOL_ANNOTATIONS,
@@ -12,6 +12,7 @@ import {
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import type { GovernedNoteReplaceRuntime } from "./runtime.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { canonicalRejection, preparationPlanRejection } from "../../../services/obsidianFrontmatterFormat.js";
 
 const PlanSchema = z.object({
   ...GovernedResponseFields,
@@ -73,7 +74,7 @@ async function runTool(
           text: JSON.stringify(
             result,
             null,
-            (params as { responseMode?: string })?.responseMode === "compact"
+            (params as { responseMode?: string })?.responseMode !== "detailed"
               ? undefined
               : 2,
           ),
@@ -82,12 +83,13 @@ async function runTool(
       isError: false,
     };
   } catch (error) {
+    const canonical = toolName === "obsidian_note_replace_plan" ? canonicalRejection(error) ?? preparationPlanRejection(error) : undefined;
     return {
       content: [
         {
           type: "text" as const,
           text: JSON.stringify(
-            publicMcpToolErrorPayload(error, {
+            canonical ?? publicMcpToolErrorPayload(error, {
               operation: toolName,
               toolName,
               params,
@@ -111,7 +113,7 @@ export async function registerGovernedNoteReplaceTools(
     "obsidian_note_replace_plan",
     {
       description:
-        "Plan one complete atomic replacement of an existing Markdown note. This reads the live Atomic Write Bridge, validates the future Markdown and protected frontmatter, seals the before/after proofs and next content in the private journal, without applying the requested replacement. Missing creation dates are first prepared by the active vault date manager, then reread before sealing. planRef is opaque.",
+        "Plan one complete atomic replacement of an existing Markdown note. Caller-supplied frontmatter must already use Obsidian's canonical form; a refusal returns expectedFrontmatter for the caller to resend. Type issues are warnings. The live Bridge validates and seals before/after proofs without applying the requested replacement. Missing creation dates may first be prepared by the active vault date manager; any preparation normalization is announced. planRef is opaque.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

@@ -12,6 +12,14 @@ const {LocalBasesService}=await import('../dist/services/localBasesService.js');
 const {warmSharedTaskCache,processListAllTasks}=await import('../dist/mcp-server/tools/tasksShared/logic.js');
 const context={requestId:'cache-consumer-fixture',timestamp:new Date().toISOString(),operation:'test'};
 config.obsidianVaultPath=root;config.obsidianCacheSource='rest';
+async function readTaskModes(cache){
+ const compact=JSON.parse(await processListAllTasks({responseFormat:'json'},context,cache));
+ assert.equal(compact.responseMode,'compact');
+ assert.equal(compact.count,compact.tasks.length);
+ const legacy=JSON.parse(await processListAllTasks({responseFormat:'json',responseMode:'legacy'},context,cache));
+ assert.ok(Array.isArray(legacy));
+ return [compact.tasks,legacy];
+}
 after(()=>fs.rmSync(root,{recursive:true,force:true}));
 async function fixture(body){
  config.obsidianSharedCacheDbPath=path.join(root,crypto.randomUUID()+'.sqlite');
@@ -31,14 +39,14 @@ for(const kind of ['tasks','bases','tasks-without-service'])test(kind+' refuses 
 }));
 test('task projection drops disappeared source even when another file replaces its count',()=>fixture(async f=>{
  await warmSharedTaskCache(f.cache);f.set({'Two.md':'- [ ] task-two'});await f.cache.refreshCache(true);
- const result=JSON.parse(await processListAllTasks({responseFormat:'json'},context,f.cache));
- assert.equal(result.length,1);assert.equal(result[0].description,'task-two');
+ for(const result of await readTaskModes(f.cache)){
+  assert.equal(result.length,1);assert.equal(result[0].description,'task-two');
+ }
 }));
 test('task memory cache keys include content hash when timestamps and size are unchanged',()=>fixture(async f=>{
- const first=JSON.parse(await processListAllTasks({responseFormat:'json'},context,f.cache));
- assert.equal(first[0].description,'task-one');f.set({'One.md':'- [ ] task-two'});await f.cache.refreshCache(true);
- const second=JSON.parse(await processListAllTasks({responseFormat:'json'},context,f.cache));
- assert.equal(second[0].description,'task-two');
+ for(const first of await readTaskModes(f.cache)) assert.equal(first[0].description,'task-one');
+ f.set({'One.md':'- [ ] task-two'});await f.cache.refreshCache(true);
+ for(const second of await readTaskModes(f.cache)) assert.equal(second[0].description,'task-two');
 }));
 
 
@@ -67,8 +75,7 @@ test('in-process task readers reprove explicit uncertainty before serving',()=>f
  assert.equal(f.cache.isReady(),false);
  await warmSharedTaskCache(f.cache);
  assert.equal(f.cache.isReady(),true);
- const result=JSON.parse(await processListAllTasks({responseFormat:'json'},context,f.cache));
- assert.equal(result[0].description,'task-two');
+ for(const result of await readTaskModes(f.cache)) assert.equal(result[0].description,'task-two');
 }));
 
 test('in-process task readers remain unavailable when uncertainty cannot be reverified',()=>fixture(async f=>{

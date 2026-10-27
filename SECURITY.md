@@ -67,6 +67,15 @@ for the transport threat model. The local move boundary is specified by the
 
 ## P0 error and log privacy contract
 
+The governed create and whole-note replacement plan tools have one explicit
+exception to content-free public error diagnostics: on
+`frontmatter_not_obsidian_canonical`, `expectedFrontmatter` returns the
+canonical rendering of the frontmatter supplied in that same request. It never
+contains the note body, backend content, parser diagnostics or a path. This
+field is constructed only for that refusal and bypasses neither authorization
+nor the prohibition on logging caller input. Other errors retain the closed
+envelope below.
+
 The P0 boundary is implemented at the shared MCP error and logger sinks:
 
 - MCP and Bridge failures are returned through their canonical public error
@@ -89,12 +98,25 @@ The P0 boundary is implemented at the shared MCP error and logger sinks:
   strings that are retained only for correlation are HMAC-fingerprinted with a
   secret generated for the current process; fingerprints are not stable across
   process restarts and are not reversible through a plain dictionary hash.
+- Operator-facing log fields are closed vocabularies or bounded identifiers:
+  registered `toolName`, identifier-shaped developer-defined `operation` and
+  `module`, the Local REST API `routeClass`, and an `errorClass` read from a
+  failure's system code or HTTP status, never from its message. Anything
+  outside those vocabularies is HMAC-fingerprinted as before.
 - Recovery diagnostics are deliberately narrow: only schema-validated IDs,
   digests, references and closed reason/phase/outcome codes may be returned.
   Batch-item failures may retain their ordinal and the exact validated
   vault-relative request path already supplied by the caller. An untrusted
   Bridge/backend path, an absolute path, and backend error text never pass this
   boundary.
+- A note-name refusal (`note_name_*` reason codes, see
+  [note name rules](docs/note-name-rules.md)) additionally returns a `hint`
+  restricted to a closed vocabulary of fixed sentences (optionally with a segment
+  number and a code point) and, when a safe fix exists, `suggestedPath` /
+  `suggestedName`. A suggestion is derived from the caller's own path, is released
+  only if it satisfies the same name rule, and is never written to logs. This is an
+  explicit, scoped exception to the rule that no caller-derived string crosses the
+  public envelope.
 - `@modelcontextprotocol/sdk` is pinned exactly to `1.30.0`: the private
   `createToolError` hook is only the ultimate fallback for SDK validation and
   unknown-tool failures. CI fails on dependency drift until the SDK provides a
@@ -110,8 +132,9 @@ excluded.
 The read-only `obsidian_list_pending_operations` cockpit is a deliberately
 closed public projection for resuming governed work. Each returned row contains
 only `operationKind`, the domain `planRef`, `state`, `admittedAt`, `updatedAt`,
-bounded `ageSeconds` and the closed `nextAction` (`apply`, `status` or
-`recover`). The opaque cursor contains only the last public ordering key.
+bounded `ageSeconds`, the closed `nextAction` (`apply`, `status` or
+`recover`) and the boolean `closeAllowed`. The opaque cursor contains only the
+last public ordering key.
 
 The cockpit never returns or logs vault or journal paths, idempotency or other
 secret keys, target names, note or Canvas content, formula/frontmatter values,
@@ -124,6 +147,18 @@ profile, policy, Bridge and binding checks.
 The contract is exercised by `npm run test:log-privacy` (including the batch
 item fixture) on Linux and Windows in CI. The CI `bridge-privacy` job also runs
 privacy checks for the Bases, Operon and Atomic Write Bridges on both platforms.
+
+## Administrative closure and effect fence
+
+`obsidian_operation_close` never writes a note and never turns an uncertain
+outcome into success. It closes only when the Atomic Write Bridge proves, at its
+effect point, that no attempt can still act; a Bridge without the fence, an
+unreachable Bridge, a binding mismatch or a running effect refuse without
+change. Closure evidence holds verdicts, epochs, attempt identifiers, Bridge
+version and binding, and the current note hash; never note content, paths in
+errors or idempotency keys. Effect-fence tokens are not credentials: Local REST
+authentication still applies. Enabling **Require a fence token for every
+write** refuses writes from MCP clients that do not send tokens.
 
 ## Reverse proxy boundary
 

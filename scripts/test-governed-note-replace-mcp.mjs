@@ -10,6 +10,7 @@ import {
   rmSync,
 } from "node:fs";
 import http from "node:http";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 const modern = process.env.MCP_TEST_PROTOCOL_ERA === "modern";
@@ -178,7 +179,8 @@ class FakeObsidianAtomicWriteServer {
       json(res, 200, {
         ok: true,
         contractVersion: 1,
-        plugin: { id: "obsidian-atomic-write-bridge", version: "0.1.0" },
+        plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.4" },
+        frontmatterFormat: { contractVersion: 1, supported: true },
         backend: {
           kind: "obsidian-vault-process",
           bindingFingerprint: this.bindingFingerprint,
@@ -203,6 +205,15 @@ class FakeObsidianAtomicWriteServer {
           : {}),
         ...(this.settlement ? { settlement: this.settlement } : {}),
       });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/extensions/obsidian-atomic-write-bridge/notes/prepare-date") {
+      json(res, 422, { error: { reasonCode: "atomic_write_creation_property_missing" } });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/extensions/obsidian-atomic-write-bridge/frontmatter/format") {
+      const { yaml } = await requestBody(req);
+      json(res, 200, await nativeFormatFixture(this.bindingFingerprint).inspectFrontmatterFormat(yaml));
       return;
     }
     if (
@@ -399,7 +410,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
   assert.equal(
     payload.error.message,
     payload.error.details?.reasonCode === "atomic_write_creation_property_missing"
-      ? "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez."
+      ? "La date de création est absente ou sa préparation indisponible. Demandez au propriétaire du coffre de la faire ajouter par le gestionnaire de dates, puis relancez le plan."
       : PUBLIC_MESSAGES[code],
     `${label} catalog message`,
   );
@@ -411,7 +422,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     `${label} request id details`,
   );
   assert.doesNotMatch(
-    JSON.stringify(payload),
+    JSON.stringify({ ...payload, error: { ...payload.error, details: { ...payload.error.details, reasonCode: undefined } } }),
     new RegExp(forbiddenMarker, "u"),
     `${label} leaked marker`,
   );
@@ -423,7 +434,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
         field === "reasonCode" &&
         value !== "atomic_write_creation_property_missing"
       )
-        assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
+        assert.match(value, /^[A-Za-z][A-Za-z0-9_]+$/u);
       if (field === "phase")
         assert.ok(
           ["planned", "applying", "recovering", "terminal"].includes(value),
@@ -550,7 +561,7 @@ async function startClient(
 }
 
 async function call(session, name, args, expectedError = false) {
-  const result = await session.client.callTool({ name, arguments: args });
+  const result = await session.client.callTool({ name, arguments: { responseMode: "detailed", ...args } });
   observed.push(JSON.stringify(result));
   assert.equal(Boolean(result.isError), expectedError, `${name} error status`);
   return { result, payload: parseResult(result) };
@@ -590,6 +601,16 @@ try {
   await hybrid.close();
 
   session = await startClient("full", "live");
+  {
+    const response = await call(session, "obsidian_note_replace_plan", {
+      path: FIXTURE_PATH,
+      nextContent: `---\n${PROTECTED_LINE}\nstatut: 'actif'\n---\nPRIVATE-FORMAT-BODY\n`,
+      idempotencyKey: "noncanonical-replacement",
+    }, true);
+    assert.equal(response.payload.reason, "frontmatter_not_obsidian_canonical");
+    assert.equal(response.payload.expectedFrontmatter, `---\n${PROTECTED_LINE}\nstatut: actif\n---`);
+    assert.doesNotMatch(JSON.stringify(response.result), /PRIVATE-FORMAT-BODY/);
+  }
   const listed = await session.client.listTools();
   const cockpitTool = listed.tools.find(
     (tool) => tool.name === "obsidian_list_pending_operations",
@@ -1008,7 +1029,7 @@ try {
   );
   assertPublicError(
     missingCreatedAttempt.payload,
-    "FORBIDDEN",
+    "VALIDATION_ERROR",
     "creation-date properties to exist",
     "missing creation date",
   );

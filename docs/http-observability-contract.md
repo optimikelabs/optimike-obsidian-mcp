@@ -109,6 +109,18 @@ logged only after that body completes. If a response body fails after headers
 were produced, the event preserves the status placed on the wire and reports
 `result: exception` instead of inventing a later HTTP `500`.
 
+## Runtime log events
+
+The file logs written by the runtime (`combined.log` and the per-level files, see [Operations](../OPERATIONS.md#runtime-log-files)) follow the same privacy boundary as the request logs above. Their message is a constant `Runtime <level> event.`; an event is read through closed fields:
+
+- `toolName`: a registered tool name, taken from the MCP call in progress when the logging site did not set it. Any other value is fingerprinted.
+- `operation` and `module`: developer-defined identifiers. A value that is not a bounded identifier is fingerprinted. A contract test fails when a new template literal feeding these fields interpolates anything outside a short list of closed values.
+- `routeClass`, `method` and `status`: the Local REST API route family, method and status of the upstream call, never a route tail.
+- `errorClass`: a closed class derived from the failure's system code or upstream HTTP status, never from its message.
+- `event`: a closed label (`live_api_probe_unavailable`, `live_api_probe_recovered`, `log_events_suppressed`).
+
+`timestamp` is the emission time. A request context reused by a long-lived loop keeps its creation time as `requestTimestamp`. The live Obsidian API probe behind `/readyz` uses its own correlation ID per availability episode instead of the transport's startup context, writes one `live_api_probe_unavailable` event when Obsidian becomes unreachable and one `live_api_probe_recovered` event when it returns. Identical events of one request inside `MCP_LOG_DEDUPE_WINDOW_MS` collapse into one line followed by a `log_events_suppressed` line with `suppressedRepeats`.
+
 ## Public HTTP error envelope
 
 Every HTTP rejection, including pre-auth rate limits, authentication, origin
