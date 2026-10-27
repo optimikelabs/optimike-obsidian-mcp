@@ -205,6 +205,10 @@ class FakeObsidianAtomicWriteServer {
       });
       return;
     }
+    if (req.method === "POST" && url.pathname === "/extensions/obsidian-atomic-write-bridge/notes/prepare-date") {
+      json(res, 422, { error: { reasonCode: "atomic_write_creation_property_missing" } });
+      return;
+    }
     if (
       req.method === "POST" &&
       url.pathname === "/extensions/obsidian-atomic-write-bridge/notes/read"
@@ -399,7 +403,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
   assert.equal(
     payload.error.message,
     payload.error.details?.reasonCode === "atomic_write_creation_property_missing"
-      ? "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez."
+      ? "La date de création est absente ou sa préparation indisponible. Demandez au propriétaire du coffre de la faire ajouter par le gestionnaire de dates, puis relancez le plan."
       : PUBLIC_MESSAGES[code],
     `${label} catalog message`,
   );
@@ -411,7 +415,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     `${label} request id details`,
   );
   assert.doesNotMatch(
-    JSON.stringify(payload),
+    JSON.stringify({ ...payload, error: { ...payload.error, details: { ...payload.error.details, reasonCode: undefined } } }),
     new RegExp(forbiddenMarker, "u"),
     `${label} leaked marker`,
   );
@@ -423,7 +427,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
         field === "reasonCode" &&
         value !== "atomic_write_creation_property_missing"
       )
-        assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
+        assert.match(value, /^[A-Za-z][A-Za-z0-9_]+$/u);
       if (field === "phase")
         assert.ok(
           ["planned", "applying", "recovering", "terminal"].includes(value),
@@ -550,7 +554,7 @@ async function startClient(
 }
 
 async function call(session, name, args, expectedError = false) {
-  const result = await session.client.callTool({ name, arguments: args });
+  const result = await session.client.callTool({ name, arguments: { responseMode: "detailed", ...args } });
   observed.push(JSON.stringify(result));
   assert.equal(Boolean(result.isError), expectedError, `${name} error status`);
   return { result, payload: parseResult(result) };
@@ -1008,7 +1012,7 @@ try {
   );
   assertPublicError(
     missingCreatedAttempt.payload,
-    "FORBIDDEN",
+    "VALIDATION_ERROR",
     "creation-date properties to exist",
     "missing creation date",
   );

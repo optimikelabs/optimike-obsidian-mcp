@@ -71,7 +71,7 @@ export type CompiledCanvasPatch = {
 };
 
 function fail(message: string, reason: string): never {
-  throw new McpError(BaseErrorCode.VALIDATION_ERROR, message, { reason });
+  throw new McpError(BaseErrorCode.VALIDATION_ERROR, message, { reasonCode: reason });
 }
 
 function sha256(value: string): string {

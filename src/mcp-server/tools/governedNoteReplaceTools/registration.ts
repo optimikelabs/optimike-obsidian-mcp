@@ -73,7 +73,7 @@ async function runTool(
           text: JSON.stringify(
             result,
             null,
-            (params as { responseMode?: string })?.responseMode === "compact"
+            (params as { responseMode?: string })?.responseMode !== "detailed"
               ? undefined
               : 2,
           ),

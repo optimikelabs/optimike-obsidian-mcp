@@ -194,6 +194,47 @@ function collectStringsAndKeys(value: unknown): string[] {
   return [];
 }
 
+/** Mask code without changing line breaks; unmatched inline delimiters remain prose. */
+function markdownWithoutCode(body: string): { text: string; unclosedFence: boolean } {
+  let fence: { marker: string; length: number } | undefined;
+  let text = "";
+  for (const line of body.match(/[^\n]*(?:\n|$)/gu) ?? []) {
+    if (!line) continue;
+    const opening = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)/u.exec(line);
+    if (fence) {
+      const closing = /^ {0,3}(`+|~+)[ \t]*\r?\n?$/u.exec(line);
+      if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) fence = undefined;
+      text += line.replace(/[^\r\n]/gu, " ");
+    } else if (opening && (opening[1][0] !== "`" || !opening[2].includes("`"))) {
+      fence = { marker: opening[1][0], length: opening[1].length };
+      text += line.replace(/[^\r\n]/gu, " ");
+    } else text += line;
+  }
+  // Inline spans can cross lines; closing runs must have the exact same length.
+  const chars = [...text];
+  for (let i = 0; i < chars.length;) {
+    if (chars[i] !== "`" || (i > 0 && chars[i - 1] === "\\")) { i++; continue; }
+    let end = i;
+    while (chars[end] === "`") end++;
+    const length = end - i;
+    let close = end;
+    while (close < chars.length) {
+      if (chars[close] !== "`") { close++; continue; }
+      let after = close;
+      while (chars[after] === "`") after++;
+      if (after - close === length) {
+        for (let j = i; j < after; j++) if (chars[j] !== "\n" && chars[j] !== "\r") chars[j] = " ";
+        end = after;
+        break;
+      }
+      close = after;
+    }
+    i = end;
+  }
+  text = chars.join("");
+  return { text, unclosedFence: Boolean(fence) };
+}
+
 export function validateObsidianMarkdown(
   content: string,
 ): FormatValidationResult {
@@ -240,7 +281,8 @@ export function validateObsidianMarkdown(
     }
   }
 
-  const wikilinks = [...body.matchAll(/!?\[\[([^\]]*)\]\]/gu)].map(
+  const markdown = markdownWithoutCode(body);
+  const wikilinks = [...markdown.text.matchAll(/!?\[\[([^\]]*)\]\]/gu)].map(
     (match) => match[1],
   );
   for (const wikilink of wikilinks) {
@@ -255,8 +297,8 @@ export function validateObsidianMarkdown(
     }
   }
 
-  const openingLinks = (body.match(/\[\[/gu) ?? []).length;
-  const closingLinks = (body.match(/\]\]/gu) ?? []).length;
+  const openingLinks = (markdown.text.match(/(?<!\\)\[\[/gu) ?? []).length;
+  const closingLinks = (markdown.text.match(/(?<!\\)\]\]/gu) ?? []).length;
   if (openingLinks !== closingLinks) {
     addIssue(
       issues,
@@ -267,8 +309,7 @@ export function validateObsidianMarkdown(
     );
   }
 
-  const fenceCount = (body.match(/```/gu) ?? []).length;
-  if (fenceCount % 2 !== 0) {
+  if (markdown.unclosedFence) {
     addIssue(
       issues,
       "error",

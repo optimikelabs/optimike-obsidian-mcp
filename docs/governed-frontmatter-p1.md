@@ -198,7 +198,7 @@ See the [shared completion contract](governed-note-replacement.md#completion-mod
 
 ## Receipts and timings
 
-All four tools accept `responseMode: compact | detailed` (default detailed) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
+All four tools accept `responseMode: compact | detailed` (default compact) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
 
 ## Authorized YAML representation after FDM
 

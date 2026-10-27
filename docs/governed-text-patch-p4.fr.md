@@ -124,7 +124,7 @@ les octets sont préservés. Sans cette option, le frontmatter reste inchangé.
 ## Taille des reçus et diagnostic
 
 Les quatre outils acceptent `responseMode: compact | detailed`. Le défaut
-`detailed` préserve la compatibilité. `compact` conserve références/digests,
+`compact` conserve références/digests,
 état, permissions, postflight et `checkAfter`, sans les longues preuves de
 plages. `detailedReceipt` indique l'appel status permettant de relire toute
 la preuve. Un reçu compact pending ne certifie jamais la réussite.

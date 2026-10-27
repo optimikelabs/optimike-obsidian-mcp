@@ -52,8 +52,15 @@ export function createNoteCreateRoutes(app: App, options: { binding: () => strin
   function mount(api: { addRoute: (route: string) => { post: (handler: (req: any, res: any) => void) => unknown } }) {
     const install = (suffix: string, handler: (value: unknown) => unknown) => api.addRoute(PREFIX + suffix).post((req, res) => {
       try { res.status(200).json(handler(req?.body)); }
-      catch { res.status(400).json({ ok: false, contractVersion: 1, retryable: false,
-        error: { code: "note_create_rejected", reasonCode: "request_or_precondition_rejected", message: "The note creation request could not be admitted or observed." } }); }
+      catch (error) {
+        const known = error instanceof Error ? error.message : "";
+        const reasonCode = error instanceof NoteCreateExists ? "note_create_target_exists"
+          : known === "note_creates_disabled" ? "note_create_disabled"
+          : (known === "invalid_create_request" || known === "invalid_note_path") ? "note_create_request_invalid" : "note_create_failed";
+        const status = reasonCode === "note_create_target_exists" ? 409 : reasonCode === "note_create_disabled" ? 403 : reasonCode === "note_create_request_invalid" ? 400 : 500;
+        res.status(status).json({ ok: false, contractVersion: 1, retryable: false,
+          error: { code: "note_create_rejected", reasonCode, message: "The note creation request could not be admitted or observed." } });
+      }
     });
     install("/preflight", value => { const r = body(value, ["contractVersion", "path"]); return preflight(nativeNotePath(r.path)); });
     install("/inspect", value => { const r = body(value, ["contractVersion", "path"]); return inspect(nativeNotePath(r.path)); });

@@ -187,6 +187,11 @@ export class ObsidianRestApiService {
             );
 
             if (axiosError.response) {
+              // Only Bridge-defined codes may cross this boundary; never forward messages or paths.
+              const bridgeReasons = new Set(["request_rejected", "resource_not_found", "write_not_authorized", "backend_binding_changed", "resource_changed", "read_failed", "write_failed", "atomic_write_creation_property_missing", "date_preparation_failed", "note_create_target_exists", "note_create_disabled", "note_create_request_invalid", "note_create_failed"]);
+              const payload = axiosError.response.data as { error?: { reasonCode?: unknown } } | undefined;
+              const reason = payload && typeof payload === "object" && payload.error && typeof payload.error === "object" ? payload.error.reasonCode : undefined;
+              const publicReason = typeof reason === "string" && bridgeReasons.has(reason) ? { reasonCode: reason } : {};
               // Handle specific HTTP status codes
               switch (axiosError.response.status) {
                 case 400:
@@ -211,7 +216,7 @@ export class ObsidianRestApiService {
                     ...operationContext,
                     ...errorDetails,
                   });
-                  throw new McpError(errorCode, errorMessage, operationContext);
+                  throw new McpError(errorCode, errorMessage, { ...operationContext, ...publicReason });
                 // NOTE: We throw immediately after logging debug for 404, skipping the general error log below.
                 case 405:
                   errorCode = BaseErrorCode.VALIDATION_ERROR; // Method not allowed often implies incorrect usage
@@ -245,7 +250,7 @@ export class ObsidianRestApiService {
                 ...operationContext,
                 ...errorDetails,
               });
-              throw new McpError(errorCode, errorMessage, operationContext);
+              throw new McpError(errorCode, errorMessage, { ...operationContext, ...publicReason });
             } else if (axiosError.request) {
               // Network error (no response received)
               errorCode = BaseErrorCode.SERVICE_UNAVAILABLE;

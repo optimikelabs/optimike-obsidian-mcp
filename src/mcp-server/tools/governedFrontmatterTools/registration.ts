@@ -107,7 +107,7 @@ async function runTool(
           text: JSON.stringify(
             await governedResponse(toolName, params, operation),
             null,
-            (params as { responseMode?: string })?.responseMode === "compact"
+            (params as { responseMode?: string })?.responseMode !== "detailed"
               ? undefined
               : 2,
           ),

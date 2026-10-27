@@ -241,6 +241,8 @@ const backend = createServer(async (request, response) => {
             inputSchema: { type: "object", properties: {} },
             annotations: { readOnlyHint: false },
           },
+          { name: "obsidian_text_patch_apply", description: "governed mutation fixture", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: false } },
+          { name: "obsidian_frontmatter_patch_apply", description: "governed mutation fixture", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: false } },
           {
             name: "generation_probe",
             description: "generation-bound annotation fixture",
@@ -395,6 +397,11 @@ const backend = createServer(async (request, response) => {
     );
     return;
   }
+  if (args.governedLoss) {
+    state.governedLossRequests = (state.governedLossRequests ?? 0) + 1;
+    response.destroy(Object.assign(new Error("PRIVATE_BACKEND_MESSAGE"), { code: "ECONNRESET" }));
+    return;
+  }
   if (args.networkLoss) {
     state.mutationRequests += 1;
     // Destroy only this response stream after the request arrived: this is a
@@ -517,7 +524,7 @@ try {
   );
   fixtureStage = "initial tools/list";
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 3);
+  assert.equal(tools.tools.length, 5);
 
   fixtureStage = "generation-fence replay";
   await assert.rejects(
@@ -902,6 +909,20 @@ try {
     "the blocked mutation must not replay after forced retirement",
   );
   await client.callTool({ name: "read_probe", arguments: {} });
+
+  // A dropped reply after a governed apply must return a status instruction,
+  // preserve only the validated plan reference, and never replay the mutation.
+  for (const [name, prefix] of [["obsidian_text_patch_apply", "obsidian-text-patch:v1:"], ["obsidian_frontmatter_patch_apply", "obsidian-frontmatter-patch:v1:"]]) {
+    const planRef = prefix + "30414766-9f49-4a61-9842-ddf6fc7574e8";
+    const result = await client.callTool({ name, arguments: { planRef, governedLoss: true, secret: "PRIVATE_NOTE" } });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(result.isError, true);
+    assert.equal(payload.error.details.mutationMayHaveApplied, true);
+    assert.equal(payload.error.details.planRef, planRef);
+    assert.equal(payload.error.details.nextAction, name.replace(/_apply$/, "_status"));
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_NOTE|PRIVATE_BACKEND_MESSAGE/);
+  }
+  assert.equal(state.governedLossRequests, 2);
 
   // Bootstrap failures must not dump the caught error, which can contain a
   // private configured path. The deliberately missing config path is the

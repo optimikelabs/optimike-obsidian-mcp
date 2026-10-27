@@ -234,7 +234,7 @@ function validateReplacement(
     );
     if (missingCreated.length > 0) {
       throw new McpError(
-        BaseErrorCode.FORBIDDEN,
+        BaseErrorCode.VALIDATION_ERROR,
         "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.",
         {
           reasonCode: "atomic_write_creation_property_missing",
@@ -348,14 +348,11 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     const fm = parseFrontmatter(source.content);
     if (!created.some(key => entriesForKey(fm, normalizeKey(key)).length === 0)) return source;
     assertCurrentWritePolicy("plan", path, source.content);
-    const fail = () => new McpError(BaseErrorCode.FORBIDDEN,
+    const fail = () => new McpError(BaseErrorCode.VALIDATION_ERROR,
       "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.",
       { reasonCode: "atomic_write_creation_property_missing" });
     if (!status.backend.writeEnabled || !this.delegate.prepareDate || protection.unsupportedIntegrations.length) throw fail();
-    let prepared;
-    try {
-      prepared = await this.delegate.prepareDate({ contractVersion: 1, path, expectedSha256: source.sha256, bindingFingerprint: source.bindingFingerprint });
-    } catch (error) { if (error instanceof McpError && error.code === BaseErrorCode.CONFLICT) throw error; throw fail(); }
+    const prepared = await this.delegate.prepareDate({ contractVersion: 1, path, expectedSha256: source.sha256, bindingFingerprint: source.bindingFingerprint });
     // Seal only a fresh read, never the preparation response or the old projection.
     const current = await this.delegate.read({ contractVersion: 1, path });
     if (current.path !== path || current.bindingFingerprint !== source.bindingFingerprint || current.sha256 !== prepared.sha256)

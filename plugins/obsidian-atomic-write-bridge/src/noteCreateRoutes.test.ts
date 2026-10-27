@@ -45,8 +45,17 @@ test("M4 routes reject stale bindings with request identity and never create or 
     const rejected = call("apply", { ...request, operationId: randomUUID(), path: "B.md" });
     assert.equal(rejected.result.outcome, "conflict");
     assert.deepEqual(readdirSync(root), ["A.md"]);
+    const disabled = call("preflight", { contractVersion: 1, path: "B.md" });
+    assert.equal(disabled.code, 403);
+    assert.equal(disabled.result.error.reasonCode, "note_create_disabled");
+    enabled = true;
+    (app as any).plugins = undefined;
+    const existing = call("preflight", { contractVersion: 1, path: "A.md" });
+    assert.equal(existing.code, 409);
+    assert.equal(existing.result.error.reasonCode, "note_create_target_exists");
     const invalid = call("apply", { ...request, path: "../private.md" });
     assert.equal(invalid.code, 400);
+    assert.equal(invalid.result.error.reasonCode, "note_create_request_invalid");
     assert.equal(JSON.stringify(invalid.result).includes(root), false);
     assert.equal(JSON.stringify(invalid.result).includes("private.md"), false);
   } finally { rmSync(root, { recursive: true, force: true }); }

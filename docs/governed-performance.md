@@ -59,3 +59,7 @@ These successive small-fixture campaigns used the shared stdio/HTTP backend, Obs
 | Compact terminal receipt | 4,217 bytes | 1,065 bytes | Three combined terminal statuses; ~75% fewer JSON bytes |
 
 Early certification retains hash comparison, date protection, idempotent replay and concurrent-drift refusal. Pending or invalidated FDM signals are not relabeled successful. A single combined body/YAML intention also avoids a second CAS and settlement cycle.
+
+## Defaults (Unreleased)
+
+Tools that expose `responseMode` default to `compact`; request `detailed`, `tree` or `legacy` explicitly where supported. `completionMode: verified` waits within the sealed observation window and may exceed a client or proxy timeout. Existing defaults remain unchanged pending timeout qualification. Select `deferred` for early return and follow `postflight.checkAfter` with status. Neither mode makes an uncertain effect safe to replay.

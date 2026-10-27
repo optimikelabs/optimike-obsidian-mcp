@@ -206,3 +206,12 @@ assertSemanticIssue(
 );
 
 console.log("Format validation privacy tests passed.");
+
+// Code delimiters must not become Markdown link or fence diagnostics.
+for (const sample of ["(`[[`)", "`` [[ ` ]] ``", "```\n[[\n```", "~~~~\n]]\n~~~~", "````js\n``` [[\n````", "```\n~~~\n```", "\\[[ prose"]) {
+  const result = validateObsidianMarkdown(sample);
+  assert.equal(result.ok, true, `code or escaped delimiter must be accepted: ${sample}`);
+}
+for (const sample of ["broken [[link", "broken link]]", "~~~\n[[\n~~", "````\ncode\n```"]) {
+  assert.equal(validateObsidianMarkdown(sample).ok, false, `real broken syntax must fail: ${sample}`);
+}

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Tools exposing `responseMode` now default to `compact`; callers needing the former detailed, tree or legacy responses must request them explicitly. `completionMode` retains its existing defaults pending qualification of proxy timeouts.
+
+### Fixed
+
+- Expose closed, non-sensitive error reasons and distinguish missing creation-date preconditions from technical failures.
+- Ignore code spans and variable-length backtick or tilde fences when validating wikilinks and fences.
+
 ## [3.14.0] - 2026-10-23
 
 ### Fixed

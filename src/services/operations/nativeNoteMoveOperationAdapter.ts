@@ -44,7 +44,7 @@ export interface NativeNoteMoveBackend {
 export type NativeMovePlanInput = { sourcePath: string; destinationPath: string; idempotencyKey: string };
 
 function bad(reason: string): never {
-  throw new McpError(BaseErrorCode.CONFLICT, "The native move request or its durable identity is invalid.", { reason });
+  throw new McpError(BaseErrorCode.CONFLICT, "The native move request or its durable identity is invalid.", { reasonCode: reason });
 }
 function key(value: string): string {
   if (!z.string().min(1).max(256).safeParse(value).success) bad("invalid_native_move_key");

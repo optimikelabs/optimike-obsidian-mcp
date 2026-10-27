@@ -42,11 +42,8 @@ assert.equal(compact.applyAllowed, false);
 assert.equal(compact.recoveryAllowed, false);
 assert.equal(JSON.stringify(compact).includes("secret"), false);
 assert.equal(compact.detailedReceipt.tool, "obsidian_text_patch_status");
-assert.equal(
-  await governedResponse("tool", {}, async () => receipt),
-  receipt,
-  "default detailed is backwards compatible",
-);
+assert.equal((await governedResponse("tool", {}, async () => receipt)).responseMode, "compact");
+assert.equal(await governedResponse("tool", { responseMode: "detailed" }, async () => receipt), receipt);
 const [one, two] = await Promise.all([
   governedResponse("one", { diagnostics: true }, async () => {
     await measureGovernedPhase(

@@ -45,7 +45,7 @@ export interface NoteCreateBackend {
   inspect(path: string): Promise<unknown>;
 }
 export type NoteCreatePlanInput = { path: string; content: string; idempotencyKey: string };
-function bad(reason: string): never { throw new McpError(BaseErrorCode.CONFLICT, "The sealed creation could not be admitted or verified.", { reason }); }
+function bad(reason: string): never { throw new McpError(reason === "create_markdown_invalid" || reason === "invalid_create_key" || reason === "invalid_create_reference" ? BaseErrorCode.VALIDATION_ERROR : BaseErrorCode.CONFLICT, "The sealed creation could not be admitted or verified.", { reasonCode: reason }); }
 function internalKey(value: string): string {
   if (!z.string().min(1).max(256).safeParse(value).success) bad("invalid_create_key");
   return "optimike:projection:v1:note-create:" + noteCreateHash(value);
