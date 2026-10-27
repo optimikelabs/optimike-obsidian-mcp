@@ -115,6 +115,9 @@ export type PendingOperationRowsInput = {
   /** Only the Note journal owns native rows without a projection envelope. */
   allowUnprojectedFallback: boolean;
   limit: number;
+  operationKind?: PendingOperationKind;
+  status?: PendingOperationRow["status"];
+  createdBefore?: string;
   after?: Pick<
     PendingOperationRow,
     "updatedAt" | "operationKind" | "operationId"
@@ -461,12 +464,15 @@ export class ObsidianNoteReplaceJournal {
       input.fallbackOperationKind,
       ...input.admittedProjectionKinds,
     ];
+    const filters: string[] = [];
+    if (input.operationKind) { filters.push("operation_kind = ?"); parameters.push(input.operationKind); }
+    if (input.status) { filters.push("status = ?"); parameters.push(input.status); }
+    if (input.createdBefore) { filters.push("created_at <= ?"); parameters.push(input.createdBefore); }
     let afterClause = "";
     if (input.after) {
-      afterClause = `
-        WHERE updated_at < ?
+      filters.push(`(updated_at < ?
           OR (updated_at = ? AND operation_kind > ?)
-          OR (updated_at = ? AND operation_kind = ? AND operation_id > ?)`;
+          OR (updated_at = ? AND operation_kind = ? AND operation_id > ?))`);
       parameters.push(
         input.after.updatedAt,
         input.after.updatedAt,
@@ -476,6 +482,7 @@ export class ObsidianNoteReplaceJournal {
         input.after.operationId,
       );
     }
+    if (filters.length) afterClause = `WHERE ${filters.join(" AND ")}`;
     parameters.push(input.limit + 1);
     const rows = this.db
       .prepare(

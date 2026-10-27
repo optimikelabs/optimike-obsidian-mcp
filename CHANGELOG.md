@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Filter pending operations by kind, state and minimum age before pagination.
+
 ### Fixed
 
 - Return `nextAction: none` for stable terminal note-create and note-move receipts. Uncertain outcomes retain `status` because a later observation may still reconcile them without redispatching the effect.

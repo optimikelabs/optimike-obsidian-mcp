@@ -21,6 +21,8 @@ Input:
 { "limit": 50, "cursor": "opaque-optional-cursor" }
 ```
 
+Optional filters `operationKind`, `status`, and `minAgeSeconds` are applied in each journal before pagination. Repeat the same filters on subsequent pages; age is evaluated when each page is requested.
+
 Each row contains only:
 
 - `operationKind`;
