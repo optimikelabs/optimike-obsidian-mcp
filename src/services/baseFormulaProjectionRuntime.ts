@@ -393,7 +393,7 @@ export function createGovernedBaseFormulaRuntime(
   if (!service) return undefined;
   const journal = new ObsidianNoteReplaceJournal(
     config.obsidianBaseFormulaJournalPath,
-    { executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs },
+    { executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs, plannedRetentionMs: config.obsidianPlannedRetentionMs },
   );
   const backend = new RestBaseAtomicWriteBackend(service);
   const adapter = new ObsidianNoteReplaceOperationAdapter(

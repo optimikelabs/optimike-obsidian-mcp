@@ -60,6 +60,7 @@ try {
   assert.equal((await f.adapter.status(p.planRef)).outcome, "committed");
   assert.equal((await f.adapter.plan(request)).planRef, p.planRef);
   const receipt = await f.adapter.status(p.planRef);
+  assert.equal(receipt.nextAction, "none");
   for (const field of ["nextContent", "idempotencyKey", "bindingFingerprint", "afterSha256"]) assert.equal(Object.hasOwn(receipt, field), false);
   f.journal.close();
   const reopened = new ObsidianNoteReplaceJournal(f.db);

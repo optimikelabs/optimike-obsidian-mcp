@@ -16,6 +16,7 @@ export type ObsidianNoteReplaceStatus =
   | "conflict"
   | "rejected"
   | "failed"
+  | "expired"
   | "outcome_unknown";
 
 export type ObsidianNoteReplaceProjection = {
@@ -77,6 +78,7 @@ export function noteReplaceIdempotencyConflict(): McpError {
 export type ObsidianNoteReplaceJournalOptions = {
   now?: () => number;
   terminalRetentionMs?: number;
+  plannedRetentionMs?: number;
   purgeIntervalMs?: number;
   executionLeaseMs?: number;
   executionSweepIntervalMs?: number;
@@ -115,6 +117,9 @@ export type PendingOperationRowsInput = {
   /** Only the Note journal owns native rows without a projection envelope. */
   allowUnprojectedFallback: boolean;
   limit: number;
+  operationKind?: PendingOperationKind;
+  status?: PendingOperationRow["status"];
+  createdBefore?: string;
   after?: Pick<
     PendingOperationRow,
     "updatedAt" | "operationKind" | "operationId"
@@ -131,6 +136,7 @@ const STABLE_TERMINAL = new Set<ObsidianNoteReplaceStatus>([
   "conflict",
   "rejected",
   "failed",
+  "expired",
 ]);
 
 const SQLITE_BUSY_TIMEOUT_MS = 5_000;
@@ -187,6 +193,7 @@ export class ObsidianNoteReplaceJournal {
   private readonly db: DatabaseSync;
   private readonly now: () => number;
   private readonly terminalRetentionMs: number;
+  private readonly plannedRetentionMs: number;
   private readonly purgeIntervalMs: number;
   private readonly executionLeaseMs: number;
   private readonly executionSweepIntervalMs: number;
@@ -206,6 +213,7 @@ export class ObsidianNoteReplaceJournal {
     this.now = options.now ?? Date.now;
     this.terminalRetentionMs =
       options.terminalRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
+    this.plannedRetentionMs = options.plannedRetentionMs ?? 30 * 24 * 60 * 60 * 1000;
     this.purgeIntervalMs = options.purgeIntervalMs ?? 60 * 60 * 1000;
     this.executionLeaseMs = options.executionLeaseMs ?? 30_000;
     this.executionSweepIntervalMs = options.executionSweepIntervalMs ?? 1_000;
@@ -461,12 +469,15 @@ export class ObsidianNoteReplaceJournal {
       input.fallbackOperationKind,
       ...input.admittedProjectionKinds,
     ];
+    const filters: string[] = [];
+    if (input.operationKind) { filters.push("operation_kind = ?"); parameters.push(input.operationKind); }
+    if (input.status) { filters.push("status = ?"); parameters.push(input.status); }
+    if (input.createdBefore) { filters.push("created_at <= ?"); parameters.push(input.createdBefore); }
     let afterClause = "";
     if (input.after) {
-      afterClause = `
-        WHERE updated_at < ?
+      filters.push(`(updated_at < ?
           OR (updated_at = ? AND operation_kind > ?)
-          OR (updated_at = ? AND operation_kind = ? AND operation_id > ?)`;
+          OR (updated_at = ? AND operation_kind = ? AND operation_id > ?))`);
       parameters.push(
         input.after.updatedAt,
         input.after.updatedAt,
@@ -476,6 +487,7 @@ export class ObsidianNoteReplaceJournal {
         input.after.operationId,
       );
     }
+    if (filters.length) afterClause = `WHERE ${filters.join(" AND ")}`;
     parameters.push(input.limit + 1);
     const rows = this.db
       .prepare(
@@ -740,14 +752,24 @@ export class ObsidianNoteReplaceJournal {
     const now = this.now();
     if (now < this.nextPurgeAt) return;
     const cutoff = new Date(now - this.terminalRetentionMs).toISOString();
+    const plannedCutoff = new Date(now - this.plannedRetentionMs).toISOString();
+    const expiredAt = new Date(now).toISOString();
+    // This atomic update fences an apply's planned -> applying transition.
+    // Never expire an already dispatched or uncertain operation.
+    const expired = this.db.prepare(`UPDATE obsidian_note_replace_plans
+      SET status = 'expired', updated_at = ?,
+          payload_json = json_set(payload_json, '$.status', 'expired', '$.updatedAt', ?, '$.nextContent', '')
+      WHERE status = 'planned' AND created_at < ?`).run(expiredAt, expiredAt, plannedCutoff);
+    this.db.prepare(`DELETE FROM obsidian_note_replace_runtime_leases
+      WHERE expires_at IS NOT NULL AND expires_at <= ?`).run(expiredAt);
     const result = this.db
       .prepare(
         `DELETE FROM obsidian_note_replace_plans
-         WHERE status IN ('committed', 'conflict', 'rejected', 'failed')
+         WHERE status IN ('committed', 'conflict', 'rejected', 'failed', 'expired')
            AND updated_at < ?`,
       )
       .run(cutoff);
-    if (Number(result.changes) > 0) {
+    if (Number(result.changes) > 0 || Number(expired.changes) > 0) {
       this.walCheckpointRequired = true;
       this.checkpointSensitiveFrames();
     }

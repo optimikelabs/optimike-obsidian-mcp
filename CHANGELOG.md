@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Filter pending operations by kind, state and minimum age before pagination.
+- Expire unsent plans after a configurable retention window and remove expired runtime leases; uncertain effects are preserved.
+
 ### Changed
 
 - Tools exposing `responseMode` now default to `compact`; callers needing the former detailed, tree or legacy responses must request them explicitly. `completionMode` retains its existing defaults pending qualification of proxy timeouts.
@@ -15,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Expose closed, non-sensitive error reasons and distinguish missing creation-date preconditions from technical failures.
 - Ignore code spans and variable-length backtick or tilde fences when validating wikilinks and fences.
+- Bound deferred postflight when observation remains unavailable: a subsequent status records an uncertain result rather than leaving the attempt applying forever.
+- Return `nextAction: none` for stable terminal note-create and note-move receipts. Uncertain outcomes retain `status` because a later observation may still reconcile them without redispatching the effect.
 
 ## [3.14.0] - 2026-10-23
 

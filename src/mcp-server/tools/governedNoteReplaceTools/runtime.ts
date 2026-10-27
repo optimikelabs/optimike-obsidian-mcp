@@ -760,7 +760,7 @@ export function createGovernedNoteReplaceRuntime(
 
   const journal = new ObsidianNoteReplaceJournal(
     config.obsidianNoteReplaceJournalPath,
-    { executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs },
+    { executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs, plannedRetentionMs: config.obsidianPlannedRetentionMs },
   );
   const backend = new GovernedAtomicWriteBackend(
     new RestAtomicWriteBackend(obsidianService),

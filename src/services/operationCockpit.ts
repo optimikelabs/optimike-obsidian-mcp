@@ -11,7 +11,7 @@ export const OPERATION_COCKPIT_CONTRACT_VERSION = 1 as const;
 export const OPERATION_COCKPIT_DEFAULT_LIMIT = 50 as const;
 export const OPERATION_COCKPIT_MAX_LIMIT = 100 as const;
 
-const OperationKindSchema = z.enum([
+export const OperationKindSchema = z.enum([
   "obsidian.note.replace",
   "obsidian.frontmatter.patch",
   "obsidian.base.formula.patch",
@@ -174,7 +174,7 @@ export class OperationCockpit {
     private readonly now: () => number = Date.now,
   ) {}
 
-  list(input: { limit?: number; cursor?: string } = {}): OperationCockpitPage {
+  list(input: { limit?: number; cursor?: string; operationKind?: PendingOperationRow["operationKind"]; status?: PendingOperationRow["status"]; minAgeSeconds?: number } = {}): OperationCockpitPage {
     const limit = input.limit ?? OPERATION_COCKPIT_DEFAULT_LIMIT;
     if (
       !Number.isSafeInteger(limit) ||
@@ -195,13 +195,17 @@ export class OperationCockpit {
           operationId: cursor.operationId,
         }
       : undefined;
+    if (input.minAgeSeconds !== undefined && (!Number.isSafeInteger(input.minAgeSeconds) || input.minAgeSeconds < 0 || input.minAgeSeconds > 315360000)) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "Invalid minimum operation age.");
+    }
+    const generatedAt = new Date(this.now()).toISOString();
+    const createdBefore = input.minAgeSeconds === undefined ? undefined : new Date(Date.parse(generatedAt) - input.minAgeSeconds * 1000).toISOString();
     const pages = this.sources.map((source) =>
-      source.listPendingOperationRows({ limit, after }),
+      source.listPendingOperationRows({ limit, after, operationKind: input.operationKind, status: input.status, createdBefore }),
     );
     const rows = pages.flatMap((page) => page.rows).sort(compareRows);
     const visible = rows.slice(0, limit);
     const hasMore = rows.length > limit || pages.some((page) => page.hasMore);
-    const generatedAt = new Date(this.now()).toISOString();
     return {
       contractVersion: OPERATION_COCKPIT_CONTRACT_VERSION,
       generatedAt,

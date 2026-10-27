@@ -215,6 +215,29 @@ function fixture() {
   };
 }
 try {
+  {
+    // Diagnostic: journal lease expiry cannot fence a request already in the bridge.
+    const f = fixture(), p = await f.plan();
+    f.backend.beforeWrite = async () => {
+      f.advance(120_001);
+      assert.equal(f.journal.get(p.operationId).status, "outcome_unknown");
+    };
+    await f.adapter.apply(p.planRef, "test", "deferred");
+    assert.match(f.backend.content, /après/);
+    assert.equal(f.backend.replaceCalls, 1);
+    console.log("DIAGNOSTIC: an expired lease and unknown journal state do not fence an already dispatched backend write");
+  }
+  {
+    const f = fixture(), p = await f.plan();
+    await f.adapter.apply(p.planRef, "test", "deferred");
+    f.restart(); f.advance(300_001);
+    f.backend.read = async () => { throw new Error("bridge unavailable"); };
+    const result = await f.adapter.status(p.planRef);
+    assert.equal(result.outcome, "outcome_unknown");
+    assert.equal(f.backend.replaceCalls, 1);
+    f.restart();
+    assert.equal(f.journal.get(p.operationId).status, "outcome_unknown");
+  }
   for (const drift of ["none", "value", "outside", "body", "created"]) {
     const f = fixture();
     f.backend.content = f.backend.content.replace("---\navant", "création: 2026-08-01T09:00\nunknown: preserve\n---\navant");

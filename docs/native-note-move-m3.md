@@ -22,6 +22,8 @@ The adapter reuses the existing process-owned SQLite journal, execution leases a
 
 The Bridge serializes its own native moves and keeps at most 128 acknowledgements within an 8 MiB budget. Those acknowledgements are process-local. A lost MCP reply can reconcile through status while the Bridge acknowledgement survives. A Bridge restart without a durable MCP acknowledgement remains outcome_unknown; matching file contents alone are not proof that this attempt moved them. A durable committed outcome survives MCP restart, but current graph verification can become indeterminate. Neither status nor duplicate apply dispatches another rename.
 
+Receipts indicate `nextAction: none` for stable terminal outcomes and `status` for an uncertain outcome that may still be reconciled from a surviving acknowledgement.
+
 There is no OS-wide directory lock, source-content atomic CAS, multi-file transaction or distributed rollback. Physical guards reject observed symlinks/junctions, hardlinked source files and root changes, but do not claim to exclude arbitrary concurrent external filesystem actors. A native error after dispatch can therefore remain uncertain. Do not create a new operation merely to force a retry. Inspect the exact source/destination and journal in the isolated pilot.
 
 ## Tests and remaining qualification

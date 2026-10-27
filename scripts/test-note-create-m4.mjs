@@ -166,6 +166,7 @@ try {
       f.files.set(input.path, input.content);
       const reconciled = await adapter.status(p.planRef);
       assert.equal(reconciled.outcome, "committed"); assert.equal(reconciled.postflight, "verified");
+      assert.equal(reconciled.nextAction, "none");
       assert.equal(reconciled.effectProof.details.match, "exact");
       await adapter.apply(p.planRef, input.idempotencyKey);
       assert.equal(f.calls(), 1);

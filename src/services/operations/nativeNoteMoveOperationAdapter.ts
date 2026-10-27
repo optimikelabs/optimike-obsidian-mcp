@@ -200,7 +200,7 @@ export class NativeNoteMoveOperationAdapter {
       affectedPaths: sealed.notes.map(note => note.path),
       limitations: ["no_global_graph_transaction", "native_rename_is_not_source_content_CAS", "backend_acknowledgements_are_process_local"],
       applyAllowed: row.status === "planned", recoveryAllowed: false,
-      nextAction: row.status === "planned" ? "apply" : "status",
+      nextAction: row.status === "planned" ? "apply" : ["applying", "outcome_unknown"].includes(row.status) ? "status" : "none",
       admittedAt: row.createdAt, updatedAt: row.updatedAt,
     };
   }

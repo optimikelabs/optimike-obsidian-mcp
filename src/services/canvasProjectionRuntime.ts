@@ -443,6 +443,7 @@ export function createGovernedCanvasRuntime(
     config.obsidianCanvasJournalPath,
     {
       executionLeaseMs: config.obsidianNoteReplaceExecutionLeaseMs,
+      plannedRetentionMs: config.obsidianPlannedRetentionMs,
     },
   );
   const backend = new RestCanvasAtomicWriteBackend(service);
