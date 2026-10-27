@@ -1,6 +1,6 @@
 import { HttpBindings } from "@hono/node-server";
 import { Context, Next } from "hono";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import {
   getHttpRequestState,

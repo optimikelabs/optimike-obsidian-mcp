@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { BaseRowSelectionSchema, baseRowTarget, type BaseRowSelectionReader, type BaseRowTarget } from "./baseRowSelection.js";
 import { canonicalizeFrontmatterPatchOperations, compileFrontmatterPatch, frontmatterCanonicalDigest, type FrontmatterPatchOperation } from "./frontmatterPatchCompiler.js";

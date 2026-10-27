@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type {
   PendingOperationRow,

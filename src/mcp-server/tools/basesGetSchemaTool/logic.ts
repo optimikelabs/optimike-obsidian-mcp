@@ -2,7 +2,7 @@
  * @fileoverview Logic for the `bases_get_schema` MCP tool.
  */
 
-import { z } from "zod";
+import { z } from "zod/v3";
 import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import { BaseSchemaResponse } from "../../../services/obsidianRestAPI/types.js";

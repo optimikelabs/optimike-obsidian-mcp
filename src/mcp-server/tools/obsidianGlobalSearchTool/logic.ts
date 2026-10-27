@@ -1,5 +1,5 @@
 import path from "node:path/posix";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   NoteJson,
   ObsidianRestApiService,

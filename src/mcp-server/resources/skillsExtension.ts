@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ProtocolError, ProtocolErrorCode, type McpRequestContext, type Server,
   type StandardSchemaWithJSON } from "@modelcontextprotocol/server";
 import type { ExternalRootsService } from "../../services/externalRootsService.js";

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { config } from "../config/index.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { logger, requestContextService } from "../utils/index.js";

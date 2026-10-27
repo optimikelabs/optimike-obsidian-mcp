@@ -31,7 +31,7 @@ smoke clients use v2. There is no private SDK hook and no package patch.
 
 The official v2 codemod performs the mechanical import and registration migration.
 The MCP-only `mcpSchema()` adapter uses public `fromJsonSchema` plus the original
-Zod 3 validator and `zod-to-json-schema@3.25.2`. It retains draft-07, input schema,
+Zod 3 validator (the `zod/v3` API shipped inside `zod@4.6.7`, which carries the fix for GHSA-mrhx-c7xc-m3w5; no patched 3.x exists) and `zod-to-json-schema@3.25.2`. It retains draft-07, input schema,
 defaults, coercion, stripping, asynchronous refinements and output transforms.
 Business validation was not globally migrated to Zod 4. A golden test compares
 actual SDK v1 and v2 wire schemas and validator results. Legacy tool catalogues keep

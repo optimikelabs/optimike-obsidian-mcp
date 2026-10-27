@@ -29,7 +29,7 @@ import { mcpProtocolMode } from "./protocolMode.js";
 import { dump, load } from "js-yaml";
 import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 // Import validated configuration and environment details.
 import { config, environment } from "../config/index.js";
 // Import core utilities: ErrorHandler, logger, requestContextService.

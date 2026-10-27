@@ -1,6 +1,6 @@
 import type { SettlementCompletionMode } from "./operations/obsidianNoteReplaceOperationAdapter.js";
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   canonicalizeFrontmatterPatchOperations,
   compileFrontmatterPatch,

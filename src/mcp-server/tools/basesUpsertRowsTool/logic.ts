@@ -2,7 +2,7 @@
  * @fileoverview Logic for the `bases_upsert_rows` MCP tool.
  */
 
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import {
   BaseUpsertOperation,

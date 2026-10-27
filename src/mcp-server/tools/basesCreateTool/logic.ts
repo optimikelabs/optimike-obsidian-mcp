@@ -2,7 +2,7 @@
  * @fileoverview Logic for the `bases_create` MCP tool.
  */
 
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import {
   BaseCreateRequest,

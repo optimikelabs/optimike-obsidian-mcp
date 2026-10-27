@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import type { AuthInfo } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   ExternalRootError,
   ExternalRootsService,

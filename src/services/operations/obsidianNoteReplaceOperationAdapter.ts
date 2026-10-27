@@ -1,5 +1,5 @@
 import { resolveProjectedFrontmatterSettlement } from "./projectedFrontmatterSettlement.js";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { createHash } from "node:crypto";
 import type {
   AtomicWriteCasRequest,

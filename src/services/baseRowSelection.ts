@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { load } from "js-yaml";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { nativeNotePath } from "./nativeNoteMoveContract.js";
 import type { ObsidianRestApiService } from "./obsidianRestAPI/service.js";
 import { requestContextService } from "../utils/index.js";

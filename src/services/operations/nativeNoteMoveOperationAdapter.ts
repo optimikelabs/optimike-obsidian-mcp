@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import {

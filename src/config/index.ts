@@ -5,7 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path, { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { parseVaultExcludePatterns } from "../services/vaultExclusions.js";
 
 dotenv.config();

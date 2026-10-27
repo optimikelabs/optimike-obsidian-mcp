@@ -27,7 +27,7 @@ import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
 import { operationDigest } from "../../../services/operations/contract.js";
 import { compileFrontmatterPatch } from "../../../services/frontmatterPatchCompiler.js";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { config } from "../../../config/index.js";
 import { validateObsidianMarkdown } from "../../../services/obsidianFormatService.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";

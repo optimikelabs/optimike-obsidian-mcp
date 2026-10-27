@@ -1,6 +1,6 @@
 import path from "node:path"; // Using POSIX path functions for vault path manipulation
 import { load } from "js-yaml";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   NoteJson,
   ObsidianRestApiService,

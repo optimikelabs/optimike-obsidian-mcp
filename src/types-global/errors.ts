@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Defines a set of standardized error codes for common issues within MCP servers or tools.

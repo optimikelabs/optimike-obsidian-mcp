@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { NoteCreateOperationAdapter } from "../../../services/operations/noteCreateOperationAdapter.js";
 import { NOTE_CREATE_MAX_BYTES } from "../../../services/noteCreateContract.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
