@@ -51,7 +51,10 @@ d'Obsidian n'est encore en cours (`legacy.quiescent`). À partir de là, aucune
 requête sans jeton ne peut passer un point d'effet, et les anciennes versions du
 Bridge chargées dans la même session ont eu le temps de finir. Le reçu indique
 `priorEffect: unknown` et la preuve. Activer ce réglage refuse les écritures des
-clients MCP qui n'envoient pas de jeton.
+clients MCP qui n'envoient pas de jeton. Le laisser actif : la garantie
+historique tient tant qu'il reste actif, ou dès qu'aucun processus MCP d'une
+version antérieure ne tourne plus (seul un tel processus pourrait encore livrer
+une requête sans jeton).
 
 ## Refus (rien ne change)
 

@@ -48,7 +48,10 @@ unfenced write admitted in this Obsidian realm is still running
 (`legacy.quiescent`). From then on no unfenced request can pass any effect
 point, and older Bridge builds in the same realm had time to finish. The
 receipt records `priorEffect: unknown` and the legacy proof. Enabling the
-setting refuses writes from MCP clients that do not send tokens.
+setting refuses writes from MCP clients that do not send tokens. Keep it
+enabled: the legacy guarantee holds while it stays on, or once no MCP process
+of an older release is still running (only such a process could deliver an
+unfenced request again).
 
 ## Refusals (nothing changes)
 
