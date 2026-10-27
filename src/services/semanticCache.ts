@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { config } from "../config/index.js";
 import { logger, requestContextService, type RequestContext } from "../utils/index.js";
 import { loadSmartEnv, type SmartVec } from "./smartEnv.js";
+import { applyWalSizeLimit } from "./sqliteWal.js";
 
 type SemanticManifestRow = {
   smart_env_dir: string;
@@ -153,6 +154,7 @@ export class SemanticCacheService {
     this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA synchronous = NORMAL;");
+    applyWalSizeLimit(this.db);
     this.db.exec(SCHEMA_SQL);
     this.ttlMs = Number.isFinite(ttlMs) ? Math.max(ttlMs, 0) : 60000;
   }

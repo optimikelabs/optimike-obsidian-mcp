@@ -14,6 +14,7 @@ import { dump, load } from "js-yaml";
 import { config } from "../config/index.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
+import { extractInlineTags } from "./markdownTags.js";
 import { assertNewNotePath, assertNoFoldedSibling } from "./noteNameMcp.js";
 
 export type VaultFileReadResult = {
@@ -77,11 +78,7 @@ export function extractMarkdownTags(content: string): {
   const frontmatterTags = Array.isArray(frontmatter.tags)
     ? uniqueTags(frontmatter.tags.map(String))
     : [];
-  const inlineTags = uniqueTags(
-    [...body.matchAll(/(^|[\s([{])#([A-Za-z0-9][A-Za-z0-9_/-]*)/gu)].map(
-      (match) => match[2],
-    ),
-  );
+  const inlineTags = uniqueTags(extractInlineTags(body));
   return {
     frontmatterTags,
     inlineTags,

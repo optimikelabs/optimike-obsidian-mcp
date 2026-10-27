@@ -5,6 +5,7 @@ import {
   NoteJson,
   ObsidianRestApiService,
 } from "../../../services/obsidianRestAPI/index.js";
+import { extractInlineTags } from "../../../services/markdownTags.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -522,11 +523,8 @@ function extractTags(frontmatter: Record<string, any>, body: string): string[] {
     collected.add(frontmatterTags.replace(/^#/u, ""));
   }
 
-  const regex = /(^|\s)#([A-Za-z0-9/_-]+)/g;
-  for (const match of body.matchAll(regex)) {
-    if (match[2]) {
-      collected.add(match[2]);
-    }
+  for (const tag of extractInlineTags(body)) {
+    collected.add(tag);
   }
 
   return [...collected];

@@ -498,6 +498,7 @@ Aucun fichier n’est créé vide. Les fichiers tournés sont `nom1.log`, `nom2.
 | --- | --- | --- | --- |
 | `MCP_LOG_MAX_FILE_SIZE_MB` | `8` | 1–1024 | taille à laquelle un fichier de log tourne |
 | `MCP_LOG_MAX_FILES` | `10` | 1–200 | fichiers conservés par famille (`combined`, `info`, ...) |
+| `MCP_SQLITE_JOURNAL_SIZE_LIMIT_MB` | `64` | 0–4096 | taille à laquelle le WAL du cache partagé est tronqué après un checkpoint complet (`0` = défaut SQLite, pas de troncature) |
 | `MCP_LOG_DEDUPE_WINDOW_MS` | `300000` | 0–3600000 | les événements identiques d’une même requête dans cette fenêtre sont réunis en une ligne ; `0` conserve tout |
 
 La rétention est un budget de taille, pas une durée : les défauts conservent 80 Mio par famille. Le jour le plus chargé mesuré sur un runtime de production a écrit 8,33 Mo dans `combined.log` (3,6 Mo un jour calme) ; les défauts gardent donc au moins 8 jours de contexte en laissant 25 % pour les champs décrits ci-dessous, et environ deux semaines un jour moyen. Chaque famille est plafonnée séparément ; le pire cas est le plafond multiplié par le nombre de familles existantes (`combined` et `info` portent l’essentiel du volume).
@@ -544,11 +545,16 @@ n’accorde aucune capacité. Voir le
 Actions de maintenance supportées :
 
 - `integrity_check`
-- `run_maintenance`
+- `run_maintenance` (checkpoint, `VACUUM`, `ANALYZE` ; lourd)
+- `checkpoint_wal` (checkpoint WAL non destructif, sans `VACUUM` ; renvoie la taille du WAL avant/après et les pages libres)
 - `refresh_vault_cache`
 - `refresh_semantic_cache`
 - `refresh_tasks_cache`
 - `refresh_all`
+
+### Journaux d’opérations orphelins
+
+Chaque profil d’exécution (`sha256({mode, baseUrl, vault})`) a ses propres fichiers de journal durables dans le dossier d’état. `npm run maintenance:foreign-journals` liste ceux des autres profils sans rien ouvrir, modifier ni supprimer, et signale comme candidats au déplacement ceux sans opération non terminale ; voir [suivi d’audit](docs/audit-followups-20261027.md#2-orphan-durable-journals). Les tests qui lancent le vrai runtime importent `scripts/lib/isolated-state.mjs` pour n’en laisser aucun.
 
 ### Vérification automatisée locale
 

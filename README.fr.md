@@ -46,10 +46,10 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 | Travail général sur le coffre                        | `standard`  |                          30 |
 | Notes, tags, Bases et Canvas                         | `authoring` |                          44 |
 | Workflows Tasks / Operon                             | `tasks`     |                          36 |
-| Usage courant complet, préférence gouvernée | `operational` | 84 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          88 |
+| Usage courant complet, préférence gouvernée | `operational` | 86 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          91 |
 
-Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 87 outils operational et 91 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
+Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 89 outils operational et 94 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
 Sélectionner le profil avant `tools/list` :
 

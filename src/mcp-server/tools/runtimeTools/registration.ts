@@ -5,6 +5,7 @@ import { restBaseRowSelection } from "../../../services/baseRowSelection.js";
 import { registerBaseRowsPatchTools } from "../baseRowsPatchTools/index.js";
 import { registerNoteCreateTools } from "../noteCreateTools/index.js";
 import { registerNativeNoteMoveTools } from "../nativeNoteMoveTools/index.js";
+import { registerNoteDeleteTools } from "../noteDeleteTools/index.js";
 import {
   MAINTENANCE_TOOL_ANNOTATIONS,
   READ_ONLY_TOOL_ANNOTATIONS,
@@ -43,12 +44,15 @@ const MaintenanceInputSchema = z.object({
     .enum([
       "integrity_check",
       "run_maintenance",
+      "checkpoint_wal",
       "refresh_vault_cache",
       "refresh_semantic_cache",
       "refresh_tasks_cache",
       "refresh_all",
     ])
-    .describe("Maintenance action to run on the shared local runtime."),
+    .describe(
+      "Maintenance action to run on the shared local runtime. checkpoint_wal writes the shared cache WAL back and truncates it without deleting data or running VACUUM; run_maintenance also VACUUMs (heavy, needs free disk about the size of the database).",
+    ),
 });
 
 const RuntimeStatusInputSchema = z
@@ -159,6 +163,7 @@ export async function registerRuntimeTools(
 
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
   registerNativeNoteMoveTools(server, governedNoteReplaceRuntime?.nativeMove);
+  registerNoteDeleteTools(server, governedNoteReplaceRuntime?.noteDelete);
   registerNoteCreateTools(server, governedNoteReplaceRuntime?.noteCreate);
   registerBaseRowsPatchTools(
     server,

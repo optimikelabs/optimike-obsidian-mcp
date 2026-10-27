@@ -50,6 +50,8 @@ const DEFAULT_MUTATION_TOOLS = [
   "operon_recover_mutation",
   "external_move_apply",
   "external_move_rollback",
+  "obsidian_note_delete_plan",
+  "obsidian_note_delete_apply",
   "obsidian_note_replace_plan",
   "obsidian_note_replace_apply",
   "obsidian_note_replace_recover",

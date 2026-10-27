@@ -88,6 +88,15 @@ const EnvSchema = z
       .max(1024)
       .default(8),
     MCP_LOG_MAX_FILES: z.coerce.number().int().min(1).max(200).default(10),
+    // After a complete checkpoint SQLite truncates the shared cache's WAL file
+    // back to this size (PRAGMA journal_size_limit); 0 keeps SQLite's default
+    // of never truncating it.
+    MCP_SQLITE_JOURNAL_SIZE_LIMIT_MB: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(4096)
+      .default(64),
     // Identical events of one request inside this window collapse into one
     // line carrying `suppressedRepeats`; 0 disables the collapse.
     MCP_LOG_DEDUPE_WINDOW_MS: z.coerce
@@ -502,6 +511,7 @@ export const config = {
   logMaxFileSizeBytes: env.MCP_LOG_MAX_FILE_SIZE_MB * 1024 * 1024,
   logMaxFiles: env.MCP_LOG_MAX_FILES,
   logDedupeWindowMs: env.MCP_LOG_DEDUPE_WINDOW_MS,
+  sqliteJournalSizeLimitBytes: env.MCP_SQLITE_JOURNAL_SIZE_LIMIT_MB * 1024 * 1024,
   environment: env.NODE_ENV,
   mcpTransportType: env.MCP_TRANSPORT_TYPE,
   mcpHttpPort: env.MCP_HTTP_PORT,

@@ -22,6 +22,7 @@ import {
 } from "../../utils/index.js"; // Added requestContextService
 import type { NoteCreateApply } from "../noteCreateContract.js";
 import type { NativeMoveApply } from "../nativeNoteMoveContract.js";
+import type { NoteDeleteApply } from "../noteDeleteContract.js";
 import * as activeFileMethods from "./methods/activeFileMethods.js";
 import * as atomicWriteMethods from "./methods/atomicWriteMethods.js";
 import * as baseAtomicWriteMethods from "./methods/baseAtomicWriteMethods.js";
@@ -189,7 +190,7 @@ export class ObsidianRestApiService {
 
             if (axiosError.response) {
               // Only Bridge-defined codes may cross this boundary; never forward messages or paths.
-              const bridgeReasons = new Set(["request_rejected", "invalid_frontmatter", "resource_not_found", "write_not_authorized", "backend_binding_changed", "resource_changed", "read_failed", "write_failed", "atomic_write_creation_property_missing", "date_preparation_failed", "note_create_target_exists", "note_create_disabled", "note_create_request_invalid", "note_create_failed"]);
+              const bridgeReasons = new Set(["request_rejected", "invalid_frontmatter", "resource_not_found", "write_not_authorized", "backend_binding_changed", "resource_changed", "read_failed", "write_failed", "atomic_write_creation_property_missing", "date_preparation_failed", "note_create_target_exists", "note_create_disabled", "note_create_request_invalid", "note_create_failed", "note_has_backlinks", "trash_preference_permanent", "trash_preference_unavailable", "note_delete_disabled", "delete_backlink_limit", "note_not_found", "physical_path_unsupported", "invalid_note_path"]);
               const payload = axiosError.response.data as { error?: { reasonCode?: unknown } } | undefined;
               const reason = payload && typeof payload === "object" && payload.error && typeof payload.error === "object" ? payload.error.reasonCode : undefined;
               const publicReason = typeof reason === "string" && bridgeReasons.has(reason) ? { reasonCode: reason } : {};
@@ -465,6 +466,55 @@ export class ObsidianRestApiService {
       },
       context,
       "nativeNoteMoveStatus",
+    );
+  }
+
+  noteDeletePreflight(
+    payload: { contractVersion: 1; path: string; acknowledgeBacklinks: boolean },
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/note-delete/preflight",
+        data: payload,
+      },
+      context,
+      "noteDeletePreflight",
+    );
+  }
+
+  noteDeleteApply(
+    payload: NoteDeleteApply,
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/note-delete/apply",
+        data: payload,
+      },
+      context,
+      "noteDeleteApply",
+    );
+  }
+
+  noteDeleteStatus(
+    payload: {
+      contractVersion: 1;
+      operationId: string;
+      preconditionDigest: string;
+    },
+    context: RequestContext,
+  ): Promise<unknown> {
+    return this._request(
+      {
+        method: "POST",
+        url: "/extensions/obsidian-atomic-write-bridge/note-delete/status",
+        data: payload,
+      },
+      context,
+      "noteDeleteStatus",
     );
   }
 

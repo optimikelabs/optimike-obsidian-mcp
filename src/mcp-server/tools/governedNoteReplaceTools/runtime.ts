@@ -21,6 +21,8 @@ import {
   type NativeNoteMoveBackend,
 } from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
 import { RestNativeNoteMoveBackend } from "../../../services/operations/restNativeNoteMoveBackend.js";
+import { NoteDeleteOperationAdapter, type NoteDeleteBackend } from "../../../services/operations/noteDeleteOperationAdapter.js";
+import { RestNoteDeleteBackend } from "../../../services/operations/restNoteDeleteBackend.js";
 import type { SettlementCompletionMode } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
@@ -588,6 +590,7 @@ export class GovernedNoteReplaceRuntime {
     | AssetFileReason
     | ImageProcessingError["reason"];
   readonly nativeMove: NativeNoteMoveOperationAdapter | undefined;
+  readonly noteDelete: NoteDeleteOperationAdapter | undefined;
   private closed = false;
   private readonly leaseHeartbeat: NodeJS.Timeout;
   private leaseRenewalFailureReported = false;
@@ -600,8 +603,10 @@ export class GovernedNoteReplaceRuntime {
     private readonly vaultCacheService?: VaultCacheService,
     nativeMoveBackend?: NativeNoteMoveBackend,
     noteCreateBackend?: NoteCreateBackend,
+    noteDeleteBackend?: NoteDeleteBackend,
   ) {
     this.noteCreate = noteCreateBackend ? new NoteCreateOperationAdapter(noteCreateBackend, journal) : undefined;
+    this.noteDelete = noteDeleteBackend ? new NoteDeleteOperationAdapter(noteDeleteBackend, journal) : undefined;
     this.nativeMove = nativeMoveBackend ? new NativeNoteMoveOperationAdapter(nativeMoveBackend, journal) : undefined;
     if (
       config.assetImportEnabled &&
@@ -705,6 +710,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
         "obsidian.frontmatter.patch",
         "obsidian.text.patch",
         "obsidian.note.move",
+        "obsidian.note.delete",
         "obsidian.note.create",
         "obsidian.base.rows.patch",
         "obsidian.asset.import",
@@ -964,6 +970,7 @@ export function createGovernedNoteReplaceRuntime(
     vaultCacheService,
     new RestNativeNoteMoveBackend(obsidianService),
     new RestNoteCreateBackend(obsidianService),
+    new RestNoteDeleteBackend(obsidianService),
   );
 
   // The application lifecycle closes the runtime explicitly. This synchronous

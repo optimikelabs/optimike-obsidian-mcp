@@ -35,6 +35,7 @@ const atomicReady = {
   },
   nativeMove: { supported: true, enabled: true, preferenceReadable: true },
   noteCreate: { supported: true, enabled: true, exclusiveCreate: true },
+  noteDelete: { supported: true, enabled: true, trashPreference: "local", permanentDeletion: false },
   limits: { markdownOnly: true },
 };
 
@@ -162,8 +163,8 @@ function capability(manifest, id) {
 
 const ready = projectCapabilityManifest(input());
 assert.equal(ready.contractVersion, 1);
-assert.equal(ready.capabilities.length, 12);
-assert.equal(ready.summary.ready, 12);
+assert.equal(ready.capabilities.length, 13);
+assert.equal(ready.summary.ready, 13);
 assert.equal(ready.admission.state, "not-applicable");
 for (const item of ready.capabilities) {
   assert.equal(item.discoverable, true, item.id);
@@ -188,6 +189,24 @@ assert.equal(capability(projectCapabilityManifest(input({ writeMode: "guarded" }
 assert.equal(capability(projectCapabilityManifest(input({ profile: "tasks" })), "governed-native-move").state, "hidden");
 const legacyBridge = { ...atomicReady }; delete legacyBridge.nativeMove;
 assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: legacyBridge } })), "governed-native-move").available, false);
+
+// Governed deletion: negotiated with the Bridge, closed when it is old, never offered under a permanent-deletion preference.
+const deleteState = (noteDelete, extra = {}) => {
+  const value = { ...atomicReady };
+  if (noteDelete === undefined) delete value.noteDelete; else value.noteDelete = noteDelete;
+  return capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value }, ...extra })), "governed-note-delete");
+};
+assert.equal(deleteState(atomicReady.noteDelete).state, "ready");
+assert.equal(deleteState(undefined).available, false, "a Bridge without governed deletion is refused closed");
+assert.equal(deleteState(undefined).reasonCode, "bridge_contract_incompatible");
+assert.equal(deleteState({ ...atomicReady.noteDelete, enabled: false }).reasonCode, "bridge_write_disabled");
+for (const trashPreference of ["permanent", "unknown"]) {
+  const item = deleteState({ ...atomicReady.noteDelete, trashPreference });
+  assert.equal(item.authorized, false, `${trashPreference} trash preference must not be authorized`);
+}
+assert.equal(deleteState({ ...atomicReady.noteDelete, permanentDeletion: true }).available, false);
+assert.equal(deleteState(atomicReady.noteDelete, { writeMode: "guarded" }).reasonCode, "write_policy_blocked");
+assert.equal(capability(projectCapabilityManifest(input({ profile: "standard" })), "governed-note-delete").state, "hidden");
 
 const standard = projectCapabilityManifest(input({ profile: "standard" }));
 assert.equal(capability(standard, "governed-note-write").state, "ready");
@@ -845,7 +864,7 @@ console.log("PASS: R1-C unavailable and unknown observations are distinct from e
 
 for (const [probeName, ids, reason] of [
   ['localRest', ['local-rest'], 'local_rest_probe_timed_out'],
-  ['atomicWrite', ['governed-note-write','governed-frontmatter-write','governed-native-move','governed-note-create','governed-canvas-write'], 'bridge_probe_timed_out'],
+  ['atomicWrite', ['governed-note-write','governed-frontmatter-write','governed-native-move','governed-note-delete','governed-note-create','governed-canvas-write'], 'bridge_probe_timed_out'],
   ['baseAtomicWrite', ['governed-base-rows','governed-base-write'], 'bridge_probe_timed_out'],
   ['operon', ['operon-read','operon-write'], 'bridge_probe_timed_out'],
 ]) {

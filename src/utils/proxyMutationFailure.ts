@@ -3,6 +3,13 @@ export function proxyMutationFailure(name: string, args: unknown) {
   const prefixes: Record<string, string> = {
     obsidian_text_patch_apply: "obsidian-text-patch:v1:",
     obsidian_frontmatter_patch_apply: "obsidian-frontmatter-patch:v1:",
+    obsidian_note_replace_apply: "obsidian-note-replace:v1:",
+    obsidian_note_create_apply: "obsidian-note-create:v1:",
+    obsidian_note_move_apply: "obsidian-note-move:v1:",
+    obsidian_note_delete_apply: "obsidian-note-delete:v1:",
+    obsidian_canvas_patch_apply: "obsidian-canvas-patch:v1:",
+    bases_formula_patch_apply: "obsidian-base-formula-patch:v1:",
+    bases_rows_patch_apply: "obsidian-base-rows-patch:v1:",
   };
   const prefix = prefixes[name];
   if (!prefix || !args || typeof args !== "object" || Array.isArray(args)) return undefined;

@@ -25,6 +25,11 @@ import {
 } from "../../../utils/index.js";
 import { NoteJson, ObsidianRestApiService } from "../index.js";
 import { CacheEventSupervisor } from "./eventSupervisor.js";
+import {
+  applyWalSizeLimit,
+  checkpointWal,
+  type WalCheckpointResult,
+} from "../../sqliteWal.js";
 
 export interface CacheEntry {
   content: string;
@@ -357,6 +362,11 @@ export class VaultCacheService {
       analyze: true,
       checkpoint: "truncate",
     };
+  }
+
+  /** Non-destructive WAL checkpoint; see `checkpointWal`. */
+  public runWalCheckpoint(): WalCheckpointResult {
+    return checkpointWal(this.db, config.obsidianSharedCacheDbPath);
   }
 
   public async rebuildFromSource(): Promise<void> {
@@ -906,6 +916,7 @@ export class VaultCacheService {
     db.exec("PRAGMA busy_timeout = 5000;");
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA synchronous = NORMAL;");
+    applyWalSizeLimit(db);
     db.exec(CREATE_SCHEMA_SQL);
     return db;
   }

@@ -91,7 +91,7 @@ assert.deepEqual(Object.keys(cycle.expectedSurface.liveProfiles).sort(), [...req
 for (const [profile, count] of Object.entries(cycle.expectedSurface.liveProfiles)) {
   assert.equal(compileToolProfileNames({ profile, registrationMode: "live", availableStaticRequirements: ["vault-cache"] }).length, count);
 }
-const requiredLifecycleFamilies = ["note-move", "note-create", "base-rows"];
+const requiredLifecycleFamilies = ["note-move", "note-delete", "note-create", "base-rows"];
 assert.deepEqual([...cycle.expectedSurface.threeMemberFamilies].sort(), [...requiredLifecycleFamilies].sort());
 for (const family of cycle.expectedSurface.threeMemberFamilies) {
   assert.deepEqual(governedLifecycleRoles(family), ["plan", "apply", "status"]);

@@ -1,4 +1,5 @@
 import { load } from "js-yaml";
+import { extractInlineTags, markdownWithoutCode } from "./markdownTags.js";
 import { extractMarkdownTags } from "./vaultFileService.js";
 
 export type ObsidianFormatKind = "markdown" | "base" | "canvas";
@@ -43,7 +44,7 @@ const CALLOUT_TYPES = new Set([
   "warning",
 ]);
 
-const TAG_PATTERN = /^[A-Za-z_][A-Za-z0-9_/-]*$/u;
+const TAG_PATTERN = /^[\p{L}\p{Extended_Pictographic}_][\p{L}\p{N}\p{M}\p{Extended_Pictographic}_/-]*$/u;
 const CANVAS_NODE_TYPES = new Set(["text", "file", "link", "group"]);
 const CANVAS_SIDES = new Set(["top", "right", "bottom", "left"]);
 
@@ -87,11 +88,7 @@ function uniqueTags(tags: string[]): string[] {
 }
 
 function extractInlineTagsSafely(body: string): string[] {
-  return uniqueTags(
-    [...body.matchAll(/(^|[\s([{])#([A-Za-z0-9][A-Za-z0-9_/-]*)/gu)].map(
-      (match) => match[2],
-    ),
-  );
+  return uniqueTags(extractInlineTags(body));
 }
 
 function extractMarkdownTagsSafely(
@@ -192,47 +189,6 @@ function collectStringsAndKeys(value: unknown): string[] {
     ]);
   }
   return [];
-}
-
-/** Mask code without changing line breaks; unmatched inline delimiters remain prose. */
-function markdownWithoutCode(body: string): { text: string; unclosedFence: boolean } {
-  let fence: { marker: string; length: number } | undefined;
-  let text = "";
-  for (const line of body.match(/[^\n]*(?:\n|$)/gu) ?? []) {
-    if (!line) continue;
-    const opening = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)/u.exec(line);
-    if (fence) {
-      const closing = /^ {0,3}(`+|~+)[ \t]*\r?\n?$/u.exec(line);
-      if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) fence = undefined;
-      text += line.replace(/[^\r\n]/gu, " ");
-    } else if (opening && (opening[1][0] !== "`" || !opening[2].includes("`"))) {
-      fence = { marker: opening[1][0], length: opening[1].length };
-      text += line.replace(/[^\r\n]/gu, " ");
-    } else text += line;
-  }
-  // Inline spans can cross lines; closing runs must have the exact same length.
-  const chars = [...text];
-  for (let i = 0; i < chars.length;) {
-    if (chars[i] !== "`" || (i > 0 && chars[i - 1] === "\\")) { i++; continue; }
-    let end = i;
-    while (chars[end] === "`") end++;
-    const length = end - i;
-    let close = end;
-    while (close < chars.length) {
-      if (chars[close] !== "`") { close++; continue; }
-      let after = close;
-      while (chars[after] === "`") after++;
-      if (after - close === length) {
-        for (let j = i; j < after; j++) if (chars[j] !== "\n" && chars[j] !== "\r") chars[j] = " ";
-        end = after;
-        break;
-      }
-      close = after;
-    }
-    i = end;
-  }
-  text = chars.join("");
-  return { text, unclosedFence: Boolean(fence) };
 }
 
 export function validateObsidianMarkdown(

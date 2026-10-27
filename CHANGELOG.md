@@ -12,6 +12,13 @@ Atomic Write Bridge 0.8.3 or later is required for native frontmatter inspection
 ### Added
 
 - Filter pending operations by kind, state and minimum age before pagination.
+
+- Governed note deletion: `obsidian_note_delete_plan` / `_apply` / `_status` (see [governed note deletion](docs/governed-note-delete.md)). The plan seals the note's exact SHA-256 and size, its incoming links and the vault trash preference; apply makes the Atomic Write Bridge re-derive the whole seal immediately before `FileManager.trashFile` and refuse on any difference. The note goes to Obsidian's trash and never outright: a permanent-deletion preference is refused. A note with incoming links is refused unless `acknowledgeBacklinks: true`. Postflight `verified` needs the note absent from its path and a new exact copy in the vault trash; with the system trash it is `path_absent_only`. The Bridge grant `allowNoteDeletes` defaults to off, the server needs `MCP_WRITE_MODE=full`, and a Bridge without the `noteDelete` capability is refused closed. The family is exposed by `operational` and `full` only; there is no recover or undo tool.
+- `obsidian_runtime_maintenance` action `checkpoint_wal`: non-destructive WAL checkpoint (`TRUNCATE`, falling back to `PASSIVE` when blocked) that reports WAL size before and after and free pages. No `VACUUM`, nothing implicit.
+- `MCP_SQLITE_JOURNAL_SIZE_LIMIT_MB` (default 64, `0` = SQLite default): the shared cache WAL is truncated to this size after a complete checkpoint (`PRAGMA journal_size_limit`, applied on every connection to the shared cache). The audit machine's WAL had reached 167 MB.
+- `npm run maintenance:foreign-journals` (`scripts/list-foreign-journals.mjs`): read-only inventory of durable journals that belong to another profile, with their non-terminal operation counts; candidates (empty or terminal-only, untouched for 7 days) can be moved aside with an explicit `--apply`, never deleted. The databases are copied before being read.
+- Two log events per applied Operon mutation, `Operon native apply returned.` and `Operon post-apply snapshot refresh finished.`, each with `durationMs`, to attribute the 30 s median of `operon_transition_task`.
+- [Audit follow-ups](docs/audit-followups-20261027.md): tags, journals, WAL, Operon recovery, `completionMode` measurements and the Operon latency diagnosis.
 - Expire unsent plans after a configurable retention window and remove expired runtime leases; uncertain effects are preserved.
 
 - Shared note-name rule (`src/services/noteNameRules.ts`) valid on Windows, macOS, mobile and in Obsidian links, applied to every name the MCP creates: `obsidian_note_create_plan`/`apply` and the Atomic Write Bridge create route, the **destination** of `obsidian_note_move_plan`/`apply` and the Bridge move route, and files written by the headless filesystem tools (`VaultFileService`). It refuses `\ : * ? " < > | # ^ [ ] %%`, control and invisible characters (no-break and zero-width spaces), non-NFC Unicode, leading dots, edge spaces, Windows reserved names, names over 255 UTF-8 bytes and paths over 240 characters, and a new name that differs from an existing sibling only by case or Unicode form. See [note name rules](docs/note-name-rules.md) for the sources.
@@ -25,6 +32,8 @@ Atomic Write Bridge 0.8.3 or later is required for native frontmatter inspection
 ### Changed
 
 - Tools exposing `responseMode` now default to `compact`; callers needing the former detailed, tree or legacy responses must request them explicitly. `completionMode` retains its existing defaults pending qualification of proxy timeouts.
+- `obsidian_delete_note` is hidden in the `operational` profile while the governed deletion family is registered; `full` keeps it. It sends no `permanent` flag, so what it did depended on the Local REST API version (trash by default on 5.5.2, not verified on older releases) and it carried no plan, proof or receipt.
+- `completionMode` keeps its `deferred` default: in 21 days of sessions two `verified` waits ended unsettled after 37.4 s and 73.8 s, the latter beyond the SDK's 60 s default request timeout. See [audit follow-ups](docs/audit-followups-20261027.md#5-completionmode-verified-as-the-default) for the conditions to change it.
 
 - Require Obsidian's native frontmatter format for governed note creation and whole-note replacement. Noncanonical caller input is refused with the canonical caller-provided frontmatter in `expectedFrontmatter`. Property type issues are warnings only.
 - Body and property patches explicitly announce and seal normalization of existing noncanonical frontmatter. Targeted values use the native Bridge serializer. Postflight accepts no alternate target-key representation: only qualified date-line effects may differ.
@@ -40,6 +49,11 @@ Atomic Write Bridge 0.8.3 or later is required for native frontmatter inspection
 
 ### Fixed
 
+- Inline tags follow Obsidian's rules: a purely numerical candidate is not a tag (`#107/ #113/ #114/` came back from `obsidian_read_note` as the tags `107/`, `113/`, `114/`), a trailing `/` is dropped, code blocks and code spans are ignored, and Unicode letters are kept whole (`#RÔLE` was truncated to `R`). One shared extractor replaces three copies.
+- Tests that start the real runtime no longer write one durable journal per temporary vault into the real state directory (about 2,100 orphan databases accumulated on the audit machine): they import `scripts/lib/isolated-state.mjs`.
+- `operon_list_pending_recoveries` and `operon_recover_mutation`: the refusal under `OPERON_MUTATION_ALLOWED_PATH_PREFIXES` carries `reasonCode: operon_recovery_blocked_by_path_scope` and an explicit message (a policy refusal, not an empty list, not retryable), and the tool descriptions say so up front while the allowlist is set. The allowlist is unchanged.
+- The proxy returns the honest `OUTCOME_UNKNOWN` receipt, with the `status` tool to call, when it loses the response of any governed apply (note replace, create, move, delete, canvas, Base formula, Base rows), not only text and frontmatter patches. A live `verified` apply that outlasted the SDK's 60 s request timeout surfaced as `MCP backend rejected the request (status=unknown)`.
+- The journal's pending-operation listing admits seven projection kinds (it was capped at six) so the new deletion kind appears in `obsidian_list_pending_operations`.
 - Expose closed, non-sensitive error reasons and distinguish missing creation-date preconditions from technical failures.
 - Ignore code spans and variable-length backtick or tilde fences when validating wikilinks and fences.
 - Bound deferred postflight when observation remains unavailable: a subsequent status records an uncertain result rather than leaving the attempt applying forever.

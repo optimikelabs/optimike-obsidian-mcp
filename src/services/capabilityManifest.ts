@@ -34,6 +34,7 @@ export type CapabilityId =
   | "semantic-search"
   | "governed-note-write"
   | "governed-native-move"
+  | "governed-note-delete"
   | "governed-note-create"
   | "governed-base-rows"
   | "governed-frontmatter-write"
@@ -247,6 +248,11 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "obsidian_note_move_plan",
     "obsidian_note_move_apply",
     "obsidian_note_move_status",
+  ],
+  "governed-note-delete": [
+    "obsidian_note_delete_plan",
+    "obsidian_note_delete_apply",
+    "obsidian_note_delete_status",
   ],
   "governed-note-write": [
     "obsidian_note_replace_plan",
@@ -536,6 +542,7 @@ function atomicCapability(
   id:
     | "governed-note-write"
     | "governed-native-move"
+    | "governed-note-delete"
     | "governed-note-create"
     | "governed-base-rows"
     | "governed-frontmatter-write"
@@ -576,9 +583,20 @@ function atomicCapability(
   const canvas = id === "governed-canvas-write";
   const native = id === "governed-native-move";
   const create = id === "governed-note-create";
+  const del = id === "governed-note-delete";
   const noteCreate = record(status.noteCreate);
   const nativeMove = record(status.nativeMove);
-  const available = create
+  const noteDelete = record(status.noteDelete);
+  // A Bridge that predates governed deletion has no `noteDelete` capability: closed refusal.
+  const trashUsable =
+    noteDelete.trashPreference === "local" ||
+    noteDelete.trashPreference === "system";
+  const available = del
+    ? contractReady &&
+      lifecycleReady &&
+      noteDelete.supported === true &&
+      noteDelete.permanentDeletion === false
+    : create
     ? contractReady &&
       lifecycleReady &&
       noteCreate.supported === true &&
@@ -591,14 +609,16 @@ function atomicCapability(
       : canvas
         ? contractReady && lifecycleReady && backend.canvasAtomicCas === true
         : contractReady && lifecycleReady;
-  const bridgeAuthorized = create
+  const bridgeAuthorized = del
+    ? noteDelete.enabled === true && trashUsable
+    : create
     ? noteCreate.enabled === true
     : native
       ? nativeMove.enabled === true
       : canvas
         ? backend.canvasWriteEnabled === true
         : backend.writeEnabled === true;
-  const writePolicyAllows = native
+  const writePolicyAllows = native || del
     ? input.writeMode === "full"
     : input.writeMode !== "readonly";
   const authorized = bridgeAuthorized && writePolicyAllows;
@@ -1094,6 +1114,7 @@ export function projectCapabilityManifest(
     semanticCapability(input),
     atomicCapability(input, "governed-note-write"),
     atomicCapability(input, "governed-native-move"),
+    atomicCapability(input, "governed-note-delete"),
     atomicCapability(input, "governed-note-create"),
     baseRowsCapability(input),
     atomicCapability(input, "governed-frontmatter-write"),
@@ -1306,6 +1327,7 @@ export async function collectCapabilityManifest(options: {
       ? [
           ...TOOL_FAMILIES["governed-note-write"],
           ...TOOL_FAMILIES["governed-native-move"],
+          ...TOOL_FAMILIES["governed-note-delete"],
           ...TOOL_FAMILIES["governed-note-create"],
           ...TOOL_FAMILIES["governed-base-rows"],
           ...TOOL_FAMILIES["governed-frontmatter-write"],

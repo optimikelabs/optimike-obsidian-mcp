@@ -1,3 +1,4 @@
+import "./lib/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -53,6 +54,8 @@ function defaultJournalPath(baseUrl) {
     OBSIDIAN_API_KEY: "fixture-api-key",
     OBSIDIAN_BASE_URL: baseUrl,
     XDG_STATE_HOME: path.join(process.cwd(), ".tmp", "profile-state"),
+    // Windows prefers LOCALAPPDATA: empty it so the default path really comes from XDG_STATE_HOME.
+    LOCALAPPDATA: "",
   });
   const result = spawnSync(
     process.execPath,

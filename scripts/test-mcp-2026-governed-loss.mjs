@@ -1,3 +1,4 @@
+import "./lib/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";

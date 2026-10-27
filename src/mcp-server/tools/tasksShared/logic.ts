@@ -8,6 +8,7 @@ import { config } from "../../../config/index.js";
 import { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import { logger, RequestContext, requestContextService } from "../../../utils/index.js";
+import { applyWalSizeLimit } from "../../../services/sqliteWal.js";
 import { Task, parseTasks, queryTasks as filterTasks, taskToString } from "./TaskParser.js";
 
 type StatusMap = Record<string, Task["status"]>;
@@ -198,6 +199,7 @@ function openSharedCacheDb(readOnly: boolean): DatabaseSync {
     db.exec("PRAGMA busy_timeout = 5000;");
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA synchronous = NORMAL;");
+    applyWalSizeLimit(db);
     db.exec(SHARED_TASK_CACHE_SCHEMA_SQL);
   }
   try {
