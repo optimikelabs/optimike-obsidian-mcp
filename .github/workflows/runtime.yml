@@ -26,6 +26,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:log-privacy
+      - run: npm run test:audit-suite
       - run: npm run test:backend-supervisor
       - run: node scripts/test-governed-frontmatter-model.mjs
       - run: npm run test:runtime

@@ -483,6 +483,7 @@ No file is created empty. Rotated files are `name1.log`, `name2.log`, and so on.
 | --- | --- | --- | --- |
 | `MCP_LOG_MAX_FILE_SIZE_MB` | `8` | 1–1024 | size at which a log file rotates |
 | `MCP_LOG_MAX_FILES` | `10` | 1–200 | files kept per family (`combined`, `info`, ...) |
+| `MCP_SQLITE_JOURNAL_SIZE_LIMIT_MB` | `64` | 0–4096 | size the shared cache WAL is truncated to after a complete checkpoint (`0` = SQLite default, no truncation) |
 | `MCP_LOG_DEDUPE_WINDOW_MS` | `300000` | 0–3600000 | identical events of one request inside this window collapse into one line; `0` keeps every event |
 
 Retention is a size budget, not an age: the defaults keep 80 MiB per family. The busiest day measured on a production runtime wrote 8.33 MB to `combined.log` (3.6 MB on a quiet day), so the defaults keep at least 8 days of context after allowing 25% for the fields described below, and about two weeks on an average day. Each family is capped separately; the worst case is the cap multiplied by the number of families that exist (`combined` and `info` carry most of the volume).
@@ -528,7 +529,8 @@ next action. It never repairs a runtime or grants a capability. See
 Supported maintenance actions:
 
 - `integrity_check`
-- `run_maintenance`
+- `run_maintenance` (checkpoint, `VACUUM`, `ANALYZE`; heavy)
+- `checkpoint_wal` (non-destructive WAL checkpoint, no `VACUUM`; returns WAL size before/after and free pages)
 - `refresh_vault_cache`
 - `refresh_semantic_cache`
 - `refresh_tasks_cache`
@@ -550,6 +552,10 @@ Supported maintenance actions:
    `obsidian_operation_close` and `datePreparationPaths`; offline fallback:
    `scripts/release-date-preparation-lock.mjs` with Obsidian and the backend
    stopped. See [Administrative closure](docs/administrative-closure.md).
+
+### Orphan operation journals
+
+Every runtime profile (`sha256({mode, baseUrl, vault})`) has its own durable journal files in the state directory. `npm run maintenance:foreign-journals` lists those of other profiles without opening, changing or deleting anything and flags the ones with no non-terminal operation as move candidates; see [audit follow-ups](docs/audit-followups-20261027.md#2-orphan-durable-journals). Tests that start the real runtime import `scripts/test-support/isolated-state.mjs` so they leave none behind.
 
 ### Automated local verification
 

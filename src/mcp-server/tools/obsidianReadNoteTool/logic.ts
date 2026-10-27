@@ -5,6 +5,7 @@ import {
   NoteJson,
   ObsidianRestApiService,
 } from "../../../services/obsidianRestAPI/index.js";
+import { extractInlineTags } from "../../../services/markdownTags.js";
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import { BaseErrorCode, McpError } from "../../../types-global/errors.js";
 import {
@@ -408,7 +409,11 @@ export const processObsidianReadNote = async (
     if (requestedFormat === "json") {
       // Return the full NoteJson object. Its internal 'stat' will remain numeric.
       // The formatted stats are provided in the top-level 'response.stats'.
-      response.content = noteJson;
+      // Local REST's native tag list can include numeric PR references. Recompute
+      // from the returned text using the same rules as the shared-cache path.
+      const normalizedContent = (noteJson.content ?? "").replace(/\r\n/g, "\n");
+      const { body } = extractFrontmatter(normalizedContent);
+      response.content = { ...noteJson, tags: extractTags(noteJson.frontmatter ?? {}, body) };
       response.stats = formattedStat; // Always include formatted stat at top level for JSON format
       logger.debug(
         `Response format set to JSON, including full NoteJson (with original numeric stat) and top-level formatted stat.`,
@@ -522,11 +527,8 @@ function extractTags(frontmatter: Record<string, any>, body: string): string[] {
     collected.add(frontmatterTags.replace(/^#/u, ""));
   }
 
-  const regex = /(^|\s)#([A-Za-z0-9/_-]+)/g;
-  for (const match of body.matchAll(regex)) {
-    if (match[2]) {
-      collected.add(match[2]);
-    }
+  for (const tag of extractInlineTags(body)) {
+    collected.add(tag);
   }
 
   return [...collected];

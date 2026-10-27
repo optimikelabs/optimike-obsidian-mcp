@@ -129,6 +129,7 @@ export type PendingOperationKind =
   | "obsidian.canvas.patch"
   | "obsidian.text.patch"
   | "obsidian.note.move"
+  | "obsidian.note.delete"
   | "obsidian.note.create"
   | "obsidian.base.rows.patch"
   | "obsidian.asset.import";
@@ -557,7 +558,7 @@ export class ObsidianNoteReplaceJournal {
 
     if (
       input.admittedProjectionKinds.length < 1 ||
-      input.admittedProjectionKinds.length > 6 ||
+      input.admittedProjectionKinds.length > 8 ||
       new Set(input.admittedProjectionKinds).size !==
         input.admittedProjectionKinds.length
     ) {

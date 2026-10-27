@@ -93,8 +93,10 @@ The family is live/hybrid-live only and has no recover or undo operation. Missin
 - `obsidian_search_replace`: live REST search/replace for an explicit
   `filePath` or the live `activeFile`, or guarded exact `filePath`
   search/replace in headless write modes.
-- `obsidian_delete_note`: live REST delete; in `headless-filesystem`, explicit
-  filesystem delete requires `expectedHash` or `expectedMtime`.
+- `obsidian_delete_note`: live REST delete with no plan or proof (hidden in
+  `operational` in favour of the governed `obsidian_note_delete_*` family, see
+  [governed note deletion](governed-note-delete.md)); in `headless-filesystem`,
+  explicit filesystem delete requires `expectedHash` or `expectedMtime`.
 
 ## Governed Atomic Note Replacement
 

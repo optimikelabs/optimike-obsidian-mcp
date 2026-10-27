@@ -25,6 +25,7 @@ import {
   OperonSetRelationshipsInputSchema,
   OperonUpdateRecurrenceSchema,
 } from "../../../services/operon/contract.js";
+import { config } from "../../../config/index.js";
 import { OperonService } from "../../../services/operon/service.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import { mcpSchema } from "../../mcpSchema.js";
@@ -92,8 +93,21 @@ async function runTool(
   }
 }
 
+/**
+ * Recovery fails closed whenever the mutation allowlist is configured (records
+ * carry no route evidence). The tools stay discoverable, as for every policy
+ * refusal, but their description says so up front instead of leaving the agent
+ * to learn it from a refusal.
+ */
+const RECOVERY_BLOCKED_NOTICE =
+  "UNAVAILABLE in this runtime: OPERON_MUTATION_ALLOWED_PATH_PREFIXES is set, so every call is refused with reasonCode operon_recovery_blocked_by_path_scope (a refusal, not an empty list; retrying cannot succeed). Do not call it; ask the vault owner to review uncertain Operon mutations. ";
+
 export async function registerOperonTools(server: McpServer): Promise<void> {
   const service = new OperonService();
+  const recoveryNotice =
+    config.operonMutationAllowedPathPrefixes.length > 0
+      ? RECOVERY_BLOCKED_NOTICE
+      : "";
   server.registerTool(
     "operon_status",
     {
@@ -374,6 +388,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_list_pending_recoveries",
     {
       description:
+        recoveryNotice +
         "List durable official Operon Developer API mutation recoveries. Read-only: it does not retry or apply anything. Blocked when OPERON_MUTATION_ALLOWED_PATH_PREFIXES is nonempty because recovery records lack canonical route evidence; a refusal is not an empty recovery list. Preserve any known recoveryRef, inspect the affected task with authorized reads, and do not replay the original mutation or relax the allowlist to bypass this gate. When permitted, use the returned recoveryRef only with operon_recover_mutation after inspecting the uncertain outcome.",
       inputSchema: mcpSchema(OperonPendingRecoveriesInputSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
@@ -387,6 +402,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_recover_mutation",
     {
       description:
+        recoveryNotice +
         "Recover exactly one uncertain official Operon mutation by recoveryRef. Set recovery.kind=developer-api for legacy official recovery, or use the exact task-workflow kind returned by pending state and optionally echo its planDigest. This replays the same durable plan only; it never constructs a new mutation. Requires idempotencyKey, OPERON_MUTATIONS_ENABLED=true, MCP_WRITE_MODE=full, and an empty OPERON_MUTATION_ALLOWED_PATH_PREFIXES because current recovery records do not prove their route.",
       inputSchema: mcpSchema(OperonRecoverMutationInputSchema.shape),
       annotations: MUTATION_ANNOTATIONS,

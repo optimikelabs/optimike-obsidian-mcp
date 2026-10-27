@@ -91,7 +91,7 @@ assert.deepEqual(Object.keys(cycle.expectedSurface.liveProfiles).sort(), [...req
 for (const [profile, count] of Object.entries(cycle.expectedSurface.liveProfiles)) {
   assert.equal(compileToolProfileNames({ profile, registrationMode: "live", availableStaticRequirements: ["vault-cache"] }).length, count);
 }
-const requiredLifecycleFamilies = ["note-move", "note-create", "base-rows"];
+const requiredLifecycleFamilies = ["note-move", "note-delete", "note-create", "base-rows"];
 assert.deepEqual([...cycle.expectedSurface.threeMemberFamilies].sort(), [...requiredLifecycleFamilies].sort());
 for (const family of cycle.expectedSurface.threeMemberFamilies) {
   assert.deepEqual(governedLifecycleRoles(family), ["plan", "apply", "status"]);
@@ -116,7 +116,7 @@ for (const name of requiredDocs) {
   assert.ok(pkg.files.includes(name), `npm package must include ${name}`);
 }
 const qualifiedBridgeVersions = {
-  "obsidian-atomic-write-bridge": "0.8.4",
+  "obsidian-atomic-write-bridge": "0.8.5",
   "obsidian-bases-bridge": "1.2.2",
   "obsidian-operon-bridge": "0.9.3",
 };

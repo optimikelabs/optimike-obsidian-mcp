@@ -21,6 +21,9 @@ import {
   type NativeNoteMoveBackend,
 } from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
 import { RestNativeNoteMoveBackend } from "../../../services/operations/restNativeNoteMoveBackend.js";
+import { NoteDeleteOperationAdapter, type NoteDeleteBackend } from "../../../services/operations/noteDeleteOperationAdapter.js";
+import { NOTE_DELETE_PREFIX } from "../../../services/noteDeleteContract.js";
+import { RestNoteDeleteBackend } from "../../../services/operations/restNoteDeleteBackend.js";
 import type { SettlementCompletionMode } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
@@ -659,6 +662,7 @@ export class GovernedNoteReplaceRuntime {
     | AssetFileReason
     | ImageProcessingError["reason"];
   readonly nativeMove: NativeNoteMoveOperationAdapter | undefined;
+  readonly noteDelete: NoteDeleteOperationAdapter | undefined;
   private closed = false;
   private readonly closure: AdministrativeClosureService;
   private readonly leaseHeartbeat: NodeJS.Timeout;
@@ -672,8 +676,10 @@ export class GovernedNoteReplaceRuntime {
     private readonly vaultCacheService?: VaultCacheService,
     nativeMoveBackend?: NativeNoteMoveBackend,
     noteCreateBackend?: NoteCreateBackend,
+    noteDeleteBackend?: NoteDeleteBackend,
   ) {
     this.noteCreate = noteCreateBackend ? new NoteCreateOperationAdapter(noteCreateBackend, journal) : undefined;
+    this.noteDelete = noteDeleteBackend ? new NoteDeleteOperationAdapter(noteDeleteBackend, journal) : undefined;
     this.nativeMove = nativeMoveBackend ? new NativeNoteMoveOperationAdapter(nativeMoveBackend, journal) : undefined;
     this.closure = new AdministrativeClosureService(journal, backend, this.closureProfiles(noteCreateBackend),
       ["obsidian-canvas-patch:v1:", "obsidian-base-formula-patch:v1:", "oasset:"]);
@@ -748,7 +754,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   }
 
   private closureProfiles(noteCreateBackend?: NoteCreateBackend): ClosureKindProfile[] {
-    const statusField = (status: unknown, field: "noteCreate" | "nativeMove") => {
+    const statusField = (status: unknown, field: "noteCreate" | "nativeMove" | "noteDelete") => {
       const value = (status as Record<string, { bindingFingerprint?: unknown } | undefined> | null)?.[field]?.bindingFingerprint;
       return typeof value === "string" ? value : undefined;
     };
@@ -791,6 +797,12 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
         operationKind: "obsidian.note.move", planRefPrefix: NATIVE_MOVE_PREFIX,
         binding: (status) => statusField(status, "nativeMove"),
         reconcile: async (operationId) => this.nativeMove?.status(NATIVE_MOVE_PREFIX + operationId),
+        observe: async () => ({ kind: "unavailable" as const }),
+      },
+      {
+        operationKind: "obsidian.note.delete", planRefPrefix: NOTE_DELETE_PREFIX,
+        binding: (status) => statusField(status, "noteDelete"),
+        reconcile: async (operationId) => this.noteDelete?.status(NOTE_DELETE_PREFIX + operationId),
         observe: async () => ({ kind: "unavailable" as const }),
       },
     ];
@@ -837,6 +849,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
         "obsidian.frontmatter.patch",
         "obsidian.text.patch",
         "obsidian.note.move",
+        "obsidian.note.delete",
         "obsidian.note.create",
         "obsidian.base.rows.patch",
         "obsidian.asset.import",
@@ -1096,6 +1109,7 @@ export function createGovernedNoteReplaceRuntime(
     vaultCacheService,
     new RestNativeNoteMoveBackend(obsidianService),
     new RestNoteCreateBackend(obsidianService),
+    new RestNoteDeleteBackend(obsidianService),
   );
 
   // The application lifecycle closes the runtime explicitly. This synchronous

@@ -12,7 +12,7 @@ const {registerObsidianGetFrontmatterTool}=await import('../dist/mcp-server/tool
 const {registerObsidianManageFrontmatterTool}=await import('../dist/mcp-server/tools/obsidianManageFrontmatterTool/registration.js');
 const {mcpSchema}=await import('../dist/mcp-server/mcpSchema.js');
 const full=compileToolProfileNames({profile:'full',registrationMode:'live'}),operational=compileToolProfileNames({profile:'operational',registrationMode:'live'});
-assert.deepEqual(full.filter(x=>!operational.includes(x)).sort(),['bases_upsert_config','obsidian_manage_frontmatter','obsidian_search_replace','obsidian_update_note']);
+assert.deepEqual(full.filter(x=>!operational.includes(x)).sort(),['bases_upsert_config','obsidian_delete_note','obsidian_manage_frontmatter','obsidian_search_replace','obsidian_update_note']);
 for(const name of ['obsidian_get_frontmatter','obsidian_manage_tags','bases_upsert_rows','external_read','external_move_status','operon_update_task','obsidian_runtime_maintenance'])assert.ok(operational.includes(name),name);
 assert.deepEqual(selectAvailableToolProfileNames({profile:'operational',availableNames:full}),operational);
 const partial=full.filter(x=>x!=='obsidian_frontmatter_patch_recover');

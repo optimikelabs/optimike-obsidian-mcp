@@ -6,12 +6,12 @@
     "vault-cache",
     "asset-policy"
   ],
-  "toolCount": 96,
+  "toolCount": 99,
   "classificationCounts": {
     "canonical-unique": 48,
     "alias-redundant": 0,
     "compatibility-historical": 1,
-    "governed-operation": 32,
+    "governed-operation": 35,
     "diagnostic": 10,
     "administration": 5
   },
@@ -63,6 +63,9 @@
       "obsidian_note_create_apply",
       "obsidian_note_create_plan",
       "obsidian_note_create_status",
+      "obsidian_note_delete_apply",
+      "obsidian_note_delete_plan",
+      "obsidian_note_delete_status",
       "obsidian_note_links",
       "obsidian_note_move_apply",
       "obsidian_note_move_plan",
@@ -157,6 +160,9 @@
       "obsidian_note_create_apply",
       "obsidian_note_create_plan",
       "obsidian_note_create_status",
+      "obsidian_note_delete_apply",
+      "obsidian_note_delete_plan",
+      "obsidian_note_delete_status",
       "obsidian_note_links",
       "obsidian_note_move_apply",
       "obsidian_note_move_plan",
@@ -877,6 +883,9 @@
           "obsidian_note_create_apply",
           "obsidian_note_create_plan",
           "obsidian_note_create_status",
+          "obsidian_note_delete_apply",
+          "obsidian_note_delete_plan",
+          "obsidian_note_delete_status",
           "obsidian_note_links",
           "obsidian_note_move_apply",
           "obsidian_note_move_plan",
@@ -971,6 +980,9 @@
           "obsidian_note_create_apply",
           "obsidian_note_create_plan",
           "obsidian_note_create_status",
+          "obsidian_note_delete_apply",
+          "obsidian_note_delete_plan",
+          "obsidian_note_delete_status",
           "obsidian_note_links",
           "obsidian_note_move_apply",
           "obsidian_note_move_plan",
@@ -1267,7 +1279,6 @@
           "obsidian_canvas_patch_plan",
           "obsidian_canvas_patch_recover",
           "obsidian_canvas_patch_status",
-          "obsidian_delete_note",
           "obsidian_frontmatter_patch_apply",
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
@@ -1280,6 +1291,9 @@
           "obsidian_note_create_apply",
           "obsidian_note_create_plan",
           "obsidian_note_create_status",
+          "obsidian_note_delete_apply",
+          "obsidian_note_delete_plan",
+          "obsidian_note_delete_status",
           "obsidian_note_links",
           "obsidian_note_move_apply",
           "obsidian_note_move_plan",
@@ -1357,7 +1371,6 @@
           "obsidian_canvas_patch_plan",
           "obsidian_canvas_patch_recover",
           "obsidian_canvas_patch_status",
-          "obsidian_delete_note",
           "obsidian_frontmatter_patch_apply",
           "obsidian_frontmatter_patch_plan",
           "obsidian_frontmatter_patch_recover",
@@ -1370,6 +1383,9 @@
           "obsidian_note_create_apply",
           "obsidian_note_create_plan",
           "obsidian_note_create_status",
+          "obsidian_note_delete_apply",
+          "obsidian_note_delete_plan",
+          "obsidian_note_delete_status",
           "obsidian_note_links",
           "obsidian_note_move_apply",
           "obsidian_note_move_plan",
@@ -2951,8 +2967,22 @@
           "headless-filesystem"
         ],
         "operational": [
-          "live",
-          "hybrid-live",
+          "headless-filesystem"
+        ]
+      },
+      "replacement": {
+        "family": "note-delete",
+        "tools": [
+          "obsidian_note_delete_apply",
+          "obsidian_note_delete_plan",
+          "obsidian_note_delete_status"
+        ]
+      },
+      "fallback": {
+        "tools": [
+          "obsidian_delete_note"
+        ],
+        "modes": [
           "headless-filesystem"
         ]
       }
@@ -3607,6 +3637,90 @@
           "live",
           "hybrid-live"
         ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "status"
+    },
+    {
+      "name": "obsidian_note_delete_apply",
+      "canonicalName": "obsidian_note_delete_apply",
+      "classification": "governed-operation",
+      "group": "notes.direct.admin",
+      "family": "note-delete",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_note_delete_plan",
+      "canonicalName": "obsidian_note_delete_plan",
+      "classification": "governed-operation",
+      "group": "notes.direct.admin",
+      "family": "note-delete",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_note_delete_status",
+      "canonicalName": "obsidian_note_delete_status",
+      "classification": "governed-operation",
+      "group": "notes.direct.admin",
+      "family": "note-delete",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "full",
+        "operational"
+      ],
+      "profileModes": {
         "full": [
           "live",
           "hybrid-live"

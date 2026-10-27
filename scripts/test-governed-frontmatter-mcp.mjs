@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { isolatedStateEnv } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -67,6 +68,7 @@ const stderrStreams = [];
 
 function childEnv(writeMode = "full", runtimeMode = "live") {
   const environment = {
+    ...isolatedStateEnv(),
     NODE_ENV: "test",
     MCP_TRANSPORT_TYPE: "stdio",
     MCP_LOG_LEVEL: "debug",

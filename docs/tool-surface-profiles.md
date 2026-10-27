@@ -12,9 +12,9 @@ Profiles reduce schema volume and routing ambiguity. They are not an authorizati
 
 ## Complete operational profile
 
-`operational` preserves useful `full` workflows: Operon, external documents, diagnostics, assets and distinct direct capabilities. In live mode it hides `obsidian_update_note`, `obsidian_search_replace` and `obsidian_manage_frontmatter` when their governed families are complete. `obsidian_get_frontmatter` provides dedicated read-only key access without mutation inputs. Batch `bases_upsert_rows` and composite/inline tag operations retain their separate contracts; prefer governed Frontmatter for YAML tags. Historical whole-document `bases_upsert_config` remains reserved for `full`.
+`operational` preserves useful `full` workflows: Operon, external documents, diagnostics, assets and distinct direct capabilities. In live mode it hides `obsidian_update_note`, `obsidian_search_replace`, `obsidian_manage_frontmatter` and `obsidian_delete_note` when their governed families are complete; deletion goes through `obsidian_note_delete_plan`/`apply`/`status` ([governed note deletion](governed-note-delete.md)). `obsidian_get_frontmatter` provides dedicated read-only key access without mutation inputs. Batch `bases_upsert_rows` and composite/inline tag operations retain their separate contracts; prefer governed Frontmatter for YAML tags. Historical whole-document `bases_upsert_config` remains reserved for `full`.
 
-This profile has 85 live tools with cache versus 89 for `full`, excluding three optional asset tools. Select `/mcp/operational` or `--tool-profile operational`. `full` preserves compatibility and existing direct calls. No write rights or mutation contracts change. A structurally absent family may leave a bounded fallback visible on a dedicated runtime; a conflict, unavailable Bridge or uncertain effect in a governed runtime never authorizes direct-write fallback.
+This profile has 87 live tools with cache versus 92 for `full`, excluding three optional asset tools. Select `/mcp/operational` or `--tool-profile operational`. `full` preserves compatibility and existing direct calls. No write rights or mutation contracts change. A structurally absent family may leave a bounded fallback visible on a dedicated runtime; a conflict, unavailable Bridge or uncertain effect in a governed runtime never authorizes direct-write fallback.
 
 Skills already explicitly published to `full` remain visible to `operational` with the same root/path checks; cursors remain profile-bound. Other profile policies remain unchanged. Stdio selection is fixed for one proxy lifetime; an existing session may require reconnection to discover its new catalogue.
 
@@ -25,12 +25,12 @@ Skills already explicitly published to `full` remain visible to `operational` wi
 | `standard`  | General vault reading/search and common governed note/Frontmatter work      |                 30 tools |
 | `authoring` | `standard` plus tags, bounded Bases authoring/formulas and Canvas authoring |                 44 tools |
 | `tasks`     | Markdown Tasks compatibility plus the complete live Operon MCP contract     |                 36 tools |
-| `operational` | Complete daily workflows with governed preference | 85 tools |
-| `full`      | Explicit complete/admin surface for the active runtime                      |                 89 tools |
+| `operational` | Complete daily workflows with governed preference | 87 tools |
+| `full`      | Explicit complete/admin surface for the active runtime                      |                 92 tools |
 
-The counts above exclude three optional asset tools: the current local configuration exposes 87 operational and 91 full tools. The local launcher explicitly selects operational; the package-wide unspecified default remains standard.
+The counts above exclude three optional asset tools: the current local configuration exposes 90 operational and 95 full tools. The local launcher explicitly selects operational; the package-wide unspecified default remains standard.
 
-Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 89 tools. The canonical registry covers 96 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
+Counts are projections of the current registry and may be lower in restricted runtimes. `full` means all tools structurally registered by the active runtime, not always 92 tools. The canonical registry covers 99 unique names across all runtimes because four names exist only in `headless-filesystem`. The operation cockpit is live-only because it reads the process-owned governed journals; visibility never substitutes for a write grant.
 
 `obsidian_note_links` is live/hybrid-live only because its semantics come from Obsidian Desktop's public `MetadataCache`; degraded and headless profiles omit it rather than simulating graph semantics from filesystem state.
 

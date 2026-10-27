@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "3.14.0",
+  "version": "3.15.0",
   "description": "Unified Obsidian MCP server with shared local cache, Operon and Tasks tools, Bases support, semantic search, runtime observability, and degraded read mode for durable agent workflows.",
   "main": "dist/index.js",
   "files": [
@@ -22,6 +22,8 @@
     "docs/governed-note-replacement.fr.md",
     "docs/governed-note-replacement.md",
     "docs/native-note-move-m3.md",
+    "docs/governed-note-delete.md",
+    "docs/audit-followups-20261027.md",
     "docs/durable-note-create-m4.md",
     "docs/note-name-rules.md",
     "docs/note-name-rules.fr.md",
@@ -124,7 +126,9 @@
     "docs/installation-options.md",
     "docs/installation-options.fr.md",
     "docs/releases/3.14.0.md",
-    "docs/releases/3.14.0.fr.md"
+    "docs/releases/3.14.0.fr.md",
+    "docs/releases/3.15.0.md",
+    "docs/releases/3.15.0.fr.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
@@ -199,6 +203,8 @@
     "test:cycle": "npm run build && node scripts/check-cycle-source.mjs",
     "test:cycle:package": "npm run test:cycle && npm run test:package",
     "test:base-rows": "npm run build && node scripts/test-base-rows-selection-m5.mjs && node scripts/test-base-rows-patch-m5.mjs",
+    "maintenance:foreign-journals": "node scripts/list-foreign-journals.mjs",
+    "test:audit-suite": "npm run build && node scripts/test-inline-tags.mjs && node scripts/test-journal-hygiene.mjs && node scripts/test-wal-maintenance.mjs && node scripts/test-operon-recovery-policy.mjs && node scripts/test-proxy-mutation-failure.mjs && node scripts/test-note-delete.mjs",
     "test:native-note-move": "npm run build && node scripts/test-native-note-move-m3.mjs && node scripts/test-native-note-move-surface.mjs",
     "test:note-names": "npm run build && node scripts/test-note-name-rules.mjs",
     "test:note-links": "npm run build && node scripts/test-note-links-m2.mjs",

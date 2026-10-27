@@ -46,10 +46,10 @@ Runtime answers what the backend can execute. It does not decide how many tools 
 | General vault work                                | `standard`  |                    30 |
 | Notes, tags, Bases and Canvas authoring           | `authoring` |                    44 |
 | Tasks / Operon workflows                          | `tasks`     |                    36 |
-| Complete daily workflows with governed preference | `operational` | 85 |
-| Explicit complete, admin and specialized surfaces | `full`      |                    89 |
+| Complete daily workflows with governed preference | `operational` | 87 |
+| Explicit complete, admin and specialized surfaces | `full`      |                    92 |
 
-The counts above exclude three optional asset tools: the current local configuration exposes 87 operational and 91 full tools. The local launcher explicitly selects operational; the package-wide unspecified default remains standard.
+The counts above exclude three optional asset tools: the current local configuration exposes 90 operational and 95 full tools. The local launcher explicitly selects operational; the package-wide unspecified default remains standard.
 
 In 3.0, an unspecified profile defaults to `standard`. `smart_semantic_search` is the only registered semantic-search name; the former `smart_search` and `smart-search` aliases have been removed. `full` remains an explicit opt-in for the complete active-runtime surface. `bases_upsert_config` is a `full`-only whole-Base compatibility path; legacy whole-file config writes are default-off, while normal authoring uses bounded Base creation/row writes plus the governed formula family.
 

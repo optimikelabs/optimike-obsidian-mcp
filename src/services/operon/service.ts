@@ -7,6 +7,7 @@ import { config } from "../../config/index.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { logger, requestContextService } from "../../utils/index.js";
 import { assertWriteAllowed } from "../writePolicy.js";
+import { applyWalSizeLimit } from "../sqliteWal.js";
 import {
   OPERON_CONTRACT_VERSION,
   OPERON_LEGACY_SNAPSHOT_SCHEMA_VERSION,
@@ -374,6 +375,7 @@ export class OperonService {
     db.exec("PRAGMA busy_timeout = 5000;");
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA synchronous = NORMAL;");
+    applyWalSizeLimit(db);
     db.exec(SNAPSHOT_TABLE_SQL);
     return db;
   }
@@ -1004,8 +1006,16 @@ export class OperonService {
       payload,
     );
     if (reservedResult) return reservedResult.result;
+    const applyStartedAt = Date.now();
     const response = await this.getClient().post(path, payload, {
       validateStatus: () => true,
+    });
+    // Timing evidence for the slow-Operon diagnosis (docs/operon-latency.md):
+    // the native apply and the post-apply snapshot refresh are logged apart.
+    logger.info("Operon native apply returned.", {
+      ...this.requestContext(operation, { operonId }),
+      durationMs: Date.now() - applyStartedAt,
+      httpStatus: response.status,
     });
     const preDispatchReason =
       response.status === 503
@@ -1120,8 +1130,13 @@ export class OperonService {
     }
     this.writeMutationJournal(action, operonId, payload, result);
     if (result.status === "applied") {
+      const refreshStartedAt = Date.now();
       try {
         await this.ensureSnapshot(true);
+        logger.info("Operon post-apply snapshot refresh finished.", {
+          ...this.requestContext(operation, { operonId }),
+          durationMs: Date.now() - refreshStartedAt,
+        });
       } catch (error) {
         logger.warning(
           "Operon mutation succeeded but snapshot refresh failed.",
@@ -1175,6 +1190,8 @@ export class OperonService {
       this.requestContext(operation, {
         allowedPathPrefixes: config.operonMutationAllowedPathPrefixes,
         routeEvidence: "unavailable",
+        reasonCode: "operon_recovery_blocked_by_path_scope",
+        retryable: false,
       }),
     );
   }

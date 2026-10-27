@@ -154,6 +154,9 @@ const GOVERNED_OPERATION_TOOL_NAMES = [
   "obsidian_note_move_plan",
   "obsidian_note_move_apply",
   "obsidian_note_move_status",
+  "obsidian_note_delete_plan",
+  "obsidian_note_delete_apply",
+  "obsidian_note_delete_status",
   "obsidian_note_replace_plan",
   "obsidian_note_replace_apply",
   "obsidian_note_replace_status",
@@ -305,7 +308,7 @@ function defineTool(
 
 /** Recovery is a domain contract, not a mandatory synthetic fourth tool. */
 export function governedLifecycleRoles(family: string): readonly GovernedLifecycleRole[] {
-  return ["note-move", "note-create", "base-rows", "asset-import"].includes(family)
+  return ["note-move", "note-delete", "note-create", "base-rows", "asset-import"].includes(family)
     ? ["plan", "apply", "status"]
     : ["plan", "apply", "status", "recover"];
 }
@@ -398,7 +401,13 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "notes.direct.admin",
     "notes-admin",
     LIVE_OR_FILESYSTEM_MODES,
-    { surfaceClass: "direct", annotationClass: "destructive" },
+    {
+      surfaceClass: "direct",
+      annotationClass: "destructive",
+      // Hidden in profiles that prefer governed alternatives (operational) while
+      // the governed deletion family is registered; kept in `full`.
+      preferredAlternativeFamily: "note-delete",
+    },
   ),
   defineTool(
     "obsidian_move_note",
@@ -412,6 +421,9 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
   ...governedFamily("obsidian_note_replace", "notes.governed", "note-replace"),
   ...governedFamily("obsidian_text_patch", "notes.governed", "text-patch"),
   ...governedFamily("obsidian_note_move", "notes.governed", "note-move"),
+  // Destructive: lives in the admin group so it is exposed only by the `operational`
+  // and `full` profiles, never by `standard` or `authoring`.
+  ...governedFamily("obsidian_note_delete", "notes.direct.admin", "note-delete"),
   ...governedFamily("obsidian_note_create", "notes.governed", "note-create"),
 
   defineTool(

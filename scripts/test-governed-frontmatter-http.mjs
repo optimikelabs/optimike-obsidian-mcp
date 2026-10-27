@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {

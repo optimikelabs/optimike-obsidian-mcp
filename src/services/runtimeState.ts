@@ -18,6 +18,7 @@ const PROCESS_STARTED_AT_MS = Math.round(Date.now() - process.uptime() * 1000);
 export type RuntimeMaintenanceAction =
   | "integrity_check"
   | "run_maintenance"
+  | "checkpoint_wal"
   | "refresh_vault_cache"
   | "refresh_semantic_cache"
   | "refresh_tasks_cache"
@@ -586,6 +587,19 @@ export function projectPublicRuntimeMaintenanceResult(
     action,
     ...(value.sharedCache === undefined
       ? {}
+      : action === "checkpoint_wal"
+        ? {
+            sharedCache: {
+              mode: sharedCache.mode === "passive" ? "passive" : "truncate",
+              busy: booleanOr(sharedCache.busy),
+              walBytesBefore: numberOr(sharedCache.walBytesBefore),
+              walBytesAfter: numberOr(sharedCache.walBytesAfter),
+              logFrames: numberOr(sharedCache.logFrames),
+              checkpointedFrames: numberOr(sharedCache.checkpointedFrames),
+              freelistPages: numberOr(sharedCache.freelistPages),
+              pageCount: numberOr(sharedCache.pageCount),
+            },
+          }
       : action === "run_maintenance"
         ? {
             sharedCache: {
@@ -691,6 +705,11 @@ export async function runRuntimeMaintenance(
           : {
               enabled: false,
             },
+      };
+    case "checkpoint_wal":
+      return {
+        action,
+        sharedCache: vaultCacheService!.runWalCheckpoint(),
       };
     case "refresh_vault_cache":
       await vaultCacheService!.rebuildFromSource();

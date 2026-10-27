@@ -336,6 +336,26 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "invalid_create_reference",
   "invalid_native_move_key",
   "invalid_row_key",
+  "operon_recovery_blocked_by_path_scope",
+  "delete_backlink_limit",
+  "delete_bridge_grant_disabled",
+  "delete_domain_mismatch",
+  "delete_key_intent_conflict",
+  "delete_key_mismatch",
+  "delete_note_has_backlinks",
+  "delete_note_not_found",
+  "delete_observation_identity_mismatch",
+  "delete_observation_invalid",
+  "delete_path_invalid",
+  "delete_physical_path_unsupported",
+  "delete_preflight_invalid",
+  "delete_reference_invalid",
+  "delete_reference_unavailable",
+  "delete_seal_mismatch",
+  "delete_target_mismatch",
+  "delete_trash_preference_permanent",
+  "delete_trash_preference_unavailable",
+  "invalid_delete_key",
   "markdown_validation_failed",
   "native_move_domain_mismatch",
   "native_move_key_intent_conflict",
@@ -633,6 +653,14 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Les versions du Bridge et du MCP sont incompatibles. Alignez la paire sur le Bridge requis avant de réessayer.";
   if (reasonCode === "atomic_write_creation_property_missing")
     return "La date de création est absente ou sa préparation indisponible. Demandez au propriétaire du coffre de la faire ajouter par le gestionnaire de dates, puis relancez le plan.";
+  if (reasonCode === "delete_note_has_backlinks")
+    return "The note is linked from other notes. Inspect them with obsidian_note_links, then replan with acknowledgeBacklinks=true to delete it anyway; those links will become unresolved, they are not rewritten.";
+  if (reasonCode === "delete_trash_preference_permanent")
+    return "The vault's Deleted files preference is permanent deletion. This operation only moves a note to a trash and never deletes outright; ask the vault owner to change the preference.";
+  if (reasonCode === "delete_bridge_grant_disabled")
+    return "Governed note deletion is not enabled in the Atomic Write Bridge settings. Ask the vault owner to enable it.";
+  if (reasonCode === "operon_recovery_blocked_by_path_scope")
+    return "Operon recovery is disabled by policy while OPERON_MUTATION_ALLOWED_PATH_PREFIXES is set; this is a refusal, not an empty list, and retrying will not change it. Do not replay the original mutation or relax the allowlist. Keep any known recoveryRef, inspect the affected task with authorized reads, and ask the vault owner to review it.";
   if (code === BaseErrorCode.VALIDATION_ERROR && isNoteNameReasonCode(reasonCode))
     return "The note path is not a valid name on every platform and in Obsidian. See hint and suggestedPath.";
   switch (code) {

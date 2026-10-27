@@ -34,6 +34,7 @@ import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { createNativeNoteMoveRoutes } from "./nativeNoteMoveRoutes.js";
+import { createNoteDeleteRoutes } from "./noteDeleteRoutes.js";
 import { inspectFrontmatterFormat, InvalidFrontmatter } from "./frontmatterFormat.js";
 import {
   EFFECT_FENCE_CONTRACT_VERSION,
@@ -54,6 +55,7 @@ type PluginData = {
   allowNoteCreates: boolean;
   /** Absent in older data.json files; never written until the owner changes it. */
   requireEffectFence?: boolean;
+  allowNoteDeletes: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -290,8 +292,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   allowNoteCreates = false;
   requireEffectFence = false;
   effectFence!: EffectFence;
+  allowNoteDeletes = false;
   private noteCreate: ReturnType<typeof createNoteCreateRoutes>;
   private nativeMove: ReturnType<typeof createNativeNoteMoveRoutes>;
+  private noteDelete: ReturnType<typeof createNoteDeleteRoutes>;
   private templateDateGuard!: ReturnType<typeof createTemplateDateGuard>;
   private datePreparation!: ReturnType<typeof createDatePreparation>;
   private fdmCompletion!: ReturnType<typeof createFdmCompletion>;
@@ -310,6 +314,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     // Created before any route: every effect of this instance passes this fence.
     this.effectFence = new EffectFence({ requireFence: () => this.requireEffectFence });
     this.register(() => this.effectFence.dispose());
+    this.allowNoteDeletes = stored?.allowNoteDeletes === true;
     const deviceStorageKey = "optimike-atomic-write-bridge:device-id";
     let deviceId = window.localStorage.getItem(deviceStorageKey);
     if (!deviceId) {
@@ -331,7 +336,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       stored?.allowWrites !== this.allowWrites ||
       stored?.allowCanvasWrites !== this.allowCanvasWrites ||
       stored?.allowNativeMoves !== this.allowNativeMoves ||
-      stored?.allowNoteCreates !== this.allowNoteCreates
+      stored?.allowNoteCreates !== this.allowNoteCreates ||
+      (stored?.allowNoteDeletes !== undefined && stored.allowNoteDeletes !== this.allowNoteDeletes)
     ) {
       await this.saveSettings();
     }
@@ -345,6 +351,17 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     } catch {
       // An unsupported native host must not disable the existing atomic CAS routes.
       this.nativeMove = undefined;
+    }
+    try {
+      this.noteDelete = createNoteDeleteRoutes(this.app, {
+        binding: () => this.bindingFingerprint,
+        enabled: () => this.allowNoteDeletes,
+        registerEvent: (event) => this.registerEvent(event),
+        enterEffect: (fence) => this.effectFence.enter(fence),
+      });
+    } catch {
+      // An unsupported host must not disable the existing atomic CAS routes.
+      this.noteDelete = undefined;
     }
     try {
       this.noteCreate = createNoteCreateRoutes(this.app, {
@@ -373,6 +390,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       allowNativeMoves: this.allowNativeMoves,
       allowNoteCreates: this.allowNoteCreates,
       requireEffectFence: this.requireEffectFence,
+      allowNoteDeletes: this.allowNoteDeletes,
     } satisfies PluginData);
   }
 
@@ -457,6 +475,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             frontmatterFormat: { contractVersion: 1, supported: typeof (this.app as any).metadataTypeManager?.getAssignedWidget === "function" },
             nativeMove: this.nativeMove?.capabilities() ?? { supported: false, enabled: false },
             noteCreate: this.noteCreate?.capabilities() ?? { supported: false, enabled: false },
+            noteDelete: this.noteDelete?.capabilities() ?? { supported: false, enabled: false },
             limits: { markdownOnly: true },
             settlement: {
               contractVersion: 1,
@@ -907,6 +926,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
         });
 
       this.nativeMove?.mount(api);
+      this.noteDelete?.mount(api);
       this.noteCreate?.mount(api);
       console.info("[" + this.manifest.id + "] optional OpenAPI: " + documentation.publish());
       return () => api.unregister?.();
@@ -957,6 +977,13 @@ class AtomicWriteSettingsTab extends PluginSettingTab {
       .setDesc("Désactivé par défaut. Une note Markdown à la fois ; le postflight vérifie le voisinage observé, pas tout le graphe. Le serveur exige aussi MCP_WRITE_MODE=full.")
       .addToggle((toggle) => toggle.setValue(this.bridge.allowNativeMoves).onChange(async (value) => {
         this.bridge.allowNativeMoves = value;
+        await this.bridge.saveSettings();
+      }));
+    new Setting(containerEl)
+      .setName("Autoriser les suppressions gouvernées de notes")
+      .setDesc("Désactivé par défaut. Une note Markdown à la fois, uniquement vers la corbeille d’Obsidian selon le réglage « Fichiers supprimés » ; la suppression définitive est refusée. Le serveur exige aussi MCP_WRITE_MODE=full.")
+      .addToggle((toggle) => toggle.setValue(this.bridge.allowNoteDeletes).onChange(async (value) => {
+        this.bridge.allowNoteDeletes = value;
         await this.bridge.saveSettings();
       }));
     new Setting(containerEl)
