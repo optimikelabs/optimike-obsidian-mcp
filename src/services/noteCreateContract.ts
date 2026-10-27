@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { nativeNotePath } from "./nativeNoteMoveContract.js";
+import { assertNoteName } from "./noteNameRules.js";
 import { resolveModifiedTimeSettlement } from "./operations/modifiedTimeSettlement.js";
 
 export const NOTE_CREATE_PREFIX = "obsidian-note-create:v1:";
@@ -52,7 +52,7 @@ export function createPolicyDigest(policy: NoteCreatePolicy): string {
   return noteCreateHash(JSON.stringify(validateCreatePolicy(policy)));
 }
 export function validateNoteCreate(path: string, content: string, policy: NoteCreatePolicy): void {
-  nativeNotePath(path);
+  assertNoteName(path);
   if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > NOTE_CREATE_MAX_BYTES ||
       Buffer.from(content, "utf8").toString("utf8") !== content || content.startsWith("\uFEFF") || /\r(?!\n)/u.test(content)) {
     throw new Error("invalid_create_content");

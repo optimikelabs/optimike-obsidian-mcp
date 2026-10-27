@@ -4,6 +4,7 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { validateObsidianMarkdown } from "../obsidianFormatService.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import { nativeNotePath } from "../nativeNoteMoveContract.js";
+import { assertNewNotePath } from "../noteNameMcp.js";
 import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCreateHash, observeCreateContent, validateCreatePolicy, validateNoteCreate,
   type NoteCreateApply, type NoteCreatePreflight } from "../noteCreateContract.js";
 import { operationDigest } from "./contract.js";
@@ -87,7 +88,7 @@ export class NoteCreateOperationAdapter {
     return row;
   }
   async plan(input: NoteCreatePlanInput) {
-    nativeNotePath(input.path);
+    assertNewNotePath(input.path);
     validateNoteCreate(input.path, input.content, { version: 1, utcOffsetMinutes: 0, fields: [] });
     if (!validateObsidianMarkdown(input.content).ok) bad("create_markdown_invalid");
     const key = internalKey(input.idempotencyKey), hash = noteCreateHash(input.content), identity = intent(input.path, hash);

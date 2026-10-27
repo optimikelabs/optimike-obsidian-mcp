@@ -2,7 +2,7 @@
 
 ## Contract and scope
 
-This candidate moves one existing Markdown note through Obsidian `FileManager.renameFile`, never by rewriting wikilinks or renaming a folder at the filesystem layer. A durable MCP plan seals exact source/destination paths, the backend/vault binding, the source content hash, the native update-links preference and a bounded observed neighborhood. It revalidates before dispatch. The destination parent must already exist; case-only renames are refused.
+This candidate moves one existing Markdown note through Obsidian `FileManager.renameFile`, never by rewriting wikilinks or renaming a folder at the filesystem layer. A durable MCP plan seals exact source/destination paths, the backend/vault binding, the source content hash, the native update-links preference and a bounded observed neighborhood. It revalidates before dispatch. The destination parent must already exist; case-only renames are refused. The destination is a new name and must satisfy the shared [note name rules](note-name-rules.md) (refused with a closed `note_name_*` reason, a fixed hint and a `suggestedPath`; a sibling that differs only by case or Unicode form is refused too). The source and its neighborhood may keep a legacy name, so moving such a note to a valid name is the repair path.
 
 The public family is `obsidian_note_move_plan`, `obsidian_note_move_apply`, `obsidian_note_move_status`. There is deliberately no recover or undo endpoint. Other governed families retain their existing lifecycle. Standard/authoring/full expose the complete three-tool family in live/hybrid-live; tasks and headless/degraded modes do not expose it.
 

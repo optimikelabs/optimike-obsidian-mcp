@@ -11,6 +11,7 @@ import TransportStream from "winston-transport";
 import { config } from "../../config/index.js";
 import { TOOL_PROFILE_IDS } from "../../mcp-server/toolProfiles.js";
 import { RequestContext } from "./requestContext.js";
+import { NOTE_NAME_REASON_CODES } from "../../services/noteNameRules.js";
 
 /**
  * Defines the supported logging levels based on RFC 5424 Syslog severity levels,
@@ -183,7 +184,8 @@ const SAFE_NESTED_LOG_FIELDS = new Set([
 ]);
 
 const SAFE_LOG_ENUM_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
-  reasonCode: new Set([
+  reasonCode: new Set<string>([
+    ...NOTE_NAME_REASON_CODES,
     "semantic_index_unavailable",
     "semantic_embedder_configuration_invalid",
     "semantic_query_embedding_failed",

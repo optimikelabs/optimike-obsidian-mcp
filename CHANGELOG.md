@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Shared note-name rule (`src/services/noteNameRules.ts`) valid on Windows, macOS, mobile and in Obsidian links, applied to every name the MCP creates: `obsidian_note_create_plan`/`apply` and the Atomic Write Bridge create route, the **destination** of `obsidian_note_move_plan`/`apply` and the Bridge move route, and files written by the headless filesystem tools (`VaultFileService`). It refuses `\ : * ? " < > | # ^ [ ] %%`, control and invisible characters (no-break and zero-width spaces), non-NFC Unicode, leading dots, edge spaces, Windows reserved names, names over 255 UTF-8 bytes and paths over 240 characters, and a new name that differs from an existing sibling only by case or Unicode form. See [note name rules](docs/note-name-rules.md) for the sources.
+- A refusal returns a closed `note_name_*` `reasonCode`, a fixed-vocabulary `hint` (rule or character, optional segment and code point) and a deterministic `suggestedPath`/`suggestedName` the caller may resubmit; nothing is renamed or created automatically and conforming names are never modified. The creation/move tool descriptions now state the rules.
+- `obsidian_validate_format` accepts `kind: "note_name"` with `filePath` to check a proposed name read-only with the same rule and proposal.
+
+### Changed
+
+- The error boundary releases `hint`, `suggestedPath` and `suggestedName` for note-name refusals only after validating them against the closed hint vocabulary and the name rule itself; suggestions are never logged. This is an explicit, scoped exception to the no-caller-derived-string rule (see SECURITY.md).
+- Headless `obsidian_move_note` and `obsidian_admin_filesystem` dry runs apply the name rule too, and backslash-separated paths are refused (use `/`).
+- Existing notes are not judged: only new names (creation, move destination, non-existing file) are validated, so a note with a legacy name stays readable, editable and movable.
+
+### Limits
+
+- Not covered: the legacy Bases Bridge `bases_create`/`bases_upsert_config` routes (independent plugin, disabled by default) and external roots. Asset import keeps its own segment rule, which does not refuse invisible characters.
+
 ## [3.14.0] - 2026-10-23
 
 ### Fixed

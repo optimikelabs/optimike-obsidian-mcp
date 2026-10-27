@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   mkdir,
+  readdir,
   readFile,
   realpath,
   rename,
@@ -13,6 +14,7 @@ import { dump, load } from "js-yaml";
 import { config } from "../config/index.js";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { RequestContext } from "../utils/index.js";
+import { assertNewNotePath, assertNoFoldedSibling } from "./noteNameMcp.js";
 
 export type VaultFileReadResult = {
   path: string;
@@ -155,6 +157,20 @@ export class VaultFileService {
     return absolutePath;
   }
 
+  /**
+   * A file that does not exist yet gets a NEW name: apply the shared
+   * cross-platform rule and refuse a case/Unicode-folded sibling. Existing
+   * files keep whatever legacy name they have.
+   */
+  async assertNewFileName(filePath: string, absolutePath: string): Promise<void> {
+    if (await stat(absolutePath).then(() => true, () => false)) return;
+    assertNewNotePath(filePath.replace(/^\/+/u, ""), { extensions: null });
+    let siblings: string[];
+    try { siblings = await readdir(path.dirname(absolutePath)); }
+    catch { return; } // parent not created yet: nothing can collide
+    assertNoFoldedSibling(path.basename(absolutePath), siblings);
+  }
+
   private async assertRealPathInsideVault(
     absolutePath: string,
     context: RequestContext,
@@ -266,6 +282,7 @@ export class VaultFileService {
     context: RequestContext,
   ): Promise<VaultFileReadResult> {
     const absolutePath = this.resolveVaultPath(filePath, context);
+    await this.assertNewFileName(filePath, absolutePath);
     await this.assertParentRealPathInsideVault(absolutePath, context);
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await this.assertRealPathInsideVault(path.dirname(absolutePath), context);
@@ -549,6 +566,7 @@ export class VaultFileService {
     const sourceAbsolutePath = this.resolveVaultPath(sourcePath, context);
     const targetAbsolutePath = this.resolveVaultPath(targetPath, context);
     await this.assertRealPathInsideVault(sourceAbsolutePath, context);
+    await this.assertNewFileName(targetPath, targetAbsolutePath);
     await mkdir(path.dirname(targetAbsolutePath), { recursive: true });
     await this.assertRealPathInsideVault(
       path.dirname(targetAbsolutePath),

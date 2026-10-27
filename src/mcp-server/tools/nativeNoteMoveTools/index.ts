@@ -8,6 +8,7 @@ import {
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { NOTE_NAME_RULES_DESCRIPTION } from "../../../services/noteNameRules.js";
 
 const Plan = z
   .object({
@@ -21,7 +22,7 @@ const Plan = z
       .min(1)
       .max(1024)
       .describe(
-        "Exact absent Markdown destination; its parent must already exist.",
+        "Exact absent Markdown destination; its parent must already exist. Must satisfy the shared note name rules (see the tool description); the source may keep a legacy name.",
       ),
     idempotencyKey: z.string().min(1).max(256),
   })
@@ -68,7 +69,7 @@ export function registerNativeNoteMoveTools(
     "obsidian_note_move_plan",
     {
       description:
-        "Seal one native Markdown move and its bounded observed semantic neighborhood without moving a note. Requires MCP_WRITE_MODE=full and the independent native-move Bridge grant. No global graph transaction or source-content CAS. Unknown/truncated neighborhoods are refused; graph effects outside the sealed neighborhood are not certified.",
+        `Seal one native Markdown move and its bounded observed semantic neighborhood without moving a note. Requires MCP_WRITE_MODE=full and the independent native-move Bridge grant. No global graph transaction or source-content CAS. Unknown/truncated neighborhoods are refused; graph effects outside the sealed neighborhood are not certified. ${NOTE_NAME_RULES_DESCRIPTION}`,
       inputSchema: mcpSchema(Plan.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

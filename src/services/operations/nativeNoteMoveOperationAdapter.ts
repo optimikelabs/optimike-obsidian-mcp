@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { assertWriteAllowed } from "../writePolicy.js";
+import { asNoteNameMcpError } from "../noteNameMcp.js";
 import {
   NATIVE_MOVE_PREFIX, nativeDigest, nativeMovePaths, verifyNativeMovePreflight,
   type NativeMoveApply, type NativeMoveObservation, type NativeMovePreflight,
@@ -93,7 +94,9 @@ export class NativeNoteMoveOperationAdapter {
     return row;
   }
   async plan(input: NativeMovePlanInput) {
-    const paths = nativeMovePaths(input.sourcePath, input.destinationPath);
+    let paths: ReturnType<typeof nativeMovePaths>;
+    try { paths = nativeMovePaths(input.sourcePath, input.destinationPath); }
+    catch (error) { throw asNoteNameMcpError(error); }
     const internalKey = key(input.idempotencyKey);
     const identity = nativeDigest(paths);
     const existing = this.lookup(internalKey, identity);

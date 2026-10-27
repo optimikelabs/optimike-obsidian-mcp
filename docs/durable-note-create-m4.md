@@ -8,6 +8,10 @@ The Bridge uses a local filesystem exclusive create (`O_CREAT | O_EXCL`) followe
 
 A process/OS failure can leave a partial newly created file. Status never repairs, overwrites or deletes it, and apply never redispatches an already admitted uncertain attempt. Directory fsync/power-loss durability and races with hostile processes replacing ancestor directories are not certified. The local vault and host filesystem remain a trusted boundary; do not expose creation against an adversarial shared mount. Windows/Linux filesystem tests do not establish correctness for network or cloud-mounted vaults.
 
+## Name of the new note
+
+The path is a new name: it must satisfy the shared [note name rules](note-name-rules.md) (valid on Windows, macOS, mobile and in Obsidian links; Unicode NFC; no `# ^ [ ] : * ? " < > | \`, no invisible characters, no Windows reserved names, bounded length). The plan refuses before any Bridge call with `VALIDATION_ERROR`, a closed `note_name_*` `reasonCode`, a fixed `hint` and a `suggestedPath` the caller may resubmit; nothing is renamed or created automatically. A sibling that differs only by letter case or Unicode form is refused too: by the MCP from the directory listing, and again by the Bridge on the real directory at preflight and apply.
+
 ## Receipts and ambiguity
 
 `committed` means the intended resource state was observed, not that this attempt is proven to have authored the file. Every receipt reports `authorAttribution: not_proven` and `indexing: not_certified`. A known exclusive-create conflict remains terminal conflict. After a lost response or process restart, only exact intended bytes or explicitly qualified date-field effects may reconcile an uncertain operation. Absence, partial content, changed binding or unexplained changes remain unverified. There is no automatic retry/new-key policy and no recover/undo tool.
