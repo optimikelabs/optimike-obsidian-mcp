@@ -17,7 +17,39 @@ export type ObsidianNoteReplaceStatus =
   | "rejected"
   | "failed"
   | "expired"
-  | "outcome_unknown";
+  | "outcome_unknown"
+  /** Administrative closure after review: no further effect can occur, success is not claimed. */
+  | "reviewed_unverified";
+
+/**
+ * Write attempts whose effect-fence token was durably recorded before dispatch.
+ * `untracked` is sticky: an execution started by a build without this record
+ * (or before it) may have dispatched without any token.
+ */
+export type EffectTracking = {
+  contractVersion: 1;
+  untracked: boolean;
+  lastExecutionStartedAtEpochMs?: number;
+  attempts: Array<{ attemptId: string; epoch?: string; recordedAt: string }>;
+};
+
+export const MAX_RECORDED_EFFECT_ATTEMPTS = 32;
+
+export type AdministrativeClosureEvidence = {
+  contractVersion: 1;
+  closedAt: string;
+  reasonCode: "operator_review" | "historical_cleanup";
+  previousOutcome: "outcome_unknown";
+  guarantee: "no_further_effect";
+  priorEffect: "none" | "may_have_occurred" | "unknown";
+  bridge: { pluginVersion: string; bindingFingerprint: string; epoch: string };
+  attempts: Array<{ attemptId: string; epoch: string; verdict: string; settledAgoMs?: number }>;
+  legacy?: { requireFence: true; strictForMs: number; unfencedInFlight: 0 };
+  observation:
+    | { kind: "note-sha256"; sha256: string; matches?: "before" | "after" | "neither" }
+    | { kind: "note-absent" }
+    | { kind: "unavailable" };
+};
 
 export type ObsidianNoteReplaceProjection = {
   contractVersion: 1;
@@ -60,6 +92,8 @@ export type ObsidianNoteReplacePlan = {
   };
   modifiedTimeSettlementEvidence?: ModifiedTimeSettlementEvidence;
   effectProof?: OperationProof;
+  effectTracking?: EffectTracking;
+  administrativeClosure?: AdministrativeClosureEvidence;
 };
 
 export class ObsidianNoteReplaceConcurrencyError extends Error {
@@ -288,7 +322,19 @@ export class ObsidianNoteReplaceJournal {
             created_at TEXT NOT NULL
           )
         `);
+        // Released preparation locks keep their review evidence (no note content).
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS obsidian_date_preparation_fence_reviews (
+            target_digest TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            reviewed_at TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            PRIMARY KEY (target_digest, attempt_id)
+          )
+        `);
         this.ensureExecutionLeaseExpiryColumn();
+        this.ensureDatePreparationFenceEpochColumn();
         this.renewExecutionLease();
         this.markInterruptedPlans();
         this.maybePurgeTerminalPlans();
@@ -342,11 +388,45 @@ export class ObsidianNoteReplaceJournal {
     return !!this.db.prepare("SELECT 1 FROM obsidian_date_preparation_fences WHERE target_digest = ?").get(targetDigest);
   }
 
-  acquireDatePreparationFence(targetDigest: string): string | undefined {
+  /** The attempt id doubles as the Bridge effect-fence token when an epoch is known. */
+  acquireDatePreparationFence(targetDigest: string, fenceEpoch?: string): string | undefined {
     const attempt = randomUUID();
-    const result = this.db.prepare("INSERT OR IGNORE INTO obsidian_date_preparation_fences (target_digest, attempt_id, created_at) VALUES (?, ?, ?)")
-      .run(targetDigest, attempt, new Date(this.now()).toISOString());
+    const result = this.db.prepare("INSERT OR IGNORE INTO obsidian_date_preparation_fences (target_digest, attempt_id, created_at, fence_epoch) VALUES (?, ?, ?, ?)")
+      .run(targetDigest, attempt, new Date(this.now()).toISOString(), fenceEpoch ?? null);
     return Number(result.changes) === 1 ? attempt : undefined;
+  }
+
+  getDatePreparationFence(targetDigest: string): { attemptId: string; createdAt: string; fenceEpoch?: string } | undefined {
+    const row = this.db.prepare("SELECT attempt_id, created_at, fence_epoch FROM obsidian_date_preparation_fences WHERE target_digest = ?")
+      .get(targetDigest) as { attempt_id: string; created_at: string; fence_epoch: string | null } | undefined;
+    return row ? { attemptId: row.attempt_id, createdAt: row.created_at, ...(row.fence_epoch ? { fenceEpoch: row.fence_epoch } : {}) } : undefined;
+  }
+
+  getDatePreparationFenceReview(targetDigest: string): { attemptId: string; reviewedAt: string; evidence: unknown } | undefined {
+    const row = this.db.prepare("SELECT attempt_id, reviewed_at, evidence_json FROM obsidian_date_preparation_fence_reviews WHERE target_digest = ? ORDER BY reviewed_at DESC LIMIT 1")
+      .get(targetDigest) as { attempt_id: string; reviewed_at: string; evidence_json: string } | undefined;
+    return row ? { attemptId: row.attempt_id, reviewedAt: row.reviewed_at, evidence: JSON.parse(row.evidence_json) } : undefined;
+  }
+
+  /** Atomically release one exact preparation lock and keep its review evidence. */
+  resolveDatePreparationFence(targetDigest: string, attempt: string, evidence: unknown): boolean {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db.prepare("SELECT created_at FROM obsidian_date_preparation_fences WHERE target_digest = ? AND attempt_id = ?")
+        .get(targetDigest, attempt) as { created_at: string } | undefined;
+      if (!row) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+      this.db.prepare("INSERT INTO obsidian_date_preparation_fence_reviews (target_digest, attempt_id, created_at, reviewed_at, evidence_json) VALUES (?, ?, ?, ?, ?)")
+        .run(targetDigest, attempt, row.created_at, new Date(this.now()).toISOString(), JSON.stringify(evidence));
+      this.db.prepare("DELETE FROM obsidian_date_preparation_fences WHERE target_digest = ? AND attempt_id = ?").run(targetDigest, attempt);
+      this.db.exec("COMMIT");
+      return true;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   releaseVerifiedDatePreparationFence(targetDigest: string, attempt: string): boolean {
@@ -387,6 +467,7 @@ export class ObsidianNoteReplaceJournal {
       status: "planned",
       createdAt: now,
       updatedAt: now,
+      effectTracking: { contractVersion: 1, untracked: false, attempts: [] },
     };
     const insertValues = maximumActiveProjectionRows === undefined
       ? "VALUES (?, ?, ?, ?, ?, ?)"
@@ -695,6 +776,115 @@ export class ObsidianNoteReplaceJournal {
     );
   }
 
+  /**
+   * Record the effect-fence token of the live attempt BEFORE its dispatch. The
+   * compare-and-set fails once the attempt no longer owns an applying plan, so
+   * a stale executor never dispatches after an interruption sweep.
+   */
+  recordEffectAttempt(
+    operationId: string,
+    expectedExecutionAttemptId: string,
+    fenceEpoch: string | undefined,
+  ): ObsidianNoteReplacePlan {
+    const current = this.get(operationId);
+    if (
+      !current ||
+      current.status !== "applying" ||
+      current.executionOwner?.attemptId !== expectedExecutionAttemptId
+    ) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    const tracking: EffectTracking = current.effectTracking ?? {
+      contractVersion: 1,
+      // A historical plan may already have unrecorded dispatches.
+      untracked: true,
+      lastExecutionStartedAtEpochMs: current.executionStartedAtEpochMs,
+      attempts: [],
+    };
+    if (tracking.attempts.some((item) => item.attemptId === expectedExecutionAttemptId)) {
+      return current;
+    }
+    if (tracking.attempts.length >= MAX_RECORDED_EFFECT_ATTEMPTS) {
+      throw new McpError(
+        BaseErrorCode.FORBIDDEN,
+        "The operation reached its bounded number of write attempts.",
+        { reason: "effect_attempt_limit_reached" },
+      );
+    }
+    const updated: ObsidianNoteReplacePlan = {
+      ...current,
+      effectTracking: {
+        ...tracking,
+        attempts: [
+          ...tracking.attempts,
+          {
+            attemptId: expectedExecutionAttemptId,
+            ...(fenceEpoch ? { epoch: fenceEpoch } : {}),
+            recordedAt: new Date(this.now()).toISOString(),
+          },
+        ],
+      },
+      updatedAt: new Date(this.now()).toISOString(),
+    };
+    const result = this.db
+      .prepare(
+        `UPDATE obsidian_note_replace_plans SET payload_json = ?, updated_at = ?
+         WHERE operation_id = ? AND status = 'applying' AND payload_json = ?`,
+      )
+      .run(
+        JSON.stringify(updated),
+        updated.updatedAt,
+        operationId,
+        JSON.stringify(current),
+      );
+    if (Number(result.changes) !== 1) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    return updated;
+  }
+
+  /**
+   * Administrative closure. The caller must have proven, through the Bridge
+   * effect fence, that no recorded or legacy attempt can still produce an
+   * effect. The compare-and-set on the exact observed payload fails if any
+   * new attempt, recovery or reconciliation happened in between.
+   */
+  closeAdministratively(
+    observed: ObsidianNoteReplacePlan,
+    evidence: AdministrativeClosureEvidence,
+  ): ObsidianNoteReplacePlan {
+    this.assertOpen();
+    if (observed.status !== "outcome_unknown") {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    const updated: ObsidianNoteReplacePlan = {
+      ...observed,
+      status: "reviewed_unverified",
+      updatedAt: new Date(this.now()).toISOString(),
+      executionOwner: undefined,
+      nextContent: "",
+      administrativeClosure: evidence,
+    };
+    const result = this.db
+      .prepare(
+        `UPDATE obsidian_note_replace_plans
+         SET status = 'reviewed_unverified', payload_json = ?, updated_at = ?
+         WHERE operation_id = ? AND status = 'outcome_unknown' AND payload_json = ?`,
+      )
+      .run(
+        JSON.stringify(updated),
+        updated.updatedAt,
+        observed.operationId,
+        JSON.stringify(observed),
+      );
+    if (Number(result.changes) !== 1) {
+      throw new ObsidianNoteReplaceConcurrencyError();
+    }
+    this.walCheckpointRequired = true;
+    this.checkpointSensitiveFrames();
+    return updated;
+  }
+
   private transitionInternal(
     operationId: string,
     expected: ObsidianNoteReplaceStatus[],
@@ -718,19 +908,39 @@ export class ObsidianNoteReplaceJournal {
     ) {
       throw new ObsidianNoteReplaceConcurrencyError();
     }
+    const nowMs = this.now();
     const updated: ObsidianNoteReplacePlan = {
       ...current,
       status: next,
-      updatedAt: new Date(this.now()).toISOString(),
+      updatedAt: new Date(nowMs).toISOString(),
       ...(next === "applying"
         ? {
             executionOwner: {
               ...this.executionOwner,
               attemptId: randomUUID(),
             },
-            executionStartedAtEpochMs: this.now(),
+            executionStartedAtEpochMs: nowMs,
             settlementObservationStartedAtEpochMs: undefined,
             settlementDeferred: undefined,
+            ...(current.effectTracking ||
+            current.executionStartedAtEpochMs === undefined
+              ? {
+                  effectTracking: {
+                    // A plan never executed before has no unrecorded dispatch.
+                    ...(current.effectTracking ?? {
+                      contractVersion: 1 as const,
+                      untracked: false,
+                      attempts: [],
+                    }),
+                    // A start this tracker did not see may have dispatched without a token.
+                    untracked:
+                      (current.effectTracking?.untracked ?? false) ||
+                      current.executionStartedAtEpochMs !==
+                        current.effectTracking?.lastExecutionStartedAtEpochMs,
+                    lastExecutionStartedAtEpochMs: nowMs,
+                  },
+                }
+              : {}),
           }
         : { executionOwner: undefined }),
       ...(settlementEvidence
@@ -927,6 +1137,24 @@ export class ObsidianNoteReplaceJournal {
       // Another process may have completed the same additive migration after
       // our schema read. Only suppress that race when the column now exists.
       if (!hasExpiry()) throw error;
+    }
+  }
+
+  private ensureDatePreparationFenceEpochColumn(): void {
+    const hasEpoch = () =>
+      (
+        this.db
+          .prepare("PRAGMA table_info(obsidian_date_preparation_fences)")
+          .all() as Array<{ name: string }>
+      ).some((column) => column.name === "fence_epoch");
+    if (hasEpoch()) return;
+    try {
+      this.db.exec(
+        "ALTER TABLE obsidian_date_preparation_fences ADD COLUMN fence_epoch TEXT",
+      );
+    } catch (error) {
+      // Another process may have completed the same additive migration.
+      if (!hasEpoch()) throw error;
     }
   }
 

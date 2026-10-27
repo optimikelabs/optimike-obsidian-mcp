@@ -63,6 +63,8 @@ export type OperationCockpitItem = {
   updatedAt: string;
   ageSeconds: number;
   nextAction: "apply" | "status" | "recover";
+  /** obsidian_operation_close can be attempted after owner review (the Bridge fence still decides). */
+  closeAllowed: boolean;
 };
 
 export type OperationCockpitPage = {
@@ -139,6 +141,15 @@ function nextAction(
   return ["obsidian.note.move", "obsidian.note.create", "obsidian.base.rows.patch", "obsidian.asset.import"].includes(kind) ? "status" : "recover";
 }
 
+const CLOSABLE_KINDS = new Set<PendingOperationRow["operationKind"]>([
+  "obsidian.note.replace",
+  "obsidian.frontmatter.patch",
+  "obsidian.text.patch",
+  "obsidian.base.rows.patch",
+  "obsidian.note.create",
+  "obsidian.note.move",
+]);
+
 function publicItem(
   row: PendingOperationRow,
   now: number,
@@ -165,6 +176,7 @@ function publicItem(
     updatedAt: value.updatedAt,
     ageSeconds,
     nextAction: nextAction(value.status, value.operationKind),
+    closeAllowed: value.status === "outcome_unknown" && CLOSABLE_KINDS.has(value.operationKind),
   };
 }
 

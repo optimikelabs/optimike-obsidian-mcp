@@ -9,7 +9,7 @@ import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCrea
   type NoteCreateApply, type NoteCreatePreflight } from "../noteCreateContract.js";
 import { operationDigest } from "./contract.js";
 import { frontmatterEnvelope, inspectNativeFrontmatter, rejectNonCanonical } from "../obsidianFrontmatterFormat.js";
-import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
+import { effectFenceEpoch, type AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "./obsidianNoteReplaceJournal.js";
 
 /** Newly created user-authored frontmatter is a change from the empty document.
@@ -134,9 +134,13 @@ export class NoteCreateOperationAdapter {
     try {
       const plan = this.sealed(row);
       this.authorize("apply", row.path, row.nextContent);
+      // Durable effect-fence token before the request exists; a stale owner stops here.
+      const fenceEpoch = effectFenceEpoch(await this.backend.status());
+      row = this.journal.recordEffectAttempt(row.operationId, attempt, fenceEpoch);
       dispatched = true;
       const result = Result.parse(await this.backend.create({ contractVersion: 1, operationId: row.operationId, path: row.path,
-        content: row.nextContent, contentSha256: row.afterSha256, bindingFingerprint: row.bindingFingerprint, policyDigest: plan.policyDigest }));
+        content: row.nextContent, contentSha256: row.afterSha256, bindingFingerprint: row.bindingFingerprint, policyDigest: plan.policyDigest,
+        ...(fenceEpoch ? { fence: { contractVersion: 1 as const, epoch: fenceEpoch, attemptId: attempt } } : {}) }));
       if (result.operationId !== row.operationId || result.path !== row.path || result.bindingFingerprint !== row.bindingFingerprint ||
           result.contentSha256 !== row.afterSha256 || result.policyDigest !== plan.policyDigest) bad("create_result_identity_mismatch");
       if (result.outcome !== "created") {

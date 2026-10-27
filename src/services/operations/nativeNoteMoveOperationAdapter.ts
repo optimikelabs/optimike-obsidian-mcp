@@ -10,6 +10,7 @@ import {
   ObsidianNoteReplaceConcurrencyError, ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
 } from "./obsidianNoteReplaceJournal.js";
+import { effectFenceEpoch } from "./obsidianNoteReplaceOperationAdapter.js";
 
 const KIND = "obsidian.note.move";
 const KEY_PREFIX = "optimike:projection:v1:native-move:";
@@ -38,6 +39,8 @@ const Observation = z.object({
   observedGraphDigest: Hash.optional(), scope: z.literal("sealed_neighborhood_only"), replayAllowed: z.literal(false),
 }).strict();
 export interface NativeNoteMoveBackend {
+  /** Atomic Write Bridge status; its effect-fence epoch is sealed before dispatch. */
+  bridgeStatus?(): Promise<unknown>;
   preflight(sourcePath: string, destinationPath: string): Promise<unknown>;
   apply(request: NativeMoveApply): Promise<unknown>;
   status(operationId: string, preconditionDigest: string): Promise<unknown>;
@@ -153,9 +156,17 @@ export class NativeNoteMoveOperationAdapter {
     try {
       this.authorize("apply", row.path);
       const plan = this.sealed(row);
+      // Durable effect-fence token before the request exists; a stale owner stops here.
+      const fenceEpoch = this.backend.bridgeStatus ? effectFenceEpoch(await this.backend.bridgeStatus()) : undefined;
+      try { row = this.journal.recordEffectAttempt(row.operationId, attemptId, fenceEpoch); }
+      catch (error) {
+        if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(reference);
+        throw error;
+      }
       observed = this.observation(await this.backend.apply({ contractVersion: 1, operationId: row.operationId,
         sourcePath: plan.sourcePath, destinationPath: plan.destinationPath, bindingFingerprint: row.bindingFingerprint,
-        preconditionDigest: row.requestDigest }), row);
+        preconditionDigest: row.requestDigest,
+        ...(fenceEpoch ? { fence: { contractVersion: 1 as const, epoch: fenceEpoch, attemptId } } : {}) }), row);
       row = this.journal.transition(row.operationId, ["applying"], observed.outcome,
         observed.outcome === "committed" ? undefined : "native_move_not_committed", attemptId);
     } catch {

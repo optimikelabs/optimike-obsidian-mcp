@@ -64,6 +64,8 @@ export type NativeMoveApply = {
   destinationPath: string;
   bindingFingerprint: string;
   preconditionDigest: string;
+  /** Effect fence token recorded by the MCP journal before dispatch. */
+  fence?: { contractVersion: 1; epoch: string; attemptId: string };
 };
 export type NativeMoveObservation = {
   contractVersion: 1;

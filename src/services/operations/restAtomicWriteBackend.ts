@@ -2,6 +2,8 @@ import type { ObsidianRestApiService } from "../obsidianRestAPI/service.js";
 import type {
   AtomicWriteCasRequest,
   AtomicWriteCasResponse,
+  EffectFenceResolveRequest,
+  EffectFenceResolveResponse,
   AtomicWriteReadRequest,
   AtomicWriteReadResponse,
   AtomicWriteStatusResponse,
@@ -33,7 +35,12 @@ export class RestAtomicWriteBackend implements AtomicWriteBackend {
     );
   }
 
-  prepareDate(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string }) {
+  resolveEffectFence(payload: EffectFenceResolveRequest): Promise<EffectFenceResolveResponse> {
+    return this.rest.resolveAtomicWriteEffectFence(payload, requestContextService.createRequestContext({ operation: "AtomicWriteEffectFence" }));
+  }
+
+  prepareDate(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string;
+    fence?: { contractVersion: 1; epoch: string; attemptId: string } }) {
     return this.rest.prepareAtomicWriteDate(payload, requestContextService.createRequestContext({ operation: "AtomicWriteDatePreparation" }));
   }
 

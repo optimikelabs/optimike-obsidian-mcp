@@ -10,6 +10,7 @@ import {
   type NativeSemanticNote, type NativeMoveApply,
 } from "../../../src/services/nativeNoteMoveContract.js";
 import { NativeNoteMoveService, NativeMoveBeforeEffectConflict, type NativeMoveHost } from "./nativeNoteMove.js";
+import { parseEffectFenceToken, type EffectFenceToken } from "./effectFence.js";
 
 const PREFIX = "/extensions/obsidian-atomic-write-bridge/native-note-move";
 const SAFE_REASONS = new Set([
@@ -40,7 +41,11 @@ export function readNativeUpdateLinksPreference(vault: unknown): boolean | null 
 
 export function createNativeNoteMoveRoutes(
   app: App,
-  options: { binding: () => string; enabled: () => boolean; registerEvent: (event: EventRef) => void },
+  options: {
+    binding: () => string; enabled: () => boolean; registerEvent: (event: EventRef) => void;
+    /** Effect fence admission; throws when the attempt must produce no effect. */
+    enterEffect?: (fence: EffectFenceToken | undefined) => () => void;
+  },
 ) {
   const adapter = app.vault.adapter as { getBasePath?: () => string; exists?: (path: string) => Promise<boolean> };
   const configuredRoot = adapter.getBasePath?.();
@@ -133,7 +138,7 @@ export function createNativeNoteMoveRoutes(
       return parent === "" || app.vault.getAbstractFileByPath(parent) instanceof TFolder;
     },
     note,
-    rename: async (plan) => {
+    rename: async (plan, fence) => {
       const fresh: NativeSemanticNote[] = [];
       try {
         for (const item of plan.notes) fresh.push(await note(item.path));
@@ -148,8 +153,13 @@ export function createNativeNoteMoveRoutes(
       }
       physical(plan.sourcePath); physical(plan.destinationPath, true);
       const barrier = host.clock();
+      // Effect point: the fence admits the attempt in the same tick that starts renameFile.
+      let settleEffect: (() => void) | undefined;
+      try { settleEffect = options.enterEffect?.(fence); }
+      catch { throw new NativeMoveBeforeEffectConflict(); }
       // This is a native rename, not an atomic source-content CAS or an OS-wide directory lock.
-      await app.fileManager.renameFile(source, plan.destinationPath);
+      try { await app.fileManager.renameFile(source, plan.destinationPath); }
+      finally { settleEffect?.(); }
       if (source.path !== plan.destinationPath || app.vault.getAbstractFileByPath(plan.sourcePath) !== null) {
         throw new Error("native_move_result_unproven");
       }
@@ -175,7 +185,12 @@ export function createNativeNoteMoveRoutes(
       return service.preflight(nativeNotePath(r.sourcePath), nativeNotePath(r.destinationPath));
     });
     install("/apply", async (value) => {
-      const r = body(value, ["contractVersion", "operationId", "sourcePath", "destinationPath", "bindingFingerprint", "preconditionDigest"]);
+      const keys = ["contractVersion", "operationId", "sourcePath", "destinationPath", "bindingFingerprint", "preconditionDigest"];
+      const fenced = !!value && typeof value === "object" && (value as Record<string, unknown>).fence !== undefined;
+      const r = body(value, fenced ? [...keys, "fence"] : keys);
+      if (fenced) {
+        try { r.fence = parseEffectFenceToken(r.fence); } catch { throw new Error("invalid_native_request"); }
+      }
       return service.apply(r as unknown as NativeMoveApply);
     });
     install("/status", async (value) => {

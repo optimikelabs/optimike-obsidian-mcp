@@ -36,6 +36,7 @@ import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/i
 import type { VaultCacheService } from "../../../services/obsidianRestAPI/vaultCache/index.js";
 import {
   type AtomicWriteBackend,
+  effectFenceEpoch,
   markAtomicWritePreDispatchError,
   effectiveAtomicWriteDateProtection,
   effectiveAtomicWriteProtectedFrontmatterKeys,
@@ -49,6 +50,15 @@ import {
   type PendingOperationRowsPage,
 } from "../../../services/operations/obsidianNoteReplaceJournal.js";
 import { RestAtomicWriteBackend } from "../../../services/operations/restAtomicWriteBackend.js";
+import {
+  AdministrativeClosureService,
+  type AdministrativeClosureReasonCode,
+  type ClosureItemResult,
+  type ClosureKindProfile,
+} from "../../../services/operations/administrativeClosure.js";
+import { NOTE_CREATE_PREFIX } from "../../../services/noteCreateContract.js";
+import { NATIVE_MOVE_PREFIX } from "../../../services/nativeNoteMoveContract.js";
+import type { EffectFenceResolveRequest } from "../../../services/obsidianRestAPI/types.js";
 import type { OperationReceipt } from "../../../services/operations/contract.js";
 import {
   assertWriteAllowed,
@@ -361,6 +371,13 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     return status;
   }
 
+  resolveEffectFence(payload: EffectFenceResolveRequest) {
+    if (!this.delegate.resolveEffectFence) {
+      throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "The Atomic Write Bridge effect fence is unavailable.", { reasonCode: "closure_fence_capability_missing" });
+    }
+    return this.delegate.resolveEffectFence(payload);
+  }
+
   inspectFrontmatterFormat(yaml: string) {
     if (!this.delegate.inspectFrontmatterFormat) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Native frontmatter format inspection is unavailable.", { reasonCode: "frontmatter_format_capability_missing" });
     return this.delegate.inspectFrontmatterFormat(yaml);
@@ -406,7 +423,7 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       throw new McpError(BaseErrorCode.CONFLICT, "The planning read could not be verified.", { reason: "note_source_proof_invalid" });
     const fenceKey = operationDigest({ domain: "obsidian-date-preparation-v1", path, bindingFingerprint: source.bindingFingerprint });
     const unverified = () => new McpError(BaseErrorCode.CONFLICT,
-      "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise.",
+      "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise : obsidian_operation_close avec datePreparationPaths.",
       { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true });
     if (this.journal.hasDatePreparationFence(fenceKey)) throw unverified();
     if (expectedSource && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
@@ -429,12 +446,24 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     if (!status.backend.writeEnabled || !this.delegate.prepareDate || protection.unsupportedIntegrations.length || !protection.createdPropertyNames.length ||
         !Number.isInteger(offset) || Math.abs(offset!) > 840) throw fail();
     let prepared;
-    const attempt = this.journal.acquireDatePreparationFence(fenceKey);
+    // The lock attempt id is also the Bridge effect-fence token (durable before dispatch).
+    const fenceEpoch = effectFenceEpoch(status);
+    const attempt = this.journal.acquireDatePreparationFence(fenceKey, fenceEpoch);
     if (!attempt) throw unverified();
     const dispatchedAt = Date.now();
     try {
-      prepared = await this.delegate.prepareDate({ contractVersion: 1, path, expectedSha256: source.sha256, bindingFingerprint: source.bindingFingerprint });
-    } catch { throw unverified(); }
+      prepared = await this.delegate.prepareDate({ contractVersion: 1, path, expectedSha256: source.sha256, bindingFingerprint: source.bindingFingerprint,
+        ...(fenceEpoch ? { fence: { contractVersion: 1, epoch: fenceEpoch, attemptId: attempt } } : {}) });
+    } catch (error) {
+      // Only the Bridge's own fence refusal proves that no preparation started.
+      if (fenceEpoch && error instanceof McpError && error.code === BaseErrorCode.FORBIDDEN &&
+          (error.details as { reasonCode?: unknown } | undefined)?.reasonCode === "effect_fence_refused" &&
+          this.journal.releaseVerifiedDatePreparationFence(fenceKey, attempt)) {
+        throw new McpError(BaseErrorCode.CONFLICT, "The Atomic Write Bridge changed before date preparation; nothing was prepared. Plan again.",
+          { reasonCode: "effect_fence_refused" });
+      }
+      throw unverified();
+    }
     if (prepared.datePreparation?.kind !== "date-manager-before-plan") throw unverified();
     // Seal only a fresh read, never the preparation response or the old projection.
     let current;
@@ -589,6 +618,7 @@ export class GovernedNoteReplaceRuntime {
     | ImageProcessingError["reason"];
   readonly nativeMove: NativeNoteMoveOperationAdapter | undefined;
   private closed = false;
+  private readonly closure: AdministrativeClosureService;
   private readonly leaseHeartbeat: NodeJS.Timeout;
   private leaseRenewalFailureReported = false;
 
@@ -603,6 +633,8 @@ export class GovernedNoteReplaceRuntime {
   ) {
     this.noteCreate = noteCreateBackend ? new NoteCreateOperationAdapter(noteCreateBackend, journal) : undefined;
     this.nativeMove = nativeMoveBackend ? new NativeNoteMoveOperationAdapter(nativeMoveBackend, journal) : undefined;
+    this.closure = new AdministrativeClosureService(journal, backend, this.closureProfiles(noteCreateBackend),
+      ["obsidian-canvas-patch:v1:", "obsidian-base-formula-patch:v1:", "oasset:"]);
     if (
       config.assetImportEnabled &&
       config.assetFolder &&
@@ -662,6 +694,64 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
       }
     }, leaseHeartbeatMs);
     this.leaseHeartbeat.unref();
+  }
+
+  /** Administrative closure: Bridge fence first, then one compare-and-set; never a note write. */
+  closeOperation(planRef: string, options: { dryRun: boolean; reasonCode: AdministrativeClosureReasonCode }): Promise<ClosureItemResult> {
+    return this.closure.closeOperation(planRef, options);
+  }
+
+  releaseDatePreparationLock(path: string, options: { dryRun: boolean; reasonCode: AdministrativeClosureReasonCode }): Promise<ClosureItemResult> {
+    return this.closure.releaseDatePreparationLock(path, options);
+  }
+
+  private closureProfiles(noteCreateBackend?: NoteCreateBackend): ClosureKindProfile[] {
+    const statusField = (status: unknown, field: "noteCreate" | "nativeMove") => {
+      const value = (status as Record<string, { bindingFingerprint?: unknown } | undefined> | null)?.[field]?.bindingFingerprint;
+      return typeof value === "string" ? value : undefined;
+    };
+    const atomicBinding = (status: unknown) => {
+      const value = (status as { backend?: { bindingFingerprint?: unknown } } | null)?.backend?.bindingFingerprint;
+      return typeof value === "string" ? value : undefined;
+    };
+    const observeNote = async (row: ObsidianNoteReplacePlan) => {
+      try {
+        const read = await this.backend.read({ contractVersion: 1, path: row.path });
+        if (read.path !== row.path || read.bindingFingerprint !== row.bindingFingerprint) return { kind: "unavailable" as const };
+        return { kind: "note-sha256" as const, sha256: read.sha256,
+          matches: read.sha256 === row.afterSha256 ? "after" as const : read.sha256 === row.beforeSha256 ? "before" as const : "neither" as const };
+      } catch (error) {
+        return error instanceof McpError && error.code === BaseErrorCode.NOT_FOUND ? { kind: "note-absent" as const } : { kind: "unavailable" as const };
+      }
+    };
+    const replaceFamily = (operationKind: string, planRefPrefix: string): ClosureKindProfile => ({
+      operationKind, planRefPrefix, binding: atomicBinding, observe: observeNote,
+      reconcile: (operationId) => this.status(PLAN_REF_PREFIX + operationId),
+    });
+    return [
+      replaceFamily("obsidian.note.replace", PLAN_REF_PREFIX),
+      replaceFamily("obsidian.frontmatter.patch", "obsidian-frontmatter-patch:v1:"),
+      replaceFamily("obsidian.text.patch", "obsidian-text-patch:v1:"),
+      replaceFamily("obsidian.base.rows.patch", "obsidian-base-rows-patch:v1:"),
+      {
+        operationKind: "obsidian.note.create", planRefPrefix: NOTE_CREATE_PREFIX,
+        binding: (status) => statusField(status, "noteCreate"),
+        reconcile: async (operationId) => this.noteCreate?.status(NOTE_CREATE_PREFIX + operationId),
+        observe: async (row) => {
+          const observed = await noteCreateBackend?.inspect(row.path) as { exists?: unknown; sha256?: unknown } | undefined;
+          if (observed?.exists === false) return { kind: "note-absent" as const };
+          return typeof observed?.sha256 === "string"
+            ? { kind: "note-sha256" as const, sha256: observed.sha256, matches: observed.sha256 === row.afterSha256 ? "after" as const : "neither" as const }
+            : { kind: "unavailable" as const };
+        },
+      },
+      {
+        operationKind: "obsidian.note.move", planRefPrefix: NATIVE_MOVE_PREFIX,
+        binding: (status) => statusField(status, "nativeMove"),
+        reconcile: async (operationId) => this.nativeMove?.status(NATIVE_MOVE_PREFIX + operationId),
+        observe: async () => ({ kind: "unavailable" as const }),
+      },
+    ];
   }
 
   readForProjection(path: string, requireNativeFormat = false) {

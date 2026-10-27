@@ -46,8 +46,8 @@ Runtime answers what the backend can execute. It does not decide how many tools 
 | General vault work                                | `standard`  |                    30 |
 | Notes, tags, Bases and Canvas authoring           | `authoring` |                    44 |
 | Tasks / Operon workflows                          | `tasks`     |                    36 |
-| Complete daily workflows with governed preference | `operational` | 84 |
-| Explicit complete, admin and specialized surfaces | `full`      |                    88 |
+| Complete daily workflows with governed preference | `operational` | 85 |
+| Explicit complete, admin and specialized surfaces | `full`      |                    89 |
 
 The counts above exclude three optional asset tools: the current local configuration exposes 87 operational and 91 full tools. The local launcher explicitly selects operational; the package-wide unspecified default remains standard.
 

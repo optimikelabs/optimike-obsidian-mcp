@@ -11,6 +11,7 @@ export type WriteOperation =
   | "obsidian_note_move_apply"
   | "obsidian_note_create_plan"
   | "obsidian_note_create_apply"
+  | "obsidian_operation_close"
   | "obsidian_admin_filesystem"
   | "obsidian_manage_canvas"
   | "obsidian_update_note"

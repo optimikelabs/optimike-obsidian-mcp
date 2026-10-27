@@ -6,14 +6,14 @@
     "vault-cache",
     "asset-policy"
   ],
-  "toolCount": 95,
+  "toolCount": 96,
   "classificationCounts": {
     "canonical-unique": 48,
     "alias-redundant": 0,
     "compatibility-historical": 1,
     "governed-operation": 32,
     "diagnostic": 10,
-    "administration": 4
+    "administration": 5
   },
   "modes": {
     "live": [
@@ -71,6 +71,7 @@
       "obsidian_note_replace_plan",
       "obsidian_note_replace_recover",
       "obsidian_note_replace_status",
+      "obsidian_operation_close",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
@@ -164,6 +165,7 @@
       "obsidian_note_replace_plan",
       "obsidian_note_replace_recover",
       "obsidian_note_replace_status",
+      "obsidian_operation_close",
       "obsidian_read_note",
       "obsidian_runtime_maintenance",
       "obsidian_runtime_status",
@@ -883,6 +885,7 @@
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
           "obsidian_note_replace_status",
+          "obsidian_operation_close",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -976,6 +979,7 @@
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
           "obsidian_note_replace_status",
+          "obsidian_operation_close",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -1284,6 +1288,7 @@
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
           "obsidian_note_replace_status",
+          "obsidian_operation_close",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -1373,6 +1378,7 @@
           "obsidian_note_replace_plan",
           "obsidian_note_replace_recover",
           "obsidian_note_replace_status",
+          "obsidian_operation_close",
           "obsidian_read_note",
           "obsidian_runtime_maintenance",
           "obsidian_runtime_status",
@@ -3919,6 +3925,33 @@
         ]
       },
       "lifecycleRole": "status"
+    },
+    {
+      "name": "obsidian_operation_close",
+      "canonicalName": "obsidian_operation_close",
+      "classification": "administration",
+      "group": "runtime.maintenance",
+      "family": "operation-closure",
+      "surfaceClass": "canonical",
+      "annotationClass": "maintenance",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      }
     },
     {
       "name": "obsidian_read_note",

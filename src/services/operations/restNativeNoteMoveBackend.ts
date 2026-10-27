@@ -6,6 +6,9 @@ import { assertNoFoldedSibling } from "../noteNameMcp.js";
 
 export class RestNativeNoteMoveBackend implements NativeNoteMoveBackend {
   constructor(private readonly rest: ObsidianRestApiService) {}
+  bridgeStatus(): Promise<unknown> {
+    return this.rest.getAtomicWriteStatus(requestContextService.createRequestContext({ operation: "AtomicWriteStatus" }));
+  }
   async preflight(sourcePath: string, destinationPath: string): Promise<unknown> {
     const context = requestContextService.createRequestContext({ operation: "NativeNoteMovePreflight" });
     const slash = destinationPath.lastIndexOf("/");

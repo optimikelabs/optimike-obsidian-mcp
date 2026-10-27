@@ -16,12 +16,12 @@ Les profils réduisent le volume des schémas et l’ambiguïté de routage. Ils
 | `standard`  | Lecture/recherche générale et travail courant gouverné Note/Frontmatter |                    30 outils |
 | `authoring` | `standard` + tags, authoring Bases borné/formules et authoring Canvas   |                    44 outils |
 | `tasks`     | Compatibilité Markdown Tasks + contrat MCP Operon live complet          |                    36 outils |
-| `operational` | Usage courant complet, préférence gouvernée | 84 outils |
-| `full`      | Surface complète/admin explicite du runtime actif                       |                    88 outils |
+| `operational` | Usage courant complet, préférence gouvernée | 85 outils |
+| `full`      | Surface complète/admin explicite du runtime actif                       |                    89 outils |
 
 Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 87 outils operational et 91 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard.
 
-Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 88 outils. Le registre canonique couvre 95 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
+Ces nombres sont des projections du registre actuel et peuvent être plus faibles dans les runtimes restreints. `full` signifie tous les outils structurellement enregistrés par le runtime actif, pas toujours 89 outils. Le registre canonique couvre 96 noms uniques entre tous les runtimes, dont quatre n’existent qu’en `headless-filesystem`. Le cockpit des opérations est live-only car il lit les journaux gouvernés possédés par le processus ; sa visibilité ne remplace jamais un grant d’écriture.
 
 `obsidian_note_links` est limité à `live` / `hybrid-live` : sa sémantique vient du `MetadataCache` public d’Obsidian Desktop. Les profils dégradés et headless l’omettent plutôt que de simuler le graphe depuis l’état filesystem.
 
@@ -149,7 +149,7 @@ Les clients qui ont réellement besoin de l’administration, des racines extern
 
 `operational` garde les fonctions utiles de `full` : Operon, documents externes, diagnostics, import d’assets et fonctions directes distinctes. Dans un runtime live, il masque `obsidian_update_note`, `obsidian_search_replace` et `obsidian_manage_frontmatter` quand leurs familles gouvernées sont complètes. `obsidian_get_frontmatter` est une lecture de clé dédiée, sans paramètres de mutation. Les lots `bases_upsert_rows` et les opérations composites/inline sur les tags gardent leurs contrats propres ; pour les tags YAML, préférer la projection frontmatter gouvernée. Le remplacement historique de document entier `bases_upsert_config` reste réservé à `full`.
 
-Le profil compte 84 outils live avec cache, contre 88 dans `full`, hors publication optionnelle de trois outils d’assets. `/mcp/operational` et `--tool-profile operational` le sélectionnent. `full` conserve la compatibilité et ses anciens outils ; aucun droit ou contrat de mutation n’est étendu. Une famille structurellement absente peut laisser un fallback borné disponible dans un runtime dédié ; un conflit, une panne du Bridge ou un effet incertain dans un runtime gouverné n’autorise jamais de basculer vers une écriture directe.
+Le profil compte 85 outils live avec cache, contre 89 dans `full`, hors publication optionnelle de trois outils d’assets. `/mcp/operational` et `--tool-profile operational` le sélectionnent. `full` conserve la compatibilité et ses anciens outils ; aucun droit ou contrat de mutation n’est étendu. Une famille structurellement absente peut laisser un fallback borné disponible dans un runtime dédié ; un conflit, une panne du Bridge ou un effet incertain dans un runtime gouverné n’autorise jamais de basculer vers une écriture directe.
 
 Les publications de Skills déjà explicitement autorisées pour `full` restent visibles dans `operational`, avec les mêmes racines, chemins et contrôles ; les cursors restent liés au profil. Les autres profils ne changent pas de politique. Le choix stdio reste fixe pendant la vie du proxy : une session déjà ouverte peut nécessiter une reconnexion pour son nouveau catalogue.
 
