@@ -337,7 +337,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       stored?.allowCanvasWrites !== this.allowCanvasWrites ||
       stored?.allowNativeMoves !== this.allowNativeMoves ||
       stored?.allowNoteCreates !== this.allowNoteCreates ||
-      stored?.allowNoteDeletes !== this.allowNoteDeletes
+      (stored?.allowNoteDeletes !== undefined && stored.allowNoteDeletes !== this.allowNoteDeletes)
     ) {
       await this.saveSettings();
     }
