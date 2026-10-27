@@ -11,6 +11,8 @@ Atomic Write Bridge 0.8.4 or later is required for governed writes and native fr
 
 ### Added
 
+- Opt-in ChatGPT stdio proxy compatibility for root `content` keys in JSON text tool results; disabled by default. See [Secure Tunnel](docs/chatgpt-secure-tunnel.md).
+
 - Filter pending operations by kind, state and minimum age before pagination.
 - Expire unsent plans after a configurable retention window and remove expired runtime leases; uncertain effects are preserved.
 

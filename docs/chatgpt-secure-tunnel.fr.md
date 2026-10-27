@@ -58,6 +58,8 @@ $tunnelClient = Join-Path $env:LOCALAPPDATA "Optimike\tunnel-client\tunnel-clien
 
 Créer ensuite une application en mode développeur dans ChatGPT, choisir **Tunnel** comme type de connexion et sélectionner le tunnel associé. Vérifier que le client local est live et ready avant de tester l’application.
 
+Définir `MCP_PROXY_CHATGPT_RESULT_COMPAT=1` **uniquement dans le lanceur du proxy ChatGPT** pour contourner le [problème tunnel #91](https://github.com/openai/tunnel-client/issues/91). Dans les résultats réussis du backend, une clé racine `content` d’un objet JSON dans un bloc texte devient `note_content` ; ordre, mise en forme, autres clés, textes non JSON, blocs non texte et erreurs sont conservés. Si `note_content` existe déjà ou si `content` est dupliqué, le bloc reste inchangé pour éviter une perte. Désactivé par défaut : ni le backend partagé ni les autres clients ne changent. Redémarrer le tunnel après modification de son lanceur. Ce contournement ne prouve pas à lui seul le résultat de bout en bout dans ChatGPT.
+
 ## Charger une configuration locale et des racines externes
 
 Le processus lancé par `tunnel-client` doit recevoir la même configuration qu’un client stdio local. Les secrets Obsidian et les chemins privés restent hors Git. Pour injecter proprement le profil d’outils et le fichier de racines, créer un lanceur PowerShell local, par exemple `C:\Users\vous\.config\optimike\start-chatgpt-mcp.ps1` :
@@ -67,6 +69,7 @@ $ErrorActionPreference = "Stop"
 $repository = "C:\chemin\vers\optimike-obsidian-mcp"
 $externalRoots = "C:\Users\vous\.config\optimike\external-roots.json"
 
+$env:MCP_PROXY_CHATGPT_RESULT_COMPAT = "1"
 $env:MCP_TOOL_PROFILE = "full"
 $env:MCP_EXTERNAL_ROOTS_FILE = $externalRoots
 

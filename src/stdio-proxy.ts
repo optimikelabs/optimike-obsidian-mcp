@@ -2,6 +2,7 @@
 
 import { configuredSkillRegistry, installSkillsExtension } from "./mcp-server/resources/skillsExtension.js";
 import type { McpRequestContext } from "@modelcontextprotocol/server";
+import { parseTree } from "jsonc-parser";
 import { proxyMutationFailure } from "./utils/proxyMutationFailure.js";
 
 import "./config/toolProfileCli.js";
@@ -81,6 +82,61 @@ import {
   safelyReadUntrustedErrorField,
   safelySnapshotUntrustedErrorArray,
 } from "./utils/security/safeErrorField.js";
+
+// Keep the backend and all other proxy clients unchanged. Replace only the
+// root key token so formatting, key order, values and nested keys survive.
+function chatgptCompatibleResult<
+  T extends { content: unknown; isError?: unknown },
+>(result: T): T {
+  if (
+    process.env.MCP_PROXY_CHATGPT_RESULT_COMPAT !== "1" ||
+    result.isError === true ||
+    !Array.isArray(result.content)
+  )
+    return result;
+  let changed = false;
+  const content = result.content.map((block: unknown) => {
+    if (
+      !block ||
+      typeof block !== "object" ||
+      !("type" in block) ||
+      block.type !== "text" ||
+      !("text" in block) ||
+      typeof block.text !== "string"
+    )
+      return block;
+    try {
+      const value: unknown = JSON.parse(block.text);
+      if (
+        !value ||
+        typeof value !== "object" ||
+        Array.isArray(value) ||
+        !Object.hasOwn(value, "content") ||
+        Object.hasOwn(value, "note_content")
+      )
+        return block;
+      const root = parseTree(block.text);
+      const properties =
+        root?.children?.filter(
+          (node) => node.children?.[0]?.value === "content",
+        ) ?? [];
+      if (properties.length !== 1) return block;
+      const key = properties[0]?.children?.[0];
+      if (!key) return block;
+      changed = true;
+      return {
+        ...block,
+        text:
+          block.text.slice(0, key.offset) +
+          '"note_content"' +
+          block.text.slice(key.offset + key.length),
+      };
+    } catch {
+      return block;
+    }
+  });
+  return changed ? { ...result, content } : result;
+}
 
 type PackageInfo = { name?: string; version?: string };
 type BackendClient = {
@@ -1507,11 +1563,12 @@ async function start() {
       }
 
       try {
-        return await withBackendRetry(
+        const result = await withBackendRetry(
           "callTool",
           (client) => client.callTool(backendParams(request.params)),
           { replayNetworkFailure: { toolName: request.params.name } },
         );
+        return chatgptCompatibleResult(result);
       } catch (error) {
         // Do not imply that a lost response means a failed write, and never
         // copy arbitrary input or backend error text into the public result.
