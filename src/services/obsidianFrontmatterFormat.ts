@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { createHash } from "node:crypto";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { AtomicWriteBackend } from "./operations/obsidianNoteReplaceOperationAdapter.js";
