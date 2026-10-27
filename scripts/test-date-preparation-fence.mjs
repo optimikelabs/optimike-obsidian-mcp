@@ -61,6 +61,11 @@ const fake = {
     if (scenario === "fdm_pending") refuse(BaseErrorCode.CONFLICT, "date_preparation_fdm_pending");
     if (scenario === "command_missing") refuse(BaseErrorCode.VALIDATION_ERROR, "atomic_write_creation_property_missing");
     if (scenario === "lost_before_arrival") throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "no response");
+    if (scenario === "replayed_after_effect") {
+      // An earlier delivery of the same token passed the effect point; this one is refused.
+      fence.enter(payload.fence)();
+      refuse(BaseErrorCode.FORBIDDEN, "effect_fence_refused");
+    }
     const settle = fence.enter(payload.fence);
     try {
       const stamp = new Date().toISOString().slice(0, 16);
@@ -135,7 +140,16 @@ try {
   runtime.releasePreparation(resumed.source);
   assert.equal(locks(), 0);
 
-  // 4. Without a fence-capable Bridge nothing can be proven: the lock stays.
+  // 4. A fence refusal is not enough on its own: a replayed token may have acted.
+  content = undated;
+  scenario = "replayed_after_effect";
+  assert.equal(reasonOf(await plan()), "date_preparation_unverified");
+  assert.equal(locks(), 1);
+  now += 60_000;
+  assert.equal((await runtime.releaseDatePreparationLock(NOTE, { dryRun: false, reasonCode: "operator_review" })).result, "closed");
+  assert.equal(locks(), 0);
+
+  // 5. Without a fence-capable Bridge nothing can be proven: the lock stays.
   content = undated;
   fenceSupported = false;
   scenario = "changed_before_effect";

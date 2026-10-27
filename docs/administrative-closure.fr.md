@@ -89,9 +89,9 @@ la revue dans `obsidian_date_preparation_fence_reviews`.
 
 Le verrou ne reste désormais que si la préparation a pu agir :
 
-- Tout échec de la requête de préparation est vérifié auprès du fence. Un refus
-  du fence ou le verdict `revoked_before_effect` prouve que cette tentative n'a
-  jamais atteint son point d'effet et ne l'atteindra jamais : le verrou est levé
+- Tout échec de la requête de préparation est vérifié auprès du fence. Seul le
+  verdict `revoked_before_effect` prouve que cette tentative n'a jamais atteint
+  son point d'effet et ne l'atteindra jamais : le verrou est levé
   aussitôt et le plan échoue avec une raison réessayable —
   `date_preparation_not_started` (note modifiée entre-temps, requête non
   arrivée), `date_preparation_fdm_pending` (voir plus bas) ou le refus d'origine

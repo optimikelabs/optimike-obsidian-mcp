@@ -511,18 +511,17 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
 
   /**
    * The lock stays only if the preparation may have acted. The Bridge decides:
-   * its own fence refusal, or a revocation verdict `revoked_before_effect`,
-   * proves that this attempt never reached its effect point and never will.
+   * only a revocation verdict `revoked_before_effect` proves that this attempt
+   * never reached its effect point and never will.
    */
   private async preparationFailure(
     error: unknown, key: string, binding: string, fenceEpoch: string | undefined, attempt: string,
     unverified: () => McpError, fail: () => McpError,
   ): Promise<McpError> {
     if (!fenceEpoch) return unverified();
+    // Even a Bridge fence refusal is checked: a replayed token may have acted before.
+    if (!(await this.releaseUnstartedPreparation(key, binding, { epoch: fenceEpoch, attemptId: attempt }))) return unverified();
     const reason = error instanceof McpError ? (error.details as { reasonCode?: unknown } | undefined)?.reasonCode : undefined;
-    const refused = error instanceof McpError && error.code === BaseErrorCode.FORBIDDEN && reason === "effect_fence_refused";
-    if (refused) this.journal.releaseVerifiedDatePreparationFence(key, attempt);
-    else if (!(await this.releaseUnstartedPreparation(key, binding, { epoch: fenceEpoch, attemptId: attempt }))) return unverified();
     if (reason === "atomic_write_creation_property_missing") return fail();
     if (reason === "date_preparation_fdm_pending") {
       return new McpError(BaseErrorCode.CONFLICT,

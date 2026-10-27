@@ -85,9 +85,9 @@ releases it with the same verdict rules and keeps the review in
 
 The lock now stays only when the preparation may have acted:
 
-- Any failure of the preparation request is checked against the fence. A
-  Bridge fence refusal, or a revocation verdict `revoked_before_effect`, proves
-  that this attempt never reached its effect point and never will: the lock is
+- Any failure of the preparation request is checked against the fence. Only
+  a revocation verdict `revoked_before_effect` proves that this attempt never
+  reached its effect point and never will: the lock is
   released at once and the plan fails with a retryable reason —
   `date_preparation_not_started` (note edited meanwhile, request not
   delivered), `date_preparation_fdm_pending` (see below) or the original
