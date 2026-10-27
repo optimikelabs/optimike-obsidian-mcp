@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bound deferred postflight when observation remains unavailable: a subsequent status records an uncertain result rather than leaving the attempt applying forever.
 - Return `nextAction: none` for stable terminal note-create and note-move receipts. Uncertain outcomes retain `status` because a later observation may still reconcile them without redispatching the effect.
 
 ## [3.14.0] - 2026-10-23

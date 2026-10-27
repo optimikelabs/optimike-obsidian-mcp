@@ -847,7 +847,16 @@ export class ObsidianNoteReplaceOperationAdapter
   async status(reference: string): Promise<OperationReceipt> {
     const plan = this.required(reference);
     if (plan.status === "applying" || plan.status === "outcome_unknown") {
-      return receipt(this.profile, await this.reconcile(plan));
+      try {
+        return receipt(this.profile, await this.reconcile(plan));
+      } catch (error) {
+        const started = plan.settlementObservationStartedAtEpochMs;
+        if (plan.status === "applying" && plan.settlementDeferred && started !== undefined &&
+            (this.options.now ?? Date.now)() - started >= 300_000) {
+          return receipt(this.profile, this.uncertain(plan, "Deferred postflight observation was unavailable beyond its bounded lifetime.", this.requiredExecutionAttemptId(plan)));
+        }
+        throw error;
+      }
     }
     return receipt(this.profile, plan);
   }
