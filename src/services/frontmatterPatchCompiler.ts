@@ -302,7 +302,7 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
       { reason: "frontmatter_missing" },
     );
   }
-  const eol = opening[1] as "\n" | "\r\n";
+  const openingEol = opening[1] as "\n" | "\r\n";
   const contentStart = opening[0].length;
 
   let closingStart = -1;
@@ -328,6 +328,8 @@ function parseFrontmatterSource(content: string): FrontmatterSource {
   }
 
   const source = content.slice(contentStart, closingStart);
+  // Obsidian may serialize the YAML as LF while preserving a CRLF delimiter.
+  const eol = source.includes("\n") && !source.includes("\r\n") ? "\n" : openingEol;
   const lines = splitLines(content, contentStart, closingStart);
   const { blockScalarHeaderLines, multilineQuotedScalarLines } =
     scanYamlFeatures(lines);
@@ -595,6 +597,7 @@ function applyEdits(
 export function compileFrontmatterPatch(
   content: string,
   operations: FrontmatterPatchOperation[],
+  nativeEntries?: Record<string, string>,
 ): CompiledFrontmatterPatch {
   const canonicalOperations =
     canonicalizeFrontmatterPatchOperations(operations);
@@ -643,17 +646,25 @@ export function compileFrontmatterPatch(
       continue;
     }
 
-    const rendered = renderJsonValue(operation.value);
+    const jsonValue = renderJsonValue(operation.value);
+    const rendered = nativeEntries?.[normalized];
+    if (nativeEntries && (typeof rendered !== "string" || !rendered.endsWith(source.eol) || rendered.includes("\r") && source.eol === "\n")) {
+      fail("The native frontmatter representation is unavailable.", { reason: "frontmatter_native_render_invalid" });
+    }
+    if (rendered && Buffer.byteLength(rendered, "utf8") > MAX_RENDERED_VALUE_BYTES) {
+      fail("Frontmatter value exceeds the P1 compiler size limit.", { reason: "frontmatter_value_too_large" });
+    }
+    const replacement = rendered ?? `${entry?.key ?? operation.key}: ${jsonValue}${source.eol}`;
     if (entry) {
       edits.push({
         key: entry.key,
         operation: "set",
         start: entry.start,
         end: entry.end,
-        replacement: `${entry.key}: ${rendered}${source.eol}`,
+        replacement,
       });
     } else {
-      additions.push(`${operation.key}: ${rendered}${source.eol}`);
+      additions.push(replacement);
     }
   }
 
@@ -716,4 +727,14 @@ export function compileFrontmatterPatch(
       untouchedSourceSha256: sha256(untouchedSource),
     },
   };
+}
+
+export function nativeFrontmatterPatchKeys(content: string, operations: FrontmatterPatchOperation[]): Array<{ normalized: string; key: string; value: FrontmatterJsonValue }> {
+  const source = parseFrontmatterSource(content);
+  return canonicalizeFrontmatterPatchOperations(operations).flatMap(operation => {
+    if (operation.op !== "set") return [];
+    renderJsonValue(operation.value);
+    const normalized = normalizeKey(operation.key);
+    return [{ normalized, key: source.entries.get(normalized)?.key ?? operation.key, value: operation.value }];
+  });
 }

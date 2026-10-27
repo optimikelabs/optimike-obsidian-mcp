@@ -16,12 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tools exposing `responseMode` now default to `compact`; callers needing the former detailed, tree or legacy responses must request them explicitly. `completionMode` retains its existing defaults pending qualification of proxy timeouts.
 
+- Require Obsidian's native frontmatter format for governed note creation and whole-note replacement. Noncanonical caller input is refused with the canonical caller-provided frontmatter in `expectedFrontmatter`. Property type issues are warnings only.
+- Body and property patches explicitly announce and seal normalization of existing noncanonical frontmatter. Targeted values use the native Bridge serializer. Postflight accepts no alternate target-key representation: only qualified date-line effects may differ.
+- Detect and announce normalization during FDM's pre-plan date preparation; if its effect cannot be verified, report that the note may have changed and require inspection. FDM remains the date owner; Linter settings are unchanged.
+
 ### Fixed
 
 - Expose closed, non-sensitive error reasons and distinguish missing creation-date preconditions from technical failures.
 - Ignore code spans and variable-length backtick or tilde fences when validating wikilinks and fences.
 - Bound deferred postflight when observation remains unavailable: a subsequent status records an uncertain result rather than leaving the attempt applying forever.
 - Return `nextAction: none` for stable terminal note-create and note-move receipts. Uncertain outcomes retain `status` because a later observation may still reconcile them without redispatching the effect.
+
+### Security
+
+- The format route uses Obsidian's own serializer, is capability-negotiated and bound to the vault identity. Its dedicated refusal field deliberately returns only a canonical rendering of caller-supplied frontmatter, never parser diagnostics or the note body. This is an explicit, narrowly scoped exception to content-free public error diagnostics.
 
 ## [3.14.0] - 2026-10-23
 

@@ -1,5 +1,8 @@
 # ADR: P1 governed frontmatter projection
 
+This ADR records the 2.7.0 admission. The current contract now adds announced
+Obsidian-native frontmatter normalization; see [P1](../governed-frontmatter-p1.md).
+
 ## Status
 
 Accepted, implemented, and released in `2.7.0`. The pure model,

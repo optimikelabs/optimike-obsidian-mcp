@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 process.env.NODE_ENV = "test";
 process.env.OBSIDIAN_RUNTIME_MODE = "live";
 process.env.OBSIDIAN_API_KEY = "hermetic-fixture";
@@ -19,6 +20,7 @@ function fixture(name, fields = []) {
   const db = path.join(root, name + ".sqlite"), clock = () => now;
   const journal = new ObsidianNoteReplaceJournal(db, { now: clock });
   const backend = {
+    ...nativeFormatFixture(bindingFingerprint),
     async preflight(path) { return { contractVersion: 1, path, bindingFingerprint, policy, policyDigest, absent: true, enabled: true }; },
     async create(r) { calls++; content = r.content; const { content: ignored, ...rest } = r; return { ...rest, outcome: "created", reason: "created" }; },
     async inspect(path) { return { contractVersion: 1, path, bindingFingerprint, exists: content !== undefined,

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { FrontmatterAssessment } from "../obsidianFrontmatterFormat.js";
 
 export const OPERATION_RUNTIME_CONTRACT_VERSION = 1 as const;
 
@@ -48,7 +49,9 @@ export type OperationReceipt = {
       | "compensated"
       | "unverified";
   };
-  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string; lineEndingsNormalized?: true };
+  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string; lineEndingsNormalized?: true;
+    frontmatterNormalization?: { applied: true; reason: "date_preparation"; sourceSha256: string; preparedSha256: string } };
+  frontmatterFormat?: FrontmatterAssessment;
   admittedAt: string;
   updatedAt: string;
   terminalAt?: string;

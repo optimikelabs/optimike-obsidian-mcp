@@ -67,6 +67,13 @@ move local est définie dans
 
 ## Contrat P0 de confidentialité des erreurs et des logs
 
+Exception explicite pour les plans de création et de remplacement complet :
+en cas de `frontmatter_not_obsidian_canonical`, `expectedFrontmatter` contient
+la forme canonique du seul frontmatter fourni dans cette même requête. Il ne
+contient ni corps de note, ni contenu lu du coffre, ni diagnostic du parseur,
+ni chemin. Les données de l’appelant restent interdites dans les logs ; les
+autres erreurs gardent l’enveloppe fermée ci-dessous.
+
 La frontière P0 est appliquée aux sinks MCP d’erreur et de journalisation
 partagés :
 

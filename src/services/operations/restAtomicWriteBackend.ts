@@ -20,6 +20,10 @@ export class RestAtomicWriteBackend implements AtomicWriteBackend {
     );
   }
 
+  inspectFrontmatterFormat(yaml: string): Promise<unknown> {
+    return this.rest.inspectAtomicFrontmatterFormat({ contractVersion: 1, yaml }, requestContextService.createRequestContext({ operation: "AtomicFrontmatterFormat" }));
+  }
+
   read(payload: AtomicWriteReadRequest): Promise<AtomicWriteReadResponse> {
     return this.rest.readAtomicWriteNote(
       payload,

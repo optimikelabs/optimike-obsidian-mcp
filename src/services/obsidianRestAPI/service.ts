@@ -359,6 +359,10 @@ export class ObsidianRestApiService {
     );
   }
 
+  inspectAtomicFrontmatterFormat(payload: { contractVersion: 1; yaml: string }, context: RequestContext): Promise<unknown> {
+    return this._request({ method: "POST", url: "/extensions/obsidian-atomic-write-bridge/frontmatter/format", data: payload }, context, "inspectAtomicFrontmatterFormat");
+  }
+
   prepareAtomicWriteDate(
     payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string },
     context: RequestContext,

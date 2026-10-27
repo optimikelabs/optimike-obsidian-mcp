@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import http from "node:http";
 import { createServer } from "node:net";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import path from "node:path";
 const modern = process.env.MCP_TEST_PROTOCOL_ERA === "modern";
 const { Client } = await import(
@@ -116,6 +117,7 @@ class FakeAtomicWriteServer {
         ok: true,
         contractVersion: 1,
         plugin: { id: "obsidian-atomic-write-bridge", version: "0.1.0" },
+        frontmatterFormat: { contractVersion: 1, supported: true },
         backend: {
           kind: "obsidian-vault-process",
           bindingFingerprint: this.bindingFingerprint,
@@ -124,6 +126,11 @@ class FakeAtomicWriteServer {
         },
         limits: { markdownOnly: true },
       });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/extensions/obsidian-atomic-write-bridge/frontmatter/format") {
+      const { yaml } = await requestBody(req);
+      json(res, 200, await nativeFormatFixture(this.bindingFingerprint).inspectFrontmatterFormat(yaml));
       return;
     }
     if (

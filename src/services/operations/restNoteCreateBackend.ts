@@ -5,6 +5,8 @@ import { requestContextService } from "../../utils/index.js";
 
 export class RestNoteCreateBackend implements NoteCreateBackend {
   constructor(private readonly rest: ObsidianRestApiService) {}
+  status() { return this.rest.getAtomicWriteStatus(requestContextService.createRequestContext({ operation: "AtomicWriteStatus" })); }
+  inspectFrontmatterFormat(yaml: string) { return this.rest.inspectAtomicFrontmatterFormat({ contractVersion: 1, yaml }, requestContextService.createRequestContext({ operation: "AtomicFrontmatterFormat" })); }
   preflight(path: string): Promise<unknown> {
     return this.rest.noteCreatePreflight({ contractVersion: 1, path },
       requestContextService.createRequestContext({ operation: "NoteCreatePreflight" }));

@@ -190,14 +190,11 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
 function expectedNominalContent() {
   return [
     "---",
-    "# keep header",
     "création: 2026-08-14",
-    `statut: "${SECRET}"`,
-    "# keep separator",
+    `statut: ${SECRET}`,
     "meta:",
     "  nested: true",
     "rang: 1",
-    "",
     "---",
     "Body must stay byte-identical.",
     "",
@@ -409,10 +406,7 @@ try {
     "obsidian_note_replace_plan",
     {
       path: FRONTMATTER_FIXTURE_PATH,
-      nextContent: FRONTMATTER_INITIAL_CONTENT.replace(
-        "owner: mike",
-        "owner: direct-p0",
-      ),
+      nextContent: "---\ncréation: 2026-08-14\nstatut: actif\nmeta:\n  nested: true\nowner: Mike\n---\nBody must stay byte-identical.\n",
       idempotencyKey: formerlyCollidingDirectKey,
     },
   );
@@ -436,10 +430,7 @@ try {
     "obsidian_note_replace_plan",
     {
       path: FRONTMATTER_FIXTURE_PATH,
-      nextContent: FRONTMATTER_INITIAL_CONTENT.replace(
-        "owner: mike",
-        "owner: reserved-p0",
-      ),
+      nextContent: "---\ncréation: 2026-08-14\nstatut: actif\nmeta:\n  nested: true\nowner: Mike\n---\nBody must stay byte-identical.\n",
       idempotencyKey: `optimike:projection:v1:${formerlyCollidingDirectKey}`,
     },
     true,
@@ -468,8 +459,9 @@ try {
   assert.match(nominalPlan.payload.planRef, /^obsidian-frontmatter-patch:v1:/u);
   assert.equal(
     nominalPlan.payload.projection.sourcePreservation,
-    "byte-identical-outside-authorized-frontmatter-ranges",
+    "byte-identical-outside-authorized-frontmatter-ranges-after-announced-normalization",
   );
+  assert.equal(nominalPlan.payload.frontmatterFormat.normalization.applied, true);
   assert.equal(fake.content, FRONTMATTER_INITIAL_CONTENT);
   assertNoPrivateData(nominalPlan.result, "P1 plan receipt");
   const pendingFrontmatter = await call(
@@ -815,6 +807,22 @@ try {
     },
   );
   assert.equal(policyCommitted.payload.outcome, "committed");
+
+  fake.reset();
+  const nativeTypes = await call(session, "obsidian_frontmatter_patch_plan", {
+    path: FRONTMATTER_FIXTURE_PATH, idempotencyKey: "native-values",
+    operations: [{ op: "set", key: "statut", value: "clos" }, { op: "set", key: "tags", value: ["un", "deux"] },
+      { op: "set", key: "vide", value: null }, { op: "set", key: "nombre", value: 42 }, { op: "set", key: "coche", value: true },
+      { op: "set", key: "jour", value: "2026-10-21" }],
+  });
+  assert.equal(nativeTypes.payload.frontmatterFormat.normalization.applied, true);
+  assert.equal((await call(session, "obsidian_frontmatter_patch_apply", { planRef: nativeTypes.payload.planRef, idempotencyKey: "native-values" })).payload.outcome, "committed");
+  assert.match(fake.content, /statut: clos\n/);
+  assert.match(fake.content, /tags:\n  - un\n  - deux\n/);
+  assert.match(fake.content, /vide:\n/);
+  assert.match(fake.content, /nombre: 42\n/);
+  assert.match(fake.content, /coche: true\n/);
+  assert.match(fake.content, /jour: 2026-10-21\n/);
 
   for (const response of observed)
     assertNoPrivateData(response, "MCP response");

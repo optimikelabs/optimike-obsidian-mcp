@@ -9,6 +9,7 @@ import {
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { canonicalRejection } from "../../../services/obsidianFrontmatterFormat.js";
 
 const Plan = z
   .object({
@@ -50,13 +51,14 @@ async function run(toolName: string, operation: () => Promise<unknown>) {
       ],
     };
   } catch (error) {
+    const canonical = toolName === "obsidian_note_create_plan" ? canonicalRejection(error) : undefined;
     return {
       isError: true,
       content: [
         {
           type: "text" as const,
           text: JSON.stringify(
-            publicMcpToolErrorPayload(error, {
+            canonical ?? publicMcpToolErrorPayload(error, {
               operation: toolName,
               toolName,
               params: {},
@@ -76,7 +78,7 @@ export function registerNoteCreateTools(
     "obsidian_note_create_plan",
     {
       description:
-        "Seal one absent-only Markdown creation in the existing durable journal. Does not create a note. Requires the separate Bridge creation grant and writable MCP policy; no automatic naming or parent-directory creation.",
+        "Seal one absent-only Markdown creation in the existing durable journal. Caller-supplied frontmatter must use Obsidian's canonical form; a refusal returns expectedFrontmatter for resubmission. Type issues are warnings. Does not create a note. Requires the separate Bridge creation grant and writable MCP policy; no automatic naming or parent-directory creation.",
       inputSchema: mcpSchema(Plan.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

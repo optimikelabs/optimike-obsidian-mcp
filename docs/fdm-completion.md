@@ -31,7 +31,7 @@ sealed observation delay. Pending receipts remain pending even after that delay.
 The MCP stores this token privately in deferred postflight metadata, never in the
 sealed intent or public receipt. Status can certify early only after the matching
 complete acknowledgement, followed by the original exact-byte or narrowly admitted
-date/frontmatter-format comparison. Public detailed proof adds completionKind,
+qualified date-line comparison; other frontmatter representation drift is not accepted. Public detailed proof adds completionKind,
 completionDigest, completionEpoch and completionGeneration. Replays do not dispatch
 another CAS; a backend restart preserves the private token, while a Bridge/FDM
 reload invalidates the process-local acknowledgement and keeps the old wait.

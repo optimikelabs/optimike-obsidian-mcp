@@ -2,8 +2,9 @@
 
 Version anglaise : [governed-frontmatter-p1.md](governed-frontmatter-p1.md)
 
-P1 ajoute un domaine de mutation Frontmatter source-preserving au-dessus du
-runtime atomique P0 publié. Il n’ajoute pas un autre moteur transactionnel.
+P1 ajoute un domaine de mutation Frontmatter au-dessus du runtime atomique P0.
+Un frontmatter existant non canonique est normalisé dans le plan et annoncé.
+P1 n’ajoute pas un autre moteur transactionnel.
 
 ## Surface publique
 
@@ -47,7 +48,7 @@ standard. Elle contient au maximum 64 opérations top-level uniques :
 - `delete` : supprimer une clé top-level existante lorsque sa plage source et
   l’appartenance des commentaires voisins sont non ambiguës.
 
-Le compilateur échoue fermé sur toute source non supportée : clés dupliquées ou
+Le compilateur échoue fermé sur toute source normalisée non supportée : clés dupliquées ou
 collisionnant par casse, ancres, alias, merge keys, tags YAML explicites, clés
 complexes ou quotées, syntaxe multi-document, entrées ciblées contenant des
 scalaires de bloc directs ou imbriqués ou des scalaires quotés multilignes,
@@ -56,20 +57,22 @@ valeurs trop grandes.
 
 ## Garantie de préservation de la source
 
-P1 n’effectue jamais :
+P1 demande au Bridge la forme produite par `parseYaml` et `stringifyYaml`
+d’Obsidian. Si le frontmatter existant diffère, le plan annonce sa normalisation
+dans `frontmatterFormat.normalization`, avec les empreintes avant et après.
+Les commentaires, guillemets, listes inline, replis et fins de ligne du YAML
+peuvent changer ; cette étape ne normalise pas le corps. La capacité du Bridge
+est obligatoire et liée à son identité. Les écarts de type, les propriétés sans
+type et les widgets inconnus sont signalés sans refus.
+
+Après cette normalisation annoncée, P1 rend les valeurs ciblées avec Obsidian
+et ne modifie que leurs plages. Pour chaque plan admis :
 
 ```text
-parse YAML -> modifier l’objet -> régénérer tout le YAML
+actualDiff(normalizedBefore, after) est inclus dans authorizedChangeSet(intent)
 ```
 
-Il localise les plages source appartenant aux entrées top-level ciblées et ne
-modifie que ces plages. Pour chaque plan admis :
-
-```text
-actualDiff(before, after) est inclus dans authorizedChangeSet(intent)
-```
-
-Lorsqu’ils ne sont pas ciblés, restent byte-identical :
+Après la normalisation annoncée, lorsqu’ils ne sont pas ciblés, restent byte-identical :
 
 - le corps Markdown ;
 - les fins de ligne ;
@@ -221,15 +224,9 @@ Voir le [contrat commun des modes](governed-note-replacement.fr.md#modes-de-reto
 
 Les quatre outils acceptent `responseMode: compact | detailed` (défaut compact) et `diagnostics: true`. Le reçu compact conserve l’état, les permissions et le délai de postflight ; `detailedReceipt` indique la lecture status de la preuve complète. Les durées couvrent uniquement l’appel serveur courant et ne modifient pas le plan scellé.
 
-## Représentation des clés autorisées après FDM
+## Représentation exacte après FDM
 
-FDM peut retirer des guillemets ou développer une collection YAML lors de sa
-mise à jour de date. La postflight reconnaît ce changement uniquement pour
-les clés frontmatter autorisées par la projection scellée : présence et valeurs
-YAML doivent être identiques, le compilateur doit reconstruire leur forme
-scellée, et le vérificateur original doit ensuite accepter une seule date
-modifiée valide avec tous les autres octets exactement identiques. Une clé
-supprimée ne peut réapparaître. Toute dérive du corps, création, d'une clé
-inconnue ou du type YAML reste incertaine. Aucune seconde écriture n'est faite.
-Le reçu détaillé expose settlementAuthorizedFormatKeyCount et le hash réellement
-observé ; le journal conserve les clés concernées, y compris après redémarrage.
+La postflight ne tolère plus une autre représentation, même pour une clé ciblée.
+Seule une ligne de modification qualifiée peut différer : sa restauration doit
+rendre tous les autres octets identiques au contenu scellé. Le signal FDM ne
+remplace pas cette comparaison et n’autorise aucune seconde écriture.

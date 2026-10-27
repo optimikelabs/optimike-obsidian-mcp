@@ -24,6 +24,7 @@ import {
   type OperationReceipt,
 } from "./operations/contract.js";
 import { assertWriteAllowed, type WriteOperation } from "./writePolicy.js";
+import { DatePreparationPlanFailure, frontmatterAssessment } from "./obsidianFrontmatterFormat.js";
 
 const OPERATION_KIND = "obsidian.text.patch" as const;
 const PUBLIC_PLAN_REF_PREFIX = "obsidian-text-patch:v1:";
@@ -240,6 +241,15 @@ function storedProjection(
     );
   }
   const composed = parsed.data;
+  if (composed.proof.beforeContentSha256 !== view.beforeSha256 ||
+      (!composed.frontmatterProof && !view.frontmatterFormat?.normalization.applied && composed.proof.nextContentSha256 !== view.afterSha256)) {
+    throw new McpError(BaseErrorCode.CONFLICT, "The text patch proof does not match the sealed child.", { reason: "text_patch_composition_invalid" });
+  }
+  const normalization = view.frontmatterFormat?.normalization;
+  if (normalization?.applied && (normalization.sourceSha256 !== composed.proof.nextContentSha256 ||
+      (composed.frontmatterProof ? normalization.afterFrontmatterSha256 !== composed.frontmatterProof.beforeFrontmatterSha256 : normalization.normalizedSha256 !== view.afterSha256))) {
+    throw new McpError(BaseErrorCode.CONFLICT, "The normalized frontmatter proof does not match the sealed text patch.", { reason: "text_patch_normalization_proof_mismatch" });
+  }
   if (
     Boolean(composed.frontmatterProof) !== Boolean(composed.composition) ||
     (composed.frontmatterProof &&
@@ -344,7 +354,7 @@ function projectedReceipt(
         : {}),
     }),
     target: {
-      kind: projection.frontmatterProof
+      kind: projection.frontmatterProof || view.frontmatterFormat?.normalization.applied
         ? "vault-markdown-body-and-frontmatter"
         : "vault-markdown-text-body",
       logicalRef: child.target.logicalRef,
@@ -354,7 +364,7 @@ function projectedReceipt(
       : { recoveryRef: undefined }),
     projection: {
       kind: OPERATION_KIND,
-      sourcePreservation: projection.frontmatterProof
+      sourcePreservation: projection.frontmatterProof || view.frontmatterFormat?.normalization.applied
         ? "byte-identical-outside-authorized-body-and-frontmatter-ranges"
         : projection.proof.sourcePreservation,
       ...(projection.frontmatterProof
@@ -408,11 +418,14 @@ export class GovernedTextPatchRuntime {
     );
     if (replay) return replay;
 
-    const source = await this.noteRuntime.readForProjection(path);
+    const source = await this.noteRuntime.readForProjection(path, true);
+    try {
     let compiled;
     let frontmatter;
+    let normalized;
     try {
       compiled = compileTextPatch(source.content, input.operations, path);
+      normalized = await this.noteRuntime.inspectFrontmatter(compiled.nextContent, source.bindingFingerprint);
       if (input.frontmatterOperations) {
         assertWriteAllowed({
           operation: "obsidian_frontmatter_patch_plan",
@@ -424,10 +437,8 @@ export class GovernedTextPatchRuntime {
             (operation) => operation.key,
           ),
         });
-        frontmatter = compileFrontmatterPatch(
-          compiled.nextContent,
-          input.frontmatterOperations,
-        );
+        const nativeEntries = await this.noteRuntime.renderFrontmatterEntries(normalized.content, input.frontmatterOperations, source.bindingFingerprint);
+        frontmatter = compileFrontmatterPatch(normalized.content, input.frontmatterOperations, nativeEntries);
       }
     } catch (error) {
       const concurrentWinner = await this.replayExisting(
@@ -435,6 +446,7 @@ export class GovernedTextPatchRuntime {
         publicKey,
         requestedIntentDigest,
       );
+      if (concurrentWinner && source.datePreparation?.kind === "date-manager-before-plan") throw new DatePreparationPlanFailure(source.datePreparation);
       if (concurrentWinner) return concurrentWinner;
       throw error;
     }
@@ -443,7 +455,10 @@ export class GovernedTextPatchRuntime {
       compiled.operations,
       frontmatter?.operations,
     );
-    const nextContent = frontmatter?.nextContent ?? compiled.nextContent;
+    const nextContent = frontmatter?.nextContent ?? normalized.content;
+    const finalFormat = await this.noteRuntime.inspectFrontmatter(nextContent, source.bindingFingerprint);
+    if (finalFormat.normalized) throw new McpError(BaseErrorCode.CONFLICT, "The compiled patch is not in the native frontmatter format.", { reason: "frontmatter_native_render_invalid" });
+    const format = frontmatterAssessment(compiled.nextContent, normalized.content, finalFormat.warnings);
     const projection: StoredProjection = {
       contractVersion: 1,
       kind: OPERATION_KIND,
@@ -471,13 +486,19 @@ export class GovernedTextPatchRuntime {
       idempotencyKey: internalKey,
       expectedBeforeSha256: source.sha256,
       datePreparation: source.datePreparation,
+      frontmatterFormat: format,
       expectedBindingFingerprint: source.bindingFingerprint,
       idempotencyIdentity: intentDigest,
       projection,
     });
     const view = this.noteRuntime.inspect(child.planRef);
+    if (source.datePreparation?.kind === "date-manager-before-plan" && view.beforeSha256 !== source.sha256) throw new DatePreparationPlanFailure(source.datePreparation);
     storedProjection(view, publicKey, intentDigest);
     return projectedReceipt(child, view, true);
+    } catch (error) {
+      if (source.datePreparation?.kind === "date-manager-before-plan") throw new DatePreparationPlanFailure(source.datePreparation);
+      throw error;
+    } finally { this.noteRuntime.releasePreparation?.(source); }
   }
 
   async apply(

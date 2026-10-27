@@ -2,9 +2,16 @@
 
 ## Public contract
 
+When automatic dates are active, an empty YAML mapping (`{}`) is refused before
+creation with `frontmatter_empty_mapping_date_management`: the date manager
+would remove the mapping marker, which cannot be justified by date-line-only
+settlement. Supply a nonempty canonical mapping or omit the frontmatter.
+
 `obsidian_note_create_plan`, `obsidian_note_create_apply`, `obsidian_note_create_status` are a live-only three-tool family. The existing process-owned SQLite journal is reused; there is no second durable runtime and no synthetic recover endpoint. Planning stores an exact private content snapshot and an observed-absence proof. Apply requires the sealed target/backend/date-policy identity and independent `allowNoteCreates` Bridge grant (false by default). Guarded/full MCP write policy permits explicit bounded content; readonly rejects new plans/effects.
 
 The Bridge uses a local filesystem exclusive create (`O_CREAT | O_EXCL`) followed by file data fsync. Existing files are never overwritten. The parent directory must exist. Hidden/configuration paths, traversal, device paths, symlinks/junctions and hardlink leaves are refused by pre/post checks. A source file is not published under an automatic suffix. This is not a rename, general file writer, or transaction across notes.
+
+Create planning requires the identity-bound native format capability. If caller-provided YAML is not already in Obsidian's canonical form, planning refuses with `frontmatter_not_obsidian_canonical` and an `expectedFrontmatter` field containing the canonical form of that caller-provided frontmatter. The caller can resend it. It contains no note body or parser diagnostic. Property type discrepancies and undeclared types are warnings only. The capability and canonical form are checked again before apply.
 
 A process/OS failure can leave a partial newly created file. Status never repairs, overwrites or deletes it, and apply never redispatches an already admitted uncertain attempt. Directory fsync/power-loss durability and races with hostile processes replacing ancestor directories are not certified. The local vault and host filesystem remain a trusted boundary; do not expose creation against an adversarial shared mount. Windows/Linux filesystem tests do not establish correctness for network or cloud-mounted vaults.
 

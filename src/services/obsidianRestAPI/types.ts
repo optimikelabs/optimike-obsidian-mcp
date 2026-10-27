@@ -47,6 +47,7 @@ export type AtomicWriteCasRequest = AtomicWriteReadRequest & {
 };
 
 export type AtomicWriteStatusResponse = {
+  frontmatterFormat?: { contractVersion: 1; supported: boolean };
   datePreparation?: { contractVersion: 1; supported: true };
   ok: true;
   contractVersion: 1;

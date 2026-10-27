@@ -33,12 +33,21 @@ published artifacts, and public diagnostics.
 
 Input: `path`, complete `nextContent`, and mandatory `idempotencyKey`.
 
-Planning performs no note write. The Atomic Write Bridge reads the existing
+The requested replacement is not written during planning. An undated note can
+first be dated by FDM as described in the text-patch contract. The Atomic Write Bridge reads the existing
 `.md` note; that same read supplies the before SHA-256 and the current content
 used for structured protected-frontmatter comparison. The server validates the
 future Obsidian Markdown, seals target, backend binding, before/after hashes,
 request digest, idempotency key, and the private recovery content, then returns
 a receipt with an opaque `planRef`.
+
+The caller's frontmatter must already match Obsidian's native canonical form.
+The Bridge's read-only `frontmatter/format` capability is mandatory and bound
+to its vault identity. A noncanonical input is refused with the closed reason
+`frontmatter_not_obsidian_canonical` and a dedicated `expectedFrontmatter`
+field derived only from the caller's own frontmatter; no body or parser error
+is returned. The caller can resend that form. Type discrepancies are warnings,
+not admission failures. The capability and sealed form are checked again before CAS.
 
 The same key and canonical request return the same plan. Reusing the key for a
 different replacement is rejected. Planning is not classified as read-only:

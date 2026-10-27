@@ -381,6 +381,10 @@ const SAFE_PUBLIC_REASON_CODES = new Set([
   "semantic_query_embedding_failed",
   "semantic_query_vector_invalid",
   "atomic_write_creation_property_missing",
+  "date_preparation_unverified",
+  "frontmatter_format_capability_missing",
+  "frontmatter_format_changed",
+  "frontmatter_empty_mapping_date_management",
   "REVISION_CONFLICT",
   "OPERON_BRIDGE_REQUEST_INVALID",
   "OPERON_BRIDGE_UNAUTHORIZED",
@@ -591,6 +595,8 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (reasonCode === "date_preparation_unverified")
+    return "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise.";
   if (reasonCode === "atomic_write_creation_property_missing")
     return "La date de création est absente ou sa préparation indisponible. Demandez au propriétaire du coffre de la faire ajouter par le gestionnaire de dates, puis relancez le plan.";
   switch (code) {

@@ -29,12 +29,22 @@ artefacts publiés et diagnostics publics.
 
 Entrée : `path`, le `nextContent` complet et une `idempotencyKey` obligatoire.
 
-Le planning n’écrit pas la note. L’Atomic Write Bridge lit la note `.md`
+Le planning n’applique pas le remplacement demandé. Une note non datée peut
+être d’abord datée par FDM, comme décrit dans le contrat de patch de texte.
+L’Atomic Write Bridge lit la note `.md`
 existante ; cette même lecture fournit le SHA-256 initial et le contenu utilisé
 pour comparer structurellement le frontmatter protégé. Le serveur valide le
 futur Markdown Obsidian, scelle cible, binding backend, hashes avant/après,
 digest de requête, clé d’idempotence et contenu privé nécessaire à la
 récupération, puis retourne un reçu avec un `planRef` opaque.
+
+Le frontmatter fourni doit déjà être au format canonique natif d’Obsidian. La
+capacité de contrôle du Bridge est obligatoire et liée à l’identité du coffre.
+Si la forme diffère, le plan est refusé avec `frontmatter_not_obsidian_canonical`
+et `expectedFrontmatter`, construit uniquement depuis le frontmatter de la
+requête. L’appelant peut le renvoyer ; le corps et les diagnostics du parseur
+ne sont pas exposés. Les écarts de type sont signalés sans refus. La capacité
+et la forme scellée sont revérifiées avant le CAS.
 
 La même clé et la même requête canonique retournent le même plan. Réutiliser la
 clé pour un autre remplacement est refusé. Plan n’est pas une simple lecture :
