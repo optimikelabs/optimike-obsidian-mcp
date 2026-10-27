@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.1] - 2026-10-27
+
+### Changed
+
+- Operon mutations return their receipt without waiting for the full snapshot refresh. The refresh runs in the background, coalesced per Bridge and snapshot database; the receipt still states only what the Bridge proved (`after`). Any later read in the same process waits for a refresh that started after the receipt before reusing the snapshot, even when the index generation did not move. Both duration events remain; `Operon post-apply snapshot refresh finished.` now carries `background: true`.
+- `operon_get_task` no longer rebuilds the full snapshot when the index generation changed: it reads the one task through the existing Bridge route `GET /tasks/:operonId`, accepted only at the generation and settings signature of the live status read just before, then refreshes the snapshot in the background. A missing task, a moved generation or an unexpected answer falls back to the snapshot path; an unreachable Bridge falls back to the stale snapshot with a single status attempt.
+- A snapshot refresh reads pages, configuration and validation together and fences them with one status before and one after (previously three statuses and a sequential validation).
+- Retain Atomic Write Bridge 0.8.5, Operon Bridge 0.9.3 and Bases Bridge 1.2.2; no Bridge code changes.
+
+### Limits
+
+- Pilot test vault, 159 tasks, Operon 4.2.0, Bridge 0.9.3, medians of 8 runs (27 October 2026): mutation receipt 15.2 to 9.0 s; `operon_get_task` after a generation change 4.9 to 2.0 s; `operon_query_tasks` after a change 5.0 to 3.0 s; three concurrent `operon_get_task` 5.1 to 2.3 s. A second `operon_get_task` issued immediately after the first, before the background refresh ends, costs 2.1 s instead of 0.7 s; after a 4 s pause it is back to 0.7 s. Each Bridge call costs about 0.7 s because the Bridge renegotiates its Operon Developer API session on every index-state read; only a Bridge release can remove that share. See the [audit follow-ups](docs/audit-followups-20261027.md) and the [English](docs/releases/3.15.1.md) and [French](docs/releases/3.15.1.fr.md) release notes.
+
 ## [3.15.0] - 2026-10-27
 
 Atomic Write Bridge 0.8.4 or later is required for governed writes and native frontmatter inspection. Deploy and roll back the MCP and Bridge as one pair after draining pending operations and preparation fences, and verify artifact hashes. Empty YAML blocks are treated as empty mappings; invalid or duplicate-key YAML receives a validation error. Tool-registration lifecycle messages are debug-level.
