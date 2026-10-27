@@ -166,11 +166,14 @@ Contrôles communs :
   lecture ultérieure du même processus attend un refresh commencé après le reçu
   avant de réutiliser le snapshot, même si la génération d’index n’a pas bougé.
   Tant que ce snapshot ne contient pas un reçu confirmé, les échecs live
-  passagers (index qui se stabilise ou bouge, Bridge momentanément injoignable)
-  sont relancés pendant 15 secondes au plus au lieu de se replier ; un repli
-  après ce délai, ou après un échec durable comme un refus P0, reste
-  `operon-cache` / `stale: true` et ajoute une limite indiquant qu’il ne contient
-  pas une mutation confirmée ;
+  passagers (index qui se stabilise ou bouge, 503 ou réponse relançable du
+  Bridge) sont relancés au lieu de se replier, dans 15 secondes dernier essai
+  compris, une seule fois par mutation en attente, et jusqu’à l’annulation par
+  le client. Une absence de réponse HTTP (connexion refusée, Bridge ou Obsidian
+  absent) est durable et provoque un repli immédiat. Tout repli recharge le
+  snapshot enregistré, reste `operon-cache` / `stale: true` et, tant que la
+  mutation n’est pas couverte, ajoute une limite indiquant qu’il ne contient pas
+  une mutation confirmée ;
 - aucune mutation ne s’appuie sur un snapshot headless ou obsolète.
 
 Le journal MCP `operon_mutation_journal` réserve la clé avant l’appel au Bridge.

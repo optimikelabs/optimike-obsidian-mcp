@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.2] - 2026-10-27
+
+### Fixed
+
+- A read that waits for a confirmed but uncovered Operon mutation treats a missing HTTP answer (connection refused, port closed, reset, client timeout) as durable: it falls back at once to the persisted snapshot, `operon-cache` / `stale: true`, with the missing-mutation limitation. 3.15.1 waited about 15 seconds on every such read while Obsidian or the Bridge stayed down.
+- Retries for transient failures (index settling or moving, Bridge 503 or retryable answer) now stop at the deadline including the last attempt (an attempt in progress is abandoned, not awaited for up to 180 s), are spent once per pending mutation (later reads for the same mutations answer at once), and stop when the client cancels the MCP request (`operon_get_task`, `operon_query_tasks`, `operon_list_tasks`).
+- A stale fallback reloads the persisted snapshot before returning it. In 3.15.1 a read could return the pre-mutation snapshot without the limitation when the background refresh committed the mutation while that read waited for a failing live status.
+- Retain Atomic Write Bridge 0.8.5, Operon Bridge 0.9.3 and Bases Bridge 1.2.2; no Bridge code changes. See the [English](docs/releases/3.15.2.md) and [French](docs/releases/3.15.2.fr.md) release notes.
+
 ## [3.15.1] - 2026-10-27
 
 ### Changed
