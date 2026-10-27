@@ -11,6 +11,8 @@ Atomic Write Bridge 0.8.4 or later is required for governed writes and native fr
 
 ### Added
 
+- Opt-in ChatGPT stdio proxy compatibility for root `content` keys in JSON text tool results; disabled by default. See [Secure Tunnel](docs/chatgpt-secure-tunnel.md).
+
 - Filter pending operations by kind, state and minimum age before pagination.
 
 - Governed note deletion: `obsidian_note_delete_plan` / `_apply` / `_status` (see [governed note deletion](docs/governed-note-delete.md)). The plan seals the note's exact SHA-256 and size, its incoming links and the vault trash preference; apply makes the Atomic Write Bridge re-derive the whole seal immediately before `FileManager.trashFile` and refuse on any difference. The note goes to Obsidian's trash and never outright: a permanent-deletion preference is refused. A note with incoming links is refused unless `acknowledgeBacklinks: true`. Postflight `verified` needs the note absent from its path and a new exact copy in the vault trash; with the system trash it is `path_absent_only`. The Bridge grant `allowNoteDeletes` defaults to off, the server needs `MCP_WRITE_MODE=full`, and a Bridge without the `noteDelete` capability is refused closed. The family is exposed by `operational` and `full` only; there is no recover or undo tool. It uses the effect fence and the administrative closure of the other governed applies and requires Atomic Write Bridge 0.8.4 or later.
