@@ -920,7 +920,7 @@ function serializeTasksResponse(
     cursor?: string;
   },
 ): string {
-  const responseMode = options.responseMode ?? "legacy";
+  const responseMode = options.responseMode ?? "compact";
   const offset = parseCursor(options.cursor);
   const limit = options.responseLimit;
   const finalTasks = limit && limit > 0

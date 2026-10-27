@@ -616,3 +616,9 @@ assert.doesNotMatch(loggerSource, /mcpDataPayload\.error/u);
 assert.doesNotMatch(loggerSource, /originalMessage|mcpPayload/u);
 
 console.log("Log privacy contract passed.");
+
+for (const [field, reason] of [["reason", "create_markdown_invalid"], ["reasonCode", "create_markdown_invalid"], ["reasonCode", "PRIVATE_SECRET_PATH.md"]]) {
+  const wire = publicMcpToolErrorPayload(new McpError(BaseErrorCode.VALIDATION_ERROR, marker, { [field]: reason }), { operation: "test", params: {} });
+  assert.equal(wire.error.details.reasonCode, reason === "create_markdown_invalid" ? reason : undefined);
+  assert.doesNotMatch(JSON.stringify(wire), /PRIVATE_SECRET_PATH|P0-BACKEND-ONLY-MARKER/u);
+}

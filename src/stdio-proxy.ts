@@ -2,6 +2,7 @@
 
 import { configuredSkillRegistry, installSkillsExtension } from "./mcp-server/resources/skillsExtension.js";
 import type { McpRequestContext } from "@modelcontextprotocol/server";
+import { proxyMutationFailure } from "./utils/proxyMutationFailure.js";
 
 import "./config/toolProfileCli.js";
 import { serveDualStdio } from "./mcp-server/transports/dualStdio.js";
@@ -1505,11 +1506,19 @@ async function start() {
         })();
       }
 
-      return withBackendRetry(
-        "callTool",
-        (client) => client.callTool(backendParams(request.params)),
-        { replayNetworkFailure: { toolName: request.params.name } },
-      );
+      try {
+        return await withBackendRetry(
+          "callTool",
+          (client) => client.callTool(backendParams(request.params)),
+          { replayNetworkFailure: { toolName: request.params.name } },
+        );
+      } catch (error) {
+        // Do not imply that a lost response means a failed write, and never
+        // copy arbitrary input or backend error text into the public result.
+        const uncertain = proxyMutationFailure(request.params.name, request.params.arguments);
+        if (uncertain) return uncertain;
+        throw error;
+      }
     });
 
     return proxyServer;

@@ -1,0 +1,21 @@
+/** A transport failure cannot prove whether a dispatched governed write occurred. */
+export function proxyMutationFailure(name: string, args: unknown) {
+  const prefixes: Record<string, string> = {
+    obsidian_text_patch_apply: "obsidian-text-patch:v1:",
+    obsidian_frontmatter_patch_apply: "obsidian-frontmatter-patch:v1:",
+  };
+  const prefix = prefixes[name];
+  if (!prefix || !args || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(args, "planRef");
+  const planRef = descriptor && "value" in descriptor ? descriptor.value : undefined;
+  if (typeof planRef !== "string" || !planRef.startsWith(prefix) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(planRef.slice(prefix.length))) return undefined;
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: JSON.stringify({
+      ok: false,
+      error: { code: "OUTCOME_UNKNOWN", message: "The mutation may have applied. Call the matching status tool before any further action.",
+        details: { mutationMayHaveApplied: true, planRef, nextAction: name.replace(/_apply$/u, "_status") } },
+    }) }],
+  };
+}

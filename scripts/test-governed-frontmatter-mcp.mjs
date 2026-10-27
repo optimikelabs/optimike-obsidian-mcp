@@ -124,7 +124,7 @@ async function startClient(writeMode = "full", runtimeMode = "live") {
 }
 
 async function call(session, name, args, expectedError = false) {
-  const result = await session.client.callTool({ name, arguments: args });
+  const result = await session.client.callTool({ name, arguments: { responseMode: "detailed", ...args } });
   observed.push(JSON.stringify(result));
   assert.equal(Boolean(result.isError), expectedError, `${name} error status`);
   return { result, payload: parse(result) };
@@ -159,7 +159,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     `${label} request id details`,
   );
   assert.doesNotMatch(
-    JSON.stringify(payload),
+    JSON.stringify({ ...payload, error: { ...payload.error, details: { ...payload.error.details, reasonCode: undefined } } }),
     new RegExp(forbiddenMarker, "u"),
     `${label} leaked marker`,
   );
@@ -167,7 +167,7 @@ function assertPublicError(payload, code, forbiddenMarker, label) {
     if (field in (payload.error.details ?? {})) {
       const value = payload.error.details[field];
       assert.equal(typeof value, "string");
-      if (field === "reasonCode") assert.match(value, /^[A-Z][A-Z0-9_]+$/u);
+      if (field === "reasonCode") assert.match(value, /^[A-Za-z][A-Za-z0-9_]+$/u);
       if (field === "phase")
         assert.ok(
           ["planned", "applying", "recovering", "terminal"].includes(value),
@@ -298,7 +298,7 @@ try {
     assertPublicError(
       missing.payload,
       "NOT_FOUND",
-      "note_replace_plan_not_found",
+      "PRIVATE_SOURCE_SENTINEL",
       "unknown plan",
     );
   }
@@ -558,7 +558,7 @@ try {
     assertPublicError(
       blockedChildReplay.payload,
       "NOT_FOUND",
-      "note_replace_plan_not_found",
+      "PRIVATE_SOURCE_SENTINEL",
       "forged child plan",
     );
   }

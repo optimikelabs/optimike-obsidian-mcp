@@ -121,8 +121,7 @@ Without this option, frontmatter remains byte-identical.
 
 ## Receipt size and diagnostics
 
-All four tools accept `responseMode: compact | detailed` (default detailed for
-compatibility). Compact preserves references/digests, state, permissions,
+All four tools accept `responseMode: compact | detailed` (default compact). Compact preserves references/digests, state, permissions,
 postflight and checkAfter, omitting verbose range proofs. `detailedReceipt`
 provides the matching status call to retrieve complete evidence. Pending is
 never certified success, in either representation.

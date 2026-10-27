@@ -314,7 +314,7 @@ function parseResult(result) {
 }
 async function call(session, name, args, expectedError = false) {
   try {
-    const result = await session.client.callTool({ name, arguments: args });
+    const result = await session.client.callTool({ name, arguments: { responseMode: "detailed", ...args } });
     observed.push(JSON.stringify(result));
     assert.equal(
       Boolean(result.isError),

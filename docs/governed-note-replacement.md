@@ -259,4 +259,4 @@ A refusal proven by internal checks before any CAS dispatch is immediate: it doe
 
 ## Receipts and timings
 
-All four tools accept `responseMode: compact | detailed` (default detailed) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
+All four tools accept `responseMode: compact | detailed` (default compact) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.

@@ -7,6 +7,7 @@ export const DATE_PREPARATION_MESSAGE =
   "Note datée par le gestionnaire de dates avant le plan.";
 export const MISSING_CREATION_MESSAGE =
   "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.";
+export class DatePreparationError extends Error {}
 const POLL_MS = 100;
 const STABLE_MS = 1_000;
 const COMMAND_SETTLEMENT_BUDGET_MS = STABLE_MS + 2 * POLL_MS;
@@ -35,7 +36,7 @@ export function createDatePreparation(
     const delimiter = /^---(?:\r?\n|$)/gm;
     delimiter.lastIndex = opening[0].length;
     const closing = delimiter.exec(content);
-    if (!closing) throw Error(MISSING_CREATION_MESSAGE);
+    if (!closing) throw new DatePreparationError(MISSING_CREATION_MESSAGE);
     // Normalize only the YAML input. The body remains byte-for-byte as read.
     const properties = parse(
       content.slice(opening[0].length, closing.index).replace(/\r\n/g, "\n"),
@@ -45,7 +46,7 @@ export function createDatePreparation(
       typeof properties !== "object" ||
       Array.isArray(properties)
     )
-      throw Error(MISSING_CREATION_MESSAGE);
+      throw new DatePreparationError(MISSING_CREATION_MESSAGE);
     return {
       properties,
       body: content.slice(closing.index + closing[0].length),
@@ -56,7 +57,7 @@ export function createDatePreparation(
     const deadline = now() + (options.timeoutMs ?? 55_000);
     const run = async () => {
       const fail = () => {
-        throw Error(MISSING_CREATION_MESSAGE);
+        throw new DatePreparationError(MISSING_CREATION_MESSAGE);
       };
       if (disposed || !options.enabled() || now() >= deadline) return fail();
       const scope = await dateManagementScope(app, request.path);

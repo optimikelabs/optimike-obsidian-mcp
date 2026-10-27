@@ -513,3 +513,12 @@ test("Atomic Write Bridge remounts exactly once after Local REST reload", async 
   bridge.restLifecycle.stop();
   assert.equal(providers[2].unregisters, 1);
 });
+
+test("date preparation reasons distinguish missing precondition and technical failure", async () => {
+  const payloadFactory = await loadPayloadFactory();
+  const missing = payloadFactory("atomic_write_creation_property_missing", "PRIVATE_PATH") as Record<string, any>;
+  const failure = payloadFactory("date_preparation_failed", "PRIVATE_PATH") as Record<string, any>;
+  assert.equal(missing.error.reasonCode, "atomic_write_creation_property_missing");
+  assert.equal(failure.error.reasonCode, "date_preparation_failed");
+  assert.doesNotMatch(JSON.stringify([missing, failure]), /PRIVATE_PATH/u);
+});

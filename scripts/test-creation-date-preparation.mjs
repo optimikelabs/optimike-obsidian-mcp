@@ -28,6 +28,7 @@ const { governedResponse } = await import(
 const { ErrorHandler, publicMcpToolErrorPayload } = await import(
   "../dist/utils/internal/errorHandler.js"
 );
+const { McpError, BaseErrorCode } = await import("../dist/types-global/errors.js");
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const initial = "---\r\nstatut: actif\r\n---\r\nneedle\r\n";
 const binding = hash("test-vault");
@@ -99,7 +100,8 @@ const fake = {
   },
   async prepareAtomicWriteDate(request) {
     preparations++;
-    if (!active || failPreparation) throw Error("no manager or failed command");
+    if (!active) throw new McpError(BaseErrorCode.VALIDATION_ERROR, "missing", { reasonCode: "atomic_write_creation_property_missing" });
+    if (failPreparation) throw Error("technical fixture failure");
     assert.equal(request.expectedSha256, hash(content));
     const lineEndingsNormalized = content.includes("\r\n");
     content = content
@@ -209,10 +211,10 @@ try {
         operation: "test",
         input: { path: "Test.md" },
       });
-      assert.equal(publicError.code, "FORBIDDEN");
+      assert.equal(publicError.code, "VALIDATION_ERROR");
       assert.match(
         publicError.message,
-        /Ouvrez-la dans Obsidian et enregistrez-la une fois/,
+        /propriétaire du coffre/,
       );
       assert.equal(
         publicError.details.reasonCode,
@@ -271,7 +273,7 @@ try {
       operations: [{ op: "append_body", text: "blocked" }],
       idempotencyKey: "manager-failed",
     }),
-    /Ouvrez-la dans Obsidian/,
+    /technical fixture failure/,
   );
   assert.equal(content, initial);
   failPreparation = false;

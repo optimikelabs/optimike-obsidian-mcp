@@ -25,7 +25,7 @@ const Stored = z.object({
 }).strict();
 export type BaseRowsPatchInput = BaseRowTarget & { operations: FrontmatterPatchOperation[]; idempotencyKey: string };
 function fail(reason: string): never {
-  throw new McpError(BaseErrorCode.CONFLICT, "The governed Base row plan or its selection is invalid or changed; replan is required.", { reason });
+  throw new McpError(BaseErrorCode.CONFLICT, "The governed Base row plan or its selection is invalid or changed; replan is required.", { reasonCode: reason });
 }
 function privateKey(value: string) {
   if (typeof value !== "string" || !value || value !== value.trim() || value.length > 256 ||

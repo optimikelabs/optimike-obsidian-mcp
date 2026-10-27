@@ -43,6 +43,15 @@ function fixture(name, dateFields = []) {
 }
 try {
   {
+    const f = fixture("invalid-markdown");
+    await assert.rejects(f.adapter.plan({ ...input, content: "broken [[link" }), error => {
+      assert.equal(error.code, "VALIDATION_ERROR");
+      assert.equal(error.details.reasonCode, "create_markdown_invalid");
+      return true;
+    });
+    f.journal.close();
+  }
+  {
     const f = fixture("nominal"); const p = await f.adapter.plan(input);
     assert.equal(f.calls(), 0); assert.equal((await f.adapter.plan(input)).planRef, p.planRef);
     await assert.rejects(f.adapter.plan({ ...input, content: "different" }));

@@ -28,7 +28,7 @@ import {
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
 import { dateManagementScope, createTemplateDateGuard } from "./dateManagementScope.js";
-import { createDatePreparation, MISSING_CREATION_MESSAGE } from "./datePreparation.js";
+import { createDatePreparation, DatePreparationError } from "./datePreparation.js";
 import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
@@ -153,6 +153,14 @@ const ATOMIC_PUBLIC_ERRORS: Record<string, AtomicPublicErrorDescriptor> = {
     retryable: false,
     message:
       "The resource changed after it was read. Read it again before retrying.",
+  },
+  atomic_write_creation_property_missing: {
+    code: "atomic_write_creation_property_missing", reasonCode: "atomic_write_creation_property_missing",
+    status: "blocked", retryable: false, message: "Date preparation requires vault owner intervention.",
+  },
+  date_preparation_failed: {
+    code: "date_preparation_failed", reasonCode: "date_preparation_failed",
+    status: "rejected", retryable: false, message: "Date preparation failed.",
   },
   read_error: {
     code: "read_error",
@@ -662,8 +670,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             sha256: sha256(content), size: Buffer.byteLength(content, "utf8"), bindingFingerprint: this.bindingFingerprint,
             ...(prepared.datePreparation ? { datePreparation: prepared.datePreparation } : {}) });
         } catch (error) {
-          const conflict = safeInstanceOf(error, HashConflictError) || safeInstanceOf(error, BindingConflictError);
-          sendJson(res, conflict ? 409 : 403, errorPayload(conflict ? "hash_conflict" : "atomic_write_creation_property_missing", MISSING_CREATION_MESSAGE));
+          if (safeInstanceOf(error, BindingConflictError)) sendJson(res, 409, errorPayload("binding_conflict"));
+          else if (safeInstanceOf(error, HashConflictError)) sendJson(res, 409, errorPayload("hash_conflict", undefined, safeHashConflictDetails(error)));
+          else if (safeInstanceOf(error, DatePreparationError)) sendJson(res, 422, errorPayload("atomic_write_creation_property_missing"));
+          else sendJson(res, 500, errorPayload("date_preparation_failed"));
         }
       });
 

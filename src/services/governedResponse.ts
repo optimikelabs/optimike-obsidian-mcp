@@ -7,7 +7,7 @@ export const GovernedResponseFields = {
     .enum(["compact", "detailed"])
     .optional()
     .describe(
-      "Default detailed for compatibility. compact preserves state, postflight/checkAfter, permissions and proof digests; retrieve full evidence with the matching status tool and responseMode=detailed.",
+      "Default compact. compact preserves state, postflight/checkAfter, permissions and proof digests; retrieve full evidence with the matching status tool and responseMode=detailed.",
     ),
   diagnostics: z
     .boolean()
@@ -93,7 +93,7 @@ export async function governedResponse(
     ? await timings.run(phases, work)
     : await work();
   const result =
-    options.responseMode === "compact"
+    options.responseMode !== "detailed"
       ? compactReceipt(value, toolName)
       : value;
   if (!options.diagnostics || !result || typeof result !== "object")

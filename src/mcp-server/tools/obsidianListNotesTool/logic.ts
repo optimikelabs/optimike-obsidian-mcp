@@ -71,7 +71,7 @@ export const ObsidianListNotesInputSchema = z
     responseMode: z
       .enum(["tree", "compact"])
       .optional()
-      .default("tree")
+      .default("compact")
       .describe(
         "Response shape. 'tree' preserves the legacy tree string; 'compact' returns paginated path entries for agent context efficiency.",
       ),

@@ -38,7 +38,7 @@ export interface BaseRowSelectionTransport {
   query(baseId: string, view: string): Promise<unknown>;
 }
 function refuse(reason: string): never {
-  throw new McpError(BaseErrorCode.CONFLICT, "The Base row selection is unavailable, ambiguous or changed; replan is required.", { reason });
+  throw new McpError(BaseErrorCode.CONFLICT, "The Base row selection is unavailable, ambiguous or changed; replan is required.", { reasonCode: reason });
 }
 export function baseRowTarget(value: unknown): BaseRowTarget {
   const p = BaseRowTargetSchema.parse(value);

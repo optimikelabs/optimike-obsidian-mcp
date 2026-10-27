@@ -12,7 +12,7 @@ import { ASSET_IMPORT_KIND as KIND, ASSET_IMPORT_REF as REF, ASSET_IMPORT_KEY as
 import type { ProcessedImage } from "./imageProcessing.js";
 
 function deny(reason:string, code:BaseErrorCode=BaseErrorCode.FORBIDDEN):never {
-  throw new McpError(code,"The asset operation could not be authorized or verified.",{reason});
+  throw new McpError(code,"The asset operation could not be authorized or verified.",{reasonCode: reason});
 }
 function operationId(ref:string):string {
   if(typeof ref!=="string"||!ref.startsWith(REF)||!z.string().uuid().safeParse(ref.slice(REF.length)).success) deny("asset_plan_invalid");
