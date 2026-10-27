@@ -987,14 +987,13 @@ export class ObsidianNoteReplaceJournal {
     const now = this.now();
     if (now < this.nextPurgeAt) return;
     const cutoff = new Date(now - this.terminalRetentionMs).toISOString();
-    const plannedCutoff = new Date(now - this.plannedRetentionMs).toISOString();
     const expiredAt = new Date(now).toISOString();
     // This atomic update fences an apply's planned -> applying transition.
     // Never expire an already dispatched or uncertain operation.
-    const expired = this.db.prepare(`UPDATE obsidian_note_replace_plans
+    const expired = this.plannedRetentionMs === 0 ? { changes: 0 } : this.db.prepare(`UPDATE obsidian_note_replace_plans
       SET status = 'expired', updated_at = ?,
           payload_json = json_set(payload_json, '$.status', 'expired', '$.updatedAt', ?, '$.nextContent', '')
-      WHERE status = 'planned' AND created_at < ?`).run(expiredAt, expiredAt, plannedCutoff);
+      WHERE status = 'planned' AND created_at < ?`).run(expiredAt, expiredAt, new Date(now - this.plannedRetentionMs).toISOString());
     this.db.prepare(`DELETE FROM obsidian_note_replace_runtime_leases
       WHERE expires_at IS NOT NULL AND expires_at <= ?`).run(expiredAt);
     const result = this.db
