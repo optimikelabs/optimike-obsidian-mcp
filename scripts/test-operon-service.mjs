@@ -171,6 +171,10 @@ const state = {
   taskGetGeneration: null,
   holdTaskGet: null,
   holdPage: null,
+  holdValidation: null,
+  notReadyStatuses: 0,
+  taskGetSignature: null,
+  taskGetOtherId: null,
   failPages: 0,
   validationCalls: 0,
   mutationCalls: 0,
@@ -189,12 +193,18 @@ const state = {
 
 function statusPayload() {
   state.statusCalls += 1;
+  // The index settles again right after a write (second writer, reindex).
+  const settling = state.notReadyStatuses > 0;
+  if (settling) state.notReadyStatuses -= 1;
   const generation =
     state.mode === "status-drift" && state.statusCalls >= 2
       ? state.generation + 1
       : state.generation;
   return {
-    ok: state.mode !== "incompatible" && state.mode !== "initializing",
+    ok:
+      !settling &&
+      state.mode !== "incompatible" &&
+      state.mode !== "initializing",
     contractVersion: "1",
     lifecycle: {
       state: "ready",
@@ -230,7 +240,10 @@ function statusPayload() {
       supportedRange: "2.4.0",
     },
     index: {
-      ready: state.mode !== "incompatible" && state.mode !== "initializing",
+      ready:
+        !settling &&
+        state.mode !== "incompatible" &&
+        state.mode !== "initializing",
       generation,
       taskCount: tasks.length,
       duplicateConflictCount: state.mode === "duplicate" ? 1 : 0,
@@ -343,7 +356,11 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "GET" && url.pathname.endsWith("/validate")) {
-    sendJson(response, 200, validationPayload());
+    if (state.holdValidation) {
+      state.holdValidation.then(() =>
+        sendJson(response, 200, validationPayload()),
+      );
+    } else sendJson(response, 200, validationPayload());
     return;
   }
   const nativeReadOperation =
@@ -404,8 +421,10 @@ const server = http.createServer((request, response) => {
               source: "operon-live",
               stale: false,
               generation: state.taskGetGeneration ?? state.generation,
-              settingsSignature: "fnv1a32:settings",
-              task,
+              settingsSignature: state.taskGetSignature ?? "fnv1a32:settings",
+              task: state.taskGetOtherId
+                ? { ...task, operonId: state.taskGetOtherId }
+                : task,
               limitations: ["read-only"],
             }
           : { error: "not_found" },
@@ -2677,8 +2696,11 @@ try {
     "the covered snapshot is reused",
   );
 
-  // 4. Errors: a failed background refresh is logged and the next read
-  //    refreshes; if that also fails, the fallback is labelled stale.
+  // 4. Errors after a receipt: a failed background refresh is logged; the
+  //    next read retries rather than serving a snapshot that misses the
+  //    receipt. A persistent failure ends in a bounded wait and a stale
+  //    fallback that says it misses the mutation; a non-transient failure
+  //    falls back without waiting.
   loggedEvents.length = 0;
   state.failPages = 2;
   await raceApply("race-error-1", "e1");
@@ -2691,14 +2713,74 @@ try {
       ),
     "refresh failure warning",
   );
-  const fallback = await readProbe();
-  assert.equal(fallback.page.source, "operon-cache");
-  assert.equal(fallback.page.stale, true);
-  assert.equal(fallback.probe, "m3", "the stale fallback is labelled stale");
   const retried = await readProbe();
   assert.equal(retried.page.source, "operon-live");
   assert.equal(retried.page.stale, false);
-  assert.equal(retried.probe, "e1");
+  assert.equal(retried.probe, "e1", "the read after a receipt sees it");
+  assert.ok(
+    loggedEvents.some(
+      (event) =>
+        event.message ===
+        "Operon read retries until a confirmed mutation is readable.",
+    ),
+  );
+  await settleBackground();
+  const defaultDeadline = OperonService.pendingMutationReadDeadlineMs;
+  OperonService.pendingMutationReadDeadlineMs = 1_000;
+  state.failPages = 1_000;
+  await raceApply("race-error-2", "e2");
+  const persistentStarted = Date.now();
+  const fallback = await readProbe();
+  assert.ok(Date.now() - persistentStarted >= 500, "bounded retries first");
+  assert.equal(fallback.page.source, "operon-cache");
+  assert.equal(fallback.page.stale, true);
+  assert.equal(fallback.probe, "e1", "the stale fallback is labelled stale");
+  assert.ok(
+    fallback.page.limitations.some((entry) =>
+      entry.includes(
+        "predates an Operon mutation this server already confirmed",
+      ),
+    ),
+    "the fallback discloses the confirmed mutation it misses",
+  );
+  state.failPages = 0;
+  OperonService.pendingMutationReadDeadlineMs = defaultDeadline;
+  const recoveredRead = await readProbe();
+  assert.equal(recoveredRead.page.stale, false);
+  assert.equal(recoveredRead.probe, "e2");
+  await settleBackground();
+  state.mode = "p0";
+  await raceApply("race-error-p0", "p0");
+  const p0Started = Date.now();
+  const p0Fallback = await readProbe();
+  assert.ok(Date.now() - p0Started < 3_000, "no retry on a P0 refusal");
+  assert.equal(p0Fallback.page.stale, true);
+  state.mode = "normal";
+  const afterP0Read = await readProbe();
+  assert.equal(afterP0Read.probe, "p0");
+  await settleBackground();
+
+  // 4a. E5 qualification case: right after the receipt the index settles
+  //     again (a second writer), so the live status is briefly not ready.
+  //     The read must wait for it, not serve the snapshot without the
+  //     mutation.
+  await raceApply("race-notready-1", "n1");
+  state.notReadyStatuses = 3;
+  const settlingRead = await service.getTask({ operonId: "abc1234" });
+  assert.equal(settlingRead.source, "operon-live");
+  assert.equal(settlingRead.stale, false);
+  assert.equal(settlingRead.task.fields.latency_probe, "n1");
+  state.notReadyStatuses = 0;
+  await settleBackground();
+  // Same for a query while the background refresh hits the settling index.
+  await raceApply("race-notready-2", "n2");
+  state.notReadyStatuses = 2;
+  const settlingQuery = await readProbe();
+  assert.equal(settlingQuery.page.stale, false);
+  assert.equal(settlingQuery.probe, "n2");
+  state.notReadyStatuses = 0;
+  await settleBackground();
+
   // Same failure when the mutation leaves the generation unchanged: the
   // persisted snapshot still matches the live generation but predates the
   // receipt, so it must not be served as live.
@@ -2759,6 +2841,31 @@ try {
     "a generation mismatch falls back to the snapshot path",
   );
   state.taskGetGeneration = null;
+  for (const [label, apply, reset] of [
+    [
+      "settings signature",
+      () => (state.taskGetSignature = "fnv1a32:other-settings"),
+      () => (state.taskGetSignature = null),
+    ],
+    [
+      "task identity",
+      () => (state.taskGetOtherId = "bcd2345"),
+      () => (state.taskGetOtherId = null),
+    ],
+  ]) {
+    state.generation += 1;
+    apply();
+    pagesBefore = state.postCalls;
+    const guarded = await service.getTask({ operonId: "abc1234" });
+    reset();
+    assert.equal(guarded.task.operonId, "abc1234");
+    assert.equal(
+      state.postCalls,
+      pagesBefore + 1,
+      `a single-task answer with another ${label} falls back to the snapshot path`,
+    );
+    await settleBackground();
+  }
   await assert.rejects(
     service.getTask({ operonId: "zzz9999" }),
     (error) => error.code === "NOT_FOUND",
@@ -2772,6 +2879,64 @@ try {
     (error) => error.code === "NOT_FOUND",
   );
   state.mode = "normal";
+
+  // 5a. R7-R1: the index moves after the pages but before validation and the
+  //     final status. The snapshot must not store old pages under the new
+  //     generation (status before/after fence).
+  await settleBackground();
+  state.generation += 1;
+  let releaseValidation;
+  state.holdValidation = new Promise((resolve) => {
+    releaseValidation = resolve;
+  });
+  pagesBefore = state.postCalls;
+  const driftRead = service.ensureSnapshot(true);
+  await waitFor(() => state.postCalls === pagesBefore + 1, "drift pages");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const driftIndex = tasks.findIndex((task) => task.operonId === "abc1234");
+  tasks[driftIndex] = makeTask("abc1234", {
+    fields: { ...tasks[driftIndex].fields, latency_probe: "drift" },
+  });
+  state.generation += 1;
+  state.holdValidation = null;
+  releaseValidation();
+  const driftSnapshot = await driftRead;
+  assert.equal(
+    driftSnapshot.source,
+    "operon-cache",
+    "a refresh whose pages predate the final status is refused",
+  );
+  const afterDrift = await readProbe();
+  assert.equal(afterDrift.page.stale, false);
+  assert.equal(afterDrift.probe, "drift", "no snapshot mixes generations");
+
+  // 5b. R7-R2: a refresh only covers mutations counted before it started. A
+  //     same-generation receipt that lands during a refresh stays uncovered
+  //     when the catch-up refresh fails.
+  await settleBackground();
+  state.generation += 1;
+  let releaseValidation7;
+  state.holdValidation = new Promise((resolve) => {
+    releaseValidation7 = resolve;
+  });
+  pagesBefore = state.postCalls;
+  const coverRead = readProbe();
+  await waitFor(() => state.postCalls === pagesBefore + 1, "cover pages");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  state.failPages = 1;
+  await raceApply("race-nogen-cover-1", "c1");
+  state.holdValidation = null;
+  releaseValidation7();
+  await coverRead;
+  await settleBackground();
+  assert.ok(
+    service.liveState.coveredMutations < service.liveState.appliedMutations,
+    "the early refresh does not cover the later receipt",
+  );
+  const afterCover = await readProbe();
+  assert.equal(afterCover.page.stale, false);
+  assert.equal(afterCover.probe, "c1", "the read after the receipt sees it");
+  await settleBackground();
 
   // 6. Contexts are isolated: another snapshot database never joins this
   //    refresh, and keeps its own mutation bookkeeping.

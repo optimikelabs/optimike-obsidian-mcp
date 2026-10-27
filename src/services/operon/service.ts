@@ -193,6 +193,37 @@ function liveSnapshotState(key: string): LiveSnapshotState {
   return state;
 }
 
+/**
+ * Live failures that are expected to clear on their own: the index or the
+ * settings moved during a read, the index is settling, or the Bridge is
+ * momentarily unreachable. Duplicate ids, P0 validation, incompatibility and
+ * malformed payloads are not transient.
+ */
+const transientLiveErrors = new WeakSet<object>();
+
+function transient<T extends object>(error: T): T {
+  transientLiveErrors.add(error);
+  return error;
+}
+
+function isTransientLiveError(error: unknown): boolean {
+  if (error && typeof error === "object" && transientLiveErrors.has(error)) {
+    return true;
+  }
+  if (!axios.isAxiosError(error)) return false;
+  if (!error.response) return true;
+  const payload = error.response.data as
+    | { error?: { retryable?: unknown } }
+    | undefined;
+  return error.response.status === 503 || payload?.error?.retryable === true;
+}
+
+/** Pause between attempts while a confirmed mutation is not yet readable. */
+const PENDING_MUTATION_RETRY_DELAY_MS = 400;
+
+const PENDING_MUTATION_LIMITATION =
+  "This persisted snapshot predates an Operon mutation this server already confirmed; it does not reflect that mutation. Retry once the Operon index settles.";
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -280,6 +311,12 @@ function matchesMutationJournalOperonId(
 }
 
 export class OperonService {
+  /**
+   * How long a read keeps retrying transient live failures while the
+   * persisted snapshot misses a mutation this server already confirmed.
+   */
+  static pendingMutationReadDeadlineMs = 15_000;
+
   private readonly dbPath = config.obsidianSharedCacheDbPath;
   private readonly liveState = liveSnapshotState(
     `${config.obsidianBaseUrl.replace(/\/$/u, "")}\n${this.dbPath}`,
@@ -1665,11 +1702,12 @@ export class OperonService {
   private async fetchLiveStatus(): Promise<OperonStatus> {
     const status = await this.fetchBridgeStatus("fetchLiveOperonStatus");
     if (!status.ok || !status.operon.compatible || !status.index.ready) {
-      throw new McpError(
+      const error = new McpError(
         BaseErrorCode.SERVICE_UNAVAILABLE,
         `Operon Bridge is not ready (present=${status.operon.present}, version=${status.operon.version ?? "unknown"}, compatible=${status.operon.compatible}).`,
         this.requestContext("fetchLiveOperonStatus"),
       );
+      throw status.operon.compatible ? transient(error) : error;
     }
     if (!status.capabilities.list || !status.capabilities.query) {
       throw new McpError(
@@ -1759,18 +1797,20 @@ export class OperonService {
       observed.operon.version !== expected.operon.version ||
       observed.bridge.version !== expected.bridge.version;
     if (changed) {
-      throw new McpError(
-        BaseErrorCode.CONFLICT,
-        `Operon index or settings changed during ${phase}; retry after the index settles.`,
-        this.requestContext("assertStableOperonStatus", {
-          phase,
-          expectedGeneration: expected.index.generation,
-          observedGeneration: observed.index.generation,
-          expectedTaskCount: expected.index.taskCount,
-          observedTaskCount: observed.index.taskCount,
-          expectedSettingsSignature: expected.settingsSignature,
-          observedSettingsSignature: observed.settingsSignature,
-        }),
+      throw transient(
+        new McpError(
+          BaseErrorCode.CONFLICT,
+          `Operon index or settings changed during ${phase}; retry after the index settles.`,
+          this.requestContext("assertStableOperonStatus", {
+            phase,
+            expectedGeneration: expected.index.generation,
+            observedGeneration: observed.index.generation,
+            expectedTaskCount: expected.index.taskCount,
+            observedTaskCount: observed.index.taskCount,
+            expectedSettingsSignature: expected.settingsSignature,
+            observedSettingsSignature: observed.settingsSignature,
+          }),
+        ),
       );
     }
   }
@@ -1812,28 +1852,32 @@ export class OperonService {
         page.generation !== expectedStatus.index.generation ||
         page.settingsSignature !== expectedStatus.settingsSignature
       ) {
-        throw new McpError(
-          BaseErrorCode.CONFLICT,
-          "Operon generation or settings changed between snapshot pages.",
-          this.requestContext("fetchAllLiveOperonTasks", {
-            pageIndex,
-            expectedGeneration: expectedStatus.index.generation,
-            observedGeneration: page.generation,
-            expectedSettingsSignature: expectedStatus.settingsSignature,
-            observedSettingsSignature: page.settingsSignature,
-          }),
+        throw transient(
+          new McpError(
+            BaseErrorCode.CONFLICT,
+            "Operon generation or settings changed between snapshot pages.",
+            this.requestContext("fetchAllLiveOperonTasks", {
+              pageIndex,
+              expectedGeneration: expectedStatus.index.generation,
+              observedGeneration: page.generation,
+              expectedSettingsSignature: expectedStatus.settingsSignature,
+              observedSettingsSignature: page.settingsSignature,
+            }),
+          ),
         );
       }
       expectedTotal ??= page.total;
       if (page.total !== expectedTotal) {
-        throw new McpError(
-          BaseErrorCode.CONFLICT,
-          "Operon task count changed while the snapshot was being paged; retry after the index settles.",
-          this.requestContext("fetchAllLiveOperonTasks", {
-            expectedTotal,
-            observedTotal: page.total,
-            pageIndex,
-          }),
+        throw transient(
+          new McpError(
+            BaseErrorCode.CONFLICT,
+            "Operon task count changed while the snapshot was being paged; retry after the index settles.",
+            this.requestContext("fetchAllLiveOperonTasks", {
+              expectedTotal,
+              observedTotal: page.total,
+              pageIndex,
+            }),
+          ),
         );
       }
       tasks.push(...page.tasks);
@@ -1898,15 +1942,17 @@ export class OperonService {
       validation.generation !== finalStatus.index.generation ||
       validation.settingsSignature !== finalStatus.settingsSignature
     ) {
-      throw new McpError(
-        BaseErrorCode.CONFLICT,
-        "Operon generation or settings changed before validation completed.",
-        this.requestContext("refreshLiveOperonSnapshot", {
-          expectedGeneration: finalStatus.index.generation,
-          observedGeneration: validation.generation,
-          expectedSettingsSignature: finalStatus.settingsSignature,
-          observedSettingsSignature: validation.settingsSignature,
-        }),
+      throw transient(
+        new McpError(
+          BaseErrorCode.CONFLICT,
+          "Operon generation or settings changed before validation completed.",
+          this.requestContext("refreshLiveOperonSnapshot", {
+            expectedGeneration: finalStatus.index.generation,
+            observedGeneration: validation.generation,
+            expectedSettingsSignature: finalStatus.settingsSignature,
+            observedSettingsSignature: validation.settingsSignature,
+          }),
+        ),
       );
     }
     if (!validation.ok || validation.summary.P0 > 0) {
@@ -1919,13 +1965,15 @@ export class OperonService {
       );
     }
     if (configuration.settingsSignature !== finalStatus.settingsSignature) {
-      throw new McpError(
-        BaseErrorCode.CONFLICT,
-        "Operon configuration changed before the snapshot could be committed.",
-        this.requestContext("refreshLiveOperonSnapshot", {
-          expectedSettingsSignature: finalStatus.settingsSignature,
-          observedSettingsSignature: configuration.settingsSignature,
-        }),
+      throw transient(
+        new McpError(
+          BaseErrorCode.CONFLICT,
+          "Operon configuration changed before the snapshot could be committed.",
+          this.requestContext("refreshLiveOperonSnapshot", {
+            expectedSettingsSignature: finalStatus.settingsSignature,
+            observedSettingsSignature: configuration.settingsSignature,
+          }),
+        ),
       );
     }
     this.saveSnapshot(finalStatus, pageResult.tasks, validation, configuration);
@@ -2014,7 +2062,7 @@ export class OperonService {
     });
     // Every mutation receipt returned before this read must be visible in it.
     const required = this.liveState.appliedMutations;
-    const cached = this.loadSnapshot("operon-cache");
+    let cached = this.loadSnapshot("operon-cache");
 
     if (!liveModeConfigured()) {
       if (cached) return cached;
@@ -2025,31 +2073,75 @@ export class OperonService {
       );
     }
 
-    try {
-      const status = await this.fetchLiveStatus();
-      if (
-        !forceRefresh &&
-        this.cachedSnapshotIsCurrent(cached, status, required)
-      ) {
-        return this.liveViewOfCachedSnapshot(cached, status);
+    const deadline = Date.now() + OperonService.pendingMutationReadDeadlineMs;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        const status = await this.fetchLiveStatus();
+        if (
+          !forceRefresh &&
+          this.cachedSnapshotIsCurrent(cached, status, required)
+        ) {
+          return this.liveViewOfCachedSnapshot(cached, status);
+        }
+        return await this.refreshCovering(required, {
+          status,
+          covers: required,
+        });
+      } catch (error) {
+        // The persisted snapshot is known to miss a mutation this server has
+        // already confirmed: falling back to it would hide that mutation.
+        // While the failure is transient (index settling after the write, a
+        // second writer, a momentary Bridge outage), retry within a bound.
+        const missesConfirmedMutation =
+          this.liveState.coveredMutations < required;
+        if (
+          missesConfirmedMutation &&
+          isTransientLiveError(error) &&
+          Date.now() + PENDING_MUTATION_RETRY_DELAY_MS < deadline
+        ) {
+          logger.info(
+            "Operon read retries until a confirmed mutation is readable.",
+            {
+              ...context,
+              attempt,
+              error: errorMessage(error),
+            },
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, PENDING_MUTATION_RETRY_DELAY_MS),
+          );
+          cached = this.loadSnapshot("operon-cache");
+          continue;
+        }
+        logger.warning(
+          "Live Operon Bridge unavailable; considering persisted snapshot fallback.",
+          {
+            ...context,
+            error: errorMessage(error),
+            cacheAvailable: Boolean(cached),
+            missesConfirmedMutation,
+          },
+        );
+        if (cached) {
+          return missesConfirmedMutation
+            ? {
+                ...cached,
+                limitations: [
+                  ...new Set([
+                    ...cached.limitations,
+                    PENDING_MUTATION_LIMITATION,
+                  ]),
+                ],
+              }
+            : cached;
+        }
+        if (error instanceof McpError) throw error;
+        throw new McpError(
+          BaseErrorCode.SERVICE_UNAVAILABLE,
+          `Operon Bridge unavailable and no cache exists: ${errorMessage(error)}`,
+          context,
+        );
       }
-      return await this.refreshCovering(required, { status, covers: required });
-    } catch (error) {
-      logger.warning(
-        "Live Operon Bridge unavailable; considering persisted snapshot fallback.",
-        {
-          ...context,
-          error: errorMessage(error),
-          cacheAvailable: Boolean(cached),
-        },
-      );
-      if (cached) return cached;
-      if (error instanceof McpError) throw error;
-      throw new McpError(
-        BaseErrorCode.SERVICE_UNAVAILABLE,
-        `Operon Bridge unavailable and no cache exists: ${errorMessage(error)}`,
-        context,
-      );
     }
   }
 
@@ -2771,6 +2863,8 @@ export class OperonService {
     try {
       status = await this.fetchLiveStatus();
     } catch (error) {
+      // The cache misses a confirmed mutation: let the snapshot path retry.
+      if (this.liveState.coveredMutations < required) return null;
       // Same fallback as ensureSnapshot, without a second status attempt.
       logger.warning(
         "Live Operon Bridge unavailable; considering persisted snapshot fallback.",
@@ -2855,7 +2949,7 @@ export class OperonService {
     // The persisted snapshot is behind: bring it up to date in the background
     // (coalesced) so the next reads of this generation are served from it.
     void this.refreshCovering(required).catch((error: unknown) => {
-      logger.debug(
+      logger.warning(
         "Operon background snapshot refresh failed after a task read.",
         {
           ...this.requestContext("getOperonTask", { operonId }),
