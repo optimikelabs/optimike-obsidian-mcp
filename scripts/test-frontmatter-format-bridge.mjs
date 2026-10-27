@@ -26,3 +26,12 @@ test("rejects non-mapping roots and never returns parser diagnostics", () => {
     assert.throws(() => inspectFrontmatterFormat(input, parse, obsidianOptions, types), /invalid_frontmatter/);
   }
 });
+
+test("types: dates, nested objects, empty values and unknown widgets are only signals", () => {
+  const registry = { getAssignedWidget: key => ({ jour: "date", heure: "datetime", invalide: "date", objet: "text", vide: "number", futur: "custom" })[key] ?? null };
+  const input = "jour: 2026-10-21\nheure: 2026-10-21T14:30\ninvalide: 2026-02-30\nobjet:\n  enfant: valeur\nvide:\nfutur: valeur\n";
+  const { warnings } = inspectFrontmatterFormat(input, parse, obsidianOptions, registry);
+  assert.deepEqual(warnings.map(({ key, reason }) => [key, reason]), [
+    ["invalide", "type_mismatch"], ["objet", "type_mismatch"], ["vide", "empty_value"], ["futur", "unknown_widget"],
+  ]);
+});

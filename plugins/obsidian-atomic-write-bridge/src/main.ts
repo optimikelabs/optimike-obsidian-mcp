@@ -427,7 +427,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               return;
             }
             const result = inspectFrontmatterFormat(body.yaml, parseYaml, stringifyYaml, types);
-            sendJson(res, 200, { ok: true, contractVersion: 1, ...result });
+            sendJson(res, 200, { ok: true, contractVersion: 1, bindingFingerprint: this.bindingFingerprint, ...result });
           } catch {
             // Parser diagnostics can contain private frontmatter; never return them.
             sendJson(res, 400, errorPayload("invalid_request"));
