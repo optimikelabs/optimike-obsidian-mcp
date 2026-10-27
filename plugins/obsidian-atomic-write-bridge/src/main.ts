@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   parseLinktext,
   parseYaml,
+  stringifyYaml,
   Plugin,
   PluginSettingTab,
   resolveSubpath,
@@ -33,6 +34,7 @@ import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { createNativeNoteMoveRoutes } from "./nativeNoteMoveRoutes.js";
+import { inspectFrontmatterFormat } from "./frontmatterFormat.js";
 import {
   RestExtensionLifecycle,
   RestExtensionPartialMountError,
@@ -386,6 +388,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               canvasWriteEnabled: this.allowCanvasWrites,
             },
             datePreparation: { contractVersion: 1, supported: true },
+            frontmatterFormat: { contractVersion: 1, supported: typeof (this.app as any).metadataTypeManager?.getAssignedWidget === "function" },
             nativeMove: this.nativeMove?.capabilities() ?? { supported: false, enabled: false },
             noteCreate: this.noteCreate?.capabilities() ?? { supported: false, enabled: false },
             limits: { markdownOnly: true },
@@ -405,6 +408,30 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
               },
             },
           });
+        });
+
+      api
+        .addRoute(`${ATOMIC_WRITE_REST_PREFIX}/frontmatter/format`)
+        .post((req: any, res: any) => {
+          try {
+            const body = req?.body;
+            if (!body || body.contractVersion !== 1 || typeof body.yaml !== "string" ||
+                Buffer.byteLength(body.yaml, "utf8") > 5 * 1024 * 1024 ||
+                Object.keys(body).some((key) => key !== "contractVersion" && key !== "yaml")) {
+              sendJson(res, 400, errorPayload("invalid_request"));
+              return;
+            }
+            const types = (this.app as any).metadataTypeManager;
+            if (typeof types?.getAssignedWidget !== "function") {
+              sendJson(res, 503, errorPayload("read_error"));
+              return;
+            }
+            const result = inspectFrontmatterFormat(body.yaml, parseYaml, stringifyYaml, types);
+            sendJson(res, 200, { ok: true, contractVersion: 1, ...result });
+          } catch {
+            // Parser diagnostics can contain private frontmatter; never return them.
+            sendJson(res, 400, errorPayload("invalid_request"));
+          }
         });
 
       api
