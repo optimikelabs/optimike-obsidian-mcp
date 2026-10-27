@@ -29,7 +29,7 @@ import {
 } from "./contract.js";
 import { getFrontmatterDateIntegrationContract } from "./modifiedTimeIntegrations.js";
 import { dateManagementScope, createTemplateDateGuard } from "./dateManagementScope.js";
-import { createDatePreparation, DatePreparationError } from "./datePreparation.js";
+import { createDatePreparation, DatePreparationDeferred, DatePreparationError } from "./datePreparation.js";
 import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
@@ -199,6 +199,10 @@ const ATOMIC_PUBLIC_ERRORS: Record<string, AtomicPublicErrorDescriptor> = {
   date_preparation_failed: {
     code: "date_preparation_failed", reasonCode: "date_preparation_failed",
     status: "rejected", retryable: false, message: "Date preparation failed.",
+  },
+  date_preparation_fdm_pending: {
+    code: "date_preparation_fdm_pending", reasonCode: "date_preparation_fdm_pending", status: "conflict", retryable: false,
+    message: "The date manager still has pending work for this note; nothing was prepared. Plan again shortly.",
   },
   effect_fence_refused: {
     code: "effect_fence_refused", reasonCode: "effect_fence_refused", status: "blocked", retryable: false,
@@ -798,6 +802,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
         } catch (error) {
           if (safeInstanceOf(error, BindingConflictError)) sendJson(res, 409, errorPayload("binding_conflict"));
           else if (safeInstanceOf(error, EffectFenceRefused)) sendJson(res, 403, errorPayload("effect_fence_refused"));
+          else if (safeInstanceOf(error, DatePreparationDeferred)) sendJson(res, 409, errorPayload("date_preparation_fdm_pending"));
           else if (safeInstanceOf(error, HashConflictError)) sendJson(res, 409, errorPayload("hash_conflict", undefined, safeHashConflictDetails(error)));
           else if (safeInstanceOf(error, DatePreparationError)) sendJson(res, 422, errorPayload("atomic_write_creation_property_missing"));
           else sendJson(res, 500, errorPayload("date_preparation_failed"));

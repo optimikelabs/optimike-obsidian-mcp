@@ -425,7 +425,10 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     const unverified = () => new McpError(BaseErrorCode.CONFLICT,
       "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise : obsidian_operation_close avec datePreparationPaths.",
       { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true });
-    if (this.journal.hasDatePreparationFence(fenceKey)) throw unverified();
+    // A lock whose attempt provably never reached its effect point is released
+    // (and that attempt revoked forever); any other lock needs owner review.
+    if (this.journal.hasDatePreparationFence(fenceKey) &&
+        !(await this.releaseUnstartedPreparation(fenceKey, source.bindingFingerprint))) throw unverified();
     if (expectedSource && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
       throw new McpError(BaseErrorCode.CONFLICT, "The note changed before date preparation.");
     const originalFormat = requireNativeFormat ? await inspectNativeFrontmatter(this.delegate, source.content, source.bindingFingerprint) : undefined;
@@ -455,16 +458,11 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       prepared = await this.delegate.prepareDate({ contractVersion: 1, path, expectedSha256: source.sha256, bindingFingerprint: source.bindingFingerprint,
         ...(fenceEpoch ? { fence: { contractVersion: 1, epoch: fenceEpoch, attemptId: attempt } } : {}) });
     } catch (error) {
-      // Only the Bridge's own fence refusal proves that no preparation started.
-      if (fenceEpoch && error instanceof McpError && error.code === BaseErrorCode.FORBIDDEN &&
-          (error.details as { reasonCode?: unknown } | undefined)?.reasonCode === "effect_fence_refused" &&
-          this.journal.releaseVerifiedDatePreparationFence(fenceKey, attempt)) {
-        throw new McpError(BaseErrorCode.CONFLICT, "The Atomic Write Bridge changed before date preparation; nothing was prepared. Plan again.",
-          { reasonCode: "effect_fence_refused" });
-      }
-      throw unverified();
+      throw await this.preparationFailure(error, fenceKey, source.bindingFingerprint, fenceEpoch, attempt, unverified, fail);
     }
-    if (prepared.datePreparation?.kind !== "date-manager-before-plan") throw unverified();
+    if (prepared.datePreparation?.kind !== "date-manager-before-plan") {
+      throw await this.preparationFailure(undefined, fenceKey, source.bindingFingerprint, fenceEpoch, attempt, unverified, fail);
+    }
     // Seal only a fresh read, never the preparation response or the old projection.
     let current;
     try { current = await this.delegate.read({ contractVersion: 1, path }); } catch { throw unverified(); }
@@ -509,6 +507,51 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       catch { throw unverified(); }
     }
     return result;
+  }
+
+  /**
+   * The lock stays only if the preparation may have acted. The Bridge decides:
+   * its own fence refusal, or a revocation verdict `revoked_before_effect`,
+   * proves that this attempt never reached its effect point and never will.
+   */
+  private async preparationFailure(
+    error: unknown, key: string, binding: string, fenceEpoch: string | undefined, attempt: string,
+    unverified: () => McpError, fail: () => McpError,
+  ): Promise<McpError> {
+    if (!fenceEpoch) return unverified();
+    const reason = error instanceof McpError ? (error.details as { reasonCode?: unknown } | undefined)?.reasonCode : undefined;
+    const refused = error instanceof McpError && error.code === BaseErrorCode.FORBIDDEN && reason === "effect_fence_refused";
+    if (refused) this.journal.releaseVerifiedDatePreparationFence(key, attempt);
+    else if (!(await this.releaseUnstartedPreparation(key, binding, { epoch: fenceEpoch, attemptId: attempt }))) return unverified();
+    if (reason === "atomic_write_creation_property_missing") return fail();
+    if (reason === "date_preparation_fdm_pending") {
+      return new McpError(BaseErrorCode.CONFLICT,
+        "Le gestionnaire de dates traite encore cette note (note récente ou modification en attente) ; rien n'a été modifié. Relancez le plan dans une trentaine de secondes.",
+        { reasonCode: "date_preparation_fdm_pending" });
+    }
+    return new McpError(BaseErrorCode.CONFLICT,
+      "La préparation des dates n'a pas démarré (note modifiée entre-temps ou Bridge indisponible) ; rien n'a été modifié. Relisez la note puis relancez le plan.",
+      { reasonCode: "date_preparation_not_started" });
+  }
+
+  private async releaseUnstartedPreparation(key: string, binding: string, token?: { epoch: string; attemptId: string }): Promise<boolean> {
+    const lock = this.journal.getDatePreparationFence(key);
+    const target = token ?? (lock?.fenceEpoch ? { epoch: lock.fenceEpoch, attemptId: lock.attemptId } : undefined);
+    if (!target || !this.delegate.resolveEffectFence) return false;
+    let response;
+    try {
+      response = await this.delegate.resolveEffectFence({ contractVersion: 1, bindingFingerprint: binding, mode: "revoke", attempts: [target], includeLegacy: false });
+    } catch { return false; }
+    const result = response?.results?.[0];
+    if (response?.bindingFingerprint !== binding || result?.epoch !== target.epoch || result.attemptId !== target.attemptId ||
+        result.verdict !== "revoked_before_effect") return false;
+    // Only this revoked attempt's own lock is released; a newer attempt keeps its lock.
+    this.journal.resolveDatePreparationFence(key, target.attemptId, {
+      contractVersion: 1, closedAt: new Date().toISOString(), reasonCode: "automatic_not_started",
+      previousState: "date_preparation_unverified", guarantee: "no_further_effect", priorEffect: "none",
+      attempts: [{ ...target, verdict: result.verdict }],
+    });
+    return true;
   }
 
   releasePreparation(source: { datePreparation?: OperationReceipt["datePreparation"] }): void {
