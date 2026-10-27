@@ -173,6 +173,7 @@ const state = {
   holdPage: null,
   holdValidation: null,
   notReadyStatuses: 0,
+  holdNextStatus: null,
   taskGetSignature: null,
   taskGetOtherId: null,
   failPages: 0,
@@ -348,6 +349,18 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === "GET" && url.pathname.endsWith("/status")) {
+    if (state.holdNextStatus) {
+      const hold = state.holdNextStatus;
+      state.holdNextStatus = null;
+      hold.entered = true;
+      hold.promise.then(() => {
+        const payload = statusPayload();
+        payload.ok = false;
+        payload.index.ready = false;
+        sendJson(response, 200, payload);
+      });
+      return;
+    }
     sendJson(response, 200, statusPayload());
     return;
   }
@@ -2879,6 +2892,161 @@ try {
     (error) => error.code === "NOT_FOUND",
   );
   state.mode = "normal";
+
+  // 4b. R8: a durable outage (connection refused) is not waited for: the
+  //     read answers at once from the snapshot, stale, and says it misses
+  //     the confirmed mutation; so does get_task.
+  const bridgeBaseUrl = config.obsidianBaseUrl;
+  const closedPort = await new Promise((resolve) => {
+    const probe = http.createServer();
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  const pointBridgeAt = (url) => {
+    config.obsidianBaseUrl = url;
+    service.client = null;
+  };
+  const mentionsMissingMutation = (limitations) =>
+    limitations.some((entry) =>
+      entry.includes(
+        "predates an Operon mutation this server already confirmed",
+      ),
+    );
+  loggedEvents.length = 0;
+  state.failPages = 1;
+  await raceApply("race-down-1", "d1");
+  await waitFor(
+    () =>
+      loggedEvents.some(
+        (event) =>
+          event.message ===
+          "Operon mutation succeeded but snapshot refresh failed.",
+      ),
+    "refresh failure before the outage",
+  );
+  pointBridgeAt(`http://127.0.0.1:${closedPort}`);
+  let outageStarted = Date.now();
+  const downRead = await readProbe();
+  const downReadMs = Date.now() - outageStarted;
+  outageStarted = Date.now();
+  const downTask = await service.getTask({ operonId: "abc1234" });
+  const downTaskMs = Date.now() - outageStarted;
+  pointBridgeAt(bridgeBaseUrl);
+  assert.ok(
+    downReadMs < 2_000,
+    `refused connection answered in ${downReadMs} ms`,
+  );
+  assert.ok(downTaskMs < 2_000, `get_task answered in ${downTaskMs} ms`);
+  assert.equal(downRead.page.source, "operon-cache");
+  assert.equal(downRead.page.stale, true);
+  assert.ok(mentionsMissingMutation(downRead.page.limitations));
+  assert.equal(downTask.stale, true);
+  assert.ok(mentionsMissingMutation(downTask.limitations));
+  const backUp = await readProbe();
+  assert.equal(backUp.page.stale, false);
+  assert.equal(backUp.probe, "d1");
+  await settleBackground();
+
+  // 4c. R8: once a read has spent the whole retry window on a mutation, the
+  //     next reads waiting for the same mutation answer at once.
+  OperonService.pendingMutationReadDeadlineMs = 1_000;
+  state.failPages = 1_000;
+  await raceApply("race-window-1", "w1");
+  let windowStarted = Date.now();
+  const firstWindowRead = await readProbe();
+  const firstWindowMs = Date.now() - windowStarted;
+  windowStarted = Date.now();
+  const secondWindowRead = await readProbe();
+  const secondWindowMs = Date.now() - windowStarted;
+  assert.ok(firstWindowMs >= 500, "the first read retries within the window");
+  assert.ok(
+    secondWindowMs < 400,
+    `the next read does not wait again (${secondWindowMs} ms)`,
+  );
+  for (const read of [firstWindowRead, secondWindowRead]) {
+    assert.equal(read.page.stale, true);
+    assert.ok(mentionsMissingMutation(read.page.limitations));
+  }
+  state.failPages = 0;
+  const afterWindow = await readProbe();
+  assert.equal(afterWindow.page.stale, false);
+  assert.equal(afterWindow.probe, "w1");
+  await settleBackground();
+
+  // 4d. R8: an attempt that hangs (refresh blocked) stops at the deadline.
+  releasePages = holdPages();
+  await raceApply("race-hang-1", "h1");
+  const hangStarted = Date.now();
+  const hung = await Promise.race([
+    readProbe(),
+    new Promise((resolve) => setTimeout(() => resolve("still waiting"), 5_000)),
+  ]);
+  const hangMs = Date.now() - hangStarted;
+  assert.notEqual(hung, "still waiting", "the read is bounded by the deadline");
+  assert.ok(hangMs < 3_000, `hung attempt stopped after ${hangMs} ms`);
+  assert.equal(hung.page.stale, true);
+  assert.ok(mentionsMissingMutation(hung.page.limitations));
+  releasePages();
+  await settleBackground();
+  const afterHang = await readProbe();
+  assert.equal(afterHang.probe, "h1");
+  OperonService.pendingMutationReadDeadlineMs = defaultDeadline;
+
+  // 4e. R8: a cancelled request stops retrying.
+  state.failPages = 1_000;
+  await raceApply("race-cancel-1", "x1");
+  const cancel = new AbortController();
+  const cancelStarted = Date.now();
+  setTimeout(() => cancel.abort(), 300);
+  const cancelled = await service.query(
+    { operonIds: ["abc1234"], includeProperties: true },
+    cancel.signal,
+  );
+  const cancelMs = Date.now() - cancelStarted;
+  assert.ok(
+    cancelMs < 2_000,
+    `cancellation stops the retries (${cancelMs} ms)`,
+  );
+  assert.equal(cancelled.stale, true);
+  state.failPages = 0;
+  const afterCancel = await readProbe();
+  assert.equal(afterCancel.probe, "x1");
+  await settleBackground();
+
+  // 4f. R8-2: the background refresh completes while a read waits for its
+  //     status, and that status then fails. The read must not return the
+  //     snapshot it loaded before the refresh committed.
+  releasePages = holdPages();
+  pagesBefore = state.postCalls;
+  await raceApply("race-reload-1", "o2");
+  await waitFor(() => state.postCalls === pagesBefore + 1, "held refresh");
+  let releaseStatus;
+  const statusHold = {
+    entered: false,
+    promise: new Promise((resolve) => {
+      releaseStatus = resolve;
+    }),
+  };
+  state.holdNextStatus = statusHold;
+  const racingRead = readProbe();
+  await waitFor(() => statusHold.entered, "read status held");
+  releasePages();
+  await waitFor(
+    () =>
+      service.liveState.coveredMutations === service.liveState.appliedMutations,
+    "background refresh committed",
+  );
+  releaseStatus();
+  const raced = await racingRead;
+  assert.equal(raced.page.stale, true, "the status failed");
+  assert.equal(
+    raced.probe,
+    "o2",
+    "the fallback is the snapshot already committed with the mutation",
+  );
+  await settleBackground();
 
   // 5a. R7-R1: the index moves after the pages but before validation and the
   //     final status. The snapshot must not store old pages under the new

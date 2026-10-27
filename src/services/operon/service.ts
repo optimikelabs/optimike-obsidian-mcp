@@ -176,6 +176,12 @@ type OperonMutationAction =
 interface LiveSnapshotState {
   appliedMutations: number;
   coveredMutations: number;
+  /**
+   * Highest `appliedMutations` value for which a read already waited the
+   * whole retry window without seeing it covered. Later reads waiting for the
+   * same mutations answer at once instead of waiting again.
+   */
+  retryWindowSpentFor: number;
   inFlight: {
     covers: number;
     promise: Promise<OperonSnapshotEnvelope>;
@@ -187,7 +193,12 @@ const liveSnapshotStates = new Map<string, LiveSnapshotState>();
 function liveSnapshotState(key: string): LiveSnapshotState {
   let state = liveSnapshotStates.get(key);
   if (!state) {
-    state = { appliedMutations: 0, coveredMutations: 0, inFlight: null };
+    state = {
+      appliedMutations: 0,
+      coveredMutations: 0,
+      retryWindowSpentFor: 0,
+      inFlight: null,
+    };
     liveSnapshotStates.set(key, state);
   }
   return state;
@@ -211,7 +222,9 @@ function isTransientLiveError(error: unknown): boolean {
     return true;
   }
   if (!axios.isAxiosError(error)) return false;
-  if (!error.response) return true;
+  // No HTTP answer at all (connection refused, port closed, reset, client
+  // timeout): Obsidian or the Bridge is gone, not settling. Durable.
+  if (!error.response) return false;
   const payload = error.response.data as
     | { error?: { retryable?: unknown } }
     | undefined;
@@ -220,6 +233,53 @@ function isTransientLiveError(error: unknown): boolean {
 
 /** Pause between attempts while a confirmed mutation is not yet readable. */
 const PENDING_MUTATION_RETRY_DELAY_MS = 400;
+
+/** Error used to stop waiting at the retry deadline or on cancellation. */
+class PendingMutationWaitStopped extends Error {}
+
+/**
+ * Settles with `promise`, or rejects once `deadline` passes or `signal`
+ * aborts. The abandoned promise keeps running (it may be a shared refresh)
+ * and its outcome is ignored.
+ */
+async function beforeDeadline<T>(
+  promise: Promise<T>,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<T> {
+  promise.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const stop = new Promise<never>((_, reject) => {
+    const fail = (reason: string) =>
+      reject(new PendingMutationWaitStopped(reason));
+    if (signal?.aborted) return fail("request cancelled");
+    timer = setTimeout(
+      () => fail("retry deadline reached"),
+      Math.max(0, deadline - Date.now()),
+    );
+    onAbort = () => fail("request cancelled");
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, stop]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function pauseUnlessAborted(ms: number, signal?: AbortSignal) {
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
 
 const PENDING_MUTATION_LIMITATION =
   "This persisted snapshot predates an Operon mutation this server already confirmed; it does not reflect that mutation. Retry once the Operon index settles.";
@@ -2055,7 +2115,10 @@ export class OperonService {
     );
   }
 
-  async ensureSnapshot(forceRefresh = false): Promise<OperonSnapshotEnvelope> {
+  async ensureSnapshot(
+    forceRefresh = false,
+    signal?: AbortSignal,
+  ): Promise<OperonSnapshotEnvelope> {
     const context = this.requestContext("ensureOperonSnapshot", {
       forceRefresh,
       runtimeMode: config.obsidianRuntimeMode,
@@ -2073,30 +2136,49 @@ export class OperonService {
       );
     }
 
+    const state = this.liveState;
     const deadline = Date.now() + OperonService.pendingMutationReadDeadlineMs;
+    // Retry only if no earlier read already spent the window on these same
+    // mutations (for example while Obsidian stays closed).
+    const retriesAllowed = state.retryWindowSpentFor < required;
     for (let attempt = 1; ; attempt += 1) {
+      const pending = state.coveredMutations < required;
       try {
-        const status = await this.fetchLiveStatus();
-        if (
-          !forceRefresh &&
-          this.cachedSnapshotIsCurrent(cached, status, required)
-        ) {
-          return this.liveViewOfCachedSnapshot(cached, status);
-        }
-        return await this.refreshCovering(required, {
-          status,
-          covers: required,
-        });
+        const attemptResult = (async () => {
+          const status = await this.fetchLiveStatus();
+          if (
+            !forceRefresh &&
+            this.cachedSnapshotIsCurrent(cached, status, required)
+          ) {
+            return this.liveViewOfCachedSnapshot(cached, status);
+          }
+          return await this.refreshCovering(required, {
+            status,
+            covers: required,
+          });
+        })();
+        // While a confirmed mutation is uncovered, no attempt may outlive the
+        // retry deadline or the caller's cancellation.
+        return pending
+          ? await beforeDeadline(attemptResult, deadline, signal)
+          : await attemptResult;
       } catch (error) {
+        // Decide first, then reload: a refresh that completed meanwhile has
+        // saved before it raised `coveredMutations`, so a reload after a
+        // "covered" answer always returns that newer snapshot.
+        const missesConfirmedMutation = state.coveredMutations < required;
+        cached = this.loadSnapshot("operon-cache");
         // The persisted snapshot is known to miss a mutation this server has
         // already confirmed: falling back to it would hide that mutation.
         // While the failure is transient (index settling after the write, a
-        // second writer, a momentary Bridge outage), retry within a bound.
-        const missesConfirmedMutation =
-          this.liveState.coveredMutations < required;
-        if (
+        // second writer, a Bridge 503), retry within the bound.
+        const transientMiss =
           missesConfirmedMutation &&
+          retriesAllowed &&
           isTransientLiveError(error) &&
+          !signal?.aborted;
+        if (
+          transientMiss &&
           Date.now() + PENDING_MUTATION_RETRY_DELAY_MS < deadline
         ) {
           logger.info(
@@ -2107,11 +2189,19 @@ export class OperonService {
               error: errorMessage(error),
             },
           );
-          await new Promise((resolve) =>
-            setTimeout(resolve, PENDING_MUTATION_RETRY_DELAY_MS),
+          await pauseUnlessAborted(PENDING_MUTATION_RETRY_DELAY_MS, signal);
+          if (!signal?.aborted) continue;
+        }
+        if (
+          missesConfirmedMutation &&
+          retriesAllowed &&
+          !signal?.aborted &&
+          (transientMiss || error instanceof PendingMutationWaitStopped)
+        ) {
+          state.retryWindowSpentFor = Math.max(
+            state.retryWindowSpentFor,
+            required,
           );
-          cached = this.loadSnapshot("operon-cache");
-          continue;
         }
         logger.warning(
           "Live Operon Bridge unavailable; considering persisted snapshot fallback.",
@@ -2124,15 +2214,7 @@ export class OperonService {
         );
         if (cached) {
           return missesConfirmedMutation
-            ? {
-                ...cached,
-                limitations: [
-                  ...new Set([
-                    ...cached.limitations,
-                    PENDING_MUTATION_LIMITATION,
-                  ]),
-                ],
-              }
+            ? this.withPendingMutationLimitation(cached)
             : cached;
         }
         if (error instanceof McpError) throw error;
@@ -2279,9 +2361,12 @@ export class OperonService {
     };
   }
 
-  async query(queryInput: unknown): Promise<OperonTaskPage> {
+  async query(
+    queryInput: unknown,
+    signal?: AbortSignal,
+  ): Promise<OperonTaskPage> {
     const query = OperonQuerySchema.parse(queryInput);
-    const snapshot = await this.ensureSnapshot(query.forceRefresh);
+    const snapshot = await this.ensureSnapshot(query.forceRefresh, signal);
     return queryOperonSnapshot(snapshot, query);
   }
 
@@ -2863,18 +2948,30 @@ export class OperonService {
     try {
       status = await this.fetchLiveStatus();
     } catch (error) {
-      // The cache misses a confirmed mutation: let the snapshot path retry.
-      if (this.liveState.coveredMutations < required) return null;
+      const missesConfirmedMutation =
+        this.liveState.coveredMutations < required;
+      // A transient failure while the cache misses a confirmed mutation:
+      // let the snapshot path retry within its bound.
+      if (
+        missesConfirmedMutation &&
+        isTransientLiveError(error) &&
+        this.liveState.retryWindowSpentFor < required
+      ) {
+        return null;
+      }
       // Same fallback as ensureSnapshot, without a second status attempt.
+      // Reload after deciding: a refresh may have completed meanwhile.
+      const latest = this.loadSnapshot("operon-cache");
       logger.warning(
         "Live Operon Bridge unavailable; considering persisted snapshot fallback.",
         {
           ...this.requestContext("getOperonTask", { operonId }),
           error: errorMessage(error),
-          cacheAvailable: Boolean(cached),
+          cacheAvailable: Boolean(latest),
+          missesConfirmedMutation,
         },
       );
-      if (!cached) {
+      if (!latest) {
         if (error instanceof McpError) throw error;
         throw new McpError(
           BaseErrorCode.SERVICE_UNAVAILABLE,
@@ -2882,7 +2979,12 @@ export class OperonService {
           this.requestContext("getOperonTask", { operonId }),
         );
       }
-      return this.taskFromSnapshot(cached, operonId);
+      return this.taskFromSnapshot(
+        missesConfirmedMutation
+          ? this.withPendingMutationLimitation(latest)
+          : latest,
+        operonId,
+      );
     }
     if (this.cachedSnapshotIsCurrent(cached, status, required)) {
       return this.taskFromSnapshot(
@@ -2899,6 +3001,17 @@ export class OperonService {
       });
       return null;
     }
+  }
+
+  private withPendingMutationLimitation(
+    snapshot: OperonSnapshotEnvelope,
+  ): OperonSnapshotEnvelope {
+    return {
+      ...snapshot,
+      limitations: [
+        ...new Set([...snapshot.limitations, PENDING_MUTATION_LIMITATION]),
+      ],
+    };
   }
 
   private taskFromSnapshot(
@@ -2971,11 +3084,14 @@ export class OperonService {
     };
   }
 
-  async getTask(options: {
-    operonId: string;
-    includeProperties?: boolean;
-    forceRefresh?: boolean;
-  }): Promise<Record<string, unknown>> {
+  async getTask(
+    options: {
+      operonId: string;
+      includeProperties?: boolean;
+      forceRefresh?: boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
     if (!options.forceRefresh && liveModeConfigured()) {
       const direct = await this.getTaskLive(options.operonId);
       if (direct) {
@@ -2987,12 +3103,15 @@ export class OperonService {
         };
       }
     }
-    const result = await this.query({
-      operonIds: [options.operonId],
-      includeProperties: options.includeProperties ?? false,
-      forceRefresh: options.forceRefresh ?? false,
-      limit: 1,
-    });
+    const result = await this.query(
+      {
+        operonIds: [options.operonId],
+        includeProperties: options.includeProperties ?? false,
+        forceRefresh: options.forceRefresh ?? false,
+        limit: 1,
+      },
+      signal,
+    );
     if (result.tasks.length === 0) {
       throw new McpError(
         BaseErrorCode.NOT_FOUND,

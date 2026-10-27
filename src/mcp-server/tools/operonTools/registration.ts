@@ -142,8 +142,13 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
       inputSchema: mcpSchema(OperonQuerySchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (params: z.infer<typeof OperonQuerySchema>) =>
-      runTool("operon_list_tasks", params, () => service.query(params)),
+    async (
+      params: z.infer<typeof OperonQuerySchema>,
+      ctx?: { mcpReq?: { signal?: AbortSignal } },
+    ) =>
+      runTool("operon_list_tasks", params, () =>
+        service.query(params, ctx?.mcpReq?.signal),
+      ),
   );
   server.registerTool(
     "operon_query_tasks",
@@ -153,8 +158,13 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
       inputSchema: mcpSchema(OperonQuerySchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (params: z.infer<typeof OperonQuerySchema>) =>
-      runTool("operon_query_tasks", params, () => service.query(params)),
+    async (
+      params: z.infer<typeof OperonQuerySchema>,
+      ctx?: { mcpReq?: { signal?: AbortSignal } },
+    ) =>
+      runTool("operon_query_tasks", params, () =>
+        service.query(params, ctx?.mcpReq?.signal),
+      ),
   );
   server.registerTool(
     "operon_query_saved_filter",
@@ -177,8 +187,13 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
       inputSchema: mcpSchema(GetTaskSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (params: z.infer<typeof GetTaskSchema>) =>
-      runTool("operon_get_task", params, () => service.getTask(params)),
+    async (
+      params: z.infer<typeof GetTaskSchema>,
+      ctx?: { mcpReq?: { signal?: AbortSignal } },
+    ) =>
+      runTool("operon_get_task", params, () =>
+        service.getTask(params, ctx?.mcpReq?.signal),
+      ),
   );
   server.registerTool(
     "operon_validate",
