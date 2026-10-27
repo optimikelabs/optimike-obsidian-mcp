@@ -73,6 +73,14 @@ const publicOf = (error, tool = "obsidian_note_delete_plan") =>
   publicMcpToolErrorPayload(error, { operation: tool, toolName: tool, params: {} });
 
 try {
+  // Exercise the actual REST error wrapper, not only a preconstructed McpError.
+  const { ObsidianRestApiService } = await import("../dist/services/obsidianRestAPI/service.js");
+  const rest = new ObsidianRestApiService();
+  for (const reason of ["note_delete_disabled", "note_has_backlinks"]) {
+    rest.axiosInstance.defaults.adapter = async () => { throw { response: { status: 400, data: { error: { reasonCode: reason } } } }; };
+    await assert.rejects(rest.noteDeletePreflight({ contractVersion: 1, path: "Projects/Old.md", acknowledgeBacklinks: false }, { requestId: "test", timestamp: new Date().toISOString(), operation: "test" }), (error) => error.details?.reasonCode === reason);
+  }
+
   // Nominal: plan seals the hash, apply dispatches once, replay and status never dispatch again.
   const f = setup("nominal");
   const planned = await f.adapter.plan(request);

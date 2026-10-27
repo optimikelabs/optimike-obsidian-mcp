@@ -166,6 +166,7 @@ export class ObsidianRestApiService {
     });
 
     let conflictActualSha256: string | undefined;
+    let bridgeReasonCode: string | undefined;
     try {
       return await ErrorHandler.tryCatch(
         async () => {
@@ -196,7 +197,8 @@ export class ObsidianRestApiService {
               const bridgeReasons = new Set(["request_rejected", "invalid_frontmatter", "resource_not_found", "write_not_authorized", "backend_binding_changed", "resource_changed", "read_failed", "write_failed", "atomic_write_creation_property_missing", "date_preparation_failed", "note_create_target_exists", "note_create_disabled", "note_create_request_invalid", "note_create_failed", "effect_fence_refused", "date_preparation_fdm_pending", "note_has_backlinks", "trash_preference_permanent", "trash_preference_unavailable", "note_delete_disabled", "delete_backlink_limit", "note_not_found", "physical_path_unsupported", "invalid_note_path"]);
               const payload = axiosError.response.data as { error?: { reasonCode?: unknown } } | undefined;
               const reason = payload && typeof payload === "object" && payload.error && typeof payload.error === "object" ? payload.error.reasonCode : undefined;
-              const publicReason = typeof reason === "string" && bridgeReasons.has(reason) ? { reasonCode: reason } : {};
+              bridgeReasonCode = typeof reason === "string" && bridgeReasons.has(reason) ? reason : undefined;
+              const publicReason = bridgeReasonCode ? { reasonCode: bridgeReasonCode } : {};
               // Handle specific HTTP status codes
               switch (axiosError.response.status) {
                 case 400:
@@ -297,6 +299,11 @@ export class ObsidianRestApiService {
         error.code === BaseErrorCode.CONFLICT
       ) {
         throw new ObsidianRestConflictError(conflictActualSha256);
+      }
+      // Preserve only the closed Bridge vocabulary for internal adapters; the
+      // public error boundary applies its own allowlist before returning details.
+      if (bridgeReasonCode && error instanceof McpError) {
+        throw new McpError(error.code, error.message, { ...error.details, reasonCode: bridgeReasonCode });
       }
       throw error;
     }
