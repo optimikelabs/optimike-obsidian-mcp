@@ -45,6 +45,7 @@ const fake = createServer(async (req, res) => {
           atomicCas: true,
           writeEnabled: true,
         },
+        frontmatterFormat: { contractVersion: 1, supported: true },
         limits: { markdownOnly: true },
       });
       return;
@@ -52,6 +53,14 @@ const fake = createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+    if (route.endsWith("/frontmatter/format")) {
+      assert.equal(body.contractVersion, 1);
+      assert.equal(typeof body.yaml, "string");
+      // This fixture tests loss and recovery, not Obsidian's serializer.
+      json(res, 200, { ok: true, contractVersion: 1, bindingFingerprint: binding,
+        canonicalYaml: body.yaml, warnings: [] });
+      return;
+    }
     if (route.endsWith("/notes/read") && body.path === note) {
       json(res, 200, {
         ok: true,
