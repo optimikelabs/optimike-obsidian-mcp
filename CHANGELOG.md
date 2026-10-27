@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Filter pending operations by kind, state and minimum age before pagination.
 - Expire unsent plans after a configurable retention window and remove expired runtime leases; uncertain effects are preserved.
 
+- Shared note-name rule (`src/services/noteNameRules.ts`) valid on Windows, macOS, mobile and in Obsidian links, applied to every name the MCP creates: `obsidian_note_create_plan`/`apply` and the Atomic Write Bridge create route, the **destination** of `obsidian_note_move_plan`/`apply` and the Bridge move route, and files written by the headless filesystem tools (`VaultFileService`). It refuses `\ : * ? " < > | # ^ [ ] %%`, control and invisible characters (no-break and zero-width spaces), non-NFC Unicode, leading dots, edge spaces, Windows reserved names, names over 255 UTF-8 bytes and paths over 240 characters, and a new name that differs from an existing sibling only by case or Unicode form. See [note name rules](docs/note-name-rules.md) for the sources.
+- A refusal returns a closed `note_name_*` `reasonCode`, a fixed-vocabulary `hint` (rule or character, optional segment and code point) and a deterministic `suggestedPath`/`suggestedName` the caller may resubmit; nothing is renamed or created automatically and conforming names are never modified. The creation/move tool descriptions now state the rules.
+- `obsidian_validate_format` accepts `kind: "note_name"` with `filePath` to check a proposed name read-only with the same rule and proposal.
+
+
 ### Changed
 
 - Tools exposing `responseMode` now default to `compact`; callers needing the former detailed, tree or legacy responses must request them explicitly. `completionMode` retains its existing defaults pending qualification of proxy timeouts.
@@ -19,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require Obsidian's native frontmatter format for governed note creation and whole-note replacement. Noncanonical caller input is refused with the canonical caller-provided frontmatter in `expectedFrontmatter`. Property type issues are warnings only.
 - Body and property patches explicitly announce and seal normalization of existing noncanonical frontmatter. Targeted values use the native Bridge serializer. Postflight accepts no alternate target-key representation: only qualified date-line effects may differ.
 - Detect and announce normalization during FDM's pre-plan date preparation; if its effect cannot be verified, report that the note may have changed and require inspection. FDM remains the date owner; Linter settings are unchanged.
+
+- The error boundary releases `hint`, `suggestedPath` and `suggestedName` for note-name refusals only after validating them against the closed hint vocabulary and the name rule itself; suggestions are never logged. This is an explicit, scoped exception to the no-caller-derived-string rule (see SECURITY.md).
+- Headless `obsidian_move_note` and `obsidian_admin_filesystem` dry runs apply the name rule too, and backslash-separated paths are refused (use `/`).
+- Existing notes are not judged: only new names (creation, move destination, non-existing file) are validated, so a note with a legacy name stays readable, editable and movable.
+
 
 ### Fixed
 
@@ -30,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - The format route uses Obsidian's own serializer, is capability-negotiated and bound to the vault identity. Its dedicated refusal field deliberately returns only a canonical rendering of caller-supplied frontmatter, never parser diagnostics or the note body. This is an explicit, narrowly scoped exception to content-free public error diagnostics.
+
+### Limits
+
+- Not covered: the legacy Bases Bridge `bases_create`/`bases_upsert_config` routes (independent plugin, disabled by default) and external roots. Asset import keeps its own segment rule, which does not refuse invisible characters.
 
 ## [3.14.0] - 2026-10-23
 

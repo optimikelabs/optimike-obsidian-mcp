@@ -1,8 +1,9 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseLinktext, resolveSubpath, TFile, TFolder, type App, type EventRef } from "obsidian";
 import { MAX_NOTE_BYTES, sha256 } from "./contract.js";
+import { hasFoldedNameCollision } from "../../../src/services/noteNameRules.js";
 import { projectNoteLinks } from "./noteLinks.js";
 import {
   NATIVE_MOVE_MAX_REFERENCES, nativeNotePath, sealNativeMove,
@@ -69,6 +70,12 @@ export function createNativeNoteMoveRoutes(
       }
     }
   }
+  /** A sibling differing only by case or Unicode form is the same file on Windows/macOS: the destination is not free. */
+  function foldedSibling(logical: string): boolean {
+    const parts = logical.split("/");
+    try { return hasFoldedNameCollision(parts.at(-1)!, readdirSync(path.join(physicalRoot, ...parts.slice(0, -1)))); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+  }
   function file(logical: string): TFile {
     nativeNotePath(logical);
     const entry = app.vault.getAbstractFileByPath(logical);
@@ -119,7 +126,7 @@ export function createNativeNoteMoveRoutes(
     clock: () => ({ epoch, resolved }),
     absent: async (logical) => {
       physical(logical, true);
-      return app.vault.getAbstractFileByPath(logical) === null && !(await adapter.exists!(logical));
+      return app.vault.getAbstractFileByPath(logical) === null && !(await adapter.exists!(logical)) && !foldedSibling(logical);
     },
     parentExists: (logical) => {
       const parent = logical.includes("/") ? logical.slice(0, logical.lastIndexOf("/")) : "";

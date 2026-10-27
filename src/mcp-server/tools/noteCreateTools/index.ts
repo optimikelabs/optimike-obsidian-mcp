@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { NoteCreateOperationAdapter } from "../../../services/operations/noteCreateOperationAdapter.js";
 import { NOTE_CREATE_MAX_BYTES } from "../../../services/noteCreateContract.js";
+import { NOTE_NAME_RULES_DESCRIPTION } from "../../../services/noteNameRules.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import {
   GOVERNED_PLAN_TOOL_ANNOTATIONS,
@@ -18,7 +19,7 @@ const Plan = z
       .min(1)
       .max(1024)
       .describe(
-        "Exact new vault-relative Markdown path; parent directory must already exist.",
+        "Exact new vault-relative Markdown path; parent directory must already exist. Must satisfy the shared note name rules (see the tool description).",
       ),
     content: z
       .string()
@@ -78,7 +79,7 @@ export function registerNoteCreateTools(
     "obsidian_note_create_plan",
     {
       description:
-        "Seal one absent-only Markdown creation in the existing durable journal. Caller-supplied frontmatter must use Obsidian's canonical form; a refusal returns expectedFrontmatter for resubmission. Type issues are warnings. Does not create a note. Requires the separate Bridge creation grant and writable MCP policy; no automatic naming or parent-directory creation.",
+        `Seal one absent-only Markdown creation in the existing durable journal. Caller-supplied frontmatter must use Obsidian's canonical form; a refusal returns expectedFrontmatter for resubmission. Type issues are warnings. Does not create a note. Requires the separate Bridge creation grant and writable MCP policy; no automatic naming or parent-directory creation. ${NOTE_NAME_RULES_DESCRIPTION}`,
       inputSchema: mcpSchema(Plan.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

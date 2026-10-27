@@ -104,6 +104,15 @@ partagés :
   leur ordinal et l’exact chemin relatif au coffre déjà validé et fourni par le
   caller. Un chemin issu d’un Bridge/backend non fiable, un chemin absolu et le
   texte d’erreur backend ne franchissent jamais cette frontière.
+- Un refus de nom de note (codes `note_name_*`, voir les
+  [règles de nom de note](docs/note-name-rules.fr.md)) renvoie en plus un `hint`
+  limité à un vocabulaire fermé de phrases fixes (avec éventuellement un numéro de
+  segment et un point de code) et, quand une correction sûre existe,
+  `suggestedPath` / `suggestedName`. Une proposition est dérivée du chemin de
+  l’appelant, n’est rendue que si elle respecte la même règle de nom et n’est
+  jamais écrite dans les journaux. C’est une exception explicite et bornée à la
+  règle selon laquelle aucune chaîne dérivée de l’appelant ne traverse
+  l’enveloppe publique.
 - `@modelcontextprotocol/sdk` est épinglé exactement à `1.30.0` : le hook privé
   `createToolError` n’est que le fallback ultime pour la validation SDK et les
   outils inconnus. La CI échoue en cas de dérive de dépendance jusqu’à ce que le

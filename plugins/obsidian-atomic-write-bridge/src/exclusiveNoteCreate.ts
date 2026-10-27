@@ -1,6 +1,7 @@
-import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, realpathSync, readSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readdirSync, realpathSync, readSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { nativeNotePath } from "../../../src/services/nativeNoteMoveContract.js";
+import { hasFoldedNameCollision } from "../../../src/services/noteNameRules.js";
 import { NOTE_CREATE_MAX_BYTES, noteCreateHash } from "../../../src/services/noteCreateContract.js";
 
 export class NoteCreateExists extends Error {}
@@ -22,6 +23,14 @@ export class ExclusiveNoteCreateFiles {
       }
     }
     return path.join(current, parts.at(-1)!);
+  }
+  /** True when a sibling differs only by case or Unicode form (same file on Windows/macOS, a sync trap elsewhere). */
+  hasFoldedSibling(logical: string): boolean {
+    const filename = this.location(logical);
+    let names: string[];
+    try { names = readdirSync(path.dirname(filename)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+    return hasFoldedNameCollision(path.basename(filename), names);
   }
   inspect(logical: string): { exists: false } | { exists: true; content: string; sha256: string } {
     const filename = this.location(logical);

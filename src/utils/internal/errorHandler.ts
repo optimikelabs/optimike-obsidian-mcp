@@ -9,6 +9,9 @@ import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { generateUUID, sanitizeInputForLogging } from "../index.js"; // Import from main barrel file
 import { logger } from "./logger.js";
 import {
+  NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
+} from "../../services/noteNameRules.js";
+import {
   activeRequestCorrelationId,
   RequestContext,
 } from "./requestContext.js"; // Import RequestContext
@@ -209,6 +212,10 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "planRef",
   "recoveryRef",
   "reasonCode",
+  // Note-name refusal (shared rule): closed hint and a validated suggestion.
+  "hint",
+  "suggestedPath",
+  "suggestedName",
   "retryable",
   "recoveryAllowed",
   "applyAllowed",
@@ -219,7 +226,10 @@ const SAFE_ERROR_DETAIL_FIELDS = new Set([
   "outcome",
 ]);
 
-const SAFE_PUBLIC_REASON_CODES = new Set([
+const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"]);
+
+const SAFE_PUBLIC_REASON_CODES = new Set<string>([
+  ...NOTE_NAME_REASON_CODES,
   "ambiguous_base_view",
   "ambiguous_delete_comment",
   "ambiguous_trailing_comment",
@@ -523,6 +533,9 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   }
   if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
+  if (field === "hint") return isNoteNameHint(value);
+  // A suggestion is only released if it satisfies the shared name rule itself.
+  if (CALLER_DERIVED_PUBLIC_FIELDS.has(field)) return checkNoteName(value, { extensions: null }).ok;
   if (field === "operationId") {
     return UUID.test(value) || OPERON_FALLBACK_OPERATION_ID.test(value);
   }
@@ -585,6 +598,7 @@ function safeDiagnosticFields(
     if (
       typeof value === "string" &&
       callerStrings &&
+      !CALLER_DERIVED_PUBLIC_FIELDS.has(field) &&
       isCallerDerivedString(value, callerStrings)
     ) {
       continue;
@@ -599,6 +613,8 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise.";
   if (reasonCode === "atomic_write_creation_property_missing")
     return "La date de création est absente ou sa préparation indisponible. Demandez au propriétaire du coffre de la faire ajouter par le gestionnaire de dates, puis relancez le plan.";
+  if (code === BaseErrorCode.VALIDATION_ERROR && isNoteNameReasonCode(reasonCode))
+    return "The note path is not a valid name on every platform and in Obsidian. See hint and suggestedPath.";
   switch (code) {
     case BaseErrorCode.UNAUTHORIZED:
       return "Authentication is required for this request.";
@@ -973,7 +989,12 @@ export class ErrorHandler {
       ),
     };
 
-    logPayload.errorDetails = finalError.details;
+    // Caller-derived suggestions go to the caller only, never to the log sink.
+    logPayload.errorDetails = Object.fromEntries(
+      Object.entries(finalError.details ?? {}).filter(
+        ([key]) => !CALLER_DERIVED_PUBLIC_FIELDS.has(key),
+      ),
+    );
 
     if (includeStack) logPayload.stackAvailable = true;
 

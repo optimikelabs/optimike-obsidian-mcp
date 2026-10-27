@@ -104,6 +104,14 @@ The P0 boundary is implemented at the shared MCP error and logger sinks:
   vault-relative request path already supplied by the caller. An untrusted
   Bridge/backend path, an absolute path, and backend error text never pass this
   boundary.
+- A note-name refusal (`note_name_*` reason codes, see
+  [note name rules](docs/note-name-rules.md)) additionally returns a `hint`
+  restricted to a closed vocabulary of fixed sentences (optionally with a segment
+  number and a code point) and, when a safe fix exists, `suggestedPath` /
+  `suggestedName`. A suggestion is derived from the caller's own path, is released
+  only if it satisfies the same name rule, and is never written to logs. This is an
+  explicit, scoped exception to the rule that no caller-derived string crosses the
+  public envelope.
 - `@modelcontextprotocol/sdk` is pinned exactly to `1.30.0`: the private
   `createToolError` hook is only the ultimate fallback for SDK validation and
   unknown-tool failures. CI fails on dependency drift until the SDK provides a
