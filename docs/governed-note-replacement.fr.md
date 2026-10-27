@@ -2,6 +2,11 @@
 
 Version anglaise : [governed-note-replacement.md](governed-note-replacement.md)
 
+Les plans non envoyés expirent après `MCP_OBSIDIAN_PLANNED_RETENTION_DAYS` jours
+(30 par défaut ; de 1 à 3650). La valeur `0` désactive leur expiration et
+conserve leur contenu privé jusqu'à modification explicite de ce réglage ; elle
+ne désactive pas la purge des reçus terminaux ni celle des baux expirés.
+
 Optimike Obsidian MCP 2.6.0 expose la première mutation publique non-Operon appuyée sur le
 vocabulaire du runtime commun. Elle remplace le contenu complet d’une note
 Markdown existante sans publier d’API générique `operation_*`.

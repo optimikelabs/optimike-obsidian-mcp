@@ -6,11 +6,17 @@ function fixture() {
   let state = {state:'complete',epoch:'epoch',generation:1,sha256:sha256('bytes')};
   const api = {contractVersion:1,implementation:'elysia-fdm-1.6.0-v1',epoch:'epoch',
     begin:()=> 'private-key',activate:()=>{},cancel:()=>{},observe:async()=>({...state})};
-  const fdm = {manifest:{version:'1.6.0'},settings:{dateFormat:"yyyy-MM-dd'T'HH:mm",enableAutoUpdate:true,enableModifiedTime:true,headerUpdated:'modification'},optimikeSettlement:api};
-  const app = {plugins:{plugins:{'frontmatter-date-manager':fdm},getPlugin:(id: string)=>id === 'frontmatter-date-manager' ? fdm : undefined}};
+  const fdm = {manifest:{version:'1.6.0'},settings:{dateFormat:"yyyy-MM-dd'T'HH:mm",enableAutoUpdate:true,enableModifiedTime:true,headerUpdated:'modification',filterRules:'Excluded'},optimikeSettlement:api};
+  const app = {vault:{configDir:'.obsidian'},plugins:{plugins:{'frontmatter-date-manager':fdm},getPlugin:(id: string)=>id === 'frontmatter-date-manager' ? fdm : undefined}};
   const consumer=createFdmCompletion(app),token=consumer.begin('Note.md')!;
   return {consumer,token,fdm,api,setState:(next:Partial<typeof state>)=>{state={...state,...next};}};
 }
+test('excluded and template paths do not advertise an impossible FDM acknowledgement',async()=>{
+  const f=fixture();
+  assert.equal(await f.consumer.beginForPath('Excluded/A.md'),undefined);
+  assert.equal(await f.consumer.beginForPath('X/Modèles/A.md'),undefined);
+  assert.equal(typeof await f.consumer.beginForPath('Notes/A.md'),'string');
+});
 test('only a matching completion survives content read and generation fencing',async()=>{
   const f=fixture();assert.equal((await f.consumer.read('Note.md',f.token,async()=> 'bytes')).completion?.state,'complete');
   assert.equal((await f.consumer.read('Note.md',f.token,async()=> 'different')).completion?.state,'pending');

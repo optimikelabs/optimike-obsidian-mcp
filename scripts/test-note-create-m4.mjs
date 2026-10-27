@@ -22,7 +22,7 @@ function fixture(name, dateFields = []) {
     ...nativeFormatFixture(() => binding),
     async preflight(path) {
       if (files.has(path)) throw new Error("target exists");
-      return { contractVersion: 1, path, bindingFingerprint: binding, vaultBindingFingerprint: binding, absent: true, enabled: true, policy, policyDigest: createPolicyDigest(policy) };
+      return { contractVersion: 1, path, bindingFingerprint: binding, absent: true, enabled: true, policy, policyDigest: createPolicyDigest(policy) };
     },
     async create(request) {
       calls++;
@@ -79,14 +79,31 @@ try {
     } finally { f.journal.close(); }
   }
   {
+    const f = fixture("legacy-wire-identity");
+    try {
+      const preflight = f.backend.preflight;
+      f.backend.preflight = async path => { const { vaultBindingFingerprint, ...wire } = await preflight(path); return wire; };
+      const status = f.backend.status;
+      f.backend.status = async () => ({ ...(await status()), noteCreate: { supported: true, enabled: true, bindingFingerprint: "b".repeat(64) } });
+      await assert.rejects(f.adapter.plan(input), error => error.details?.reasonCode === "create_preflight_identity_mismatch");
+      assert.equal(f.calls(), 0);
+      f.backend.status = async () => ({ ...(await status()), noteCreate: { supported: true, enabled: true, bindingFingerprint: "a".repeat(64) } });
+      const p = await f.adapter.plan(input);
+      assert.equal((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "committed");
+      assert.equal(f.calls(), 1);
+    } finally { f.journal.close(); }
+  }
+  {
     const f = fixture("format-vault-identity");
     try {
       const preflight = f.backend.preflight;
       f.backend.preflight = async path => ({ ...(await preflight(path)), bindingFingerprint: "b".repeat(64) });
+      const initialStatus = f.backend.status;
+      f.backend.status = async () => ({ ...(await initialStatus()), noteCreate: { supported: true, enabled: true, bindingFingerprint: "b".repeat(64) } });
       const p = await f.adapter.plan(input);
       const status = f.backend.status;
       f.backend.status = async () => ({ ...(await status()), backend: { bindingFingerprint: "c".repeat(64) } });
-      await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey), error => error.details?.reasonCode === "frontmatter_format_capability_missing");
+      await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey), error => error.details?.reasonCode === "create_preflight_identity_mismatch");
       assert.equal(f.calls(), 0);
       assert.equal((await f.adapter.status(p.planRef)).phase, "planned");
     } finally { f.journal.close(); }

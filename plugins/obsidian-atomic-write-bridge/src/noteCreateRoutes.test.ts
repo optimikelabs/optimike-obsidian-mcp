@@ -4,9 +4,20 @@ import { mkdtempSync, rmSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { z } from "zod/v3";
 import type { App } from "obsidian";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { noteCreateHash } from "../../../src/services/noteCreateContract.js";
+import { LegacyCreateInspection, LegacyCreateResult } from "./legacyWireSchemas.js";
+
+// Frozen strict preflight wire contract from MCP tags v3.12.0 and v3.14.0.
+const HASH = z.string().regex(/^[a-f0-9]{64}$/u);
+const Policy = z.object({ version: z.literal(1), utcOffsetMinutes: z.number().int().min(-840).max(840),
+  fields: z.array(z.object({ pluginId: z.enum(["update-time-on-edit", "frontmatter-date-manager", "update-time"]),
+    propertyName: z.string().min(1).max(128), role: z.enum(["created", "modified"]), delayMs: z.number().int().min(0).max(240000),
+  }).strict()).max(6) }).strict();
+const LegacyPreflight = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
+  absent: z.literal(true), enabled: z.literal(true), policy: Policy, policyDigest: HASH }).strict();
 
 test("M4 routes reject stale bindings with request identity and never create or suffix a conflicted target", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "create-routes-"));
@@ -24,15 +35,17 @@ test("M4 routes reject stale bindings with request identity and never create or 
   try {
     const p = call("preflight", { contractVersion: 1, path: "A.md" });
     assert.equal(p.code, 200);
-    assert.equal(p.result.vaultBindingFingerprint, "a".repeat(64));
-    assert.notEqual(p.result.bindingFingerprint, p.result.vaultBindingFingerprint);
+    assert.equal(LegacyPreflight.safeParse(p.result).success, true, "v3.12/v3.14 strict preflight must accept the actual Bridge response");
+    assert.notEqual(p.result.bindingFingerprint, "a".repeat(64));
     const request = { contractVersion: 1, operationId: randomUUID(), path: "A.md", content: "# A\n",
       contentSha256: noteCreateHash("# A\n"), bindingFingerprint: p.result.bindingFingerprint, policyDigest: p.result.policyDigest };
     const stale = call("apply", { ...request, bindingFingerprint: "b".repeat(64) });
     assert.equal(stale.result.outcome, "conflict");
     assert.equal(stale.result.bindingFingerprint, "b".repeat(64));
     assert.deepEqual(readdirSync(root), []);
-    assert.equal(call("apply", request).result.outcome, "created");
+    const created = call("apply", request).result;
+    assert.equal(created.outcome, "created");
+    assert.equal(LegacyCreateResult.safeParse(created).success, true);
     assert.equal(call("apply", request).result.outcome, "conflict");
     assert.deepEqual(readdirSync(root), ["A.md"]);
     (app as any).plugins = { plugins: { "frontmatter-date-manager": { settings: {
@@ -40,6 +53,7 @@ test("M4 routes reject stale bindings with request identity and never create or 
       headerCreated: "created", headerUpdated: "updated", dateFormat: "yyyy-MM-dd'T'HH:mm",
     } } } };
     const found = call("inspect", { contractVersion: 1, path: "A.md" });
+    assert.equal(LegacyCreateInspection.safeParse(found.result).success, true);
     assert.equal(found.result.content, "# A\n");
     assert.equal(found.result.sha256, request.contentSha256);
     assert.equal("policyDigest" in found.result, false);

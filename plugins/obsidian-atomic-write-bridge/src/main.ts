@@ -860,7 +860,7 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             );
             this.templateDateGuard?.ensure();
             let beforeSha256 = "";
-            const completionToken = this.fdmCompletion.begin(request.path);
+            const completionToken = await this.fdmCompletion.beginForPath(request.path);
             let written: string;
             let settleEffect: (() => void) | undefined;
             try { written = await this.app.vault.process(

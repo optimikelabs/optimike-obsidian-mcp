@@ -439,7 +439,7 @@ try {
     const createBackend = {
       status: () => f.bridge.status(),
       inspectFrontmatterFormat: async () => { throw new Error("not used"); },
-      preflight: async (pathValue) => ({ contractVersion: 1, path: pathValue, bindingFingerprint: f.bridge.createBinding, vaultBindingFingerprint: f.bridge.bindingFingerprint, absent: true, enabled: true, policy, policyDigest: createPolicyDigest(policy) }),
+      preflight: async (pathValue) => ({ contractVersion: 1, path: pathValue, bindingFingerprint: f.bridge.createBinding, absent: true, enabled: true, policy, policyDigest: createPolicyDigest(policy) }),
       create: async (request) => {
         createRequest = request;
         const settle = f.bridge.fence.enter(request.fence);

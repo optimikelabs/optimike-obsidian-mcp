@@ -219,7 +219,7 @@ const EnvSchema = z
       .min(1_000)
       .max(300_000)
       .default(30_000),
-    MCP_OBSIDIAN_PLANNED_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+    MCP_OBSIDIAN_PLANNED_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
     MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID: z
       .string()
       .regex(

@@ -13,6 +13,7 @@ import { EffectFence, EffectFenceRefused, type EffectFenceRegistry } from "./eff
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { sha256 } from "./contract.js";
 import { noteCreateHash } from "../../../src/services/noteCreateContract.js";
+import { LegacyCas, LegacyRead } from "./legacyWireSchemas.js";
 
 function fence() {
   const registry: EffectFenceRegistry = { epochs: [] };
@@ -114,6 +115,7 @@ test("notes/cas admits the token inside vault.process; revocation before the cal
     plugins: { plugins: { "obsidian-local-rest-api": { getPublicApi: () => api } }, getPlugin: () => null },
     vault: {
       getAbstractFileByPath: () => file,
+      read: async () => content,
       process: async (_file: unknown, fn: (value: string) => string) => {
         if (beforeCallback) { const hook = beforeCallback; beforeCallback = undefined; await hook(); }
         content = fn(content);
@@ -136,6 +138,14 @@ test("notes/cas admits the token inside vault.process; revocation before the cal
     bindingFingerprint: "b".repeat(64), expectedSha256: sha256(content), nextContent: next, ...(fenceToken ? { fence: fenceToken } : {}) });
   const resolve = (attempts: unknown[], mode = "revoke", includeLegacy = false) =>
     invoke("POST", "/effect-fence/resolve", { contractVersion: 1, bindingFingerprint: "b".repeat(64), mode, attempts, includeLegacy });
+
+  // The old client sends no fence. Replacement, text patch and frontmatter
+  // patch all use this same read/CAS wire contract with the setting disabled.
+  const legacyRead = await invoke("POST", "/notes/read", { contractVersion: 1, path: "Note.md" });
+  assert.equal(LegacyRead.safeParse(legacyRead.payload).success, true);
+  const legacyCas = await cas(undefined, "avant\n");
+  assert.equal(legacyCas.code, 200);
+  assert.equal(LegacyCas.safeParse(legacyCas.payload).success, true);
 
   // The request is inside vault.process, before the callback: the revocation wins.
   const held = token();

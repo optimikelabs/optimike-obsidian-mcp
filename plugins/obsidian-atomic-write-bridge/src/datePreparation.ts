@@ -76,14 +76,15 @@ export function createDatePreparation(
       const fail = () => {
         throw new DatePreparationError(MISSING_CREATION_MESSAGE);
       };
-      if (disposed || !options.enabled() || now() >= deadline) return fail();
+      if (disposed || !options.enabled()) return fail();
+      if (now() >= deadline) throw new DatePreparationDeferred();
       const scope = await dateManagementScope(app, request.path);
-      if (now() >= deadline) return fail();
+      if (now() >= deadline) throw new DatePreparationDeferred();
       if (!scope.managed) {
         const content = await app.vault.read(
           app.vault.getAbstractFileByPath(request.path),
         );
-        if (now() >= deadline) return fail();
+        if (now() >= deadline) throw new DatePreparationDeferred();
         if (sha256(content) !== request.expectedSha256)
           throw new HashConflictError(sha256(content));
         return {
@@ -112,7 +113,7 @@ export function createDatePreparation(
       const file = app.vault.getAbstractFileByPath(request.path);
       if (!file || file.extension !== "md") return fail();
       const original = await app.vault.read(file);
-      if (now() >= deadline) return fail();
+      if (now() >= deadline) throw new DatePreparationDeferred();
       if (sha256(original) !== request.expectedSha256)
         throw new HashConflictError(sha256(original));
       const before = envelope(original);
@@ -153,7 +154,7 @@ export function createDatePreparation(
         if (sha256(settled) !== request.expectedSha256)
           throw new HashConflictError(sha256(settled));
       }
-      if (deadline - now() < COMMAND_SETTLEMENT_BUDGET_MS) return fail();
+      if (deadline - now() < COMMAND_SETTLEMENT_BUDGET_MS) throw new DatePreparationDeferred();
       // Effect point: opening the temporary leaf can already let plugins act on
       // the note. Admission is synchronous with the first workspace change and
       // settles only after the leaf is released and the observation ended.

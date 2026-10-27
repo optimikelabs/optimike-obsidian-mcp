@@ -617,6 +617,19 @@ assert.doesNotMatch(loggerSource, /originalMessage|mcpPayload/u);
 
 console.log("Log privacy contract passed.");
 
+for (const [code, field, reason, message] of [
+  [BaseErrorCode.CONFLICT, "reasonCode", "date_preparation_fdm_pending", /rien n.a été modifié.*trentaine de secondes/iu],
+  [BaseErrorCode.CONFLICT, "reasonCode", "date_preparation_not_started", /rien n.a été modifié.*relisez/iu],
+  [BaseErrorCode.FORBIDDEN, "reason", "effect_attempt_limit_reached", /limite.*tentatives/iu],
+  [BaseErrorCode.CONFLICT, "reasonCode", "date_preparation_unverified", /obsidian_operation_close.*datePreparationPaths/u],
+  [BaseErrorCode.SERVICE_UNAVAILABLE, "reasonCode", "atomic_bridge_version_unsupported", /versions.*Bridge.*MCP/iu],
+]) {
+  const wire = publicMcpToolErrorPayload(new McpError(code, marker, { [field]: reason, privateContent: marker }), { operation: "test", params: {} });
+  assert.equal(wire.error.details.reasonCode, reason);
+  assert.match(wire.error.message, message);
+  assert.doesNotMatch(JSON.stringify(wire), new RegExp(marker, "u"));
+}
+
 for (const [field, reason] of [["reason", "create_markdown_invalid"], ["reasonCode", "create_markdown_invalid"], ["reasonCode", "PRIVATE_SECRET_PATH.md"]]) {
   const wire = publicMcpToolErrorPayload(new McpError(BaseErrorCode.VALIDATION_ERROR, marker, { [field]: reason }), { operation: "test", params: {} });
   assert.equal(wire.error.details.reasonCode, reason === "create_markdown_invalid" ? reason : undefined);

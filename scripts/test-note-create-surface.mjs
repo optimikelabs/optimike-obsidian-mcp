@@ -42,7 +42,6 @@ const backend = {
       contractVersion: 1,
       path,
       bindingFingerprint,
-      vaultBindingFingerprint: bindingFingerprint,
       absent: true,
       enabled: true,
       policy,

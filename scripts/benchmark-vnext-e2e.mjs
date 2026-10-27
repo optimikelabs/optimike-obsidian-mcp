@@ -174,7 +174,6 @@ const backend = {
       bindingFingerprint,
       policy,
       policyDigest,
-      vaultBindingFingerprint: bindingFingerprint,
       absent: true,
       enabled: true,
     };

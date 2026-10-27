@@ -34,6 +34,9 @@ const Policy = z.object({ version: z.literal(1), utcOffsetMinutes: z.number().in
   }).strict()).max(6) }).strict();
 const Preflight = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH, vaultBindingFingerprint: HASH.optional(),
   absent: z.literal(true), enabled: z.literal(true), policy: Policy, policyDigest: HASH }).strict();
+// Keep the wire response compatible with strict MCP v3.12/v3.14 schemas. The
+// vault binding is sealed locally after it is obtained from the Bridge status.
+const WirePreflight = Preflight.omit({ vaultBindingFingerprint: true }).strict();
 const Inspection = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
   // Optional only for rolling compatibility with the immediately preceding
   // Bridge contract. It is deliberately ignored for reconciliation.
@@ -90,6 +93,13 @@ export class NoteCreateOperationAdapter {
     if (key !== undefined && (row.idempotencyKey !== internalKey(key) || row.projection!.publicIdempotencyKey !== key)) bad("create_key_mismatch");
     return row;
   }
+  private async vaultBindingForCreate(expectedCreateBinding: string): Promise<string> {
+    const status = await this.backend.status();
+    const vault = HASH.safeParse(status?.backend?.bindingFingerprint);
+    if (!vault.success || status?.noteCreate?.supported !== true || status.noteCreate.enabled !== true ||
+        status.noteCreate.bindingFingerprint !== expectedCreateBinding) bad("create_preflight_identity_mismatch");
+    return vault.data;
+  }
   async plan(input: NoteCreatePlanInput) {
     assertNewNotePath(input.path);
     validateNoteCreate(input.path, input.content, { version: 1, utcOffsetMinutes: 0, fields: [] });
@@ -103,11 +113,11 @@ export class NoteCreateOperationAdapter {
     const old = winner(); if (old) return this.receipt(old);
     this.authorize("plan", input.path, input.content);
     let plan: NoteCreatePreflight;
-    try { plan = Preflight.parse(await this.backend.preflight(input.path)); }
+    try { plan = WirePreflight.parse(await this.backend.preflight(input.path)); }
     catch (error) { const existing = winner(); if (existing) return this.receipt(existing); throw error; }
     if (plan.path !== input.path || createPolicyDigest(plan.policy) !== plan.policyDigest) bad("create_preflight_identity_mismatch");
     validateNoteCreate(input.path, input.content, plan.policy);
-    if (!plan.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
+    plan = { ...plan, vaultBindingFingerprint: await this.vaultBindingForCreate(plan.bindingFingerprint) };
     const format = await inspectNativeFrontmatter(this.backend, input.content, plan.vaultBindingFingerprint);
     rejectNonCanonical(format);
     if (plan.policy.fields.length && frontmatterEnvelope(input.content)?.yaml.trim() === "{}")
@@ -125,6 +135,7 @@ export class NoteCreateOperationAdapter {
     const admitted = this.sealed(row);
     this.authorize("apply", row.path, row.nextContent);
     if (!admitted.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
+    if (await this.vaultBindingForCreate(admitted.bindingFingerprint) !== admitted.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
     const format = await inspectNativeFrontmatter(this.backend, row.nextContent, admitted.vaultBindingFingerprint);
     if (format.normalized) throw new McpError(BaseErrorCode.CONFLICT, "The sealed note no longer matches the native frontmatter format.", { reasonCode: "frontmatter_format_changed" });
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }

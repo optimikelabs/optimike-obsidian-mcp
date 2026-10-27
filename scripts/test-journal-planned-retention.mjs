@@ -34,5 +34,20 @@ try {
   assert.equal(reopened.get(planned.operationId), undefined);
   assert.equal(reopened.get(unknown.operationId).status, 'outcome_unknown');
   reopened.close();
+  const preservedDb = path.join(root, 'preserved.sqlite');
+  const preserveOpts = { ...opts, plannedRetentionMs: 0 };
+  const preserved = new ObsidianNoteReplaceJournal(preservedDb, preserveOpts);
+  const oldPlan = preserved.create({idempotencyKey:'historical', requestDigest:'historical', path:'a.md', beforeSha256:'before', afterSha256:'after', nextContent:'secret', bindingFingerprint:'binding'});
+  preserved.close();
+  const beforeDb = new DatabaseSync(preservedDb);
+  const beforeRow = beforeDb.prepare('SELECT status, updated_at, payload_json FROM obsidian_note_replace_plans WHERE operation_id = ?').get(oldPlan.operationId);
+  beforeDb.close();
+  now += 10 * 365 * 24 * 60 * 60 * 1000;
+  const afterRestart = new ObsidianNoteReplaceJournal(preservedDb, preserveOpts);
+  assert.equal(afterRestart.get(oldPlan.operationId).status, 'planned');
+  afterRestart.close();
+  const afterDb = new DatabaseSync(preservedDb);
+  assert.deepEqual(afterDb.prepare('SELECT status, updated_at, payload_json FROM obsidian_note_replace_plans WHERE operation_id = ?').get(oldPlan.operationId), beforeRow);
+  afterDb.close();
   console.log('PASS: planned expiration fences apply, survives restart, purges terminal receipts and expired leases while preserving uncertain operations');
 } finally { try { a.close(); b.close(); } catch {} rmSync(root, {recursive:true, force:true}); }

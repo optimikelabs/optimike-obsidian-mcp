@@ -419,6 +419,9 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "semantic_query_vector_invalid",
   "atomic_write_creation_property_missing",
   "date_preparation_unverified",
+  "date_preparation_fdm_pending",
+  "date_preparation_not_started",
+  "effect_attempt_limit_reached",
   "frontmatter_format_capability_missing",
   "frontmatter_format_changed",
   "frontmatter_empty_mapping_date_management",
@@ -639,7 +642,15 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
   if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_frontmatter")
     return "Le frontmatter doit être une table YAML valide sans clés dupliquées.";
   if (reasonCode === "date_preparation_unverified")
-    return "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise.";
+    return "La préparation des dates a pu modifier ou normaliser la note. Utilisez obsidian_operation_close avec datePreparationPaths pour une revue administrative avant reprise.";
+  if (reasonCode === "date_preparation_fdm_pending")
+    return "Le gestionnaire de dates ou une autre préparation occupe encore la file ; rien n'a été modifié par cette préparation. Relancez le plan dans une trentaine de secondes.";
+  if (reasonCode === "date_preparation_not_started")
+    return "La préparation des dates n'a pas démarré ; rien n'a été modifié par cette préparation. Relisez la note puis relancez le plan.";
+  if (reasonCode === "effect_attempt_limit_reached")
+    return "La limite de tentatives de cette opération est atteinte. Consultez son statut avant toute nouvelle action ; ne rejouez pas un effet incertain.";
+  if (reasonCode === "atomic_bridge_version_unsupported")
+    return "Les versions du Bridge et du MCP sont incompatibles. Alignez la paire sur le Bridge requis avant de réessayer.";
   if (reasonCode === "atomic_write_creation_property_missing")
     return "La date de création est absente ou sa préparation indisponible. Demandez au propriétaire du coffre de la faire ajouter par le gestionnaire de dates, puis relancez le plan.";
   if (reasonCode === "delete_note_has_backlinks")

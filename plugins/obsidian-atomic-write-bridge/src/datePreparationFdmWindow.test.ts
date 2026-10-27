@@ -8,7 +8,7 @@ import { sha256 } from "./contract.js";
  * (setupCreateHandler/armNewFileWindow, the modify handler during the window,
  * onNewFileWindowExpired and the manual command), on one shared clock.
  */
-function fixture(windowMs = 20_000) {
+function fixture(windowMs = 20_000, timeoutMs = 55_000) {
   let clock = 0;
   let commands = 0;
   const timers: Array<{ at: number; run: () => void }> = [];
@@ -51,7 +51,7 @@ function fixture(windowMs = 20_000) {
     commands: { commands: { "frontmatter-date-manager:update-timestamps-current-file": {} }, executeCommandById() { commands++; date(); return true; } },
   };
   const parse = (yaml: string) => Object.fromEntries(yaml.split("\n").map((line) => [line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 1).trim()]));
-  const prepare = createDatePreparation(app, parse, { enabled: () => true, now: () => clock, sleep: async (ms) => advance(ms), timeoutMs: 55_000 });
+  const prepare = createDatePreparation(app, parse, { enabled: () => true, now: () => clock, sleep: async (ms) => advance(ms), timeoutMs });
   return { fdm, prepare, advance, content: () => content, request: () => ({ path: file.path, expectedSha256: sha256(content) }),
     schedule: (delay: number, run: () => void) => { timers.push({ at: clock + delay, run }); }, dateNow: () => date(), commands: () => commands };
 }
@@ -84,4 +84,26 @@ test("a pending FDM pass that changes the note during the wait is a conflict bef
   await assert.rejects(run, (error: any) => error?.constructor?.name === "HashConflictError");
   assert.equal(f.commands(), 0);
   assert.match(f.content(), /création:/u, "only FDM's own pass dated the note");
+});
+
+test("deadline spent waiting in the preparation queue reports retryable pre-effect deferral", async () => {
+  const f = fixture(120_000);
+  const before = f.content();
+  f.schedule(1000, () => f.advance(60_000));
+  const results = await Promise.allSettled([f.prepare(f.request()), f.prepare(f.request())]);
+  for (const result of results) {
+    assert.equal(result.status, "rejected");
+    if (result.status === "rejected") assert.ok(result.reason instanceof DatePreparationDeferred);
+  }
+  assert.equal(f.commands(), 0);
+  assert.equal(f.content(), before);
+});
+
+test("insufficient budget before opening the note is deferral without an effect", async () => {
+  const f = fixture(0, 100);
+  f.advance(1);
+  const before = f.content();
+  await assert.rejects(f.prepare(f.request()), error => error instanceof DatePreparationDeferred);
+  assert.equal(f.commands(), 0);
+  assert.equal(f.content(), before);
 });

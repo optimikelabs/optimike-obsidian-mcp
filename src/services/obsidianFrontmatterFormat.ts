@@ -1,7 +1,7 @@
 import { z } from "zod/v3";
 import { createHash } from "node:crypto";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
-import { supportedAtomicBridgeVersion } from "./atomicBridgeVersion.js";
+import { requireAtomicBridgeVersion } from "./atomicBridgeVersion.js";
 import type { AtomicWriteBackend } from "./operations/obsidianNoteReplaceOperationAdapter.js";
 import type { OperationReceipt } from "./operations/contract.js";
 
@@ -79,9 +79,13 @@ export function frontmatterEnvelope(content: string): { start: number; end: numb
 
 export async function inspectNativeFrontmatter(backend: Pick<AtomicWriteBackend, "status" | "inspectFrontmatterFormat">, content: string, expectedBinding?: string) {
   let status;
-  try { status = await backend.status(); } catch { throw unavailable(); }
+  try { status = await backend.status(); } catch (error) {
+    if (error instanceof McpError && error.details?.reasonCode === "atomic_bridge_version_unsupported") throw error;
+    throw unavailable();
+  }
+  requireAtomicBridgeVersion(status);
   const binding = status?.backend?.bindingFingerprint;
-  if (!supportedAtomicBridgeVersion(status?.plugin?.version) || status?.frontmatterFormat?.contractVersion !== 1 || status.frontmatterFormat.supported !== true ||
+  if (status?.frontmatterFormat?.contractVersion !== 1 || status.frontmatterFormat.supported !== true ||
       !backend.inspectFrontmatterFormat || !/^[a-f0-9]{64}$/u.test(binding ?? "") || (expectedBinding && binding !== expectedBinding)) throw unavailable();
   const envelope = frontmatterEnvelope(content);
   if (!envelope) return { content, warnings: [] as FrontmatterTypeWarning[], normalized: false, bindingFingerprint: binding };
