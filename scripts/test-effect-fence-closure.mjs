@@ -68,7 +68,7 @@ class FencedBridge {
 
   async status() {
     return {
-      ok: true, contractVersion: 1, plugin: { id: "obsidian-atomic-write-bridge", version: "test-fence" },
+      ok: true, contractVersion: 1, plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.3" },
       frontmatterFormat: { contractVersion: 1, supported: true },
       backend: { kind: "obsidian-vault-process", bindingFingerprint: this.bindingFingerprint, atomicCas: true, writeEnabled: true },
       limits: { markdownOnly: true },

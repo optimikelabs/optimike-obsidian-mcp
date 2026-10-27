@@ -35,7 +35,7 @@ const fake = {
   ...nativeFormatFixture(binding),
   async getAtomicWriteStatus() {
     return {
-      ok: true, contractVersion: 1, plugin: { id: "atomic", version: "test" },
+      ok: true, contractVersion: 1, plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.3" },
       datePreparation: { contractVersion: 1, supported: true }, frontmatterFormat: { contractVersion: 1, supported: true },
       ...(fenceSupported ? { effectFence: fence.capability() } : {}),
       backend: { kind: "obsidian-vault-process", bindingFingerprint: binding, atomicCas: true, writeEnabled: true },
