@@ -134,6 +134,7 @@ const shutdown = async (signal: string) => {
     }
 
     await vaultCacheService?.close();
+    logger.flushSuppressed();
     logger.info("Graceful shutdown completed successfully", shutdownContext);
     process.exit(0);
   } catch (error) {

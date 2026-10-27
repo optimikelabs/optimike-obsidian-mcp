@@ -98,6 +98,11 @@ The P0 boundary is implemented at the shared MCP error and logger sinks:
   strings that are retained only for correlation are HMAC-fingerprinted with a
   secret generated for the current process; fingerprints are not stable across
   process restarts and are not reversible through a plain dictionary hash.
+- Operator-facing log fields are closed vocabularies or bounded identifiers:
+  registered `toolName`, identifier-shaped developer-defined `operation` and
+  `module`, the Local REST API `routeClass`, and an `errorClass` read from a
+  failure's system code or HTTP status, never from its message. Anything
+  outside those vocabularies is HMAC-fingerprinted as before.
 - Recovery diagnostics are deliberately narrow: only schema-validated IDs,
   digests, references and closed reason/phase/outcome codes may be returned.
   Batch-item failures may retain their ordinal and the exact validated

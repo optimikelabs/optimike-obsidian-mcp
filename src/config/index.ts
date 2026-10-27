@@ -80,6 +80,22 @@ const EnvSchema = z
     MCP_SERVER_NAME: z.string().optional(),
     MCP_SERVER_VERSION: z.string().optional(),
     MCP_LOG_LEVEL: z.string().default("info"),
+    // Rotation applies to each log family (combined plus one file per level).
+    MCP_LOG_MAX_FILE_SIZE_MB: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1024)
+      .default(8),
+    MCP_LOG_MAX_FILES: z.coerce.number().int().min(1).max(200).default(10),
+    // Identical events of one request inside this window collapse into one
+    // line carrying `suppressedRepeats`; 0 disables the collapse.
+    MCP_LOG_DEDUPE_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(3_600_000)
+      .default(300_000),
     LOGS_DIR: z.string().default(path.join(projectRoot, "logs")),
     NODE_ENV: z.string().default("development"),
     MCP_TRANSPORT_TYPE: z.enum(["stdio", "http"]).default("stdio"),
@@ -483,6 +499,9 @@ export const config = {
   mcpServerVersion: env.MCP_SERVER_VERSION || pkg.version,
   logLevel: env.MCP_LOG_LEVEL,
   logsPath: validatedLogsPath,
+  logMaxFileSizeBytes: env.MCP_LOG_MAX_FILE_SIZE_MB * 1024 * 1024,
+  logMaxFiles: env.MCP_LOG_MAX_FILES,
+  logDedupeWindowMs: env.MCP_LOG_DEDUPE_WINDOW_MS,
   environment: env.NODE_ENV,
   mcpTransportType: env.MCP_TRANSPORT_TYPE,
   mcpHttpPort: env.MCP_HTTP_PORT,
