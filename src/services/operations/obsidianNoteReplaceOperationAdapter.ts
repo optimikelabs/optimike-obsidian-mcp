@@ -3,11 +3,14 @@ import { createHash } from "node:crypto";
 import type {
   AtomicWriteCasRequest,
   AtomicWriteCasResponse,
+  EffectFenceResolveRequest,
+  EffectFenceResolveResponse,
   AtomicWriteReadRequest,
   AtomicWriteReadResponse,
   AtomicWriteStatusResponse,
 } from "../obsidianRestAPI/types.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
+import { supportedAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
   operationDigest,
@@ -79,6 +82,14 @@ const StatusSchema = z
       writeEnabled: z.boolean(),
     }),
     limits: z.object({ markdownOnly: z.literal(true) }),
+    effectFence: z
+      .object({
+        contractVersion: z.literal(1),
+        supported: z.literal(true),
+        epoch: z.string().uuid(),
+      })
+      .passthrough()
+      .optional(),
     settlement: z
       .object({
         contractVersion: z.literal(1),
@@ -171,6 +182,19 @@ const CasSchema = z
   })
   .passthrough();
 
+/** The Bridge effect-fence epoch, when the Bridge can check tokens at the effect point. */
+export function effectFenceEpoch(status: unknown): string | undefined {
+  const version = (status as { plugin?: { version?: unknown } } | null)?.plugin?.version;
+  if (!supportedAtomicBridgeVersion(version)) return undefined;
+  const fence = (status as { effectFence?: unknown } | null)?.effectFence;
+  if (!fence || typeof fence !== "object") return undefined;
+  const value = fence as Record<string, unknown>;
+  return value.contractVersion === 1 && value.supported === true &&
+    typeof value.epoch === "string" && z.string().uuid().safeParse(value.epoch).success
+    ? value.epoch
+    : undefined;
+}
+
 // An in-process, one-use marker issued only by the trusted policy wrapper.
 // Never trust caller/upstream error properties as evidence of non-dispatch.
 const preDispatchErrors = new WeakSet<Error>();
@@ -187,7 +211,9 @@ export interface AtomicWriteBackend {
   status(): Promise<AtomicWriteStatusResponse>;
   read(payload: AtomicWriteReadRequest): Promise<AtomicWriteReadResponse>;
   inspectFrontmatterFormat?(yaml: string): Promise<unknown>;
-  prepareDate?(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string }): Promise<AtomicWriteReadResponse>;
+  prepareDate?(payload: { contractVersion: 1; path: string; expectedSha256: string; bindingFingerprint: string;
+    fence?: { contractVersion: 1; epoch: string; attemptId: string } }): Promise<AtomicWriteReadResponse>;
+  resolveEffectFence?(payload: EffectFenceResolveRequest): Promise<EffectFenceResolveResponse>;
   replace(payload: AtomicWriteCasRequest): Promise<AtomicWriteCasResponse>;
 }
 
@@ -1020,6 +1046,19 @@ export class ObsidianNoteReplaceOperationAdapter
           executionAttemptId,
         );
       }
+      // The token is durable before the request exists. An executor that no
+      // longer owns the applying plan (interruption sweep, closure) stops here.
+      const fenceEpoch = effectFenceEpoch(status);
+      try {
+        plan = this.journal.recordEffectAttempt(
+          plan.operationId,
+          executionAttemptId,
+          fenceEpoch,
+        );
+      } catch (error) {
+        if (!(error instanceof ObsidianNoteReplaceConcurrencyError)) throw error;
+        return this.journal.get(plan.operationId) ?? plan;
+      }
       casDispatched = true;
       const rawResult = await this.backend.replace({
         contractVersion: 1,
@@ -1027,6 +1066,9 @@ export class ObsidianNoteReplaceOperationAdapter
         bindingFingerprint: plan.bindingFingerprint,
         expectedSha256: plan.beforeSha256,
         nextContent: plan.nextContent,
+        ...(fenceEpoch
+          ? { fence: { contractVersion: 1, epoch: fenceEpoch, attemptId: executionAttemptId } }
+          : {}),
       });
       plan = this.beginModifiedTimeSettlementObservationOrReload(
         plan,

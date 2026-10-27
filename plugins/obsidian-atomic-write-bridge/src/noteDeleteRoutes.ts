@@ -7,6 +7,7 @@ import {
   type NoteDeleteApply, type NoteDeleteBacklink, type NoteDeletePreflight, type NoteDeleteTrashOption,
 } from "../../../src/services/noteDeleteContract.js";
 import { nativeNotePath } from "../../../src/services/nativeNoteMoveContract.js";
+import { parseEffectFenceToken, type EffectFenceToken } from "./effectFence.js";
 import { NoteDeleteBeforeEffectConflict, NoteDeleteService, type NoteDeleteHost } from "./noteDelete.js";
 
 const PREFIX = "/extensions/obsidian-atomic-write-bridge/note-delete";
@@ -39,7 +40,11 @@ export function readTrashOption(vault: unknown): NoteDeleteTrashOption | "perman
 
 export function createNoteDeleteRoutes(
   app: App,
-  options: { binding: () => string; enabled: () => boolean; registerEvent: (event: EventRef) => void },
+  options: {
+    binding: () => string; enabled: () => boolean; registerEvent: (event: EventRef) => void;
+    /** Effect fence admission; throws when the attempt must produce no effect. */
+    enterEffect?: (fence: EffectFenceToken | undefined) => () => void;
+  },
 ) {
   const adapter = app.vault.adapter as {
     getBasePath?: () => string;
@@ -117,7 +122,7 @@ export function createNoteDeleteRoutes(
       }
       return matches;
     },
-    trash: async (plan: NoteDeletePreflight) => {
+    trash: async (plan: NoteDeletePreflight, fence) => {
       let fresh;
       try {
         fresh = await observe(plan.path);
@@ -130,8 +135,13 @@ export function createNoteDeleteRoutes(
       const target = file(plan.path);
       if (!host.enabled() || host.trashOption() !== plan.trashOption) throw new NoteDeleteBeforeEffectConflict();
       physical(plan.path);
+      // Effect point: the fence admits the attempt in the same tick that starts trashFile.
+      let settleEffect: (() => void) | undefined;
+      try { settleEffect = options.enterEffect?.(fence); }
+      catch { throw new NoteDeleteBeforeEffectConflict(); }
       // FileManager.trashFile follows the vault's "Deleted files" preference; it is not an atomic content CAS.
-      await app.fileManager.trashFile(target);
+      try { await app.fileManager.trashFile(target); }
+      finally { settleEffect?.(); }
       if (app.vault.getAbstractFileByPath(plan.path) !== null) throw new Error("native_trash_result_unproven");
     },
   };
@@ -154,7 +164,12 @@ export function createNoteDeleteRoutes(
       return service.preflight(nativeNotePath(r.path), r.acknowledgeBacklinks);
     });
     install("/apply", async (value) => {
-      const r = body(value, ["contractVersion", "operationId", "path", "bindingFingerprint", "preconditionDigest"]);
+      const keys = ["contractVersion", "operationId", "path", "bindingFingerprint", "preconditionDigest"];
+      const fenced = !!value && typeof value === "object" && (value as Record<string, unknown>).fence !== undefined;
+      const r = body(value, fenced ? [...keys, "fence"] : keys);
+      if (fenced) {
+        try { r.fence = parseEffectFenceToken(r.fence); } catch { throw new Error("invalid_delete_request"); }
+      }
       return service.apply(r as unknown as NoteDeleteApply);
     });
     install("/status", async (value) => {

@@ -290,4 +290,4 @@ Les quatre outils acceptent `responseMode: compact | detailed` (défaut compact)
 
 ## Compatibilité de l’intégration audit
 
-L’inspection native du frontmatter exige Atomic Write Bridge 0.8.3 ou ultérieur. Basculer et restaurer le MCP et le Bridge ensemble, après contrôle des opérations planned, applying ou outcome-unknown et des verrous de préparation ; vérifier les empreintes des artefacts, pas seulement les versions.
+L’inspection native du frontmatter exige Atomic Write Bridge 0.8.4 ou ultérieur. Basculer et restaurer le MCP et le Bridge ensemble, après contrôle des opérations planned, applying ou outcome-unknown et des verrous de préparation ; vérifier les empreintes des artefacts, pas seulement les versions.

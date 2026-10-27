@@ -230,6 +230,7 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   ...NOTE_NAME_REASON_CODES,
+  "atomic_bridge_version_unsupported",
   "frontmatter_native_render_invalid",
   "frontmatter_normalization_proof_mismatch",
   "text_patch_normalization_proof_mismatch",

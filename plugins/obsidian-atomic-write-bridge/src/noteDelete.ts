@@ -30,9 +30,10 @@ export interface NoteDeleteHost {
   trashCopies(path: string, sha256: string): Promise<string[]>;
   /**
    * Must re-read the note and compare it with the plan immediately before
-   * `FileManager.trashFile`, and confirm the path is gone afterwards.
+   * `FileManager.trashFile`, admit the effect fence token in the same tick that
+   * calls it, and confirm the path is gone afterwards.
    */
-  trash(plan: NoteDeletePreflight): Promise<void>;
+  trash(plan: NoteDeletePreflight, fence?: NoteDeleteApply["fence"]): Promise<void>;
 }
 
 type Entry = {
@@ -136,7 +137,7 @@ export class NoteDeleteService {
       if (this.host.trashOption() !== plan.trashOption) throw new NoteDeleteBeforeEffectConflict();
       entry.dispatchedAt = this.now();
       mayHaveDispatched = true;
-      await this.host.trash(plan);
+      await this.host.trash(plan, request.fence);
       entry.observation = { ...observation, outcome: "committed", reason: "native_trash_returned" };
     } catch (error) {
       const before = !mayHaveDispatched || error instanceof NoteDeleteBeforeEffectConflict;

@@ -199,6 +199,24 @@ try {
     trashOption: "local", trashPostflight: "verified", replayAllowed: false });
   assert.equal((await lying.adapter.apply(lyingPlan.planRef, request.idempotencyKey)).outcome, "outcome_unknown");
 
+  // Effect fence (administrative-closure mechanism): token recorded before dispatch, unqualified Bridge refused before any state change.
+  const fenced = setup("fenced");
+  const epoch = "11111111-1111-4111-8111-111111111111";
+  fenced.backend.bridgeStatus = async () => ({ plugin: { version: "0.8.4" }, effectFence: { contractVersion: 1, supported: true, epoch } });
+  let sentFence;
+  const realApply = fenced.backend.apply;
+  fenced.backend.apply = async (req) => { sentFence = req.fence; return realApply(req); };
+  const fencedPlan = await fenced.adapter.plan(request);
+  await fenced.adapter.apply(fencedPlan.planRef, request.idempotencyKey);
+  assert.equal(sentFence.epoch, epoch);
+  assert.match(sentFence.attemptId, /^[0-9a-f-]{36}$/u);
+  const old = setup("old-bridge");
+  const oldPlan = await old.adapter.plan(request);
+  old.backend.bridgeStatus = async () => { throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "old", { reasonCode: "atomic_bridge_version_unsupported" }); };
+  await assert.rejects(old.adapter.apply(oldPlan.planRef, request.idempotencyKey));
+  assert.equal(old.applies(), 0);
+  assert.equal((await old.adapter.status(oldPlan.planRef)).phase, "planned", "an unqualified Bridge is refused before any state change");
+
   // Tools: three governed names, own plan prefix, honest proxy receipt when the response is lost.
   const registered = new Map();
   registerNoteDeleteTools({ registerTool: (name, definition, handler) => registered.set(name, { definition, handler }) }, system.adapter);

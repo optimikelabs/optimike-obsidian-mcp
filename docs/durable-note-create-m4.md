@@ -27,6 +27,8 @@ A content-free effect proof is persisted before terminal payload zeroization. La
 
 If the file exists but its observed content matches neither the sealed bytes nor qualified automatic date effects after the settlement delay, status transitions an `applying` attempt to `terminal / outcome_unknown` with `postflight: unverified`. Apply and recovery remain disallowed; status may later reconcile a qualified observation without redispatching creation.
 
+Each dispatch records an effect-fence token first. An `outcome_unknown` creation that no observation can settle is closed, after owner review, with `obsidian_operation_close` as `reviewed_unverified` (never a second creation); see [Administrative closure](administrative-closure.md).
+
 Receipts indicate `nextAction: none` for stable terminal outcomes. `outcome_unknown` continues to suggest `status`: a later qualified observation can still change that outcome, without a new creation. An optional status on a committed receipt can refresh the current postflight without changing the historical outcome.
 
 ## Automatic fields

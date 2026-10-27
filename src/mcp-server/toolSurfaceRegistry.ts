@@ -195,6 +195,7 @@ const DIAGNOSTIC_TOOL_NAMES = [
 const ADMINISTRATION_TOOL_NAMES = [
   "obsidian_admin_filesystem",
   "obsidian_runtime_maintenance",
+  "obsidian_operation_close",
   "obsidian_delete_note",
   "obsidian_move_note",
 ] as const;
@@ -559,6 +560,13 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "runtime.maintenance",
     "runtime",
     ALL_MODES,
+    { annotationClass: "maintenance" },
+  ),
+  defineTool(
+    "obsidian_operation_close",
+    "runtime.maintenance",
+    "operation-closure",
+    LIVE_MODES,
     { annotationClass: "maintenance" },
   ),
 

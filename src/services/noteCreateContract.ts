@@ -18,6 +18,8 @@ export type NoteCreatePreflight = {
 export type NoteCreateApply = {
   contractVersion: 1; operationId: string; path: string; content: string;
   contentSha256: string; bindingFingerprint: string; policyDigest: string;
+  /** Effect fence token recorded by the MCP journal before dispatch. */
+  fence?: { contractVersion: 1; epoch: string; attemptId: string };
 };
 export type NoteCreateInspection = {
   contractVersion: 1; path: string; bindingFingerprint: string;

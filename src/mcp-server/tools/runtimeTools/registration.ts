@@ -35,7 +35,7 @@ import type { GovernedBaseFormulaRuntime } from "../../../services/baseFormulaPr
 import type { GovernedCanvasRuntime } from "../../../services/canvasProjectionRuntime.js";
 import { registerGovernedCanvasTools } from "../governedCanvasTools/index.js";
 import { registerOperonTools } from "../operonTools/index.js";
-import { registerOperationCockpitTool } from "../operationCockpitTools/index.js";
+import { registerOperationCloseTool, registerOperationCockpitTool } from "../operationCockpitTools/index.js";
 import type { PendingOperationSource } from "../../../services/operationCockpit.js";
 import { mcpSchema } from "../../mcpSchema.js";
 
@@ -160,6 +160,7 @@ export async function registerRuntimeTools(
     pendingOperationSources.push(governedCanvasRuntime);
   }
   registerOperationCockpitTool(server, pendingOperationSources);
+  registerOperationCloseTool(server, governedNoteReplaceRuntime);
 
   await registerGovernedNoteReplaceTools(server, governedNoteReplaceRuntime);
   registerNativeNoteMoveTools(server, governedNoteReplaceRuntime?.nativeMove);

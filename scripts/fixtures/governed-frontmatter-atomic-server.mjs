@@ -132,7 +132,7 @@ export class GovernedFrontmatterAtomicServer {
       json(response, 200, {
         ok: true,
         contractVersion: 1,
-        plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.3" },
+        plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.4" },
         frontmatterFormat: { contractVersion: 1, supported: true },
         backend: {
           kind: "obsidian-vault-process",

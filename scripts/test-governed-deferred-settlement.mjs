@@ -44,7 +44,7 @@ class FakeAtomicWriteBackend {
     const response = {
       ok: true,
       contractVersion: 1,
-      plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.3" },
+      plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.4" },
       frontmatterFormat: { contractVersion: 1, supported: true },
       backend: {
         kind: "obsidian-vault-process",
@@ -229,7 +229,8 @@ try {
     await f.adapter.apply(p.planRef, "test", "deferred");
     assert.match(f.backend.content, /après/);
     assert.equal(f.backend.replaceCalls, 1);
-    console.log("DIAGNOSTIC: an expired lease and unknown journal state do not fence an already dispatched backend write");
+    // Only the Bridge effect fence closes this race: see test-effect-fence-closure.mjs.
+    console.log("DIAGNOSTIC: without a Bridge effect fence, an expired lease and unknown journal state do not stop an already dispatched write");
   }
   {
     const f = fixture(), p = await f.plan();

@@ -147,7 +147,13 @@ headless fallback modes retain the direct compatibility tools.
 - `obsidian_list_pending_operations`: list only `planned`, `applying`, and
   `outcome_unknown` receipts from the current live runtime's already-open Note,
   Base Formula, and Canvas journals. Frontmatter and Text Patch retain their
-  public projected family and `planRef`.
+  public projected family and `planRef`. `closeAllowed` marks rows that the
+  owner may close administratively.
+- `obsidian_operation_close` (operational/full): after owner review, close
+  `outcome_unknown` operations as `reviewed_unverified` or release
+  `date_preparation_unverified` locks, only when the Atomic Write Bridge effect
+  fence proves that no attempt can still act. `dryRun` defaults to true. See
+  [Administrative closure](administrative-closure.md).
 
 The paginated projection contains the operation family, exact opaque domain
 reference, durable state, timestamps, bounded age and the next safe action. It

@@ -12,7 +12,9 @@ export type OperationOutcome =
   | "failed"
   | "outcome_unknown"
   | "compensated"
-  | "expired";
+  | "expired"
+  /** Closed after review: no further effect can occur; success is not claimed. */
+  | "reviewed_unverified";
 
 export type OperationProof = {
   kind: string;

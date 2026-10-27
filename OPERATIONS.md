@@ -536,6 +536,23 @@ Supported maintenance actions:
 - `refresh_tasks_cache`
 - `refresh_all`
 
+### Closing uncertain operations
+
+1. Install the Bridge and MCP of the same release, restart Obsidian, then the
+   backend.
+2. In Obsidian, Atomic Write Bridge settings, enable **Require a fence token for
+   every write** (refuses writes from older MCP clients) and keep it on for at
+   least 10 minutes.
+3. Dry run: `node scripts/close-pending-operations.mjs --launcher <launch.mjs>`;
+   read the JSON report (`would_close`, refusals and reasons).
+4. After owner approval: same command with `--apply`. Refusals are never
+   retried automatically; `closure_effect_settling` and other retryable reasons
+   can be rerun later.
+5. A `date_preparation_unverified` note is released with
+   `obsidian_operation_close` and `datePreparationPaths`; offline fallback:
+   `scripts/release-date-preparation-lock.mjs` with Obsidian and the backend
+   stopped. See [Administrative closure](docs/administrative-closure.md).
+
 ### Orphan operation journals
 
 Every runtime profile (`sha256({mode, baseUrl, vault})`) has its own durable journal files in the state directory. `npm run maintenance:foreign-journals` lists those of other profiles without opening, changing or deleting anything and flags the ones with no non-terminal operation as move candidates; see [audit follow-ups](docs/audit-followups-20261027.md#2-orphan-durable-journals). Tests that start the real runtime import `scripts/test-support/isolated-state.mjs` so they leave none behind.

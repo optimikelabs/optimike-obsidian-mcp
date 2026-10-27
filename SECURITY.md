@@ -132,8 +132,9 @@ excluded.
 The read-only `obsidian_list_pending_operations` cockpit is a deliberately
 closed public projection for resuming governed work. Each returned row contains
 only `operationKind`, the domain `planRef`, `state`, `admittedAt`, `updatedAt`,
-bounded `ageSeconds` and the closed `nextAction` (`apply`, `status` or
-`recover`). The opaque cursor contains only the last public ordering key.
+bounded `ageSeconds`, the closed `nextAction` (`apply`, `status` or
+`recover`) and the boolean `closeAllowed`. The opaque cursor contains only the
+last public ordering key.
 
 The cockpit never returns or logs vault or journal paths, idempotency or other
 secret keys, target names, note or Canvas content, formula/frontmatter values,
@@ -146,6 +147,18 @@ profile, policy, Bridge and binding checks.
 The contract is exercised by `npm run test:log-privacy` (including the batch
 item fixture) on Linux and Windows in CI. The CI `bridge-privacy` job also runs
 privacy checks for the Bases, Operon and Atomic Write Bridges on both platforms.
+
+## Administrative closure and effect fence
+
+`obsidian_operation_close` never writes a note and never turns an uncertain
+outcome into success. It closes only when the Atomic Write Bridge proves, at its
+effect point, that no attempt can still act; a Bridge without the fence, an
+unreachable Bridge, a binding mismatch or a running effect refuse without
+change. Closure evidence holds verdicts, epochs, attempt identifiers, Bridge
+version and binding, and the current note hash; never note content, paths in
+errors or idempotency keys. Effect-fence tokens are not credentials: Local REST
+authentication still applies. Enabling **Require a fence token for every
+write** refuses writes from MCP clients that do not send tokens.
 
 ## Reverse proxy boundary
 

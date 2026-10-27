@@ -6,6 +6,7 @@ import {
   type NoteDeleteApply, type NoteDeleteObservation, type NoteDeletePreflight,
 } from "../noteDeleteContract.js";
 import { nativeNotePath } from "../nativeNoteMoveContract.js";
+import { effectFenceEpoch } from "./obsidianNoteReplaceOperationAdapter.js";
 import {
   ObsidianNoteReplaceConcurrencyError, ObsidianNoteReplaceJournal,
   type ObsidianNoteReplacePlan,
@@ -29,6 +30,8 @@ const Observation = z.object({
 }).strict();
 
 export interface NoteDeleteBackend {
+  /** Atomic Write Bridge status; its effect-fence epoch is sealed before dispatch. */
+  bridgeStatus?(): Promise<unknown>;
   preflight(path: string, acknowledgeBacklinks: boolean): Promise<unknown>;
   apply(request: NoteDeleteApply): Promise<unknown>;
   status(operationId: string, preconditionDigest: string): Promise<unknown>;
@@ -163,6 +166,8 @@ export class NoteDeleteOperationAdapter {
     let row = this.require(reference, idempotencyKey);
     if (row.status !== "planned") return this.status(reference);
     this.authorize("apply", row.path);
+    // Refuse an unqualified Bridge before changing the durable operation state.
+    if (this.backend.bridgeStatus) await this.backend.bridgeStatus();
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }
     catch (error) {
       if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(reference);
@@ -173,8 +178,16 @@ export class NoteDeleteOperationAdapter {
     try {
       this.authorize("apply", row.path);
       const plan = this.sealed(row);
+      // Durable effect-fence token before the request exists; a stale owner stops here.
+      const fenceEpoch = this.backend.bridgeStatus ? effectFenceEpoch(await this.backend.bridgeStatus()) : undefined;
+      try { row = this.journal.recordEffectAttempt(row.operationId, attemptId, fenceEpoch); }
+      catch (error) {
+        if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(reference);
+        throw error;
+      }
       observed = this.observation(await this.backend.apply({ contractVersion: 1, operationId: row.operationId,
-        path: plan.path, bindingFingerprint: row.bindingFingerprint, preconditionDigest: row.requestDigest }), row);
+        path: plan.path, bindingFingerprint: row.bindingFingerprint, preconditionDigest: row.requestDigest,
+        ...(fenceEpoch ? { fence: { contractVersion: 1 as const, epoch: fenceEpoch, attemptId } } : {}) }), row);
       row = this.journal.transition(row.operationId, ["applying"], observed.outcome,
         observed.outcome === "committed" ? undefined : "note_delete_not_committed", attemptId);
     } catch {

@@ -134,9 +134,9 @@ que les corps de requête et les suffixes de route restent exclus.
 Le cockpit read-only `obsidian_list_pending_operations` est une projection
 publique volontairement fermée pour reprendre un travail gouverné. Chaque ligne
 retournée contient uniquement `operationKind`, le `planRef` métier, `state`,
-`admittedAt`, `updatedAt`, `ageSeconds` borné et `nextAction` fermé (`apply`,
-`status` ou `recover`). Le curseur opaque ne contient que la dernière clé
-publique de tri.
+`admittedAt`, `updatedAt`, `ageSeconds` borné, `nextAction` fermé (`apply`,
+`status` ou `recover`) et le booléen `closeAllowed`. Le curseur opaque ne
+contient que la dernière clé publique de tri.
 
 Le cockpit ne retourne ni ne journalise de chemins du coffre ou des journaux,
 clés d’idempotence ou autres clés secrètes, noms de cibles, contenu de Note ou
@@ -151,6 +151,19 @@ Le contrat est exercé par `npm run test:log-privacy` (fixture des items batch
 incluse) sur Linux et Windows dans la CI. Le job CI `bridge-privacy` exécute
 aussi les contrôles de confidentialité des Bridges Bases, Operon et Atomic
 Write sur les deux plateformes.
+
+## Clôture administrative et fence au point d'effet
+
+`obsidian_operation_close` n'écrit jamais de note et ne transforme jamais une
+issue incertaine en succès. Il ne clôt que si l'Atomic Write Bridge prouve, à
+son point d'effet, qu'aucune tentative ne peut encore agir ; un Bridge sans
+fence, injoignable, une identité différente ou un effet en cours refusent sans
+rien changer. Les preuves conservées contiennent verdicts, époques, identifiants
+de tentative, version et identité du Bridge et l'empreinte actuelle de la note ;
+jamais de contenu de note, de chemin dans une erreur ni de clé d'idempotence.
+Les jetons de fence ne sont pas des secrets d'accès : l'authentification Local
+REST s'applique toujours. Activer **Exiger un jeton de fence pour toute
+écriture** refuse les écritures des clients MCP qui n'envoient pas de jeton.
 
 ## Frontière reverse proxy
 

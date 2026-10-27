@@ -22,6 +22,8 @@ function fixture(options: { backlinks?: NoteDeleteBacklink[]; trash?: NoteDelete
   let trashObservable = true;
   let reoccupy = false;
   let failTrashAfterEffect = false;
+  let refuseFence = false;
+  const fences: Array<unknown> = [];
   const trashed: Array<{ name: string; sha256: string }> = [{ name: ".trash/Old.md", sha256: hash("older identical-name note") }];
   const host: NoteDeleteHost = {
     binding: () => binding, enabled: () => enabled, trashOption: () => trashOption,
@@ -32,7 +34,9 @@ function fixture(options: { backlinks?: NoteDeleteBacklink[]; trash?: NoteDelete
     absent: async () => !present && !reoccupy,
     trashCopies: async (_path, sha) =>
       trashObservable ? trashed.filter((entry) => entry.sha256 === sha).map((entry) => entry.name) : [],
-    trash: async (plan) => {
+    trash: async (plan, fence) => {
+      fences.push(fence);
+      if (refuseFence) throw new NoteDeleteBeforeEffectConflict();
       const fresh = await host.observe(plan.path).catch(() => { throw new NoteDeleteBeforeEffectConflict(); });
       if (fresh.sha256 !== plan.sha256) throw new NoteDeleteBeforeEffectConflict();
       trashCalls++;
@@ -58,6 +62,8 @@ function fixture(options: { backlinks?: NoteDeleteBacklink[]; trash?: NoteDelete
     setReoccupied: () => { reoccupy = true; },
     setTrashObservable: (value: boolean) => { trashObservable = value; },
     failAfterEffect: () => { failTrashAfterEffect = true; },
+    refuseFence: () => { refuseFence = true; },
+    fences,
     removeBehindOurBack: () => { present = false; },
   };
 }
@@ -219,4 +225,18 @@ test("status without a backend receipt is honestly unknown", async () => {
   const status = await f.service.status(randomUUID(), "c".repeat(64));
   assert.equal(status.outcome, "outcome_unknown");
   assert.equal(status.reason, "backend_receipt_unavailable");
+});
+
+test("the effect fence token reaches the effect point, and a refusing fence leaves the note untouched", async () => {
+  const fence = { contractVersion: 1 as const, epoch: randomUUID(), attemptId: randomUUID() };
+  const f = fixture();
+  const request = { ...(await f.plan()), fence };
+  assert.equal((await f.service.apply(request)).outcome, "committed");
+  assert.deepEqual(f.fences, [fence]);
+  const refused = fixture();
+  const refusedRequest = { ...(await refused.plan()), fence };
+  refused.refuseFence();
+  const observed = await refused.service.apply(refusedRequest);
+  assert.equal(observed.outcome, "conflict");
+  assert.equal(refused.trashCalls(), 0);
 });
