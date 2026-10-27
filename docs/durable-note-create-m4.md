@@ -16,6 +16,8 @@ A content-free effect proof is persisted before terminal payload zeroization. La
 
 If the file exists but its observed content matches neither the sealed bytes nor qualified automatic date effects after the settlement delay, status transitions an `applying` attempt to `terminal / outcome_unknown` with `postflight: unverified`. Apply and recovery remain disallowed; status may later reconcile a qualified observation without redispatching creation.
 
+Receipts indicate `nextAction: none` for stable terminal outcomes. `outcome_unknown` continues to suggest `status`: a later qualified observation can still change that outcome, without a new creation. An optional status on a committed receipt can refresh the current postflight without changing the historical outcome.
+
 ## Automatic fields
 
 The existing Bridge date-integration discovery and strict timestamp-settlement verifier are reused. Only qualified created/modified fields with a supported format/delay are eligible. Viewed fields, ambiguous keys and unsupported configurations refuse admission. Active automatic fields require an explicit frontmatter envelope in the sealed content. An explicit creation timestamp is never silently replaced. Body changes or unqualified YAML normalization are not accepted. Status may be pending until the advertised delay passes. No arbitrary plugin rewrite is excused.

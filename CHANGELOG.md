@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Return `nextAction: none` for stable terminal note-create and note-move receipts. Uncertain outcomes retain `status` because a later observation may still reconcile them without redispatching the effect.
+
 ## [3.14.0] - 2026-10-23
 
 ### Fixed

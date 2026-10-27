@@ -185,7 +185,8 @@ export class NoteCreateOperationAdapter {
       beforeProof: { kind: "observed-path-absence", digest: row.beforeSha256 },
       expectedContentSha256: row.afterSha256, effectProof: row.effectProof ?? null, postflight,
       automaticDateFields: plan.policy.fields.map(field => ({ propertyName: field.propertyName, role: field.role })),
-      applyAllowed: row.status === "planned", recoveryAllowed: false, nextAction: row.status === "planned" ? "apply" : "status",
+      applyAllowed: row.status === "planned", recoveryAllowed: false,
+      nextAction: row.status === "planned" ? "apply" : ["applying", "outcome_unknown"].includes(row.status) ? "status" : "none",
       indexing: "not_certified", authorAttribution: "not_proven", admittedAt: row.createdAt, updatedAt: row.updatedAt,
     };
   }
