@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { get_encoding } from "tiktoken";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
@@ -164,6 +165,7 @@ const policy = { version: 1, utcOffsetMinutes: 0, fields: [] },
   bindingFingerprint = "a".repeat(64),
   policyDigest = createPolicyDigest(policy);
 const backend = {
+  ...nativeFormatFixture(bindingFingerprint),
   async preflight(path) {
     assert.equal(files.has(path), false);
     return {

@@ -27,6 +27,7 @@ import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
 import { operationDigest } from "../../../services/operations/contract.js";
 import { compileFrontmatterPatch } from "../../../services/frontmatterPatchCompiler.js";
+import { inspectNativeFrontmatter, rejectNonCanonical } from "../../../services/obsidianFrontmatterFormat.js";
 import { z } from "zod";
 import { config } from "../../../config/index.js";
 import { validateObsidianMarkdown } from "../../../services/obsidianFormatService.js";
@@ -302,6 +303,11 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     }
     if (context) context.atomicWriteStatus = status;
     return status;
+  }
+
+  inspectFrontmatterFormat(yaml: string) {
+    if (!this.delegate.inspectFrontmatterFormat) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Native frontmatter format inspection is unavailable.", { reason: "frontmatter_format_capability_missing" });
+    return this.delegate.inspectFrontmatterFormat(yaml);
   }
 
   async read(payload: Parameters<AtomicWriteBackend["read"]>[0]) {
@@ -610,6 +616,8 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     const status = await this.backend.status();
     const keys = effectiveAtomicWriteProtectedFrontmatterKeys(status, config.mcpProtectedFrontmatterKeys);
     validateReplacement(before.content, input.nextContent, "plan", keys);
+    const format = await inspectNativeFrontmatter(this.backend, input.nextContent, before.bindingFingerprint);
+    rejectNonCanonical(format);
     const source = await this.backend.prepareForPlan(input.path, before);
     let nextContent = input.nextContent;
     if (source.datePreparation?.kind === "date-manager-before-plan") {
@@ -621,8 +629,12 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
         return {op: "set" as const, key, value};
       }));
       if (operations.length) nextContent = compileFrontmatterPatch(nextContent, operations).nextContent;
+      // The date manager owns these inserted fields; render them using the
+      // same native serializer after preserving the caller's canonical input.
+      nextContent = (await inspectNativeFrontmatter(this.backend, nextContent, source.bindingFingerprint)).content;
     }
     return this.plan({ ...input, nextContent, idempotencyIdentity: identity,
+      frontmatterFormat: { normalization: { applied: false }, typeWarnings: format.warnings },
       expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint, datePreparation: source.datePreparation });
   }
 

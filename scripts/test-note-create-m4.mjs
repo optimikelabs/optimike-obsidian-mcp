@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 process.env.NODE_ENV = "test";
 process.env.OBSIDIAN_RUNTIME_MODE = "live";
 process.env.OBSIDIAN_API_KEY = "hermetic-fixture-key";
@@ -18,6 +19,7 @@ function fixture(name, dateFields = []) {
   const files = new Map(), db = path.join(root, name + ".sqlite"), clock = () => now;
   const journal = new ObsidianNoteReplaceJournal(db, { now: clock });
   const backend = {
+    ...nativeFormatFixture(() => binding),
     async preflight(path) {
       if (files.has(path)) throw new Error("target exists");
       return { contractVersion: 1, path, bindingFingerprint: binding, absent: true, enabled: true, policy, policyDigest: createPolicyDigest(policy) };
@@ -42,6 +44,22 @@ function fixture(name, dateFields = []) {
     policy: value => { policy = value; } };
 }
 try {
+  {
+    const f = fixture("format-admission");
+    try {
+      const noncanonical = { ...input, content: "---\ntitle: 'Test'\n---\nPrivate prose.\n" };
+      await assert.rejects(f.adapter.plan(noncanonical), error => error.message === "frontmatter_not_obsidian_canonical" && error.expectedFrontmatter === "---\ntitle: Test\n---");
+      assert.equal(f.calls(), 0);
+      const status = f.backend.status;
+      f.backend.status = async () => ({ backend: { bindingFingerprint: "a".repeat(64) } });
+      await assert.rejects(f.adapter.plan(input));
+      assert.equal(f.calls(), 0);
+      f.backend.status = status;
+      const p = await f.adapter.plan(input);
+      assert.deepEqual(p.typeWarnings, []);
+      assert.deepEqual((await f.adapter.status(p.planRef)).typeWarnings, []);
+    } finally { f.journal.close(); }
+  }
   {
     const f = fixture("nominal"); const p = await f.adapter.plan(input);
     assert.equal(f.calls(), 0); assert.equal((await f.adapter.plan(input)).planRef, p.planRef);

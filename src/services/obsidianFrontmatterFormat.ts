@@ -20,6 +20,20 @@ export class FrontmatterNotCanonical extends Error {
   constructor(readonly expectedFrontmatter: string) { super("frontmatter_not_obsidian_canonical"); }
 }
 
+export function rejectNonCanonical(result: { content: string; normalized: boolean }): void {
+  if (!result.normalized) return;
+  const envelope = frontmatterEnvelope(result.content);
+  if (!envelope) throw unavailable();
+  throw new FrontmatterNotCanonical(result.content.slice(0, envelope.end) + "---");
+}
+
+/** The dedicated field is permitted only for the caller's supplied frontmatter. */
+export function canonicalRejection(error: unknown) {
+  return error instanceof FrontmatterNotCanonical ? {
+    code: "VALIDATION_ERROR", reason: "frontmatter_not_obsidian_canonical", expectedFrontmatter: error.expectedFrontmatter,
+  } : undefined;
+}
+
 export function frontmatterEnvelope(content: string): { start: number; end: number; yaml: string } | undefined {
   const opening = /^---\r?\n/u.exec(content);
   if (!opening) return undefined;

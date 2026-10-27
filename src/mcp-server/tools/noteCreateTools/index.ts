@@ -9,6 +9,7 @@ import {
   READ_ONLY_TOOL_ANNOTATIONS,
 } from "../../toolAnnotations.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { canonicalRejection } from "../../../services/obsidianFrontmatterFormat.js";
 
 const Plan = z
   .object({
@@ -50,13 +51,14 @@ async function run(toolName: string, operation: () => Promise<unknown>) {
       ],
     };
   } catch (error) {
+    const canonical = toolName === "obsidian_note_create_plan" ? canonicalRejection(error) : undefined;
     return {
       isError: true,
       content: [
         {
           type: "text" as const,
           text: JSON.stringify(
-            publicMcpToolErrorPayload(error, {
+            canonical ?? publicMcpToolErrorPayload(error, {
               operation: toolName,
               toolName,
               params: {},

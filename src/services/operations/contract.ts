@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { FrontmatterTypeWarning } from "../obsidianFrontmatterFormat.js";
 
 export const OPERATION_RUNTIME_CONTRACT_VERSION = 1 as const;
 
@@ -49,6 +50,7 @@ export type OperationReceipt = {
       | "unverified";
   };
   datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string; lineEndingsNormalized?: true };
+  frontmatterFormat?: { normalization: { applied: boolean; reason?: string }; typeWarnings: FrontmatterTypeWarning[] };
   admittedAt: string;
   updatedAt: string;
   terminalAt?: string;

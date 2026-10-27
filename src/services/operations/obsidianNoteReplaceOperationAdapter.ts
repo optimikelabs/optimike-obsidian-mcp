@@ -197,6 +197,7 @@ export type ObsidianNoteReplacePlanInput = {
   nextContent: string;
   idempotencyKey: string;
   datePreparation?: OperationReceipt["datePreparation"];
+  frontmatterFormat?: OperationReceipt["frontmatterFormat"];
   expectedBeforeSha256?: string;
   expectedBindingFingerprint?: string;
   idempotencyIdentity?: string;
@@ -465,6 +466,7 @@ function planDigest(
 ): string {
   return operationDigest({
     ...(plan.datePreparation ? { datePreparation: plan.datePreparation } : {}),
+    ...(plan.frontmatterFormat ? { frontmatterFormat: plan.frontmatterFormat } : {}),
     contractVersion: OPERATION_RUNTIME_CONTRACT_VERSION,
     operationKind: profile.operationKind,
     operationId: plan.operationId,
@@ -517,6 +519,7 @@ function receipt(
     planRef: planRef(profile, plan.operationId),
     planDigest: digest,
     ...(plan.datePreparation ? { datePreparation: plan.datePreparation } : {}),
+    ...(plan.frontmatterFormat ? { frontmatterFormat: plan.frontmatterFormat } : {}),
     phase: current.phase,
     outcome: current.outcome,
     backend: {
@@ -773,6 +776,7 @@ export class ObsidianNoteReplaceOperationAdapter
       path: input.path,
       beforeSha256: read.sha256,
       afterSha256,
+      ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
       bindingFingerprint: read.bindingFingerprint,
       ...(input.idempotencyIdentity
         ? { idempotencyIdentity: input.idempotencyIdentity }
@@ -792,6 +796,7 @@ export class ObsidianNoteReplaceOperationAdapter
         idempotencyKey: input.idempotencyKey,
         requestDigest,
         ...(input.datePreparation ? { datePreparation: input.datePreparation } : {}),
+        ...(input.frontmatterFormat ? { frontmatterFormat: input.frontmatterFormat } : {}),
         ...(input.idempotencyIdentity
           ? { idempotencyIdentity: input.idempotencyIdentity }
           : {}),

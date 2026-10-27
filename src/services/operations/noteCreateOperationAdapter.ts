@@ -7,6 +7,8 @@ import { nativeNotePath } from "../nativeNoteMoveContract.js";
 import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCreateHash, observeCreateContent, validateCreatePolicy, validateNoteCreate,
   type NoteCreateApply, type NoteCreatePreflight } from "../noteCreateContract.js";
 import { operationDigest } from "./contract.js";
+import { inspectNativeFrontmatter, rejectNonCanonical } from "../obsidianFrontmatterFormat.js";
+import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "./obsidianNoteReplaceJournal.js";
 
 /** Newly created user-authored frontmatter is a change from the empty document.
@@ -39,7 +41,7 @@ const Inspection = z.object({ contractVersion: z.literal(1), path: z.string().ma
 const Result = z.object({ contractVersion: z.literal(1), operationId: z.string().uuid(), path: z.string().max(1024),
   bindingFingerprint: HASH, policyDigest: HASH, contentSha256: HASH,
   outcome: z.enum(["created", "conflict", "outcome_unknown"]), reason: z.string().regex(/^[a-z_]{1,96}$/u) }).strict();
-export interface NoteCreateBackend {
+export interface NoteCreateBackend extends Pick<AtomicWriteBackend, "status" | "inspectFrontmatterFormat"> {
   preflight(path: string): Promise<unknown>;
   create(request: NoteCreateApply): Promise<unknown>;
   inspect(path: string): Promise<unknown>;
@@ -74,7 +76,8 @@ export class NoteCreateOperationAdapter {
     if (createPolicyDigest(plan.policy) !== plan.policyDigest || row.path !== plan.path || row.bindingFingerprint !== plan.bindingFingerprint ||
         row.idempotencyIdentity !== intent(row.path, row.afterSha256) || row.projection.intentDigest !== row.idempotencyIdentity ||
         row.beforeSha256 !== absence({ path: row.path, bindingFingerprint: row.bindingFingerprint }) ||
-        row.requestDigest !== operationDigest({ ...plan, contentSha256: row.afterSha256 }) ||
+        row.requestDigest !== operationDigest({ ...plan, contentSha256: row.afterSha256,
+          ...(Object.hasOwn(row.projection.proof, "typeWarnings") ? { typeWarnings: row.projection.proof.typeWarnings } : {}) }) ||
         (["planned", "applying", "outcome_unknown"].includes(row.status) && noteCreateHash(row.nextContent) !== row.afterSha256)) bad("create_seal_mismatch");
     return plan;
   }
@@ -103,11 +106,13 @@ export class NoteCreateOperationAdapter {
     catch (error) { const existing = winner(); if (existing) return this.receipt(existing); throw error; }
     if (plan.path !== input.path || createPolicyDigest(plan.policy) !== plan.policyDigest) bad("create_preflight_identity_mismatch");
     validateNoteCreate(input.path, input.content, plan.policy);
+    const format = await inspectNativeFrontmatter(this.backend, input.content, plan.bindingFingerprint);
+    rejectNonCanonical(format);
     this.authorize("plan", input.path, input.content);
     const row = this.journal.create({ idempotencyKey: key, idempotencyIdentity: identity, path: input.path,
       nextContent: input.content, beforeSha256: absence({ path: input.path, bindingFingerprint: plan.bindingFingerprint }), afterSha256: hash,
-      bindingFingerprint: plan.bindingFingerprint, requestDigest: operationDigest({ ...plan, contentSha256: hash }),
-      projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity, proof: { preflight: plan } } });
+      bindingFingerprint: plan.bindingFingerprint, requestDigest: operationDigest({ ...plan, contentSha256: hash, typeWarnings: format.warnings }),
+      projection: { contractVersion: 1, kind: KIND, publicIdempotencyKey: input.idempotencyKey, intentDigest: identity, proof: { preflight: plan, typeWarnings: format.warnings } } });
     return this.receipt(row);
   }
   async apply(ref: string, key: string) {
@@ -185,6 +190,7 @@ export class NoteCreateOperationAdapter {
       beforeProof: { kind: "observed-path-absence", digest: row.beforeSha256 },
       expectedContentSha256: row.afterSha256, effectProof: row.effectProof ?? null, postflight,
       automaticDateFields: plan.policy.fields.map(field => ({ propertyName: field.propertyName, role: field.role })),
+      typeWarnings: row.projection?.proof.typeWarnings ?? [],
       applyAllowed: row.status === "planned", recoveryAllowed: false, nextAction: row.status === "planned" ? "apply" : "status",
       indexing: "not_certified", authorAttribution: "not_proven", admittedAt: row.createdAt, updatedAt: row.updatedAt,
     };

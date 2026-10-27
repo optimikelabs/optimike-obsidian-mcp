@@ -12,6 +12,7 @@ import {
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import type { GovernedNoteReplaceRuntime } from "./runtime.js";
 import { mcpSchema } from "../../mcpSchema.js";
+import { canonicalRejection } from "../../../services/obsidianFrontmatterFormat.js";
 
 const PlanSchema = z.object({
   ...GovernedResponseFields,
@@ -82,12 +83,13 @@ async function runTool(
       isError: false,
     };
   } catch (error) {
+    const canonical = toolName === "obsidian_note_replace_plan" ? canonicalRejection(error) : undefined;
     return {
       content: [
         {
           type: "text" as const,
           text: JSON.stringify(
-            publicMcpToolErrorPayload(error, {
+            canonical ?? publicMcpToolErrorPayload(error, {
               operation: toolName,
               toolName,
               params,

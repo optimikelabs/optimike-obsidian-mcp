@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 const root = mkdtempSync(path.join(os.tmpdir(), "creation-date-test-"));
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -55,6 +56,7 @@ const fake = {
       ok: true,
       contractVersion: 1,
       datePreparation: { contractVersion: 1, supported: true },
+      frontmatterFormat: { contractVersion: 1, supported: true },
       plugin: { id: "atomic", version: "test" },
       backend: {
         kind: "obsidian-vault-process",
@@ -97,6 +99,7 @@ const fake = {
   async readAtomicWriteNote() {
     return read();
   },
+  async inspectAtomicFrontmatterFormat({ yaml }) { return nativeFormatFixture(binding).inspectFrontmatterFormat(yaml); },
   async prepareAtomicWriteDate(request) {
     preparations++;
     if (!active || failPreparation) throw Error("no manager or failed command");
@@ -231,9 +234,10 @@ try {
   assert.equal(writes, 1);
   // Whole-note callers also continue while preserving only manager-produced dates.
   active = true;
+  const canonicalDirect = initial.replace("statut: actif\r\n", "statut: actif\n").replace("needle", "direct");
   const direct = await runtime.planPublicDirect({
     path: "Test.md",
-    nextContent: initial.replace("needle", "direct"),
+    nextContent: canonicalDirect,
     idempotencyKey: "direct",
   });
   assert.equal(direct.phase, "planned");
@@ -248,7 +252,7 @@ try {
     (
       await runtime.planPublicDirect({
         path: "Test.md",
-        nextContent: initial.replace("needle", "direct"),
+        nextContent: canonicalDirect,
         idempotencyKey: "direct",
       })
     ).operationId,

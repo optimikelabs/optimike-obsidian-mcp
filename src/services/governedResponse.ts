@@ -56,6 +56,7 @@ function compactReceipt(value: unknown, toolName: string): unknown {
     "target",
     "postflight",
     "datePreparation",
+    "frontmatterFormat",
     "applyAllowed",
     "recoveryAllowed",
     "recoveryRef",

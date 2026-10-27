@@ -10,6 +10,7 @@ import {
   rmSync,
 } from "node:fs";
 import http from "node:http";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 const modern = process.env.MCP_TEST_PROTOCOL_ERA === "modern";
@@ -179,6 +180,7 @@ class FakeObsidianAtomicWriteServer {
         ok: true,
         contractVersion: 1,
         plugin: { id: "obsidian-atomic-write-bridge", version: "0.1.0" },
+        frontmatterFormat: { contractVersion: 1, supported: true },
         backend: {
           kind: "obsidian-vault-process",
           bindingFingerprint: this.bindingFingerprint,
@@ -203,6 +205,11 @@ class FakeObsidianAtomicWriteServer {
           : {}),
         ...(this.settlement ? { settlement: this.settlement } : {}),
       });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/extensions/obsidian-atomic-write-bridge/frontmatter/format") {
+      const { yaml } = await requestBody(req);
+      json(res, 200, await nativeFormatFixture(this.bindingFingerprint).inspectFrontmatterFormat(yaml));
       return;
     }
     if (
@@ -590,6 +597,16 @@ try {
   await hybrid.close();
 
   session = await startClient("full", "live");
+  {
+    const response = await call(session, "obsidian_note_replace_plan", {
+      path: FIXTURE_PATH,
+      nextContent: `---\n${PROTECTED_LINE}\nstatut: 'actif'\n---\nPRIVATE-FORMAT-BODY\n`,
+      idempotencyKey: "noncanonical-replacement",
+    }, true);
+    assert.equal(response.payload.reason, "frontmatter_not_obsidian_canonical");
+    assert.equal(response.payload.expectedFrontmatter, `---\n${PROTECTED_LINE}\nstatut: actif\n---`);
+    assert.doesNotMatch(JSON.stringify(response.result), /PRIVATE-FORMAT-BODY/);
+  }
   const listed = await session.client.listTools();
   const cockpitTool = listed.tools.find(
     (tool) => tool.name === "obsidian_list_pending_operations",

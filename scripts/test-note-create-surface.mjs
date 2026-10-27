@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
 
@@ -35,6 +36,7 @@ const policy = { version: 1, utcOffsetMinutes: 0, fields: [] },
 const files = new Map();
 let writes = 0;
 const backend = {
+  ...nativeFormatFixture(bindingFingerprint),
   async preflight(path) {
     return {
       contractVersion: 1,
@@ -146,6 +148,14 @@ try {
         .map((c) => c.text)
         .join("\n"),
     );
+  const nonCanonical = await call("obsidian_note_create_plan", {
+    path: "Canonical.md", content: "---\nstatut: 'actif'\n---\nPRIVATE-BODY\n", idempotencyKey: "format-refusal",
+  });
+  assert.equal(nonCanonical.isError, true);
+  assert.equal(value(nonCanonical).reason, "frontmatter_not_obsidian_canonical");
+  assert.equal(value(nonCanonical).expectedFrontmatter, "---\nstatut: actif\n---");
+  assert.doesNotMatch(JSON.stringify(nonCanonical), /PRIVATE-BODY|plans\.sqlite/);
+  assert.equal(writes, 0);
   const p = value(
     await call("obsidian_note_create_plan", {
       path: "A.md",
