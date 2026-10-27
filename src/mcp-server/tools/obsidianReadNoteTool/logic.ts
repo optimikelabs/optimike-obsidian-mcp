@@ -409,7 +409,11 @@ export const processObsidianReadNote = async (
     if (requestedFormat === "json") {
       // Return the full NoteJson object. Its internal 'stat' will remain numeric.
       // The formatted stats are provided in the top-level 'response.stats'.
-      response.content = noteJson;
+      // Local REST's native tag list can include numeric PR references. Recompute
+      // from the returned text using the same rules as the shared-cache path.
+      const normalizedContent = (noteJson.content ?? "").replace(/\r\n/g, "\n");
+      const { body } = extractFrontmatter(normalizedContent);
+      response.content = { ...noteJson, tags: extractTags(noteJson.frontmatter ?? {}, body) };
       response.stats = formattedStat; // Always include formatted stat at top level for JSON format
       logger.debug(
         `Response format set to JSON, including full NoteJson (with original numeric stat) and top-level formatted stat.`,

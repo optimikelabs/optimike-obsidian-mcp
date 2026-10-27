@@ -117,4 +117,12 @@ const out = await processObsidianReadNote(
 );
 assert.deepEqual(sorted(out.content.tags), sorted(["seo", "projet/x", "stratégie"]));
 
+// Live REST path must not trust the native list of numeric references.
+const live = await processObsidianReadNote(
+  ObsidianReadNoteInputSchema.parse({ filePath: "Test.md", format: "json" }), context,
+  { getFileContent: async () => ({ path: "Test.md", content: content.replace(/\n/g, "\r\n"), frontmatter: { tags: ["seo"] }, stat, tags: ["107/", "113/", "114/", "seo"] }) },
+);
+assert.deepEqual(sorted(live.content.tags), sorted(["seo", "projet/x", "stratégie"]));
+assert.ok(live.content.content.includes("\r\n"), "returned content remains unchanged");
+
 console.log("PASS inline tags follow Obsidian rules (numeric, nesting, Unicode, code)");
