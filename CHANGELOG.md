@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Require Obsidian's native frontmatter format for governed note creation and whole-note replacement. Noncanonical caller input is refused with the canonical caller-provided frontmatter in `expectedFrontmatter`. Property type issues are warnings only.
+- Body and property patches explicitly announce and seal normalization of existing noncanonical frontmatter. Targeted values use the native Bridge serializer. Postflight accepts no alternate target-key representation: only qualified date-line effects may differ.
+- Detect and announce normalization during FDM's pre-plan date preparation; if its effect cannot be verified, report that the note may have changed and require inspection. FDM remains the date owner; Linter settings are unchanged.
+
+### Security
+
+- The format route uses Obsidian's own serializer, is capability-negotiated and bound to the vault identity. Its dedicated refusal field deliberately returns only a canonical rendering of caller-supplied frontmatter, never parser diagnostics or the note body. This is an explicit, narrowly scoped exception to content-free public error diagnostics.
+
 ## [3.14.0] - 2026-10-23
 
 ### Fixed

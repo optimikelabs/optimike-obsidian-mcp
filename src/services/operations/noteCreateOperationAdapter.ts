@@ -7,7 +7,7 @@ import { nativeNotePath } from "../nativeNoteMoveContract.js";
 import { NOTE_CREATE_PREFIX, NOTE_CREATE_MAX_BYTES, createPolicyDigest, noteCreateHash, observeCreateContent, validateCreatePolicy, validateNoteCreate,
   type NoteCreateApply, type NoteCreatePreflight } from "../noteCreateContract.js";
 import { operationDigest } from "./contract.js";
-import { inspectNativeFrontmatter, rejectNonCanonical } from "../obsidianFrontmatterFormat.js";
+import { frontmatterEnvelope, inspectNativeFrontmatter, rejectNonCanonical } from "../obsidianFrontmatterFormat.js";
 import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "./obsidianNoteReplaceJournal.js";
 
@@ -108,6 +108,8 @@ export class NoteCreateOperationAdapter {
     validateNoteCreate(input.path, input.content, plan.policy);
     const format = await inspectNativeFrontmatter(this.backend, input.content, plan.bindingFingerprint);
     rejectNonCanonical(format);
+    if (plan.policy.fields.length && frontmatterEnvelope(input.content)?.yaml.trim() === "{}")
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "An empty frontmatter mapping cannot be verified with automatic dates.", { reasonCode: "frontmatter_empty_mapping_date_management" });
     this.authorize("plan", input.path, input.content);
     const row = this.journal.create({ idempotencyKey: key, idempotencyIdentity: identity, path: input.path,
       nextContent: input.content, beforeSha256: absence({ path: input.path, bindingFingerprint: plan.bindingFingerprint }), afterSha256: hash,
@@ -120,6 +122,8 @@ export class NoteCreateOperationAdapter {
     if (row.status !== "planned") return this.status(ref);
     const admitted = this.sealed(row);
     this.authorize("apply", row.path, row.nextContent);
+    const format = await inspectNativeFrontmatter(this.backend, row.nextContent, admitted.bindingFingerprint);
+    if (format.normalized) throw new McpError(BaseErrorCode.CONFLICT, "The sealed note no longer matches the native frontmatter format.", { reasonCode: "frontmatter_format_changed" });
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }
     catch (error) { if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(ref); throw error; }
     const attempt = row.executionOwner!.attemptId;

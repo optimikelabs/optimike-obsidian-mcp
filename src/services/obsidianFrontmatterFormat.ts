@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import type { AtomicWriteBackend } from "./operations/obsidianNoteReplaceOperationAdapter.js";
+import type { OperationReceipt } from "./operations/contract.js";
 
 const WarningSchema = z.object({
   key: z.string().max(1024),
@@ -13,6 +15,21 @@ const ResultSchema = z.object({
   canonicalYaml: z.string().max(5 * 1024 * 1024), warnings: z.array(WarningSchema).max(4096),
 }).strict();
 export type FrontmatterTypeWarning = z.infer<typeof WarningSchema>;
+export type FrontmatterAssessment = {
+  normalization: { applied: boolean; reason?: string; sourceSha256?: string; normalizedSha256?: string; beforeFrontmatterSha256?: string; afterFrontmatterSha256?: string };
+  typeWarnings: FrontmatterTypeWarning[];
+};
+
+export function frontmatterAssessment(source: string, normalized: string, warnings: FrontmatterTypeWarning[]): FrontmatterAssessment {
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const applied = source !== normalized;
+  return { normalization: applied ? {
+    applied: true, reason: "existing_frontmatter_not_obsidian_canonical",
+    sourceSha256: digest(source), normalizedSha256: digest(normalized),
+    beforeFrontmatterSha256: digest(frontmatterEnvelope(source)?.yaml ?? ""),
+    afterFrontmatterSha256: digest(frontmatterEnvelope(normalized)?.yaml ?? ""),
+  } : { applied: false }, typeWarnings: warnings };
+}
 
 /** This exception contains only a canonical representation of the caller's own input.
  * It must be projected explicitly by the two plan tools, never the generic logger. */
@@ -31,6 +48,21 @@ export function rejectNonCanonical(result: { content: string; normalized: boolea
 export function canonicalRejection(error: unknown) {
   return error instanceof FrontmatterNotCanonical ? {
     code: "VALIDATION_ERROR", reason: "frontmatter_not_obsidian_canonical", expectedFrontmatter: error.expectedFrontmatter,
+  } : undefined;
+}
+
+export class DatePreparationPlanFailure extends Error {
+  constructor(readonly datePreparation: NonNullable<OperationReceipt["datePreparation"]>) {
+    super("date_preparation_completed_plan_unverified");
+  }
+}
+
+export function preparationPlanRejection(error: unknown) {
+  return error instanceof DatePreparationPlanFailure ? {
+    ok: false,
+    error: { code: "CONFLICT", reasonCode: "date_preparation_completed_plan_unverified",
+      message: "La préparation des dates a modifié la note avant l'échec du plan. Relisez la note et les opérations en attente avant toute reprise.", mutationMayHaveApplied: true },
+    datePreparation: error.datePreparation,
   } : undefined;
 }
 
@@ -60,5 +92,5 @@ export async function inspectNativeFrontmatter(backend: Pick<AtomicWriteBackend,
 }
 
 function unavailable() {
-  return new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Native frontmatter format inspection is unavailable.", { reason: "frontmatter_format_capability_missing" });
+  return new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Native frontmatter format inspection is unavailable.", { reasonCode: "frontmatter_format_capability_missing" });
 }

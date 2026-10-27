@@ -1,5 +1,9 @@
 # Patches texte gouvernés du corps Markdown (P4)
 
+Un frontmatter réduit à `{}` est refusé avant toute préparation de date avec
+`frontmatter_empty_mapping_date_management` : l’ajout de dates supprime ce
+marqueur et ne peut pas être vérifié par la seule tolérance des lignes de date.
+
 Optimike MCP expose une famille bornée pour modifier le corps d’une
 note Markdown existante :
 
@@ -22,8 +26,9 @@ hash avant écriture et le contenu privé, puis ne retourne qu’un reçu opaque
 
 Les opérations sont ordonnées et bornées. Regex, cible active, création de
 fichier, ressource non Markdown, frontmatter mal fermé et correspondance
-ambiguë sont refusés avant la création du plan enfant. Sans `frontmatterOperations`, le frontmatter reste
-identique octet pour octet. Les vraies lignes de tâches Markdown sont
+ambiguë sont refusés avant la création du plan enfant. Un frontmatter existant
+non canonique est normalisé et annoncé, même sans `frontmatterOperations`.
+Les vraies lignes de tâches Markdown sont
 protégées ; les exemples placés dans un bloc de code fenced restent du texte.
 
 ## Représentation du texte et protection des tâches
@@ -117,9 +122,11 @@ deux politiques d'écriture et la protection des dates s'appliquent. Un échec
 YAML ou un conflit refuse l'ensemble ; aucune moitié du patch n'est appliquée.
 
 La preuve distingue les plages du corps (coordonnées de chaque opération) et
-celles du frontmatter (entrée = sortie du compilateur corps). `composition`
-lie le hash intermédiaire et le hash final. Hors de ces plages autorisées,
-les octets sont préservés. Sans cette option, le frontmatter reste inchangé.
+celles du frontmatter (entrée = sortie du compilateur corps après normalisation
+native annoncée). `composition` lie les hash intermédiaire et final. Hors de
+ces plages et de la normalisation annoncée, les octets sont préservés. Même
+sans cette option, un ancien frontmatter non canonique est normalisé et annoncé
+dans `frontmatterFormat.normalization` ; les écarts de type sont des avertissements.
 
 ## Taille des reçus et diagnostic
 
@@ -134,18 +141,11 @@ lecture de note, lecture préalable au CAS, CAS atomique et rafraîchissement du
 cache. Les durées excluent le transport client et ne sont pas persistées dans
 l'intention scellée. Les appels concurrents ont des compteurs isolés.
 
-## Représentation des clés autorisées après FDM
+## Représentation exacte après FDM
 
-FDM peut retirer des guillemets ou développer une collection YAML lors de sa
-mise à jour de date. La postflight reconnaît ce changement uniquement pour
-les clés frontmatter autorisées par la projection scellée : présence et valeurs
-YAML doivent être identiques, le compilateur doit reconstruire leur forme
-scellée, et le vérificateur original doit ensuite accepter une seule date
-modifiée valide avec tous les autres octets exactement identiques. Une clé
-supprimée ne peut réapparaître. Toute dérive du corps, création, d'une clé
-inconnue ou du type YAML reste incertaine. Aucune seconde écriture n'est faite.
-Le reçu détaillé expose settlementAuthorizedFormatKeyCount et le hash réellement
-observé ; le journal conserve les clés concernées, y compris après redémarrage.
+Seule une ligne de date de modification qualifiée peut différer. Une dérive
+de représentation, même sur une clé ciblée, ou du corps reste non vérifiée.
+Le signal FDM ne remplace pas cette comparaison exacte.
 
 ## Préparation des notes sans date de création
 
@@ -153,7 +153,13 @@ Avant de sceller un nouveau plan, le runtime peut demander au Bridge de dater un
 
 Après datation, une nouvelle lecture sert de source au compilateur et au CAS. Le reçu durable, y compris en mode compact, contient `datePreparation` et « Note datée par le gestionnaire de dates avant le plan. ». La préservation du frontmatter et du corps annoncée par le patch se mesure à partir de cette source datée. Le patch demandé attend toujours `apply` ; la datation peut donc précéder son autorisation d’application.
 
-Sans gestionnaire actif, avec une commande absente ou une datation non observée dans les 55 secondes comptées dès l’arrivée de la requête, attente en file comprise, le plan est refusé : « Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez. » Une commande déjà remise à FDM peut terminer après un timeout ; relire avant de réessayer. Aucun patch n’est scellé sur un état incertain.
+Sans gestionnaire actif ou commande disponible, le plan est refusé avec `atomic_write_creation_property_missing`. Après l’envoi à FDM, un échec ou une preuve insuffisante renvoie `date_preparation_unverified` et `mutationMayHaveApplied: true`. Un verrou durable empêche un rejeu automatique et les nouveaux plans sur cette cible, même après redémarrage ; aucune clôture administrative publique de ce verrou n’est encore disponible. Si la préparation a normalisé le frontmatter, le reçu l’annonce dans `datePreparation.frontmatterNormalization` avec les empreintes source et préparée. Aucun patch n’est scellé sur un état incertain.
+
+Le verrou reste tenu jusqu’au scellement du plan demandé. Si la préparation
+vérifiée a réussi mais que la compilation ou l’admission échoue ensuite, la
+réponse `date_preparation_completed_plan_unverified` annonce `datePreparation`
+et invite à relire la note et les opérations en attente, sans exposer le
+contenu ni les diagnostics du parseur.
 
 Cette préparation exige le Bridge candidat et le MCP candidat ensemble. Les noms de dates viennent des réglages actifs du coffre. Sans intégration active, le Bridge candidat reconnaît les clés de création canoniques protégées `création`, `creation` ou `created` ; il ne déduit pas un rôle de date d’un nom arbitraire. Les autres gestionnaires, les configurations multiples ou désactivées restent refusés pour la préparation automatique. Les notes déjà datées gardent leur protection et leur CAS. Un remplacement complet recopie uniquement les valeurs de dates observées après FDM ; il ne permet aucune modification des clés protégées demandée par le client.
 

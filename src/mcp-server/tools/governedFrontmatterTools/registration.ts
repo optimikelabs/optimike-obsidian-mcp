@@ -16,6 +16,7 @@ import {
 import type { FrontmatterJsonValue } from "../../../services/frontmatterPatchCompiler.js";
 import type { GovernedNoteReplaceRuntime } from "../governedNoteReplaceTools/runtime.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
+import { preparationPlanRejection } from "../../../services/obsidianFrontmatterFormat.js";
 import { mcpSchema } from "../../mcpSchema.js";
 
 const JsonValueSchema: z.ZodType<FrontmatterJsonValue> = z.lazy(() =>
@@ -121,7 +122,7 @@ async function runTool(
         {
           type: "text" as const,
           text: JSON.stringify(
-            publicMcpToolErrorPayload(error, {
+            (toolName === "obsidian_frontmatter_patch_plan" ? preparationPlanRejection(error) : undefined) ?? publicMcpToolErrorPayload(error, {
               operation: toolName,
               toolName,
               params,
@@ -146,7 +147,7 @@ export async function registerGovernedFrontmatterTools(
     "obsidian_frontmatter_patch_plan",
     {
       description:
-        "Plan a source-preserving patch of top-level frontmatter keys in one existing Markdown note. The compiler changes only authorized source ranges, then seals the complete next note through the existing atomic note runtime. It returns an opaque planRef without applying the requested patch. Missing creation dates are first prepared by the active vault date manager, then reread before sealing.",
+        "Plan a patch of top-level frontmatter keys in one existing Markdown note. Values use Obsidian's native format. Existing noncanonical frontmatter is normalized in the sealed plan and announced in frontmatterFormat.normalization; type issues are warnings. After that normalization only authorized ranges change. It returns an opaque planRef without applying the requested patch. Missing creation dates may first be prepared by the active vault date manager, with normalization reported in datePreparation.",
       inputSchema: mcpSchema(PlanSchema.shape),
       annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
     },

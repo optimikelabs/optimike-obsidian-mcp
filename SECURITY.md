@@ -67,6 +67,15 @@ for the transport threat model. The local move boundary is specified by the
 
 ## P0 error and log privacy contract
 
+The governed create and whole-note replacement plan tools have one explicit
+exception to content-free public error diagnostics: on
+`frontmatter_not_obsidian_canonical`, `expectedFrontmatter` returns the
+canonical rendering of the frontmatter supplied in that same request. It never
+contains the note body, backend content, parser diagnostics or a path. This
+field is constructed only for that refusal and bypasses neither authorization
+nor the prohibition on logging caller input. Other errors retain the closed
+envelope below.
+
 The P0 boundary is implemented at the shared MCP error and logger sinks:
 
 - MCP and Bridge failures are returned through their canonical public error

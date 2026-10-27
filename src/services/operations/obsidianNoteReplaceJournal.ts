@@ -31,7 +31,7 @@ export type ObsidianNoteReplacePlan = {
   operationId: string;
   idempotencyKey: string;
   requestDigest: string;
-  datePreparation?: { kind: "date-manager-before-plan" | "outside-date-management"; message: string; lineEndingsNormalized?: true };
+  datePreparation?: import("./contract.js").OperationReceipt["datePreparation"];
   frontmatterFormat?: import("./contract.js").OperationReceipt["frontmatterFormat"];
   idempotencyIdentity?: string;
   projection?: ObsidianNoteReplaceProjection;
@@ -273,6 +273,13 @@ export class ObsidianNoteReplaceJournal {
             expires_at TEXT
           )
         `);
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS obsidian_date_preparation_fences (
+            target_digest TEXT PRIMARY KEY,
+            attempt_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          )
+        `);
         this.ensureExecutionLeaseExpiryColumn();
         this.renewExecutionLease();
         this.markInterruptedPlans();
@@ -319,6 +326,23 @@ export class ObsidianNoteReplaceJournal {
            expires_at = excluded.expires_at`,
       )
       .run(this.executionOwner.instanceId, heartbeatAt, expiresAt);
+  }
+
+  /** A dispatched FDM preparation is never automatically replayed after an
+   * uncertain response, including after restart. The target is stored hashed. */
+  hasDatePreparationFence(targetDigest: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM obsidian_date_preparation_fences WHERE target_digest = ?").get(targetDigest);
+  }
+
+  acquireDatePreparationFence(targetDigest: string): string | undefined {
+    const attempt = randomUUID();
+    const result = this.db.prepare("INSERT OR IGNORE INTO obsidian_date_preparation_fences (target_digest, attempt_id, created_at) VALUES (?, ?, ?)")
+      .run(targetDigest, attempt, new Date(this.now()).toISOString());
+    return Number(result.changes) === 1 ? attempt : undefined;
+  }
+
+  releaseVerifiedDatePreparationFence(targetDigest: string, attempt: string): boolean {
+    return Number(this.db.prepare("DELETE FROM obsidian_date_preparation_fences WHERE target_digest = ? AND attempt_id = ?").run(targetDigest, attempt).changes) === 1;
   }
 
   create(

@@ -23,11 +23,12 @@ import {
 import { RestNativeNoteMoveBackend } from "../../../services/operations/restNativeNoteMoveBackend.js";
 import type { SettlementCompletionMode } from "../../../services/operations/obsidianNoteReplaceOperationAdapter.js";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
 import { operationDigest } from "../../../services/operations/contract.js";
-import { compileFrontmatterPatch } from "../../../services/frontmatterPatchCompiler.js";
-import { inspectNativeFrontmatter, rejectNonCanonical } from "../../../services/obsidianFrontmatterFormat.js";
+import { compileFrontmatterPatch, nativeFrontmatterPatchKeys, type FrontmatterPatchOperation } from "../../../services/frontmatterPatchCompiler.js";
+import { DatePreparationPlanFailure, frontmatterEnvelope, inspectNativeFrontmatter, rejectNonCanonical } from "../../../services/obsidianFrontmatterFormat.js";
 import { z } from "zod";
 import { config } from "../../../config/index.js";
 import { validateObsidianMarkdown } from "../../../services/obsidianFormatService.js";
@@ -64,9 +65,10 @@ type CallContext =
       kind: "plan";
       path: string;
       nextContent: string;
+      requireNativeFormat?: boolean;
       atomicWriteStatus?: unknown;
     }
-  | { kind: "apply" | "recover"; path: string; atomicWriteStatus?: unknown };
+  | { kind: "apply" | "recover"; path: string; requireNativeFormat?: boolean; atomicWriteStatus?: unknown };
 
 type FrontmatterRecord = Record<string, unknown>;
 
@@ -117,6 +119,59 @@ function parseFrontmatter(content: string): FrontmatterRecord {
     throw new Error("Frontmatter must be a YAML object.");
   }
   return parsed as FrontmatterRecord;
+}
+
+/** Compare the actual preparation against the native serialization of the
+ * original, allowing only the manager's simple date lines and its already
+ * reported editor line-ending conversion. */
+function preparationNonDateBytes(content: string, dateKeys: readonly string[], allowLineEndingConversion: boolean): string {
+  const envelope = frontmatterEnvelope(content);
+  if (!envelope) return `\0${allowLineEndingConversion ? content.replace(/\r\n/g, "\n") : content}`;
+  const body = content.slice(envelope.end + 3).replace(/^\r?\n/u, "");
+  const names = new Set(dateKeys.map(normalizeKey));
+  const kept: string[] = [];
+  for (const line of envelope.yaml.split("\n")) {
+    const clean = line.endsWith("\r") ? line.slice(0, -1) : line;
+    const key = /^([^\s:#][^:]*):(?:\s*(.*))?$/u.exec(clean);
+    if (key && names.has(normalizeKey(key[1]))) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/u.exec(key[2] ?? "");
+      const parts = match?.slice(1).map(part => Number(part ?? "0"));
+      const candidate = parts && new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]));
+      if (!parts || !candidate || candidate.getUTCFullYear() !== parts[0] || candidate.getUTCMonth() !== parts[1] - 1 ||
+          candidate.getUTCDate() !== parts[2] || candidate.getUTCHours() !== parts[3] || candidate.getUTCMinutes() !== parts[4] || candidate.getUTCSeconds() !== parts[5])
+        throw new McpError(BaseErrorCode.CONFLICT, "The date preparation produced an unsupported date line.", { reason: "date_preparation_unqualified" });
+      continue;
+    }
+    kept.push(line);
+  }
+  const yaml = kept.join("\n");
+  const comparable = `${yaml}\0${body}`;
+  return allowLineEndingConversion ? comparable.replace(/\r\n/g, "\n") : comparable;
+}
+
+function preparationDelimiters(content: string, allowLineEndingConversion: boolean): string | undefined {
+  const envelope = frontmatterEnvelope(content);
+  if (!envelope) return undefined;
+  const opening = content.slice(0, envelope.start);
+  const ending = /^(---(?:\r?\n|$))/u.exec(content.slice(envelope.end))?.[1] ?? "";
+  const result = opening + "\0" + ending;
+  return allowLineEndingConversion ? result.replace(/\r\n/g, "\n") : result;
+}
+
+function preparationDateValue(content: string, name: string): string | undefined {
+  const yaml = frontmatterEnvelope(content)?.yaml ?? "";
+  const values = yaml.split(/\r?\n/u).flatMap(line => {
+    const match = /^([^\s:#][^:]*):(?:\s*(.*))?$/u.exec(line);
+    return match && normalizeKey(match[1]) === normalizeKey(name) ? [match[2] ?? ""] : [];
+  });
+  if (values.length > 1) throw new Error("duplicate_date");
+  return values[0];
+}
+
+function preparationDateInWindow(value: string, start: number, end: number, offsetMinutes: number): boolean {
+  const local = (ms: number) => new Date(ms + offsetMinutes * 60_000).toISOString().slice(0, 19);
+  const length = value.length === 16 ? 16 : 19;
+  return value.length === length && value >= local(start).slice(0, length) && value <= local(end).slice(0, length);
 }
 
 function entriesForKey(
@@ -284,8 +339,9 @@ function validateReplacement(
 
 class GovernedAtomicWriteBackend implements AtomicWriteBackend {
   private readonly callContext = new AsyncLocalStorage<CallContext>();
+  private readonly preparationFences = new WeakMap<object, { key: string; attempt: string }>();
 
-  constructor(private readonly delegate: AtomicWriteBackend) {}
+  constructor(private readonly delegate: AtomicWriteBackend, private readonly journal: ObsidianNoteReplaceJournal) {}
 
   withContext<T>(
     context: CallContext,
@@ -306,7 +362,7 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
   }
 
   inspectFrontmatterFormat(yaml: string) {
-    if (!this.delegate.inspectFrontmatterFormat) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Native frontmatter format inspection is unavailable.", { reason: "frontmatter_format_capability_missing" });
+    if (!this.delegate.inspectFrontmatterFormat) throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "Native frontmatter format inspection is unavailable.", { reasonCode: "frontmatter_format_capability_missing" });
     return this.delegate.inspectFrontmatterFormat(yaml);
   }
 
@@ -328,8 +384,9 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
           { reason: "atomic_write_status_not_sealed" },
         );
       }
+      const comparison = context.requireNativeFormat ? (await inspectNativeFrontmatter(this.delegate, result.content, result.bindingFingerprint)).content : result.content;
       validateReplacement(
-        result.content,
+        comparison,
         context.nextContent,
         "plan",
         effectiveAtomicWriteProtectedFrontmatterKeys(
@@ -342,10 +399,19 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
     return result;
   }
 
-  async prepareForPlan(path: string, expectedSource?: { sha256: string; bindingFingerprint: string }) {
+  async prepareForPlan(path: string, expectedSource?: { sha256: string; bindingFingerprint: string }, requireNativeFormat = false) {
     const source = await this.delegate.read({ contractVersion: 1, path });
+    if (source.path !== path || source.sha256 !== createHash("sha256").update(source.content, "utf8").digest("hex") ||
+        source.size !== Buffer.byteLength(source.content, "utf8"))
+      throw new McpError(BaseErrorCode.CONFLICT, "The planning read could not be verified.", { reason: "note_source_proof_invalid" });
+    const fenceKey = operationDigest({ domain: "obsidian-date-preparation-v1", path, bindingFingerprint: source.bindingFingerprint });
+    const unverified = () => new McpError(BaseErrorCode.CONFLICT,
+      "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise.",
+      { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true });
+    if (this.journal.hasDatePreparationFence(fenceKey)) throw unverified();
     if (expectedSource && (source.sha256 !== expectedSource.sha256 || source.bindingFingerprint !== expectedSource.bindingFingerprint))
       throw new McpError(BaseErrorCode.CONFLICT, "The note changed before date preparation.");
+    const originalFormat = requireNativeFormat ? await inspectNativeFrontmatter(this.delegate, source.content, source.bindingFingerprint) : undefined;
     if (source.dateManagement?.managed === false) return { ...source, datePreparation: { kind: "outside-date-management" as const, message: "Note hors gestion des dates." } };
     const status = await this.delegate.status();
     const protection = effectiveAtomicWriteDateProtection(status);
@@ -353,25 +419,78 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
       ...(protection.createdPropertyNames.length || !status.datePreparation?.supported ? [] : config.mcpProtectedFrontmatterKeys.filter(key => /^(création|creation|created)$/iu.test(key)))])];
     const fm = parseFrontmatter(source.content);
     if (!created.some(key => entriesForKey(fm, normalizeKey(key)).length === 0)) return source;
+    if (requireNativeFormat && frontmatterEnvelope(originalFormat!.content)?.yaml.trim() === "{}")
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "An empty frontmatter mapping cannot be verified with automatic dates.", { reasonCode: "frontmatter_empty_mapping_date_management" });
     assertCurrentWritePolicy("plan", path, source.content);
     const fail = () => new McpError(BaseErrorCode.FORBIDDEN,
       "Cette note n'a pas encore de date de création. Ouvrez-la dans Obsidian et enregistrez-la une fois, puis réessayez.",
       { reasonCode: "atomic_write_creation_property_missing" });
-    if (!status.backend.writeEnabled || !this.delegate.prepareDate || protection.unsupportedIntegrations.length) throw fail();
+    const offset = status.settlement?.modifiedTimeFrontmatter.utcOffsetMinutes;
+    if (!status.backend.writeEnabled || !this.delegate.prepareDate || protection.unsupportedIntegrations.length || !protection.createdPropertyNames.length ||
+        !Number.isInteger(offset) || Math.abs(offset!) > 840) throw fail();
     let prepared;
+    const attempt = this.journal.acquireDatePreparationFence(fenceKey);
+    if (!attempt) throw unverified();
+    const dispatchedAt = Date.now();
     try {
       prepared = await this.delegate.prepareDate({ contractVersion: 1, path, expectedSha256: source.sha256, bindingFingerprint: source.bindingFingerprint });
-    } catch (error) { if (error instanceof McpError && error.code === BaseErrorCode.CONFLICT) throw error; throw fail(); }
+    } catch { throw unverified(); }
+    if (prepared.datePreparation?.kind !== "date-manager-before-plan") throw unverified();
     // Seal only a fresh read, never the preparation response or the old projection.
-    const current = await this.delegate.read({ contractVersion: 1, path });
-    if (current.path !== path || current.bindingFingerprint !== source.bindingFingerprint || current.sha256 !== prepared.sha256)
-      throw new McpError(BaseErrorCode.CONFLICT, "The note changed during date preparation.");
-    if (created.some(key => entriesForKey(parseFrontmatter(current.content), normalizeKey(key)).length !== 1)) throw fail();
-    return { ...current, ...(prepared.datePreparation?.kind === "date-manager-before-plan" ? { datePreparation: {
+    let current;
+    try { current = await this.delegate.read({ contractVersion: 1, path }); } catch { throw unverified(); }
+    if (current.path !== path || current.bindingFingerprint !== source.bindingFingerprint || current.sha256 !== prepared.sha256 ||
+        current.sha256 !== createHash("sha256").update(current.content, "utf8").digest("hex") || current.size !== Buffer.byteLength(current.content, "utf8"))
+      throw unverified();
+    try {
+      if (originalFormat) {
+      const preparedFormat = await inspectNativeFrontmatter(this.delegate, current.content, current.bindingFingerprint);
+      const dateKeys = (status.protection?.frontmatterDateProperties.integrations ?? []).flatMap(item => [item.createdPropertyName, item.modifiedPropertyName].filter((key): key is string => !!key));
+      const lineEndingsNormalized = prepared.datePreparation?.lineEndingsNormalized === true;
+      const observedAt = Date.now();
+      const beforeDates = parseFrontmatter(originalFormat.content);
+      const afterDates = parseFrontmatter(current.content);
+      for (const key of created) {
+        const beforeEntries = entriesForKey(beforeDates, normalizeKey(key));
+        if (beforeEntries.length > 0 && !isDeepStrictEqual(beforeEntries, entriesForKey(afterDates, normalizeKey(key))))
+          throw new McpError(BaseErrorCode.CONFLICT, "An existing creation date changed during preparation.", { reason: "date_preparation_created_drift" });
+      }
+      const originalDelimiters = preparationDelimiters(originalFormat.content, lineEndingsNormalized);
+      if (preparedFormat.normalized || (originalDelimiters !== undefined && originalDelimiters !== preparationDelimiters(current.content, lineEndingsNormalized)) ||
+          preparationNonDateBytes(originalFormat.content, dateKeys, lineEndingsNormalized) !== preparationNonDateBytes(current.content, dateKeys, lineEndingsNormalized))
+        throw new McpError(BaseErrorCode.CONFLICT, "The note changed outside the qualified date preparation.", { reason: "date_preparation_non_date_drift" });
+      for (const key of dateKeys) {
+        const beforeDate = preparationDateValue(originalFormat.content, key);
+        const afterDate = preparationDateValue(current.content, key);
+        if (beforeDate !== afterDate && (!afterDate || !preparationDateInWindow(afterDate, dispatchedAt, observedAt, offset!)))
+          throw new McpError(BaseErrorCode.CONFLICT, "The date preparation is outside its observation window.", { reason: "date_preparation_unqualified" });
+      }
+      }
+      if (created.some(key => entriesForKey(parseFrontmatter(current.content), normalizeKey(key)).length !== 1)) throw fail();
+    } catch { throw unverified(); }
+    const result = { ...current, ...(prepared.datePreparation?.kind === "date-manager-before-plan" ? { datePreparation: {
       kind: "date-manager-before-plan" as const, message: "Note datée par le gestionnaire de dates avant le plan." + (prepared.datePreparation.lineEndingsNormalized === true
         ? " fins de ligne normalisées par Obsidian pendant la datation." : ""),
-      ...(prepared.datePreparation.lineEndingsNormalized === true ? { lineEndingsNormalized: true as const } : {})
+      ...(prepared.datePreparation.lineEndingsNormalized === true ? { lineEndingsNormalized: true as const } : {}),
+      ...(originalFormat?.normalized ? { frontmatterNormalization: { applied: true as const, reason: "date_preparation" as const, sourceSha256: source.sha256, preparedSha256: current.sha256 } } : {})
     }} : {}) };
+    if (requireNativeFormat) this.preparationFences.set(result, { key: fenceKey, attempt });
+    else {
+      try { if (!this.journal.releaseVerifiedDatePreparationFence(fenceKey, attempt)) throw unverified(); }
+      catch { throw unverified(); }
+    }
+    return result;
+  }
+
+  releasePreparation(source: { datePreparation?: OperationReceipt["datePreparation"] }): void {
+    const fence = this.preparationFences.get(source);
+    if (!fence) return;
+    try {
+      if (!this.journal.releaseVerifiedDatePreparationFence(fence.key, fence.attempt)) throw new Error("fence_release_failed");
+      this.preparationFences.delete(source);
+    } catch {
+      throw new DatePreparationPlanFailure(source.datePreparation!);
+    }
   }
 
   async replace(payload: Parameters<AtomicWriteBackend["replace"]>[0]) {
@@ -389,6 +508,11 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
         contractVersion: 1,
         path: payload.path,
       }));
+      const fenceKey = operationDigest({ domain: "obsidian-date-preparation-v1", path: payload.path, bindingFingerprint: current.bindingFingerprint });
+      if (this.journal.hasDatePreparationFence(fenceKey)) {
+        throw new McpError(BaseErrorCode.CONFLICT, "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise.",
+          { reasonCode: "date_preparation_unverified", mutationMayHaveApplied: true });
+      }
       if (
         current.path !== payload.path ||
         current.bindingFingerprint !== payload.bindingFingerprint
@@ -411,8 +535,11 @@ class GovernedAtomicWriteBackend implements AtomicWriteBackend {
           { reason: "atomic_write_status_not_sealed" },
         );
       }
+      const comparison = context.requireNativeFormat ? (await inspectNativeFrontmatter(this.delegate, current.content, current.bindingFingerprint)).content : current.content;
+      if (context.requireNativeFormat && (await inspectNativeFrontmatter(this.delegate, payload.nextContent, current.bindingFingerprint)).normalized)
+        throw new McpError(BaseErrorCode.CONFLICT, "The sealed note no longer matches the native frontmatter format.", { reasonCode: "frontmatter_format_changed" });
       validateReplacement(
-        current.content,
+        comparison,
         payload.nextContent,
         "effect",
         effectiveAtomicWriteProtectedFrontmatterKeys(
@@ -451,6 +578,7 @@ export type GovernedNoteReplacePlanView = {
   bindingFingerprint: string;
   status: ObsidianNoteReplacePlan["status"];
   projection?: ObsidianNoteReplacePlan["projection"];
+  frontmatterFormat?: ObsidianNoteReplacePlan["frontmatterFormat"];
 };
 
 export class GovernedNoteReplaceRuntime {
@@ -536,8 +664,30 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     this.leaseHeartbeat.unref();
   }
 
-  readForProjection(path: string) {
-    return this.backend.prepareForPlan ? this.backend.prepareForPlan(path) : this.backend.read({ contractVersion: 1, path });
+  readForProjection(path: string, requireNativeFormat = false) {
+    return this.backend.prepareForPlan ? this.backend.prepareForPlan(path, undefined, requireNativeFormat) : this.backend.read({ contractVersion: 1, path });
+  }
+
+  releasePreparation(source: { datePreparation?: OperationReceipt["datePreparation"] }) {
+    this.backend.releasePreparation?.(source);
+  }
+
+  inspectFrontmatter(content: string, bindingFingerprint: string) {
+    return inspectNativeFrontmatter(this.backend, content, bindingFingerprint);
+  }
+
+  async renderFrontmatterEntries(content: string, operations: FrontmatterPatchOperation[], bindingFingerprint: string) {
+    const result: Record<string, string> = Object.create(null) as Record<string, string>;
+    for (const entry of nativeFrontmatterPatchKeys(content, operations)) {
+      const json = JSON.stringify({ [entry.key]: entry.value });
+      const formatted = await this.inspectFrontmatter(`---\n${json}\n---\n`, bindingFingerprint);
+      const envelope = frontmatterEnvelope(formatted.content);
+      if (!envelope || !envelope.yaml.startsWith(`${entry.key}:`)) {
+        throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The key cannot be represented in the supported native frontmatter patch subset.", { reason: "frontmatter_native_render_invalid" });
+      }
+      result[entry.normalized] = envelope.yaml;
+    }
+    return result;
   }
 
   listPendingOperationRows(
@@ -577,7 +727,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   plan(input: ObsidianNoteReplacePlanInput): Promise<OperationReceipt> {
     assertCurrentWritePolicy("plan", input.path, input.nextContent);
     return this.backend.withContext(
-      { kind: "plan", path: input.path, nextContent: input.nextContent },
+      { kind: "plan", path: input.path, nextContent: input.nextContent, requireNativeFormat: !!input.frontmatterFormat },
       () => this.adapter.plan(input),
     );
   }
@@ -591,7 +741,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     if (plan.status === "planned") {
       assertCurrentWritePolicy("apply", plan.path, plan.nextContent);
     }
-    const operation = this.backend.withContext({ kind: "apply", path: plan.path }, () =>
+    const operation = this.backend.withContext({ kind: "apply", path: plan.path, requireNativeFormat: !!plan.frontmatterFormat }, () =>
       this.adapter.apply(reference, idempotencyKey, completionMode),
     );
     return this.refreshCacheAfterCommit(plan, operation, true);
@@ -612,13 +762,19 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     const existing = this.findPlanByIdempotencyKey(input.idempotencyKey);
     if (existing?.idempotencyIdentity === identity) return this.status(`${PLAN_REF_PREFIX}${existing.operationId}`);
     if (existing) return this.plan(existing.idempotencyIdentity ? { ...input, idempotencyIdentity: identity } : input);
+    assertSupportedMarkdownEnvelope(input.nextContent, "plan");
+    if (!validateObsidianMarkdown(input.nextContent).ok) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The sealed next content is not valid conservative Obsidian Markdown.", { reason: "markdown_validation_failed" });
+    }
     const before = await this.backend.read({ contractVersion: 1, path: input.path });
     const status = await this.backend.status();
     const keys = effectiveAtomicWriteProtectedFrontmatterKeys(status, config.mcpProtectedFrontmatterKeys);
-    validateReplacement(before.content, input.nextContent, "plan", keys);
+    const beforeFormat = await inspectNativeFrontmatter(this.backend, before.content, before.bindingFingerprint);
     const format = await inspectNativeFrontmatter(this.backend, input.nextContent, before.bindingFingerprint);
     rejectNonCanonical(format);
-    const source = await this.backend.prepareForPlan(input.path, before);
+    validateReplacement(beforeFormat.content, input.nextContent, "plan", keys);
+    const source = await this.backend.prepareForPlan(input.path, before, true);
+    try {
     let nextContent = input.nextContent;
     if (source.datePreparation?.kind === "date-manager-before-plan") {
       const fm = parseFrontmatter(source.content);
@@ -633,9 +789,15 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
       // same native serializer after preserving the caller's canonical input.
       nextContent = (await inspectNativeFrontmatter(this.backend, nextContent, source.bindingFingerprint)).content;
     }
-    return this.plan({ ...input, nextContent, idempotencyIdentity: identity,
+    const result = await this.plan({ ...input, nextContent, idempotencyIdentity: identity,
       frontmatterFormat: { normalization: { applied: false }, typeWarnings: format.warnings },
       expectedBeforeSha256: source.sha256, expectedBindingFingerprint: source.bindingFingerprint, datePreparation: source.datePreparation });
+    if (source.datePreparation?.kind === "date-manager-before-plan" && this.inspect(result.planRef).beforeSha256 !== source.sha256) throw new DatePreparationPlanFailure(source.datePreparation);
+    return result;
+    } catch (error) {
+      if (source.datePreparation?.kind === "date-manager-before-plan") throw new DatePreparationPlanFailure(source.datePreparation);
+      throw error;
+    } finally { this.backend.releasePreparation(source); }
   }
 
   async applyPublicDirectPlan(
@@ -666,7 +828,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     if (plan.status === "outcome_unknown") {
       assertCurrentWritePolicy("recover", plan.path, plan.nextContent);
     }
-    const operation = this.backend.withContext({ kind: "recover", path: plan.path }, () =>
+    const operation = this.backend.withContext({ kind: "recover", path: plan.path, requireNativeFormat: !!plan.frontmatterFormat }, () =>
       this.adapter.recover(reference, idempotencyKey, completionMode),
     );
     return this.refreshCacheAfterCommit(plan, operation, true);
@@ -715,6 +877,7 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
   private view(plan: ObsidianNoteReplacePlan): GovernedNoteReplacePlanView {
     return {
       operationId: plan.operationId,
+      ...(plan.frontmatterFormat ? { frontmatterFormat: plan.frontmatterFormat } : {}),
       idempotencyKey: plan.idempotencyKey,
       ...(plan.idempotencyIdentity
         ? { idempotencyIdentity: plan.idempotencyIdentity }
@@ -779,6 +942,7 @@ export function createGovernedNoteReplaceRuntime(
   );
   const backend = new GovernedAtomicWriteBackend(
     new RestAtomicWriteBackend(obsidianService),
+    journal,
   );
   const adapter = new ObsidianNoteReplaceOperationAdapter(
     backend,

@@ -1,5 +1,9 @@
 # Governed Markdown body text patches (P4)
 
+Before automatic date preparation, an empty frontmatter mapping (`{}`) is
+refused with `frontmatter_empty_mapping_date_management`: adding dates removes
+the mapping marker and cannot be justified by date-line-only verification.
+
 Optimike MCP exposes one bounded body-only text patch family for existing
 Markdown notes:
 
@@ -22,7 +26,8 @@ before hash and private content, and returns only an opaque receipt.
 
 Operations are ordered and bounded. Regex, active-file targets, file creation,
 non-Markdown resources, malformed frontmatter and ambiguous default literal
-matches fail before a child plan is created. Frontmatter bytes are preserved.
+matches fail before a child plan is created. Existing noncanonical frontmatter
+is normalized as an announced part of the plan; canonical frontmatter is preserved.
 Real Markdown task lines are protected, while task examples inside fenced code
 blocks remain ordinary body text.
 
@@ -109,15 +114,16 @@ See the [shared completion contract](governed-note-replacement.md#completion-mod
 
 `obsidian_text_patch_plan` optionally accepts `frontmatterOperations` using
 the structured frontmatter `set` / `delete` compiler. Body compilation runs
-first, followed by YAML compilation on that output. ONE sealed child plan,
+first, followed by announced native frontmatter normalization and YAML compilation. ONE sealed child plan,
 ONE CAS and ONE date-settlement observation cover both intentions. Both
 write policies and dynamic date protections apply. YAML failure or a conflict
 rejects the whole change; there is no partial body/frontmatter commit.
 
 The body proof keeps its operation-input coordinates. Frontmatter proof
-coordinates refer to body-patch output. `composition` binds intermediate and
-final content hashes. Bytes outside authorized ranges remain identical.
-Without this option, frontmatter remains byte-identical.
+coordinates refer to the normalized body-patch output. `composition` binds intermediate and
+final content hashes; normalization hashes bind the extra step. Bytes outside
+authorized body and announced frontmatter changes remain identical. Even without
+`frontmatterOperations`, an old noncanonical frontmatter is normalized and announced.
 
 ## Receipt size and diagnostics
 
@@ -131,16 +137,11 @@ never certified success, in either representation.
 status, note reads, pre-dispatch reads, atomic CAS and cache refresh. It excludes
 client transport and does not enter the sealed intent or journal.
 
-## Authorized YAML representation after FDM
+## Exact YAML representation after FDM
 
-FDM may unquote a scalar or expand a YAML collection while updating the date.
-Postflight recognizes this only for keys authorized by the sealed projection:
-key presence and parsed YAML values must match, the compiler must restore their
-sealed spelling, and the original exact resolver must then accept a single valid
-modified-date change with every remaining byte unchanged. Deleted keys cannot
-reappear. Body, creation-date, unknown-key and YAML-type drift remain uncertain.
-No second write occurs. Detailed proof includes settlementAuthorizedFormatKeyCount
-and the original observed hash; authorized keys are retained durably in the journal.
+Only a qualified modified-date line may differ from the sealed candidate.
+Representation drift of a targeted property, unknown-key drift and body drift
+remain unverified. The completion signal does not replace this exact check.
 
 ## Creation-date preparation
 
@@ -148,7 +149,13 @@ Before sealing a new plan, the runtime can ask the candidate Atomic Write Bridge
 
 The compiler and CAS use a fresh dated read. The durable and compact receipts include `datePreparation`. Source-preservation claims start at that dated source: the requested patch still waits for `apply`, but vault-owned dating can happen during planning. A whole-note replacement carries forward only observed manager-owned date values, while caller edits to protected keys remain forbidden.
 
-No active manager, absent commands or no observed date within 55 seconds fail closed with `atomic_write_creation_property_missing` and an actionable message asking the user to open and save the note in Obsidian once. An already dispatched FDM command may finish after a timeout; reread before retrying. No patch is sealed on uncertain evidence.
+No active manager or absent command fails closed with `atomic_write_creation_property_missing`. Once preparation has been dispatched, a timeout, lost response or unverifiable effect returns `date_preparation_unverified` and `mutationMayHaveApplied: true`. A durable target fence prevents another preparation or patch plan even after restart: no automatic replay is allowed. No public administrative closure for this fence is currently available; an operator must investigate it as an explicit integration follow-up. No patch is sealed on uncertain evidence. If preparation normalized an existing noncanonical frontmatter, `datePreparation.frontmatterNormalization` announces the effect and binds its source and prepared hashes. The fresh read must match the native canonical source outside qualified date lines, with the separately reported editor line-ending exception.
+
+The fence remains held until the requested plan is sealed. If verified preparation
+completed but later compilation or admission fails, the tool returns
+`date_preparation_completed_plan_unverified` with `datePreparation`, including
+any normalization, and directs the caller to inspect the note and pending
+operations. It never returns parser diagnostics or note content.
 
 Install the candidate MCP and Bridge together. Active vault settings define date names. Without an active integration, only protected canonical creation keys (`création`, `creation`, `created`) are recognized, not arbitrary names. Other date managers, multiple integrations and disabled FDM are not admitted for automatic preparation. Already-dated notes retain protected-key and CAS behavior.
 

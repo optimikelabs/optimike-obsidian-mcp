@@ -1,4 +1,3 @@
-import { resolveProjectedFrontmatterSettlement } from "./projectedFrontmatterSettlement.js";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import type {
@@ -1424,21 +1423,7 @@ export class ObsidianNoteReplaceOperationAdapter
       applyStartedAtEpochMs: plan.executionStartedAtEpochMs,
       settlementObservedAtEpochMs: (this.options.now ?? Date.now)(),
     };
-    return (
-      resolveModifiedTimeSettlement(
-        plan.nextContent,
-        observedContent,
-        plan.modifiedTimeSettlementPolicy,
-        window,
-      ) ??
-      resolveProjectedFrontmatterSettlement(
-        plan.nextContent,
-        observedContent,
-        plan.modifiedTimeSettlementPolicy,
-        window,
-        plan.projection,
-      )
-    );
+    return resolveModifiedTimeSettlement(plan.nextContent, observedContent, plan.modifiedTimeSettlementPolicy, window);
   }
 
   private async awaitModifiedTimeSettlementObservation(

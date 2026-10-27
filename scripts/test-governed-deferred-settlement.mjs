@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { nativeFormatFixture } from "./fixtures/native-frontmatter-format.mjs";
 import { ObsidianNoteReplaceOperationAdapter, markAtomicWritePreDispatchError } from "../dist/services/operations/obsidianNoteReplaceOperationAdapter.js";
 import { ObsidianNoteReplaceJournal } from "../dist/services/operations/obsidianNoteReplaceJournal.js";
 import { BaseErrorCode, McpError } from "../dist/types-global/errors.js";
@@ -44,6 +45,7 @@ class FakeAtomicWriteBackend {
       ok: true,
       contractVersion: 1,
       plugin: { id: "obsidian-atomic-write-bridge", version: "0.2.0" },
+      frontmatterFormat: { contractVersion: 1, supported: true },
       backend: {
         kind: "obsidian-vault-process",
         bindingFingerprint: this.bindingFingerprint,
@@ -61,6 +63,8 @@ class FakeAtomicWriteBackend {
     }
     return response;
   }
+
+  inspectFrontmatterFormat(yaml) { return nativeFormatFixture(this.bindingFingerprint).inspectFrontmatterFormat(yaml); }
 
   async read(payload) {
     assert.equal(payload.path, this.path);
@@ -215,7 +219,7 @@ function fixture() {
   };
 }
 try {
-  for (const drift of ["none", "value", "outside", "body", "created"]) {
+  for (const drift of ["date_only", "none", "value", "outside", "body", "created"]) {
     const f = fixture();
     f.backend.content = f.backend.content.replace("---\navant", "création: 2026-08-01T09:00\nunknown: preserve\n---\navant");
     const nextContent = f.backend.content.replace("avant", "après").replace("---\naprès", 'bench_unicode: "élysia ✅"\n---\naprès');
@@ -223,18 +227,19 @@ try {
     const p = await f.adapter.plan({path:f.backend.path,nextContent,idempotencyKey:"test",idempotencyIdentity:intentDigest,projection:{contractVersion:1,kind:"obsidian.text.patch",publicIdempotencyKey:"public",intentDigest,proof:{},frontmatterProof:{changedKeys:["bench_unicode"]}}});
     await f.adapter.apply(p.planRef,"test","deferred");
     f.restart(); f.advance(37250);
-    f.backend.content = f.backend.content.replace("2026-10-08T09:00","2026-10-08T10:00").replace('bench_unicode: "élysia ✅"','bench_unicode: élysia ✅');
+    f.backend.content = f.backend.content.replace("2026-10-08T09:00","2026-10-08T10:00");
+    if (drift !== "date_only") f.backend.content = f.backend.content.replace('bench_unicode: "élysia ✅"','bench_unicode: élysia ✅');
     if(drift==="value")f.backend.content=f.backend.content.replace("élysia ✅","concurrent");
     if(drift==="outside")f.backend.content=f.backend.content.replace("unknown: preserve",'unknown: "preserve"');
     if(drift==="body")f.backend.content=f.backend.content.replace("après","concurrent");
     if(drift==="created")f.backend.content=f.backend.content.replace("création: 2026-08-01T09:00","création: 2026-08-02T09:00");
     const final = await f.adapter.status(p.planRef);
-    assert.equal(final.outcome,drift==="none"?"committed":"outcome_unknown");
+    assert.equal(final.outcome,drift==="date_only"?"committed":"outcome_unknown");
     assert.equal(f.backend.replaceCalls,1);
-    if(drift==="none"){
+    if(drift==="date_only"){
       assert.equal(final.afterProof.details.sha256,sha256(f.backend.content));
-      assert.equal(final.afterProof.details.settlementAuthorizedFormatKeyCount,1);
-      f.restart();const durable=await f.adapter.status(p.planRef);assert.equal(durable.afterProof.details.settlementAuthorizedFormatKeyCount,1);assert.equal(durable.outcome,"committed");
+      assert.equal(final.afterProof.details.settlementAuthorizedFormatKeyCount,undefined);
+      f.restart();const durable=await f.adapter.status(p.planRef);assert.equal(durable.outcome,"committed");
     }
   }
   for (const restart of [false, true]) {

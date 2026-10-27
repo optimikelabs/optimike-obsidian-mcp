@@ -45,6 +45,11 @@ function fixture(name, dateFields = []) {
 }
 try {
   {
+    const f = fixture("empty-mapping-dates", [{ pluginId: "update-time", role: "modified", propertyName: "updated", delayMs: 2250 }]);
+    await assert.rejects(f.adapter.plan({ ...input, content: "---\n{}\n---\nbody\n" }), error => error.details?.reasonCode === "frontmatter_empty_mapping_date_management");
+    assert.equal(f.calls(), 0); f.journal.close();
+  }
+  {
     const f = fixture("format-admission");
     try {
       const noncanonical = { ...input, content: "---\ntitle: 'Test'\n---\nPrivate prose.\n" };
@@ -58,6 +63,10 @@ try {
       const p = await f.adapter.plan(input);
       assert.deepEqual(p.typeWarnings, []);
       assert.deepEqual((await f.adapter.status(p.planRef)).typeWarnings, []);
+      f.backend.status = async () => ({ backend: { bindingFingerprint: "a".repeat(64) } });
+      await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey));
+      assert.equal(f.calls(), 0);
+      assert.equal((await f.adapter.status(p.planRef)).phase, "planned");
     } finally { f.journal.close(); }
   }
   {
@@ -123,7 +132,7 @@ try {
   }
   {
     const f = fixture("rebind"), p = await f.adapter.plan(input); f.rebind();
-    assert.notEqual((await f.adapter.apply(p.planRef, input.idempotencyKey)).outcome, "committed");
+    await assert.rejects(f.adapter.apply(p.planRef, input.idempotencyKey));
     assert.equal(f.files.size, 0); f.journal.close(); cases++;
   }
   {
