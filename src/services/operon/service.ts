@@ -206,9 +206,11 @@ function liveSnapshotState(key: string): LiveSnapshotState {
 
 /**
  * Live failures that are expected to clear on their own: the index or the
- * settings moved during a read, the index is settling, or the Bridge is
- * momentarily unreachable. Duplicate ids, P0 validation, incompatibility and
- * malformed payloads are not transient.
+ * settings moved during a read, the index is settling, or the Bridge answers
+ * 503 or marks its error retryable. An error without an HTTP answer (Bridge
+ * unreachable, connection refused) is durable: reads fall back at once.
+ * Duplicate ids, P0 validation, incompatibility and malformed payloads are
+ * not transient.
  */
 const transientLiveErrors = new WeakSet<object>();
 

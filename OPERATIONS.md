@@ -158,6 +158,15 @@ The final server can expose different capabilities depending on which Obsidian p
   - required for live `.base` write support and full bridge-backed query behavior
   - exposes the Bases endpoints used by this MCP
 
+- Optimike Atomic Write Bridge (bundled)
+
+  - required for governed note writes, creation, native move, deletion, Frontmatter and Canvas
+  - MCP 3.15.x requires version 0.8.5; deploy and roll back both as one pair
+
+- Optimike Operon Bridge (bundled)
+
+  - required for the Operon tools; see [Operon MCP Contract](docs/operon-mcp-contract.md)
+
 - Local Bases fallback
 
   - available in headless modes for `bases_list`, `bases_get_schema`, and `bases_query`
@@ -197,6 +206,11 @@ the install receipt; rollback refuses any managed file changed after install.
 
 The full commands, failure states and release gate are in
 [Bridge Bundle, Upgrade and Rollback](docs/bridge-packaging.md).
+
+Upgrade the MCP and the Bridge bundle of the same release together. MCP 3.15.x
+ships Atomic Write Bridge 0.8.5, Operon Bridge 0.9.3 and Bases Bridge 1.2.2.
+Before switching or rolling back the pair, drain pending operations and date
+preparation fences ([Closing uncertain operations](#closing-uncertain-operations)).
 
 ## Governed atomic note replacement
 
@@ -771,6 +785,7 @@ That is the final intended shape of the product.
 - Security and deployment boundary: [SECURITY.md](SECURITY.md)
 - Mode-by-mode capability matrix: [docs/runtime-capability-matrix.md](docs/runtime-capability-matrix.md)
 - Dedicated headless server profile: [docs/headless-server-profile.md](docs/headless-server-profile.md)
+- Release notes: [docs/releases/](docs/releases/)
 - Agent routing guide: [docs/mcp-routing-guide.md](docs/mcp-routing-guide.md)
 - External roots and handoff: [docs/external-roots-setup.md](docs/external-roots-setup.md)
 - French operations guide: [OPERATIONS.fr.md](OPERATIONS.fr.md)

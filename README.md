@@ -12,6 +12,8 @@ Version 3.12 adds the operational profile, read-only frontmatter access and fast
 
 Version 3.14 prepares undated notes through FDM before protected edits, preserves undated templates and excluded paths, and accepts Obsidian CRLF/LF normalization during preparation. FDM 1.6.0 is qualified; other date managers are not. See the [3.14.0 release notes](docs/releases/3.14.0.md).
 
+Version 3.15 adds [governed note deletion](docs/governed-note-delete.md) to Obsidian's trash (off by default: Bridge grant `allowNoteDeletes` plus `MCP_WRITE_MODE=full`), the Bridge effect fence with [`obsidian_operation_close`](docs/administrative-closure.md) for uncertain operations, a shared [note-name rule](docs/note-name-rules.md), Obsidian's native frontmatter format for governed writes, readable rotating logs, the `checkpoint_wal` maintenance action, opt-in [ChatGPT result compatibility](docs/chatgpt-secure-tunnel.md) and an optional [backend supervisor](docs/backend-supervision.md). Tools exposing `responseMode` now answer `compact` by default; request `detailed` (or `tree` / `legacy` where the tool offers it) for the previous shape. In `operational`, `obsidian_delete_note` is hidden in favour of the governed deletion family. Versions 3.15.1 and 3.15.2 return Operon mutation receipts sooner and bound read retries after a mutation. Install MCP 3.15.x and Atomic Write Bridge 0.8.5 together, from the Bridge bundle of the same release. See the [3.15.0](docs/releases/3.15.0.md), [3.15.1](docs/releases/3.15.1.md) and [3.15.2](docs/releases/3.15.2.md) release notes.
+
 ## Capability map
 
 | Area                    | What the MCP provides                                                  | Main dependency                                            |
@@ -120,7 +122,7 @@ Enable only the surfaces you use:
 
 - [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) for live note, metadata and tag operations;
 - bundled **Bases Bridge** for live Bases and governed formula CAS;
-- bundled **Optimike Atomic Write Bridge** for governed Note replacement, body text patch, Frontmatter and Canvas `plan → apply → status → recover`;
+- bundled **Optimike Atomic Write Bridge** for governed Note replacement, body text patch, Frontmatter and Canvas `plan → apply → status → recover`, and governed note deletion. MCP 3.15.x requires Atomic Write Bridge 0.8.5: deploy and roll back both as one pair;
 - **Smart Connections** for the local semantic index;
 - **Operon Developer API V1** and bundled **Optimike Operon Bridge 0.9.3** for governed task operations. Optimike MCP `3.9.1` certifies official Operon `3.9.3` against Developer API V1 with Operon CLI `1.2.0` and Local REST API `5.1.0`; release admission follows the [proportionate qualification policy](docs/bridge-packaging.md#proportionate-release-qualification), with the exact-SHA Pilot 2 gate for changed or unqualified paths. The public Developer API contract and additive workflow boundary did not drift from `3.6.2`; Pilot 2 verifies native preview/apply, idempotent replay, stale-revision rejection, typed media, exact restoration and zero pending recovery. Future non-denied releases remain `compatible-provisional` until separately evidenced. The three bundled Bridges [recover their Local REST routes after late startup or reload](docs/bridge-lifecycle.md) without restarting the MCP or changing write authorization. Their [single verified release bundle](docs/bridge-packaging.md) preserves plugin settings and supports fenced rollback.
 - **Obsidian Tasks** for Tasks-compatible Markdown parsing.

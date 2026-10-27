@@ -42,12 +42,16 @@ question.
 | Comment les lectures et mutations Operon sont-elles gouvernées ?                    | [Contrat MCP Operon](operon-mcp-contract.fr.md)                                         |
 | Comment fonctionne le remplacement atomique gouverné ?                              | [Contrat de remplacement gouverné](governed-note-replacement.fr.md)                     |
 | Comment retrouver une opération gouvernée en attente dont la référence est perdue ? | [Cockpit des opérations P5](operation-cockpit-p5.fr.md)                                 |
+| Comment clore une opération incertaine que rien ne peut régler ?                    | [Clôture administrative](administrative-closure.fr.md)                                  |
+| Comment supprimer une note sans risque, et comment l’activer ?                      | [Suppression gouvernée de note](governed-note-delete.md) (en anglais)                   |
+| Quels noms de notes le MCP accepte-t-il ?                                           | [Règles de noms de notes](note-name-rules.fr.md)                                        |
+| Comment garder le backend HTTP partagé en marche ?                                  | [Supervision du backend](backend-supervision.fr.md)                                     |
 | Comment ajouter, préfixer ou remplacer du texte sans écraser une concurrence ?      | [Patch texte gouverné P4](governed-text-patch-p4.fr.md)                                 |
 | Comment muter sûrement les formules nommées d’une Base Obsidian ?                   | [Formules Base gouvernées P2](governed-base-formula-p2.fr.md)                           |
 | Comment muter sûrement le graphe d’un JSON Canvas existant ?                        | [Canvas gouverné P3](governed-canvas-p3.fr.md)                                          |
 | Pourquoi le MCP expose-t-il des fonctions Operon au lieu d’appeler la CLI ?         | [Audit CLI / Developer API](operon-cli-audit.fr.md)                                     |
 | Pourquoi une décision d’architecture a-t-elle été prise ?                           | [Index des ADR](adr/README.md)                                                          |
-| Qu’est-ce qui a changé ?                                                            | [Changelog](../CHANGELOG.md)                                                            |
+| Qu’est-ce qui a changé ?                                                            | [Changelog](../CHANGELOG.md) et [notes de version](releases/)                           |
 
 Frontmatter gouvernée source-preserving : [contrat P1](governed-frontmatter-p1.fr.md).
 Formules Base gouvernées source-preserving : [contrat P2](governed-base-formula-p2.fr.md).
@@ -110,7 +114,7 @@ Option de fraicheur du cache : [contrat et validation](cache-events.fr.md).
 
 ## Bridge OpenAPI
 
-- [Bridge OpenAPI route inventory](bridge-openapi.fr.md) ? optional documentation; not authorization or complete payload schemas.
+- [Inventaire des routes OpenAPI des Bridges](bridge-openapi.fr.md) : documentation facultative ; ni autorisation ni schémas complets des payloads.
 
 ## Images
 

@@ -6,7 +6,7 @@ This optional family creates one verified local image from one explicitly select
 
 Referencing or displaying a remote image does not authorize downloading or importing it. Reusing an existing local image must not create another copy or recompress it. Only a deliberate import request (or an explicitly authorized workflow policy) selects this family. No clipping-specific behavior, background aspiration, bulk migration, overwrite, rename or automatic cleanup is introduced.
 
-`asset_import_plan`, `asset_import_apply` and `asset_import_status` are a complete optional family in the `full` profile, with a live/hybrid-live governed runtime. Unconfigured installations retain their previous 87-tool full live surface. The cross-runtime catalogue includes 94 names, including the three conditional asset tools; its `assumedStaticRequirements` describe configured potential, not default exposure. Other profiles and unsupported runtime modes do not acquire these tools.
+`asset_import_plan`, `asset_import_apply` and `asset_import_status` are a complete optional family in the `full` profile, with a live/hybrid-live governed runtime. Unconfigured installations keep the 92-tool full live surface. The cross-runtime catalogue includes 99 names, including the three conditional asset tools; its `assumedStaticRequirements` describe configured potential, not default exposure. Other profiles and unsupported runtime modes do not acquire these tools.
 
 ## Explicit server configuration
 

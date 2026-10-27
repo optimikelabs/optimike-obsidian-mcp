@@ -42,12 +42,16 @@ French operator guides are linked alongside their English equivalents.
 | How are Operon reads and mutations governed?                         | [Operon MCP Contract](operon-mcp-contract.md)                                         |
 | How does governed atomic note replacement work?                      | [Governed Note Replacement](governed-note-replacement.md)                             |
 | How do I find a lost pending governed operation?                     | [Pending Operation Cockpit P5](operation-cockpit-p5.md)                               |
+| How do I close an uncertain operation that nothing can settle?       | [Administrative Closure](administrative-closure.md)                                   |
+| How is a note deleted safely, and how is deletion enabled?           | [Governed Note Deletion](governed-note-delete.md)                                     |
+| Which note names does the MCP accept?                                | [Note Name Rules](note-name-rules.md)                                                 |
+| How do I keep the shared HTTP backend running?                       | [Backend Supervision](backend-supervision.md)                                         |
 | How do I append, prepend or replace body text without a lost update? | [Governed Text Patch P4](governed-text-patch-p4.md)                                   |
 | How are named Obsidian Base formulas mutated safely?                 | [Governed Base Formula P2](governed-base-formula-p2.md)                               |
 | How is one existing JSON Canvas graph mutated safely?                | [Governed Canvas P3](governed-canvas-p3.md)                                           |
 | Why does MCP expose Operon functions instead of calling the CLI?     | [Operon CLI / Developer API audit](operon-cli-audit.md)                               |
 | Why was an architecture decision made?                               | [ADR Index](adr/README.md)                                                            |
-| What changed?                                                        | [Changelog](../CHANGELOG.md)                                                          |
+| What changed?                                                        | [Changelog](../CHANGELOG.md) and [release notes](releases/)                           |
 
 Governed source-preserving Frontmatter: [P1 contract](governed-frontmatter-p1.md).
 Governed source-preserving Base formulas: [P2 contract](governed-base-formula-p2.md).
@@ -110,7 +114,7 @@ Optional cache freshness: [contract and validation](cache-events.md).
 
 ## Bridge OpenAPI
 
-- [Bridge OpenAPI route inventory](bridge-openapi.md) ? optional documentation; not authorization or complete payload schemas.
+- [Bridge OpenAPI route inventory](bridge-openapi.md): optional documentation; not authorization or complete payload schemas.
 
 ## Images
 
