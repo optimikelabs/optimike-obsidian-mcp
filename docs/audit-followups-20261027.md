@@ -90,3 +90,21 @@ Most probable cause (inference): the native Operon transition itself (graph and 
 Added: two log events per applied mutation, `Operon native apply returned.` and `Operon post-apply snapshot refresh finished.`, each with `durationMs`, so the next ten transitions attribute the time without guessing. Refutation test: if the refresh event is a small fraction of the call, the cause is Operon's native settle and only Operon (or the vault's plugin load) can fix it.
 
 Proposed correction, not implemented (it changes the receipt timing contract): return the mutation receipt right after the identity and outcome checks and refresh the snapshot in the background, coalesced, leaving the next read to see a stale-by-generation snapshot and refresh itself. Expected gain: the refresh share of each mutation. A short-lived cache of the live status result across one tool call would remove repeated round trips on reads.
+
+**Implemented in 3.15.1 (server only, Bridge unchanged).** Measured on the pilot test vault (159 tasks, Operon 4.2.0, Bridge 0.9.3, medians of 8 runs; the production renderer is also loaded by Smart Connections, so absolute values there are higher):
+
+| Call | 3.15.0 | 3.15.1 |
+| --- | --- | --- |
+| Mutation receipt (`operon_update_task`, description) | 15.2 s | 9.0 s |
+| `operon_get_task` after a generation change | 4.9 s | 2.0 s |
+| `operon_query_tasks` after a generation change | 5.0 s | 3.0 s |
+| Three concurrent `operon_get_task` after a change | 5.1 s | 2.3 s |
+| `operon_get_task` / `operon_query_tasks`, unchanged generation | 0.7 s | 0.7 s |
+| Second `operon_get_task` right after the first (background refresh still running) | 0.7 s | 2.1 s |
+
+- Receipts no longer wait for the snapshot. The refresh runs in the background, coalesced per Bridge and snapshot database. Read-after-write holds in the process: a read reuses the snapshot only once a refresh that started after the last receipt has completed, so it never relies on the generation alone. Tested races: refresh started before a mutation, several mutations during one refresh (one follow-up refresh covers them), a failed refresh followed by a successful read, a failed retry labelled `operon-cache` / `stale`, and two snapshot databases that never share a refresh.
+- `operon_get_task` reads one task through the existing Bridge route when the snapshot is behind, fenced on the generation and settings of the status read just before. Parity checked on the pilot vault: 158 of 158 tasks identical to the snapshot copy.
+- Qualification finding, fixed: a second write right after the mutation (the date manager stamping the note, Sync, an editor) moves the index while the background refresh runs; the refresh fails and the next read fell back to the snapshot without the mutation (`operon-cache`, `stale: true`, previous value; reproduced 2 of 8 on the pilot vault). Reads now retry transient failures for up to 15 seconds while a confirmed mutation is uncovered: 10 of 10 reads saw the mutation, at about 8 s in that case. Without a second writer the timings above are unchanged.
+- Review R8, fixed in 3.15.2: with Obsidian or the Bridge down after a mutation, every read of 3.15.1 waited about 15 s (connection refused was treated as transient); a missing HTTP answer is now durable and falls back at once. Retries stop at the deadline including the last attempt, run once per pending mutation and stop on cancellation. A fallback reloads the persisted snapshot, closing a race in which a read returned the pre-mutation value without the limitation.
+- A refresh now issues 2 status calls instead of 3 and runs validation alongside the pages.
+- Cause of the remaining time (fact, measured): the Local REST API answers in 2 ms, but every Bridge call that reads the index state renegotiates the Operon Developer API session, about 0.7 s each (status 0.75 s, single task 1.3 s, page 1.3 s, validation 1.3 s). Caching that session in the Bridge between index generations would remove most of what remains; it needs a Bridge release and was not done here.

@@ -359,6 +359,18 @@ export const OperonBridgePageSchema = z.object({
 
 export type OperonBridgePage = z.infer<typeof OperonBridgePageSchema>;
 
+/** `GET /tasks/:operonId` — one task read against a stable index generation. */
+export const OperonBridgeTaskReadSchema = z.object({
+  ok: z.literal(true),
+  contractVersion: z.literal(OPERON_CONTRACT_VERSION),
+  source: z.literal("operon-live"),
+  stale: z.literal(false),
+  generation: z.number().int().positive(),
+  settingsSignature: z.string().min(1),
+  task: OperonTaskSchema,
+  limitations: z.array(z.string()),
+});
+
 export const OperonValidationSchema = z.object({
   ok: z.boolean(),
   contractVersion: z.literal(OPERON_CONTRACT_VERSION),
@@ -1724,7 +1736,7 @@ export function parseOperonCursor(cursor: string | undefined): number {
   return value;
 }
 
-function stripProperties(task: OperonTask): OperonTask {
+export function stripOperonTaskProperties(task: OperonTask): OperonTask {
   if (!("properties" in task)) return task;
   const { properties: _properties, ...rest } = task;
   return rest;
@@ -1758,6 +1770,6 @@ export function queryOperonSnapshot(
     cursor: String(offset),
     nextCursor: nextOffset < filtered.length ? String(nextOffset) : undefined,
     hasMore: nextOffset < filtered.length,
-    tasks: query.includeProperties ? page : page.map(stripProperties),
+    tasks: query.includeProperties ? page : page.map(stripOperonTaskProperties),
   };
 }

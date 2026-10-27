@@ -73,6 +73,19 @@ versions Operon/Bridge, la version du contrat, les capacités et les limites.
 - `operon-cache` : dernier snapshot SQLite validé, toujours obsolète et jamais
   utilisé comme preuve d’une mutation.
 
+`operon_get_task` ne sert le snapshot enregistré que s’il correspond à la
+génération live et couvre tous les reçus de mutation rendus par ce processus.
+Sinon, il lit cette seule tâche par la route Bridge dédiée et ne l’accepte que
+si elle rapporte la même génération d’index et la même signature de réglages que
+le statut live lu juste avant (`source: operon-live`, `snapshotAgeMs: 0`) ; le
+snapshot complet est alors rafraîchi en arrière-plan. Une tâche absente de
+l’index live, une génération qui a bougé ou une réponse inattendue renvoient au
+chemin snapshot. Sur ce chemin d’une seule tâche, `operon-live` n’inclut pas la
+validation complète du coffre : une tâche dont le fichier source a disparu alors
+que l’index la liste encore est rendue en live, alors qu’un refresh du snapshot
+refuserait le coffre pour cette violation P0 `source_missing`. Un doublon
+d’`operonId` refuse toujours la lecture, via le statut live.
+
 Un payload invalide, une pagination tronquée, une génération instable, des IDs
 dupliqués, une version incompatible, un index non prêt ou une validation P0
 n’écrasent jamais le dernier snapshot sain.
@@ -147,8 +160,20 @@ Contrôles communs :
 - les résultats Task Workflow sont validés strictement avant projection ; une
   preuve native malformée ou contradictoire reste `outcome-unknown`, et
   `nativeProof` ne contient que la projection de preuve bornée ;
-- après apply, le Bridge relit l’index live vérifié et le MCP rafraîchit son
-  snapshot SQLite ;
+- après apply, le Bridge relit l’index live vérifié ; le MCP rend le reçu sans
+  attendre son snapshot SQLite, rafraîchi en arrière-plan et de façon
+  coalescée. Le reçu n’affirme que ce que le Bridge a prouvé (`after`). Toute
+  lecture ultérieure du même processus attend un refresh commencé après le reçu
+  avant de réutiliser le snapshot, même si la génération d’index n’a pas bougé.
+  Tant que ce snapshot ne contient pas un reçu confirmé, les échecs live
+  passagers (index qui se stabilise ou bouge, 503 ou réponse relançable du
+  Bridge) sont relancés au lieu de se replier, dans 15 secondes dernier essai
+  compris, une seule fois par mutation en attente, et jusqu’à l’annulation par
+  le client. Une absence de réponse HTTP (connexion refusée, Bridge ou Obsidian
+  absent) est durable et provoque un repli immédiat. Tout repli recharge le
+  snapshot enregistré, reste `operon-cache` / `stale: true` et, tant que la
+  mutation n’est pas couverte, ajoute une limite indiquant qu’il ne contient pas
+  une mutation confirmée ;
 - aucune mutation ne s’appuie sur un snapshot headless ou obsolète.
 
 Le journal MCP `operon_mutation_journal` réserve la clé avant l’appel au Bridge.
