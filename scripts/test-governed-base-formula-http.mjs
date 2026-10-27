@@ -27,11 +27,12 @@ async function unusedPort() {
 }
 
 async function waitForHealth(url, child) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
     if (child.exitCode !== null)
       throw new Error(`HTTP MCP exited: ${child.exitCode}`);
     try {
-      if ((await fetch(url)).ok) return;
+      if ((await fetch(url, { signal: AbortSignal.timeout(1000) })).ok) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
