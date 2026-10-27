@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { isolatedStateEnv } from "./lib/isolated-state.mjs";
+import { isolatedStateEnv } from "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {

@@ -1,4 +1,4 @@
-import "./lib/isolated-state.mjs";
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";

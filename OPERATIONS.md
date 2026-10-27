@@ -538,7 +538,7 @@ Supported maintenance actions:
 
 ### Orphan operation journals
 
-Every runtime profile (`sha256({mode, baseUrl, vault})`) has its own durable journal files in the state directory. `npm run maintenance:foreign-journals` lists those of other profiles without opening, changing or deleting anything and flags the ones with no non-terminal operation as move candidates; see [audit follow-ups](docs/audit-followups-20261027.md#2-orphan-durable-journals). Tests that start the real runtime import `scripts/lib/isolated-state.mjs` so they leave none behind.
+Every runtime profile (`sha256({mode, baseUrl, vault})`) has its own durable journal files in the state directory. `npm run maintenance:foreign-journals` lists those of other profiles without opening, changing or deleting anything and flags the ones with no non-terminal operation as move candidates; see [audit follow-ups](docs/audit-followups-20261027.md#2-orphan-durable-journals). Tests that start the real runtime import `scripts/test-support/isolated-state.mjs` so they leave none behind.
 
 ### Automated local verification
 

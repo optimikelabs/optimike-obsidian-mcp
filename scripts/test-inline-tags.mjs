@@ -1,4 +1,4 @@
-import "./lib/isolated-state.mjs";
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 
 process.env.OBSIDIAN_API_KEY = "test-no-network";

@@ -554,7 +554,7 @@ Actions de maintenance supportées :
 
 ### Journaux d’opérations orphelins
 
-Chaque profil d’exécution (`sha256({mode, baseUrl, vault})`) a ses propres fichiers de journal durables dans le dossier d’état. `npm run maintenance:foreign-journals` liste ceux des autres profils sans rien ouvrir, modifier ni supprimer, et signale comme candidats au déplacement ceux sans opération non terminale ; voir [suivi d’audit](docs/audit-followups-20261027.md#2-orphan-durable-journals). Les tests qui lancent le vrai runtime importent `scripts/lib/isolated-state.mjs` pour n’en laisser aucun.
+Chaque profil d’exécution (`sha256({mode, baseUrl, vault})`) a ses propres fichiers de journal durables dans le dossier d’état. `npm run maintenance:foreign-journals` liste ceux des autres profils sans rien ouvrir, modifier ni supprimer, et signale comme candidats au déplacement ceux sans opération non terminale ; voir [suivi d’audit](docs/audit-followups-20261027.md#2-orphan-durable-journals). Les tests qui lancent le vrai runtime importent `scripts/test-support/isolated-state.mjs` pour n’en laisser aucun.
 
 ### Vérification automatisée locale
 

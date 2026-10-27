@@ -1,4 +1,4 @@
-import "./lib/isolated-state.mjs";
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import os from "node:os";

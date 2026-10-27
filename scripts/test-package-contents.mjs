@@ -30,7 +30,7 @@ const requiredFiles = [
   "docs/governed-note-delete.md",
   "docs/audit-followups-20261027.md",
   "scripts/list-foreign-journals.mjs",
-  "scripts/lib/isolated-state.mjs",
+  "scripts/test-support/isolated-state.mjs",
   "dist/services/operations/noteDeleteOperationAdapter.js",
   "dist/services/markdownTags.js",
   "docs/durable-note-create-m4.md",

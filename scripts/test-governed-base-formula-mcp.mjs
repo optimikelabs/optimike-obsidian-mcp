@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import "./lib/isolated-state.mjs";
+import "./test-support/isolated-state.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
