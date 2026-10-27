@@ -276,4 +276,4 @@ All four tools accept `responseMode: compact | detailed` (default compact) and `
 
 ## Audit integration compatibility
 
-Native frontmatter inspection requires Atomic Write Bridge 0.8.3 or later. Deploy and roll back the MCP and Bridge as one pair, after checking for planned, applying or outcome-unknown operations and unresolved preparation fences; compare artifact hashes, not just versions.
+Native frontmatter inspection requires Atomic Write Bridge 0.8.4 or later. Deploy and roll back the MCP and Bridge as one pair, after checking for planned, applying or outcome-unknown operations and unresolved preparation fences; compare artifact hashes, not just versions.

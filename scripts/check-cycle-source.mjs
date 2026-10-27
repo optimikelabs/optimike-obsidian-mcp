@@ -116,7 +116,7 @@ for (const name of requiredDocs) {
   assert.ok(pkg.files.includes(name), `npm package must include ${name}`);
 }
 const qualifiedBridgeVersions = {
-  "obsidian-atomic-write-bridge": "0.8.3",
+  "obsidian-atomic-write-bridge": "0.8.4",
   "obsidian-bases-bridge": "1.2.2",
   "obsidian-operon-bridge": "0.9.3",
 };

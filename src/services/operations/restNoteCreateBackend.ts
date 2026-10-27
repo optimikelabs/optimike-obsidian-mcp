@@ -3,10 +3,11 @@ import type { NoteCreateApply } from "../noteCreateContract.js";
 import type { NoteCreateBackend } from "./noteCreateOperationAdapter.js";
 import { requestContextService } from "../../utils/index.js";
 import { assertNoFoldedSibling } from "../noteNameMcp.js";
+import { requireAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 
 export class RestNoteCreateBackend implements NoteCreateBackend {
   constructor(private readonly rest: ObsidianRestApiService) {}
-  status() { return this.rest.getAtomicWriteStatus(requestContextService.createRequestContext({ operation: "AtomicWriteStatus" })); }
+  async status() { return requireAtomicBridgeVersion(await this.rest.getAtomicWriteStatus(requestContextService.createRequestContext({ operation: "AtomicWriteStatus" }))); }
   inspectFrontmatterFormat(yaml: string) { return this.rest.inspectAtomicFrontmatterFormat({ contractVersion: 1, yaml }, requestContextService.createRequestContext({ operation: "AtomicFrontmatterFormat" })); }
   async preflight(path: string): Promise<unknown> {
     const context = requestContextService.createRequestContext({ operation: "NoteCreatePreflight" });

@@ -3,13 +3,15 @@ import type { NativeMoveApply } from "../nativeNoteMoveContract.js";
 import type { NativeNoteMoveBackend } from "./nativeNoteMoveOperationAdapter.js";
 import { requestContextService } from "../../utils/index.js";
 import { assertNoFoldedSibling } from "../noteNameMcp.js";
+import { requireAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 
 export class RestNativeNoteMoveBackend implements NativeNoteMoveBackend {
   constructor(private readonly rest: ObsidianRestApiService) {}
-  bridgeStatus(): Promise<unknown> {
-    return this.rest.getAtomicWriteStatus(requestContextService.createRequestContext({ operation: "AtomicWriteStatus" }));
+  async bridgeStatus(): Promise<unknown> {
+    return requireAtomicBridgeVersion(await this.rest.getAtomicWriteStatus(requestContextService.createRequestContext({ operation: "AtomicWriteStatus" })));
   }
   async preflight(sourcePath: string, destinationPath: string): Promise<unknown> {
+    await this.bridgeStatus();
     const context = requestContextService.createRequestContext({ operation: "NativeNoteMovePreflight" });
     const slash = destinationPath.lastIndexOf("/");
     let siblings: string[] | undefined;

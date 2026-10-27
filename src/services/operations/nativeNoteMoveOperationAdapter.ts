@@ -146,6 +146,8 @@ export class NativeNoteMoveOperationAdapter {
     let row = this.require(reference, idempotencyKey);
     if (row.status !== "planned") return this.status(reference);
     this.authorize("apply", row.path);
+    // Refuse an unqualified Bridge before changing the durable operation state.
+    if (this.backend.bridgeStatus) await this.backend.bridgeStatus();
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }
     catch (error) {
       if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(reference);

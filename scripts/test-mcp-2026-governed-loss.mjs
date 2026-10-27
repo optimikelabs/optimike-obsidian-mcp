@@ -38,7 +38,7 @@ const fake = createServer(async (req, res) => {
       json(res, 200, {
         ok: true,
         contractVersion: 1,
-        plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.3" },
+        plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.4" },
         backend: {
           kind: "obsidian-vault-process",
           bindingFingerprint: binding,

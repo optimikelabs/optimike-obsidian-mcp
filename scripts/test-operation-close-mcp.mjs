@@ -62,7 +62,7 @@ class FencedBridgeServer {
     return { entered: enteredPromise, release };
   }
   status() {
-    return { ok: true, contractVersion: 1, plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.3" },
+    return { ok: true, contractVersion: 1, plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.4" },
       frontmatterFormat: { contractVersion: 1, supported: true }, effectFence: this.fence.capability(),
       backend: { kind: "obsidian-vault-process", bindingFingerprint: this.binding, atomicCas: true, writeEnabled: true },
       limits: { markdownOnly: true } };

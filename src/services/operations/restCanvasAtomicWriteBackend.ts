@@ -9,16 +9,17 @@ import type {
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { requestContextService } from "../../utils/index.js";
 import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
+import { requireAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 
 export class RestCanvasAtomicWriteBackend implements AtomicWriteBackend {
   constructor(private readonly rest: ObsidianRestApiService) {}
 
   async status(): Promise<AtomicWriteStatusResponse> {
-    const status = await this.rest.getAtomicWriteStatus(
+    const status = requireAtomicBridgeVersion(await this.rest.getAtomicWriteStatus(
       requestContextService.createRequestContext({
         operation: "CanvasAtomicWriteStatus",
       }),
-    );
+    ));
     if (
       status.backend.canvasAtomicCas !== true ||
       typeof status.backend.canvasWriteEnabled !== "boolean"

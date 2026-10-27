@@ -10,6 +10,7 @@ import type {
   AtomicWriteStatusResponse,
 } from "../obsidianRestAPI/types.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
+import { supportedAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 import {
   OPERATION_RUNTIME_CONTRACT_VERSION,
   operationDigest,
@@ -183,6 +184,8 @@ const CasSchema = z
 
 /** The Bridge effect-fence epoch, when the Bridge can check tokens at the effect point. */
 export function effectFenceEpoch(status: unknown): string | undefined {
+  const version = (status as { plugin?: { version?: unknown } } | null)?.plugin?.version;
+  if (!supportedAtomicBridgeVersion(version)) return undefined;
   const fence = (status as { effectFence?: unknown } | null)?.effectFence;
   if (!fence || typeof fence !== "object") return undefined;
   const value = fence as Record<string, unknown>;

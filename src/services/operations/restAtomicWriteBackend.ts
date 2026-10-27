@@ -10,16 +10,17 @@ import type {
 } from "../obsidianRestAPI/types.js";
 import { requestContextService } from "../../utils/index.js";
 import type { AtomicWriteBackend } from "./obsidianNoteReplaceOperationAdapter.js";
+import { requireAtomicBridgeVersion } from "../atomicBridgeVersion.js";
 
 export class RestAtomicWriteBackend implements AtomicWriteBackend {
   constructor(private readonly rest: ObsidianRestApiService) {}
 
-  status(): Promise<AtomicWriteStatusResponse> {
-    return this.rest.getAtomicWriteStatus(
+  async status(): Promise<AtomicWriteStatusResponse> {
+    return requireAtomicBridgeVersion(await this.rest.getAtomicWriteStatus(
       requestContextService.createRequestContext({
         operation: "AtomicWriteStatus",
       }),
-    );
+    ));
   }
 
   inspectFrontmatterFormat(yaml: string): Promise<unknown> {

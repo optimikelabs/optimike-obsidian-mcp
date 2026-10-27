@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Atomic Write Bridge 0.8.3 or later is required for native frontmatter inspection. Deploy and roll back the MCP and Bridge as one pair after draining pending operations and preparation fences, and verify artifact hashes. Empty YAML blocks are treated as empty mappings; invalid or duplicate-key YAML receives a validation error. Tool-registration lifecycle messages are debug-level.
+Atomic Write Bridge 0.8.4 or later is required for governed writes and native frontmatter inspection. Deploy and roll back the MCP and Bridge as one pair after draining pending operations and preparation fences, and verify artifact hashes. Empty YAML blocks are treated as empty mappings; invalid or duplicate-key YAML receives a validation error. Tool-registration lifecycle messages are debug-level.
 
 ### Added
 
