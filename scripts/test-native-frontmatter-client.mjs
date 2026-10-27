@@ -38,8 +38,10 @@ test("fails closed on missing capability, identity mismatch or invalid route res
 test("requires a stable Bridge 0.8.4 or later", async () => {
   for (const version of ["0.8.2", "0.8.3", "0.8.4-rc.1", "test", undefined]) {
     const old = { ...backend, status: async () => ({ ...status, plugin: { id: "obsidian-atomic-write-bridge", version } }) };
-    await assert.rejects(inspectNativeFrontmatter(old, "texte\n"), error => error.code === BaseErrorCode.SERVICE_UNAVAILABLE);
+    await assert.rejects(inspectNativeFrontmatter(old, "texte\n"), error => error.code === BaseErrorCode.SERVICE_UNAVAILABLE && error.details.reasonCode === "atomic_bridge_version_unsupported");
   }
+  const rejected = { ...backend, status: async () => { throw new McpError(BaseErrorCode.SERVICE_UNAVAILABLE, "private", { reasonCode: "atomic_bridge_version_unsupported" }); } };
+  await assert.rejects(inspectNativeFrontmatter(rejected, "texte\n"), error => error.details?.reasonCode === "atomic_bridge_version_unsupported");
   for (const version of ["0.8.4", "0.8.5", "0.9.0", "1.0.0", "0.8.4+build.1"]) {
     const newer = { ...backend, status: async () => ({ ...status, plugin: { id: "obsidian-atomic-write-bridge", version } }) };
     assert.equal((await inspectNativeFrontmatter(newer, "texte\n")).content, "texte\n");

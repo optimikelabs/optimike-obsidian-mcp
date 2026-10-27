@@ -6,6 +6,7 @@ import {
   type NativeMoveApply, type NativeSemanticNote,
 } from "../../../src/services/nativeNoteMoveContract.js";
 import { NativeNoteMoveService, NativeMoveBeforeEffectConflict, type NativeMoveHost } from "./nativeNoteMove.js";
+import { LegacyMoveObservation, LegacyMoveSnapshot } from "./legacyWireSchemas.js";
 
 const digest = (value: string) => nativeDigest(value);
 function fixture() {
@@ -63,8 +64,13 @@ function fixture() {
 }
 
 test("M3 nominal: native completion is not graph completion", async () => {
-  const f = fixture(); const p = await f.plan();
-  assert.equal((await f.service.apply(p)).outcome, "committed");
+  const f = fixture();
+  const snapshot = await f.service.preflight("Old/Source.md", "New/Destination.md");
+  assert.equal(LegacyMoveSnapshot.safeParse(snapshot).success, true);
+  const p = await f.plan();
+  const applied = await f.service.apply(p);
+  assert.equal(applied.outcome, "committed");
+  assert.equal(LegacyMoveObservation.safeParse(applied).success, true);
   assert.equal((await f.service.status(p.operationId, p.preconditionDigest)).graphPostflight, "pending");
   f.tick(6000);
   assert.equal((await f.service.status(p.operationId, p.preconditionDigest)).graphPostflight, "indeterminate");

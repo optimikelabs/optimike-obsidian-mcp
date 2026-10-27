@@ -31,7 +31,7 @@ export function createNoteCreateRoutes(app: App, options: {
     const policy = noteCreateDatePolicy(app), policyDigest = createPolicyDigest(policy);
     if (files.hasFoldedSibling(path)) throw new NoteNameError({ reasonCode: "note_name_case_collision", hint: noteNameFixedHint("note_name_case_collision") });
     if (app.vault.getAbstractFileByPath(path) || files.inspect(path).exists) throw new NoteCreateExists();
-    return { contractVersion: 1 as const, path, bindingFingerprint, vaultBindingFingerprint: options.binding(), absent: true as const, enabled: true as const, policy, policyDigest };
+    return { contractVersion: 1 as const, path, bindingFingerprint, absent: true as const, enabled: true as const, policy, policyDigest };
   }
   function inspect(path: string) {
     nativeNotePath(path);
