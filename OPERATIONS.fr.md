@@ -529,6 +529,23 @@ Lire un échec : relever le `requestId` renvoyé dans l’erreur, puis lire ses 
 
 Rien ne surveille le backend après son démarrage, et un backend lancé par un client ou un tunnel s’arrête avec lui. [`scripts/supervise-backend.ps1`](scripts/supervise-backend.ps1) maintient le backend HTTP partagé en marche de façon autonome ; voir [Supervision du backend](docs/backend-supervision.fr.md).
 
+### Clore les opérations incertaines
+
+1. Installer le Bridge et le MCP de la même release, relancer Obsidian puis le
+   backend.
+2. Dans Obsidian, réglages de l'Atomic Write Bridge, activer **Exiger un jeton
+   de fence pour toute écriture** (refuse les écritures des anciens clients MCP)
+   et le laisser actif au moins 10 minutes.
+3. Essai à blanc : `node scripts/close-pending-operations.mjs --launcher <launch.mjs>` ;
+   lire le rapport JSON (`would_close`, refus et raisons).
+4. Après accord du propriétaire : même commande avec `--apply`. Les refus ne
+   sont jamais relancés automatiquement ; `closure_effect_settling` et les autres
+   raisons réessayables peuvent être relancés plus tard.
+5. Une note `date_preparation_unverified` se libère avec
+   `obsidian_operation_close` et `datePreparationPaths` ; repli hors ligne :
+   `scripts/release-date-preparation-lock.mjs`, Obsidian et backend arrêtés.
+   Voir [Clôture administrative](docs/administrative-closure.fr.md).
+
 ### Tools MCP runtime
 
 - `obsidian_runtime_status`

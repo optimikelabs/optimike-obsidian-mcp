@@ -98,6 +98,8 @@
     "docs/governed-text-patch-p4.fr.md",
     "docs/operation-cockpit-p5.md",
     "docs/operation-cockpit-p5.fr.md",
+    "docs/administrative-closure.md",
+    "docs/administrative-closure.fr.md",
     "docs/tool-routing-evaluation-p6.md",
     "docs/tool-routing-evaluation-p6.fr.md",
     "docs/adr/ADR-Governed-Canvas-P3.md",

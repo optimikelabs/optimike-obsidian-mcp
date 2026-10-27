@@ -7,7 +7,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import http from "node:http";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -37,6 +40,7 @@ class FencedBridgeServer {
   refusals = 0;
   fence = new EffectFence({ requireFence: () => false, registry: { epochs: [] } });
   hold = undefined;
+  dropNextCas = false;
 
   constructor() {
     this.server = http.createServer((request, response) => {
@@ -84,6 +88,7 @@ class FencedBridgeServer {
     }
     if (route === "/notes/cas") {
       if (this.hold) { const hold = this.hold; this.hold = undefined; hold.entered(payload); await hold.released; }
+      if (this.dropNextCas) { this.dropNextCas = false; request.socket.destroy(); return; }
       if (sha256(this.content) !== payload.expectedSha256) return json(response, 409, { ok: false, error: { code: "hash_conflict", reasonCode: "resource_changed" } });
       let settle;
       try { settle = this.fence.enter(payload.fence); }
@@ -111,12 +116,8 @@ const bridge = new FencedBridgeServer();
 await bridge.listen();
 const transcripts = [];
 
-async function startClient(writeMode = "full") {
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: ["dist/index.js"],
-    cwd: process.cwd(),
-    env: {
+function serverEnv(writeMode) {
+  return {
       NODE_ENV: "test", MCP_TRANSPORT_TYPE: "stdio", MCP_LOG_LEVEL: "error", LOGS_DIR: logsPath, MCP_WRITE_MODE: writeMode,
       MCP_GUARDED_MAX_WRITE_CHARS: "100000", MCP_PROTECTED_FRONTMATTER_KEYS: "création,modification",
       MCP_OBSIDIAN_NOTE_REPLACE_JOURNAL_PATH: journalPath, MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS: "1000",
@@ -125,7 +126,15 @@ async function startClient(writeMode = "full") {
       OBSIDIAN_STARTUP_MAX_RETRIES: "1", OBSIDIAN_STARTUP_RETRY_DELAY_MS: "10", SEMANTIC_SEARCH_PREWARM: "false",
       ENABLE_QUERY_EMBEDDING: "false", SMART_SEARCH_MODE: "files", OPERON_MUTATIONS_ENABLED: "false", MCP_TOOL_PROFILE: "operational",
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-    },
+  };
+}
+
+async function startClient(writeMode = "full") {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["dist/index.js"],
+    cwd: process.cwd(),
+    env: serverEnv(writeMode),
     stderr: "pipe",
   });
   const client = new Client({ name: "operation-close-integration", version: "1.0.0" }, { capabilities: {} });
@@ -215,9 +224,35 @@ try {
   assert.equal(notLocked.items[0].reasonCode, "date_preparation_not_locked");
   await call(second, "obsidian_operation_close", { dryRun: false }, true);
 
+  // Batch command of the operations procedure, through a launcher like launch.mjs.
+  for (const key of ["batch-a", "batch-b"]) {
+    bridge.content = BEFORE;
+    const planned = await call(second, "obsidian_note_replace_plan", { path: NOTE, nextContent: AFTER + key, idempotencyKey: key, responseMode: "detailed" });
+    bridge.dropNextCas = true;
+    const lost = await call(second, "obsidian_note_replace_apply", { planRef: planned.planRef, idempotencyKey: key, completionMode: "deferred", responseMode: "detailed" });
+    assert.equal(lost.outcome, "outcome_unknown");
+  }
+  const launcher = path.join(root, "launch-fixture.mjs");
+  writeFileSync(launcher, `Object.assign(process.env, ${JSON.stringify(serverEnv("full"))});\nprocess.chdir(${JSON.stringify(process.cwd())});\nawait import(${JSON.stringify(pathToFileURL(path.join(process.cwd(), "dist/index.js")).href)});\n`, "utf8");
+  // Asynchronous on purpose: this process also serves the fixture Bridge.
+  const runBatch = async (...extra) => {
+    const out = path.join(root, `batch-${extra.length ? "apply" : "dry"}.json`);
+    await promisify(execFile)(process.execPath, ["scripts/close-pending-operations.mjs", "--launcher", launcher, "--out", out, ...extra]);
+    return JSON.parse(readFileSync(out, "utf8"));
+  };
+  const dryBatch = await runBatch();
+  assert.equal(dryBatch.apply, false);
+  assert.deepEqual(dryBatch.summary, { would_close: 2 });
+  assert.equal((await call(second, "obsidian_list_pending_operations", { status: "outcome_unknown" })).operations.length, 2);
+  const applied = await runBatch("--apply");
+  assert.deepEqual(applied.summary, { closed: 2 });
+  assert.ok(applied.items.every((item) => item.evidence.priorEffect === "none"));
+  assert.equal((await call(second, "obsidian_list_pending_operations", {})).operations.length, 0);
+  assert.equal(bridge.writes, 0);
+
   const serialized = transcripts.join("\n");
   assert.equal(serialized.includes("PRIVATE-CLOSURE-PAYLOAD"), false, "closure receipts never return note content");
-  console.log("PASS operation close MCP: held write refused after crash and closure, dry run, readonly policy, idempotent replay, cockpit and status");
+  console.log("PASS operation close MCP: held write refused after crash and closure, dry run, readonly policy, idempotent replay, cockpit and status, batch script dry run then apply");
 } finally {
   await first?.client.close().catch(() => undefined);
   await second?.client.close().catch(() => undefined);

@@ -145,7 +145,7 @@ plan → apply → status → recover
 
 Après timeout ou perte de transport, appeler `status` avant `recover` ; ne jamais recréer aveuglément une mutation. Les plans durables ne sont pas liés au profil qui les a créés.
 
-Si le client a perdu la référence opaque du plan, appeler `obsidian_list_pending_operations`. Ce cockpit read-only liste uniquement les reçus Obsidian gouvernés en attente ou incertains depuis les journaux déjà ouverts du runtime live, avec le `planRef` métier exact et la prochaine action sûre. Il n'expose ni cible, ni clé d'idempotence, ni contenu, ni hash, ni binding backend, et n'appelle jamais status, apply ou recovery. Voir [Cockpit des opérations en attente](docs/operation-cockpit-p5.fr.md).
+Si le client a perdu la référence opaque du plan, appeler `obsidian_list_pending_operations`. Ce cockpit read-only liste uniquement les reçus Obsidian gouvernés en attente ou incertains depuis les journaux déjà ouverts du runtime live, avec le `planRef` métier exact et la prochaine action sûre. Il n'expose ni cible, ni clé d'idempotence, ni contenu, ni hash, ni binding backend, et n'appelle jamais status, apply ou recovery. Voir [Cockpit des opérations en attente](docs/operation-cockpit-p5.fr.md). Les opérations incertaines que rien ne peut régler se clôturent, après revue du propriétaire, avec `obsidian_operation_close` ([Clôture administrative](docs/administrative-closure.fr.md)).
 
 ## Racines documentaires externes
 

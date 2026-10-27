@@ -534,6 +534,23 @@ Supported maintenance actions:
 - `refresh_tasks_cache`
 - `refresh_all`
 
+### Closing uncertain operations
+
+1. Install the Bridge and MCP of the same release, restart Obsidian, then the
+   backend.
+2. In Obsidian, Atomic Write Bridge settings, enable **Require a fence token for
+   every write** (refuses writes from older MCP clients) and keep it on for at
+   least 10 minutes.
+3. Dry run: `node scripts/close-pending-operations.mjs --launcher <launch.mjs>`;
+   read the JSON report (`would_close`, refusals and reasons).
+4. After owner approval: same command with `--apply`. Refusals are never
+   retried automatically; `closure_effect_settling` and other retryable reasons
+   can be rerun later.
+5. A `date_preparation_unverified` note is released with
+   `obsidian_operation_close` and `datePreparationPaths`; offline fallback:
+   `scripts/release-date-preparation-lock.mjs` with Obsidian and the backend
+   stopped. See [Administrative closure](docs/administrative-closure.md).
+
 ### Automated local verification
 
 The local smoke script checks the runtime exactly as Codex uses it:

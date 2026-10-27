@@ -13,6 +13,7 @@ read-modify-write operation.
 - `POST /extensions/obsidian-atomic-write-bridge/notes/cas`
 - `POST /extensions/obsidian-atomic-write-bridge/canvas/read`
 - `POST /extensions/obsidian-atomic-write-bridge/canvas/cas`
+- `POST /extensions/obsidian-atomic-write-bridge/effect-fence/resolve`
 
 Every request body is strict and versioned with `contractVersion: 1`. The CAS
 routes accept only an existing resource of the declared type, the sealed backend binding
@@ -24,6 +25,17 @@ Note and Canvas writes have independent gates, both disabled by default. The
 operator must explicitly enable the required capability in this bridge's
 Obsidian settings. Read and status remain
 available while the write gate is closed.
+
+Effect fence: every write route accepts an optional `fence`
+`{ contractVersion: 1, epoch, attemptId }` and admits it synchronously at the
+effect point (inside the `Vault.process` callback, immediately before an
+exclusive create, a native rename or the FDM preparation leaf). A revoked,
+replayed or superseded token is refused with HTTP `403` `effect_fence_refused`
+and no effect. `effect-fence/resolve` inspects or irreversibly revokes tokens;
+`status.effectFence` exposes the epoch of this plugin load. The setting
+**Require a fence token for every write** (off by default) also refuses
+unfenced writes; it is required to close attempts dispatched by older MCP
+clients. See [Administrative closure](../../docs/administrative-closure.md).
 
 The bridge depends on the public extension API of **Local REST API**. It does
 not depend on Operon or on Operon's Developer API grant UI.
