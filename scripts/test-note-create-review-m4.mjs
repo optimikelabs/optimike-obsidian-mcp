@@ -21,7 +21,7 @@ function fixture(name, fields = []) {
   const journal = new ObsidianNoteReplaceJournal(db, { now: clock });
   const backend = {
     ...nativeFormatFixture(bindingFingerprint),
-    async preflight(path) { return { contractVersion: 1, path, bindingFingerprint, policy, policyDigest, absent: true, enabled: true }; },
+    async preflight(path) { return { contractVersion: 1, path, bindingFingerprint, vaultBindingFingerprint: bindingFingerprint, policy, policyDigest, absent: true, enabled: true }; },
     async create(r) { calls++; content = r.content; const { content: ignored, ...rest } = r; return { ...rest, outcome: "created", reason: "created" }; },
     async inspect(path) { return { contractVersion: 1, path, bindingFingerprint, exists: content !== undefined,
       ...(content === undefined ? {} : { content, sha256: noteCreateHash(content) }) }; },

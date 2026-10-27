@@ -152,7 +152,7 @@ try {
   let backendCalls = 0;
   const policy = { version: 1, utcOffsetMinutes: 0, fields: [] };
   const createBackend = {
-    async preflight(p) { backendCalls++; return { contractVersion: 1, path: p, bindingFingerprint: "a".repeat(64), absent: true, enabled: true, policy, policyDigest: createPolicyDigest(policy) }; },
+    async preflight(p) { backendCalls++; return { contractVersion: 1, path: p, bindingFingerprint: "b".repeat(64), vaultBindingFingerprint: "a".repeat(64), absent: true, enabled: true, policy, policyDigest: createPolicyDigest(policy) }; },
     async status() { return { backend: { bindingFingerprint: "a".repeat(64) }, frontmatterFormat: { contractVersion: 1, supported: true } }; },
     async inspectFrontmatterFormat(yaml) { return { ok: true, contractVersion: 1, bindingFingerprint: "a".repeat(64), canonicalYaml: yaml, warnings: [] }; },
     async create() { throw new Error("must not be reached"); },

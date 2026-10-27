@@ -24,6 +24,8 @@ test("M4 routes reject stale bindings with request identity and never create or 
   try {
     const p = call("preflight", { contractVersion: 1, path: "A.md" });
     assert.equal(p.code, 200);
+    assert.equal(p.result.vaultBindingFingerprint, "a".repeat(64));
+    assert.notEqual(p.result.bindingFingerprint, p.result.vaultBindingFingerprint);
     const request = { contractVersion: 1, operationId: randomUUID(), path: "A.md", content: "# A\n",
       contentSha256: noteCreateHash("# A\n"), bindingFingerprint: p.result.bindingFingerprint, policyDigest: p.result.policyDigest };
     const stale = call("apply", { ...request, bindingFingerprint: "b".repeat(64) });

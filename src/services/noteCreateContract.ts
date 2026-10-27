@@ -12,7 +12,7 @@ export type CreateDateField = {
 };
 export type NoteCreatePolicy = { version: 1; utcOffsetMinutes: number; fields: CreateDateField[] };
 export type NoteCreatePreflight = {
-  contractVersion: 1; path: string; bindingFingerprint: string;
+  contractVersion: 1; path: string; bindingFingerprint: string; vaultBindingFingerprint?: string;
   absent: true; enabled: true; policy: NoteCreatePolicy; policyDigest: string;
 };
 export type NoteCreateApply = {

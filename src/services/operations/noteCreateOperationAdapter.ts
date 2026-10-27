@@ -32,7 +32,7 @@ const Policy = z.object({ version: z.literal(1), utcOffsetMinutes: z.number().in
   fields: z.array(z.object({ pluginId: z.enum(["update-time-on-edit", "frontmatter-date-manager", "update-time"]),
     propertyName: z.string().min(1).max(128), role: z.enum(["created", "modified"]), delayMs: z.number().int().min(0).max(240000),
   }).strict()).max(6) }).strict();
-const Preflight = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
+const Preflight = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH, vaultBindingFingerprint: HASH.optional(),
   absent: z.literal(true), enabled: z.literal(true), policy: Policy, policyDigest: HASH }).strict();
 const Inspection = z.object({ contractVersion: z.literal(1), path: z.string().max(1024), bindingFingerprint: HASH,
   // Optional only for rolling compatibility with the immediately preceding
@@ -107,7 +107,8 @@ export class NoteCreateOperationAdapter {
     catch (error) { const existing = winner(); if (existing) return this.receipt(existing); throw error; }
     if (plan.path !== input.path || createPolicyDigest(plan.policy) !== plan.policyDigest) bad("create_preflight_identity_mismatch");
     validateNoteCreate(input.path, input.content, plan.policy);
-    const format = await inspectNativeFrontmatter(this.backend, input.content, plan.bindingFingerprint);
+    if (!plan.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
+    const format = await inspectNativeFrontmatter(this.backend, input.content, plan.vaultBindingFingerprint);
     rejectNonCanonical(format);
     if (plan.policy.fields.length && frontmatterEnvelope(input.content)?.yaml.trim() === "{}")
       throw new McpError(BaseErrorCode.VALIDATION_ERROR, "An empty frontmatter mapping cannot be verified with automatic dates.", { reasonCode: "frontmatter_empty_mapping_date_management" });
@@ -123,7 +124,8 @@ export class NoteCreateOperationAdapter {
     if (row.status !== "planned") return this.status(ref);
     const admitted = this.sealed(row);
     this.authorize("apply", row.path, row.nextContent);
-    const format = await inspectNativeFrontmatter(this.backend, row.nextContent, admitted.bindingFingerprint);
+    if (!admitted.vaultBindingFingerprint) bad("create_preflight_identity_mismatch");
+    const format = await inspectNativeFrontmatter(this.backend, row.nextContent, admitted.vaultBindingFingerprint);
     if (format.normalized) throw new McpError(BaseErrorCode.CONFLICT, "The sealed note no longer matches the native frontmatter format.", { reasonCode: "frontmatter_format_changed" });
     try { row = this.journal.transition(row.operationId, ["planned"], "applying"); }
     catch (error) { if (error instanceof ObsidianNoteReplaceConcurrencyError) return this.status(ref); throw error; }
