@@ -167,6 +167,11 @@ const state = {
   generation: 1,
   statusCalls: 0,
   postCalls: 0,
+  taskGetCalls: 0,
+  taskGetGeneration: null,
+  holdTaskGet: null,
+  holdPage: null,
+  failPages: 0,
   validationCalls: 0,
   mutationCalls: 0,
   pendingRecoveryCalls: 0,
@@ -185,7 +190,7 @@ const state = {
 function statusPayload() {
   state.statusCalls += 1;
   const generation =
-    state.mode === "status-drift" && state.statusCalls >= 3
+    state.mode === "status-drift" && state.statusCalls >= 2
       ? state.generation + 1
       : state.generation;
   return {
@@ -386,11 +391,27 @@ const server = http.createServer((request, response) => {
     const task = tasks.find(
       (candidate) => candidate.operonId === taskGetMatch[1],
     );
-    sendJson(
-      response,
-      task ? 200 : 404,
-      task ? { task } : { error: "not_found" },
-    );
+    state.taskGetCalls += 1;
+    // Same envelope as the real Bridge single-task route.
+    const sendTask = () =>
+      sendJson(
+        response,
+        task ? 200 : 404,
+        task
+          ? {
+              ok: true,
+              contractVersion: "1",
+              source: "operon-live",
+              stale: false,
+              generation: state.taskGetGeneration ?? state.generation,
+              settingsSignature: "fnv1a32:settings",
+              task,
+              limitations: ["read-only"],
+            }
+          : { error: "not_found" },
+      );
+    if (state.holdTaskGet) state.holdTaskGet.then(sendTask);
+    else sendTask();
     return;
   }
   if (request.method === "POST" && url.pathname.endsWith("/tasks/query")) {
@@ -408,25 +429,33 @@ const server = http.createServer((request, response) => {
         ? [tasks[0]]
         : generationDrift
           ? [secondPage ? tasks[1] : tasks[0]]
-          : tasks;
-      sendJson(response, 200, {
-        ok: true,
-        contractVersion: "1",
-        source: "operon-live",
-        stale: false,
-        generation:
-          generationDrift && secondPage
-            ? state.generation + 1
-            : state.generation,
-        settingsSignature: "fnv1a32:settings",
-        total: tasks.length,
-        count: pageTasks.length,
-        cursor: String(params.cursor ?? "0"),
-        nextCursor: generationDrift && !secondPage ? "1" : undefined,
-        hasMore: generationDrift && !secondPage,
-        tasks: pageTasks,
-        limitations: ["read-only"],
-      });
+          : [...tasks]; // the real Bridge copies tasks at request time
+      if (state.failPages > 0) {
+        state.failPages -= 1;
+        sendJson(response, 503, { error: "fixture_page_failure" });
+        return;
+      }
+      const sendPage = () =>
+        sendJson(response, 200, {
+          ok: true,
+          contractVersion: "1",
+          source: "operon-live",
+          stale: false,
+          generation:
+            generationDrift && secondPage
+              ? state.generation + 1
+              : state.generation,
+          settingsSignature: "fnv1a32:settings",
+          total: tasks.length,
+          count: pageTasks.length,
+          cursor: String(params.cursor ?? "0"),
+          nextCursor: generationDrift && !secondPage ? "1" : undefined,
+          hasMore: generationDrift && !secondPage,
+          tasks: pageTasks,
+          limitations: ["read-only"],
+        });
+      if (state.holdPage) state.holdPage.then(sendPage);
+      else sendPage();
     });
     return;
   }
@@ -753,7 +782,22 @@ const server = http.createServer((request, response) => {
         return;
       }
       const requestedFields = params.patch.fields ?? {};
-      const fields = { ...tasks[0].fields, ...requestedFields };
+      const raceIndex = String(params.idempotencyKey).startsWith("race-")
+        ? tasks.findIndex((task) => task.operonId === operonId)
+        : -1;
+      const fields = {
+        ...tasks[raceIndex >= 0 ? raceIndex : 0].fields,
+        ...requestedFields,
+      };
+      if (raceIndex >= 0 && params.dryRun === false) {
+        // Latency race fixtures: the Bridge indexes the change before it
+        // answers; `race-nogen-` keeps the generation to prove the MCP does
+        // not rely on the generation alone for read-after-write.
+        tasks[raceIndex] = makeTask(operonId, { fields });
+        if (!String(params.idempotencyKey).startsWith("race-nogen-")) {
+          state.generation += 1;
+        }
+      }
       if (
         state.mode === "gallery-reordered" &&
         Array.isArray(fields.taskGallery)
@@ -965,6 +1009,15 @@ process.env.SEMANTIC_SEARCH_PREWARM = "false";
 
 const { OperonService } = await import("../dist/services/operon/service.js");
 const { config } = await import("../dist/config/index.js");
+const { logger } = await import("../dist/utils/index.js");
+const loggedEvents = [];
+for (const level of ["info", "warning"]) {
+  const original = logger[level].bind(logger);
+  logger[level] = (message, context) => {
+    loggedEvents.push({ level, message, context });
+    return original(message, context);
+  };
+}
 
 try {
   const service = new OperonService();
@@ -2494,8 +2547,263 @@ try {
   );
   config.obsidianSharedCacheDbPath = originalDbPath;
 
+  // --- Latency: receipts before the refresh, read-after-write, coalescing ---
+  const waitFor = async (predicate, label) => {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error(`Timed out waiting for ${label}.`);
+  };
+  const holdPages = () => {
+    let release;
+    state.holdPage = new Promise((resolve) => {
+      release = resolve;
+    });
+    return () => {
+      state.holdPage = null;
+      release();
+    };
+  };
+  const settleBackground = async () => {
+    await waitFor(() => service.liveState.inFlight === null, "idle refresh");
+  };
+  const raceApply = (key, probe, operonId = "abc1234") =>
+    service.updateTask({
+      idempotencyKey: key,
+      dryRun: false,
+      operonId,
+      expectedRevision: tasks.find((task) => task.operonId === operonId)
+        .revision,
+      patch: { fields: { latency_probe: probe } },
+    });
+  const readProbe = async (operonId = "abc1234") => {
+    const page = await service.query({
+      operonIds: [operonId],
+      includeProperties: true,
+    });
+    return { page, probe: page.tasks[0]?.fields.latency_probe };
+  };
+  state.mode = "normal";
+  state.mutations = true;
+  config.operonMutationsEnabled = true;
+  config.mcpWriteMode = "guarded";
+  await settleBackground();
+  await service.ensureSnapshot(true);
+
+  // 1. The receipt returns while the post-apply refresh is still blocked,
+  //    with both duration events; concurrent reads share that refresh.
+  loggedEvents.length = 0;
+  let releasePages = holdPages();
+  let pagesBefore = state.postCalls;
+  const applied = await raceApply("race-receipt-1", "r1");
+  assert.equal(applied.status, "applied");
+  assert.equal(applied.after.fields.latency_probe, "r1");
+  await waitFor(() => state.postCalls === pagesBefore + 1, "background page");
+  assert.ok(
+    loggedEvents.some(
+      (event) =>
+        event.message === "Operon native apply returned." &&
+        Number.isFinite(event.context.durationMs),
+    ),
+  );
+  const sharedReads = [readProbe(), readProbe()];
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(
+    state.postCalls,
+    pagesBefore + 1,
+    "reads after the receipt must join the covering refresh",
+  );
+  releasePages();
+  for (const { page, probe } of await Promise.all(sharedReads)) {
+    assert.equal(probe, "r1", "a read after a receipt sees that mutation");
+    assert.equal(page.source, "operon-live");
+    assert.equal(page.stale, false);
+    assert.ok(page.snapshotAt);
+  }
+  assert.equal(state.postCalls, pagesBefore + 1);
+  await settleBackground();
+  const refreshEvent = loggedEvents.find(
+    (event) => event.message === "Operon post-apply snapshot refresh finished.",
+  );
+  assert.ok(refreshEvent && Number.isFinite(refreshEvent.context.durationMs));
+
+  // 2. A refresh that started before the mutation must not be reused, even
+  //    when the generation does not move.
+  state.generation += 1; // an outside edit makes the next read refresh
+  releasePages = holdPages();
+  pagesBefore = state.postCalls;
+  const earlyRead = readProbe();
+  await waitFor(() => state.postCalls === pagesBefore + 1, "early refresh");
+  await raceApply("race-nogen-early-1", "r2");
+  const lateRead = readProbe();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(state.postCalls, pagesBefore + 1, "late read waits, no join");
+  releasePages();
+  assert.equal((await earlyRead).probe, "r1", "the early read predates it");
+  const late = await lateRead;
+  assert.equal(late.probe, "r2", "the late read must see the mutation");
+  assert.equal(late.page.stale, false);
+  assert.equal(state.postCalls, pagesBefore + 2);
+  await settleBackground();
+  const sameGenerationGet = await service.getTask({ operonId: "abc1234" });
+  assert.equal(sameGenerationGet.stale, false);
+
+  // 3. Several mutations during one refresh: one follow-up refresh covers all.
+  releasePages = holdPages();
+  pagesBefore = state.postCalls;
+  await raceApply("race-many-1", "m1");
+  await waitFor(() => state.postCalls === pagesBefore + 1, "first refresh");
+  await raceApply("race-many-2", "m2");
+  await raceApply("race-many-3", "m3");
+  const coveredBefore = service.liveState.coveredMutations;
+  releasePages();
+  await settleBackground();
+  assert.equal(
+    state.postCalls,
+    pagesBefore + 2,
+    "mutations applied during a refresh coalesce into one follow-up refresh",
+  );
+  assert.equal(
+    service.liveState.coveredMutations,
+    service.liveState.appliedMutations,
+  );
+  assert.ok(service.liveState.coveredMutations > coveredBefore);
+  const afterMany = await readProbe();
+  assert.equal(afterMany.probe, "m3");
+  assert.equal(
+    state.postCalls,
+    pagesBefore + 2,
+    "the covered snapshot is reused",
+  );
+
+  // 4. Errors: a failed background refresh is logged and the next read
+  //    refreshes; if that also fails, the fallback is labelled stale.
+  loggedEvents.length = 0;
+  state.failPages = 2;
+  await raceApply("race-error-1", "e1");
+  await waitFor(
+    () =>
+      loggedEvents.some(
+        (event) =>
+          event.message ===
+          "Operon mutation succeeded but snapshot refresh failed.",
+      ),
+    "refresh failure warning",
+  );
+  const fallback = await readProbe();
+  assert.equal(fallback.page.source, "operon-cache");
+  assert.equal(fallback.page.stale, true);
+  assert.equal(fallback.probe, "m3", "the stale fallback is labelled stale");
+  const retried = await readProbe();
+  assert.equal(retried.page.source, "operon-live");
+  assert.equal(retried.page.stale, false);
+  assert.equal(retried.probe, "e1");
+  // Same failure when the mutation leaves the generation unchanged: the
+  // persisted snapshot still matches the live generation but predates the
+  // receipt, so it must not be served as live.
+  loggedEvents.length = 0;
+  state.failPages = 1;
+  await raceApply("race-nogen-error-1", "e2");
+  await waitFor(
+    () =>
+      loggedEvents.some(
+        (event) =>
+          event.message ===
+          "Operon mutation succeeded but snapshot refresh failed.",
+      ),
+    "same-generation refresh failure warning",
+  );
+  const sameGenerationRetry = await readProbe();
+  assert.equal(sameGenerationRetry.page.stale, false);
+  assert.equal(sameGenerationRetry.probe, "e2");
+
+  // 5. operon_get_task: direct single-task read after a mutation, parity
+  //    with the snapshot path, generation fence and not-found fallback.
+  releasePages = holdPages();
+  pagesBefore = state.postCalls;
+  const taskGetsBefore = state.taskGetCalls;
+  await raceApply("race-get-1", "g1");
+  const directAfterApply = await service.getTask({
+    operonId: "abc1234",
+    includeProperties: true,
+  });
+  assert.equal(directAfterApply.task.fields.latency_probe, "g1");
+  assert.equal(directAfterApply.source, "operon-live");
+  assert.equal(directAfterApply.stale, false);
+  assert.equal(directAfterApply.snapshotAgeMs, 0);
+  assert.ok(state.taskGetCalls > taskGetsBefore);
+  assert.equal(
+    state.postCalls,
+    pagesBefore + 1,
+    "get_task does not wait for a full snapshot",
+  );
+  releasePages();
+  await settleBackground();
+  const snapshotPathTask = await service.getTask({
+    operonId: "abc1234",
+    includeProperties: true,
+    forceRefresh: true,
+  });
+  assert.deepEqual(directAfterApply.task, snapshotPathTask.task);
+  const strippedDirect = await service.getTask({ operonId: "bcd2345" });
+  assert.equal("properties" in strippedDirect.task, false);
+  state.generation += 1;
+  state.taskGetGeneration = state.generation + 1;
+  pagesBefore = state.postCalls;
+  const fenced = await service.getTask({ operonId: "abc1234" });
+  assert.equal(fenced.stale, false);
+  assert.equal(
+    state.postCalls,
+    pagesBefore + 1,
+    "a generation mismatch falls back to the snapshot path",
+  );
+  state.taskGetGeneration = null;
+  await assert.rejects(
+    service.getTask({ operonId: "zzz9999" }),
+    (error) => error.code === "NOT_FOUND",
+  );
+  state.mode = "offline";
+  const offlineTask = await service.getTask({ operonId: "abc1234" });
+  assert.equal(offlineTask.source, "operon-cache");
+  assert.equal(offlineTask.stale, true);
+  await assert.rejects(
+    service.getTask({ operonId: "zzz9999" }),
+    (error) => error.code === "NOT_FOUND",
+  );
+  state.mode = "normal";
+
+  // 6. Contexts are isolated: another snapshot database never joins this
+  //    refresh, and keeps its own mutation bookkeeping.
+  const isolatedDbPath = path.join(tempRoot, "isolated-cache.sqlite");
+  const baseDbPath = config.obsidianSharedCacheDbPath;
+  config.obsidianSharedCacheDbPath = isolatedDbPath;
+  const isolatedService = new OperonService();
+  config.obsidianSharedCacheDbPath = baseDbPath;
+  assert.notEqual(isolatedService.liveState, service.liveState);
+  state.generation += 1;
+  releasePages = holdPages();
+  pagesBefore = state.postCalls;
+  const mainRead = service.ensureSnapshot();
+  await waitFor(() => state.postCalls === pagesBefore + 1, "main refresh");
+  const isolatedRead = isolatedService.ensureSnapshot();
+  await waitFor(
+    () => state.postCalls === pagesBefore + 2,
+    "isolated context starts its own refresh",
+  );
+  releasePages();
+  const [mainSnapshot, isolatedSnapshot] = await Promise.all([
+    mainRead,
+    isolatedRead,
+  ]);
+  assert.equal(mainSnapshot.stale, false);
+  assert.equal(isolatedSnapshot.stale, false);
+  assert.equal(isolatedService.liveState.appliedMutations, 0);
+  config.mcpWriteMode = "readonly";
+  config.operonMutationsEnabled = false;
+  state.mutations = false;
   console.log(
-    "PASS: Operon snapshot v2/v1 compatibility, typed ordered fields, periodic workflows, task-workflow recovery, readiness gating, postflight, scoped mutations, and durable/concurrent mutation idempotency",
+    "PASS: Operon snapshot v2/v1 compatibility, typed ordered fields, periodic workflows, task-workflow recovery, readiness gating, postflight, scoped mutations, and durable/concurrent mutation idempotency, background post-apply refresh races, and direct single-task reads",
   );
 } finally {
   await new Promise((resolve, reject) =>

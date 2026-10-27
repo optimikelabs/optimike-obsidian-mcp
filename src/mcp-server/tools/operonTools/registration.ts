@@ -173,7 +173,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_get_task",
     {
       description:
-        "Read one Operon task by stable operonId from the live-generation-validated snapshot or the last persisted stale fallback.",
+        "Read one Operon task by stable operonId: from the live-generation-validated snapshot when it is current, otherwise from a live single-task read fenced on the same index generation, or from the last persisted stale fallback.",
       inputSchema: mcpSchema(GetTaskSchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
