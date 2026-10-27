@@ -34,7 +34,10 @@ test("note names: the create routes refuse names that are not valid everywhere a
     const invalidNames = ["Note [x].md", "Idée #4.md", "Idée ^1.md", "Fin: suite.md", NFD_E_ACUTE + "cole.md",
       "Note" + NARROW_NBSP + "x.md", "a" + ZERO_WIDTH + "b.md", "Note .md", "CON.md"];
     for (const invalid of invalidNames) {
-      assert.equal(call("preflight", { contractVersion: 1, path: invalid }).code, 400, invalid);
+      const rejection = call("preflight", { contractVersion: 1, path: invalid });
+      assert.equal(rejection.code, 400, invalid);
+      assert.match(rejection.result.error.reasonCode, /^note_(?:name_|create_request_invalid)/u);
+      assert.equal(JSON.stringify(rejection.result).includes(invalid), false);
     }
     // apply re-validates: a refused name cannot be created through a forged apply
     const ok = call("preflight", { contractVersion: 1, path: "Ok.md" }).result;
@@ -50,7 +53,9 @@ test("note names: the create routes refuse names that are not valid everywhere a
     assert.equal(files.hasFoldedSibling("É".normalize("NFD") + "cole.md"), true);
     assert.equal(files.hasFoldedSibling("École.md"), false, "an exact twin is 'exists', not a folded sibling");
     assert.equal(files.hasFoldedSibling("Autre.md"), false);
-    assert.equal(call("preflight", { contractVersion: 1, path: "école.md" }).code, 400);
+    const collision = call("preflight", { contractVersion: 1, path: "école.md" });
+    assert.equal(collision.code, 400);
+    assert.equal(collision.result.error.reasonCode, "note_name_case_collision");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

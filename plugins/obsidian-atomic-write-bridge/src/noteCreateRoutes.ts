@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import type { App } from "obsidian";
 import { nativeNotePath } from "../../../src/services/nativeNoteMoveContract.js";
-import { assertNoteName } from "../../../src/services/noteNameRules.js";
+import { assertNoteName, NoteNameError, noteNameFixedHint } from "../../../src/services/noteNameRules.js";
 import { createPolicyDigest, noteCreateHash, validateNoteCreate, type NoteCreateApply } from "../../../src/services/noteCreateContract.js";
 import { ExclusiveNoteCreateFiles, NoteCreateExists } from "./exclusiveNoteCreate.js";
 import { noteCreateDatePolicy } from "./noteCreatePolicy.js";
@@ -24,7 +24,8 @@ export function createNoteCreateRoutes(app: App, options: { binding: () => strin
     assertNoteName(path);
     if (!options.enabled()) throw new Error("note_creates_disabled");
     const policy = noteCreateDatePolicy(app), policyDigest = createPolicyDigest(policy);
-    if (app.vault.getAbstractFileByPath(path) || files.inspect(path).exists || files.hasFoldedSibling(path)) throw new NoteCreateExists();
+    if (files.hasFoldedSibling(path)) throw new NoteNameError({ reasonCode: "note_name_case_collision", hint: noteNameFixedHint("note_name_case_collision") });
+    if (app.vault.getAbstractFileByPath(path) || files.inspect(path).exists) throw new NoteCreateExists();
     return { contractVersion: 1 as const, path, bindingFingerprint, absent: true as const, enabled: true as const, policy, policyDigest };
   }
   function inspect(path: string) {
@@ -56,10 +57,11 @@ export function createNoteCreateRoutes(app: App, options: { binding: () => strin
       try { res.status(200).json(handler(req?.body)); }
       catch (error) {
         const known = error instanceof Error ? error.message : "";
-        const reasonCode = error instanceof NoteCreateExists ? "note_create_target_exists"
+        const reasonCode = error instanceof NoteNameError ? error.violation.reasonCode
+          : error instanceof NoteCreateExists ? "note_create_target_exists"
           : known === "note_creates_disabled" ? "note_create_disabled"
           : (known === "invalid_create_request" || known === "invalid_note_path") ? "note_create_request_invalid" : "note_create_failed";
-        const status = reasonCode === "note_create_target_exists" ? 409 : reasonCode === "note_create_disabled" ? 403 : reasonCode === "note_create_request_invalid" ? 400 : 500;
+        const status = error instanceof NoteNameError ? 400 : reasonCode === "note_create_target_exists" ? 409 : reasonCode === "note_create_disabled" ? 403 : reasonCode === "note_create_request_invalid" ? 400 : 500;
         res.status(status).json({ ok: false, contractVersion: 1, retryable: false,
           error: { code: "note_create_rejected", reasonCode, message: "The note creation request could not be admitted or observed." } });
       }
