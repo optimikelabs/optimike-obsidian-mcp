@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parse, stringify } from "yaml";
 import { inspectNativeFrontmatter } from "../dist/services/obsidianFrontmatterFormat.js";
+import { BaseErrorCode, McpError } from "../dist/types-global/errors.js";
 
 const binding = "a".repeat(64);
-const status = { frontmatterFormat: { contractVersion: 1, supported: true }, backend: { bindingFingerprint: binding } };
+const status = { plugin: { id: "obsidian-atomic-write-bridge", version: "0.8.3" }, frontmatterFormat: { contractVersion: 1, supported: true }, backend: { bindingFingerprint: binding } };
 const backend = { status: async () => status, inspectFrontmatterFormat: async yaml => ({ ok: true, contractVersion: 1, bindingFingerprint: binding,
   canonicalYaml: stringify(parse(yaml), null, { nullStr: "", lineWidth: 0, aliasDuplicateObjects: false }), warnings: [] }) };
 
@@ -24,4 +25,23 @@ test("fails closed on missing capability, identity mismatch or invalid route res
     { ...backend, inspectFrontmatterFormat: async () => ({ invalid: true }) },
   ]) await assert.rejects(inspectNativeFrontmatter(value, "---\na: 1\n---\n"));
   await assert.rejects(inspectNativeFrontmatter(backend, "---\na: 1\n---\n", "b".repeat(64)));
+});
+
+test("requires a stable Bridge 0.8.3 or later", async () => {
+  for (const version of ["0.8.2", "0.8.3-rc.1", "test", undefined]) {
+    const old = { ...backend, status: async () => ({ ...status, plugin: { id: "obsidian-atomic-write-bridge", version } }) };
+    await assert.rejects(inspectNativeFrontmatter(old, "texte\n"), error => error.code === BaseErrorCode.SERVICE_UNAVAILABLE);
+  }
+  for (const version of ["0.8.3", "0.8.4", "0.9.0", "1.0.0", "0.8.3+build.1"]) {
+    const newer = { ...backend, status: async () => ({ ...status, plugin: { id: "obsidian-atomic-write-bridge", version } }) };
+    assert.equal((await inspectNativeFrontmatter(newer, "texte\n")).content, "texte\n");
+  }
+});
+
+test("invalid YAML is a validation error; infrastructure failures remain unavailable", async () => {
+  const invalid = { ...backend, inspectFrontmatterFormat: async () => { throw new McpError(BaseErrorCode.VALIDATION_ERROR, "secret parser diagnostic", { reasonCode: "invalid_frontmatter" }); } };
+  await assert.rejects(inspectNativeFrontmatter(invalid, "---\nsecret: x\nsecret: y\n---\n"), error =>
+    error.code === BaseErrorCode.VALIDATION_ERROR && error.details.reasonCode === "invalid_frontmatter" && !error.message.includes("secret"));
+  const down = { ...backend, inspectFrontmatterFormat: async () => { throw new Error("secret"); } };
+  await assert.rejects(inspectNativeFrontmatter(down, "---\na: 1\n---\n"), error => error.code === BaseErrorCode.SERVICE_UNAVAILABLE && !error.message.includes("secret"));
 });

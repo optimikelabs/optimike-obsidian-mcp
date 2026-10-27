@@ -38,7 +38,7 @@ export const registerObsidianManageFrontmatterTool = async (
       module: "ObsidianManageFrontmatterRegistration",
     });
 
-  logger.info(`Attempting to register tool: ${toolName}`, registrationContext);
+  logger.debug(`Attempting to register tool: ${toolName}`, registrationContext);
 
   await ErrorHandler.tryCatch(
     async () => {
@@ -115,7 +115,7 @@ export const registerObsidianManageFrontmatterTool = async (
         },
       );
 
-      logger.info(
+      logger.debug(
         `Tool registered successfully: ${toolName}`,
         registrationContext,
       );

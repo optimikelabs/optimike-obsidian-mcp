@@ -22,8 +22,14 @@ test("read-only serializer uses the observed Obsidian options and signals types"
 });
 
 test("rejects non-mapping roots and never returns parser diagnostics", () => {
-  for (const input of ["- a\n", "texte\n", "null\n"]) {
+  for (const input of ["- a\n", "texte\n", "null\n", "secret: first\nsecret: second\n"]) {
     assert.throws(() => inspectFrontmatterFormat(input, parse, obsidianOptions, types), /invalid_frontmatter/);
+  }
+});
+
+test("empty frontmatter is an empty mapping", () => {
+  for (const yaml of ["", "\r\n", "  \n"]) {
+    assert.equal(inspectFrontmatterFormat(yaml, parse, obsidianOptions, types).canonicalYaml, "{}\n");
   }
 });
 

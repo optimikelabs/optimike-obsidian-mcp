@@ -34,7 +34,7 @@ import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { createNativeNoteMoveRoutes } from "./nativeNoteMoveRoutes.js";
-import { inspectFrontmatterFormat } from "./frontmatterFormat.js";
+import { inspectFrontmatterFormat, InvalidFrontmatter } from "./frontmatterFormat.js";
 import {
   RestExtensionLifecycle,
   RestExtensionPartialMountError,
@@ -105,6 +105,13 @@ type AtomicPublicErrorDescriptor = {
 };
 
 const ATOMIC_PUBLIC_ERRORS: Record<string, AtomicPublicErrorDescriptor> = {
+  invalid_frontmatter: {
+    code: "invalid_frontmatter",
+    reasonCode: "invalid_frontmatter",
+    status: "rejected",
+    retryable: false,
+    message: "The frontmatter must be a valid YAML mapping without duplicate keys.",
+  },
   invalid_request: {
     code: "invalid_request",
     reasonCode: "request_rejected",
@@ -436,9 +443,10 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             }
             const result = inspectFrontmatterFormat(body.yaml, parseYaml, stringifyYaml, types);
             sendJson(res, 200, { ok: true, contractVersion: 1, bindingFingerprint: this.bindingFingerprint, ...result });
-          } catch {
+          } catch (error) {
             // Parser diagnostics can contain private frontmatter; never return them.
-            sendJson(res, 400, errorPayload("invalid_request"));
+            const invalid = safeInstanceOf(error, InvalidFrontmatter);
+            sendJson(res, invalid ? 400 : 503, errorPayload(invalid ? "invalid_frontmatter" : "read_error"));
           }
         });
 

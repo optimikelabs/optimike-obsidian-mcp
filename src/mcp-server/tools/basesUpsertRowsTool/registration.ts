@@ -68,7 +68,7 @@ export async function registerBasesUpsertRowsTool(
         },
       );
 
-      logger.info(
+      logger.debug(
         `Tool ${TOOL_NAME} enregistré avec succès`,
         registrationContext,
       );

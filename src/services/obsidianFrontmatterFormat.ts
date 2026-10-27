@@ -80,15 +80,29 @@ export async function inspectNativeFrontmatter(backend: Pick<AtomicWriteBackend,
   let status;
   try { status = await backend.status(); } catch { throw unavailable(); }
   const binding = status?.backend?.bindingFingerprint;
-  if (status?.frontmatterFormat?.contractVersion !== 1 || status.frontmatterFormat.supported !== true ||
+  if (!supportedBridgeVersion(status?.plugin?.version) || status?.frontmatterFormat?.contractVersion !== 1 || status.frontmatterFormat.supported !== true ||
       !backend.inspectFrontmatterFormat || !/^[a-f0-9]{64}$/u.test(binding ?? "") || (expectedBinding && binding !== expectedBinding)) throw unavailable();
   const envelope = frontmatterEnvelope(content);
   if (!envelope) return { content, warnings: [] as FrontmatterTypeWarning[], normalized: false, bindingFingerprint: binding };
   let result: z.infer<typeof ResultSchema>;
-  try { result = ResultSchema.parse(await backend.inspectFrontmatterFormat(envelope.yaml)); } catch { throw unavailable(); }
+  try { result = ResultSchema.parse(await backend.inspectFrontmatterFormat(envelope.yaml)); } catch (error) {
+    if (error instanceof McpError && error.code === BaseErrorCode.VALIDATION_ERROR && error.details?.reasonCode === "invalid_frontmatter") {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The frontmatter must be a valid YAML mapping without duplicate keys.", { reasonCode: "invalid_frontmatter" });
+    }
+    throw unavailable();
+  }
   if (result.bindingFingerprint !== binding) throw unavailable();
   return { content: content.slice(0, envelope.start) + result.canonicalYaml + content.slice(envelope.end),
     warnings: result.warnings, normalized: result.canonicalYaml !== envelope.yaml, bindingFingerprint: binding };
+}
+
+function supportedBridgeVersion(version: unknown): boolean {
+  if (typeof version !== "string") return false;
+  const parts = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\+[0-9A-Za-z.-]+)?$/u.exec(version);
+  if (!parts) return false;
+  const [major, minor, patch] = parts.slice(1).map(Number);
+  if (![major, minor, patch].every(Number.isSafeInteger)) return false;
+  return major > 0 || minor > 8 || (minor === 8 && patch >= 3);
 }
 
 function unavailable() {

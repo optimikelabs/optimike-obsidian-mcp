@@ -31,7 +31,7 @@ export const registerQueryTasksTool = async (
       module: "QueryTasksRegistration",
     });
 
-  logger.info(`Attempting to register tool: ${toolName}`, registrationContext);
+  logger.debug(`Attempting to register tool: ${toolName}`, registrationContext);
 
   await ErrorHandler.tryCatch(
     async () => {
@@ -82,7 +82,7 @@ export const registerQueryTasksTool = async (
         },
       );
 
-      logger.info(
+      logger.debug(
         `Tool registered successfully: ${toolName}`,
         registrationContext,
       );

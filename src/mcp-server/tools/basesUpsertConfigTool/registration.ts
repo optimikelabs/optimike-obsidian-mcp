@@ -69,7 +69,7 @@ export async function registerBasesUpsertConfigTool(
         },
       );
 
-      logger.info(
+      logger.debug(
         `Tool ${TOOL_NAME} enregistré avec succès`,
         registrationContext,
       );

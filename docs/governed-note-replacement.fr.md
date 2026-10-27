@@ -287,3 +287,7 @@ Un refus confirmé par les contrôles internes avant tout envoi CAS reste imméd
 ## Reçus et mesures
 
 Les quatre outils acceptent `responseMode: compact | detailed` (défaut compact) et `diagnostics: true`. Le reçu compact conserve l’état, les permissions et le délai de postflight ; `detailedReceipt` indique la lecture status de la preuve complète. Les durées couvrent uniquement l’appel serveur courant et ne modifient pas le plan scellé.
+
+## Compatibilité de l’intégration audit
+
+L’inspection native du frontmatter exige Atomic Write Bridge 0.8.3 ou ultérieur. Basculer et restaurer le MCP et le Bridge ensemble, après contrôle des opérations planned, applying ou outcome-unknown et des verrous de préparation ; vérifier les empreintes des artefacts, pas seulement les versions.

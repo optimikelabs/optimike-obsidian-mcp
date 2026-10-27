@@ -65,7 +65,7 @@ const fake = {
       contractVersion: 1,
       datePreparation: { contractVersion: 1, supported: true },
       frontmatterFormat: { contractVersion: 1, supported: formatAvailable },
-      plugin: { id: "atomic", version: "test" },
+      plugin: { id: "atomic", version: "0.8.3" },
       backend: {
         kind: "obsidian-vault-process",
         bindingFingerprint: binding,

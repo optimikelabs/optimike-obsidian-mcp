@@ -230,6 +230,12 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   ...NOTE_NAME_REASON_CODES,
+  "frontmatter_native_render_invalid",
+  "frontmatter_normalization_proof_mismatch",
+  "text_patch_normalization_proof_mismatch",
+  "note_source_proof_invalid",
+  "frontmatter_envelope_invalid",
+  "invalid_frontmatter",
   "ambiguous_base_view",
   "ambiguous_delete_comment",
   "ambiguous_trailing_comment",
@@ -609,6 +615,8 @@ function safeDiagnosticFields(
 }
 
 function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
+  if (code === BaseErrorCode.VALIDATION_ERROR && reasonCode === "invalid_frontmatter")
+    return "Le frontmatter doit être une table YAML valide sans clés dupliquées.";
   if (reasonCode === "date_preparation_unverified")
     return "La préparation des dates a pu modifier ou normaliser la note. Une revue administrative est nécessaire avant reprise.";
   if (reasonCode === "atomic_write_creation_property_missing")

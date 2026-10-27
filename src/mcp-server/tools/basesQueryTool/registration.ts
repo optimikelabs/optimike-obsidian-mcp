@@ -88,7 +88,7 @@ export async function registerBasesQueryTool(
         },
       );
 
-      logger.info(
+      logger.debug(
         `Tool ${TOOL_NAME} enregistré avec succès`,
         registrationContext,
       );

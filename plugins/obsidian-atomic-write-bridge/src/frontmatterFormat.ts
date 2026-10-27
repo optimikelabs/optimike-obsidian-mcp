@@ -1,3 +1,7 @@
+export class InvalidFrontmatter extends Error {
+  constructor() { super("invalid_frontmatter"); }
+}
+
 /** Read-only adapter to Obsidian's own YAML serializer and property registry. */
 export function inspectFrontmatterFormat(
   yaml: string,
@@ -5,9 +9,11 @@ export function inspectFrontmatterFormat(
   stringify: (value: unknown) => string,
   types: { getAssignedWidget(key: string): string | null },
 ) {
-  const value = parse(yaml);
+  let value: unknown;
+  try { value = yaml.trim() === "" ? {} : parse(yaml); }
+  catch { throw new InvalidFrontmatter(); }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("invalid_frontmatter");
+    throw new InvalidFrontmatter();
   }
   const warnings: Array<{ key: string; reason: "untyped" | "type_mismatch" | "unknown_widget" | "empty_value"; declaredType?: string; actualType?: string }> = [];
   const known = new Set(["text", "multitext", "number", "checkbox", "date", "datetime"]);

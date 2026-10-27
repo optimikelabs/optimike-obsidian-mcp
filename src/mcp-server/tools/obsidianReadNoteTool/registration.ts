@@ -54,7 +54,7 @@ export const registerObsidianReadNoteTool = async (
       module: "ObsidianReadNoteRegistration", // Identify the module
     });
 
-  logger.info(`Attempting to register tool: ${toolName}`, registrationContext);
+  logger.debug(`Attempting to register tool: ${toolName}`, registrationContext);
 
   // Wrap the registration logic in a tryCatch block for robust error handling during server setup.
   await ErrorHandler.tryCatch(
@@ -134,7 +134,7 @@ export const registerObsidianReadNoteTool = async (
         },
       ); // End of server.tool call
 
-      logger.info(
+      logger.debug(
         `Tool registered successfully: ${toolName}`,
         registrationContext,
       );

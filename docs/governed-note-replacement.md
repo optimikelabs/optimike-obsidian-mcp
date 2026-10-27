@@ -273,3 +273,7 @@ A refusal proven by internal checks before any CAS dispatch is immediate: it doe
 ## Receipts and timings
 
 All four tools accept `responseMode: compact | detailed` (default compact) and `diagnostics: true`. Compact retains state, permissions and postflight timing; `detailedReceipt` provides the status call for full proof. Timings cover the current server call only and do not alter the sealed plan.
+
+## Audit integration compatibility
+
+Native frontmatter inspection requires Atomic Write Bridge 0.8.3 or later. Deploy and roll back the MCP and Bridge as one pair, after checking for planned, applying or outcome-unknown operations and unresolved preparation fences; compare artifact hashes, not just versions.

@@ -57,7 +57,7 @@ export async function registerObsidianNoteLinksTool(
           };
         },
       );
-      logger.info(
+      logger.debug(
         "Tool registered successfully: " + toolName,
         registrationContext,
       );

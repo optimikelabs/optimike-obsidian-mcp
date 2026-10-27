@@ -1816,7 +1816,7 @@ async function createMcpServerInstance(
   const context = requestContextService.createRequestContext({
     operation: "createMcpServerInstance",
   });
-  logger.info("Initializing MCP server instance with shared services", context);
+  logger.debug("Initializing MCP server instance with shared services", context);
 
   requestContextService.configure({
     appName: config.mcpServerName,
@@ -1979,7 +1979,7 @@ async function createMcpServerInstance(
       );
     }
 
-    logger.info("Resources and tools registered successfully", context);
+    logger.debug("Resources and tools registered successfully", context);
 
     if (vaultCacheService && servingContext?.era !== "modern") {
       logger.info(

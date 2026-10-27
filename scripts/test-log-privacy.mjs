@@ -622,3 +622,9 @@ for (const [field, reason] of [["reason", "create_markdown_invalid"], ["reasonCo
   assert.equal(wire.error.details.reasonCode, reason === "create_markdown_invalid" ? reason : undefined);
   assert.doesNotMatch(JSON.stringify(wire), /PRIVATE_SECRET_PATH|P0-BACKEND-ONLY-MARKER/u);
 }
+
+for (const reason of ["frontmatter_native_render_invalid", "frontmatter_normalization_proof_mismatch", "text_patch_normalization_proof_mismatch", "note_source_proof_invalid", "frontmatter_envelope_invalid", "invalid_frontmatter"]) {
+  const wire = publicMcpToolErrorPayload(new McpError(BaseErrorCode.VALIDATION_ERROR, marker, { reason, privateContent: marker }), { operation: "test", params: {} });
+  assert.equal(wire.error.details.reasonCode, reason);
+  assert.doesNotMatch(JSON.stringify(wire), /P0-PRIVATE-PAYLOAD-MARKER/u);
+}
