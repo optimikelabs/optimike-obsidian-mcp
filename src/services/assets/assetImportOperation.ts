@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { operationDigest } from "../operations/contract.js";
 import { ObsidianNoteReplaceJournal, ObsidianNoteReplaceConcurrencyError, type ObsidianNoteReplacePlan } from "../operations/obsidianNoteReplaceJournal.js";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";

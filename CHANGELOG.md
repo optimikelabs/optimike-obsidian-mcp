@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Fix the production `npm audit` gate (`--audit-level=high`), which started failing on 2026-10-27 for reasons independent of the code: Zod `<4.6.6` (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections; no patched 3.x exists). Move `zod` to 4.6.7 and keep the existing business schemas on the unchanged Zod 3 API through the `zod/v3` subpath, so validation behaviour does not change. The nested Zod copies of `@modelcontextprotocol/{client,core,server}` are deduplicated onto 4.6.7.
+- Update `openai` to 6.49.0 (its 4.55.0–5.23.2 range depended on the vulnerable Zod; only the embeddings client and a chat-message type are used), `sanitize-html` to 2.18.1 (GHSA-x3q4-9hxx-gx8m, GHSA-374f-7chj-9948, GHSA-cv27-6wvh-8x7j) and `hono` to 4.13.14 (GHSA-5r4p-p66f-jhc7). The token counter now skips non-function (custom) tool calls introduced by the `openai` 6 types.
+
 - The format route uses Obsidian's own serializer, is capability-negotiated and bound to the vault identity. Its dedicated refusal field deliberately returns only a canonical rendering of caller-supplied frontmatter, never parser diagnostics or the note body. This is an explicit, narrowly scoped exception to content-free public error diagnostics.
 
 ### Limits

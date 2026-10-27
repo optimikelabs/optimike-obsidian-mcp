@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { mcpSchema } from "../dist/mcp-server/mcpSchema.js";
 
 process.env.OBSIDIAN_RUNTIME_MODE = "hybrid";

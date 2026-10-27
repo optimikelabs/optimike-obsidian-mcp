@@ -29,7 +29,7 @@ import { load } from "js-yaml";
 import { operationDigest } from "../../../services/operations/contract.js";
 import { compileFrontmatterPatch, nativeFrontmatterPatchKeys, type FrontmatterPatchOperation } from "../../../services/frontmatterPatchCompiler.js";
 import { DatePreparationPlanFailure, frontmatterEnvelope, inspectNativeFrontmatter, rejectNonCanonical } from "../../../services/obsidianFrontmatterFormat.js";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { config } from "../../../config/index.js";
 import { validateObsidianMarkdown } from "../../../services/obsidianFormatService.js";
 import type { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";

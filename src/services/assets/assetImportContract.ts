@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { assetSegment, assetFilename, ASSET_MAX_BYTES } from "./windowsAssetFiles.js";
 
 export const ASSET_IMPORT_KIND = "obsidian.asset.import" as const;

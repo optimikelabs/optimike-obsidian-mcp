@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { BaseRowsPatchRuntime } from "../../../services/baseRowsPatchRuntime.js";
 import { restBaseRowSelection } from "../../../services/baseRowSelection.js";
 import { registerBaseRowsPatchTools } from "../baseRowsPatchTools/index.js";

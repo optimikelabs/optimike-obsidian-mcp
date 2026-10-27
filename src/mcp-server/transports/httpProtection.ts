@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { isIP } from "node:net";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { AuthInfo } from "./auth/index.js";
 import type { VerifiedHttpIdentity } from "./httpRequestState.js";
 

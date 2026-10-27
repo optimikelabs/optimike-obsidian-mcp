@@ -1,5 +1,5 @@
 import path from "node:path"; // node:path provides OS-specific path functions; using path.posix for vault path manipulation.
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   ObsidianRestApiService,
   VaultCacheService,

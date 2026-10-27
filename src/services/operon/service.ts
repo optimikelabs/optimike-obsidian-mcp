@@ -71,7 +71,7 @@ import {
   type OperonTransitionTask,
   type OperonUpdateTask,
 } from "./contract.js";
-import type { z } from "zod";
+import type { z } from "zod/v3";
 
 const BRIDGE_PREFIX = "/extensions/optimike-operon-bridge/v1";
 const PAGE_SIZE = 500;

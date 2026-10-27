@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { dump } from "js-yaml";
 import {
   NoteJson,

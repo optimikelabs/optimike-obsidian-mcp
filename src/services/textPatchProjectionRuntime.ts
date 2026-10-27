@@ -7,7 +7,7 @@ import {
   type FrontmatterPatchProof,
 } from "./frontmatterPatchCompiler.js";
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   PROJECTED_IDEMPOTENCY_KEY_PREFIX,
   type GovernedNoteReplacePlanView,

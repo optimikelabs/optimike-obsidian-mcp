@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { NativeNoteMoveOperationAdapter } from "../../../services/operations/nativeNoteMoveOperationAdapter.js";
 import { publicMcpToolErrorPayload } from "../../../utils/internal/errorHandler.js";
 import {

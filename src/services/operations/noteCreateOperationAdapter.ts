@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { load } from "js-yaml";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { validateObsidianMarkdown } from "../obsidianFormatService.js";

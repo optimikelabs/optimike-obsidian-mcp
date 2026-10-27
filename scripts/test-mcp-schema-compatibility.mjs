@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { Client as V1Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer as V1Server } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport as V1Transport } from "@modelcontextprotocol/sdk/inMemory.js";

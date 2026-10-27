@@ -11,7 +11,7 @@ const { processObsidianListNotes, ObsidianListNotesInputSchema } = await import(
 );
 const { processObsidianGlobalSearch, ObsidianGlobalSearchInputSchemaShape } =
   await import("../dist/mcp-server/tools/obsidianGlobalSearchTool/logic.js");
-const { z } = await import("zod");
+const { z } = await import("zod/v3");
 const schema = z.object(ObsidianGlobalSearchInputSchemaShape);
 const context = {
   requestId: "reliability-retrieval",

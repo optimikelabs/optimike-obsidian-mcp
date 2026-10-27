@@ -1,7 +1,7 @@
 import { HttpBindings } from "@hono/node-server";
 import { Context, Next } from "hono";
 import { existsSync } from "node:fs";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { config } from "../../config/index.js";
 import type { VaultCacheService } from "../../services/obsidianRestAPI/vaultCache/index.js";
 import { logger, requestContextService } from "../../utils/index.js";

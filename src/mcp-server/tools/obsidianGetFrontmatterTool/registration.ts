@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { READ_ONLY_TOOL_ANNOTATIONS } from "../../toolAnnotations.js";
 import { mcpSchema } from "../../mcpSchema.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";

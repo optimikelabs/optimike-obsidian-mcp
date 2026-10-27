@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   OperationCockpit,
   OPERATION_COCKPIT_DEFAULT_LIMIT,

@@ -2,7 +2,7 @@
  * @fileoverview Logic for the `bases_query` MCP tool.
  */
 
-import { z } from "zod";
+import { z } from "zod/v3";
 import { LocalBasesService } from "../../../services/localBasesService.js";
 import { ObsidianRestApiService } from "../../../services/obsidianRestAPI/index.js";
 import {
