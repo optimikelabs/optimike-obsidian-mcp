@@ -2,6 +2,8 @@
 
 French version: [governed-note-replacement.fr.md](governed-note-replacement.fr.md)
 
+Unsent `planned` records expire after `MCP_OBSIDIAN_PLANNED_RETENTION_DAYS` (default 30, range 1–3650), at journal maintenance on startup or subsequent journal access. Expiry atomically changes only still-planned rows to terminal `expired`, clears their private content, and retains the sealed hash. Apply racing expiry can win only by transitioning the plan first. Expired leases are removed during maintenance. Stable terminal receipts are purged after the existing retention window; after purge the journal no longer guarantees idempotency for that key. `applying` and `outcome_unknown` are never expired or purged as failed attempts.
+
 Optimike Obsidian MCP 2.6.0 exposes the first public non-Operon mutation backed by the
 common operation-runtime vocabulary. It replaces the complete content of one
 existing Markdown note without exposing a generic `operation_*` API.

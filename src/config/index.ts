@@ -194,6 +194,7 @@ const EnvSchema = z
       .min(1_000)
       .max(300_000)
       .default(30_000),
+    MCP_OBSIDIAN_PLANNED_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
     MCP_OBSIDIAN_NOTE_REPLACE_PROFILE_ID: z
       .string()
       .regex(
@@ -552,6 +553,7 @@ export const config = {
     ),
   obsidianNoteReplaceExecutionLeaseMs:
     env.MCP_OBSIDIAN_NOTE_REPLACE_EXECUTION_LEASE_MS,
+  obsidianPlannedRetentionMs: env.MCP_OBSIDIAN_PLANNED_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   obsidianBaseFormulaJournalPath:
     env.MCP_OBSIDIAN_BASE_FORMULA_JOURNAL_PATH ||
     path.join(

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Filter pending operations by kind, state and minimum age before pagination.
+- Expire unsent plans after a configurable retention window and remove expired runtime leases; uncertain effects are preserved.
 
 ### Fixed
 
