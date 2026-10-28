@@ -443,6 +443,14 @@ export function canonicalizeCanvasPatchOperations(
   });
 }
 
+/** A new Canvas must already be a valid graph so the governed patch lifecycle can edit it later. */
+export function validateCanvasForCreate(source: string): { nodes: number; edges: number } {
+  const root = parseStrict(boundedCanvasContent(source));
+  const error = graphError(root);
+  if (error) fail(error, "canvas_graph_invalid");
+  return { nodes: entityArray(root, "nodes").length, edges: entityArray(root, "edges").length };
+}
+
 export function compileCanvasPatch(
   source: string,
   inputOperations: CanvasPatchOperation[],

@@ -6,12 +6,12 @@
     "vault-cache",
     "asset-policy"
   ],
-  "toolCount": 99,
+  "toolCount": 105,
   "classificationCounts": {
     "canonical-unique": 48,
     "alias-redundant": 0,
     "compatibility-historical": 1,
-    "governed-operation": 35,
+    "governed-operation": 41,
     "diagnostic": 10,
     "administration": 5
   },
@@ -21,6 +21,9 @@
       "asset_import_plan",
       "asset_import_status",
       "bases_create",
+      "bases_create_apply",
+      "bases_create_plan",
+      "bases_create_status",
       "bases_formula_patch_apply",
       "bases_formula_patch_plan",
       "bases_formula_patch_recover",
@@ -45,6 +48,9 @@
       "external_runtime_status",
       "external_stat",
       "list_all_tasks",
+      "obsidian_canvas_create_apply",
+      "obsidian_canvas_create_plan",
+      "obsidian_canvas_create_status",
       "obsidian_canvas_patch_apply",
       "obsidian_canvas_patch_plan",
       "obsidian_canvas_patch_recover",
@@ -118,6 +124,9 @@
       "asset_import_plan",
       "asset_import_status",
       "bases_create",
+      "bases_create_apply",
+      "bases_create_plan",
+      "bases_create_status",
       "bases_formula_patch_apply",
       "bases_formula_patch_plan",
       "bases_formula_patch_recover",
@@ -142,6 +151,9 @@
       "external_runtime_status",
       "external_stat",
       "list_all_tasks",
+      "obsidian_canvas_create_apply",
+      "obsidian_canvas_create_plan",
+      "obsidian_canvas_create_status",
       "obsidian_canvas_patch_apply",
       "obsidian_canvas_patch_plan",
       "obsidian_canvas_patch_recover",
@@ -545,6 +557,9 @@
       "modes": {
         "live": [
           "bases_create",
+          "bases_create_apply",
+          "bases_create_plan",
+          "bases_create_status",
           "bases_formula_patch_apply",
           "bases_formula_patch_plan",
           "bases_formula_patch_recover",
@@ -556,6 +571,9 @@
           "bases_rows_patch_plan",
           "bases_rows_patch_status",
           "bases_upsert_rows",
+          "obsidian_canvas_create_apply",
+          "obsidian_canvas_create_plan",
+          "obsidian_canvas_create_status",
           "obsidian_canvas_patch_apply",
           "obsidian_canvas_patch_plan",
           "obsidian_canvas_patch_recover",
@@ -591,6 +609,9 @@
         ],
         "hybrid-live": [
           "bases_create",
+          "bases_create_apply",
+          "bases_create_plan",
+          "bases_create_status",
           "bases_formula_patch_apply",
           "bases_formula_patch_plan",
           "bases_formula_patch_recover",
@@ -602,6 +623,9 @@
           "bases_rows_patch_plan",
           "bases_rows_patch_status",
           "bases_upsert_rows",
+          "obsidian_canvas_create_apply",
+          "obsidian_canvas_create_plan",
+          "obsidian_canvas_create_status",
           "obsidian_canvas_patch_apply",
           "obsidian_canvas_patch_plan",
           "obsidian_canvas_patch_recover",
@@ -841,6 +865,9 @@
           "asset_import_plan",
           "asset_import_status",
           "bases_create",
+          "bases_create_apply",
+          "bases_create_plan",
+          "bases_create_status",
           "bases_formula_patch_apply",
           "bases_formula_patch_plan",
           "bases_formula_patch_recover",
@@ -865,6 +892,9 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_canvas_create_apply",
+          "obsidian_canvas_create_plan",
+          "obsidian_canvas_create_status",
           "obsidian_canvas_patch_apply",
           "obsidian_canvas_patch_plan",
           "obsidian_canvas_patch_recover",
@@ -938,6 +968,9 @@
           "asset_import_plan",
           "asset_import_status",
           "bases_create",
+          "bases_create_apply",
+          "bases_create_plan",
+          "bases_create_status",
           "bases_formula_patch_apply",
           "bases_formula_patch_plan",
           "bases_formula_patch_recover",
@@ -962,6 +995,9 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_canvas_create_apply",
+          "obsidian_canvas_create_plan",
+          "obsidian_canvas_create_status",
           "obsidian_canvas_patch_apply",
           "obsidian_canvas_patch_plan",
           "obsidian_canvas_patch_recover",
@@ -1252,6 +1288,9 @@
           "asset_import_plan",
           "asset_import_status",
           "bases_create",
+          "bases_create_apply",
+          "bases_create_plan",
+          "bases_create_status",
           "bases_formula_patch_apply",
           "bases_formula_patch_plan",
           "bases_formula_patch_recover",
@@ -1275,6 +1314,9 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_canvas_create_apply",
+          "obsidian_canvas_create_plan",
+          "obsidian_canvas_create_status",
           "obsidian_canvas_patch_apply",
           "obsidian_canvas_patch_plan",
           "obsidian_canvas_patch_recover",
@@ -1344,6 +1386,9 @@
           "asset_import_plan",
           "asset_import_status",
           "bases_create",
+          "bases_create_apply",
+          "bases_create_plan",
+          "bases_create_status",
           "bases_formula_patch_apply",
           "bases_formula_patch_plan",
           "bases_formula_patch_recover",
@@ -1367,6 +1412,9 @@
           "external_runtime_status",
           "external_stat",
           "list_all_tasks",
+          "obsidian_canvas_create_apply",
+          "obsidian_canvas_create_plan",
+          "obsidian_canvas_create_status",
           "obsidian_canvas_patch_apply",
           "obsidian_canvas_patch_plan",
           "obsidian_canvas_patch_recover",
@@ -1798,6 +1846,105 @@
           "headless-filesystem"
         ]
       }
+    },
+    {
+      "name": "bases_create_apply",
+      "canonicalName": "bases_create_apply",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-create",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "bases_create_plan",
+      "canonicalName": "bases_create_plan",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-create",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "bases_create_status",
+      "canonicalName": "bases_create_status",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-create",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "status"
     },
     {
       "name": "bases_formula_patch_apply",
@@ -2810,6 +2957,105 @@
           "headless-filesystem"
         ]
       }
+    },
+    {
+      "name": "obsidian_canvas_create_apply",
+      "canonicalName": "obsidian_canvas_create_apply",
+      "classification": "governed-operation",
+      "group": "canvas.governed",
+      "family": "canvas-create",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "obsidian_canvas_create_plan",
+      "canonicalName": "obsidian_canvas_create_plan",
+      "classification": "governed-operation",
+      "group": "canvas.governed",
+      "family": "canvas-create",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "obsidian_canvas_create_status",
+      "canonicalName": "obsidian_canvas_create_status",
+      "classification": "governed-operation",
+      "group": "canvas.governed",
+      "family": "canvas-create",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "status"
     },
     {
       "name": "obsidian_canvas_patch_apply",

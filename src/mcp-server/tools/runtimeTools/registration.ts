@@ -4,6 +4,7 @@ import { BaseRowsPatchRuntime } from "../../../services/baseRowsPatchRuntime.js"
 import { restBaseRowSelection } from "../../../services/baseRowSelection.js";
 import { registerBaseRowsPatchTools } from "../baseRowsPatchTools/index.js";
 import { registerNoteCreateTools } from "../noteCreateTools/index.js";
+import { registerVaultFileCreateTools } from "../vaultFileCreateTools/index.js";
 import { registerNativeNoteMoveTools } from "../nativeNoteMoveTools/index.js";
 import { registerNoteDeleteTools } from "../noteDeleteTools/index.js";
 import {
@@ -166,6 +167,7 @@ export async function registerRuntimeTools(
   registerNativeNoteMoveTools(server, governedNoteReplaceRuntime?.nativeMove);
   registerNoteDeleteTools(server, governedNoteReplaceRuntime?.noteDelete);
   registerNoteCreateTools(server, governedNoteReplaceRuntime?.noteCreate);
+  registerVaultFileCreateTools(server, [governedNoteReplaceRuntime?.baseCreate, governedNoteReplaceRuntime?.canvasCreate]);
   registerBaseRowsPatchTools(
     server,
     governedNoteReplaceRuntime && obsidianService

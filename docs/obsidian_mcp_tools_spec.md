@@ -28,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 99 unique names, including three
-optional asset tools. Full live/hybrid registration currently contains 92 names
+The current cross-runtime registry contains 105 unique names, including three
+optional asset tools. Full live/hybrid registration currently contains 98 names
 without them. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 
@@ -446,6 +446,10 @@ exact plugin engine semantics remains outside the current headless surface.
 ### Durable note creation M4
 
 `obsidian_note_create_plan/apply/status` seals one explicit absent Markdown target and reuses the durable journal. The separate Bridge creation grant is required; no overwrite/suffix/recovery replay is permitted. Committed means intended state observed, not authorship. Indexing remains unqualified until Pilot2. See [the exclusive-create contract](durable-note-create-m4.md).
+
+### Governed Base and Canvas creation
+
+`bases_create_plan/apply/status` and `obsidian_canvas_create_plan/apply/status` seal one explicit absent `.base` or `.canvas` target after format validation (Base YAML mapping without errors; Canvas graph accepted by the P3 compiler) and reuse the durable journal and the exclusive-create effect of note creation. Each kind needs its own default-off Atomic Write Bridge 0.9.0 grant; only the exact sealed bytes verify; no overwrite, suffix, parent creation, recovery replay or edit of an existing file. See [governed Base and Canvas creation](governed-file-create.md).
 
 ## Governed single-row Base property patch M5 / P7
 

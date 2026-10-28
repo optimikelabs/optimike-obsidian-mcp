@@ -1,6 +1,6 @@
 # Configuration selon votre installation
 
-Installez ensemble le MCP et le bundle des Bridges de la même release : le MCP 3.15.x exige Atomic Write Bridge 0.8.5. Voir [Bundle des Bridges, mise à niveau et rollback](bridge-packaging.fr.md) et les [notes de version](releases/).
+Installez ensemble le MCP et le bundle des Bridges de la même release : le MCP 3.16.x livre Atomic Write Bridge 0.9.0, exigé pour la création gouvernée de Bases et de Canvas. Voir [Bundle des Bridges, mise à niveau et rollback](bridge-packaging.fr.md) et les [notes de version](releases/).
 
 Le profil `operational` privilégie les écritures gouvernées ; `full` conserve les outils de compatibilité. Choisissez le profil selon vos clients et vos workflows. Les permissions restent contrôlées indépendamment du catalogue.
 

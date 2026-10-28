@@ -14,7 +14,7 @@ L’opérateur choisit un dossier existant avec `MCP_ASSET_FOLDER`, configure `O
 
 Une source ExternalRoot reste soumise à `readable` + `handoff`, à ses filtres et à ses limites. En HTTP, les trois opérations, y compris la consultation d’un reçu, exigent une identité non-développement avec le scope `external:read`. Le chemin local d’un fichier attaché à ChatGPT n’est jamais traité comme un chemin serveur.
 
-Les outils `asset_import_plan`, `asset_import_apply` et `asset_import_status` forment une famille facultative complète du profil `full` en runtime live/hybrid-live. Sans configuration, la surface `full` live reste à 92 outils ; le catalogue transversal contient 99 noms, dont trois conditionnels. Les hypothèses de disponibilité sont déclarées dans le catalogue.
+Les outils `asset_import_plan`, `asset_import_apply` et `asset_import_status` forment une famille facultative complète du profil `full` en runtime live/hybrid-live. Sans configuration, la surface `full` live reste à 98 outils ; le catalogue transversal contient 105 noms, dont trois conditionnels. Les hypothèses de disponibilité sont déclarées dans le catalogue.
 
 ## Effets et preuves
 

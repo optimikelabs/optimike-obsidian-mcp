@@ -1,10 +1,10 @@
 {
   "id": "obsidian-atomic-write-bridge",
   "name": "Optimike Atomic Write Bridge",
-  "version": "0.8.5",
+  "version": "0.9.0",
   "minAppVersion": "1.1.0",
   "author": "Optimike",
   "authorUrl": "https://github.com/optimikelabs",
-  "description": "Expose les CAS notes/Canvas, les liens natifs et les opérations opt-in de déplacement/création via Local REST API.",
+  "description": "Expose les CAS notes/Canvas, les liens natifs et les opérations opt-in de déplacement et de création de notes, Bases et Canvas via Local REST API.",
   "isDesktopOnly": true
 }

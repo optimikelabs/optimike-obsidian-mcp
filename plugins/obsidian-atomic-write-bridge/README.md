@@ -109,6 +109,10 @@ Copy `build/main.js` and `build/manifest.json` to:
 
 Enable Local REST API first, then enable Optimike Atomic Write Bridge.
 
+## Version 0.9.0 — exclusive Base and Canvas creation
+
+Two independent settings, false by default: `allowBaseCreates` and `allowCanvasCreates`. POST `/extensions/obsidian-atomic-write-bridge/base-create/preflight`, `/apply`, `/inspect` and the same three routes under `canvas-create` are used by the MCP families `bases_create_*` and `obsidian_canvas_create_*`. They reuse the exclusive create of notes (`O_CREAT | O_EXCL`, data fsync, existing parent only, never overwrite or suffix) with the `.base` or `.canvas` extension, a binding fingerprint per kind, the effect fence and no date policy. Before the effect the Bridge parses the content again: YAML mapping (Obsidian `parseYaml`) for a Base, JSON object with `nodes` and `edges` arrays for a Canvas. A missing parent answers `404 file_create_parent_missing`. The status reports `baseCreate` and `canvasCreate`. See [governed Base and Canvas creation](../../docs/governed-file-create.md).
+
 ## Version 0.8.0 — exclusive note creation
 
 The independent `allowNoteCreates` setting is false by default. POST `/extensions/obsidian-atomic-write-bridge/note-create/preflight`, `/apply`, and `/inspect` are used by the MCP durable create family. Only apply can create an absent explicit Markdown file. Data is fsynced without overwrite or suffixing; indexing is eventual via the vault watcher. Partial/crashed writes are not automatically repaired or removed. Qualified automatic date fields reuse the existing strict settlement contract. Real Desktop/Pilot2 qualification is mandatory before deployment.

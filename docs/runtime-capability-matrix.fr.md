@@ -219,6 +219,16 @@ même frontière live/hybrid. Ils exigent Atomic Write Bridge 0.4.0, son gate CA
 Canvas indépendant, un graphe existant valide et l’identité/SHA-256 exacts du
 backend. Ils sont absents de tous les modes headless.
 
+## Création gouvernée de Bases et de Canvas
+
+`bases_create_plan`, `bases_create_apply`, `bases_create_status`,
+`obsidian_canvas_create_plan`, `obsidian_canvas_create_apply` et
+`obsidian_canvas_create_status` suivent la même frontière live/hybrid et n’ont
+pas d’outil de reprise. Ils exigent Atomic Write Bridge 0.9.0 et son grant
+indépendant de création de Bases ou de Canvas, désactivés par défaut. Ils créent
+un fichier absent et ne modifient jamais une Base ou un Canvas existant. Voir la
+[création gouvernée de Bases et de Canvas](governed-file-create.fr.md).
+
 ## Notes de sécurité
 
 - `headless-readonly` est le premier mode sûr pour une vraie copie Sync.
