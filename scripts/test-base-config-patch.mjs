@@ -115,6 +115,14 @@ let groups = 0;
   refuse([{ op: "set_view_key", view: "Tous", key: "sort", value: 5 }], "base_config_view_invalid");
   refuse([{ op: "set_view_key", view: "Tous", key: "groupBy", value: { property: "x", direction: "UP" } }], "base_config_view_invalid");
   refuse([{ op: "set_formula", name: "<<", expression: "1" }], "base_config_name_invalid");
+  for (const key of ["__proto__", "constructor", "prototype"]) {
+    refuse([{ op: "set_property", property: key, key: "polluted", value: "yes" }], "base_config_name_invalid");
+    refuse([{ op: "set_property", property: "statut", key, value: "yes" }], "base_config_name_invalid");
+    refuse([{ op: "delete_formula", name: key }], "base_config_name_invalid");
+    refuse([{ op: "set_view_key", view: "Tous", key, value: 1 }], "base_config_name_invalid");
+  }
+  assert.throws(() => compileBaseConfigPatch(BASE, [{ op: "add_view", view: JSON.parse('{"type":"table","name":"P","__proto__":{"polluted":1}}') }]));
+  assert.equal({}.polluted, undefined, "Object.prototype stays clean");
   groups++;
 }
 {

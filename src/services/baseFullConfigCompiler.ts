@@ -51,6 +51,8 @@ const MAX_VALUE_BYTES = 65_536;
 const MAX_DEPTH = 16;
 const NAME = /^[^\u0000-\u001f]{1,256}$/u;
 const KEY = /^[^\u0000-\u001f]{1,128}$/u;
+/** Keys that would reach Object.prototype through a plain-object model. */
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype", "<<"]);
 
 function fail(message: string, reasonCode: string): never {
   throw new McpError(BaseErrorCode.VALIDATION_ERROR, message, { reasonCode });
@@ -68,7 +70,7 @@ function assertJson(value: unknown, depth = 0): void {
   if (Array.isArray(value)) { value.forEach((item) => assertJson(item, depth + 1)); return; }
   if (typeof value === "object") {
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (!KEY.test(key) || key === "<<") fail("Base keys must be short plain strings.", "base_config_value_invalid");
+      if (!KEY.test(key) || FORBIDDEN_KEYS.has(key)) fail("Base keys must be short plain strings.", "base_config_value_invalid");
       assertJson(item, depth + 1);
     }
     return;
@@ -126,7 +128,7 @@ function assertViewKey(key: string, value: unknown, pluginViewType: boolean | un
 }
 
 function name(value: unknown, label: string): string {
-  if (typeof value !== "string" || !NAME.test(value) || value.trim() !== value || value === "<<") fail(`${label} must be a non-empty unpadded name.`, "base_config_name_invalid");
+  if (typeof value !== "string" || !NAME.test(value) || value.trim() !== value || FORBIDDEN_KEYS.has(value)) fail(`${label} must be a non-empty unpadded name.`, "base_config_name_invalid");
   return value;
 }
 
@@ -190,7 +192,8 @@ function viewIndex(views: unknown[], view: string): number {
 }
 
 function mapAt(model: Model, key: string): Model {
-  const value = model[key];
+  if (FORBIDDEN_KEYS.has(key)) fail("Base keys must be short plain strings.", "base_config_name_invalid");
+  const value = Object.hasOwn(model, key) ? model[key] : undefined;
   if (value === undefined || value === null) { const created: Model = {}; model[key] = created; return created; }
   if (typeof value !== "object" || Array.isArray(value)) fail(`The Base ${key} section is not a mapping.`, "base_config_section_invalid");
   return value as Model;
@@ -211,7 +214,7 @@ function applyModel(model: Model, op: BaseConfigPatchOperation, paths: Set<strin
     case "set_formula": mapAt(model, "formulas")[op.name] = op.expression; paths.add(`formulas.${op.name}`); return;
     case "delete_formula": {
       const formulas = mapAt(model, "formulas");
-      if (!(op.name in formulas)) fail("The formula was not found.", "base_config_target_missing");
+      if (!Object.hasOwn(formulas, op.name)) fail("The formula was not found.", "base_config_target_missing");
       if (Object.keys(formulas).length === 1) delete model.formulas; else delete formulas[op.name];
       paths.add(`formulas.${op.name}`); return;
     }
@@ -221,11 +224,11 @@ function applyModel(model: Model, op: BaseConfigPatchOperation, paths: Set<strin
     }
     case "delete_property": {
       const properties = mapAt(model, "properties");
-      if (!(op.property in properties)) fail("The property setting was not found.", "base_config_target_missing");
+      if (!Object.hasOwn(properties, op.property)) fail("The property setting was not found.", "base_config_target_missing");
       if (op.key === undefined) delete properties[op.property];
       else {
         const property = mapAt(properties, op.property);
-        if (!(op.key in property)) fail("The property setting was not found.", "base_config_target_missing");
+        if (!Object.hasOwn(property, op.key)) fail("The property setting was not found.", "base_config_target_missing");
         delete property[op.key];
         if (Object.keys(property).length === 0) delete properties[op.property];
       }
@@ -235,7 +238,7 @@ function applyModel(model: Model, op: BaseConfigPatchOperation, paths: Set<strin
     case "set_summary": mapAt(model, "summaries")[op.name] = op.formula; paths.add(`summaries.${op.name}`); return;
     case "delete_summary": {
       const summaries = mapAt(model, "summaries");
-      if (!(op.name in summaries)) fail("The summary was not found.", "base_config_target_missing");
+      if (!Object.hasOwn(summaries, op.name)) fail("The summary was not found.", "base_config_target_missing");
       if (Object.keys(summaries).length === 1) delete model.summaries; else delete summaries[op.name];
       paths.add(`summaries.${op.name}`); return;
     }
@@ -261,7 +264,7 @@ function applyModel(model: Model, op: BaseConfigPatchOperation, paths: Set<strin
     }
     case "delete_view_key": {
       const list = views(); const view = list[viewIndex(list, op.view)] as Model;
-      if (!(op.key in view)) fail("The view key was not found.", "base_config_target_missing");
+      if (!Object.hasOwn(view, op.key)) fail("The view key was not found.", "base_config_target_missing");
       delete view[op.key]; paths.add(`views[${op.view}].${op.key}`); return;
     }
   }
