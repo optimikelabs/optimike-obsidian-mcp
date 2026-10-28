@@ -249,6 +249,7 @@ const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   "base_config_view_exists",
   "base_config_view_invalid",
   "base_config_view_missing",
+  "base_config_view_type_unknown",
   "base_config_yaml_invalid",
   "base_config_yaml_unsupported",
   "canvas_field_invalid",

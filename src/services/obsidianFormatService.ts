@@ -310,7 +310,10 @@ export function validateObsidianMarkdown(
   };
 }
 
-export function validateObsidianBase(content: string): FormatValidationResult {
+export function validateObsidianBase(
+  content: string,
+  options: { allowPluginViewTypes?: boolean } = {},
+): FormatValidationResult {
   const issues: FormatIssue[] = [];
   let parsed: unknown;
   try {
@@ -388,6 +391,7 @@ export function validateObsidianBase(content: string): FormatValidationResult {
     // Plugins register their own view types (Obsidian Bases syntax); a
     // plugin-like id is reported, not refused.
     if (
+      options.allowPluginViewTypes === true &&
       typeof viewType === "string" &&
       !["table", "cards", "list", "map"].includes(viewType) &&
       /^[a-z][a-z0-9-]{0,63}$/u.test(viewType)

@@ -25,15 +25,23 @@ Un plan reçoit 1 à 64 opérations ordonnées, selon la
 
 Les vues se désignent par leur nom exact et unique. Une vue garde son `name` et
 son `type`. Une section `formulas`, `properties` ou `summaries` vidée est retirée.
-Les types de vue fournis par un plugin (comme `kanban`) sont acceptés avec
-l'avertissement `base-view-type-plugin`.
+Les clés de vue documentées sont contrôlées : `order` et `groupOrder` sont des
+listes, `limit` un entier positif ou nul, `groupBy` et `sort` utilisent `property`
+et `ASC`/`DESC`, `summaries` associe une propriété à un nom de résumé. Les autres
+clés restent du JSON libre. Les types de vue intégrés sont `table`, `cards`, `list` et `map`. Un type fourni
+par un plugin (comme `kanban`) exige `pluginViewType: true` sur l'opération, ou une
+Base qui en utilise déjà un ; il est signalé par l'avertissement
+`base-view-type-plugin`. Une faute de frappe comme `tabel` est refusée
+(`base_config_view_type_unknown`).
 
 ## Garanties
 
 Le plan lit la Base par le Bases Bridge Atomic V1, applique les modifications au
 modèle de document YAML (commentaires, ordre des clés et valeurs non touchées
 conservés) et compare le résultat à un modèle indépendant de la même intention :
-toute autre différence refuse le plan. Le résultat doit passer
+toute autre différence refuse le plan. Un commentaire écrit au-dessus d'une
+section retirée passe à la clé suivante ; les commentaires attachés à une entrée
+supprimée partent avec elle, et la preuve les compte dans `commentsDropped`. Le résultat doit passer
 `obsidian_validate_format` `kind: base` sans erreur. La preuve du reçu indique
 `semantic-identical-outside-authorized-paths`, liste les chemins modifiés et
 signale `formattingPreserved: false` quand le fichier ne se relisait pas à

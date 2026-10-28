@@ -37,11 +37,11 @@ const OperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set_summary"), name: Name, formula: z.string().min(1).max(65_536) })
     .describe("Custom summary formula using values, e.g. 'values.mean().round(3)'."),
   z.object({ op: z.literal("delete_summary"), name: Name }),
-  z.object({ op: z.literal("add_view"), view: z.record(Json), position: z.number().int().min(0).optional() })
+  z.object({ op: z.literal("add_view"), view: z.record(Json), position: z.number().int().min(0).optional(), pluginViewType: z.boolean().optional() })
     .describe("Add a view object with at least type and a unique name; optional 0-based position."),
   z.object({ op: z.literal("delete_view"), view: Name }),
   z.object({ op: z.literal("move_view"), view: Name, position: z.number().int().min(0) }),
-  z.object({ op: z.literal("set_view_key"), view: Name, key: Name, value: Json })
+  z.object({ op: z.literal("set_view_key"), view: Name, key: Name, value: Json, pluginViewType: z.boolean().optional() })
     .describe("Set any key of the named view: name (rename), type, filters, order, sort, groupBy, groupOrder, summaries, limit, or a view/plugin key."),
   z.object({ op: z.literal("delete_view_key"), view: Name, key: Name }),
 ]);
@@ -69,7 +69,7 @@ export function registerGovernedBaseConfigTools(server: McpServer, runtime: Gove
   if (!runtime) return;
   server.registerTool("bases_config_patch_plan", {
     description:
-      "Plan an edit of a whole existing Obsidian Base: global filters, formulas, property settings (displayName...), summaries and views (add, delete, move, rename, type, filters, order, sort, groupBy, groupOrder, summaries, limit, any view or plugin key). Comments and untouched values are kept; the result must be a valid Base. Seals the exact next YAML and hashes without writing.",
+      "Plan an edit of a whole existing Obsidian Base: global filters, formulas, property settings (displayName...), summaries and views (add, delete, move, rename, type, filters, order, sort, groupBy, groupOrder, summaries, limit, any view or plugin key). Untouched values are kept and comments survive (the proof counts any dropped with a deleted entry); the result must be a valid Base. Built-in view types are table, cards, list and map; set pluginViewType: true for a plugin type such as kanban. Seals the exact next YAML and hashes without writing.",
     inputSchema: mcpSchema(PlanSchema.shape),
     annotations: GOVERNED_PLAN_TOOL_ANNOTATIONS,
   }, (params) => runTool("bases_config_patch_plan", params, () => runtime.plan(PlanSchema.parse(params) as GovernedBaseConfigPlanInput)));

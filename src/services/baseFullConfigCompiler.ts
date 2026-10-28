@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { load } from "js-yaml";
+import { CORE_SCHEMA, load } from "js-yaml";
 import { isAlias, isMap, isScalar, isSeq, parseDocument, visit, type Document, type YAMLMap, type YAMLSeq } from "yaml";
 import { BaseErrorCode, McpError } from "../types-global/errors.js";
 import { operationDigest } from "./operations/contract.js";
@@ -24,10 +24,10 @@ export type BaseConfigPatchOperation =
   | { op: "delete_property"; property: string; key?: string }
   | { op: "set_summary"; name: string; formula: string }
   | { op: "delete_summary"; name: string }
-  | { op: "add_view"; view: { [key: string]: BaseJsonValue }; position?: number }
+  | { op: "add_view"; view: { [key: string]: BaseJsonValue }; position?: number; pluginViewType?: boolean }
   | { op: "delete_view"; view: string }
   | { op: "move_view"; view: string; position: number }
-  | { op: "set_view_key"; view: string; key: string; value: BaseJsonValue }
+  | { op: "set_view_key"; view: string; key: string; value: BaseJsonValue; pluginViewType?: boolean }
   | { op: "delete_view_key"; view: string; key: string };
 
 export type BaseConfigPatchProof = {
@@ -40,6 +40,7 @@ export type BaseConfigPatchProof = {
   changedPaths: string[];
   beforeSha256: string;
   afterSha256: string;
+  commentsDropped: number;
   warnings: string[];
 };
 
@@ -89,8 +90,43 @@ function assertFilter(node: unknown, depth = 0): void {
   items.forEach((item) => assertFilter(item, depth + 1));
 }
 
+const BUILT_IN_VIEW_TYPES = ["table", "cards", "list", "map"];
+const DIRECTION = ["ASC", "DESC"];
+
+/** Shapes of the documented view keys; other keys (view state, plugins) stay free JSON. */
+function assertViewKey(key: string, value: unknown, pluginViewType: boolean | undefined): void {
+  const bad = (what: string) => fail(`View ${key} must be ${what}.`, "base_config_view_invalid");
+  const isDirection = (item: unknown) => item === undefined || DIRECTION.includes(item as string);
+  switch (key) {
+    case "name": name(value, "View name"); return;
+    case "type":
+      if (typeof value !== "string" || !/^[a-z][a-z0-9-]{0,63}$/u.test(value)) bad("a view type id");
+      if (!BUILT_IN_VIEW_TYPES.includes(value as string) && pluginViewType !== true) {
+        fail("Only table, cards, list and map are built in; set pluginViewType: true for a plugin view type.", "base_config_view_type_unknown");
+      }
+      return;
+    case "filters": assertFilter(value); return;
+    case "order": case "groupOrder":
+      if (!Array.isArray(value) || value.some((item) => key === "order" ? typeof item !== "string" || !item : typeof item === "object" && item !== null)) bad(key === "order" ? "a list of property ids" : "a list of group values");
+      return;
+    case "limit": if (!Number.isInteger(value) || (value as number) < 0) bad("a non-negative integer"); return;
+    case "groupBy": {
+      const group = value as Record<string, unknown>;
+      if (!group || typeof group !== "object" || Array.isArray(group) || typeof group.property !== "string" || !group.property || !isDirection(group.direction)) bad("{property, direction: ASC|DESC}");
+      return;
+    }
+    case "sort":
+      if (!Array.isArray(value) || value.some((item) => !item || typeof item !== "object" || typeof (item as Record<string, unknown>).property !== "string" || !isDirection((item as Record<string, unknown>).direction))) bad("a list of {property, direction: ASC|DESC}");
+      return;
+    case "summaries":
+      if (!value || typeof value !== "object" || Array.isArray(value) || Object.values(value).some((item) => typeof item !== "string" || !item)) bad("a map of property id to summary name");
+      return;
+    default: return;
+  }
+}
+
 function name(value: unknown, label: string): string {
-  if (typeof value !== "string" || !NAME.test(value) || value.trim() !== value) fail(`${label} must be a non-empty unpadded name.`, "base_config_name_invalid");
+  if (typeof value !== "string" || !NAME.test(value) || value.trim() !== value || value === "<<") fail(`${label} must be a non-empty unpadded name.`, "base_config_name_invalid");
   return value;
 }
 
@@ -120,9 +156,8 @@ export function canonicalizeBaseConfigPatchOperations(operations: BaseConfigPatc
       case "add_view":
         if (!op.view || typeof op.view !== "object" || Array.isArray(op.view)) fail("A view is an object.", "base_config_view_invalid");
         assertJson(op.view);
-        name(op.view.name, "View name");
-        if (typeof op.view.type !== "string" || !op.view.type) fail("A view needs a type.", "base_config_view_invalid");
-        if (op.view.filters !== undefined) assertFilter(op.view.filters);
+        if (op.view.name === undefined || op.view.type === undefined) fail("A view needs a name and a type.", "base_config_view_invalid");
+        for (const [key, value] of Object.entries(op.view)) { name(key, "View key"); assertViewKey(key, value, op.pluginViewType); }
         if (op.position !== undefined && (!Number.isInteger(op.position) || op.position < 0)) fail("A view position is a non-negative integer.", "base_config_view_invalid");
         break;
       case "delete_view": name(op.view, "View"); break;
@@ -132,9 +167,7 @@ export function canonicalizeBaseConfigPatchOperations(operations: BaseConfigPatc
         break;
       case "set_view_key":
         name(op.view, "View"); name(op.key, "View key"); assertJson(op.value);
-        if (op.key === "filters") assertFilter(op.value);
-        if (op.key === "name") name(op.value, "View name");
-        if (op.key === "type" && (typeof op.value !== "string" || !op.value)) fail("A view type is a non-empty string.", "base_config_view_invalid");
+        assertViewKey(op.key, op.value, op.pluginViewType);
         break;
       case "delete_view_key":
         name(op.view, "View"); name(op.key, "View key");
@@ -242,19 +275,46 @@ function yamlViewIndex(doc: Document, view: string): number {
   return matches[0]!;
 }
 
+function ensureMap(doc: Document, path: (string | number)[]): void {
+  for (let depth = 1; depth <= path.length; depth += 1) {
+    const at = path.slice(0, depth);
+    const value = doc.getIn(at, true);
+    if (value === undefined || (isScalar(value) && (value.value === null || value.value === undefined))) doc.setIn(at, doc.createNode({}));
+    else if (!isMap(value)) fail("A Base section is not a mapping.", "base_config_section_invalid");
+  }
+}
+
+/** Remove a top-level key; a comment written above it moves to the next key or the document. */
+function deleteTop(doc: Document, key: string): void {
+  const root = doc.contents as YAMLMap;
+  const index = root.items.findIndex((pair) => isScalar(pair.key) ? pair.key.value === key : pair.key === key);
+  if (index === -1) return;
+  const pair = root.items[index]!;
+  const comment = isScalar(pair.key) ? pair.key.commentBefore : undefined;
+  const leading = index === 0 ? root.commentBefore : undefined;
+  root.items.splice(index, 1);
+  const kept = [leading, comment].filter(Boolean).join("\n");
+  if (index === 0) root.commentBefore = undefined;
+  if (!kept) return;
+  const next = root.items[index];
+  if (next && isScalar(next.key)) next.key.commentBefore = [kept, next.key.commentBefore].filter(Boolean).join("\n");
+  else if (index === 0) doc.commentBefore = [doc.commentBefore, kept].filter(Boolean).join("\n");
+  else doc.comment = [doc.comment, kept].filter(Boolean).join("\n");
+}
+
 function pruneEmpty(doc: Document, key: string): void {
   const section = doc.get(key);
-  if (isMap(section) && section.items.length === 0) doc.delete(key);
+  if (isMap(section) && section.items.length === 0) deleteTop(doc, key);
 }
 
 function applyYaml(doc: Document, op: BaseConfigPatchOperation): void {
   const node = (value: unknown) => doc.createNode(value);
   switch (op.op) {
     case "set_filters": doc.set("filters", node(op.filters)); return;
-    case "delete_filters": doc.delete("filters"); return;
-    case "set_formula": doc.setIn(["formulas", op.name], node(op.expression)); return;
+    case "delete_filters": deleteTop(doc, "filters"); return;
+    case "set_formula": ensureMap(doc, ["formulas"]); doc.setIn(["formulas", op.name], node(op.expression)); return;
     case "delete_formula": doc.deleteIn(["formulas", op.name]); pruneEmpty(doc, "formulas"); return;
-    case "set_property": doc.setIn(["properties", op.property, op.key], node(op.value)); return;
+    case "set_property": ensureMap(doc, ["properties", op.property]); doc.setIn(["properties", op.property, op.key], node(op.value)); return;
     case "delete_property":
       if (op.key === undefined) doc.deleteIn(["properties", op.property]);
       else {
@@ -263,7 +323,7 @@ function applyYaml(doc: Document, op: BaseConfigPatchOperation): void {
         if (isMap(property) && property.items.length === 0) doc.deleteIn(["properties", op.property]);
       }
       pruneEmpty(doc, "properties"); return;
-    case "set_summary": doc.setIn(["summaries", op.name], node(op.formula)); return;
+    case "set_summary": ensureMap(doc, ["summaries"]); doc.setIn(["summaries", op.name], node(op.formula)); return;
     case "delete_summary": doc.deleteIn(["summaries", op.name]); pruneEmpty(doc, "summaries"); return;
     case "add_view": {
       let seq = doc.get("views") as YAMLSeq | undefined;
@@ -309,20 +369,30 @@ export function compileBaseConfigPatch(source: string, inputOperations: BaseConf
   const options = { lineWidth: 0, minContentWidth: 0 } as const;
   const doc = parseSupported(lf);
   const formattingPreserved = parseSupported(lf).toString(options) === lf;
-  const model = load(lf) as Model;
+  let model: Model;
+  try { model = load(lf, { schema: CORE_SCHEMA }) as Model; } catch { fail("The Base YAML cannot be parsed.", "base_config_yaml_invalid"); }
   if (!model || typeof model !== "object" || Array.isArray(model)) fail("A Base file is a YAML mapping.", "base_config_section_invalid");
+  const sourceViewTypes = Array.isArray(model.views) ? (model.views as Model[]).map((view) => view?.type) : [];
   const paths = new Set<string>();
   for (const op of operations) {
     applyModel(model, op, paths);
-    applyYaml(doc, op);
+    try { applyYaml(doc, op); }
+    catch (error) { if (error instanceof McpError) throw error; fail("The Base layout does not support this edit.", "base_config_section_invalid"); }
   }
   let next = doc.toString(options);
   if (crlf) next = next.replace(/\n/gu, "\r\n");
-  const after = load(next);
+  let after: unknown;
+  try { after = load(next, { schema: CORE_SCHEMA }); } catch { fail("The compiled Base cannot be read back.", "base_config_projection_mismatch"); }
   if (operationDigest(after) !== operationDigest(model)) {
     fail("The Base compiler changed data outside the sealed intent.", "base_config_projection_mismatch");
   }
-  const validation = validateObsidianBase(next);
+  // A plugin view type passes when this edit opts in, or when the Base already used one.
+  const pluginTypes = operations.some((op) => (op.op === "add_view" || op.op === "set_view_key") && op.pluginViewType === true)
+    || sourceViewTypes.some((type) => !BUILT_IN_VIEW_TYPES.includes(type as string));
+  const validation = validateObsidianBase(next, { allowPluginViewTypes: pluginTypes });
+  const comments = (text: string) => text.split(/\r?\n/u).flatMap((line) => { const at = line.indexOf("#"); return at >= 0 && (at === 0 || /\s/u.test(line[at - 1]!)) ? [line.slice(at).trim()] : []; });
+  const kept = new Set(comments(next));
+  const commentsDropped = comments(lf).filter((comment) => !kept.has(comment)).length;
   if (!validation.ok) fail("The resulting Base is not valid.", "base_config_result_invalid");
   return {
     nextYaml: next,
@@ -333,7 +403,8 @@ export function compileBaseConfigPatch(source: string, inputOperations: BaseConf
       formattingPreserved,
       lineEnding: crlf ? "crlf" : "lf",
       patchDigest: operationDigest({ contractVersion: 1, operations, beforeSha256: sha256(source), afterSha256: sha256(next) }),
-      changedPaths: [...paths].sort().slice(0, MAX_OPERATIONS),
+      changedPaths: [...paths].sort().slice(0, MAX_OPERATIONS).map((item) => item.length > 1024 ? item.slice(0, 1021) + "..." : item),
+      commentsDropped,
       beforeSha256: sha256(source),
       afterSha256: sha256(next),
       warnings: validation.warnings.map((warning) => warning.code).slice(0, 32),

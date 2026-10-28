@@ -18,7 +18,7 @@ No Bridge change: keep Atomic Write Bridge 0.9.0, Operon Bridge 0.9.3 and Bases 
 
 ### Changed
 
-- Plugin view types in a Base (for example `kanban`) are a `base-view-type-plugin` warning instead of an error, in `obsidian_validate_format`, Base creation and Base configuration.
+- Governed Base configuration accepts a plugin view type (for example `kanban`) only with `pluginViewType: true` or when the Base already uses one, as a `base-view-type-plugin` warning; `obsidian_validate_format` and Base creation stay strict.
 - Live profiles: `authoring` 54, `operational` 97, `full` 102; catalogue 109 names. See the [English](docs/releases/3.17.0.md) and [French](docs/releases/3.17.0.fr.md) release notes.
 
 ## [3.16.0] - 2026-10-28

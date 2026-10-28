@@ -64,9 +64,13 @@ let groups = 0;
   const { nextYaml, proof } = compileBaseConfigPatch(crlf, [{ op: "set_formula", name: "taille", expression: "file.size" }]);
   assert.equal(proof.lineEnding, "crlf");
   assert.equal(/(^|[^\r])\n/.test(nextYaml), false, "CRLF kept everywhere");
-  const { nextYaml: plugin, proof: pluginProof } = compileBaseConfigPatch(BASE, [{ op: "set_view_key", view: "Tous", key: "type", value: "kanban" }]);
+  assert.throws(() => compileBaseConfigPatch(BASE, [{ op: "set_view_key", view: "Tous", key: "type", value: "kanban" }]), reason("base_config_view_type_unknown"));
+  assert.throws(() => compileBaseConfigPatch(BASE, [{ op: "set_view_key", view: "Tous", key: "type", value: "tabel" }]), reason("base_config_view_type_unknown"), "a typo is not a plugin");
+  const { nextYaml: plugin, proof: pluginProof } = compileBaseConfigPatch(BASE, [{ op: "set_view_key", view: "Tous", key: "type", value: "kanban", pluginViewType: true }]);
   assert.equal(load(plugin).views[0].type, "kanban");
-  assert.ok(pluginProof.warnings.includes("base-view-type-plugin"), "plugin view types are reported, not refused");
+  assert.ok(pluginProof.warnings.includes("base-view-type-plugin"), "an explicit plugin view type is reported, not refused");
+  const again = compileBaseConfigPatch(plugin, [{ op: "set_view_key", view: "Tous", key: "limit", value: 5 }]);
+  assert.equal(load(again.nextYaml).views[0].type, "kanban", "a Base that already uses a plugin type stays editable");
   groups++;
 }
 {
@@ -79,7 +83,7 @@ let groups = 0;
   refuse([{ op: "set_filters", filters: { and: ["a"], or: ["b"] } }], "base_config_filter_invalid");
   refuse([{ op: "delete_view_key", view: "Tous", key: "type" }], "base_config_view_invalid");
   refuse([{ op: "delete_formula", name: "absente" }], "base_config_target_missing");
-  refuse([{ op: "set_view_key", view: "Tous", key: "type", value: "Not A Type!" }], "base_config_result_invalid");
+  refuse([{ op: "set_view_key", view: "Tous", key: "type", value: "Not A Type!" }], "base_config_view_invalid");
   refuse([{ op: "set_formula", name: "x", expression: "1" }], "base_config_yaml_unsupported", "a: &ref 1\nviews:\n  - type: table\n    name: T\n    x: *ref\n");
   refuse([{ op: "set_formula", name: "x", expression: "1" }], "base_config_yaml_unsupported", "views:\r\n  - type: table\n    name: T\n");
   refuse([], "base_config_patch_size");
@@ -95,6 +99,22 @@ let groups = 0;
   assert.equal(deleted.formulas, undefined, "an emptied section is removed");
   assert.equal(deleted.properties, undefined);
   assert.equal(deleted.filters, undefined);
+  const { nextYaml: headerKept, proof: headerProof } = compileBaseConfigPatch(BASE, [{ op: "delete_filters" }]);
+  assert.ok(headerKept.startsWith("# Vues du projet\n"), "a comment above a removed first section is kept");
+  assert.equal(headerProof.commentsDropped, 0);
+  const dated = compileBaseConfigPatch(BASE, [{ op: "set_property", property: "statut", key: "displayName", value: "2024-01-01" }]);
+  assert.ok(dated.nextYaml.includes("2024-01-01"), "a date-like text value is accepted, not refused as a mismatch");
+  const empty = compileBaseConfigPatch("formulas:\nsummaries:\nviews:\n  - type: table\n    name: T\n", [
+    { op: "set_formula", name: "x", expression: "1 + 1" },
+    { op: "set_summary", name: "s", formula: "values.sum()" },
+  ]);
+  assert.equal(load(empty.nextYaml).formulas.x, "1 + 1", "an empty section can receive entries");
+  const refuse = (ops, code) => assert.throws(() => compileBaseConfigPatch(BASE, ops), reason(code));
+  refuse([{ op: "set_view_key", view: "Tous", key: "order", value: "file.name" }], "base_config_view_invalid");
+  refuse([{ op: "set_view_key", view: "Tous", key: "limit", value: "ten" }], "base_config_view_invalid");
+  refuse([{ op: "set_view_key", view: "Tous", key: "sort", value: 5 }], "base_config_view_invalid");
+  refuse([{ op: "set_view_key", view: "Tous", key: "groupBy", value: { property: "x", direction: "UP" } }], "base_config_view_invalid");
+  refuse([{ op: "set_formula", name: "<<", expression: "1" }], "base_config_name_invalid");
   groups++;
 }
 {

@@ -34,7 +34,8 @@ const ProofSchema = z.object({
   formattingPreserved: z.boolean(),
   lineEnding: z.enum(["lf", "crlf"]),
   patchDigest: z.string().regex(SHA256),
-  changedPaths: z.array(z.string().min(1).max(512)).min(1).max(64),
+  changedPaths: z.array(z.string().min(1).max(1024)).min(1).max(64),
+  commentsDropped: z.number().int().nonnegative(),
   beforeSha256: z.string().regex(SHA256),
   afterSha256: z.string().regex(SHA256),
   warnings: z.array(z.string().max(128)).max(32),
@@ -155,6 +156,10 @@ export class GovernedBaseConfigRuntime {
     }
     const source = await this.backend.read({ contractVersion: 1, path: input.path });
     const compiled = compileBaseConfigPatch(source.content, canonical.operations);
+    // Refuse before sealing: a proof the receipt schema rejects would strand the plan.
+    if (!ProofSchema.safeParse(compiled.proof).success) {
+      throw new McpError(BaseErrorCode.VALIDATION_ERROR, "The Base edit cannot be represented in a receipt.", { reasonCode: "base_config_value_invalid" });
+    }
     assertPolicy("plan", input.path, canonical.operations.length, compiled.nextYaml.length);
     const storedProjection: ObsidianNoteReplaceProjection = {
       contractVersion: 1, kind: BASE_CONFIG_OPERATION_KIND, publicIdempotencyKey: key,
