@@ -4,12 +4,21 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { parse } from "yaml";
 import type { App } from "obsidian";
 import { createVaultFileCreateRoutes, vaultFileContentParses } from "./vaultFileCreateRoutes.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
 import { EffectFenceRefused } from "./effectFence.js";
 import { vaultFileCreateHash } from "../../../src/services/vaultFileCreateContract.js";
+
+// Obsidian's parseYaml exists only inside the app, and this package is also
+// checked standalone. The stand-in returns the shapes the guard distinguishes.
+function parse(text: string): unknown {
+  if (/\[[^\]]*$/mu.test(text)) throw new Error("unclosed flow sequence");
+  const lines = text.split(/\r?\n/u).filter(Boolean);
+  if (lines[0]?.startsWith("- ")) return lines.map((line) => line.slice(2));
+  if (/^[\w.-]+:/u.test(lines[0] ?? "")) return Object.fromEntries(lines.filter((line) => /^[\w.-]+:/u.test(line)).map((line) => [line.split(":")[0], true]));
+  return text.trim();
+}
 
 const BASE = "filters:\n  and:\n    - file.ext == \"md\"\nviews:\n  - type: table\n    name: Tout\n";
 const CANVAS = "{\n\t\"nodes\":[],\n\t\"edges\":[]\n}";
