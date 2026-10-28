@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "3.16.0",
+  "version": "3.17.0",
   "description": "Unified Obsidian MCP server with shared local cache, Operon and Tasks tools, Bases support, semantic search, runtime observability, and degraded read mode for durable agent workflows.",
   "main": "dist/index.js",
   "files": [
@@ -27,6 +27,8 @@
     "docs/durable-note-create-m4.md",
     "docs/governed-file-create.md",
     "docs/governed-file-create.fr.md",
+    "docs/governed-base-config.md",
+    "docs/governed-base-config.fr.md",
     "docs/note-name-rules.md",
     "docs/note-name-rules.fr.md",
     "docs/cycle-20260920/CODEX-FINALISATION.md",
@@ -136,7 +138,9 @@
     "docs/releases/3.15.2.md",
     "docs/releases/3.15.2.fr.md",
     "docs/releases/3.16.0.md",
-    "docs/releases/3.16.0.fr.md"
+    "docs/releases/3.16.0.fr.md",
+    "docs/releases/3.17.0.md",
+    "docs/releases/3.17.0.fr.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
@@ -216,6 +220,7 @@
     "test:native-note-move": "npm run build && node scripts/test-native-note-move-m3.mjs && node scripts/test-native-note-move-surface.mjs",
     "test:note-names": "npm run build && node scripts/test-note-name-rules.mjs",
     "test:file-create": "npm run build && node scripts/test-vault-file-create.mjs",
+    "test:base-config": "npm run build && node scripts/test-base-config-patch.mjs",
     "test:note-links": "npm run build && node scripts/test-note-links-m2.mjs",
     "test:profiles": "npm run build && node scripts/test-tool-surface-registry.mjs && node scripts/test-tool-profiles.mjs && node scripts/test-elysia-task-profile.mjs",
     "test:tool-annotations": "node scripts/test-tool-annotations.mjs",

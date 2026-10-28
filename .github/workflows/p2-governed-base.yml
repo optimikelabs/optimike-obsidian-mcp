@@ -37,4 +37,5 @@ jobs:
       - run: npm ci
       - run: npm --prefix plugins/obsidian-bases-bridge ci
       - run: npm run test:governed-base
+      - run: node scripts/test-base-config-patch.mjs
       - run: node scripts/test-governed-base-doc-contract.mjs

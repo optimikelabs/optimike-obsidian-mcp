@@ -92,7 +92,7 @@ try {
     const f = fixture("base-format", "base");
     const plan = (content, file = "Vue.base") => f.adapter.plan({ path: file, content, idempotencyKey: "k-" + vaultFileCreateHash(content + file).slice(0, 8) });
     for (const [content, code] of [["views: [unclosed\n", "base-yaml-invalid"], ["- a\n- b\n", "base-not-object"],
-      ["# only a comment\n", "base-not-object"], ["views:\n  - type: kanban\n", "base-view-type"]]) {
+      ["# only a comment\n", "base-not-object"], ["views:\n  - type: Not A Type!\n", "base-view-type"]]) {
       await assert.rejects(plan(content), error => {
         assert.equal(error.code, "VALIDATION_ERROR");
         assert.equal(error.details.reasonCode, "create_format_invalid");

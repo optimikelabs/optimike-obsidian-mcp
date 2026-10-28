@@ -6,12 +6,12 @@
     "vault-cache",
     "asset-policy"
   ],
-  "toolCount": 105,
+  "toolCount": 109,
   "classificationCounts": {
     "canonical-unique": 48,
     "alias-redundant": 0,
     "compatibility-historical": 1,
-    "governed-operation": 41,
+    "governed-operation": 45,
     "diagnostic": 10,
     "administration": 5
   },
@@ -20,6 +20,10 @@
       "asset_import_apply",
       "asset_import_plan",
       "asset_import_status",
+      "bases_config_patch_apply",
+      "bases_config_patch_plan",
+      "bases_config_patch_recover",
+      "bases_config_patch_status",
       "bases_create",
       "bases_create_apply",
       "bases_create_plan",
@@ -123,6 +127,10 @@
       "asset_import_apply",
       "asset_import_plan",
       "asset_import_status",
+      "bases_config_patch_apply",
+      "bases_config_patch_plan",
+      "bases_config_patch_recover",
+      "bases_config_patch_status",
       "bases_create",
       "bases_create_apply",
       "bases_create_plan",
@@ -556,6 +564,10 @@
       "description": "Content and structure authoring: standard plus tags, Bases writes/formulas and Canvas mutation surfaces appropriate to the active runtime.",
       "modes": {
         "live": [
+          "bases_config_patch_apply",
+          "bases_config_patch_plan",
+          "bases_config_patch_recover",
+          "bases_config_patch_status",
           "bases_create",
           "bases_create_apply",
           "bases_create_plan",
@@ -608,6 +620,10 @@
           "smart_semantic_search"
         ],
         "hybrid-live": [
+          "bases_config_patch_apply",
+          "bases_config_patch_plan",
+          "bases_config_patch_recover",
+          "bases_config_patch_status",
           "bases_create",
           "bases_create_apply",
           "bases_create_plan",
@@ -864,6 +880,10 @@
           "asset_import_apply",
           "asset_import_plan",
           "asset_import_status",
+          "bases_config_patch_apply",
+          "bases_config_patch_plan",
+          "bases_config_patch_recover",
+          "bases_config_patch_status",
           "bases_create",
           "bases_create_apply",
           "bases_create_plan",
@@ -967,6 +987,10 @@
           "asset_import_apply",
           "asset_import_plan",
           "asset_import_status",
+          "bases_config_patch_apply",
+          "bases_config_patch_plan",
+          "bases_config_patch_recover",
+          "bases_config_patch_status",
           "bases_create",
           "bases_create_apply",
           "bases_create_plan",
@@ -1287,6 +1311,10 @@
           "asset_import_apply",
           "asset_import_plan",
           "asset_import_status",
+          "bases_config_patch_apply",
+          "bases_config_patch_plan",
+          "bases_config_patch_recover",
+          "bases_config_patch_status",
           "bases_create",
           "bases_create_apply",
           "bases_create_plan",
@@ -1385,6 +1413,10 @@
           "asset_import_apply",
           "asset_import_plan",
           "asset_import_status",
+          "bases_config_patch_apply",
+          "bases_config_patch_plan",
+          "bases_config_patch_recover",
+          "bases_config_patch_status",
           "bases_create",
           "bases_create_apply",
           "bases_create_plan",
@@ -1810,6 +1842,138 @@
           ]
         }
       ]
+    },
+    {
+      "name": "bases_config_patch_apply",
+      "canonicalName": "bases_config_patch_apply",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-config-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "apply"
+    },
+    {
+      "name": "bases_config_patch_plan",
+      "canonicalName": "bases_config_patch_plan",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-config-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-plan",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "plan"
+    },
+    {
+      "name": "bases_config_patch_recover",
+      "canonicalName": "bases_config_patch_recover",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-config-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "governed-mutation",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "recover"
+    },
+    {
+      "name": "bases_config_patch_status",
+      "canonicalName": "bases_config_patch_status",
+      "classification": "governed-operation",
+      "group": "bases.governed",
+      "family": "base-config-patch",
+      "surfaceClass": "canonical",
+      "annotationClass": "read-only",
+      "registrationModes": [
+        "live",
+        "hybrid-live"
+      ],
+      "profiles": [
+        "authoring",
+        "full",
+        "operational"
+      ],
+      "profileModes": {
+        "authoring": [
+          "live",
+          "hybrid-live"
+        ],
+        "full": [
+          "live",
+          "hybrid-live"
+        ],
+        "operational": [
+          "live",
+          "hybrid-live"
+        ]
+      },
+      "lifecycleRole": "status"
     },
     {
       "name": "bases_create",

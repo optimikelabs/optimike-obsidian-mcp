@@ -231,6 +231,30 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   ...NOTE_NAME_REASON_CODES,
   "atomic_bridge_version_unsupported",
+  "base_config_filter_invalid",
+  "base_config_last_view",
+  "base_config_name_invalid",
+  "base_config_operation_unsupported",
+  "base_config_patch_size",
+  "base_config_plan_not_found",
+  "base_config_projection_conflict",
+  "base_config_projection_mismatch",
+  "base_config_reference_invalid",
+  "base_config_result_invalid",
+  "base_config_section_invalid",
+  "base_config_source_too_large",
+  "base_config_target_missing",
+  "base_config_value_invalid",
+  "base_config_view_ambiguous",
+  "base_config_view_exists",
+  "base_config_view_invalid",
+  "base_config_view_missing",
+  "base_config_view_type_unknown",
+  "base_config_yaml_invalid",
+  "base_config_yaml_unsupported",
+  "canvas_field_invalid",
+  "canvas_field_unsupported",
+  "canvas_node_type_invalid",
   "frontmatter_native_render_invalid",
   "frontmatter_normalization_proof_mismatch",
   "text_patch_normalization_proof_mismatch",
@@ -483,7 +507,7 @@ const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const OPERON_FALLBACK_OPERATION_ID = /^operon-\d{13}-[0-9a-f]+$/u;
 const GOVERNED_PLAN_REFERENCE =
-  /^(?:obsidian-note-replace|obsidian-frontmatter-patch|obsidian-base-formula-patch|obsidian-canvas-patch|external-move):v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+  /^(?:obsidian-note-replace|obsidian-frontmatter-patch|obsidian-base-formula-patch|obsidian-base-config-patch|obsidian-canvas-patch|external-move):v1:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const OPERON_RECOVERY_REFERENCE = /^dvr1_[0-9a-f]{48}$/u;
 
 const SAFE_TRANSPORTS = new Set(["stdio", "http", "sse", "streamable-http"]);

@@ -26,6 +26,7 @@ import {
   type PendingOperationRowsPage,
 } from "./operations/obsidianNoteReplaceJournal.js";
 import { RestBaseAtomicWriteBackend } from "./operations/restBaseAtomicWriteBackend.js";
+import { BASE_CONFIG_OPERATION_KIND, GovernedBaseConfigRuntime } from "./baseConfigProjectionRuntime.js";
 import { assertWriteAllowed } from "./writePolicy.js";
 
 const OPERATION_KIND = "obsidian.base.formula.patch" as const;
@@ -237,6 +238,8 @@ function assertPolicy(
 export class GovernedBaseFormulaRuntime {
   private closed = false;
   private readonly heartbeat: NodeJS.Timeout;
+  /** Whole-Base configuration edits share this journal, lease and backend. */
+  readonly configPatch: GovernedBaseConfigRuntime;
 
   constructor(
     private readonly backend: RestBaseAtomicWriteBackend,
@@ -244,6 +247,7 @@ export class GovernedBaseFormulaRuntime {
     private readonly adapter: ObsidianNoteReplaceOperationAdapter,
     heartbeatMs: number,
   ) {
+    this.configPatch = new GovernedBaseConfigRuntime(backend, journal);
     this.heartbeat = setInterval(() => {
       try {
         this.journal.renewExecutionLease();
@@ -270,7 +274,7 @@ export class GovernedBaseFormulaRuntime {
     return this.journal.listPendingOperationRows({
       ...input,
       fallbackOperationKind: OPERATION_KIND,
-      admittedProjectionKinds: [OPERATION_KIND],
+      admittedProjectionKinds: [OPERATION_KIND, BASE_CONFIG_OPERATION_KIND],
       allowUnprojectedFallback: false,
     });
   }

@@ -694,7 +694,7 @@ export class GovernedNoteReplaceRuntime {
     this.noteDelete = noteDeleteBackend ? new NoteDeleteOperationAdapter(noteDeleteBackend, journal) : undefined;
     this.nativeMove = nativeMoveBackend ? new NativeNoteMoveOperationAdapter(nativeMoveBackend, journal) : undefined;
     this.closure = new AdministrativeClosureService(journal, backend, this.closureProfiles(noteCreateBackend, fileCreateBackends),
-      ["obsidian-canvas-patch:v1:", "obsidian-base-formula-patch:v1:", "oasset:"]);
+      ["obsidian-canvas-patch:v1:", "obsidian-base-formula-patch:v1:", "obsidian-base-config-patch:v1:", "oasset:"]);
     if (
       config.assetImportEnabled &&
       config.assetFolder &&

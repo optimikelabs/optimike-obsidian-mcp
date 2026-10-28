@@ -32,6 +32,7 @@ import {
 import { registerGovernedFrontmatterTools } from "../governedFrontmatterTools/index.js";
 import { registerGovernedTextPatchTools } from "../governedTextPatchTools/index.js";
 import { registerGovernedBaseFormulaTools } from "../governedBaseFormulaTools/index.js";
+import { registerGovernedBaseConfigTools } from "../governedBaseConfigTools/registration.js";
 import type { GovernedBaseFormulaRuntime } from "../../../services/baseFormulaProjectionRuntime.js";
 import type { GovernedCanvasRuntime } from "../../../services/canvasProjectionRuntime.js";
 import { registerGovernedCanvasTools } from "../governedCanvasTools/index.js";
@@ -180,6 +181,7 @@ export async function registerRuntimeTools(
   await registerGovernedTextPatchTools(server, governedNoteReplaceRuntime);
   await registerGovernedFrontmatterTools(server, governedNoteReplaceRuntime);
   await registerGovernedBaseFormulaTools(server, governedBaseFormulaRuntime);
+  registerGovernedBaseConfigTools(server, governedBaseFormulaRuntime?.configPatch);
   await registerGovernedCanvasTools(server, governedCanvasRuntime);
   await registerOperonTools(server);
 }

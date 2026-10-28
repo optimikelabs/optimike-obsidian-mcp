@@ -323,7 +323,7 @@ for (const [id, missingTools] of [
   ],
   ["governed-frontmatter-write", ["obsidian_frontmatter_patch_apply"]],
   ["governed-canvas-write", ["obsidian_canvas_patch_apply"]],
-  ["governed-base-write", ["bases_formula_patch_apply"]],
+  ["governed-base-write", ["bases_formula_patch_apply", "bases_config_patch_apply"]],
 ]) {
   const incompleteGovernedInput = input();
   incompleteGovernedInput.visibleToolNames =

@@ -179,6 +179,10 @@ const GOVERNED_OPERATION_TOOL_NAMES = [
   "bases_formula_patch_apply",
   "bases_formula_patch_status",
   "bases_formula_patch_recover",
+  "bases_config_patch_plan",
+  "bases_config_patch_apply",
+  "bases_config_patch_status",
+  "bases_config_patch_recover",
   "obsidian_canvas_patch_plan",
   "obsidian_canvas_patch_apply",
   "obsidian_canvas_patch_status",
@@ -517,6 +521,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "base-formula-patch",
   ),
   ...governedFamily("bases_create", "bases.governed", "base-create"),
+  ...governedFamily("bases_config_patch", "bases.governed", "base-config-patch"),
 
   defineTool(
     "obsidian_manage_canvas",

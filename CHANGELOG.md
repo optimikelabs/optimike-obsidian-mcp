@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-10-28
+
+No Bridge change: keep Atomic Write Bridge 0.9.0, Operon Bridge 0.9.3 and Bases Bridge 1.2.2 from the 3.16.0 bundle.
+
+### Added
+
+- Governed Base configuration: `bases_config_patch_plan` / `_apply` / `_status` / `_recover` (see [governed Base configuration](docs/governed-base-config.md)). One plan edits global filters (`and` / `or` / `not`, nested), formulas, property settings such as `displayName`, custom summaries, and views: add, delete, move, rename, change type, filters, `order`, `sort`, `groupBy`, `groupOrder`, `summaries`, `limit` or any view or plugin key. Edits go through the YAML document model, so comments and untouched values are kept; the result is checked against an independent model of the intent and must be a valid Base. It reuses the formula journal, atomic CAS and `allowAtomicBaseWrites` grant.
+- Governed Canvas patch, every JSON Canvas option: `add_node` (text, file with `#` subpath, link, group with label and background), `set_node_fields` (color and type-specific fields; `null` removes an optional field), `update_edge` (label, color, sides, arrow ends, endpoints) and arrow ends on `connect_nodes`. The Atomic Write Bridge already validated these fields.
+
+### Changed
+
+- Governed Base configuration accepts a plugin view type (for example `kanban`) only with `pluginViewType: true` or when the Base already uses one, as a `base-view-type-plugin` warning; `obsidian_validate_format` and Base creation stay strict.
+- Live profiles: `authoring` 54, `operational` 97, `full` 102; catalogue 109 names. See the [English](docs/releases/3.17.0.md) and [French](docs/releases/3.17.0.fr.md) release notes.
+
 ## [3.16.0] - 2026-10-28
 
 Atomic Write Bridge 0.9.0 ships with this release and is required for Base and Canvas creation; the other governed families still accept 0.8.4 or later. Deploy and roll back the MCP and the Bridge as one pair. Operon Bridge 0.9.3 and Bases Bridge 1.2.2 are unchanged.

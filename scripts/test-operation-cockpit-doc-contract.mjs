@@ -27,8 +27,8 @@ assert.match(docs, /never calls a backend/u);
 assert.match(docsFr, /n'appelle aucun backend/u);
 assert.match(docs, /does not scan other SQLite files/u);
 assert.match(docsFr, /ne sonde aucun autre fichier SQLite/u);
-assert.match(toolSpec, /105 unique names/u);
-assert.match(toolSpec, /98 names/u);
+assert.match(toolSpec, /109 unique names/u);
+assert.match(toolSpec, /102 names/u);
 assert.ok(packageJson.files.includes("docs/operation-cockpit-p5.md"));
 assert.ok(packageJson.files.includes("docs/operation-cockpit-p5.fr.md"));
 assert.equal(

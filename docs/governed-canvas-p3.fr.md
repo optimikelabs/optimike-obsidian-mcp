@@ -20,8 +20,16 @@ headless-filesystem sans reçu durable.
 - modifier le texte d'un nœud texte existant ;
 - déplacer ou redimensionner un nœud existant ;
 - supprimer un nœud et l'ensemble scellé de ses edges incidentes ;
-- connecter deux nœuds existants ou ajoutés avec un ID d'edge explicite ;
-- supprimer une edge.
+- connecter deux nœuds existants ou ajoutés avec un ID d'edge explicite, avec
+  côtés, étiquette, couleur et extrémités de flèche (`fromEnd` / `toEnd`) facultatifs ;
+- supprimer une edge ;
+- depuis la 3.17.0, ajouter un nœud de n'importe quel type JSON Canvas
+  (`add_node` : texte, fichier avec section `#` facultative, lien, groupe avec titre et fond) ;
+- depuis la 3.17.0, modifier les champs d'un nœud existant (`set_node_fields` :
+  couleur, texte, fichier, section, url, titre, fond, style du fond ; `null`
+  retire un champ facultatif ; l'id, le type et la géométrie ne changent pas ici) ;
+- depuis la 3.17.0, modifier une edge existante (`update_edge` : étiquette,
+  couleur, côtés, extrémités, ou nœuds de départ et d'arrivée).
 
 Un ID de nœud ou d'edge ne peut être ciblé qu'une fois par plan. Le compilateur
 préserve les champs racine inconnus et les valeurs inconnues des entités

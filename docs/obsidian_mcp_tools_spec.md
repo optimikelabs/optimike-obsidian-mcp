@@ -28,8 +28,8 @@ registration and tool-profile exposure are separate filters:
 - a hidden tool remains protected by the same runtime/write/security checks;
   visibility is not authorization.
 
-The current cross-runtime registry contains 105 unique names, including three
-optional asset tools. Full live/hybrid registration currently contains 98 names
+The current cross-runtime registry contains 109 unique names, including three
+optional asset tools. Full live/hybrid registration currently contains 102 names
 without them. See
 [Tool Surface Profiles](tool-surface-profiles.md) for exact profile semantics.
 

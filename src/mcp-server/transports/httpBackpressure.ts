@@ -64,6 +64,9 @@ const DEFAULT_MUTATION_TOOLS = [
   "bases_formula_patch_plan",
   "bases_formula_patch_apply",
   "bases_formula_patch_recover",
+  "bases_config_patch_plan",
+  "bases_config_patch_apply",
+  "bases_config_patch_recover",
 ].join(",");
 
 function envInteger(defaultValue: number, min: number, max: number) {

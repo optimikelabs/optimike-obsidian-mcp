@@ -211,6 +211,13 @@ live/hybrid registration boundary. They additionally require Bases Bridge
 1.1.0 Atomic V1 with atomic Base CAS enabled and legacy whole-file config
 writes disabled.
 
+## Governed Base configuration
+
+`bases_config_patch_plan`, `bases_config_patch_apply`,
+`bases_config_patch_status`, and `bases_config_patch_recover` follow the Base
+formula boundary and grant: filters, formulas, property settings, summaries
+and views of an existing Base. See [governed Base configuration](governed-base-config.md).
+
 ## Governed Canvas P3
 
 `obsidian_canvas_patch_plan`, `obsidian_canvas_patch_apply`,

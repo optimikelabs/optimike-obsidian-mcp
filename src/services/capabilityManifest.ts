@@ -293,6 +293,10 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "bases_formula_patch_apply",
     "bases_formula_patch_status",
     "bases_formula_patch_recover",
+    "bases_config_patch_plan",
+    "bases_config_patch_apply",
+    "bases_config_patch_status",
+    "bases_config_patch_recover",
   ],
   "governed-asset-import": [
     "asset_import_plan",

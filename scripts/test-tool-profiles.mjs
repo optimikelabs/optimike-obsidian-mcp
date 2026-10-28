@@ -12,8 +12,8 @@ import { TOOL_REGISTRATION_MODES } from "../dist/mcp-server/toolSurfaceRegistry.
 const WITH_CACHE = ["vault-cache"];
 
 const EXPECTED_COUNTS = {
-  live: { standard: 30, authoring: 50, tasks: 36, full: 98, operational: 93 },
-  "hybrid-live": { standard: 30, authoring: 50, tasks: 36, full: 98, operational: 93 },
+  live: { standard: 30, authoring: 54, tasks: 36, full: 102, operational: 97 },
+  "hybrid-live": { standard: 30, authoring: 54, tasks: 36, full: 102, operational: 97 },
   "hybrid-degraded": { standard: 6, authoring: 6, tasks: 14, full: 45, operational: 45 },
   "headless-readonly": { standard: 9, authoring: 9, tasks: 14, full: 48, operational: 48 },
   "headless-guarded": { standard: 12, authoring: 12, tasks: 14, full: 51, operational: 51 },
