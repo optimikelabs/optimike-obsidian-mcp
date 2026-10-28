@@ -46,12 +46,12 @@ Le runtime répond à ce que le backend peut exécuter. Il ne décide pas combie
 | Besoin                                               | Profil      | Taille live/hybrid complète |
 | ---------------------------------------------------- | ----------- | --------------------------: |
 | Travail général sur le coffre                        | `standard`  |                          30 |
-| Notes, tags, Bases et Canvas                         | `authoring` |                          44 |
+| Notes, tags, Bases et Canvas                         | `authoring` |                          50 |
 | Workflows Tasks / Operon                             | `tasks`     |                          36 |
-| Usage courant complet, préférence gouvernée | `operational` | 87 |
-| Surface complète explicite, admin et spécialisations | `full`      |                          92 |
+| Usage courant complet, préférence gouvernée | `operational` | 93 |
+| Surface complète explicite, admin et spécialisations | `full`      |                          98 |
 
-Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 90 outils operational et 95 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
+Les tailles ci-dessus excluent les trois outils optionnels d’assets : la configuration locale actuelle expose 96 outils operational et 101 full. Le lanceur local configure explicitement operational ; le défaut générique du paquet reste standard. En 3.0, l’absence de profil sélectionne `standard`. `smart_semantic_search` est le seul nom de recherche sémantique enregistré ; les anciens alias `smart_search` et `smart-search` ont été supprimés. `full` reste disponible par opt-in explicite pour toute la surface du runtime actif. `bases_upsert_config` reste une voie de compatibilité whole-Base réservée à `full` ; l’authoring normal utilise la création/écriture de lignes bornée et la famille gouvernée des formules.
 
 Sélectionner le profil avant `tools/list` :
 
