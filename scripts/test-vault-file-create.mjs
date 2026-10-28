@@ -31,6 +31,7 @@ function fixture(name, kind, options = {}) {
         ...(grant ? { [kind === "base" ? "baseCreate" : "canvasCreate"]: { ...grant, bindingFingerprint: createBinding() } } : {}) };
     },
     async preflight(file) {
+      if (!grant) throw Object.assign(new Error("route missing on an older Bridge"), { code: "NOT_FOUND" });
       if (files.has(file)) throw new Error("target exists");
       return { contractVersion: 1, kind, path: file, bindingFingerprint: createBinding(), absent: true, enabled: true };
     },

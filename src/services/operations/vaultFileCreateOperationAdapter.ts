@@ -126,6 +126,9 @@ export class VaultFileCreateOperationAdapter {
     };
     const old = winner(); if (old) return this.receipt(old);
     this.authorize("plan", input.path, input.content);
+    // An older Bridge has no route for this kind: say so instead of a bare 404.
+    const capability = (await this.backend.status() as unknown as Record<string, any> | null)?.[this.profile.statusField];
+    if (!capability || capability.supported !== true) bad("create_bridge_unsupported");
     let plan: VaultFileCreatePreflight;
     try { plan = WirePreflight.parse(await this.backend.preflight(input.path)); }
     catch (error) { const existing = winner(); if (existing) return this.receipt(existing); throw error; }
