@@ -14,6 +14,28 @@ import { mcpSchema } from "../../mcpSchema.js";
 
 const Id = z.string().min(1).max(256);
 const Side = z.enum(["top", "right", "bottom", "left"]);
+const End = z.enum(["none", "arrow"]);
+const Color = z.string().min(1).max(64).describe('Canvas preset "1"-"6" or a hex color such as "#ff8800".');
+const NodeFields = z.object({
+  color: Color.nullable().optional(),
+  text: z.string().max(1_048_576).nullable().optional(),
+  file: z.string().min(1).max(1024).nullable().optional(),
+  subpath: z.string().min(2).max(1024).nullable().optional(),
+  url: z.string().min(1).max(4096).nullable().optional(),
+  label: z.string().max(1024).nullable().optional(),
+  background: z.string().min(1).max(1024).nullable().optional(),
+  backgroundStyle: z.enum(["cover", "ratio", "repeat"]).nullable().optional(),
+}).strict();
+const EdgeFields = z.object({
+  label: z.string().max(1024).nullable().optional(),
+  color: Color.nullable().optional(),
+  fromSide: Side.nullable().optional(),
+  toSide: Side.nullable().optional(),
+  fromEnd: End.nullable().optional(),
+  toEnd: End.nullable().optional(),
+  fromNode: Id.optional(),
+  toNode: Id.optional(),
+}).strict();
 const OperationSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("add_text_node"),
@@ -48,8 +70,37 @@ const OperationSchema = z.discriminatedUnion("op", [
     toSide: Side.optional(),
     label: z.string().max(1024).optional(),
     color: z.string().min(1).max(64).optional(),
+    fromEnd: End.optional(),
+    toEnd: End.optional(),
   }),
   z.object({ op: z.literal("delete_edge"), id: Id }),
+  z.object({
+    op: z.literal("add_node"),
+    id: Id,
+    type: z.enum(["text", "file", "link", "group"]),
+    x: z.number().int(),
+    y: z.number().int(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    text: z.string().max(1_048_576).optional().describe("text nodes only"),
+    file: z.string().min(1).max(1024).optional().describe("file nodes only: vault-relative path"),
+    subpath: z.string().min(2).max(1024).optional().describe("file nodes only: #heading or #^block"),
+    url: z.string().min(1).max(4096).optional().describe("link nodes only"),
+    label: z.string().max(1024).optional().describe("group nodes only"),
+    background: z.string().min(1).max(1024).optional().describe("group nodes only: image path"),
+    backgroundStyle: z.enum(["cover", "ratio", "repeat"]).optional().describe("group nodes only"),
+    color: Color.optional(),
+  }).describe("Add one node of any JSON Canvas type with only the fields of that type."),
+  z.object({
+    op: z.literal("set_node_fields"),
+    id: Id,
+    fields: NodeFields.describe("Set fields of the node's own type; null removes an optional field. Geometry uses move_node; id and type never change."),
+  }),
+  z.object({
+    op: z.literal("update_edge"),
+    id: Id,
+    fields: EdgeFields.describe("Set edge fields; null removes label, color, sides or ends. fromNode/toNode re-target to existing nodes."),
+  }),
 ]);
 
 const PlanSchema = z.object({

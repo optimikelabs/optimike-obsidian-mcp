@@ -211,6 +211,14 @@ mode hybrid dégradé.
 frontière live/hybrid. Ils exigent en plus Bases Bridge 1.1.0 Atomic V1, avec le
 CAS atomique Base activé et les remplacements complets historiques désactivés.
 
+## Configuration gouvernée d’une Base
+
+`bases_config_patch_plan`, `bases_config_patch_apply`,
+`bases_config_patch_status` et `bases_config_patch_recover` suivent la frontière
+et le grant des formules Base : filtres, formules, réglages des propriétés,
+résumés et vues d’une Base existante. Voir la
+[configuration gouvernée d’une Base](governed-base-config.fr.md).
+
 ## Canvas gouverné P3
 
 `obsidian_canvas_patch_plan`, `obsidian_canvas_patch_apply`,

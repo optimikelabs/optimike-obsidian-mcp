@@ -66,6 +66,7 @@ this precedence:
 | Top-level frontmatter set/delete                  | `obsidian_frontmatter_patch_plan` then its matching lifecycle             | `obsidian_manage_frontmatter` remains useful for reads, compatibility, or when the governed live projection is absent. |
 | Named Base formula set/delete                     | `bases_formula_patch_plan` then its matching lifecycle                    | `bases_upsert_config` is a default-off whole-config compatibility path.                                                |
 | Existing JSON Canvas graph mutation               | `obsidian_canvas_patch_plan` then its matching lifecycle                  | `obsidian_manage_canvas` is a direct headless-filesystem helper without durable recovery.                              |
+| Base filters, properties, summaries or views      | `bases_config_patch_plan` then its matching lifecycle                     | `bases_upsert_config` is a default-off whole-config compatibility path.                                                |
 | New Base (`.base`) in a live vault                | `bases_create_plan` then its matching apply/status tools                  | `bases_create` writes only through the default-off legacy switch; it remains for validation and headless vaults.       |
 | New JSON Canvas in a live vault                   | `obsidian_canvas_create_plan` then its matching apply/status tools        | `obsidian_manage_canvas` creates only in `headless-filesystem`.                                                        |
 

@@ -11,6 +11,8 @@ export function proxyMutationFailure(name: string, args: unknown) {
     obsidian_note_delete_apply: "obsidian-note-delete:v1:",
     obsidian_canvas_patch_apply: "obsidian-canvas-patch:v1:",
     bases_formula_patch_apply: "obsidian-base-formula-patch:v1:",
+    bases_config_patch_apply: "obsidian-base-config-patch:v1:",
+    bases_config_patch_recover: "obsidian-base-config-patch:v1:",
     bases_rows_patch_apply: "obsidian-base-rows-patch:v1:",
   };
   const prefix = prefixes[name];

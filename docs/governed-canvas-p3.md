@@ -20,8 +20,16 @@ compatibility path without a durable receipt.
 - change the text of an existing text node;
 - move or resize an existing node;
 - delete one node and its sealed set of incident edges;
-- connect two existing or newly added nodes with an explicit edge ID;
-- delete one edge.
+- connect two existing or newly added nodes with an explicit edge ID, with
+  optional sides, label, color and arrow ends (`fromEnd` / `toEnd`);
+- delete one edge;
+- since 3.17.0, add one node of any JSON Canvas type (`add_node`: text, file
+  with optional `#` subpath, link, group with label and background);
+- since 3.17.0, change the fields of an existing node (`set_node_fields`:
+  color, text, file, subpath, url, label, background, backgroundStyle; `null`
+  removes an optional field; id, type and geometry never change here);
+- since 3.17.0, change an existing edge (`update_edge`: label, color, sides,
+  arrow ends, or re-targeted endpoints).
 
 Each node or edge ID may be targeted at most once in one plan. The compiler
 preserves unknown root fields and unknown values on targeted and untargeted

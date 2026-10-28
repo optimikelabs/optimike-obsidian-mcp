@@ -43,8 +43,42 @@ export type CanvasPatchOperation =
       toSide?: "top" | "right" | "bottom" | "left";
       label?: string;
       color?: string;
+      fromEnd?: "none" | "arrow";
+      toEnd?: "none" | "arrow";
     }
-  | { op: "delete_edge"; id: string };
+  | { op: "delete_edge"; id: string }
+  | {
+      op: "add_node";
+      id: string;
+      type: CanvasNodeType;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      text?: string;
+      file?: string;
+      subpath?: string;
+      url?: string;
+      label?: string;
+      background?: string;
+      backgroundStyle?: "cover" | "ratio" | "repeat";
+      color?: string;
+    }
+  | { op: "set_node_fields"; id: string; fields: Partial<Record<CanvasNodeField, string | null>> }
+  | { op: "update_edge"; id: string; fields: Partial<Record<CanvasEdgeField, string | null>> };
+export type CanvasNodeType = "text" | "file" | "link" | "group";
+/** Optional or type-specific node fields; geometry stays with move_node, id and type never change. */
+export const CANVAS_NODE_FIELDS = ["color", "text", "file", "subpath", "url", "label", "background", "backgroundStyle"] as const;
+export type CanvasNodeField = (typeof CANVAS_NODE_FIELDS)[number];
+/** Edge fields; endpoints may be re-targeted but never removed. */
+export const CANVAS_EDGE_FIELDS = ["label", "color", "fromSide", "toSide", "fromEnd", "toEnd", "fromNode", "toNode"] as const;
+export type CanvasEdgeField = (typeof CANVAS_EDGE_FIELDS)[number];
+const TYPE_FIELDS: Record<CanvasNodeType, readonly CanvasNodeField[]> = {
+  text: ["text", "color"],
+  file: ["file", "subpath", "color"],
+  link: ["url", "color"],
+  group: ["label", "background", "backgroundStyle", "color"],
+};
 
 export type CanvasPatchProof = {
   contractVersion: 1;
@@ -405,7 +439,32 @@ export function canonicalizeCanvasPatchOperations(
         "canvas_operation_id",
       );
     }
-    if (operation.op === "add_text_node" || operation.op === "move_node") {
+    if (operation.op === "set_node_fields" || operation.op === "update_edge") {
+      const allowed: readonly string[] = operation.op === "set_node_fields" ? CANVAS_NODE_FIELDS : CANVAS_EDGE_FIELDS;
+      const keys = Object.keys(operation.fields ?? {});
+      if (keys.length === 0 || keys.some((key) => !allowed.includes(key))) {
+        fail("Canvas field updates need at least one supported field.", "canvas_field_unsupported");
+      }
+      for (const key of keys) {
+        const value = (operation.fields as Record<string, unknown>)[key];
+        if (value !== null && typeof value !== "string") {
+          fail("Canvas field values must be strings, or null to remove an optional field.", "canvas_field_invalid");
+        }
+        if (value === null && (key === "fromNode" || key === "toNode")) {
+          fail("Canvas edge endpoints cannot be removed.", "canvas_field_invalid");
+        }
+      }
+    }
+    if (operation.op === "add_node") {
+      if (!["text", "file", "link", "group"].includes(operation.type)) {
+        fail("Canvas node type must be text, file, link, or group.", "canvas_node_type_invalid");
+      }
+      const present = CANVAS_NODE_FIELDS.filter((field) => operation[field] !== undefined);
+      if (present.some((field) => !TYPE_FIELDS[operation.type].includes(field))) {
+        fail("A Canvas field does not belong to this node type.", "canvas_field_invalid");
+      }
+    }
+    if (operation.op === "add_text_node" || operation.op === "move_node" || operation.op === "add_node") {
       const numeric = [
         operation.x,
         operation.y,
@@ -429,7 +488,7 @@ export function canonicalizeCanvasPatchOperations(
       }
     }
     const targetSet =
-      operation.op === "connect_nodes" || operation.op === "delete_edge"
+      operation.op === "connect_nodes" || operation.op === "delete_edge" || operation.op === "update_edge"
         ? edgeTargets
         : nodeTargets;
     if (targetSet.has(operation.id)) {
@@ -496,6 +555,46 @@ export function compileCanvasPatch(
         replaceAt(next, ["nodes", currentNodes.length], node),
       );
       changedNodes.add(operation.id);
+      continue;
+    }
+
+    if (operation.op === "add_node") {
+      if (indexById(expectedNodes, operation.id) !== -1) {
+        fail(`Canvas node ${operation.id} already exists.`, "canvas_node_exists");
+      }
+      const node: CanvasObject = {
+        id: operation.id, type: operation.type,
+        x: operation.x, y: operation.y, width: operation.width, height: operation.height,
+      };
+      for (const field of CANVAS_NODE_FIELDS) {
+        if (operation[field] !== undefined) node[field] = operation[field];
+      }
+      expectedNodes.push(node);
+      next = boundedCanvasContent(replaceAt(next, ["nodes", currentNodes.length], node));
+      changedNodes.add(operation.id);
+      continue;
+    }
+
+    if (operation.op === "set_node_fields" || operation.op === "update_edge") {
+      const isNode = operation.op === "set_node_fields";
+      const list = isNode ? expectedNodes : expectedEdges;
+      if (!isNode && removedIncidentEdges.has(operation.id)) {
+        fail(`Canvas edge ${operation.id} was already removed implicitly in this patch.`, "canvas_edge_reuse_after_incident_removal");
+      }
+      const index = indexById(list, operation.id);
+      if (index === -1) {
+        fail(`Canvas ${isNode ? "node" : "edge"} ${operation.id} was not found.`,
+          isNode ? "canvas_node_missing" : "canvas_edge_missing");
+      }
+      const currentIndex = indexById(isNode ? currentNodes : currentEdges, operation.id);
+      for (const [key, value] of Object.entries(operation.fields) as Array<[string, string | null]>) {
+        if (value === null) delete list[index]![key];
+        else list[index]![key] = value;
+        next = boundedCanvasContent(
+          replaceAt(next, [isNode ? "nodes" : "edges", currentIndex, key], value === null ? undefined : value),
+        );
+      }
+      (isNode ? changedNodes : changedEdges).add(operation.id);
       continue;
     }
 
@@ -626,6 +725,8 @@ export function compileCanvasPatch(
         ...(operation.toSide === undefined ? {} : { toSide: operation.toSide }),
         ...(operation.label === undefined ? {} : { label: operation.label }),
         ...(operation.color === undefined ? {} : { color: operation.color }),
+        ...(operation.fromEnd === undefined ? {} : { fromEnd: operation.fromEnd }),
+        ...(operation.toEnd === undefined ? {} : { toEnd: operation.toEnd }),
       };
       expectedEdges.push(edge);
       next = boundedCanvasContent(

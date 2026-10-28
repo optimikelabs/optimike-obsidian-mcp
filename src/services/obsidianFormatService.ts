@@ -385,7 +385,21 @@ export function validateObsidianBase(content: string): FormatValidationResult {
       continue;
     }
     const viewType = (view as Record<string, unknown>).type;
+    // Plugins register their own view types (Obsidian Bases syntax); a
+    // plugin-like id is reported, not refused.
     if (
+      typeof viewType === "string" &&
+      !["table", "cards", "list", "map"].includes(viewType) &&
+      /^[a-z][a-z0-9-]{0,63}$/u.test(viewType)
+    ) {
+      addIssue(
+        issues,
+        "warning",
+        "base-view-type-plugin",
+        "Base view type is not built in; it needs the plugin that provides it.",
+        `views[${index}].type`,
+      );
+    } else if (
       typeof viewType !== "string" ||
       !["table", "cards", "list", "map"].includes(viewType)
     ) {

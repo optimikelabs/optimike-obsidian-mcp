@@ -33,6 +33,8 @@ runtime- and profile-dependent; never infer that an absent tool can be emulated 
   \`obsidian_frontmatter_patch_plan\`. \`obsidian_manage_frontmatter\` remains
   an explicit full-profile compatibility path or a bounded non-live fallback.
   A governed conflict or uncertain effect never authorizes a direct write.
+- Base filters, property settings, summaries or views: prefer
+  \`bases_config_patch_plan\`.
 - Named Base formula set/delete: prefer \`bases_formula_patch_plan\`.
   \`bases_upsert_config\` is a whole-config compatibility path and must not bypass
   the governed formula contract.

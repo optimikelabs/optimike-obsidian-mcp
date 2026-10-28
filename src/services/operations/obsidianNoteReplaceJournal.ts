@@ -126,6 +126,7 @@ export type PendingOperationKind =
   | "obsidian.note.replace"
   | "obsidian.frontmatter.patch"
   | "obsidian.base.formula.patch"
+  | "obsidian.base.config.patch"
   | "obsidian.canvas.patch"
   | "obsidian.text.patch"
   | "obsidian.note.move"
