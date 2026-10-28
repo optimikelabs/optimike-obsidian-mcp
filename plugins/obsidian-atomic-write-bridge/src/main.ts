@@ -33,6 +33,7 @@ import { createDatePreparation, DatePreparationDeferred, DatePreparationError } 
 import { createFdmCompletion } from './fdmCompletion.js';
 import { projectNoteLinks } from "./noteLinks.js";
 import { createNoteCreateRoutes } from "./noteCreateRoutes.js";
+import { createVaultFileCreateRoutes } from "./vaultFileCreateRoutes.js";
 import { createNativeNoteMoveRoutes } from "./nativeNoteMoveRoutes.js";
 import { createNoteDeleteRoutes } from "./noteDeleteRoutes.js";
 import { inspectFrontmatterFormat, InvalidFrontmatter } from "./frontmatterFormat.js";
@@ -53,6 +54,8 @@ type PluginData = {
   allowCanvasWrites: boolean;
   allowNativeMoves: boolean;
   allowNoteCreates: boolean;
+  allowBaseCreates?: boolean;
+  allowCanvasCreates?: boolean;
   /** Absent in older data.json files; never written until the owner changes it. */
   requireEffectFence?: boolean;
   allowNoteDeletes: boolean;
@@ -290,10 +293,14 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
   allowCanvasWrites = false;
   allowNativeMoves = false;
   allowNoteCreates = false;
+  allowBaseCreates = false;
+  allowCanvasCreates = false;
   requireEffectFence = false;
   effectFence!: EffectFence;
   allowNoteDeletes = false;
   private noteCreate: ReturnType<typeof createNoteCreateRoutes>;
+  private baseCreate: ReturnType<typeof createVaultFileCreateRoutes>;
+  private canvasCreate: ReturnType<typeof createVaultFileCreateRoutes>;
   private nativeMove: ReturnType<typeof createNativeNoteMoveRoutes>;
   private noteDelete: ReturnType<typeof createNoteDeleteRoutes>;
   private templateDateGuard!: ReturnType<typeof createTemplateDateGuard>;
@@ -310,6 +317,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
     this.allowCanvasWrites = stored?.allowCanvasWrites === true;
     this.allowNativeMoves = stored?.allowNativeMoves === true;
     this.allowNoteCreates = stored?.allowNoteCreates === true;
+    this.allowBaseCreates = stored?.allowBaseCreates === true;
+    this.allowCanvasCreates = stored?.allowCanvasCreates === true;
     this.requireEffectFence = stored?.requireEffectFence === true;
     // Created before any route: every effect of this instance passes this fence.
     this.effectFence = new EffectFence({ requireFence: () => this.requireEffectFence });
@@ -337,6 +346,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       stored?.allowCanvasWrites !== this.allowCanvasWrites ||
       stored?.allowNativeMoves !== this.allowNativeMoves ||
       stored?.allowNoteCreates !== this.allowNoteCreates ||
+      (stored?.allowBaseCreates !== undefined && stored.allowBaseCreates !== this.allowBaseCreates) ||
+      (stored?.allowCanvasCreates !== undefined && stored.allowCanvasCreates !== this.allowCanvasCreates) ||
       (stored?.allowNoteDeletes !== undefined && stored.allowNoteDeletes !== this.allowNoteDeletes)
     ) {
       await this.saveSettings();
@@ -369,6 +380,17 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
         enterEffect: (fence) => this.effectFence.enter(fence),
       });
     } catch { this.noteCreate = undefined; }
+    for (const kind of ["base", "canvas"] as const) {
+      let routes: ReturnType<typeof createVaultFileCreateRoutes>;
+      try {
+        routes = createVaultFileCreateRoutes(this.app, {
+          kind, parseYaml, binding: () => this.bindingFingerprint,
+          enabled: () => kind === "base" ? this.allowBaseCreates : this.allowCanvasCreates,
+          enterEffect: (fence) => this.effectFence.enter(fence),
+        });
+      } catch { routes = undefined; }
+      if (kind === "base") this.baseCreate = routes; else this.canvasCreate = routes;
+    }
     this.addSettingTab(new AtomicWriteSettingsTab(this.app, this));
     this.templateDateGuard = createTemplateDateGuard(this.app);
     this.register(() => this.templateDateGuard.dispose());
@@ -389,6 +411,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       allowCanvasWrites: this.allowCanvasWrites,
       allowNativeMoves: this.allowNativeMoves,
       allowNoteCreates: this.allowNoteCreates,
+      allowBaseCreates: this.allowBaseCreates,
+      allowCanvasCreates: this.allowCanvasCreates,
       requireEffectFence: this.requireEffectFence,
       allowNoteDeletes: this.allowNoteDeletes,
     } satisfies PluginData);
@@ -475,6 +499,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
             frontmatterFormat: { contractVersion: 1, supported: typeof (this.app as any).metadataTypeManager?.getAssignedWidget === "function" },
             nativeMove: this.nativeMove?.capabilities() ?? { supported: false, enabled: false },
             noteCreate: this.noteCreate?.capabilities() ?? { supported: false, enabled: false },
+            baseCreate: this.baseCreate?.capabilities() ?? { supported: false, enabled: false },
+            canvasCreate: this.canvasCreate?.capabilities() ?? { supported: false, enabled: false },
             noteDelete: this.noteDelete?.capabilities() ?? { supported: false, enabled: false },
             limits: { markdownOnly: true },
             settlement: {
@@ -928,6 +954,8 @@ export default class OptimikeAtomicWriteBridgePlugin extends Plugin {
       this.nativeMove?.mount(api);
       this.noteDelete?.mount(api);
       this.noteCreate?.mount(api);
+      this.baseCreate?.mount(api);
+      this.canvasCreate?.mount(api);
       console.info("[" + this.manifest.id + "] optional OpenAPI: " + documentation.publish());
       return () => api.unregister?.();
       } catch {
@@ -970,6 +998,20 @@ class AtomicWriteSettingsTab extends PluginSettingTab {
       .setDesc("Désactivé par défaut. Crée une note Markdown explicitement nommée, sans écrasement ni suffixe. Indexation Obsidian éventuelle ; aucune reprise aveugle d’une écriture incertaine.")
       .addToggle((toggle) => toggle.setValue(this.bridge.allowNoteCreates).onChange(async (value) => {
         this.bridge.allowNoteCreates = value;
+        await this.bridge.saveSettings();
+      }));
+    new Setting(containerEl)
+      .setName("Autoriser la création exclusive de Bases")
+      .setDesc("Désactivé par défaut. Crée un fichier .base explicitement nommé et déjà validé, sans écrasement ni suffixe. Ne modifie jamais une Base existante.")
+      .addToggle((toggle) => toggle.setValue(this.bridge.allowBaseCreates).onChange(async (value) => {
+        this.bridge.allowBaseCreates = value;
+        await this.bridge.saveSettings();
+      }));
+    new Setting(containerEl)
+      .setName("Autoriser la création exclusive de Canvas")
+      .setDesc("Désactivé par défaut. Crée un fichier .canvas explicitement nommé, au graphe validé, sans écrasement ni suffixe. Ne modifie jamais un Canvas existant.")
+      .addToggle((toggle) => toggle.setValue(this.bridge.allowCanvasCreates).onChange(async (value) => {
+        this.bridge.allowCanvasCreates = value;
         await this.bridge.saveSettings();
       }));
     new Setting(containerEl)

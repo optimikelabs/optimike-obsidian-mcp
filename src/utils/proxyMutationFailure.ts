@@ -5,6 +5,8 @@ export function proxyMutationFailure(name: string, args: unknown) {
     obsidian_frontmatter_patch_apply: "obsidian-frontmatter-patch:v1:",
     obsidian_note_replace_apply: "obsidian-note-replace:v1:",
     obsidian_note_create_apply: "obsidian-note-create:v1:",
+    bases_create_apply: "obsidian-base-create:v1:",
+    obsidian_canvas_create_apply: "obsidian-canvas-create:v1:",
     obsidian_note_move_apply: "obsidian-note-move:v1:",
     obsidian_note_delete_apply: "obsidian-note-delete:v1:",
     obsidian_canvas_patch_apply: "obsidian-canvas-patch:v1:",

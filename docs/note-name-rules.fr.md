@@ -98,6 +98,7 @@ collisions de casse demandent le dossier et sont signalées par les outils de pl
 
 | Voie | Règle appliquée |
 |---|---|
+| `bases_create_plan` / `obsidian_canvas_create_plan` et Bridge `base-create` / `canvas-create` | Même règle avec l'extension `.base` ou `.canvas`, au plan, au preflight et à l'apply du Bridge ; voisin replié refusé par le MCP et le Bridge |
 | `obsidian_note_create_plan` / `_apply` et Bridge `note-create` | Règle partagée au plan (refus public), au preflight et à l'apply du Bridge ; voisin replié refusé par le MCP (liste du dossier) et par le Bridge (dossier réel) |
 | `obsidian_note_move_plan` / `_apply` et Bridge `native-note-move` | **Destination** seulement (source et voisinage restent sur le contrôle structurel historique) ; voisin replié refusé par le MCP et par le contrôle `absent` du Bridge |
 | Headless `obsidian_move_note`, `obsidian_admin_filesystem` (batch_move), `obsidian_update_note`, `obsidian_manage_canvas`, écritures `bases_*` via `VaultFileService` | Règle partagée pour les fichiers qui n'existent pas encore, toute extension ; voisin replié refusé ; les dry-runs l'appliquent aussi. Les chemins avec `\` sont désormais refusés (utiliser `/`) |

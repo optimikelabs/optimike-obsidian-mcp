@@ -9,9 +9,11 @@ export class NoteCreateExists extends Error {}
 /** Local filesystem only. Parent directories must already exist and remain ordinary. */
 export class ExclusiveNoteCreateFiles {
   private readonly root: string;
-  constructor(private readonly configuredRoot: string) { this.root = realpathSync(configuredRoot); }
+  /** `validatePath` selects the file kind; Markdown by default. */
+  constructor(private readonly configuredRoot: string,
+    private readonly validatePath: (logical: string) => string = nativeNotePath) { this.root = realpathSync(configuredRoot); }
   private location(logical: string): string {
-    nativeNotePath(logical);
+    this.validatePath(logical);
     if (realpathSync(this.configuredRoot) !== this.root) throw new Error("create_root_changed");
     const parts = logical.split("/");
     let current = this.root;

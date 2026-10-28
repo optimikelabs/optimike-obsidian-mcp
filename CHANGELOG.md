@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-10-28
+
+Atomic Write Bridge 0.9.0 ships with this release and is required for Base and Canvas creation; the other governed families still accept 0.8.4 or later. Deploy and roll back the MCP and the Bridge as one pair. Operon Bridge 0.9.3 and Bases Bridge 1.2.2 are unchanged.
+
+### Added
+
+- Governed Base creation: `bases_create_plan` / `_apply` / `_status`, and governed Canvas creation: `obsidian_canvas_create_plan` / `_apply` / `_status` (see [governed Base and Canvas creation](docs/governed-file-create.md)). The plan checks the new name with the shared note-name rule and the `.base` or `.canvas` extension, validates the format (Base YAML mapping without errors; Canvas graph accepted by the governed Canvas patch compiler, so the new Canvas stays patchable) and seals the exact bytes in the existing durable journal. Apply uses the exclusive create of note creation (`O_CREAT | O_EXCL`, fsync, existing parent only): no overwrite, no suffix, no parent creation. Only the exact sealed bytes verify; no automatic rewrite is excused. A refusal returns the closed reason code `create_format_invalid`, never the submitted content; `obsidian_validate_format` lists the issues. There is no recover or undo tool; an uncertain creation is observed with status and can be closed with `obsidian_operation_close`.
+- Atomic Write Bridge 0.9.0: routes `base-create` and `canvas-create` (`preflight`, `apply`, `inspect`), settings **Allow exclusive Base creation** (`allowBaseCreates`) and **Allow exclusive Canvas creation** (`allowCanvasCreates`), both off by default and independent of note creation, a binding fingerprint per kind, and a Bridge-side parse of the content before the effect. A missing parent directory answers `file_create_parent_missing`.
+- Capability doctor entries `governed-base-create` and `governed-canvas-create`; pending-operation kinds `obsidian.base.create` and `obsidian.canvas.create` in `obsidian_list_pending_operations`, `obsidian_operation_close` and `scripts/close-pending-operations.mjs`.
+
+### Changed
+
+- The `authoring`, `operational` and `full` live profiles expose six more tools (50, 93 and 98). `standard` and `tasks` are unchanged. The cross-runtime catalogue lists 105 names.
+- `bases_create` now points to `bases_create_plan` for live creation; its behaviour is unchanged.
+
+### Limits
+
+- No governed mutation of the views or filters of an existing Base. The format check does not evaluate Obsidian formulas, filters or rendering. See the [English](docs/releases/3.16.0.md) and [French](docs/releases/3.16.0.fr.md) release notes.
+
 ## [3.15.2] - 2026-10-27
 
 ### Fixed

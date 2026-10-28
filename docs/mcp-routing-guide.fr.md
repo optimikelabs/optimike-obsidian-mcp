@@ -53,6 +53,8 @@ interchangeables. Appliquer cette priorité :
 | Set/delete du Frontmatter de premier niveau        | `obsidian_frontmatter_patch_plan`, puis son cycle associé | `obsidian_manage_frontmatter` reste utile pour la lecture, la compatibilité ou quand la projection gouvernée live est absente. |
 | Set/delete d’une formule Base nommée               | `bases_formula_patch_plan`, puis son cycle associé        | `bases_upsert_config` reste une voie whole-config de compatibilité.                                                            |
 | Mutation d’un graphe JSON Canvas existant          | `obsidian_canvas_patch_plan`, puis son cycle associé      | `obsidian_manage_canvas` est un helper filesystem headless direct sans recovery durable.                                       |
+| Nouvelle Base (`.base`) dans un coffre live         | `bases_create_plan`, puis apply/status                    | `bases_create` n’écrit que par l’interrupteur historique désactivé par défaut ; il reste pour la validation et le headless.    |
+| Nouveau Canvas JSON dans un coffre live             | `obsidian_canvas_create_plan`, puis apply/status          | `obsidian_manage_canvas` ne crée qu’en `headless-filesystem`.                                                                  |
 
 Les voies directes update note et search/replace restent disponibles dans
 `full`, dans les fallbacks headless et tant que le quartet gouverné est

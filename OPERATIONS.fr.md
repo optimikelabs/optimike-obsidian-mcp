@@ -160,8 +160,8 @@ Le serveur final peut exposer des capacités différentes selon les plugins Obsi
 
 - Optimike Atomic Write Bridge (inclus)
 
-  - requis pour les écritures gouvernées de note, la création, le déplacement natif, la suppression, le Frontmatter et le Canvas
-  - le MCP 3.15.x exige la version 0.8.5 ; les déployer et les restaurer ensemble
+  - requis pour les écritures gouvernées de note, la création de notes, de Bases et de Canvas, le déplacement natif, la suppression, le Frontmatter et le Canvas
+  - le MCP 3.16.x livre la version 0.9.0, exigée pour créer des Bases et des Canvas ; les déployer et les restaurer ensemble
 
 - Optimike Operon Bridge (inclus)
 
@@ -211,7 +211,7 @@ Les commandes complètes, états d’échec et gates de release vivent dans
 [Bundle des Bridges, mise à niveau et rollback](docs/bridge-packaging.fr.md).
 
 Mettre à niveau ensemble le MCP et le bundle des Bridges de la même release. Le
-MCP 3.15.x livre Atomic Write Bridge 0.8.5, Operon Bridge 0.9.3 et Bases Bridge
+MCP 3.16.x livre Atomic Write Bridge 0.9.0, Operon Bridge 0.9.3 et Bases Bridge
 1.2.2. Avant de basculer ou de restaurer la paire, vider les opérations en
 attente et les fences de préparation des dates
 ([Clore les opérations incertaines](#clore-les-opérations-incertaines)).

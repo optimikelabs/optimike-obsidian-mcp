@@ -123,6 +123,7 @@ form only: case collisions need the directory and are reported by the planning t
 
 | Path | Rule applied |
 |---|---|
+| `bases_create_plan` / `obsidian_canvas_create_plan` and Atomic Write Bridge `base-create` / `canvas-create` | Same rule with the `.base` or `.canvas` extension, at plan, Bridge preflight and apply; folded sibling refused by the MCP and the Bridge |
 | `obsidian_note_create_plan` / `_apply` (MCP) and Atomic Write Bridge `note-create` | Shared rule at plan (public refusal), at Bridge preflight and apply; case/Unicode-folded sibling refused by the MCP (directory listing) and by the Bridge (real directory) |
 | `obsidian_note_move_plan` / `_apply` (MCP) and Bridge `native-note-move` | **Destination** only (source and neighbourhood stay on the legacy structural check); folded sibling refused by the MCP and by the Bridge `absent` check |
 | Headless `obsidian_move_note`, `obsidian_admin_filesystem` (batch move), `obsidian_update_note`, `obsidian_manage_canvas`, `bases_*` writes through `VaultFileService` | Shared rule for files that do not exist yet, any extension; folded sibling refused; dry runs apply it too. Backslash paths are now refused (use `/`) |

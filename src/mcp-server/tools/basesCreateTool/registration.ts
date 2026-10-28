@@ -17,7 +17,7 @@ import { mcpSchema } from "../../mcpSchema.js";
 
 const TOOL_NAME = "bases_create";
 const TOOL_DESCRIPTION =
-  "Direct validation or creation of one .base YAML document through the REST bridge. Overwrite is a legacy whole-config compatibility effect and has no durable plan/status/recovery receipt.";
+  "Direct validation or creation of one .base YAML document through the REST bridge. Overwrite is a legacy whole-config compatibility effect and has no durable plan/status/recovery receipt. To create a new Base in a live vault, prefer bases_create_plan (governed, absent-only, durable receipt); legacy writes here stay disabled unless the Bases Bridge compatibility switch is on.";
 
 export async function registerBasesCreateTool(
   server: McpServer,

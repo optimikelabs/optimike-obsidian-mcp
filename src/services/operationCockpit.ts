@@ -20,6 +20,8 @@ export const OperationKindSchema = z.enum([
   "obsidian.note.move",
   "obsidian.note.delete",
   "obsidian.note.create",
+  "obsidian.base.create",
+  "obsidian.canvas.create",
   "obsidian.base.rows.patch",
   "obsidian.asset.import",
 ]);
@@ -86,6 +88,8 @@ const PLAN_REF_PREFIXES: Readonly<
   "obsidian.note.move": "obsidian-note-move:v1:",
   "obsidian.note.delete": "obsidian-note-delete:v1:",
   "obsidian.note.create": "obsidian-note-create:v1:",
+  "obsidian.base.create": "obsidian-base-create:v1:",
+  "obsidian.canvas.create": "obsidian-canvas-create:v1:",
   "obsidian.base.rows.patch": "obsidian-base-rows-patch:v1:",
   "obsidian.asset.import": "oasset:",
 };
@@ -140,7 +144,8 @@ function nextAction(
 ): OperationCockpitItem["nextAction"] {
   if (status === "planned") return "apply";
   if (status === "applying") return "status";
-  return ["obsidian.note.move", "obsidian.note.delete", "obsidian.note.create", "obsidian.base.rows.patch", "obsidian.asset.import"].includes(kind) ? "status" : "recover";
+  return ["obsidian.note.move", "obsidian.note.delete", "obsidian.note.create", "obsidian.base.create", "obsidian.canvas.create",
+    "obsidian.base.rows.patch", "obsidian.asset.import"].includes(kind) ? "status" : "recover";
 }
 
 const CLOSABLE_KINDS = new Set<PendingOperationRow["operationKind"]>([
@@ -149,6 +154,8 @@ const CLOSABLE_KINDS = new Set<PendingOperationRow["operationKind"]>([
   "obsidian.text.patch",
   "obsidian.base.rows.patch",
   "obsidian.note.create",
+  "obsidian.base.create",
+  "obsidian.canvas.create",
   "obsidian.note.move",
   "obsidian.note.delete",
 ]);

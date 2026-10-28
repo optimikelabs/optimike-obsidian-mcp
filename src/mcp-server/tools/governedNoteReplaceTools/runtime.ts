@@ -16,6 +16,9 @@ import {
   type NoteCreateBackend,
 } from "../../../services/operations/noteCreateOperationAdapter.js";
 import { RestNoteCreateBackend } from "../../../services/operations/restNoteCreateBackend.js";
+import { RestVaultFileCreateBackend } from "../../../services/operations/restVaultFileCreateBackend.js";
+import { VaultFileCreateOperationAdapter, type VaultFileCreateBackend } from "../../../services/operations/vaultFileCreateOperationAdapter.js";
+import { VAULT_FILE_CREATE_PROFILES } from "../../../services/vaultFileCreateContract.js";
 import {
   NativeNoteMoveOperationAdapter,
   type NativeNoteMoveBackend,
@@ -657,6 +660,8 @@ export type GovernedNoteReplacePlanView = {
 
 export class GovernedNoteReplaceRuntime {
   readonly noteCreate: NoteCreateOperationAdapter | undefined;
+  readonly baseCreate: VaultFileCreateOperationAdapter | undefined;
+  readonly canvasCreate: VaultFileCreateOperationAdapter | undefined;
   readonly assetImport: AssetImportOperationAdapter | undefined;
   readonly assetImportBackendReason?:
     | AssetFileReason
@@ -677,11 +682,18 @@ export class GovernedNoteReplaceRuntime {
     nativeMoveBackend?: NativeNoteMoveBackend,
     noteCreateBackend?: NoteCreateBackend,
     noteDeleteBackend?: NoteDeleteBackend,
+    fileCreateBackends: readonly VaultFileCreateBackend[] = [],
   ) {
     this.noteCreate = noteCreateBackend ? new NoteCreateOperationAdapter(noteCreateBackend, journal) : undefined;
+    const fileCreate = (kind: "base" | "canvas") => {
+      const found = fileCreateBackends.find((item) => item.kind === kind);
+      return found ? new VaultFileCreateOperationAdapter(found, journal) : undefined;
+    };
+    this.baseCreate = fileCreate("base");
+    this.canvasCreate = fileCreate("canvas");
     this.noteDelete = noteDeleteBackend ? new NoteDeleteOperationAdapter(noteDeleteBackend, journal) : undefined;
     this.nativeMove = nativeMoveBackend ? new NativeNoteMoveOperationAdapter(nativeMoveBackend, journal) : undefined;
-    this.closure = new AdministrativeClosureService(journal, backend, this.closureProfiles(noteCreateBackend),
+    this.closure = new AdministrativeClosureService(journal, backend, this.closureProfiles(noteCreateBackend, fileCreateBackends),
       ["obsidian-canvas-patch:v1:", "obsidian-base-formula-patch:v1:", "oasset:"]);
     if (
       config.assetImportEnabled &&
@@ -753,8 +765,8 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
     return this.closure.releaseDatePreparationLock(path, options);
   }
 
-  private closureProfiles(noteCreateBackend?: NoteCreateBackend): ClosureKindProfile[] {
-    const statusField = (status: unknown, field: "noteCreate" | "nativeMove" | "noteDelete") => {
+  private closureProfiles(noteCreateBackend?: NoteCreateBackend, fileCreateBackends: readonly VaultFileCreateBackend[] = []): ClosureKindProfile[] {
+    const statusField = (status: unknown, field: "noteCreate" | "nativeMove" | "noteDelete" | "baseCreate" | "canvasCreate") => {
       const value = (status as Record<string, { bindingFingerprint?: unknown } | undefined> | null)?.[field]?.bindingFingerprint;
       return typeof value === "string" ? value : undefined;
     };
@@ -793,6 +805,22 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
             : { kind: "unavailable" as const };
         },
       },
+      ...fileCreateBackends.map((fileBackend): ClosureKindProfile => {
+        const profile = VAULT_FILE_CREATE_PROFILES[fileBackend.kind];
+        const runtime = () => fileBackend.kind === "base" ? this.baseCreate : this.canvasCreate;
+        return {
+          operationKind: profile.operationKind, planRefPrefix: profile.planRefPrefix,
+          binding: (status) => statusField(status, profile.statusField),
+          reconcile: async (operationId) => runtime()?.status(profile.planRefPrefix + operationId),
+          observe: async (row) => {
+            const observed = await fileBackend.inspect(row.path) as { exists?: unknown; sha256?: unknown } | undefined;
+            if (observed?.exists === false) return { kind: "note-absent" as const };
+            return typeof observed?.sha256 === "string"
+              ? { kind: "note-sha256" as const, sha256: observed.sha256, matches: observed.sha256 === row.afterSha256 ? "after" as const : "neither" as const }
+              : { kind: "unavailable" as const };
+          },
+        };
+      }),
       {
         operationKind: "obsidian.note.move", planRefPrefix: NATIVE_MOVE_PREFIX,
         binding: (status) => statusField(status, "nativeMove"),
@@ -851,6 +879,8 @@ new WindowsAssetFiles(policy.vaultRoot, policy.assetFolder).probe();
         "obsidian.note.move",
         "obsidian.note.delete",
         "obsidian.note.create",
+        "obsidian.base.create",
+        "obsidian.canvas.create",
         "obsidian.base.rows.patch",
         "obsidian.asset.import",
       ],
@@ -1110,6 +1140,7 @@ export function createGovernedNoteReplaceRuntime(
     new RestNativeNoteMoveBackend(obsidianService),
     new RestNoteCreateBackend(obsidianService),
     new RestNoteDeleteBackend(obsidianService),
+    [new RestVaultFileCreateBackend(obsidianService, "base"), new RestVaultFileCreateBackend(obsidianService, "canvas")],
   );
 
   // The application lifecycle closes the runtime explicitly. This synchronous

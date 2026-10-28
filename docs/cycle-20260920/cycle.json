@@ -74,18 +74,20 @@
     }
   ],
   "expectedSurface": {
-    "crossRuntime": 96,
+    "crossRuntime": 102,
     "liveProfiles": {
       "standard": 30,
-      "authoring": 44,
+      "authoring": 50,
       "tasks": 36,
-      "full": 92,
-      "operational": 87
+      "full": 98,
+      "operational": 93
     },
     "threeMemberFamilies": [
       "note-move",
       "note-delete",
       "note-create",
+      "base-create",
+      "canvas-create",
       "base-rows"
     ]
   },

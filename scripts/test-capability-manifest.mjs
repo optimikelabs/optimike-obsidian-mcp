@@ -35,6 +35,8 @@ const atomicReady = {
   },
   nativeMove: { supported: true, enabled: true, preferenceReadable: true },
   noteCreate: { supported: true, enabled: true, exclusiveCreate: true },
+  baseCreate: { supported: true, enabled: true, exclusiveCreate: true, kind: "base" },
+  canvasCreate: { supported: true, enabled: true, exclusiveCreate: true, kind: "canvas" },
   noteDelete: { supported: true, enabled: true, trashPreference: "local", permanentDeletion: false },
   limits: { markdownOnly: true },
 };
@@ -163,8 +165,8 @@ function capability(manifest, id) {
 
 const ready = projectCapabilityManifest(input());
 assert.equal(ready.contractVersion, 1);
-assert.equal(ready.capabilities.length, 13);
-assert.equal(ready.summary.ready, 13);
+assert.equal(ready.capabilities.length, 15);
+assert.equal(ready.summary.ready, 15);
 assert.equal(ready.admission.state, "not-applicable");
 for (const item of ready.capabilities) {
   assert.equal(item.discoverable, true, item.id);
@@ -835,6 +837,18 @@ const noCreate = structuredClone(atomicReady); delete noCreate.noteCreate;
 assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: noCreate } })), "governed-note-create").available, false);
 const disabledCreate = structuredClone(atomicReady); disabledCreate.noteCreate.enabled = false;
 assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: disabledCreate } })), "governed-note-create").reasonCode, "bridge_write_disabled");
+for (const [id, field] of [["governed-base-create", "baseCreate"], ["governed-canvas-create", "canvasCreate"]]) {
+  // Base/Canvas creation carry their own Bridge grant; the note grant never stands in for them.
+  assert.equal(capability(ready, id).state, "ready");
+  const older = structuredClone(atomicReady); delete older[field];
+  assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: older } })), id).reasonCode, "bridge_contract_incompatible");
+  const off = structuredClone(atomicReady); off[field].enabled = false;
+  assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: off } })), id).reasonCode, "bridge_write_disabled");
+  assert.equal(capability(projectCapabilityManifest(input({ atomicWrite: { state: "ready", value: off } })), "governed-note-create").state, "ready");
+  assert.equal(capability(projectCapabilityManifest(input({ profile: "standard" })), id).state, "hidden");
+  assert.equal(capability(projectCapabilityManifest(input({ writeMode: "readonly" })), id).reasonCode, "write_policy_blocked");
+}
+console.log("PASS governed Base/Canvas creation have their own Bridge grant and profile visibility");
 
 // M5 writes a note, never its Base config: Base read readiness and note write grants are independent.
 const baseReadOnlyForRows = structuredClone(baseReady); baseReadOnlyForRows.backend.writeEnabled = false;
@@ -864,7 +878,7 @@ console.log("PASS: R1-C unavailable and unknown observations are distinct from e
 
 for (const [probeName, ids, reason] of [
   ['localRest', ['local-rest'], 'local_rest_probe_timed_out'],
-  ['atomicWrite', ['governed-note-write','governed-frontmatter-write','governed-native-move','governed-note-delete','governed-note-create','governed-canvas-write'], 'bridge_probe_timed_out'],
+  ['atomicWrite', ['governed-note-write','governed-frontmatter-write','governed-native-move','governed-note-delete','governed-note-create','governed-base-create','governed-canvas-create','governed-canvas-write'], 'bridge_probe_timed_out'],
   ['baseAtomicWrite', ['governed-base-rows','governed-base-write'], 'bridge_probe_timed_out'],
   ['operon', ['operon-read','operon-write'], 'bridge_probe_timed_out'],
 ]) {

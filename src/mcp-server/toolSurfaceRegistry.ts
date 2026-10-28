@@ -151,6 +151,12 @@ const GOVERNED_OPERATION_TOOL_NAMES = [
   "obsidian_note_create_plan",
   "obsidian_note_create_apply",
   "obsidian_note_create_status",
+  "bases_create_plan",
+  "bases_create_apply",
+  "bases_create_status",
+  "obsidian_canvas_create_plan",
+  "obsidian_canvas_create_apply",
+  "obsidian_canvas_create_status",
   "obsidian_note_move_plan",
   "obsidian_note_move_apply",
   "obsidian_note_move_status",
@@ -308,7 +314,7 @@ function defineTool(
 
 /** Recovery is a domain contract, not a mandatory synthetic fourth tool. */
 export function governedLifecycleRoles(family: string): readonly GovernedLifecycleRole[] {
-  return ["note-move", "note-delete", "note-create", "base-rows", "asset-import"].includes(family)
+  return ["note-move", "note-delete", "note-create", "base-create", "canvas-create", "base-rows", "asset-import"].includes(family)
     ? ["plan", "apply", "status"]
     : ["plan", "apply", "status", "recover"];
 }
@@ -510,6 +516,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
     "bases.governed",
     "base-formula-patch",
   ),
+  ...governedFamily("bases_create", "bases.governed", "base-create"),
 
   defineTool(
     "obsidian_manage_canvas",
@@ -524,6 +531,7 @@ export const TOOL_SURFACE_REGISTRY: readonly ToolSurfaceEntry[] = [
   ),
 
   ...governedFamily("obsidian_canvas_patch", "canvas.governed", "canvas-patch"),
+  ...governedFamily("obsidian_canvas_create", "canvas.governed", "canvas-create"),
 
   defineTool("list_all_tasks", "tasks.markdown", "markdown-tasks", ALL_MODES),
   defineTool("query_tasks", "tasks.markdown", "markdown-tasks", ALL_MODES),

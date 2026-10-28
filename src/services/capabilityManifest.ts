@@ -36,6 +36,8 @@ export type CapabilityId =
   | "governed-native-move"
   | "governed-note-delete"
   | "governed-note-create"
+  | "governed-base-create"
+  | "governed-canvas-create"
   | "governed-base-rows"
   | "governed-frontmatter-write"
   | "governed-canvas-write"
@@ -243,6 +245,16 @@ const TOOL_FAMILIES: Readonly<Record<CapabilityId, readonly string[]>> = {
     "obsidian_note_create_plan",
     "obsidian_note_create_apply",
     "obsidian_note_create_status",
+  ],
+  "governed-base-create": [
+    "bases_create_plan",
+    "bases_create_apply",
+    "bases_create_status",
+  ],
+  "governed-canvas-create": [
+    "obsidian_canvas_create_plan",
+    "obsidian_canvas_create_apply",
+    "obsidian_canvas_create_status",
   ],
   "governed-native-move": [
     "obsidian_note_move_plan",
@@ -544,6 +556,8 @@ function atomicCapability(
     | "governed-native-move"
     | "governed-note-delete"
     | "governed-note-create"
+    | "governed-base-create"
+    | "governed-canvas-create"
     | "governed-base-rows"
     | "governed-frontmatter-write"
     | "governed-canvas-write",
@@ -582,9 +596,14 @@ function atomicCapability(
     backend.atomicCas === true;
   const canvas = id === "governed-canvas-write";
   const native = id === "governed-native-move";
-  const create = id === "governed-note-create";
+  const create = id === "governed-note-create" || id === "governed-base-create" || id === "governed-canvas-create";
   const del = id === "governed-note-delete";
-  const noteCreate = record(status.noteCreate);
+  // Base/Canvas creation share the note-creation effect with their own Bridge grant.
+  const noteCreate = record(
+    id === "governed-base-create" ? status.baseCreate
+      : id === "governed-canvas-create" ? status.canvasCreate
+        : status.noteCreate,
+  );
   const nativeMove = record(status.nativeMove);
   const noteDelete = record(status.noteDelete);
   // A Bridge that predates governed deletion has no `noteDelete` capability: closed refusal.
@@ -1116,6 +1135,8 @@ export function projectCapabilityManifest(
     atomicCapability(input, "governed-native-move"),
     atomicCapability(input, "governed-note-delete"),
     atomicCapability(input, "governed-note-create"),
+    atomicCapability(input, "governed-base-create"),
+    atomicCapability(input, "governed-canvas-create"),
     baseRowsCapability(input),
     atomicCapability(input, "governed-frontmatter-write"),
     atomicCapability(input, "governed-canvas-write"),
@@ -1329,6 +1350,8 @@ export async function collectCapabilityManifest(options: {
           ...TOOL_FAMILIES["governed-native-move"],
           ...TOOL_FAMILIES["governed-note-delete"],
           ...TOOL_FAMILIES["governed-note-create"],
+          ...TOOL_FAMILIES["governed-base-create"],
+          ...TOOL_FAMILIES["governed-canvas-create"],
           ...TOOL_FAMILIES["governed-base-rows"],
           ...TOOL_FAMILIES["governed-frontmatter-write"],
         ]

@@ -175,7 +175,7 @@ Handoff delivery is a transport contract, not a runtime-mode write capability:
 | `headless-guarded`              | Everything in `headless-readonly`, plus `obsidian_manage_frontmatter`, `obsidian_search_replace`, `obsidian_update_note`                                                                                                                                                                                                                                                                                                                       |
 | `headless-filesystem`           | Everything in `headless-guarded`, plus `bases_create`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_admin_filesystem`, `obsidian_batch_frontmatter`, `obsidian_delete_note`, `obsidian_manage_canvas`, `obsidian_manage_tags`, `obsidian_move_note`                                                                                                                                                                                   |
 | `hybrid` API unavailable        | `list_all_tasks`, `obsidian_global_search`, `obsidian_list_notes`, `obsidian_read_note`, `obsidian_runtime_maintenance`, `obsidian_runtime_status`, `obsidian_validate_format`, `query_tasks`, `smart_semantic_search`                                                                                                                                                                                                                         |
-| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools including live-only `obsidian_note_links`, governed note replacement, text patch, Frontmatter, Base formula and Canvas `plan/apply/status/recover`, governed note deletion `obsidian_note_delete_plan/apply/status` (`operational` and `full`, see [governed note deletion](governed-note-delete.md)), plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
+| `hybrid` API available / `live` | Read/search/tasks/runtime/semantic tools including live-only `obsidian_note_links`, governed note replacement, text patch, Frontmatter, Base formula and Canvas `plan/apply/status/recover`, governed note deletion `obsidian_note_delete_plan/apply/status` (`operational` and `full`, see [governed note deletion](governed-note-delete.md)), governed Base and Canvas creation `bases_create_plan/apply/status` and `obsidian_canvas_create_plan/apply/status` (`authoring`, `operational` and `full`, see [governed Base and Canvas creation](governed-file-create.md)), plus REST write tools and Bases Bridge tools: `bases_create`, `bases_get_schema`, `bases_list`, `bases_query`, `bases_upsert_config`, `bases_upsert_rows`, `obsidian_delete_note`, `obsidian_manage_frontmatter`, `obsidian_manage_tags`, `obsidian_search_replace`, `obsidian_update_note` |
 
 ## Native note move M3
 
@@ -218,6 +218,16 @@ writes disabled.
 same live/hybrid registration boundary. They require Atomic Write Bridge 0.4.0,
 its independent Canvas CAS gate, a valid existing graph, and an exact backend
 binding/SHA-256. They are absent from every headless mode.
+
+## Governed Base and Canvas creation
+
+`bases_create_plan`, `bases_create_apply`, `bases_create_status`,
+`obsidian_canvas_create_plan`, `obsidian_canvas_create_apply` and
+`obsidian_canvas_create_status` follow the same live/hybrid registration
+boundary and have no recover tool. They require Atomic Write Bridge 0.9.0 and
+its independent Base or Canvas creation grant, both off by default. They create
+one absent file and never edit an existing Base or Canvas. See
+[governed Base and Canvas creation](governed-file-create.md).
 
 ## Safety Notes
 

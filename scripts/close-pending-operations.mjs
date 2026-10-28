@@ -16,7 +16,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const CLOSABLE = new Set([
   "obsidian.note.replace", "obsidian.frontmatter.patch", "obsidian.text.patch",
-  "obsidian.base.rows.patch", "obsidian.note.create", "obsidian.note.move",
+  "obsidian.base.rows.patch", "obsidian.note.create", "obsidian.base.create", "obsidian.canvas.create", "obsidian.note.move",
 ]);
 const BATCH = 20;
 

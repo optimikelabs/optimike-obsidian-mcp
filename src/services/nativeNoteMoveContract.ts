@@ -10,11 +10,16 @@ export const nativeDigest = (value: unknown): string =>
   createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
 
 export function nativeNotePath(value: unknown): string {
+  return nativeVaultFilePath(value, ".md");
+}
+
+/** Same ordinary vault-relative path rules for the other native file kinds. */
+export function nativeVaultFilePath(value: unknown, extension: ".md" | ".base" | ".canvas"): string {
   if (typeof value !== "string" || !value || value.length > 1024 || value !== value.trim()) {
     throw new Error("invalid_note_path");
   }
   const parts = value.split("/");
-  if (!/\.md$/iu.test(value) || /[\\:\u0000-\u001f<>"|?*]/u.test(value) ||
+  if (!new RegExp(`\\${extension}$`, "iu").test(value) || /[\\:\u0000-\u001f<>"|?*]/u.test(value) ||
       parts.some((part) => !part || part.startsWith(".") || /[. ]$/u.test(part) ||
         /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/iu.test(part))) {
     throw new Error("invalid_note_path");
