@@ -121,7 +121,8 @@ test("M3 oversized link coverage is refused with its limit, never sealed partial
   }).coverage;
   assert.equal(linkCoverageRefusal(project(NATIVE_MOVE_MAX_REFERENCES, 2)), null);
   assert.equal(linkCoverageRefusal(project(653, 2)), "move_reference_limit");
-  assert.equal(linkCoverageRefusal(project(2, NATIVE_MOVE_MAX_REFERENCES + 1)), "move_neighborhood_limit");
+  // A linking note with more than 200 backlinks hits the per-note bound, not the 16-note neighborhood.
+  assert.equal(linkCoverageRefusal(project(2, NATIVE_MOVE_MAX_REFERENCES + 1)), "move_reference_limit");
   const unavailable = { ...project(2, 2), outgoing: { available: false, truncated: false } };
   assert.equal(linkCoverageRefusal(unavailable), "metadata_snapshot_unavailable");
 

@@ -22,12 +22,12 @@ export const NATIVE_MOVE_SAFE_REASONS: ReadonlySet<string> = new Set([
 
 type LinkCoverage = Record<"outgoing" | "unresolved" | "backlinks", { available: boolean; truncated: boolean }>;
 
-/** A note whose links are unobservable is refused as unavailable; one whose links exceed the
- * bound cannot be sealed completely and is refused with the limit it hit, never a partial seal. */
+/** A note whose links are unobservable is refused as unavailable; one whose links, unresolved links or
+ * backlinks exceed the per-note bound cannot be sealed completely and is refused as move_reference_limit,
+ * never a partial seal. move_neighborhood_limit stays reserved for the source's incoming-note bound. */
 export function linkCoverageRefusal(coverage: LinkCoverage): string | null {
   if (Object.values(coverage).some((part) => !part.available)) return "metadata_snapshot_unavailable";
-  if (coverage.backlinks.truncated) return "move_neighborhood_limit";
-  if (coverage.outgoing.truncated || coverage.unresolved.truncated) return "move_reference_limit";
+  if (Object.values(coverage).some((part) => part.truncated)) return "move_reference_limit";
   return null;
 }
 
