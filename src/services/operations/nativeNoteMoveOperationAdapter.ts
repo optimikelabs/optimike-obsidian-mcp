@@ -2,6 +2,7 @@ import { z } from "zod/v3";
 import { BaseErrorCode, McpError } from "../../types-global/errors.js";
 import { assertWriteAllowed } from "../writePolicy.js";
 import { asNoteNameMcpError } from "../noteNameMcp.js";
+import { nativeMoveBridgeRefusal } from "../nativeNoteMoveRefusals.js";
 import {
   NATIVE_MOVE_PREFIX, nativeDigest, nativeMovePaths, verifyNativeMovePreflight,
   type NativeMoveApply, type NativeMoveObservation, type NativeMovePreflight,
@@ -112,6 +113,11 @@ export class NativeNoteMoveOperationAdapter {
     } catch (error) {
       const winner = this.lookup(internalKey, identity);
       if (winner) return this.receipt(winner);
+      const refusal = nativeMoveBridgeRefusal(error);
+      if (refusal) {
+        const [code, reasonCode, hint] = refusal;
+        throw new McpError(code, "The native note move was refused by the Bridge policy.", { reasonCode, hint });
+      }
       throw error;
     }
     const winner = this.lookup(internalKey, identity);
