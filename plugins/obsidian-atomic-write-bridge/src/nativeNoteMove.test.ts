@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import {
-  nativeDigest, nativeGraphDigest, nativeNotePath, sealNativeMove,
+  NATIVE_MOVE_MAX_REFERENCES, nativeDigest, nativeGraphDigest, nativeNotePath, sealNativeMove,
   type NativeMoveApply, type NativeSemanticNote,
 } from "../../../src/services/nativeNoteMoveContract.js";
-import { NativeNoteMoveService, NativeMoveBeforeEffectConflict, type NativeMoveHost } from "./nativeNoteMove.js";
+import {
+  NativeNoteMoveService, NativeMoveBeforeEffectConflict, linkCoverageRefusal, nativeMoveRefusal, type NativeMoveHost,
+} from "./nativeNoteMove.js";
+import { projectNoteLinks } from "./noteLinks.js";
 import { LegacyMoveObservation, LegacyMoveSnapshot } from "./legacyWireSchemas.js";
 
 const digest = (value: string) => nativeDigest(value);
@@ -102,6 +105,38 @@ test("M3 OFF rejects linked notes, admits only empty observed neighborhoods", as
   f.notes.get("Old/Source.md")!.backlinks = [];
   const p = await f.plan();
   assert.equal((await f.service.apply(p)).outcome, "committed");
+});
+
+// Regression (2026-10-29): a linking note with 653 outgoing links was refused as
+// metadata_snapshot_unavailable, so callers could not tell a bound from an outage.
+test("M3 oversized link coverage is refused with its limit, never sealed partially", async () => {
+  const project = (outgoing: number, backlinks: number) => projectNoteLinks({
+    sourcePath: "Hub.md", cacheAvailable: true,
+    links: Array.from({ length: outgoing }, (_, i) => ({ link: "N" + i, original: "[[N" + i + "]]" })),
+    embeds: [], frontmatterLinks: [],
+    resolvedLinks: Object.fromEntries(Array.from({ length: backlinks }, (_, i) => ["B" + i + ".md", { "Hub.md": 1 }])),
+    unresolvedLinks: {}, limit: NATIVE_MOVE_MAX_REFERENCES,
+    parseLinktext: (link) => ({ path: link, subpath: "" }),
+    resolveLink: (link) => link + ".md", validateSubpath: () => ({ status: "not_requested" }),
+  }).coverage;
+  assert.equal(linkCoverageRefusal(project(NATIVE_MOVE_MAX_REFERENCES, 2)), null);
+  assert.equal(linkCoverageRefusal(project(653, 2)), "move_reference_limit");
+  // A linking note with more than 200 backlinks hits the per-note bound, not the 16-note neighborhood.
+  assert.equal(linkCoverageRefusal(project(2, NATIVE_MOVE_MAX_REFERENCES + 1)), "move_reference_limit");
+  const unavailable = { ...project(2, 2), outgoing: { available: false, truncated: false } };
+  assert.equal(linkCoverageRefusal(unavailable), "metadata_snapshot_unavailable");
+
+  const f = fixture();
+  const note = f.host.note;
+  f.host.note = async (path) => {
+    if (path !== "Back.md") return note(path);
+    throw new Error(linkCoverageRefusal(project(653, 2)) ?? "unexpected_seal");
+  };
+  const refused = await f.service.preflight("Old/Source.md", "New/Destination.md").then(() => null, (error) => error);
+  assert.deepEqual(nativeMoveRefusal(refused).error.reasonCode, "move_reference_limit");
+  assert.equal(nativeMoveRefusal(new Error("Old/Source.md")).error.reasonCode, "native_move_failed");
+  assert.equal(JSON.stringify(nativeMoveRefusal(refused)).includes("Source"), false);
+  assert.equal(f.writes(), 0);
 });
 
 test("M3 missing preference never assumes ON", async () => {

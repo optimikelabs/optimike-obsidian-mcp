@@ -11,6 +11,33 @@ import {
 } from "../../../src/services/nativeNoteMoveContract.js";
 
 export class NativeMoveBeforeEffectConflict extends Error {}
+
+/** Closed refusal vocabulary the routes may disclose; anything else is reported as native_move_failed. */
+export const NATIVE_MOVE_SAFE_REASONS: ReadonlySet<string> = new Set([
+  "invalid_native_request", "invalid_note_path", "same_or_case_only_path", "native_moves_disabled",
+  "native_preference_unavailable", "destination_not_free", "move_neighborhood_limit", "move_reference_limit",
+  "move_snapshot_byte_limit", "metadata_snapshot_unavailable", "physical_path_unsupported",
+  "update_links_disabled_for_linked_note", "native_operation_identity_conflict",
+]);
+
+type LinkCoverage = Record<"outgoing" | "unresolved" | "backlinks", { available: boolean; truncated: boolean }>;
+
+/** A note whose links are unobservable is refused as unavailable; one whose links, unresolved links or
+ * backlinks exceed the per-note bound cannot be sealed completely and is refused as move_reference_limit,
+ * never a partial seal. move_neighborhood_limit stays reserved for the source's incoming-note bound. */
+export function linkCoverageRefusal(coverage: LinkCoverage): string | null {
+  if (Object.values(coverage).some((part) => !part.available)) return "metadata_snapshot_unavailable";
+  if (Object.values(coverage).some((part) => part.truncated)) return "move_reference_limit";
+  return null;
+}
+
+/** Public 400 payload of a refused native-move route; never echoes paths or messages. */
+export function nativeMoveRefusal(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return { ok: false as const, contractVersion: 1 as const, retryable: false,
+    error: { code: "native_move_rejected", reasonCode: NATIVE_MOVE_SAFE_REASONS.has(message) ? message : "native_move_failed",
+      message: "The native move request could not be admitted or observed." } };
+}
 export type NativeMoveClock = { epoch: string; resolved: number };
 export interface NativeMoveHost {
   binding(): string;

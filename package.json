@@ -217,7 +217,7 @@
     "test:base-rows": "npm run build && node scripts/test-base-rows-selection-m5.mjs && node scripts/test-base-rows-patch-m5.mjs",
     "maintenance:foreign-journals": "node scripts/list-foreign-journals.mjs",
     "test:audit-suite": "npm run build && node scripts/test-inline-tags.mjs && node scripts/test-journal-hygiene.mjs && node scripts/test-wal-maintenance.mjs && node scripts/test-operon-recovery-policy.mjs && node scripts/test-proxy-mutation-failure.mjs && node scripts/test-note-delete.mjs",
-    "test:native-note-move": "npm run build && node scripts/test-native-note-move-m3.mjs && node scripts/test-native-note-move-surface.mjs",
+    "test:native-note-move": "npm run build && node scripts/test-native-note-move-m3.mjs && node scripts/test-native-note-move-surface.mjs && node scripts/test-native-note-move-refusal-reason.mjs",
     "test:note-names": "npm run build && node scripts/test-note-name-rules.mjs",
     "test:file-create": "npm run build && node scripts/test-vault-file-create.mjs",
     "test:base-config": "npm run build && node scripts/test-base-config-patch.mjs",

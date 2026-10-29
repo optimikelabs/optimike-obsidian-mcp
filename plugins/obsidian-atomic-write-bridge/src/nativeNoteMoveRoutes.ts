@@ -9,16 +9,12 @@ import {
   NATIVE_MOVE_MAX_REFERENCES, nativeNotePath, sealNativeMove,
   type NativeSemanticNote, type NativeMoveApply,
 } from "../../../src/services/nativeNoteMoveContract.js";
-import { NativeNoteMoveService, NativeMoveBeforeEffectConflict, type NativeMoveHost } from "./nativeNoteMove.js";
+import {
+  NativeNoteMoveService, NativeMoveBeforeEffectConflict, linkCoverageRefusal, nativeMoveRefusal, type NativeMoveHost,
+} from "./nativeNoteMove.js";
 import { parseEffectFenceToken, type EffectFenceToken } from "./effectFence.js";
 
 const PREFIX = "/extensions/obsidian-atomic-write-bridge/native-note-move";
-const SAFE_REASONS = new Set([
-  "invalid_native_request", "invalid_note_path", "same_or_case_only_path", "native_moves_disabled",
-  "native_preference_unavailable", "destination_not_free", "move_neighborhood_limit",
-  "move_snapshot_byte_limit", "metadata_snapshot_unavailable", "physical_path_unsupported",
-  "update_links_disabled_for_linked_note", "native_operation_identity_conflict",
-]);
 function body(value: unknown, keys: string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_native_request");
   const record = value as Record<string, unknown>;
@@ -114,9 +110,9 @@ export function createNativeNoteMoveRoutes(
         return value ? { status: "valid", type: value.type } : { status: "invalid" };
       },
     });
-    if (resolved !== beforeResolved || Object.values(links.coverage).some((part) => !part.available || part.truncated)) {
-      throw new Error("metadata_snapshot_unavailable");
-    }
+    if (resolved !== beforeResolved) throw new Error("metadata_snapshot_unavailable");
+    const refusal = linkCoverageRefusal(links.coverage);
+    if (refusal) throw new Error(refusal);
     return { path: logical, sha256: sha256(content),
       references: links.outgoing.map((link) => ({ kind: link.kind,
         targetPath: link.resolution.status === "resolved" ? link.resolution.targetPath : null,
@@ -172,12 +168,7 @@ export function createNativeNoteMoveRoutes(
     const install = (suffix: string, handler: (value: unknown) => Promise<unknown>) => {
       api.addRoute(PREFIX + suffix).post(async (req, res) => {
         try { res.status(200).json(await handler(req?.body)); }
-        catch (error) {
-          const message = error instanceof Error ? error.message : "";
-          res.status(400).json({ ok: false, contractVersion: 1, retryable: false,
-            error: { code: "native_move_rejected", reasonCode: SAFE_REASONS.has(message) ? message : "native_move_failed",
-              message: "The native move request could not be admitted or observed." } });
-        }
+        catch (error) { res.status(400).json(nativeMoveRefusal(error)); }
       });
     };
     install("/preflight", async (value) => {

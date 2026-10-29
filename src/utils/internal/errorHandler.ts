@@ -11,6 +11,7 @@ import { logger } from "./logger.js";
 import {
   NOTE_NAME_REASON_CODES, checkNoteName, isNoteNameHint, isNoteNameReasonCode,
 } from "../../services/noteNameRules.js";
+import { NATIVE_MOVE_PUBLIC_REASON_CODES, isNativeMoveHint } from "../../services/nativeNoteMoveRefusals.js";
 import {
   activeRequestCorrelationId,
   RequestContext,
@@ -230,6 +231,7 @@ const CALLER_DERIVED_PUBLIC_FIELDS = new Set(["suggestedPath", "suggestedName"])
 
 const SAFE_PUBLIC_REASON_CODES = new Set<string>([
   ...NOTE_NAME_REASON_CODES,
+  ...NATIVE_MOVE_PUBLIC_REASON_CODES,
   "atomic_bridge_version_unsupported",
   "base_config_filter_invalid",
   "base_config_last_view",
@@ -595,7 +597,7 @@ function isSafeDiagnosticString(field: string, value: string): boolean {
   }
   if (field === "planDigest") return /^[a-f0-9]{64}$/u.test(value);
   if (field === "reasonCode") return SAFE_PUBLIC_REASON_CODES.has(value);
-  if (field === "hint") return isNoteNameHint(value);
+  if (field === "hint") return isNoteNameHint(value) || isNativeMoveHint(value);
   // A suggestion is only released if it satisfies the shared name rule itself.
   if (CALLER_DERIVED_PUBLIC_FIELDS.has(field)) return checkNoteName(value, { extensions: null }).ok;
   if (field === "operationId") {
@@ -693,6 +695,8 @@ function publicErrorMessage(code: BaseErrorCode, reasonCode?: unknown): string {
     return "Governed note deletion is not enabled in the Atomic Write Bridge settings. Ask the vault owner to enable it.";
   if (reasonCode === "operon_recovery_blocked_by_path_scope")
     return "Operon recovery is disabled by policy while OPERON_MUTATION_ALLOWED_PATH_PREFIXES is set; this is a refusal, not an empty list, and retrying will not change it. Do not replay the original mutation or relax the allowlist. Keep any known recoveryRef, inspect the affected task with authorized reads, and ask the vault owner to review it.";
+  if (typeof reasonCode === "string" && NATIVE_MOVE_PUBLIC_REASON_CODES.includes(reasonCode))
+    return "The note move was refused. See reasonCode and hint.";
   if (code === BaseErrorCode.VALIDATION_ERROR && isNoteNameReasonCode(reasonCode))
     return "The note path is not a valid name on every platform and in Obsidian. See hint and suggestedPath.";
   switch (code) {
