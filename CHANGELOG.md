@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `obsidian_note_move_plan` now says why a move is refused. When the source or a note linking to it holds more than 200 links, unresolved links or backlinks, the Atomic Write Bridge reports `move_reference_limit` (or `move_neighborhood_limit` past 16 linking notes) instead of `metadata_snapshot_unavailable`, and the MCP returns that `reasonCode` with a fixed hint instead of a bare `VALIDATION_ERROR`. The bounds themselves are unchanged.
+
 ## [3.17.0] - 2026-10-28
 
 No Bridge change: keep Atomic Write Bridge 0.9.0, Operon Bridge 0.9.3 and Bases Bridge 1.2.2 from the 3.16.0 bundle.
