@@ -47,7 +47,14 @@ timed-out index. `semantic_embedder_unavailable` and
 `configure_query_embedder` separately report a query provider that cannot be
 constructed from the current non-secret configuration, including a Smart
 Connections built-in model index when the optional `@huggingface/transformers`
-package is not installed. The doctor never sends
+package is not installed. A probe that exceeds its deadline while the
+semantic cache is still loading (typically the first load after a restart)
+reports `semantic_index_loading` with `wait_for_semantic_index`: `degraded`
+and usable when this cache already persisted a validated index, since a query
+waits for the load and answers; `unavailable` on a first load without that
+evidence. It becomes `ready` once the load completes. A load older than two
+minutes, or a timeout with no load in flight, stays `semantic_probe_timed_out`.
+The doctor never sends
 a test embedding request.
 Operon cached reads are reported as `degraded` with
 `operon_snapshot_fallback`; cached state is never presented as proof that a

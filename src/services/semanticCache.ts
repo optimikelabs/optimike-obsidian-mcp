@@ -225,6 +225,9 @@ export class SemanticCacheService {
     dominantModel?: string;
     dominantDimension?: number;
   }> | null = null;
+  // Start of the oldest snapshot refresh or readiness validation still in
+  // flight; null when none is running.
+  private loadStartedAt: number | null = null;
 
   constructor(
     private readonly smartEnvDir: string,
@@ -258,13 +261,39 @@ export class SemanticCacheService {
 
     // All concurrent callers share one refresh, including its failure.
     if (this.pendingSnapshot) return this.pendingSnapshot;
+    this.loadStartedAt ??= now;
     const pending = this.refreshSnapshot(context);
     this.pendingSnapshot = pending;
     try {
       return await pending;
     } finally {
       if (this.pendingSnapshot === pending) this.pendingSnapshot = null;
+      this.releaseLoadMarker();
     }
+  }
+
+  private releaseLoadMarker(): void {
+    if (!this.pendingSnapshot && !this.pendingReadiness)
+      this.loadStartedAt = null;
+  }
+
+  /**
+   * Observational view of a load still in flight, for capability inspection.
+   * It never starts a load. persistedVectorCount comes from the manifest of
+   * the last snapshot this cache persisted for the same Smart Env directory:
+   * evidence that an index was already validated, not a new validation.
+   */
+  public loadInProgress(): {
+    startedAt: number;
+    persistedVectorCount: number;
+  } | null {
+    if (this.loadStartedAt === null) return null;
+    const manifest = this.readManifest();
+    const persistedVectorCount =
+      manifest && manifest.smart_env_dir === this.smartEnvDir
+        ? Number(manifest.vector_count) || 0
+        : 0;
+    return { startedAt: this.loadStartedAt, persistedVectorCount };
   }
 
   private async refreshSnapshot(
@@ -346,12 +375,14 @@ export class SemanticCacheService {
     )
       return { ...this.readiness.value };
     if (this.pendingReadiness) return { ...(await this.pendingReadiness) };
+    this.loadStartedAt ??= now;
     const pending = this.validateReadiness();
     this.pendingReadiness = pending;
     try {
       return { ...(await pending) };
     } finally {
       if (this.pendingReadiness === pending) this.pendingReadiness = null;
+      this.releaseLoadMarker();
     }
   }
 

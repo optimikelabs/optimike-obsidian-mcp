@@ -10,7 +10,10 @@ or warm the query snapshot. forceRefresh invalidates the observation and fences 
 in-flight result with the source refresh generation. Returned metadata is copied.
 A bounded capability probe timeout reports semantic_probe_timed_out with the action
 retry_capability_probe. Unvalidated index/query health never becomes available solely
-because a timed-out probe is still running.
+because a timed-out probe is still running. While a cache load is in flight and less
+than two minutes old, the timeout reports semantic_index_loading /
+wait_for_semantic_index instead; it is degraded but usable only when the persisted
+manifest of a previously validated load holds vectors.
 
 FDM 1.6.0 exposes private modify/new-file timers and processing sets, including editor
 and cache deferrals. Those implementation details are not a stable completion contract.

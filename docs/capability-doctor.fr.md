@@ -49,7 +49,15 @@ en timeout. `semantic_embedder_unavailable` et `configure_query_embedder`
 signalent séparément un provider de requête impossible à construire depuis la
 configuration non secrète actuelle, y compris un index du modèle intégré de
 Smart Connections quand le paquet optionnel `@huggingface/transformers` n’est
-pas installé. Le doctor n’envoie jamais de requête
+pas installé. Une sonde qui dépasse son délai pendant que le cache sémantique
+se charge encore (typiquement le premier chargement après un redémarrage)
+signale `semantic_index_loading` avec `wait_for_semantic_index` : `degraded`
+et utilisable quand ce cache a déjà persisté un index validé, puisqu’une
+requête attend le chargement et répond ; `unavailable` lors d’un premier
+chargement sans cette preuve. La capacité redevient `ready` dès la fin du
+chargement. Un chargement de plus de deux minutes, ou un délai dépassé sans
+chargement en cours, reste `semantic_probe_timed_out`.
+Le doctor n’envoie jamais de requête
 d’embedding de test.
 Les lectures issues du cache Operon sont
 signalées `degraded` avec `operon_snapshot_fallback` ; un snapshot n’est jamais

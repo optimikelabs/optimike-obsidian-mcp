@@ -27,6 +27,8 @@ import { detectSmartEnvQueryProvider } from "./smartEnvV3.js";
 
 export const CAPABILITY_MANIFEST_CONTRACT_VERSION = 1 as const;
 export const CAPABILITY_PROBE_TIMEOUT_MS = 2_500;
+/** A semantic cache load older than this is reported as a probe timeout. */
+export const SEMANTIC_INITIAL_LOAD_GRACE_MS = 120_000;
 
 export type CapabilityId =
   | "local-rest"
@@ -68,6 +70,7 @@ export type CapabilityReasonCode =
   | "semantic_query_embedding_disabled"
   | "semantic_index_unavailable"
   | "semantic_probe_timed_out"
+  | "semantic_index_loading"
   | "semantic_embedder_unavailable"
   | "semantic_query_unverified"
   | "bridge_unavailable"
@@ -105,6 +108,7 @@ export type CapabilityNextAction =
   | "enable_query_embedding"
   | "refresh_semantic_index"
   | "retry_capability_probe"
+  | "wait_for_semantic_index"
   | "configure_query_embedder"
   | "run_semantic_search"
   | "install_or_enable_bridge"
@@ -191,6 +195,8 @@ export interface CapabilityManifestProjectionInput {
     embedderReady: boolean;
     queryUnverified?: boolean;
   }>;
+  /** Set only when the semantic probe timed out while the cache was still loading. */
+  semanticIndexLoading?: { persistedVectorCount: number };
   operonMutationsEnabled: boolean;
   writeMode: "readonly" | "guarded" | "full";
   operonAllowedPathPrefixesConfigured: boolean;
@@ -217,6 +223,10 @@ export interface CapabilityProbeDependencies {
     embedderReady: boolean;
     queryUnverified?: boolean;
   }>;
+  semanticLoading?: () => {
+    startedAt: number;
+    persistedVectorCount: number;
+  } | null;
   atomicWrite?: () => Promise<AtomicWriteStatusResponse>;
   baseAtomicWrite?: () => Promise<BaseAtomicStatusResponse>;
   operon?: () => Promise<Record<string, unknown>>;
@@ -522,6 +532,21 @@ function semanticCapability(
       false,
       "semantic_query_embedding_disabled",
       "enable_query_embedding",
+    );
+  }
+  if (input.semanticIndex.state === "timed_out" && input.semanticIndexLoading) {
+    // The cache is still loading. A query waits for that load and answers, so
+    // an index already validated and persisted by this cache stays usable
+    // (degraded); without that evidence the capability is not certified.
+    const persisted = input.semanticIndexLoading.persistedVectorCount > 0;
+    return entry(
+      input,
+      "semantic-search",
+      persisted,
+      persisted,
+      "semantic_index_loading",
+      "wait_for_semantic_index",
+      persisted,
     );
   }
   if (input.semanticIndex.state === "timed_out") {
@@ -1380,6 +1405,29 @@ export async function collectCapabilityManifest(options: {
       baseAtomicWriteProbe ? probe(baseAtomicWriteProbe) : unavailable,
       probe(operonProbe),
     ]);
+  // A probe that lost the race against a cold cache load is not a failure:
+  // report the load while it is recent, and a timeout once it is stale.
+  let semanticIndexLoading: { persistedVectorCount: number } | undefined;
+  if (semanticIndexProbe && semanticIndex.state === "timed_out") {
+    let loading: ReturnType<
+      NonNullable<CapabilityProbeDependencies["semanticLoading"]>
+    > | undefined;
+    try {
+      loading = options.probes?.semanticIndex
+        ? options.probes.semanticLoading?.()
+        : getSemanticCacheService().loadInProgress();
+    } catch {
+      loading = undefined;
+    }
+    if (
+      loading &&
+      Date.now() - loading.startedAt < SEMANTIC_INITIAL_LOAD_GRACE_MS
+    ) {
+      semanticIndexLoading = {
+        persistedVectorCount: loading.persistedVectorCount,
+      };
+    }
+  }
   const unavailableGovernedNames = new Set<string>([
     ...(!options.governedRuntimes.note
       ? [
@@ -1418,6 +1466,7 @@ export async function collectCapabilityManifest(options: {
     semanticEnabled,
     queryEmbeddingEnabled: config.enableQueryEmbedding,
     semanticIndex,
+    semanticIndexLoading,
     operonMutationsEnabled: config.operonMutationsEnabled,
     writeMode: config.mcpWriteMode,
     operonAllowedPathPrefixesConfigured:
