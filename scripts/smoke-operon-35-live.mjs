@@ -3012,7 +3012,15 @@ async function main() {
       ),
     );
     assert.equal(communityPlugins.includes("frontmatter-date-manager"), true);
-    assert.equal(dateManagerManifest.version, "1.2.1");
+    // The pinned date writer is part of the qualified Pilot 2 baseline. An
+    // operator who has re-qualified a newer writer may override the pin
+    // explicitly; the settlement assertions below still apply unchanged.
+    assert.equal(
+      dateManagerManifest.version,
+      (
+        process.env.OPERON_35_CANARY_EXPECTED_DATE_MANAGER_VERSION ?? "1.2.1"
+      ).trim(),
+    );
     assert.equal(dateManagerSettings.enableAutoUpdate, true);
     assert.equal(dateManagerSettings.enableModifiedTime, true);
 
