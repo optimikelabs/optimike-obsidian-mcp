@@ -210,6 +210,7 @@ export class SemanticCacheService {
   private refreshGeneration = 0;
   private pendingSource: {
     generation: number;
+    signature: string;
     promise: Promise<SmartVec[]>;
   } | null = null;
   private readiness: {
@@ -292,10 +293,12 @@ export class SemanticCacheService {
       manifest.source_signature === sourceState.signature &&
       manifest.smart_env_dir === this.smartEnvDir
     ) {
-      const snapshot = this.loadSnapshotFromDb(manifest);
-      this.memorySnapshot = snapshot;
-      this.memorySnapshotLoadedAt = Date.now();
-      return snapshot;
+      const snapshot = this.tryLoadSnapshotFromDb(manifest, opContext);
+      if (snapshot) {
+        this.memorySnapshot = snapshot;
+        this.memorySnapshotLoadedAt = Date.now();
+        return snapshot;
+      }
     }
 
     logger.info("Refreshing semantic cache from .smart-env", {
@@ -303,7 +306,7 @@ export class SemanticCacheService {
       smartEnvDir: this.smartEnvDir,
       sourceFileCount: sourceState.fileCount,
     });
-    const items = await this.loadSource(generation);
+    const items = await this.loadSource(generation, sourceState.signature);
     // A maintenance invalidation during a read must not publish its old result.
     if (generation !== this.refreshGeneration)
       return this.refreshSnapshot(context);
@@ -367,9 +370,13 @@ export class SemanticCacheService {
       manifest &&
       manifest.source_signature === sourceState.signature &&
       manifest.smart_env_dir === this.smartEnvDir
-        ? this.loadSnapshotFromDb(manifest)
+        ? this.tryLoadSnapshotFromDb(manifest)
         : null;
-    const items = snapshot?.items ?? (await this.loadSource(generation));
+    // An unreadable derived cache falls back to the authoritative source,
+    // without writing: only an actual query republishes the cache.
+    const items =
+      snapshot?.items ??
+      (await this.loadSource(generation, sourceState.signature));
     if (generation !== this.refreshGeneration) return this.validateReadiness();
     const value = this.projectReadiness(
       items,
@@ -382,11 +389,23 @@ export class SemanticCacheService {
 
   // Share only an in-flight read of authoritative sources. A probe never starts
   // persistence or retains a query snapshot, and invalidated generations cannot
-  // reuse an older read. Both callers keep their existing publication fences.
-  private async loadSource(generation: number): Promise<SmartVec[]> {
-    if (this.pendingSource?.generation === generation)
+  // reuse an older read. Files can change without a new generation, so a read
+  // is shared only by callers that observed the same source signature: a query
+  // never persists an older read under a newer signature.
+  private async loadSource(
+    generation: number,
+    signature: string,
+  ): Promise<SmartVec[]> {
+    if (
+      this.pendingSource?.generation === generation &&
+      this.pendingSource.signature === signature
+    )
       return this.pendingSource.promise;
-    const pending = { generation, promise: loadSmartEnv(this.smartEnvDir) };
+    const pending = {
+      generation,
+      signature,
+      promise: loadSmartEnv(this.smartEnvDir),
+    };
     this.pendingSource = pending;
     try {
       return await pending.promise;
@@ -477,6 +496,31 @@ export class SemanticCacheService {
       dominantModel: knownModel ?? pickDominantModel([...dimensionItems]),
       dominantDimension,
     };
+  }
+
+  /**
+   * The cache is derived data: an unreadable row (corrupt or unknown encoding)
+   * must lead to a rebuild from the source, never to a permanent failure.
+   * Logs only the failure kind, never paths or vector content.
+   */
+  private tryLoadSnapshotFromDb(
+    manifest: SemanticManifestRow,
+    context?: RequestContext,
+  ): SemanticCacheSnapshot | null {
+    try {
+      return this.loadSnapshotFromDb(manifest);
+    } catch {
+      logger.warning(
+        "Semantic cache rows are unreadable; rebuilding from .smart-env.",
+        {
+          ...(context ??
+            requestContextService.createRequestContext({
+              operation: "SemanticCacheService.tryLoadSnapshotFromDb",
+            })),
+        },
+      );
+      return null;
+    }
   }
 
   private loadSnapshotFromDb(

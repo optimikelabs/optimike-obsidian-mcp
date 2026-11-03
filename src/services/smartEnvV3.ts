@@ -145,8 +145,14 @@ export async function loadSmartEnvV3(baseDir: string): Promise<SmartVec[] | null
       const trimmed = line.trim().replace(/,$/, "");
       if (!trimmed.startsWith('"smart_sources:')) continue;
       try {
-        const records = JSON.parse(`{${trimmed}}`) as Record<string, SourceRecord>;
-        const source = Object.values(records)[0];
+        const records = JSON.parse(`{${trimmed}}`) as Record<string, SourceRecord | null>;
+        const [key, source] = Object.entries(records)[0] ?? [];
+        // Smart Connections appends `"smart_sources:<path>": null` when a note
+        // is deleted; the latest record wins, so the note leaves the index.
+        if (source === null && key?.startsWith("smart_sources:")) {
+          latest.delete(key.slice("smart_sources:".length));
+          continue;
+        }
         // Search needs only the current vector reference and search metadata.
         // Never retain whole note bodies from the append-only source history.
         if (source?.path) latest.set(source.path, {
