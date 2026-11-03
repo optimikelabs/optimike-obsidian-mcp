@@ -1,0 +1,199 @@
+{
+  "contract_version": 1,
+  "cases": [
+    {
+      "id": "lf",
+      "content": "---\nname: test-skill\ndescription: Test\n---\n## Suite",
+      "code": null,
+      "values": {
+        "name": "test-skill"
+      }
+    },
+    {
+      "id": "crlf",
+      "content": "---\r\nname: test-skill\r\n---\r\nBody",
+      "code": null,
+      "values": {
+        "name": "test-skill"
+      }
+    },
+    {
+      "id": "eof",
+      "content": "---\nname: test-skill\n---",
+      "code": null,
+      "values": {
+        "name": "test-skill"
+      }
+    },
+    {
+      "id": "absent",
+      "content": "## Note libre\nBody",
+      "code": null,
+      "values": null
+    },
+    {
+      "id": "unclosed",
+      "content": "---\nname: test-skill",
+      "code": "frontmatter-unclosed",
+      "values": null
+    },
+    {
+      "id": "opening_only",
+      "content": "---",
+      "code": "frontmatter-unclosed",
+      "values": null
+    },
+    {
+      "id": "glued",
+      "content": "---\nname: test-skill\n---## Titre",
+      "code": "frontmatter-closing-invalid",
+      "values": null
+    },
+    {
+      "id": "trailing",
+      "content": "---\nname: test-skill\n--- extra",
+      "code": "frontmatter-closing-invalid",
+      "values": null
+    },
+    {
+      "id": "glued_then_rule",
+      "content": "---\nname: test-skill\n---## Titre\n---",
+      "code": "frontmatter-closing-invalid",
+      "values": null
+    },
+    {
+      "id": "opening_invalid",
+      "content": "--- extra\nname: test-skill\n---",
+      "code": "frontmatter-opening-invalid",
+      "values": null
+    },
+    {
+      "id": "prose_before_late_rule",
+      "content": "---\nname: test-skill\nTexte.\n---",
+      "code": "frontmatter-yaml-invalid",
+      "values": null
+    },
+    {
+      "id": "broken",
+      "content": "---\nname: [PRIVATE_SENTINEL\n---",
+      "code": "frontmatter-yaml-invalid",
+      "values": null
+    },
+    {
+      "id": "list",
+      "content": "---\n- a\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "scalar",
+      "content": "---\nabc\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "false",
+      "content": "---\nfalse\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "zero",
+      "content": "---\n0\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "empty_string",
+      "content": "---\n\"\"\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "null",
+      "content": "---\nnull\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "empty",
+      "content": "---\n\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "comments",
+      "content": "---\n# comment\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "duplicate",
+      "content": "---\nname: one\nname: two\n---",
+      "code": "frontmatter-yaml-invalid",
+      "values": null
+    },
+    {
+      "id": "nested_duplicate",
+      "content": "---\nmeta:\n  name: one\n  name: two\n---",
+      "code": "frontmatter-yaml-invalid",
+      "values": null
+    },
+    {
+      "id": "bom",
+      "content": "﻿---\nname: test-skill\n---",
+      "code": "frontmatter-bom-unsupported",
+      "values": null
+    },
+    {
+      "id": "unknown_tag",
+      "content": "---\nname: !unknown test\n---",
+      "code": "frontmatter-yaml-invalid",
+      "values": null
+    },
+    {
+      "id": "empty_map",
+      "content": "---\n{}\n---",
+      "code": null,
+      "values": {}
+    },
+    {
+      "id": "delimiter_scalar",
+      "content": "---\ndescription: \"avant --- après\"\n---",
+      "code": null,
+      "values": {
+        "description": "avant --- après"
+      }
+    },
+    {
+      "id": "block_scalar",
+      "content": "---\ndescription: |\n  ---\n  Text\n---",
+      "code": null,
+      "values": {
+        "description": "---\nText\n"
+      }
+    },
+    {
+      "id": "merge_override",
+      "content": "---\ndefaults: &d\n  name: inherited\nmeta:\n  <<: *d\n  name: override\n---",
+      "code": null,
+      "values": {
+        "meta": {
+          "name": "override"
+        }
+      }
+    },
+    {
+      "id": "date",
+      "content": "---\n2026-10-08\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    },
+    {
+      "id": "binary",
+      "content": "---\n!!binary SGVsbG8=\n---",
+      "code": "frontmatter-not-object",
+      "values": null
+    }
+  ]
+}
