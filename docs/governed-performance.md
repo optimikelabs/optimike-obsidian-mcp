@@ -4,6 +4,14 @@ Body and YAML intentions can share obsidian_text_patch_plan via frontmatterOpera
 Compact receipts and opt-in per-call diagnostics are additive; existing callers keep
 detailed responses. No date-settlement deadline is reduced.
 
+Read-only semantic readiness probes coalesce and retain only a successful observation
+for at most 60 seconds (bounded by query cache TTL). They do not write the DB manifest
+or warm the query snapshot. forceRefresh invalidates the observation and fences any
+in-flight result with the source refresh generation. Returned metadata is copied.
+A bounded capability probe timeout reports semantic_probe_timed_out with the action
+retry_capability_probe. Unvalidated index/query health never becomes available solely
+because a timed-out probe is still running.
+
 FDM 1.6.0 exposes private modify/new-file timers and processing sets, including editor
 and cache deferrals. Those implementation details are not a stable completion contract.
 The 37,250 ms fallback is retained. The locally qualified completion contract

@@ -44,13 +44,24 @@ que si son runtime d’index et l’embedder de requête sont activés et qu’u
 sonde live bornée charge au moins un vecteur valide depuis la source actuelle.
 `semantic_query_embedding_disabled` signale un switch
 `ENABLE_QUERY_EMBEDDING` volontairement coupé ; `semantic_index_unavailable`
-et `refresh_semantic_index` couvrent un index absent, vide, malformé, périmé ou
-en timeout. `semantic_embedder_unavailable` et `configure_query_embedder`
+et `refresh_semantic_index` couvrent un index absent, vide, malformé ou périmé.
+Une sonde qui dépasse son délai de 2,5 s signale `semantic_probe_timed_out`
+avec `retry_capability_probe`. `semantic_embedder_unavailable` et `configure_query_embedder`
 signalent séparément un provider de requête impossible à construire depuis la
 configuration non secrète actuelle, y compris un index du modèle intégré de
 Smart Connections quand le paquet optionnel `@huggingface/transformers` n’est
 pas installé. Le doctor n’envoie jamais de requête
 d’embedding de test.
+
+**Cache sémantique froid.** La recherche sémantique lit les vecteurs de Smart
+Connections à travers un cache SQLite dérivé. Après un redémarrage ou une mise
+à jour, le premier chargement les relit (plusieurs secondes sur un gros coffre ;
+la mise à jour vers la 3.18 reconstruit le cache une fois). Par défaut, le
+serveur lance ce chargement au démarrage (`SEMANTIC_SEARCH_PREWARM=true`), garde
+l’instantané chargé 60 s entre deux contrôles de la source
+(`SMART_ENV_CACHE_TTL_MS=60000`), et le doctor attend sa sonde 2,5 s. Une
+recherche lancée pendant le chargement l’attend et répond.
+
 Les lectures issues du cache Operon sont
 signalées `degraded` avec `operon_snapshot_fallback` ; un snapshot n’est jamais
 présenté comme preuve qu’une mutation peut s’exécuter ou a été appliquée.

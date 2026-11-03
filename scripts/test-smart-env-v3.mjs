@@ -27,11 +27,12 @@ try {
     "utf8",
   );
   const fingerprint = "mf_1dq06jj";
-  const record = (name, hash, readHash, index) =>
+  const record = (name, hash, readHash, index, lastRead) =>
     `"smart_sources:Notes/${name}.md": ` +
     JSON.stringify({
       path: `Notes/${name}.md`,
       last_import: { hash },
+      last_read: lastRead === undefined ? undefined : { hash: lastRead },
       embedding: {
         default: {
           [fingerprint]: { file: fingerprint, file_i: index, read_hash: readHash },
@@ -59,6 +60,59 @@ try {
   assert.equal(vectors[0].vec[0], 0.25);
   assert.equal(vectors[0].model, "qwen3-embedding:0.6b");
   assert.equal(await detectSmartEnvQueryProvider(root, vectors[0].model), "ollama");
+
+  // Re-embedding can refresh last_read without re-importing source metadata.
+  await writeFile(
+    path.join(root, "smart_sources", "smart_sources.ajson"),
+    [
+      record("Refreshed", "old-import", "current-read", 0, "current-read"),
+      record("StaleRead", "old-import", "old-import", 1, "current-read"),
+      record("MissingHash", undefined, undefined, 0),
+      record("EmptyHash", "old-import", "old-import", 0, ""),
+      record("LegacyImport", "same", "same", 1),
+    ].join(",\n"),
+    "utf8",
+  );
+  const refreshed = await loadSmartEnv(root);
+  assert.deepEqual(
+    refreshed.map((item) => item.notePath),
+    ["Notes/Refreshed.md", "Notes/LegacyImport.md"],
+    "last_read is authoritative; legacy import-only records remain supported; missing or stale hashes are rejected",
+  );
+
+  // A deleted note is appended as `"smart_sources:<path>": null`; it must leave the index.
+  await writeFile(
+    path.join(root, "smart_sources", "smart_sources.ajson"),
+    [
+      record("Current", "same", "same", 0),
+      record("Deleted", "same", "same", 1),
+      '"smart_sources:Notes/Deleted.md": null',
+    ].join(",\n"),
+    "utf8",
+  );
+  assert.deepEqual(
+    (await loadSmartEnv(root)).map((item) => item.notePath),
+    ["Notes/Current.md"],
+    "a null tombstone removes the deleted note",
+  );
+  await writeFile(
+    path.join(root, "smart_sources", "smart_sources.ajson"),
+    [
+      '"smart_sources:Notes/Deleted.md": null',
+      record("Deleted", "same", "same", 1),
+    ].join(",\n"),
+    "utf8",
+  );
+  assert.deepEqual(
+    (await loadSmartEnv(root)).map((item) => item.notePath),
+    ["Notes/Deleted.md"],
+    "a note re-created after its tombstone is indexed again",
+  );
+  await writeFile(
+    path.join(root, "smart_sources", "smart_sources.ajson"),
+    [record("Current", "same", "same", 0), record("Stale", "new", "old", 1)].join(",\n"),
+    "utf8",
+  );
 
   // Smart Connections registry is append-only: the latest matching key is authoritative
   // for both provider routing and the model fingerprint used to locate current vectors.

@@ -5,6 +5,7 @@ on:
     paths:
       - "src/services/capabilityManifest.ts"
       - "src/services/smartEnvV3.ts"
+      - "src/services/semanticCache.ts"
       - "src/adapters/embed/index.ts"
       - "src/mcp-server/tools/semanticSearchTool/registration.ts"
       - "src/services/obsidianRestAPI/service.ts"
@@ -15,6 +16,7 @@ on:
       - "src/mcp-server/server.ts"
       - "scripts/test-capability-*.mjs"
       - "scripts/test-smart-env-v3.mjs"
+      - "scripts/test-semantic-*.mjs"
       - "scripts/smoke-capability-doctor-live.mjs"
       - "scripts/test-http-tool-profiles.mjs"
       - "scripts/smoke-headless-status.mjs"
