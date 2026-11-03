@@ -20,7 +20,11 @@ const { SemanticCacheService } = await import(
   "../dist/services/semanticCache.js"
 );
 
-function options(semanticIndex, semanticLoading) {
+function options(
+  semanticIndex,
+  semanticLoading,
+  semanticQueryProvider = async () => "verified",
+) {
   return {
     profile: "full",
     registrationMode: "live",
@@ -36,6 +40,7 @@ function options(semanticIndex, semanticLoading) {
       operon: async () => ({ ok: false }),
       semanticIndex,
       semanticLoading,
+      semanticQueryProvider,
     },
   };
 }
@@ -69,6 +74,44 @@ try {
     loading.elapsed >= 2400 && loading.elapsed < 2900,
     "the health inspection keeps its bounded wait",
   );
+
+  // A persisted index is not enough: the query provider must be buildable now.
+  const noProvider = await semantic(
+    options(
+      slowProbe,
+      () => ({ startedAt: Date.now(), persistedVectorCount: 7459 }),
+      async () => "unusable",
+    ),
+  );
+  assert.equal(noProvider.capability.state, "unavailable");
+  assert.equal(noProvider.capability.reasonCode, "semantic_embedder_unavailable");
+  assert.equal(noProvider.capability.nextAction, "configure_query_embedder");
+
+  // A provider check that does not finish is no evidence either.
+  // Probe deadline timers are unref'd; keep the loop alive while they run.
+  const keepAlive = setInterval(() => {}, 1_000);
+  const unknownProvider = await semantic(
+    options(
+      slowProbe,
+      () => ({ startedAt: Date.now(), persistedVectorCount: 7459 }),
+      () => new Promise(() => {}),
+    ),
+  );
+  assert.equal(unknownProvider.capability.state, "unavailable");
+  assert.equal(unknownProvider.capability.reasonCode, "semantic_index_loading");
+  assert.equal(unknownProvider.capability.nextAction, "wait_for_semantic_index");
+  clearInterval(keepAlive);
+
+  // A provider that is buildable but not yet exercised stays usable (degraded).
+  const unverified = await semantic(
+    options(
+      slowProbe,
+      () => ({ startedAt: Date.now(), persistedVectorCount: 7459 }),
+      async () => "unverified",
+    ),
+  );
+  assert.equal(unverified.capability.state, "degraded");
+  assert.equal(unverified.capability.reasonCode, "semantic_index_loading");
 
   // A first load with no persisted evidence is named, but not certified.
   const firstLoad = await semantic(
@@ -123,9 +166,9 @@ try {
     const actualLoad = service.loadSource.bind(service);
     let release;
     const gate = new Promise((resolve) => (release = resolve));
-    service.loadSource = async (generation) => {
+    service.loadSource = async (...args) => {
       await gate;
-      return actualLoad(generation);
+      return actualLoad(...args);
     };
     const before = Date.now();
     const probing = service.probeReadiness();

@@ -13,7 +13,8 @@ retry_capability_probe. Unvalidated index/query health never becomes available s
 because a timed-out probe is still running. While a cache load is in flight and less
 than two minutes old, the timeout reports semantic_index_loading /
 wait_for_semantic_index instead; it is degraded but usable only when the persisted
-manifest of a previously validated load holds vectors.
+manifest of a previously validated load holds vectors and the query provider can be
+built (otherwise semantic_embedder_unavailable).
 
 FDM 1.6.0 exposes private modify/new-file timers and processing sets, including editor
 and cache deferrals. Those implementation details are not a stable completion contract.

@@ -287,14 +287,18 @@ export class SemanticCacheService {
   public loadInProgress(): {
     startedAt: number;
     persistedVectorCount: number;
+    dominantModel?: string;
+    dominantDimension?: number;
   } | null {
     if (this.loadStartedAt === null) return null;
     const manifest = this.readManifest();
-    const persistedVectorCount =
-      manifest && manifest.smart_env_dir === this.smartEnvDir
-        ? Number(manifest.vector_count) || 0
-        : 0;
-    return { startedAt: this.loadStartedAt, persistedVectorCount };
+    const own = manifest && manifest.smart_env_dir === this.smartEnvDir;
+    return {
+      startedAt: this.loadStartedAt,
+      persistedVectorCount: own ? Number(manifest.vector_count) || 0 : 0,
+      dominantModel: own ? (manifest.dominant_model ?? undefined) : undefined,
+      dominantDimension: own ? (manifest.dominant_dim ?? undefined) : undefined,
+    };
   }
 
   private async refreshSnapshot(

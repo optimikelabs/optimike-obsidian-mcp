@@ -51,9 +51,11 @@ Connections built-in model index when the optional `@huggingface/transformers`
 package is not installed. A probe that exceeds its deadline while the
 semantic cache is still loading (typically the first load after a restart)
 reports `semantic_index_loading` with `wait_for_semantic_index`: `degraded`
-and usable when this cache already persisted a validated index, since a query
-waits for the load and answers; `unavailable` on a first load without that
-evidence. It becomes `ready` once the load completes. A load older than two
+and usable when this cache already persisted a validated index and the query
+provider can be built now, since a query waits for the load and answers;
+`unavailable` on a first load without that evidence. A persisted index whose
+query provider cannot be built reports `semantic_embedder_unavailable` with
+`configure_query_embedder`. It becomes `ready` once the load completes. A load older than two
 minutes, or a timeout with no load in flight, stays `semantic_probe_timed_out`.
 The doctor never sends
 a test embedding request.

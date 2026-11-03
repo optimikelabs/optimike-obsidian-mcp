@@ -53,9 +53,11 @@ Smart Connections quand le paquet optionnel `@huggingface/transformers` n’est
 pas installé. Une sonde qui dépasse son délai pendant que le cache sémantique
 se charge encore (typiquement le premier chargement après un redémarrage)
 signale `semantic_index_loading` avec `wait_for_semantic_index` : `degraded`
-et utilisable quand ce cache a déjà persisté un index validé, puisqu’une
-requête attend le chargement et répond ; `unavailable` lors d’un premier
-chargement sans cette preuve. La capacité redevient `ready` dès la fin du
+et utilisable quand ce cache a déjà persisté un index validé et que le
+fournisseur de requêtes peut être construit, puisqu’une requête attend le
+chargement et répond ; `unavailable` lors d’un premier chargement sans cette
+preuve. Un index persisté dont le fournisseur de requêtes ne peut pas être
+construit signale `semantic_embedder_unavailable` avec `configure_query_embedder`. La capacité redevient `ready` dès la fin du
 chargement. Un chargement de plus de deux minutes, ou un délai dépassé sans
 chargement en cours, reste `semantic_probe_timed_out`.
 Le doctor n’envoie jamais de requête
