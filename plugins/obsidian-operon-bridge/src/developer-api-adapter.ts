@@ -787,6 +787,26 @@ export interface DeveloperApiMutationResult {
   readonly retryable: boolean;
   readonly mutationMayHaveApplied?: boolean;
   readonly nativeProof?: DeveloperApiTaskWorkflowNativeProof;
+  /** Stable public error code when the native refusal is actionable. */
+  readonly publicErrorCode?: "consent_required" | "consent_denied";
+}
+
+/**
+ * Elevated plans need a fresh confirmation in the vault window. Operon refuses
+ * with `confirmation-required` (window not able to show the prompt, or the 45 s
+ * window lapsed) or `consent-denied`. Both are actionable by the operator and
+ * must not read as a generic rejection.
+ */
+export function consentRefusalCode(
+  error: DeveloperApiError | undefined,
+): "consent_required" | "consent_denied" | undefined {
+  const code = String(error?.code ?? "").toLocaleLowerCase();
+  const reason = String(error?.reason ?? "").toLocaleLowerCase();
+  if (code === "consent-denied" || reason === "consent-denied")
+    return "consent_denied";
+  if (code === "confirmation-required" || reason === "consent-unavailable")
+    return "consent_required";
+  return undefined;
 }
 
 export interface DeveloperApiPendingRecoveryResult {
@@ -2476,13 +2496,18 @@ export class OperonDeveloperApiRuntimeAdapter {
       );
     }
     if (status === "failed") {
+      const consent = consentRefusalCode(execution.error);
       return this.mutationFailure(
         this.mapNativeErrorCode(execution.error),
         developerErrorMessage(execution.error) ||
           "Operon rejected the mutation.",
         operonId,
-        false,
-        { nativeStatus: status, nativeProof: proof },
+        consent === "consent_required",
+        {
+          nativeStatus: status,
+          nativeProof: proof,
+          ...(consent ? { publicErrorCode: consent } : {}),
+        },
       );
     }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   genericDateScheduledBoundaryError,
+  consentRefusalCode,
   genericMutationSnapshot,
   OperonDeveloperApiRuntimeAdapter,
 } from "./developer-api-adapter";
@@ -2892,4 +2893,20 @@ test("first-use capabilities list task workflows not negotiated yet, opening not
   const legacy = new OperonDeveloperApiRuntimeAdapter(consumer, {});
   (legacy as any).channelStatus = { grant: { state: "active" } };
   assert.deepEqual(legacy.firstUseCapabilities(), []);
+});
+test("Operon consent refusals map to actionable public codes", () => {
+  assert.equal(
+    consentRefusalCode({
+      code: "confirmation-required",
+      reason: "consent-unavailable",
+      message: "Operon could not present consent for this sealed plan.",
+    }),
+    "consent_required",
+  );
+  assert.equal(
+    consentRefusalCode({ code: "consent-denied", reason: "consent-denied" }),
+    "consent_denied",
+  );
+  assert.equal(consentRefusalCode({ code: "stale-source" }), undefined);
+  assert.equal(consentRefusalCode(undefined), undefined);
 });

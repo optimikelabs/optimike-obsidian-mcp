@@ -390,6 +390,22 @@ const OPERON_PUBLIC_ERRORS: Record<string, OperonPublicErrorDescriptor> = {
     message:
       "expectedRevision does not match the live task revision. Re-read the task, then plan again with its current revision.",
   },
+  consent_required: {
+    code: "consent_required",
+    reasonCode: "consent_unavailable",
+    status: "rejected",
+    retryable: true,
+    message:
+      "Operon needs a fresh confirmation in the vault window for this elevated plan. Bring the Obsidian window to the front, then apply again and confirm within 45 seconds.",
+  },
+  consent_denied: {
+    code: "consent_denied",
+    reasonCode: "consent_denied",
+    status: "rejected",
+    retryable: false,
+    message:
+      "The operator declined this plan in Obsidian. Do not retry it without a new decision.",
+  },
   operon_rejected: {
     code: "operon_rejected",
     reasonCode: "native_rejected",
@@ -3297,7 +3313,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       ...(native.planDigest ? { planDigest: native.planDigest } : {}),
       ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
       ...(native.message
-        ? { error: { code: native.code, message: native.message } }
+        ? { error: { code: native.publicErrorCode ?? native.code, message: native.message } }
         : {}),
       retryable: native.retryable,
       ...(native.mutationMayHaveApplied !== undefined
@@ -3407,7 +3423,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
       ...(native.planDigest ? { planDigest: native.planDigest } : {}),
       ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
       ...(native.message
-        ? { error: { code: native.code, message: native.message } }
+        ? { error: { code: native.publicErrorCode ?? native.code, message: native.message } }
         : {}),
       retryable: native.retryable,
       ...(native.mutationMayHaveApplied !== undefined
@@ -3551,7 +3567,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(!native.ok
             ? {
                 error: {
-                  code: native.code,
+                  code: native.publicErrorCode ?? native.code,
                   message: native.message ?? "Operon rejected task adoption.",
                 },
                 retryable: native.retryable,
@@ -4008,7 +4024,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
         ...(!native.ok
           ? {
               error: {
-                code: native.code,
+                code: native.publicErrorCode ?? native.code,
                 message: native.message ?? `Operon rejected ${kind}.`,
               },
               retryable: native.retryable,
@@ -4462,7 +4478,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(!native.ok
             ? {
                 error: {
-                  code: native.code,
+                  code: native.publicErrorCode ?? native.code,
                   message:
                     native.message ?? "Operon rejected the mutation preview.",
                 },
@@ -4506,7 +4522,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(native.planDigest ? { planDigest: native.planDigest } : {}),
           ...(native.nativeProof ? { nativeProof: native.nativeProof } : {}),
           error: {
-            code: native.code,
+            code: native.publicErrorCode ?? native.code,
             message: native.message ?? "Operon rejected the mutation.",
           },
           retryable: native.retryable,
@@ -4775,7 +4791,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(!native.ok
             ? {
                 error: {
-                  code: native.code,
+                  code: native.publicErrorCode ?? native.code,
                   message:
                     native.message ??
                     "Operon rejected the task creation preview.",
@@ -4819,7 +4835,7 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
           ...(native.recoveryRef ? { recoveryRef: native.recoveryRef } : {}),
           ...(native.planDigest ? { planDigest: native.planDigest } : {}),
           error: {
-            code: native.code,
+            code: native.publicErrorCode ?? native.code,
             message: native.message ?? "Operon rejected task creation.",
           },
           retryable: native.retryable,

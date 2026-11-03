@@ -1395,3 +1395,37 @@ test("partial route registration retains background lease until rollback succeed
     assert.equal(backgroundPolicy, true, "completed rollback restores prior policy");
   } finally { for (const cleanup of cleanups) cleanup(); }
 });
+
+test("an elevated plan without visible consent is reported as consent_required", async () => {
+  const payloadFactory = await exported("publicOperonMutationFailurePayload");
+  const base = {
+    ok: false,
+    contractVersion: "1",
+    operationId: "8b7e2b7d-4c63-4470-8c28-2af9ddb0de61",
+    idempotencyKey: "consent-key-0001",
+    status: "rejected",
+    requested: { statusId: "st_project_finished" },
+    mutationMayHaveApplied: false,
+    source: "operon-live",
+    stale: false,
+  };
+  const required = payloadFactory({
+    ...base,
+    retryable: true,
+    error: {
+      code: "consent_required",
+      message: "Operon could not present consent for this sealed plan.",
+    },
+  }) as Record<string, any>;
+  assert.equal(required.status, "rejected");
+  assert.equal(required.retryable, true);
+  assert.equal(required.error.code, "consent_required");
+  assert.match(required.error.message, /45 seconds/u);
+  const denied = payloadFactory({
+    ...base,
+    retryable: false,
+    error: { code: "consent_denied", message: "denied" },
+  }) as Record<string, any>;
+  assert.equal(denied.error.code, "consent_denied");
+  assert.equal(denied.retryable, false);
+});
