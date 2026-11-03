@@ -2579,8 +2579,16 @@ export class OperonService {
   }
 
   async transitionTask(input: unknown): Promise<OperonMutationResult> {
-    const params: OperonTransitionTask =
-      OperonTransitionTaskSchema.parse(input);
+    const parsed = OperonTransitionTaskSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new McpError(
+        BaseErrorCode.VALIDATION_ERROR,
+        parsed.error.issues[0]?.message ??
+          "Provide exactly one of status, statusId or intent.",
+        this.requestContext("operon_transition"),
+      );
+    }
+    const params: OperonTransitionTask = parsed.data;
     const payload = params.intent
       ? await this.resolveTransitionIntent(params)
       : params;
