@@ -53,9 +53,9 @@ try {
   // late success answers the next probe at once, still without persisting.
   service.forceRefresh();
   const actualLoad = service.loadSource.bind(service);
-  service.loadSource = async (generation) => {
+  service.loadSource = async (...args) => {
     await new Promise((resolve) => setTimeout(resolve, 3_000));
-    return actualLoad(generation);
+    return actualLoad(...args);
   };
   const race = () =>
     Promise.race([
