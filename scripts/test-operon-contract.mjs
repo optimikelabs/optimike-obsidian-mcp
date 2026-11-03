@@ -721,6 +721,54 @@ assert.equal(stripped.source, "operon-cache");
 assert.equal(stripped.stale, true);
 assert.equal("properties" in stripped.tasks[0], false);
 
+// fieldIncludes: list membership (any order, case-insensitive), the shape the
+// morning triage needs for `assignees`; fieldEquals stays an exact list match.
+{
+  const carried = {
+    ...task,
+    operonId: "carry01",
+    fields: { ...task.fields, assignees: ["Mike", "Claude"] },
+  };
+  const solo = {
+    ...task,
+    operonId: "solo001",
+    fields: { ...task.fields, assignees: ["Codex"] },
+  };
+  const none = { ...task, operonId: "none001", fields: { ...task.fields } };
+  const envelope = {
+    source: "operon-live",
+    stale: false,
+    snapshotAt: "2026-07-20T12:00:00.000Z",
+    snapshotAgeMs: 0,
+    operonVersion: "4.4.0",
+    bridgeVersion: "0.9.7",
+    contractVersion: OPERON_CONTRACT_VERSION,
+    snapshotSchemaVersion: 2,
+    settingsSignature: "fnv1a32:01234567",
+    generation: 42,
+    capabilities,
+    limitations: [],
+    tasks: [carried, solo, none],
+  };
+  const ids = (q) =>
+    queryOperonSnapshot(envelope, OperonQuerySchema.parse(q)).tasks.map(
+      (item) => item.operonId,
+    );
+  assert.deepEqual(ids({ fieldIncludes: { assignees: "claude" } }), ["carry01"]);
+  assert.deepEqual(ids({ fieldIncludes: { assignees: ["Claude", "Mike"] } }), [
+    "carry01",
+  ]);
+  assert.deepEqual(ids({ fieldIncludes: { assignees: "Codex" } }), ["solo001"]);
+  assert.deepEqual(ids({ fieldEquals: { assignees: "Claude" } }), []);
+  assert.deepEqual(ids({ fieldEquals: { assignees: ["Mike", "Claude"] } }), [
+    "carry01",
+  ]);
+  assert.equal(
+    OperonQuerySchema.safeParse({ fieldIncludes: { assignees: [] } }).success,
+    false,
+  );
+}
+
 const galleryMatch = queryOperonSnapshot(
   {
     source: "operon-live",

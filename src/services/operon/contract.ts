@@ -466,6 +466,17 @@ export const OperonQuerySchema = z.object({
   parentTask: z.string().nullable().optional(),
   dates: z.array(OperonDateFilterSchema).optional(),
   fieldEquals: z.record(OperonFieldValueSchema).optional(),
+  // Membership test for list fields (assignees, contexts, tags-like custom
+  // lists): every given value must be present, in any order, case-insensitive.
+  // A scalar field matches when it equals the single given value.
+  fieldIncludes: z
+    .record(
+      z.union([
+        z.string().trim().min(1),
+        z.array(z.string().trim().min(1)).min(1).max(50),
+      ]),
+    )
+    .optional(),
   propertyEquals: z.record(z.unknown()).optional(),
   sort: z.array(OperonSortSchema).optional(),
   includeProperties: z.boolean().optional().default(false),
@@ -1534,6 +1545,21 @@ function normalizeNeedle(value: unknown): string {
     .toLocaleLowerCase();
 }
 
+function fieldValueIncludes(
+  actual: OperonFieldValue | undefined,
+  expected: string | string[],
+): boolean {
+  if (actual === undefined || actual === null) return false;
+  const present = new Set(
+    (Array.isArray(actual) ? actual : [actual]).map((value) =>
+      normalizeNeedle(value),
+    ),
+  );
+  return (Array.isArray(expected) ? expected : [expected]).every((value) =>
+    present.has(normalizeNeedle(value)),
+  );
+}
+
 function fieldValueEquals(
   actual: OperonFieldValue | undefined,
   expected: OperonFieldValue,
@@ -1671,6 +1697,9 @@ export function filterOperonTasks(
       return false;
     for (const [key, expected] of Object.entries(query.fieldEquals ?? {})) {
       if (!fieldValueEquals(task.fields[key], expected)) return false;
+    }
+    for (const [key, expected] of Object.entries(query.fieldIncludes ?? {})) {
+      if (!fieldValueIncludes(task.fields[key], expected)) return false;
     }
     for (const [key, expected] of Object.entries(query.propertyEquals ?? {})) {
       if (stableStringify(task.properties?.[key]) !== stableStringify(expected))

@@ -154,7 +154,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_query_tasks",
     {
       description:
-        "Query Operon tasks by identity, text, source, checkbox, stable workflow/status IDs, visible workflow labels, priority, tier, path, tags, parent, dates, canonical/custom fields, or unmanaged file-task properties. Prefer pipelineIds/statusIds from operon_get_configuration so UI language changes do not break automations. Responses always declare source and freshness.",
+        "Query Operon tasks by identity, text, source, checkbox, stable workflow/status IDs, visible workflow labels, priority, tier, path, tags, parent, dates, canonical/custom fields, or unmanaged file-task properties. Prefer pipelineIds/statusIds from operon_get_configuration so UI language changes do not break automations. fieldEquals matches a whole value (a list only in full and in order); use fieldIncludes for list membership, e.g. fieldIncludes: { assignees: \"Claude\" }. Responses always declare source and freshness.",
       inputSchema: mcpSchema(OperonQuerySchema.shape),
       annotations: READ_ONLY_ANNOTATIONS,
     },
