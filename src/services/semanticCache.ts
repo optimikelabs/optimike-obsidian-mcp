@@ -321,10 +321,12 @@ export class SemanticCacheService {
       manifest.source_signature === sourceState.signature &&
       manifest.smart_env_dir === this.smartEnvDir
     ) {
-      const snapshot = this.loadSnapshotFromDb(manifest);
-      this.memorySnapshot = snapshot;
-      this.memorySnapshotLoadedAt = Date.now();
-      return snapshot;
+      const snapshot = this.tryLoadSnapshotFromDb(manifest, opContext);
+      if (snapshot) {
+        this.memorySnapshot = snapshot;
+        this.memorySnapshotLoadedAt = Date.now();
+        return snapshot;
+      }
     }
 
     logger.info("Refreshing semantic cache from .smart-env", {
@@ -398,8 +400,10 @@ export class SemanticCacheService {
       manifest &&
       manifest.source_signature === sourceState.signature &&
       manifest.smart_env_dir === this.smartEnvDir
-        ? this.loadSnapshotFromDb(manifest)
+        ? this.tryLoadSnapshotFromDb(manifest)
         : null;
+    // An unreadable derived cache falls back to the authoritative source,
+    // without writing: only an actual query republishes the cache.
     const items = snapshot?.items ?? (await this.loadSource(generation));
     if (generation !== this.refreshGeneration) return this.validateReadiness();
     const value = this.projectReadiness(
@@ -508,6 +512,31 @@ export class SemanticCacheService {
       dominantModel: knownModel ?? pickDominantModel([...dimensionItems]),
       dominantDimension,
     };
+  }
+
+  /**
+   * The cache is derived data: an unreadable row (corrupt or unknown encoding)
+   * must lead to a rebuild from the source, never to a permanent failure.
+   * Logs only the failure kind, never paths or vector content.
+   */
+  private tryLoadSnapshotFromDb(
+    manifest: SemanticManifestRow,
+    context?: RequestContext,
+  ): SemanticCacheSnapshot | null {
+    try {
+      return this.loadSnapshotFromDb(manifest);
+    } catch {
+      logger.warning(
+        "Semantic cache rows are unreadable; rebuilding from .smart-env.",
+        {
+          ...(context ??
+            requestContextService.createRequestContext({
+              operation: "SemanticCacheService.tryLoadSnapshotFromDb",
+            })),
+        },
+      );
+      return null;
+    }
   }
 
   private loadSnapshotFromDb(
