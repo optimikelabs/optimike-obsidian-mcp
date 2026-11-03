@@ -1,6 +1,6 @@
 {
   "name": "optimike-obsidian-mcp",
-  "version": "3.17.0",
+  "version": "3.18.0",
   "description": "Unified Obsidian MCP server with shared local cache, Operon and Tasks tools, Bases support, semantic search, runtime observability, and degraded read mode for durable agent workflows.",
   "main": "dist/index.js",
   "files": [
@@ -140,7 +140,10 @@
     "docs/releases/3.16.0.md",
     "docs/releases/3.16.0.fr.md",
     "docs/releases/3.17.0.md",
-    "docs/releases/3.17.0.fr.md"
+    "docs/releases/3.17.0.fr.md",
+    "docs/releases/3.18.0.md",
+    "docs/releases/3.18.0.fr.md",
+    "docs/semantic-vector-cache-encoding.md"
   ],
   "bin": {
     "optimike-obsidian-mcp": "dist/index.js",
