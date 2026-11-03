@@ -2319,6 +2319,29 @@ try {
     "an intent replay must not reach the Bridge",
   );
 
+  // A fast-path miss (here the single-task answer is fenced on a newer
+  // generation) is not proof of absence: the intent resolves from a snapshot.
+  state.generation += 1;
+  state.taskGetGeneration = state.generation + 1;
+  const taskGetCallsBeforeFallback = state.taskGetCalls;
+  try {
+    const intentAfterFastPathMiss = await new OperonService().transitionTask({
+      idempotencyKey: "test-transition-intent-fast-path-miss",
+      dryRun: false,
+      operonId: "abc1234",
+      expectedRevision: tasks[0].revision,
+      intent: "complete",
+    });
+    assert.equal(intentAfterFastPathMiss.status, "applied");
+    assert.equal(intentAfterFastPathMiss.requested.statusId, "st_project_done");
+    assert.ok(
+      state.taskGetCalls > taskGetCallsBeforeFallback,
+      "the fixture must exercise the single-task fast path first",
+    );
+  } finally {
+    state.taskGetGeneration = null;
+  }
+
   const recoveryInput = {
     idempotencyKey: "test-recovery-idempotency",
     recoveryRef: "dvr1_test-recovery-ref",

@@ -2658,14 +2658,10 @@ export class OperonService {
       );
     }
     const status = await this.fetchLiveStatus();
-    const live = await this.getTaskLive(params.operonId);
-    if (!live) {
-      throw new McpError(
-        BaseErrorCode.NOT_FOUND,
-        `Operon task not found: ${params.operonId}`,
-        this.requestContext("operon_transition", { operonId: params.operonId }),
-      );
-    }
+    // getTask, not getTaskLive: a fast-path miss (index moved, failed or
+    // unreadable answer) falls back to the snapshot read instead of being
+    // taken for an absent task. Only that read reports NOT_FOUND.
+    const live = await this.getTask({ operonId: params.operonId });
     const task = live.task as { pipelineId?: string | null; pipeline?: string | null };
     const resolved = resolveOperonTransitionIntent(
       status.taxonomy,
