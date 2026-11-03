@@ -67,6 +67,7 @@ export type CapabilityReasonCode =
   | "semantic_search_disabled"
   | "semantic_query_embedding_disabled"
   | "semantic_index_unavailable"
+  | "semantic_probe_timed_out"
   | "semantic_embedder_unavailable"
   | "semantic_query_unverified"
   | "bridge_unavailable"
@@ -523,6 +524,16 @@ function semanticCapability(
       "enable_query_embedding",
     );
   }
+  if (input.semanticIndex.state === "timed_out") {
+    return entry(
+      input,
+      "semantic-search",
+      false,
+      false,
+      "semantic_probe_timed_out",
+      "retry_capability_probe",
+    );
+  }
   const validated =
     input.semanticIndex.state === "ready" &&
     Number.isFinite(input.semanticIndex.value.vectorCount) &&
@@ -530,7 +541,8 @@ function semanticCapability(
   const embedderReady =
     input.semanticIndex.state === "ready" &&
     input.semanticIndex.value.embedderReady === true;
-  const queryUnverified = input.semanticIndex.state === "ready" &&
+  const queryUnverified =
+    input.semanticIndex.state === "ready" &&
     input.semanticIndex.value.queryUnverified === true;
   return entry(
     input,
@@ -542,13 +554,15 @@ function semanticCapability(
       : embedderReady
         ? "ready"
         : queryUnverified
-          ? "semantic_query_unverified" : "semantic_embedder_unavailable",
+          ? "semantic_query_unverified"
+          : "semantic_embedder_unavailable",
     !validated
       ? "refresh_semantic_index"
       : embedderReady
         ? "none"
         : queryUnverified
-          ? "run_semantic_search" : "configure_query_embedder",
+          ? "run_semantic_search"
+          : "configure_query_embedder",
     queryUnverified,
   );
 }
@@ -1318,9 +1332,21 @@ export async function collectCapabilityManifest(options: {
               modelHint: config.queryEmbedderModelHint,
               model: config.queryEmbedderModel,
               vaultModel: readiness.dominantModel,
-              vaultProvider: config.smartEnvDir ? await detectSmartEnvQueryProvider(config.smartEnvDir, readiness.dominantModel) : undefined,
+              vaultProvider: config.smartEnvDir
+                ? await detectSmartEnvQueryProvider(
+                    config.smartEnvDir,
+                    readiness.dominantModel,
+                  )
+                : undefined,
               dimension: readiness.dominantDimension,
-              ollamaBaseUrl: config.ollamaBaseUrl?.trim() || (config.smartEnvDir ? await detectOllamaBaseUrlFromSmartEnv(config.smartEnvDir, readiness.dominantModel) : undefined),
+              ollamaBaseUrl:
+                config.ollamaBaseUrl?.trim() ||
+                (config.smartEnvDir
+                  ? await detectOllamaBaseUrlFromSmartEnv(
+                      config.smartEnvDir,
+                      readiness.dominantModel,
+                    )
+                  : undefined),
               openaiApiKey: config.openaiApiKey,
               openaiBaseUrl: config.openaiBaseUrl,
               openaiDimensions: Number.isFinite(
@@ -1329,8 +1355,15 @@ export async function collectCapabilityManifest(options: {
                 ? Number(config.openaiEmbeddingDimensions)
                 : undefined,
             });
-            const health = semanticSearchHealth(selection.embed, readiness.dominantDimension ?? 0);
-            return { ...readiness, embedderReady: health === "verified", queryUnverified: health === "unverified" };
+            const health = semanticSearchHealth(
+              selection.embed,
+              readiness.dominantDimension ?? 0,
+            );
+            return {
+              ...readiness,
+              embedderReady: health === "verified",
+              queryUnverified: health === "unverified",
+            };
           } catch {
             return { ...readiness, embedderReady: false };
           }

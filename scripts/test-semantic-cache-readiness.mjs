@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -30,9 +31,18 @@ const { getQueryEmbedder } = await import("../dist/adapters/embed/index.js");
 const service = new SemanticCacheService(source, dbPath, 60_000);
 
 try {
+  let validations = 0;
+  const validate = service.validateReadiness.bind(service);
+  service.validateReadiness = async () => { validations += 1; await new Promise(resolve => setTimeout(resolve, 20)); return validate(); };
+  const concurrentProbes = await Promise.all(Array.from({length: 8}, () => service.probeReadiness()));
+  assert.ok(concurrentProbes.every(result => result.vectorCount === 1));
+  assert.equal(validations, 1, "concurrent read-only probes share one source scan");
   const observed = await service.probeReadiness();
   assert.equal(observed.vectorCount, 1);
+  assert.equal(validations, 1, "a recently completed probe answers without repeating the scan");
   assert.equal(observed.dominantDimension, 2);
+  observed.vectorCount = 0;
+  assert.equal((await service.probeReadiness()).vectorCount, 1, "callers cannot mutate the cached readiness observation");
   assert.equal(
     service.getStats().manifest,
     null,
@@ -64,7 +74,19 @@ try {
   assert.equal(snapshot.vectorCount, 1);
   assert.equal(service.getStats().manifest.vectorCount, 1);
 
+  const sourceStat = await stat(vectorFile);
+  const oldSignature = createHash("sha1").update(JSON.stringify([
+    { path: "vectors.json", mtimeMs: sourceStat.mtimeMs, size: sourceStat.size },
+  ])).digest("hex");
+  service.db.prepare("UPDATE semantic_manifest SET source_signature = ?, vector_count = 0").run(oldSignature);
+  service.db.exec("DELETE FROM semantic_vectors");
   service.forceRefresh();
+  const migrated = await service.getSnapshot();
+  assert.equal(migrated.vectorCount, 1, "unchanged vault files must not reuse a snapshot from the old reader contract");
+  assert.notEqual(migrated.sourceSignature, oldSignature);
+
+  service.forceRefresh();
+  assert.equal(service.readiness, null);
   await writeFile(vectorFile, "{ malformed semantic source", "utf8");
   await assert.rejects(
     () => service.probeReadiness(),
