@@ -213,7 +213,7 @@ export async function registerOperonTools(server: McpServer): Promise<void> {
     "operon_get_diagnostics",
     {
       description:
-        "Read Operon 3.2 native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault.",
+        "Read the loaded Operon's native runtime diagnostics through Developer API V1. Use this for lifecycle, persistence, capability/grant, catalog, and transport diagnosis; it never modifies the vault. result.health.admission describes the diagnostics-only session (writes is always false there); result.bridgeSession.admission, when present, describes the Bridge session used for mutations.",
       inputSchema: mcpSchema(z.object({})),
       annotations: READ_ONLY_ANNOTATIONS,
     },

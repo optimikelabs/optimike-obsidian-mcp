@@ -42,6 +42,7 @@ import { resolveTaskEnginePlugin } from "./task-engine-runtime";
 import {
   genericMutationSnapshot,
   OperonDeveloperApiRuntimeAdapter,
+  type DeveloperApiChannelStatus,
   type DeveloperApiReadCapability,
   type DeveloperApiMutationCapability,
   type DeveloperApiMutationResult,
@@ -377,6 +378,26 @@ const OPERON_PUBLIC_ERRORS: Record<string, OperonPublicErrorDescriptor> = {
     retryable: false,
     message: "The request conflicts with the current Operon state.",
   },
+  // A stale expectedRevision is the most common, fully recoverable mutation
+  // refusal (any Operon upgrade, or an edit to a sibling task in the same note,
+  // changes the projected revision). Report it as such instead of collapsing it
+  // into the generic bridge_failure, which reads like a broken Bridge.
+  revision_conflict: {
+    code: "revision_conflict",
+    reasonCode: "revision_mismatch",
+    status: "rejected",
+    retryable: true,
+    message:
+      "expectedRevision does not match the live task revision. Re-read the task, then plan again with its current revision.",
+  },
+  operon_rejected: {
+    code: "operon_rejected",
+    reasonCode: "native_rejected",
+    status: "rejected",
+    retryable: false,
+    message:
+      "Operon rejected the mutation. Re-read the task and the live configuration before planning again.",
+  },
   outcome_unknown: {
     code: "outcome_unknown",
     reasonCode: "outcome_unverified",
@@ -542,6 +563,7 @@ const OPERON_PUBLIC_ERROR_ALIASES: Record<string, string> = {
   "not-found": "not_found",
   "not-ready": "operon_unavailable",
   "outcome-unknown": "outcome_unknown",
+  rejected: "operon_rejected",
 };
 
 export function publicOperonErrorPayload(
@@ -3162,6 +3184,44 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
     };
   }
 
+  /**
+   * Operon reports `health.admission` for the session that served the read.
+   * Diagnostics are read through a diagnostics-only session, so that admission
+   * always shows `writes: false` even when the Bridge holds an active write
+   * grant. Expose the Bridge's strongest negotiated session next to it so an
+   * operator can tell "writes closed" from "diagnostics session is read-only".
+   */
+  private withBridgeSessionDiagnostics(
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const result = safeRecord(payload.result);
+    if (payload.ok !== true || !result) return payload;
+    let channel: DeveloperApiChannelStatus | undefined;
+    try {
+      channel = this.getOperonRuntime()?.developerApi?.status;
+    } catch {
+      return payload;
+    }
+    if (!channel) return payload;
+    return {
+      ...payload,
+      result: {
+        ...result,
+        bridgeSession: {
+          scope: "bridge-negotiated-session",
+          availability: channel.availability ?? null,
+          authority: channel.authority ?? null,
+          admission: {
+            reads: channel.admission?.reads === true,
+            writes: channel.admission?.writes === true,
+          },
+          grantState: channel.grant?.state ?? null,
+          note: "health.admission describes the diagnostics-only Developer API session; bridgeSession.admission describes the Bridge's negotiated task session used for mutations.",
+        },
+      },
+    };
+  }
+
   private async executeRecoveryMutation(
     body: Record<string, unknown>,
     failureScope?: MutationFailureScope,
@@ -4978,7 +5038,11 @@ export default class OptimikeOperonBridgePlugin extends Plugin {
             "system.diagnostics",
             (adapter) => adapter.readDiagnostics(),
           );
-          sendJson(res, result.httpStatus, result.payload);
+          sendJson(
+            res,
+            result.httpStatus,
+            this.withBridgeSessionDiagnostics(result.payload),
+          );
         } catch (error) {
           sendJson(
             res,
