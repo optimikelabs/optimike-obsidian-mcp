@@ -42,13 +42,23 @@ Semantic search is usable only when its index runtime and query embedder are
 enabled and a bounded live probe loads at least one valid vector from the
 current source. `semantic_query_embedding_disabled` reports an intentionally
 disabled `ENABLE_QUERY_EMBEDDING` switch, while `semantic_index_unavailable`
-and `refresh_semantic_index` cover a missing, empty, malformed, stale, or
-timed-out index. `semantic_embedder_unavailable` and
+and `refresh_semantic_index` cover a missing, empty, malformed or stale index.
+A probe that exceeds its 2.5 s deadline reports `semantic_probe_timed_out`
+with `retry_capability_probe`. `semantic_embedder_unavailable` and
 `configure_query_embedder` separately report a query provider that cannot be
 constructed from the current non-secret configuration, including a Smart
 Connections built-in model index when the optional `@huggingface/transformers`
 package is not installed. The doctor never sends
 a test embedding request.
+
+**Cold semantic cache.** Semantic search reads Smart Connections vectors through
+a derived SQLite cache. After a restart or an upgrade, the first load reads them
+again (several seconds on a large vault; the upgrade to 3.18 rebuilds the cache
+once). By default the server starts that load at startup
+(`SEMANTIC_SEARCH_PREWARM=true`), keeps the loaded snapshot for 60 s between
+source checks (`SMART_ENV_CACHE_TTL_MS=60000`), and the doctor waits 2.5 s for
+its probe. A search issued during the load waits for it and answers.
+
 Operon cached reads are reported as `degraded` with
 `operon_snapshot_fallback`; cached state is never presented as proof that a
 mutation can run or was applied.

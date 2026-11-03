@@ -49,6 +49,27 @@ try {
     "the read-only readiness probe must not persist or refresh a manifest",
   );
 
+  // A 3 s cold read loses the 2.5 s capability race but keeps running; its
+  // late success answers the next probe at once, still without persisting.
+  service.forceRefresh();
+  const actualLoad = service.loadSource.bind(service);
+  service.loadSource = async (generation) => {
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    return actualLoad(generation);
+  };
+  const race = () =>
+    Promise.race([
+      service.probeReadiness().then(() => "ready"),
+      new Promise((resolve) => setTimeout(() => resolve("timed_out"), 2_500)),
+    ]);
+  assert.equal(await race(), "timed_out", "a slow cold read is abandoned at the deadline");
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  const retryStart = performance.now();
+  assert.equal(await race(), "ready", "the abandoned probe's late success answers the retry");
+  assert.ok(performance.now() - retryStart < 100, "the retry is served from the observation, not a new read");
+  service.loadSource = actualLoad;
+  assert.equal(service.getStats().manifest, null, "a late probe still never persists");
+
   await assert.rejects(
     () =>
       getQueryEmbedder({

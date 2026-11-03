@@ -79,6 +79,35 @@ try {
     ["Notes/Refreshed.md", "Notes/LegacyImport.md"],
     "last_read is authoritative; legacy import-only records remain supported; missing or stale hashes are rejected",
   );
+
+  // A deleted note is appended as `"smart_sources:<path>": null`; it must leave the index.
+  await writeFile(
+    path.join(root, "smart_sources", "smart_sources.ajson"),
+    [
+      record("Current", "same", "same", 0),
+      record("Deleted", "same", "same", 1),
+      '"smart_sources:Notes/Deleted.md": null',
+    ].join(",\n"),
+    "utf8",
+  );
+  assert.deepEqual(
+    (await loadSmartEnv(root)).map((item) => item.notePath),
+    ["Notes/Current.md"],
+    "a null tombstone removes the deleted note",
+  );
+  await writeFile(
+    path.join(root, "smart_sources", "smart_sources.ajson"),
+    [
+      '"smart_sources:Notes/Deleted.md": null',
+      record("Deleted", "same", "same", 1),
+    ].join(",\n"),
+    "utf8",
+  );
+  assert.deepEqual(
+    (await loadSmartEnv(root)).map((item) => item.notePath),
+    ["Notes/Deleted.md"],
+    "a note re-created after its tombstone is indexed again",
+  );
   await writeFile(
     path.join(root, "smart_sources", "smart_sources.ajson"),
     [record("Current", "same", "same", 0), record("Stale", "new", "old", 1)].join(",\n"),
